@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { logger } from '../lib/logger.js';
 import { mcpServerConfigService } from './mcpServerConfigService.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
@@ -18,6 +18,9 @@ import {
   MCP_TOOLS_CACHE_TTL_MS,
   MCP_ALLOWED_COMMANDS,
 } from '../config/limits.js';
+import { db } from '../db/index.js';
+import { mcpToolInvocations } from '../db/schema/mcpToolInvocations.js';
+import { mcpAggregateService } from './mcpAggregateService.js';
 
 // ---------------------------------------------------------------------------
 // MCP Client Manager — lifecycle, tool discovery, and tool calling for
@@ -37,6 +40,7 @@ interface McpRunContext {
   organisationId: string;
   agentId: string;
   subaccountId: string | null;
+  isTestRun: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +254,64 @@ export const mcpClientManager = {
   },
 
   /**
+   * Write one row to mcp_tool_invocations. Completely fire-and-forget —
+   * never throws, never blocks the agent loop. The id is generated client-side
+   * so the aggregate service receives the full row without awaiting a DB round-trip.
+   */
+  writeInvocation(params: {
+    ctx: McpRunContext;
+    serverSlug: string;
+    toolName: string;
+    mcpServerConfigId?: string;
+    gateLevel: 'auto' | 'review' | 'block' | null;
+    status: 'success' | 'error' | 'timeout' | 'budget_blocked';
+    failureReason?: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown';
+    durationMs: number;
+    responseSizeBytes?: number;
+    wasTruncated?: boolean;
+    callIndex: number | null;
+  }): void {
+    const now = new Date();
+    const row = {
+      id: randomUUID(),
+      organisationId: params.ctx.organisationId,
+      subaccountId: params.ctx.subaccountId ?? undefined,
+      runId: params.ctx.runId !== 'test' ? params.ctx.runId : undefined,
+      agentId: params.ctx.agentId !== 'test' ? params.ctx.agentId : undefined,
+      mcpServerConfigId: params.mcpServerConfigId,
+      serverSlug: params.serverSlug || 'unknown',
+      toolName: params.toolName || 'unknown',
+      gateLevel: params.gateLevel ?? undefined,
+      status: params.status,
+      failureReason: params.failureReason ?? undefined,
+      durationMs: params.durationMs,
+      responseSizeBytes: params.responseSizeBytes,
+      wasTruncated: params.wasTruncated ?? false,
+      isTestRun: params.ctx.isTestRun,
+      callIndex: params.callIndex ?? undefined,
+      billingMonth: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`,
+      billingDay: now.toISOString().slice(0, 10),
+      createdAt: now,
+    };
+
+    void db
+      .insert(mcpToolInvocations)
+      .values(row)
+      .onConflictDoNothing()
+      .then(() => {
+        void mcpAggregateService.upsertMcpAggregates(row as Parameters<typeof mcpAggregateService.upsertMcpAggregates>[0]).catch((err: unknown) => {
+          logger.warn('mcp.aggregate_failed', {
+            invocationId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      })
+      .catch((err: unknown) => {
+        logger.warn('mcp.invocation_log_failed', { error: err instanceof Error ? err.message : String(err) });
+      });
+  },
+
+  /**
    * Call a tool on an external MCP server.
    */
   async callTool(
@@ -260,21 +322,46 @@ export const mcpClientManager = {
     ctx: McpRunContext & { taskId?: string; mcpCallCount?: number },
     retryCount = 0,
   ): Promise<unknown> {
-    // Budget check
+    // Capture callIndex before any counter increment or pre-execution exit.
+    // Pre-execution exits (budget-blocked, invalid slug, connect failure) use null
+    // so the UNIQUE (run_id, call_index) constraint is not triggered.
+    const callIndex = ctx.mcpCallCount ?? 0;
+
+    // Budget check — pre-execution exit
     const callCount = ctx.mcpCallCount ?? 0;
     if (callCount >= MAX_MCP_CALLS_PER_RUN) {
+      const slugParts = toolSlug.split('.');
+      this.writeInvocation({
+        ctx,
+        serverSlug: slugParts[1] ?? 'unknown',
+        toolName: slugParts.slice(2).join('.') || 'unknown',
+        gateLevel: null,
+        status: 'budget_blocked',
+        durationMs: 0,
+        callIndex: null,
+      });
       return { error: `MCP tool call limit reached (${MAX_MCP_CALLS_PER_RUN}/${MAX_MCP_CALLS_PER_RUN}). Use internal skills or request a budget increase.` };
     }
 
     // Parse slug: mcp.gmail.send_email → serverSlug=gmail, toolName=send_email
     const parts = toolSlug.split('.');
     if (parts.length < 3 || parts[0] !== 'mcp') {
+      this.writeInvocation({
+        ctx,
+        serverSlug: 'unknown',
+        toolName: 'unknown',
+        gateLevel: null,
+        status: 'error',
+        failureReason: 'invalid_response',
+        durationMs: 0,
+        callIndex: null,
+      });
       return { error: `Invalid MCP tool slug: ${toolSlug}` };
     }
     const serverSlug = parts[1];
     const toolName = parts.slice(2).join('.');
 
-    // Lazy connect if needed
+    // Lazy connect if needed — pre-execution exit on failure
     if (!clients.has(serverSlug) && lazyRegistry.has(serverSlug)) {
       const config = lazyRegistry.get(serverSlug)!;
       try {
@@ -285,32 +372,54 @@ export const mcpClientManager = {
         }
       } catch (err) {
         logger.error('mcp.lazy_connect_failed', { serverSlug, error: err instanceof Error ? err.message : String(err) });
+        this.writeInvocation({
+          ctx, serverSlug, toolName, gateLevel: null,
+          status: 'error', failureReason: 'process_crash',
+          durationMs: 0, callIndex: null,
+        });
         return { error: `Failed to connect to ${serverSlug} MCP server` };
       }
     }
 
     const instance = clients.get(serverSlug);
     if (!instance) {
+      this.writeInvocation({
+        ctx, serverSlug, toolName, gateLevel: null,
+        status: 'error', failureReason: 'unknown',
+        durationMs: 0, callIndex: null,
+      });
       return { error: `MCP server "${serverSlug}" not connected` };
     }
 
-    // Increment call count
+    // Increment call count (execution path only — not incremented for pre-execution exits)
     if (ctx.mcpCallCount !== undefined) ctx.mcpCallCount++;
     else ctx.mcpCallCount = 1;
 
-    // Execute the call
+    // Variables declared before try so finally can access them in all paths.
     const callStart = Date.now();
+    let status: 'success' | 'error' | 'timeout' | 'budget_blocked' = 'error'; // safe default
+    let failureReason: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown' | undefined;
+    let responseSizeBytes: number | undefined;
+    let wasTruncated = false;
+    let durationMs = 0;
+    // Set to true in the retry branch so finally skips the write (catch already wrote it)
+    let wroteInCatch = false;
+
     try {
       const result = await withTimeout(
         instance.client.callTool({ name: toolName, arguments: args }),
         MCP_CALL_TIMEOUT_MS,
         `mcp.${serverSlug}.${toolName}`,
       );
-      const durationMs = Date.now() - callStart;
+      durationMs = Date.now() - callStart;
 
-      // Output size guard
+      // responseSizeBytes captured before truncation check so original size is always recorded
       const serialised = JSON.stringify(result);
-      if (serialised.length > MAX_MCP_RESPONSE_SIZE) {
+      responseSizeBytes = serialised.length;
+      wasTruncated = serialised.length > MAX_MCP_RESPONSE_SIZE;
+      status = 'success';
+
+      if (wasTruncated) {
         logger.warn('mcp.output_truncated', { serverSlug, toolName, size: serialised.length, durationMs });
         return serialised.slice(0, MAX_MCP_RESPONSE_SIZE) + '\n[... response truncated at 100KB]';
       }
@@ -318,28 +427,51 @@ export const mcpClientManager = {
       logger.info('mcp.call.success', { serverSlug, toolName, durationMs, responseSize: serialised.length });
       return result;
     } catch (err) {
-      const durationMs = Date.now() - callStart;
+      durationMs = Date.now() - callStart;
       const classified = classifyMcpError(err);
+      status = classified.reason === 'timeout' ? 'timeout' : 'error';
+      failureReason = classified.reason;
+
       logger.warn('mcp.call.error', {
         serverSlug, toolName, reason: classified.reason,
         retryable: classified.retryable, retryCount, durationMs,
       });
 
       if (classified.retryable && retryCount < 1) {
+        // Write this attempt's row before recursing — the retry gets its own row via its own finally
+        wroteInCatch = true;
+        this.writeInvocation({
+          ctx, serverSlug, toolName,
+          mcpServerConfigId: instance.serverConfig.id,
+          gateLevel: resolveGateLevel(instance.serverConfig, toolName),
+          status, failureReason, durationMs, callIndex,
+        });
+
         // On process crash: reconnect before retrying
         if (classified.reason === 'process_crash') {
-          const config = instance.serverConfig;
           try {
-            const freshInstance = await this._connectSingleServer(config, ctx);
+            const freshInstance = await this._connectSingleServer(instance.serverConfig, ctx);
             if (freshInstance) clients.set(serverSlug, freshInstance);
           } catch {
-            // Reconnect failed — return error
+            // Reconnect failed — retry will fail again and write its own row
           }
         }
         return this.callTool(clients, lazyRegistry, toolSlug, args, ctx, retryCount + 1);
       }
 
       return { error: `MCP tool call failed: ${classified.message}`, failureReason: classified.reason };
+    } finally {
+      // Covers: success, truncated-success, and non-retryable errors.
+      // Skipped for retryable paths where catch already wrote the row.
+      if (!wroteInCatch) {
+        this.writeInvocation({
+          ctx, serverSlug, toolName,
+          mcpServerConfigId: instance.serverConfig.id,
+          gateLevel: resolveGateLevel(instance.serverConfig, toolName),
+          status, failureReason, durationMs,
+          responseSizeBytes, wasTruncated, callIndex,
+        });
+      }
     }
   },
 

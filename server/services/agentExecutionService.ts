@@ -607,6 +607,7 @@ export const agentExecutionService = {
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
+          isTestRun: run.isTestRun ?? false,
         });
         mcpClients = mcp.clients;
         mcpLazyRegistry = mcp.lazyRegistry;
