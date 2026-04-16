@@ -223,11 +223,19 @@ The `agent_beliefs` table already has `supersededBy` and `supersededAt` columns 
 
 **Citation detection contract:** The owning service is `memoryCitationDetector` (`server/services/memoryCitationDetector.ts`). After each run it:
 1. Receives the set of injected entry IDs and the completed run's tool calls + generated output.
-2. Uses a text-matching heuristic — checks whether each entry's key phrases appear in the tool call arguments or generated text.
-3. Stores the result as `citedEntryIds: string[]` (JSONB) on the `agent_runs` row for that run.
-4. Increments `citedCount` on each cited entry and `injectedCount` on all injected entries.
+2. Scores each injected entry against the run output using the two-path matcher below. Each path yields a per-entry match score in `[0, 1]`; the final citation score is `max(toolCallScore, textScore)`.
+3. An entry is considered "cited" if its citation score ≥ `CITATION_THRESHOLD` (default `0.7`, in `server/config/limits.ts`).
+4. Stores `citedEntryIds: string[]` (JSONB) on the `agent_runs` row for entries above threshold. Per-entry scores are stored on a separate `memory_citation_scores` table keyed by `(runId, entryId)` for S4 analysis without bloating the `agent_runs` row.
+5. Increments `citedCount` on each cited entry and `injectedCount` on all injected entries.
 
-The initial implementation uses text-matching only (no additional LLM cost). A lightweight post-run LLM pass is available as a graduated fallback if text-matching proves insufficient in practice — the service contract is unchanged in either case.
+**Matcher rules:**
+
+| Path | Signal | Score | Rationale |
+|---|---|---|---|
+| **Tool-call structured args** | Exact string match between an entry's key phrase (e.g., an email, ID, URL, proper noun extracted at write time) and any tool-call argument value | `1.0` if matched, `0.0` otherwise | Structured args carry no paraphrasing noise — a match is a near-certain citation |
+| **Generated text (fuzzy)** | Token overlap between the entry's content and the run's generated text | Jaccard over n-gram sets (n=3); score = overlap ratio. Treated as a cited signal only when ≥ `CITATION_TEXT_OVERLAP_MIN` (default `0.35`) *and* at least `CITATION_TEXT_TOKEN_MIN` (default `8`) overlapping tokens | Text is paraphrased; requires both a ratio floor and an absolute token floor to avoid false positives on short snippets |
+
+Both thresholds are tunable in `limits.ts`. The initial implementation uses deterministic text-matching only (no additional LLM cost). A lightweight post-run LLM pass is available as a graduated fallback if text-matching proves insufficient in practice — the service contract (citation score + threshold) is unchanged in either case; only the scoring engine is swapped.
 
 **S4 — Quality adjustment:** A weekly background job adjusts `qualityScore` based on `utilityRate`:
 - Entries with `utilityRate` > 0.5 get a quality boost (capped at 1.0)
@@ -235,6 +243,8 @@ The initial implementation uses text-matching only (no additional LLM cost). A l
 - Entries never injected are unaffected (no data, no adjustment)
 
 This creates a feedback loop: useful memories surface more; unused memories fade. No human involvement.
+
+**qualityScore mutation invariant.** S4 (the weekly `memory-entry-quality-adjust` job) is the **only** path that mutates `qualityScore` after an entry is written. S1 (decay/pruning) reduces `qualityScore` via its decay pass, which is scoped to time-based inactivity and is also an S4-class signal — it runs in the same job family and is allowed. S12 tracks `citedCount` / `injectedCount` only; it never touches `qualityScore`. The recency-boost computation in S2 is applied at ranking time and never persisted to `qualityScore`. Any future feature wanting to influence ranking must go through the citation/utility pipeline or add a new ranking-time factor — direct writes to `qualityScore` outside the S1/S4 job family are prohibited, enforced by co-locating the mutation in a single service (`memoryEntryQualityService`) and gating it in code review.
 
 ---
 
@@ -260,9 +270,11 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 4. Return top-K blocks (default 5) above a similarity threshold (default 0.65, lower than memory entries because blocks are curated and generally higher quality).
 5. Token budget enforcement: blocks are added in relevance order until the block token budget is exhausted.
 
-**Manual pinning preserved as override:** Explicit attachments via `memory_block_attachments` still work and are always included (they bypass relevance scoring). This handles cases where the agency knows a block is always relevant regardless of task context. Protected blocks (e.g., `config-agent-guidelines`) are always included via their explicit attachment — the relevance engine never drops them.
+**Manual pinning preserved as override:** Explicit attachments via `memory_block_attachments` still work and are always included *provided the block is active* (they bypass relevance scoring but not the status invariant). This handles cases where the agency knows a block is always relevant regardless of task context. Protected blocks (e.g., `config-agent-guidelines`) are always included via their explicit attachment — the relevance engine never drops them.
 
-**Draft block exclusion:** The relevance engine excludes blocks where `status` is `draft` or `pending_review` — exclusion is at query time (`WHERE status = 'active'`). This enforces the invariant that auto-synthesised draft blocks are not surfaced to agents before review.
+**Default mode is automatic.** The relevance engine is the default path for every agent run. Explicit attachments are an override, not the primary configuration surface. New agents should be created with zero attachments and rely on the relevance engine; attachments are added only when an agency has a specific reason to pin a block.
+
+**Block status invariant (applies to ALL injection paths):** No block with `status != 'active'` is ever injected into an agent's context — this holds for the relevance engine, explicit attachments, and any future injection path. Enforced at query time via `WHERE status = 'active'` in every block-loading query. This is the single, global invariant for block surfacing; it is cross-referenced in Sections 5.2, 5.7, and `memoryBlockService.getBlocksForAgent()`. Attempting to attach a non-active block is rejected at the route level with a 409. Auto-synthesised draft blocks (S11) are therefore never surfaced regardless of how they were attached.
 
 **Migration:** Add an `embedding` column (vector(1536)) to `memory_blocks`. Backfill embeddings for existing blocks via a one-time pg-boss job named `memory-blocks-embedding-backfill`, scheduled on deploy in Phase 2.
 
@@ -313,9 +325,11 @@ Owning service: `memoryReviewQueueService`. Org rollup reads counts grouped by `
 
 3. **Delivery:** Real-time notification via WebSocket (existing `useSocket` infrastructure) + email fallback if no WebSocket session is active. The notification includes the question, context, and one-tap answer buttons (for suggested answers) or a free-text reply field.
 
-4. **Timeout:** If no response within `CLARIFICATION_TIMEOUT` (default 30 minutes for non-blocking, 5 minutes for blocking), the agent falls back to its best-guess answer with a flag: "Answered without confirmation — please review."
+4. **Blocking semantics and deadlock avoidance:** A blocking clarification pauses **only the current step**. The run is not terminated — it enters a `waiting_on_clarification` state persisted on the `agent_runs` row. Downstream steps that depend on the paused step's output **must not execute** until either the clarification resolves or the timeout fires. Downstream steps that do not depend on the paused step may proceed — dependency is expressed by the existing step-graph (same mechanism used for skill chaining). This prevents a single clarification from freezing an entire run while still ensuring data flow is respected.
 
-5. **Non-blocking clarifications** do not pause the run. The agent continues with its best guess and the answer is reconciled on the next run if it arrives later.
+5. **Timeout:** If no response arrives within `CLARIFICATION_TIMEOUT` (default 30 minutes for non-blocking, 5 minutes for blocking), the agent falls back to its best-guess answer and the paused step transitions to the terminal state `completed_with_uncertainty` (new value on the existing step-status enum). `completed_with_uncertainty` is surfaced in the run log with a `clarificationId` pointer so the human can retrospectively inspect the question and override the fallback. Downstream steps then execute normally against the fallback answer. The run itself is flagged `hadUncertainty: true` so it appears in the weekly digest's "Items pending" section (Section 7.2).
+
+6. **Non-blocking clarifications** do not pause any step. The agent continues with its best guess and the answer is reconciled on the next run if it arrives later. Non-blocking clarifications never produce `completed_with_uncertainty` — the step completes normally and the clarification is logged as `resolved_after_completion` when answered.
 
 ### 5.5 Universal Document Drop Zone (S9)
 
@@ -338,6 +352,8 @@ Owning service: `memoryReviewQueueService`. Org rollup reads counts grouped by `
 5. **Client portal exposure:** If portal mode is Collaborative, the client sees the drop zone and can upload. A trust-builds-over-time model governs filing: for the first 5 uploads from a new client, routing proposals are shown to the agency staffer for approval before any document is filed. After 5 uploads have been approved without rejection, subsequent uploads are auto-filed to the proposed destinations and the agency staffer receives a notification (not a blocking approval request). The 5-upload threshold resets if a filing is rejected. This mirrors the S7 confidence-tiered model and keeps the approval queue lightweight for established clients.
 
 **Trust state storage:** The per-client trust counter is stored as a `clientUploadTrustState` JSONB column on the `subaccounts` table with shape `{ approvedCount: number, trustedAt: string | null, resetAt: string | null }`. Owning service: `portalUploadService`. The JSONB column avoids an additional table while keeping the state co-located with the subaccount record it governs.
+
+**Audit log (per upload).** Every drop-zone upload — agency-initiated or client-initiated via the portal — writes one row to a new `drop_zone_upload_audit` table. Columns: `id`, `subaccountId`, `uploaderUserId` (nullable — null for client-portal uploads), `uploaderRole` (`agency_staff | client_contact`), `fileName`, `fileHash` (sha256, for dedupe detection), `proposedDestinations` (JSONB — the system's suggestion with confidence scores), `selectedDestinations` (JSONB — what the user actually ticked), `appliedDestinations` (JSONB — what actually got filed after transaction), `requiredApproval` (boolean — whether trust-builds-over-time gate was active), `approvedByUserId` (nullable), `createdAt`, `appliedAt` (nullable — null if rejected or still pending). This table is the source of truth for: (a) the Weekly Digest "uploads this week" summary, (b) the trust-builds-over-time counter recomputation if the JSONB state is ever lost, and (c) compliance review for agencies handling regulated client data. No soft-delete — audit rows are immutable and retained indefinitely.
 
 ---
 
@@ -375,7 +391,7 @@ A weekly background job (`memory-block-synthesis`) per subaccount:
 
 **Reconciliation with existing provenance fields:** The existing `memory_blocks` columns `sourceRunId`, `sourceReferenceId`, `lastWrittenByPlaybookSlug`, and `confidence` track the provenance of block *content* — which run wrote it, which Reference it was promoted from, which playbook authored it, and whether the content is trustworthy. The new `source` column (`manual | auto_synthesised`) tracks the *creation origin* of the block itself — whether it was created by a human or by the synthesis job (S11). These are orthogonal concerns: a block created by the synthesis job (`source: 'auto_synthesised'`) still uses `sourceRunId` to point to the run that triggered synthesis. The `memory_block_attachments.source` column (`manual | auto_attach`) is a separate concept on a separate table — it describes how an attachment was created, not the block's creation origin.
 
-Draft blocks are flagged `source: 'auto_synthesised'` and carry a `status` field from the enum `active | draft | pending_review | rejected` on `memory_blocks`. A newly synthesised block starts at `status: 'draft'`. Blocks are not auto-attached to agents and are excluded from relevance retrieval (S6) until `status` is `'active'`. Activation occurs via one of two paths: (a) explicit agency approval via the review queue, or (b) passive aging — surviving 2 weekly synthesis cycles without being rejected (treated as implicit approval). Both paths are valid. `pending_review` is set when a block is promoted to the medium-confidence review queue (S7) and awaiting agency decision. The invariant is: no block with `status != 'active'` is ever surfaced by S6.
+Draft blocks are flagged `source: 'auto_synthesised'` and carry a `status` field from the enum `active | draft | pending_review | rejected` on `memory_blocks`. A newly synthesised block starts at `status: 'draft'`. Blocks are not auto-attached to agents and are excluded from every injection path (relevance engine and explicit attachments) until `status` is `'active'`. Activation occurs via one of two paths: (a) explicit agency approval via the review queue, or (b) passive aging — surviving 2 weekly synthesis cycles without being rejected (treated as implicit approval). Both paths are valid. `pending_review` is set when a block is promoted to the medium-confidence review queue (S7) and awaiting agency decision. This enforces the global block status invariant defined in Section 5.2 — no block with `status != 'active'` is ever surfaced to an agent by any path.
 
 ### 5.8 Self-Tuning Retrieval Metrics (S12)
 
@@ -551,6 +567,8 @@ The Configuration Assistant gets a new `mode` parameter. In `subaccount-onboardi
 - A scoped toolset (memory block creation, playbook autostart, integration kickoff, portal config, DeliveryChannels, Configuration Document generation)
 - A different completion criterion (subaccount must be in "ready" state with all playbooks in the bundle configured and autostarted, not just "agent answered the question" — the bundle defaults to `[intelligence-briefing, weekly-digest]` per Section 8.7; memory bootstrap, integration setup, and portal config are procedural steps, not bundle entries)
 
+**Minimum viable onboarding (structural enforcement):** A subaccount cannot transition to `ready` state without the following minimum set completed: (a) Step 1 (Identity) — subaccount name and website or industry recorded; (b) Step 6 (Intelligence Briefing config) — scheduled task created and autostarted; (c) Step 7 (Weekly Digest config) — scheduled task created and autostarted. Steps 2–5 and 8–9 may be skipped or deferred; the onboarding state machine rejects a `mark_ready` transition that does not satisfy the three-step minimum. This is enforced in `subaccountOnboardingService.markReady()` with a structured error listing any missing step; the Configuration Assistant surfaces this as "You still need to configure X before we can finish." Smart-skipping (Section 8.5) satisfies these requirements when it successfully pre-fills and the agency confirms. The minimum is also referenced in the Risk table (Section 13) as the abandonment-mitigation fallback.
+
 Same plumbing as the existing Configuration Assistant org-admin mode. New mode, not new agent. The agent inherits its runtime guidelines from the platform-level memory block (`config-agent-guidelines` — shipped, canonical doc at `docs/agents/config-agent-guidelines.md`). The guidelines encode the Three C's diagnostic framework, priority order (configure existing > create new skills > create new agents), tier-edit permissions, confidence-tiered action policy, and safety gates. The onboarding mode's system prompt builds on top of these guidelines, not replaces them.
 
 ### 8.3 Two Paths — Live and Async
@@ -660,10 +678,22 @@ Schemas live alongside their playbook files: e.g., `server/playbooks/intelligenc
 **Processing pipeline:**
 
 1. **Extract text** from uploaded file (DOCX parser, PDF OCR, or plain text).
-2. **LLM parsing:** Map extracted answers back to Configuration Schema field IDs. The LLM receives the schema + the document text and returns a structured JSON of `{ fieldId: answer }` pairs.
-3. **Validation:** Check each answer against its schema constraints (required, type, validation hints). Flag invalid or missing answers.
-4. **Confidence scoring:** Each parsed answer gets a confidence score (0–1) based on extraction clarity, assigned by the LLM parser in step 2 as part of its JSON output (e.g., `{ fieldId, answer, confidence }`). The threshold for auto-apply is 0.7 (consistent with the risk note in Section 13). Owning service: `configDocumentParserService` (`server/services/configDocumentParserService.ts`).
-5. **Gap analysis:** Identify unanswered required questions.
+2. **LLM parsing:** Map extracted answers back to Configuration Schema field IDs. The LLM receives the schema + the document text and returns a structured JSON array of `ParsedConfigField` records — the single canonical shape used by every downstream step:
+
+   ```typescript
+   interface ParsedConfigField {
+     fieldId: string;                          // Matches ConfigQuestion.id
+     answer: string | string[] | boolean | null; // Typed per ConfigQuestion.type; null if unanswered
+     confidence: number;                       // 0–1, assigned by the parser
+     sourceExcerpt?: string;                   // Optional — the raw text fragment the answer was derived from
+   }
+   ```
+
+   No other variant (e.g., `{ fieldId: answer }` maps, separate confidence tables) is used anywhere in the pipeline. Validation, confidence gating, gap analysis, and auto-apply all consume the same `ParsedConfigField[]` array.
+
+3. **Validation:** Check each `ParsedConfigField` against its matching `ConfigQuestion` schema constraints (required, type, validation hints). Flag invalid answers — they are treated as if `confidence = 0` for outcome routing.
+4. **Confidence gating:** The threshold for auto-apply is `PARSE_CONFIDENCE_THRESHOLD` (default `0.7`, in `limits.ts`, consistent with the risk note in Section 13). Fields below threshold are surfaced in the follow-up conversation. Owning service: `configDocumentParserService` (`server/services/configDocumentParserService.ts`).
+5. **Gap analysis:** Identify `ParsedConfigField` records where `answer === null` *and* the matching `ConfigQuestion.required === true`. These are the questions surfaced in the follow-up conversation.
 
 **Outcome routing:**
 
@@ -849,7 +879,7 @@ The job:
 | **Portfolio rollup LLM hallucination** | Agency owner sees incorrect cross-client summary | Low | Rollup cites source briefings; drill-through lets owner verify against originals; structured data (counts, KPIs) pulled from DB not LLM |
 | **Memory decay prunes an entry that was actually valuable** | Lost institutional knowledge | Low | Soft-delete only (recoverable for 90 days); entries with high citation count exempt from pruning; weekly digest reports pruned entries |
 | **Client portal exposes sensitive operational details** | Client sees internal agency processes | Medium | Portal mode defaults to Hidden; Transparency mode explicitly filters out agent instructions, task configs, and internal notes; per-feature toggles (S17) provide granular control |
-| **Onboarding conversation is too long for busy agency staff** | Abandonment, incomplete setup | Medium | Smart skipping reduces steps; hybrid path (start live, finish async); drop-out and resume; minimum viable onboarding = just Steps 1 + 6 + 7 (identity + both playbooks) |
+| **Onboarding conversation is too long for busy agency staff** | Abandonment, incomplete setup | Medium | Smart skipping reduces steps; hybrid path (start live, finish async); drop-out and resume; minimum viable onboarding structurally enforced at Steps 1 + 6 + 7 (identity + both playbooks) — see Section 8.2 |
 | **DeliveryChannels component becomes a maintenance burden as integrations grow** | Every new integration requires component changes | Low | Component queries connected integrations dynamically; new integrations register in a channel registry, not in the component itself |
 
 ---
