@@ -814,28 +814,14 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       }
 
       // Fire-and-forget re-embed of updated entries so vector search reflects
-      // the new content. Same degrade-gracefully pattern used for inserts below.
+      // the new content. Process-local dedup inside reembedEntry collapses
+      // bursts (review §3.2). Failures are non-fatal — the partial index will
+      // resurface stale entries on the next ops sweep.
       if (reembedTargets.length > 0) {
         Promise.all(
-          reembedTargets.map(async (target) => {
-            try {
-              const embedding = await generateEmbedding(target.content);
-              if (embedding) {
-                const contentHash = createHash('md5').update(target.content).digest('hex');
-                await db.execute(
-                  sql`UPDATE workspace_memory_entries
-                         SET embedding = ${formatVectorLiteral(embedding)}::vector,
-                             embedding_computed_at = NOW(),
-                             embedding_content_hash = ${contentHash},
-                             embedding_context = NULL
-                       WHERE id = ${target.id}`
-                );
-              }
-            } catch {
-              // Non-fatal — stale embedding remains and will be flagged by the
-              // workspace_memory_entries_stale_embedding_idx index.
-            }
-          })
+          reembedTargets.map((target) =>
+            reembedEntry({ id: target.id, content: target.content, resetContext: true })
+          )
         ).catch((err) => console.error('[WorkspaceMemory] Failed to re-embed updated entries:', err));
       }
 
@@ -844,28 +830,12 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       if (values.length > 0) {
         const inserted = await db.insert(workspaceMemoryEntries).values(values).returning();
 
-        // Phase 1: Generate content-only embeddings immediately (searchable right away)
+        // Phase 1: Generate content-only embeddings immediately (searchable
+        // right away). reembedEntry handles hash stamping + in-flight dedup.
         Promise.all(
-          inserted.map(async (entry) => {
-            try {
-              const embedding = await generateEmbedding(entry.content);
-              if (embedding) {
-                // External review §2.1: stamp embedding_content_hash with the
-                // hash of the exact content embedded, so later content
-                // mutations can be detected as stale.
-                const contentHash = createHash('md5').update(entry.content).digest('hex');
-                await db.execute(
-                  sql`UPDATE workspace_memory_entries
-                         SET embedding = ${formatVectorLiteral(embedding)}::vector,
-                             embedding_computed_at = NOW(),
-                             embedding_content_hash = ${contentHash}
-                       WHERE id = ${entry.id}`
-                );
-              }
-            } catch {
-              // Non-fatal — vector search degrades gracefully
-            }
-          })
+          inserted.map((entry) =>
+            reembedEntry({ id: entry.id, content: entry.content, resetContext: false })
+          )
         ).catch((err) => console.error('[WorkspaceMemory] Failed to generate embeddings:', err));
 
         // Phase 2: Enqueue async context enrichment job (B1)
@@ -1694,6 +1664,127 @@ export async function pruneStaleMemoryEntries(): Promise<number> {
     .returning({ id: workspaceMemoryEntries.id });
 
   return pruned.length;
+}
+
+// ---------------------------------------------------------------------------
+// Embedding invalidation helpers (review §2.1, item 7, §3.2)
+//
+// Single shared re-embed function used by:
+//   - Phase 1 insert path (no context to reset; row is brand new)
+//   - Dedup UPDATE path (content drifted; old context is stale)
+//   - getStaleEmbeddingsBatch / recomputeStaleEmbeddings ops helpers
+//
+// Process-local in-flight guard prevents duplicate concurrent re-embeds for
+// the same entry. This collapses bursts (e.g. several agent runs touching the
+// same entry within seconds) into a single LLM call. Local to the process —
+// across processes, a duplicate may still happen, but the partial index will
+// quickly settle to a clean state because each re-embed write is idempotent.
+// ---------------------------------------------------------------------------
+
+const inFlightReembeds = new Set<string>();
+
+/**
+ * Recompute the embedding for a single entry and stamp embedding_content_hash.
+ * Returns true on success, false if skipped (duplicate in flight) or failed.
+ *
+ * `resetContext` controls whether to clear `embedding_context` — the dedup
+ * UPDATE and ops backfill paths set this to true (the existing context was
+ * generated for the OLD content and is now misleading); the brand-new insert
+ * path sets it to false (there is no context yet to clear).
+ */
+export async function reembedEntry(params: {
+  id: string;
+  content: string;
+  resetContext: boolean;
+}): Promise<boolean> {
+  if (inFlightReembeds.has(params.id)) return false;
+  inFlightReembeds.add(params.id);
+  try {
+    const embedding = await generateEmbedding(params.content);
+    if (!embedding) return false;
+    const contentHash = createHash('md5').update(params.content).digest('hex');
+    if (params.resetContext) {
+      await db.execute(
+        sql`UPDATE workspace_memory_entries
+               SET embedding = ${formatVectorLiteral(embedding)}::vector,
+                   embedding_computed_at = NOW(),
+                   embedding_content_hash = ${contentHash},
+                   embedding_context = NULL
+             WHERE id = ${params.id}`
+      );
+    } else {
+      await db.execute(
+        sql`UPDATE workspace_memory_entries
+               SET embedding = ${formatVectorLiteral(embedding)}::vector,
+                   embedding_computed_at = NOW(),
+                   embedding_content_hash = ${contentHash}
+             WHERE id = ${params.id}`
+      );
+    }
+    return true;
+  } catch {
+    // Non-fatal — the partial index will resurface this entry on the next sweep.
+    return false;
+  } finally {
+    inFlightReembeds.delete(params.id);
+  }
+}
+
+/**
+ * Return up to `limit` entries whose embedding has drifted from their content
+ * (review item 7). Backed by the partial index from migration 0151, so this
+ * is O(stale), not O(rows). Optional `subaccountId` scopes the scan.
+ *
+ * Use cases: nightly cron, ops dashboards, post-migration sanity checks.
+ */
+export async function getStaleEmbeddingsBatch(params: {
+  subaccountId?: string;
+  limit?: number;
+} = {}): Promise<Array<{ id: string; content: string }>> {
+  const limit = Math.max(1, Math.min(1000, params.limit ?? 100));
+  const result = params.subaccountId
+    ? await db.execute(sql`
+        SELECT id, content
+          FROM workspace_memory_entries
+         WHERE embedding IS NOT NULL
+           AND embedding_content_hash IS DISTINCT FROM content_hash
+           AND deleted_at IS NULL
+           AND subaccount_id = ${params.subaccountId}
+         LIMIT ${limit}
+      `)
+    : await db.execute(sql`
+        SELECT id, content
+          FROM workspace_memory_entries
+         WHERE embedding IS NOT NULL
+           AND embedding_content_hash IS DISTINCT FROM content_hash
+           AND deleted_at IS NULL
+         LIMIT ${limit}
+      `);
+  // postgres-js returns rows directly as an array on db.execute
+  return (result as unknown as Array<{ id: string; content: string }>) ?? [];
+}
+
+/**
+ * Recompute up to `limit` stale embeddings serially. Returns scan vs success
+ * counts so callers can monitor convergence. Serial (not parallel) on purpose:
+ * embedding generation is rate-limited at the provider, and a 100-entry batch
+ * already takes long enough that bursting is wasteful.
+ */
+export async function recomputeStaleEmbeddings(params: {
+  subaccountId?: string;
+  limit?: number;
+} = {}): Promise<{ scanned: number; recomputed: number }> {
+  const stale = await getStaleEmbeddingsBatch(params);
+  let recomputed = 0;
+  for (const entry of stale) {
+    const ok = await reembedEntry({
+      id: entry.id,
+      content: entry.content,
+      resetContext: true,
+    });
+    if (ok) recomputed++;
+  }
+  return { scanned: stale.length, recomputed };
 }
 
 // ---------------------------------------------------------------------------
