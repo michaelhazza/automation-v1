@@ -455,6 +455,14 @@ Never execute mutations without a plan. Always:
    mutation was executed — skip for read-only sessions or fully no-op plans)
 ```
 
+### 5.4.1 Runtime-loaded reasoning guidelines
+
+The system prompt above encodes what the agent *can* do and the core execution discipline (scope gathering, plan-first, discovery loop cap). A deeper diagnostic and reasoning framework — the Three C's, tier model, confidence tiers, safety gates, blast-radius discipline, stale-context supersession, and escalation rules — is loaded at run start via a platform-level memory block rather than being baked into the system prompt.
+
+This separation lets the guidelines evolve via the Knowledge page without a deploy. The block is named `config-agent-guidelines`, scoped to the org subaccount, and auto-attached to this agent at seed time. It is protected from accidental deletion (route-layer guard returns `409 PROTECTED_MEMORY_BLOCK`).
+
+Canonical source: `docs/agents/config-agent-guidelines.md`. Implementation: `docs/config-agent-guidelines-spec.md`.
+
 ### 5.5 Orchestrator awareness
 
 The orchestrator agent's `masterPrompt` or `additionalPrompt` needs one addition so it knows to delegate configuration requests:

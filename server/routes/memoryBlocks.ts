@@ -1,10 +1,12 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { z } from 'zod';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateBody } from '../middleware/validate.js';
+import { logger } from '../lib/logger.js';
 import * as memoryBlockService from '../services/memoryBlockService.js';
+import { PROTECTED_BLOCK_NAMES } from '../lib/protectedBlocks.js';
 
 const router = Router();
 
@@ -30,6 +32,15 @@ const updateMemoryBlockBody = z.object({
   ownerAgentId: z.string().uuid().nullable().optional(),
 });
 
+// ─── Protected-block 409 helper ──────────────────────────────────────────────
+
+function rejectProtectedBlock(res: Response, errorCode = 'PROTECTED_MEMORY_BLOCK') {
+  res.status(409).json({
+    error: 'This memory block is protected and cannot be modified structurally. Contact platform operations.',
+    errorCode,
+  });
+}
+
 // ─── List memory blocks (org-scoped, optional subaccount filter) ────────────
 
 router.get(
@@ -47,6 +58,8 @@ router.get(
 );
 
 // ─── Create a memory block ──────────────────────────────────────────────────
+// Guard: name must not be in PROTECTED_BLOCK_NAMES — reserves the name so a
+// user-authored block cannot squat it before the seeder runs.
 
 router.post(
   '/api/memory-blocks',
@@ -55,6 +68,14 @@ router.post(
   validateBody(createMemoryBlockBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { name, content, subaccountId, ownerAgentId, isReadOnly, autoAttach } = req.body;
+
+    if (PROTECTED_BLOCK_NAMES.has(name)) {
+      res.status(409).json({
+        error: `Block name '${name}' is reserved for a platform-managed block. Contact platform operations.`,
+        errorCode: 'PROTECTED_MEMORY_BLOCK',
+      });
+      return;
+    }
 
     const block = await memoryBlockService.createBlock({
       organisationId: req.orgId!,
@@ -71,6 +92,11 @@ router.post(
 );
 
 // ─── Update a memory block (admin) ──────────────────────────────────────────
+// Guards on protected blocks:
+//   - rename (name change) → 409
+//   - isReadOnly: false    → 409  (would allow agent self-overwrite)
+//   - ownerAgentId change  → 409  (would reassign write provenance)
+//   - content edit         → allowed for org admins; logged at info level
 
 router.patch(
   '/api/memory-blocks/:id',
@@ -79,9 +105,40 @@ router.patch(
   validateBody(updateMemoryBlockBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { name, content, isReadOnly, ownerAgentId } = req.body;
+    const blockId = req.params.id;
+
+    // Fetch block name only when one of the guarded fields is present
+    const needsGuardCheck = name !== undefined || isReadOnly !== undefined || ownerAgentId !== undefined || content !== undefined;
+    if (needsGuardCheck) {
+      const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
+      if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
+        if (name !== undefined && name !== blockName) {
+          rejectProtectedBlock(res);
+          return;
+        }
+        if (isReadOnly === false) {
+          rejectProtectedBlock(res);
+          return;
+        }
+        if (ownerAgentId !== undefined) {
+          rejectProtectedBlock(res);
+          return;
+        }
+        // Content edits are permitted — log for observability
+        if (content !== undefined) {
+          logger.info('protected_block.content_edited', {
+            blockId,
+            blockName,
+            orgId: req.orgId,
+            actorUserId: req.user?.id ?? null,
+            source: 'manual',
+          });
+        }
+      }
+    }
 
     const updated = await memoryBlockService.updateBlockAdmin(
-      req.params.id,
+      blockId,
       req.orgId!,
       { name, content, isReadOnly, ownerAgentId },
     );
@@ -96,13 +153,21 @@ router.patch(
 );
 
 // ─── Delete a memory block (soft delete) ────────────────────────────────────
+// Guard: protected blocks cannot be soft-deleted via the API.
 
 router.delete(
   '/api/memory-blocks/:id',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const deleted = await memoryBlockService.deleteBlock(req.params.id, req.orgId!);
+    const blockId = req.params.id;
+    const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
+    if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
+      rejectProtectedBlock(res);
+      return;
+    }
+
+    const deleted = await memoryBlockService.deleteBlock(blockId, req.orgId!);
 
     if (!deleted) {
       res.status(404).json({ error: 'Memory block not found' });
@@ -138,6 +203,8 @@ router.post(
 );
 
 // ─── Detach a block from an agent ───────────────────────────────────────────
+// Guard: cannot detach the owning agent from a protected block. Detaching
+// disables the guidelines until the next deploy-time reseed.
 
 router.delete(
   '/api/memory-blocks/:blockId/attachments/:agentId',
@@ -145,6 +212,16 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { blockId, agentId } = req.params;
+
+    const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
+    if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
+      res.status(409).json({
+        error: 'This attachment is protected and cannot be removed. Contact platform operations.',
+        errorCode: 'PROTECTED_MEMORY_BLOCK_ATTACHMENT',
+      });
+      return;
+    }
+
     const detached = await memoryBlockService.detachBlock(blockId, agentId, req.orgId!);
 
     if (!detached) {

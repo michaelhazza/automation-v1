@@ -85,6 +85,9 @@ run_gate "$SCRIPT_DIR/verify-handoff-shape-versioned.sh"
 # ── Code quality gates ──
 run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
 
+# ── Configuration Agent guidelines protection gates ──
+run_gate "$SCRIPT_DIR/verify-protected-block-names.sh"
+
 # ── Onboarding playbooks spec (docs/onboarding-playbooks-spec.md) gates ──
 run_gate "$SCRIPT_DIR/verify-help-hint-length.mjs"
 run_gate "$SCRIPT_DIR/verify-action-call-allowlist.sh"

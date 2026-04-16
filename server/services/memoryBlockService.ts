@@ -531,6 +531,25 @@ export async function upsertFromPlaybook(
 /** Re-export the per-run quota for places that want to display it in UI. */
 export { MEMORY_BLOCKS_PER_RUN_MAX };
 
+/**
+ * Fetch the name of a memory block by ID, scoped to the caller's org.
+ * Returns null if the block does not exist or belongs to a different org.
+ * Used by route guards that need the block name before mutating.
+ */
+export async function getBlockName(blockId: string, orgId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ name: memoryBlocks.name })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, orgId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  return row?.name ?? null;
+}
+
 export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {
   // Verify the block belongs to the caller's org before detaching
   const [block] = await db

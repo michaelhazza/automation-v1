@@ -19,6 +19,7 @@ import {
 } from '../services/knowledgeService.js';
 import * as memoryBlockService from '../services/memoryBlockService.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
+import { PROTECTED_BLOCK_NAMES } from '../lib/protectedBlocks.js';
 
 // ---------------------------------------------------------------------------
 // Unified Knowledge page (spec §7) — backend shims that sit on top of the
@@ -211,6 +212,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, blockId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
+
+    // Guard: protected blocks cannot be demoted (demote soft-deletes the block).
+    // This closes the bypass path around the DELETE guard in memoryBlocks.ts.
+    const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
+    if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
+      res.status(409).json({
+        error: 'This memory block is protected and cannot be demoted. Contact platform operations.',
+        errorCode: 'PROTECTED_MEMORY_BLOCK',
+      });
+      return;
+    }
+
     const { content } = req.body as z.infer<typeof demoteBody>;
 
     const result = await demoteBlockToReference({
