@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-16 (Positioning refresh for hosted-routine and scheduled-prompt product category — portfolio-calendar and no-code-migration differentiators added; new hosted-routines objection row; vendor-neutral language preserved throughout)
+> **Last updated:** 2026-04-16 (Execution infrastructure hardening — canonical-hash idempotency, dual-bucket boundary tolerance, per-user rate limiting, WebSocket-first real-time streaming, shared run status enum, fixture read-time integrity)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -118,7 +118,7 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 | **Client portal and white-label surface** | LLM providers will not build this — their buyer is the producer, not the consumer of the producer's work. A permanent wedge for agencies serving end-clients. |
 | **Agency economics** | LLM usage ledger with full org → subaccount → run → skill cost attribution, org-level margin configuration, pre-reserved budgets, and cost circuit breakers. Agency P&L (revenue, per-client pricing, per-client margin reporting) is on the roadmap as a first-class surface. LLM providers sell tokens; they do not care what agencies bill. |
 | **Integration framework with managed connectors** | Generic integration protocols are just protocols. Synthetos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
-| **Execution infrastructure maturity** | Idempotency on every run path, pre-reserved budgets with advisory locks, dead-letter queues, loop detection, crash-resume checkpoints, correlation IDs for tracing, workspace health detectors surfacing configuration drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
+| **Execution infrastructure maturity** | Canonical-hash idempotency with dual-bucket boundary tolerance on every run path, per-user rate limiting with eviction metrics, WebSocket-first real-time execution streaming with adaptive polling backstop, pre-reserved budgets with advisory locks, dead-letter queues, loop detection, crash-resume checkpoints, correlation IDs for tracing, workspace health detectors surfacing configuration drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
 | **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Synthetos ships solutions. Verticals compound into pricing power. |
 | **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Synthetos routes to the best model per task and insulates agencies from provider shifts. |
 | **Portfolio-wide scheduled-work visibility** | A single calendar surface shows every scheduled agent run, recurring playbook, and scheduled task across every client for the next 7–30 days — roll up org-wide, drill down per client, and expose a "here's what we're doing for you next week" card inside the client portal. Hosted-routine and scheduled-prompt products show a calendar for *one user's* automations; Synthetos shows an agency's entire book of client work on one screen. Agencies pitch it on discovery calls; clients see it in their portal. |
@@ -191,7 +191,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Knowledge sources:** Per-agent data files (R2, S3, HTTP, Google Docs, Dropbox, uploads) with token budgets and caching
 - Agent templates for rapid team deployment; full run history with execution traces; idempotent deduplication on all run paths
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
-- **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with live-streaming run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default, with a re-usable test-input fixture library per agent and skill.
+- **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with WebSocket-streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill with read-time integrity checks. Server-derived canonical-hash idempotency prevents duplicate runs on rapid double-click; per-user rate limiting caps test run volume.
 
 ### Configuration Assistant
 
@@ -342,7 +342,9 @@ Extensible connector architecture supporting OAuth, API keys, webhooks, and MCP 
 Production-grade reliability — agents run consistently, recover from failures, and never double-execute.
 
 - **Job queue:** pg-boss or BullMQ; 24+ job types across 10 priority tiers with DLQ and nightly cleanup
-- **Idempotency:** every action is deduplicated — safe to retry without side effects
+- **Idempotency:** canonical-hash deduplication with dual-bucket boundary tolerance — safe to retry without side effects, even across time-window boundaries
+- **Rate limiting:** per-user test-run rate limiter with bounded memory, eviction tracking, and operational metrics
+- **Real-time execution streaming:** WebSocket-first with adaptive polling backstop (15s connected / 5s disconnected) — replaces legacy polling for lower infra load and faster UX
 - **Budget enforcement:** hard ceilings on tokens, cost, tool calls, and timeouts per run
 - **Security:** data isolation enforced at three independent layers; every tool call authorisation logged
 - Loop detection, crash-resume checkpoints, correlation IDs for cross-service tracing
@@ -797,6 +799,7 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-16 | Execution infrastructure hardening: canonical-hash idempotency with dual-bucket boundary tolerance, per-user rate limiting with eviction metrics, WebSocket-first real-time execution streaming (replacing polling), shared run status enum. Update Inline Run Now bullet with WebSocket streaming, fixture integrity, and idempotency detail. Expand Execution Infrastructure product section with rate limiting and real-time streaming. | — |
 | 2026-04-16 | Hosted-routine / scheduled-prompt product-category positioning refresh: add Portfolio-wide scheduled-work visibility and Supervised migration from no-code workflow tools to Structural Differentiators; add "I'll use a hosted routines product from an LLM provider" objection row; sharpen existing scheduled-prompt objection row with portfolio-calendar and client-portal proof points; expand Replaces / Consolidates with hosted-routine and no-code migration rows; add portfolio calendar + inline Run Now test bullets to AI Agent System; add no-code migration wedge bullet to Playbook Engine; add discovery-call demo and "why not hosted routines" conversation bullets to GTM guidance. Ships in the same commit as `docs/routines-response-dev-spec.md`. | — |
 | 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_playbook_output_to_portal` and `config_send_playbook_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
 | 2026-04-14 | Apply Editorial Rules across customer-facing sections — scrub all named LLM / AI providers and their products from Positioning, Replaces / Consolidates, and Product Capabilities; rewrite in generic, vendor-neutral, marketing-appropriate language. Add Editorial Rules section and neutralise "default provider" language in Integrations Reference. Persist editorial rules in `CLAUDE.md`. | — |
