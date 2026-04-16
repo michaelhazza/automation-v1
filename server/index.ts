@@ -50,6 +50,7 @@ import boardConfigRouter from './routes/boardConfig.js';
 import tasksRouter from './routes/tasks.js';
 import subaccountAgentsRouter from './routes/subaccountAgents.js';
 import scheduleCalendarRouter from './routes/scheduleCalendar.js';
+import agentTestFixturesRouter from './routes/agentTestFixtures.js';
 // agentTemplates deprecated — replaced by systemAgents
 import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
@@ -241,6 +242,7 @@ app.use(boardConfigRouter);
 app.use(tasksRouter);
 app.use(subaccountAgentsRouter);
 app.use(scheduleCalendarRouter);
+app.use(agentTestFixturesRouter);
 // agentTemplatesRouter removed — replaced by systemAgentsRouter
 app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
