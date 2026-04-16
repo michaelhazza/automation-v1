@@ -88,6 +88,7 @@ import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib
 import { classifySkill } from './lib/skillClassification.js';
 import { playbookTemplateService } from '../server/services/playbookTemplateService.js';
 import type { PlaybookDefinition } from '../server/lib/playbook/types.js';
+import { seedConfigAgentGuidelinesAll } from './seedConfigAgentGuidelines.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -164,7 +165,7 @@ async function preflightVerifySkillVisibility(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase1_systemBootstrap(): Promise<string> {
-  logPhase(1, 5, 'System bootstrap');
+  logPhase(1, 6, 'System bootstrap');
 
   // 1a. System organisation — upsert
   const systemOrgId = await upsertOrganisation({
@@ -349,7 +350,7 @@ async function upsertSubaccount(values: {
 // ---------------------------------------------------------------------------
 
 async function phase2_systemAgents(): Promise<void> {
-  logPhase(2, 5, 'System agents (Automation OS company)');
+  logPhase(2, 6, 'System agents (Automation OS company)');
 
   const companyDir = resolve('companies/automation-os');
   let parsed: ParsedCompany;
@@ -440,7 +441,7 @@ async function phase2_systemAgents(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase3_playbookAuthor(): Promise<void> {
-  logPhase(3, 5, 'Playbook Author system agent');
+  logPhase(3, 6, 'Playbook Author system agent');
 
   const SLUG = 'playbook-author';
   const PROMPT_PATH = resolve(process.cwd(), 'server/agents/playbook-author/master-prompt.md');
@@ -513,7 +514,7 @@ async function phase3_playbookAuthor(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase4_playbookTemplates(): Promise<void> {
-  logPhase(4, 5, 'Playbook templates');
+  logPhase(4, 6, 'Playbook templates');
 
   await seedPlaybookFiles();
   await seedPortfolioHealthPlaybook();
@@ -725,7 +726,7 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase5_devFixtures(): Promise<void> {
-  logPhase(5, 5, 'Dev fixtures (Synthetos demo org)');
+  logPhase(5, 6, 'Dev fixtures (Synthetos demo org)');
 
   const ORG_NAME = 'Synthetos';
   const ORG_SLUG = 'synthetos';
@@ -1322,8 +1323,14 @@ async function main(): Promise<void> {
   if (!IS_PRODUCTION) {
     await phase5_devFixtures();
   } else {
-    console.log('\n[5/5] Dev fixtures — skipped (production mode)');
+    console.log('\n[5/6] Dev fixtures — skipped (production mode)\n');
   }
+
+  // Phase 6 — Configuration Assistant runtime guidelines memory block.
+  // Runs in both production and dev. Seeds the guidelines block for every
+  // org that has the Configuration Assistant agent activated. Idempotent.
+  logPhase(6, 6, 'Configuration Assistant guidelines block');
+  await seedConfigAgentGuidelinesAll(db, log);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n✓ Seed complete in ${elapsed}s.`);
