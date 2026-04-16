@@ -45,6 +45,8 @@ const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
+// Memory & Briefings Phase 2 — HITL review queue (S7)
+const MemoryReviewQueuePage = lazy(() => import('./pages/MemoryReviewQueuePage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
@@ -243,6 +245,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            {/* Memory & Briefings Phase 2 — HITL review queue (S7) */}
+            <Route path="/admin/subaccounts/:subaccountId/memory-review-queue" element={<MemoryReviewQueuePage />} />
             <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />

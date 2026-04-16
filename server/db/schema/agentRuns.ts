@@ -81,7 +81,7 @@ export const agentRuns = pgTable(
 
     // Status tracking
     // Sprint 5 P4.1: added 'awaiting_clarification' for ask_clarifying_question
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification'>(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -101,6 +101,11 @@ export const agentRuns = pgTable(
     // Error tracking
     errorMessage: text('error_message'),
     errorDetail: jsonb('error_detail'),
+
+    // Phase 2 Memory & Briefings — citation tracking (S12) + uncertainty flag (S8)
+    // Migration 0137
+    citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
+    hadUncertainty: boolean('had_uncertainty').notNull().default(false),
 
     // Impact counters
     tasksCreated: integer('tasks_created').notNull().default(0),

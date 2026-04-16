@@ -19,22 +19,27 @@
  *     `itemType='belief_conflict'` for human review.
  *   - Same agent: skip (an agent cannot conflict with itself on the same entityKey).
  *
- * Phase 1 real-time injection:
- *   The real-time path (pausing an active agent run to surface a conflict) is a
- *   no-op stub in Phase 1. Phase 2 flips it live after `clarificationService`
- *   lands (Phase 2 task 16 in the build plan).
+ * Phase 2 real-time injection (active):
+ *   When `activeRunId` is supplied and the resolution queues the conflict for
+ *   review (gap ≤ threshold), this service fires a `request_clarification`
+ *   via `clarificationService` so the paused run can be wired to the
+ *   human decision. The `request_clarification` call is non-blocking — the
+ *   agent run does NOT pause because conflict resolution is generally a
+ *   background correction rather than a hard blocker on the current step.
  *
- * Spec: docs/memory-and-briefings-spec.md §4.3 (S3)
+ * Spec: docs/memory-and-briefings-spec.md §4.3 (S3) + §5.4 (S8)
  */
 
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentBeliefs, memoryReviewQueue } from '../db/schema/index.js';
+import { agentBeliefs, agentRuns, memoryReviewQueue } from '../db/schema/index.js';
 import { CONFLICT_CONFIDENCE_GAP } from '../config/limits.js';
 import {
   computeConflictResolution,
   type ConflictResolutionDecision,
 } from './beliefConflictServicePure.js';
+import { requestClarification } from './clarificationService.js';
+import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -162,17 +167,38 @@ export async function checkAndResolveConflicts(
       });
       queuedForReview += 1;
 
-      // Phase 1: real-time injection into active runs is a no-op stub.
-      // Phase 2 activates this path after clarificationService lands.
+      // Phase 2: fire a non-blocking request_clarification so the reviewer
+      // is alerted in real time. The run itself is not paused — belief
+      // conflicts are typically background corrections rather than hard
+      // blockers on the current step.
       if (activeRunId) {
-        console.info(
-          JSON.stringify({
-            event: 'belief_conflict_realtime_stub',
-            message: 'S8 not yet landed — real-time conflict injection deferred to Phase 2',
+        try {
+          const [run] = await db
+            .select({ agentId: agentRuns.agentId })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, activeRunId))
+            .limit(1);
+
+          if (run) {
+            await requestClarification({
+              subaccountId: newBelief.subaccountId,
+              organisationId: newBelief.organisationId,
+              activeRunId,
+              stepId: null,
+              askingAgentId: run.agentId,
+              question: `Belief conflict detected for entity ${newBelief.entityKey}. Which is correct?\n\nAgent A says: ${existing.value}\nAgent B says: ${newBelief.value}`,
+              contextSnippet: `entityKey=${newBelief.entityKey}; confidenceGap=${decision.confidenceGap.toFixed(2)}`,
+              urgency: 'non_blocking',
+              suggestedAnswers: [existing.value, newBelief.value],
+            });
+          }
+        } catch (err) {
+          logger.warn('beliefConflictService.clarification_failed', {
             activeRunId,
             entityKey: newBelief.entityKey,
-          }),
-        );
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   }

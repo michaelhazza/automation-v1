@@ -1347,6 +1347,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     });
   },
 
+  // ── Phase 2 S8: Real-time clarification routing ──────────────────
+  request_clarification: async (input, context) => {
+    const { executeRequestClarification } = await import('../tools/internal/requestClarification.js');
+    return executeRequestClarification(input, {
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      agentId: context.agentId,
+      stepId: (context as { stepId?: string | null }).stepId ?? null,
+    });
+  },
+
   // ── Sprint 5 P4.2: Memory block write path ─────────────────────
   update_memory_block: async (input, context) => {
     const { updateBlock } = await import('./memoryBlockService.js');

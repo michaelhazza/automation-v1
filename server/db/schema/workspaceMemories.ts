@@ -111,6 +111,13 @@ export const workspaceMemoryEntries = pgTable(
     lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
     taskSlug:       text('task_slug'),   // null = global memory visible to all tasks
 
+    // Phase 2 Memory & Briefings §4.4 — citation counters (S12/S4 feedback loop)
+    // Migration 0146. `injectedCount` is incremented once per run the entry is
+    // surfaced to the agent; `citedCount` is incremented when the citation
+    // detector flags it as cited in that run's output.
+    injectedCount:  integer('injected_count').notNull().default(0),
+    citedCount:     integer('cited_count').notNull().default(0),
+
     // Phase 2C: Hierarchical metadata — auto-classified at write time
     domain: text('domain'),   // e.g. 'crm', 'reporting', 'marketing', 'dev'
     topic:  text('topic'),    // e.g. 'budget', 'campaign', 'pipeline', 'metrics'

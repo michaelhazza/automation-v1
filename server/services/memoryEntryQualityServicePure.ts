@@ -21,6 +21,11 @@ import {
   DECAY_WINDOW_DAYS,
   PRUNE_THRESHOLD,
   PRUNE_AGE_DAYS,
+  QUALITY_ADJUST_MIN_INJECTIONS,
+  QUALITY_ADJUST_HIGH_UTILITY,
+  QUALITY_ADJUST_LOW_UTILITY,
+  QUALITY_ADJUST_BOOST_DELTA,
+  QUALITY_ADJUST_REDUCTION_DELTA,
 } from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
@@ -105,4 +110,88 @@ export function isPruneEligible(params: PruneParams): boolean {
   const daysAge = msAge / (1000 * 60 * 60 * 24);
 
   return daysAge >= PRUNE_AGE_DAYS;
+}
+
+// ---------------------------------------------------------------------------
+// S4: utility-based quality adjustment (§4.4)
+// ---------------------------------------------------------------------------
+
+export interface UtilityAdjustmentParams {
+  /** Current qualityScore in [0, 1]. */
+  qualityScore: number;
+  /** Rolling-window injectedCount. Below MIN_INJECTIONS → no adjustment. */
+  injectedCount: number;
+  /** Rolling-window citedCount. */
+  citedCount: number;
+}
+
+export interface UtilityAdjustmentDecision {
+  /** Action taken on the entry's qualityScore. */
+  action: 'boost' | 'reduce' | 'noop_insufficient_data' | 'noop_neutral_utility' | 'noop_ceiling_or_floor';
+  /** The post-adjustment qualityScore. Equal to the input when no action. */
+  newScore: number;
+  /** utilityRate = citedCount / injectedCount, or 0 when injectedCount==0. */
+  utilityRate: number;
+}
+
+/**
+ * Decide whether to boost, reduce, or leave an entry's qualityScore.
+ *
+ * Rules (§4.4):
+ *   - injectedCount < QUALITY_ADJUST_MIN_INJECTIONS → no action (insufficient data)
+ *   - utilityRate > QUALITY_ADJUST_HIGH_UTILITY → boost (+BOOST_DELTA, capped at 1.0)
+ *   - utilityRate < QUALITY_ADJUST_LOW_UTILITY → reduce (-REDUCTION_DELTA, floored at 0.0)
+ *   - utilityRate in [LOW, HIGH] → no action (neutral band)
+ *   - injectedCount == 0 → no action (never injected; §4.4 last bullet)
+ *
+ * Score bounds: capped at 1.0, floored at 0.0. At the ceiling, further boosts
+ * are no-ops; at the floor, further reductions are no-ops.
+ *
+ * Pure: this function makes the decision but persists nothing.
+ */
+export function decideUtilityAdjustment(params: UtilityAdjustmentParams): UtilityAdjustmentDecision {
+  const { qualityScore, injectedCount, citedCount } = params;
+
+  // Never injected → never adjusted (§4.4 last bullet)
+  if (injectedCount === 0) {
+    return {
+      action: 'noop_insufficient_data',
+      newScore: qualityScore,
+      utilityRate: 0,
+    };
+  }
+
+  const utilityRate = citedCount / injectedCount;
+
+  // Insufficient data → no adjustment
+  if (injectedCount < QUALITY_ADJUST_MIN_INJECTIONS && utilityRate < QUALITY_ADJUST_HIGH_UTILITY) {
+    // Still too early to penalise; only high-utility entries may be boosted early.
+    return {
+      action: 'noop_insufficient_data',
+      newScore: qualityScore,
+      utilityRate,
+    };
+  }
+
+  if (utilityRate > QUALITY_ADJUST_HIGH_UTILITY) {
+    if (qualityScore >= 1.0) {
+      return { action: 'noop_ceiling_or_floor', newScore: 1.0, utilityRate };
+    }
+    const newScore = Math.min(1.0, qualityScore + QUALITY_ADJUST_BOOST_DELTA);
+    return { action: 'boost', newScore, utilityRate };
+  }
+
+  if (utilityRate < QUALITY_ADJUST_LOW_UTILITY) {
+    if (qualityScore <= 0.0) {
+      return { action: 'noop_ceiling_or_floor', newScore: 0.0, utilityRate };
+    }
+    const newScore = Math.max(0.0, qualityScore - QUALITY_ADJUST_REDUCTION_DELTA);
+    return { action: 'reduce', newScore, utilityRate };
+  }
+
+  return {
+    action: 'noop_neutral_utility',
+    newScore: qualityScore,
+    utilityRate,
+  };
 }

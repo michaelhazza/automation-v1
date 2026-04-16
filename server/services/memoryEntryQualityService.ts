@@ -16,10 +16,14 @@
  * Spec: docs/memory-and-briefings-spec.md §4.1 (S1)
  */
 
-import { eq, and, isNull, lt, inArray } from 'drizzle-orm';
+import { eq, and, isNull, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workspaceMemoryEntries } from '../db/schema/index.js';
-import { computeDecayFactor, isPruneEligible } from './memoryEntryQualityServicePure.js';
+import {
+  computeDecayFactor,
+  isPruneEligible,
+  decideUtilityAdjustment,
+} from './memoryEntryQualityServicePure.js';
 import { REINDEX_THRESHOLD } from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
@@ -178,4 +182,85 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
       errorCode: 'DECAY_FAILED',
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// adjustFromUtility — S4 weekly quality adjustment (§4.4)
+// ---------------------------------------------------------------------------
+
+export interface UtilityAdjustmentSummary {
+  subaccountId: string;
+  scanned: number;
+  boosted: number;
+  reduced: number;
+  skipped: number;
+  durationMs: number;
+}
+
+/**
+ * Weekly utility-based quality adjustment pass (§4.4 S4).
+ *
+ * For every non-deleted entry in the subaccount, read `injectedCount` and
+ * `citedCount` from the workspace_memory_entries row, compute utilityRate,
+ * and apply the pure decision function. Persists the new qualityScore.
+ *
+ * **Invariant:** This is the second and only other allowed qualityScore
+ * mutator alongside `applyDecay`. No other service may touch qualityScore.
+ *
+ * **Feature-flagged:** The caller (weekly job) should check
+ * `S4_QUALITY_ADJUST_LIVE` before invoking — this function does NOT honour
+ * the flag itself, allowing scripted verification / one-shot runs to bypass it.
+ */
+export async function adjustFromUtility(subaccountId: string): Promise<UtilityAdjustmentSummary> {
+  const started = Date.now();
+  let scanned = 0;
+  let boosted = 0;
+  let reduced = 0;
+  let skipped = 0;
+
+  const entries = await db
+    .select({
+      id: workspaceMemoryEntries.id,
+      qualityScore: workspaceMemoryEntries.qualityScore,
+      injectedCount: workspaceMemoryEntries.injectedCount,
+      citedCount: workspaceMemoryEntries.citedCount,
+    })
+    .from(workspaceMemoryEntries)
+    .where(
+      and(
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        isNull(workspaceMemoryEntries.deletedAt),
+      ),
+    );
+
+  scanned = entries.length;
+
+  for (const entry of entries) {
+    const currentScore = entry.qualityScore ?? 0.5;
+    const decision = decideUtilityAdjustment({
+      qualityScore: currentScore,
+      injectedCount: entry.injectedCount ?? 0,
+      citedCount: entry.citedCount ?? 0,
+    });
+
+    if (decision.action === 'boost' || decision.action === 'reduce') {
+      await db
+        .update(workspaceMemoryEntries)
+        .set({ qualityScore: decision.newScore })
+        .where(eq(workspaceMemoryEntries.id, entry.id));
+      if (decision.action === 'boost') boosted += 1;
+      else reduced += 1;
+    } else {
+      skipped += 1;
+    }
+  }
+
+  return {
+    subaccountId,
+    scanned,
+    boosted,
+    reduced,
+    skipped,
+    durationMs: Date.now() - started,
+  };
 }

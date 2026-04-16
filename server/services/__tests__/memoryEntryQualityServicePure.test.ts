@@ -11,12 +11,18 @@
 import {
   computeDecayFactor,
   isPruneEligible,
+  decideUtilityAdjustment,
 } from '../../services/memoryEntryQualityServicePure.js';
 import {
   DECAY_RATE,
   DECAY_WINDOW_DAYS,
   PRUNE_THRESHOLD,
   PRUNE_AGE_DAYS,
+  QUALITY_ADJUST_MIN_INJECTIONS,
+  QUALITY_ADJUST_HIGH_UTILITY,
+  QUALITY_ADJUST_LOW_UTILITY,
+  QUALITY_ADJUST_BOOST_DELTA,
+  QUALITY_ADJUST_REDUCTION_DELTA,
 } from '../../config/limits.js';
 
 let passed = 0;
@@ -159,6 +165,81 @@ test('entry exactly at PRUNE_AGE_DAYS → prune eligible', () => {
   const exactDate = new Date(now.getTime() - PRUNE_AGE_DAYS * 24 * 60 * 60 * 1000);
   const result = isPruneEligible({ qualityScore: 0, createdAt: exactDate, now });
   assertTrue(result, 'entry at exact PRUNE_AGE_DAYS boundary is pruned');
+});
+
+// ---------------------------------------------------------------------------
+// S4 — decideUtilityAdjustment
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('decideUtilityAdjustment:');
+
+test('never injected → noop_insufficient_data', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 0, citedCount: 0 });
+  if (d.action !== 'noop_insufficient_data') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 0.5) throw new Error('score unchanged');
+});
+
+test('high utility (0.6 > 0.5) with 12 injections → boost', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 12, citedCount: 8 });
+  if (d.action !== 'boost') throw new Error(`action=${d.action}`);
+  const expected = 0.5 + QUALITY_ADJUST_BOOST_DELTA;
+  if (Math.abs(d.newScore - expected) > 1e-9) throw new Error(`score=${d.newScore}`);
+});
+
+test('low utility (0.05 < 0.1) with 12 injections → reduce', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 12, citedCount: 0 });
+  if (d.action !== 'reduce') throw new Error(`action=${d.action}`);
+  const expected = 0.5 - QUALITY_ADJUST_REDUCTION_DELTA;
+  if (Math.abs(d.newScore - expected) > 1e-9) throw new Error(`score=${d.newScore}`);
+});
+
+test('neutral utility (0.3) with 12 injections → noop_neutral_utility', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 12, citedCount: 4 });
+  if (d.action !== 'noop_neutral_utility') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 0.5) throw new Error('score unchanged');
+});
+
+test('high utility at ceiling (1.0) → noop_ceiling_or_floor', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 1.0, injectedCount: 20, citedCount: 18 });
+  if (d.action !== 'noop_ceiling_or_floor') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 1.0) throw new Error(`score=${d.newScore}`);
+});
+
+test('low utility at floor (0.0) → noop_ceiling_or_floor', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.0, injectedCount: 20, citedCount: 0 });
+  if (d.action !== 'noop_ceiling_or_floor') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 0.0) throw new Error(`score=${d.newScore}`);
+});
+
+test('low utility with only 5 injections (< MIN_INJECTIONS=10) → noop_insufficient_data', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 5, citedCount: 0 });
+  if (d.action !== 'noop_insufficient_data') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 0.5) throw new Error('unchanged');
+});
+
+test('high utility with 5 injections (<MIN_INJECTIONS) + rate > 0.5 → boost (early signal)', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 5, citedCount: 4 });
+  if (d.action !== 'boost') throw new Error(`action=${d.action}`);
+  const expected = 0.5 + QUALITY_ADJUST_BOOST_DELTA;
+  if (Math.abs(d.newScore - expected) > 1e-9) throw new Error(`score=${d.newScore}`);
+});
+
+test('boost caps at 1.0', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.98, injectedCount: 20, citedCount: 18 });
+  if (d.action !== 'boost') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 1.0) throw new Error(`score=${d.newScore}, expected 1.0 cap`);
+});
+
+test('reduce floors at 0.0', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.03, injectedCount: 20, citedCount: 0 });
+  if (d.action !== 'reduce') throw new Error(`action=${d.action}`);
+  if (d.newScore !== 0.0) throw new Error(`score=${d.newScore}, expected 0.0 floor`);
+});
+
+test('utilityRate computed correctly', () => {
+  const d = decideUtilityAdjustment({ qualityScore: 0.5, injectedCount: 20, citedCount: 7 });
+  if (Math.abs(d.utilityRate - 0.35) > 1e-9) throw new Error(`utilityRate=${d.utilityRate}`);
 });
 
 console.log('');

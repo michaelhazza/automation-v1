@@ -119,6 +119,10 @@ import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 // Memory & Briefings Phase 1 — delivery channels route (S22)
 import deliveryChannelsRouter from './routes/deliveryChannels.js';
+// Memory & Briefings Phase 2 — clarifications route (S8)
+import clarificationsRouter from './routes/clarifications.js';
+// Memory & Briefings Phase 2 — HITL review queue route (S7)
+import memoryReviewQueueRouter from './routes/memoryReviewQueue.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -232,6 +236,8 @@ app.use(agentRunsRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
+app.use(clarificationsRouter);
+app.use(memoryReviewQueueRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

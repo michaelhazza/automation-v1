@@ -1025,6 +1025,34 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     topics: [],
   },
 
+  // ── Phase 2 S8: Real-time clarification routing (§5.4) ────────────────────
+  // Distinct from ask_clarifying_question — this routes to a named role via
+  // WebSocket and supports timeout fallback for blocking urgency.
+  request_clarification: {
+    actionType: 'request_clarification',
+    description: 'Route a real-time question to a named human (subaccount manager / agency owner / client contact) via WebSocket. Blocking urgency pauses the current step until the reply or timeout; non_blocking continues with best-guess.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['question', 'urgency'],
+    parameterSchema: z.object({
+      question: z.string().min(10).max(2000).describe('The clarifying question for the recipient'),
+      contextSnippet: z.string().max(1000).optional()
+        .describe('Short context block explaining the ambiguity'),
+      urgency: z.enum(['blocking', 'non_blocking'])
+        .describe('blocking pauses the current step; non_blocking continues with best-guess'),
+      suggestedAnswers: z.array(z.string().min(1).max(500)).max(5).optional()
+        .describe('One-tap answer choices surfaced as buttons'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    isMethodology: false,
+    topics: [],
+  },
+
   read_workspace: {
     actionType: 'read_workspace',
     description: 'Read workspace memories for a subaccount. Universal context access.',

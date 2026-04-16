@@ -159,3 +159,9 @@ export * from './subaccountOnboardingState.js';
 
 // Memory & Briefings spec Phase 1 — HITL review queue (migration 0139)
 export * from './memoryReviewQueue.js';
+
+// Memory & Briefings spec Phase 2 — citation score table (migration 0140)
+export * from './memoryCitationScores.js';
+
+// Memory & Briefings spec Phase 2 — trust calibration (migration 0147)
+export * from './trustCalibrationState.js';

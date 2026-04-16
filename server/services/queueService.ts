@@ -647,6 +647,45 @@ export const queueService = {
         }
       });
 
+      // Memory & Briefings Phase 2 — one-shot memory-blocks embedding backfill (S6)
+      await (boss as any).work('memory-blocks-embedding-backfill', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryBlocksEmbeddingBackfill } = await import('../jobs/memoryBlocksEmbeddingBackfillJob.js');
+          await withTimeout(runMemoryBlocksEmbeddingBackfill(), 600_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-blocks-embedding-backfill', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 2 — clarification timeout sweep (S8)
+      await (boss as any).work('maintenance:clarification-timeout-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runClarificationTimeoutSweep } = await import('../jobs/clarificationTimeoutJob.js');
+          await withTimeout(runClarificationTimeoutSweep(), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:clarification-timeout-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 2 — weekly quality-adjust job (S4, feature-flagged)
+      await (boss as any).work('maintenance:memory-entry-quality-adjust', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryEntryQualityAdjust } = await import('../jobs/memoryEntryQualityAdjustJob.js');
+          await withTimeout(runMemoryEntryQualityAdjust().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-entry-quality-adjust', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -777,6 +816,10 @@ export const queueService = {
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
       // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
+      // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
+      await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
+      await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

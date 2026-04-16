@@ -185,6 +185,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0139_memory_review_queue.sql',
     rationale: 'Per-org HITL review queue — belief conflicts and block proposals contain workspace intelligence that must not leak across tenants.',
   },
+  // 0147 — Memory & Briefings Phase 2: trust calibration
+  {
+    tableName: 'trust_calibration_state',
+    schemaFile: 'trustCalibrationState.ts',
+    policyMigration: '0147_trust_calibration_state.sql',
+    rationale: 'Per-agent trust counter — auto-thresholds and validation history must stay tenant-isolated to prevent gaming across orgs.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

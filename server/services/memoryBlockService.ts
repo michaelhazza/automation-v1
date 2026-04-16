@@ -17,7 +17,7 @@
  *   `detachBlock`, `listBlocks`.
  */
 
-import { eq, and, asc, isNull, count, inArray } from 'drizzle-orm';
+import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks, memoryBlockAttachments, subaccountAgents } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
@@ -27,6 +27,16 @@ import {
   type MergeStrategy,
   type BlockConfidence,
 } from './memoryBlockUpsertPure.js';
+import {
+  rankBlocksForInjection,
+  type CandidateBlock,
+} from './memoryBlockServicePure.js';
+import { generateEmbedding, formatVectorLiteral } from '../lib/embeddings.js';
+import {
+  BLOCK_RELEVANCE_THRESHOLD,
+  BLOCK_RELEVANCE_TOP_K,
+  BLOCK_TOKEN_BUDGET,
+} from '../config/limits.js';
 
 // ─── Types + pure helpers (re-exported for callers) ─────────────────────────
 
@@ -34,11 +44,38 @@ export type { MemoryBlockForPrompt } from './memoryBlockServicePure.js';
 export { formatBlocksForPrompt } from './memoryBlockServicePure.js';
 import type { MemoryBlockForPrompt } from './memoryBlockServicePure.js';
 
+// ─── S6: Block status invariant ──────────────────────────────────────────────
+
+/**
+ * Global invariant (spec §5.2): No block with status != 'active' is ever
+ * injected into an agent's context. Enforced at every DB query that loads
+ * blocks for injection. Protected blocks (e.g., config-agent-guidelines) are
+ * considered always-active and bypass relevance scoring but not this filter.
+ */
+const ACTIVE_STATUS = 'active' as const;
+
+/**
+ * Known protected block names that must always be included when attached,
+ * bypassing relevance scoring but never the status invariant.
+ */
+const PROTECTED_BLOCK_NAMES: ReadonlySet<string> = new Set([
+  'config-agent-guidelines',
+]);
+
+function isProtectedBlockName(name: string): boolean {
+  return PROTECTED_BLOCK_NAMES.has(name);
+}
+
 // ─── Read path (agent run hot path) ──────────────────────────────────────────
 
 /**
  * Load all memory blocks attached to a given agent, ordered by block name
  * for deterministic prompt assembly. Excludes soft-deleted blocks.
+ *
+ * **Block status invariant (spec §5.2):** Only blocks with `status='active'`
+ * are ever returned — this is the single, global filter for every injection
+ * path. Draft / pending_review / rejected blocks never reach an agent's
+ * context regardless of how they were attached.
  */
 export async function getBlocksForAgent(
   agentId: string,
@@ -57,6 +94,8 @@ export async function getBlocksForAgent(
         eq(memoryBlockAttachments.agentId, agentId),
         eq(memoryBlocks.organisationId, organisationId),
         isNull(memoryBlocks.deletedAt),
+        // §5.2 global invariant — only active blocks ever surface
+        eq(memoryBlocks.status, ACTIVE_STATUS),
         // Phase G / §7.4 — skip tombstoned attachments so a detached
         // auto-attach row does not reappear in the agent's prompt.
         isNull(memoryBlockAttachments.deletedAt),
@@ -68,6 +107,196 @@ export async function getBlocksForAgent(
     name: r.name,
     content: r.content,
     permission: r.permission as 'read' | 'read_write',
+  }));
+}
+
+// ─── S6: Relevance-driven block retrieval ────────────────────────────────────
+
+export interface RelevantBlockParams {
+  /** Task context text used as the query embedding. */
+  taskContext: string;
+  subaccountId: string | null;
+  organisationId: string;
+  /** Token budget for relevance-path blocks. Default BLOCK_TOKEN_BUDGET. */
+  tokenBudget?: number;
+  /** Similarity threshold. Default BLOCK_RELEVANCE_THRESHOLD (0.65). */
+  threshold?: number;
+  /** Top-K relevance matches before token-budget eviction. Default BLOCK_RELEVANCE_TOP_K. */
+  topK?: number;
+  /** Optional pre-computed task context embedding (avoid double embedding call). */
+  embedding?: number[];
+}
+
+/**
+ * Semantically rank active memory blocks by cosine similarity to the task
+ * context. Explicit attachments are handled separately by `getBlocksForAgent()`
+ * — this function returns relevance-path matches only.
+ *
+ * Returns an empty array on embedding failure, no candidates, or if blocks
+ * lack embeddings (backfill not yet complete).
+ *
+ * **Block status invariant:** Query filters `WHERE status='active'`. No other
+ * code path may lift this filter.
+ *
+ * Spec: §5.2 (S6).
+ */
+export async function getRelevantBlocks(
+  params: RelevantBlockParams,
+): Promise<CandidateBlock[]> {
+  const tokenBudget = params.tokenBudget ?? BLOCK_TOKEN_BUDGET;
+  const threshold = params.threshold ?? BLOCK_RELEVANCE_THRESHOLD;
+  const topK = params.topK ?? BLOCK_RELEVANCE_TOP_K;
+
+  if (!params.taskContext || params.taskContext.trim().length === 0) {
+    return [];
+  }
+
+  // 1. Get embedding for the task context (reuse caller-provided if given)
+  const embedding = params.embedding ?? (await generateEmbedding(params.taskContext));
+  if (!embedding) return [];
+
+  const literal = formatVectorLiteral(embedding);
+
+  // 2. Cosine-rank active blocks in scope (subaccount + org-shared).
+  //    Subaccount scope: subaccountId match OR null (org-level blocks).
+  const scopeCondition = params.subaccountId
+    ? or(
+        eq(memoryBlocks.subaccountId, params.subaccountId),
+        isNull(memoryBlocks.subaccountId),
+      )
+    : isNull(memoryBlocks.subaccountId);
+
+  // Over-fetch a larger pool so token-budget eviction has headroom.
+  const poolSize = topK * 3;
+
+  const rows = await db
+    .select({
+      id: memoryBlocks.id,
+      name: memoryBlocks.name,
+      content: memoryBlocks.content,
+      // Cosine distance → similarity (1 - distance). Using <=> cosine distance op.
+      distance: sql<number>`${memoryBlocks.embedding} <=> ${literal}::vector(1536)`,
+    })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, params.organisationId),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlocks.deletedAt),
+        // Skip blocks without embeddings (backfill not yet complete)
+        sql`${memoryBlocks.embedding} IS NOT NULL`,
+        scopeCondition,
+      ),
+    )
+    .orderBy(sql`${memoryBlocks.embedding} <=> ${literal}::vector(1536)`)
+    .limit(poolSize);
+
+  // 3. Convert distance → similarity, map to CandidateBlock shape, apply ranker
+  const candidates: CandidateBlock[] = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    content: r.content,
+    score: 1 - Number(r.distance),
+    source: 'relevance',
+    protected: isProtectedBlockName(r.name),
+  }));
+
+  return rankBlocksForInjection(candidates, {
+    threshold,
+    topK,
+    tokenBudget,
+  });
+}
+
+// ─── S6: Composed read path (explicit + relevance + token budget) ────────────
+
+export interface GetBlocksForInjectionParams {
+  agentId: string;
+  subaccountId: string | null;
+  organisationId: string;
+  taskContext: string;
+  tokenBudget?: number;
+  /** Pre-computed task context embedding. */
+  embedding?: number[];
+}
+
+/**
+ * Unified block retrieval for agent run context injection.
+ *
+ * Composes:
+ *   (a) Explicit attachments via getBlocksForAgent() — status=active filtered
+ *   (b) Relevance-ranked active blocks via getRelevantBlocks()
+ *   (c) Dedupe by block id, preferring explicit over relevance
+ *
+ * Protected blocks (config-agent-guidelines) are always surfaced when attached
+ * and bypass relevance scoring / token-budget eviction.
+ *
+ * Spec: §5.2 (S6).
+ */
+export async function getBlocksForInjection(
+  params: GetBlocksForInjectionParams,
+): Promise<MemoryBlockForPrompt[]> {
+  // Load explicit attachments (already filtered by status=active)
+  const explicitRows = await db
+    .select({
+      id: memoryBlocks.id,
+      name: memoryBlocks.name,
+      content: memoryBlocks.content,
+      permission: memoryBlockAttachments.permission,
+    })
+    .from(memoryBlockAttachments)
+    .innerJoin(memoryBlocks, eq(memoryBlockAttachments.blockId, memoryBlocks.id))
+    .where(
+      and(
+        eq(memoryBlockAttachments.agentId, params.agentId),
+        eq(memoryBlocks.organisationId, params.organisationId),
+        isNull(memoryBlocks.deletedAt),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlockAttachments.deletedAt),
+      ),
+    );
+
+  const explicitCandidates: CandidateBlock[] = explicitRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    content: r.content,
+    score: 1.0, // explicit = max score; not used for ordering
+    source: 'explicit',
+    protected: isProtectedBlockName(r.name),
+  }));
+
+  // Track permission per block for the final output mapping
+  const permissionByBlockId = new Map<string, 'read' | 'read_write'>();
+  for (const r of explicitRows) {
+    permissionByBlockId.set(r.id, r.permission as 'read' | 'read_write');
+  }
+
+  // Load relevance-path matches (also status=active filtered)
+  const relevantCandidates = await getRelevantBlocks({
+    taskContext: params.taskContext,
+    subaccountId: params.subaccountId,
+    organisationId: params.organisationId,
+    tokenBudget: params.tokenBudget,
+    embedding: params.embedding,
+  });
+
+  // Compose: rank combined set. Explicit blocks bypass eviction (handled in
+  // the pure ranker by source='explicit'); relevance blocks share the budget.
+  const ranked = rankBlocksForInjection(
+    [...explicitCandidates, ...relevantCandidates],
+    {
+      threshold: BLOCK_RELEVANCE_THRESHOLD,
+      topK: BLOCK_RELEVANCE_TOP_K,
+      tokenBudget: params.tokenBudget ?? BLOCK_TOKEN_BUDGET,
+    },
+  );
+
+  return ranked.map((c) => ({
+    name: c.name,
+    content: c.content,
+    // Explicit blocks preserve their original permission; relevance blocks
+    // are read-only by default (no mutation path outside explicit attachment).
+    permission: permissionByBlockId.get(c.id) ?? 'read',
   }));
 }
 
@@ -318,7 +547,7 @@ export async function attachBlock(
 ): Promise<{ id: string }> {
   // Verify the block belongs to the caller's org before attaching
   const [block] = await db
-    .select({ id: memoryBlocks.id })
+    .select({ id: memoryBlocks.id, status: memoryBlocks.status })
     .from(memoryBlocks)
     .where(
       and(
@@ -329,6 +558,16 @@ export async function attachBlock(
     );
   if (!block) {
     throw { statusCode: 404, message: 'Memory block not found' };
+  }
+
+  // §5.2 global invariant: non-active blocks are never injected. Reject
+  // attachment at the service boundary — the route layer surfaces 409.
+  if (block.status !== ACTIVE_STATUS) {
+    throw {
+      statusCode: 409,
+      message: `Cannot attach block with status '${block.status}'. Only active blocks may be attached.`,
+      errorCode: 'BLOCK_STATUS_NOT_ACTIVE',
+    };
   }
 
   const [row] = await db

@@ -151,6 +151,79 @@ export const RECENCY_BOOST_WEIGHT = 0.15;
  */
 export const CONFLICT_CONFIDENCE_GAP = 0.2;
 
+// ── Phase 2: Relevance-driven block retrieval (S6) ──────────────────────────
+
+/**
+ * Minimum cosine similarity between a block's embedding and task context
+ * for the block to be eligible for relevance-based injection. (§5.2)
+ */
+export const BLOCK_RELEVANCE_THRESHOLD = 0.65;
+
+/** Default top-K blocks returned by relevance scoring. (§5.2) */
+export const BLOCK_RELEVANCE_TOP_K = 5;
+
+/**
+ * Per-run token budget for block injection. Blocks are added in relevance
+ * order until this budget is exhausted. ~4 chars/token rough estimate. (§5.2)
+ */
+export const BLOCK_TOKEN_BUDGET = 4000;
+
+// ── Phase 2: Citation detection (S12) ──────────────────────────────────────
+
+/**
+ * Minimum combined citation score [0,1] for an injected entry to be
+ * considered "cited" in the agent's output. (§4.4)
+ */
+export const CITATION_THRESHOLD = 0.7;
+
+/**
+ * Jaccard ratio floor for the fuzzy-text matcher. Text-based matches below
+ * this ratio are not treated as a citation. (§4.4)
+ */
+export const CITATION_TEXT_OVERLAP_MIN = 0.35;
+
+/**
+ * Absolute overlapping-token floor for the fuzzy-text matcher. A match with
+ * fewer than this many overlapping n-grams is never a citation. (§4.4)
+ */
+export const CITATION_TEXT_TOKEN_MIN = 8;
+
+// ── Phase 2: Clarification timeouts (S8) ───────────────────────────────────
+
+/** Minutes before a blocking clarification falls back to best-guess. (§5.4) */
+export const CLARIFICATION_TIMEOUT_BLOCKING_MINUTES = 5;
+
+/** Minutes before a non-blocking clarification is reconciled-on-next-run. (§5.4) */
+export const CLARIFICATION_TIMEOUT_NON_BLOCKING_MINUTES = 30;
+
+// ── Phase 2: Self-tuning quality adjustment (S4) ───────────────────────────
+
+/**
+ * Feature flag — disables the weekly memoryEntryQualityAdjustJob writes until
+ * the threshold-tuning pass completes. Phase 2 exit criterion. (§4.4)
+ * Read at boot via `env.S4_QUALITY_ADJUST_LIVE === 'true'`.
+ */
+export const S4_QUALITY_ADJUST_LIVE =
+  typeof process !== 'undefined' && process.env?.S4_QUALITY_ADJUST_LIVE === 'true';
+
+/** Rolling window (days) of citation data considered by the adjust job. (§4.4) */
+export const QUALITY_ADJUST_WINDOW_DAYS = 28;
+
+/** Minimum injectedCount before an entry becomes adjustable. (§4.4) */
+export const QUALITY_ADJUST_MIN_INJECTIONS = 10;
+
+/** utilityRate floor at/above which an entry receives a qualityScore boost. (§4.4) */
+export const QUALITY_ADJUST_HIGH_UTILITY = 0.5;
+
+/** utilityRate ceiling at/below which an entry receives a qualityScore reduction. (§4.4) */
+export const QUALITY_ADJUST_LOW_UTILITY = 0.1;
+
+/** Additive boost delta applied to high-utility entries (capped at 1.0). (§4.4) */
+export const QUALITY_ADJUST_BOOST_DELTA = 0.05;
+
+/** Additive reduction delta applied to low-utility entries. (§4.4) */
+export const QUALITY_ADJUST_REDUCTION_DELTA = 0.05;
+
 /** Maximum number of sub-agents per spawn call */
 export const MAX_SUB_AGENTS = 3;
 

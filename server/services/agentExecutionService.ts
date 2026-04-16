@@ -639,12 +639,20 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${agent.additionalPrompt}`);
       }
 
-      // Layer 2a: Shared memory blocks (P4.2 — Letta pattern)
-      // Queried once at run start and cached for the run duration.
-      const memoryBlocksForPrompt = await memoryBlockService.getBlocksForAgent(
-        request.agentId,
-        request.organisationId,
-      );
+      // Layer 2a: Shared memory blocks — composes explicit attachments +
+      // relevance-ranked active blocks (spec §5.2, S6). The block-status
+      // invariant (`status='active'` only) is enforced inside the service.
+      //
+      // Relevance retrieval requires a task context. When no task is in flight
+      // (e.g., smart-board runs), the workspace-context string derived above
+      // acts as the query text. Explicit attachments always pass through and
+      // ensure zero regression for agents configured with pinned blocks.
+      const memoryBlocksForPrompt = await memoryBlockService.getBlocksForInjection({
+        agentId: request.agentId,
+        subaccountId: request.subaccountId ?? null,
+        organisationId: request.organisationId,
+        taskContext: workspaceContext,
+      });
       const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
@@ -741,12 +749,16 @@ export const agentExecutionService = {
 
       const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
       let memory: string | null = null;
-      memory = await workspaceMemoryService.getMemoryForPrompt(
+      // Phase 2 S12: track injected memory entries for the citation detector
+      // hook at run completion.
+      const memoryWithTracking = await workspaceMemoryService.getMemoryForPromptWithTracking(
         request.organisationId,
         request.subaccountId!,
         taskContextForMemory,
         agentDomain,
       );
+      memory = memoryWithTracking.promptText;
+      const injectedMemoryEntries = memoryWithTracking.injectedEntries;
       if (memory) {
         dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
       }
@@ -1127,6 +1139,35 @@ export const agentExecutionService = {
           runId: run.id,
           error: err instanceof Error ? err.message : String(err),
         });
+      }
+
+      // Phase 2 (S12) — score injected memory entries against run output.
+      // Idempotent: second call is a PK no-op. Best-effort: failure logs
+      // and does not affect the run's persisted state.
+      if (finalStatus === 'completed' && injectedMemoryEntries.length > 0) {
+        try {
+          const { scoreRun } = await import('./memoryCitationDetector.js');
+          const generatedText = typeof loopResult.summary === 'string'
+            ? loopResult.summary
+            : '';
+          const toolCallArgs = Array.isArray(loopResult.toolCallsLog)
+            ? loopResult.toolCallsLog
+                .map((tc: unknown) => (tc as { input?: unknown })?.input)
+                .filter((v) => v !== undefined && v !== null)
+            : [];
+          await scoreRun({
+            runId: run.id,
+            organisationId: request.organisationId,
+            injectedEntries: injectedMemoryEntries,
+            generatedText,
+            toolCallArgs,
+          });
+        } catch (err) {
+          logger.warn('agent_runs.citation_score_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // H-5: upsert toolCallsLog into the snapshot table
