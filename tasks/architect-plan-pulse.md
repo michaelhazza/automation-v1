@@ -1,14 +1,16 @@
 # The Pulse — Architecture Plan
 
-> **Status:** Draft · v1 plan for subagent-driven build
-> **Classification:** Major (new subsystem, replaces four existing pages)
-> **Scope lock:** Org + Subaccount scopes only. No per-user read state. History replaces ActivityPage with 301 redirects. Major-lane ack threshold is org-configurable (defaults £50/action, £500/run). No ranking engine. WebSocket real-time. Pre-launch — delete the four old pages when Pulse ships.
+> **Status:** Draft · v1 plan for subagent-driven build (amended after first-pass decisions — see §0)
+> **Classification:** Major (new subsystem, replaces four existing pages in admin scope; portal keeps its own review queue)
+> **Scope lock:** Org + Subaccount scopes only. No per-user read state. History replaces ActivityPage with 301 redirects in admin scope. Major-lane ack threshold is org-configurable (defaults AUD $50/action, AUD $500/run). No ranking engine. WebSocket real-time. Pre-launch — delete the three admin-scope pages when Pulse ships; `ReviewQueuePage` survives on the portal route only. Per-subaccount retention override is in scope (UI on Manage Subaccount → Settings tab).
 > **Prototype:** `prototypes/pulse/index.html`
+> **Currency:** AUD v1, minor-units storage, multi-currency-ready schema. Display via `Intl.NumberFormat` with org's currency code.
 
 ---
 
 ## Table of contents
 
+0. [Amendment log — decisions locked in after first draft](#0-amendment-log)
 1. [Executive summary](#1-executive-summary)
 2. [Architecture diagram](#2-architecture-diagram)
 3. [Section 1 — Data model](#section-1--data-model)
@@ -24,6 +26,36 @@
 13. [Section 11 — Key risks and open questions](#section-11--key-risks-and-open-questions)
 14. [Follow-up questions for the dev spec](#follow-up-questions-for-the-dev-spec)
 15. [Implementation chunking](#implementation-chunking)
+
+---
+
+## 0. Amendment log
+
+After the first-pass draft, the following decisions were resolved and supersede anything earlier in the document that contradicts them. Each section below has been patched to reflect these; this log is the canonical summary.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| A1 | **Currency: AUD in v1. Multi-currency-ready backend.** `organisations.default_currency_code text NOT NULL DEFAULT 'AUD'` (ISO 4217). All monetary amounts stored as integer **minor units** (cents for AUD). `pulse_major_threshold` jsonb becomes `{perActionMinor, perRunMinor}` with currency inherited from the org. `actions.estimated_cost_minor` integer NULL. `review_audits.ack_amount_minor` + `review_audits.ack_currency_code` snapshot both at approve time for audit integrity. Display: `Intl.NumberFormat(locale, { style: 'currency', currency: code })`. Phase 2 adds per-subaccount override and FX table. | AUD is the target market; moving to multi-currency later is cheap if minor-units + currency-code are baked in from day one; expensive to retrofit. |
+| A2 | **Irreversible rule for Major lane:** `external && (destructive \|\| !idempotent)`. Supersedes the narrower `external && destructive && !idempotent` in §4.2. | Catches `send_email` and other send-and-forget actions that are external, not marked destructive, but nevertheless not reversible. |
+| A3 | **Portal review queue survives.** `ReviewQueuePage.tsx` stays wired to `/portal/:subaccountId/review-queue` only. Removed from all `/admin/*` routes. | End-client portal users need to see/approve escalated items in-portal; email is just delivery. Pulse replaces the admin-scope review UI only. |
+| A4 | **Currency: AUD → locale `en-AU`. System-scope History: system admins only** (not org owners with a toggle). | Org owners don't need cross-org visibility; narrower scope keeps permissions simple. |
+| A5 | **History retention: unchanged from platform defaults.** Pulse doesn't own retention policy. Agent-run conversation detail follows `organisations.run_retention_days` → `subaccounts.run_retention_days` (new, see A6) → `DEFAULT_RUN_RETENTION_DAYS` (90). Review-item and task activity persist indefinitely. Audit/security tables are separate and unchanged. In-UI footer note clarifies: *"Agent run detail retained per your plan's data policy. Review and task actions retained indefinitely."* | Retention is a platform concern, not a Pulse concern. Pulse renders what's in the DB. |
+| A6 | **Per-subaccount retention override** added to Pulse scope. Schema: `subaccounts.run_retention_days integer NULL`. Resolution cascade in `agentRunCleanupJob.ts`: `subaccount.run_retention_days ?? organisation.run_retention_days ?? DEFAULT_RUN_RETENTION_DAYS`. UI: new **Settings tab** on `AdminSubaccountDetailPage.tsx` exposing the override (integer days, blank = inherit). Adds one implementation chunk (Chunk 9b — see §Implementation chunking). | Agencies serve clients with different compliance obligations (legal 7yr, marketing default). Per-org is too blunt. ~1 day incremental scope; adjacent to Pulse's governance surface and worth bundling. |
+| A7 | **Detail navigation: drawer** for review/run/task detail views opened from a Pulse card or History row. Not a centered modal; a right-edge slide-in panel that keeps the Pulse list visible on the left. Playbook and Workflow editors continue to navigate full-page (they're their own surfaces). | List stays visible for rapid triage (triage N items without losing place). Standard pattern in Linear/Slack/Notion. |
+| A8 | **`retain_indefinitely` playbook flag stays out of Pulse v1.** Already exists on playbook runs; surfacing it in the Playbook config UI is a deferred item in `tasks/deferred-ai-first-features.md`. Not blocking Pulse. | Retention-escape-hatch for regulated workloads; separate from supervision. |
+
+Open questions resolved by codebase inspection (were §11.2 Q1–Q10 in the first draft, now closed except where noted):
+
+- **Q1 `EXECUTIONS_MANAGE`** — does not exist. **Add** to `server/lib/permissions.ts`, seed default roles. Chunk 1 adds it.
+- **Q2 `listAccessibleSubaccounts` helper** — does not exist. **Introduce** in `server/services/permissionService.ts` as part of Chunk 4.
+- **Q3 Retry endpoint for failed agent runs** — does not exist. v1 treats retry as **out of scope**; Pulse shows "View run" only for failed runs. A deferred item.
+- **Q4 `failureAcknowledgedAt` column on `agent_runs`** — does not exist. **Add** in Chunk 1 migration.
+- **Q5 Which skills need `estimated_cost_minor` wiring** — none have it today. Chunk 3 wires the top-usage outward-facing skills: `send_email`, `update_record`, `create_calendar_event`, `post_social`, any GHL/CRM write actions. Older skills stay NULL (treated as "cost unknown" in UI, classifier treats as 0 for the threshold check — never trips Major-by-cost).
+- **Q6 Portal review queue** — kept. See A3.
+- **Q7 Governance section on org settings page** — exists already at `OrgSettingsPage.tsx:311`. Threshold editor slots in there; the retention override (A6) lives on the **Subaccount** Settings tab, not here.
+- **Q8 Currency** — resolved to AUD v1, multi-currency-ready backend. See A1.
+- **Q9 Multi-subaccount action detection** — no existing field. **Add** `actions.subaccount_scope text NOT NULL DEFAULT 'single'` (values: `'single' | 'multiple'`). Classifier reads it directly. Chunk 1 migration.
+- **Q10 Downstream readers of `inbox_read_states`** — only `server/services/inboxService.ts`. No client code. **Safe to drop** together with `inbox_read_states` table in Chunk 10.
 
 ---
 
@@ -123,10 +155,15 @@ pulseMajorThreshold: jsonb('pulse_major_threshold').$type<{
 **One new constant module** — `server/config/pulseThresholds.ts`:
 
 ```ts
+// Amounts are integer minor units of the org's default currency
+// (cents for AUD, pence for GBP, etc.). Currency is resolved from
+// organisations.default_currency_code at render/classification time.
 export const PULSE_MAJOR_THRESHOLD_DEFAULTS = {
-  perActionPence: 5000,   // £50.00
-  perRunPence: 50_000,    // £500.00
+  perActionMinor: 5_000,   // AUD $50.00
+  perRunMinor: 50_000,     // AUD $500.00
 } as const;
+
+export const CURRENCY_DEFAULT = 'AUD' as const;
 ```
 
 ### 1.3 Cost signal on actions
@@ -135,12 +172,42 @@ Lane assignment needs a monetary cost per action. The current `actions.payloadJs
 
 ```ts
 // server/db/schema/actions.ts
-estimatedCostPence: integer('estimated_cost_pence'),  // nullable
+estimatedCostMinor: integer('estimated_cost_minor'),  // nullable, minor units
+subaccountScope: text('subaccount_scope')
+  .notNull()
+  .default('single')
+  .$type<'single' | 'multiple'>(),                    // classifier Rule 1 input
 ```
 
-- Populated by `skillExecutor` when it materialises the action (from MCP tool annotations or skill-level cost hints). NULL = unknown → treated as zero for threshold checks but surfaces in UI as "cost unknown".
-- `agent_runs` already has `budgetSpentCents`; Pulse reads that to evaluate the per-run threshold.
+- `estimatedCostMinor` is populated by `skillExecutor` when it materialises the action (from MCP tool annotations or skill-level cost hints), in the **org's default currency's minor units**. NULL = unknown → treated as zero for threshold checks but surfaces in UI as "cost unknown".
+- `agent_runs` already tracks spend in cents; Pulse reads the existing cost column to evaluate the per-run threshold. Rename lane in code but the DB column stays (only the classifier consumes it; Pulse converts to the org currency via `default_currency_code` — a no-op while AUD is the only currency).
+- `subaccountScope` captures whether an action affects one subaccount or many (e.g. a bulk broadcast). Classifier Rule 1 reads this directly.
 - **Rejected alternative:** computing cost on-the-fly inside `pulseService` by inspecting `payloadJson`. Rejected because it re-parses skill payloads on every fetch and couples Pulse to every new skill. Making the skill declare the cost at action-creation time is cleaner and is a one-line change per skill.
+
+### 1.3a Currency fields (A1)
+
+```ts
+// server/db/schema/organisations.ts
+defaultCurrencyCode: text('default_currency_code')
+  .notNull()
+  .default('AUD'),                                    // ISO 4217, 3 chars
+```
+
+No `currency_code` column on `actions` in v1 — actions inherit the org's `default_currency_code`. Phase 2 adds an override. The jsonb shape of `pulseMajorThreshold` becomes `{perActionMinor, perRunMinor}` — currency is inherited from the org.
+
+### 1.3b Per-subaccount retention (A6)
+
+```ts
+// server/db/schema/subaccounts.ts
+runRetentionDays: integer('run_retention_days'),      // nullable; override
+```
+
+Cleanup job resolution cascade in `server/jobs/agentRunCleanupJob.ts`:
+1. `subaccounts.run_retention_days` (if non-null and non-zero for this run's subaccount)
+2. `organisations.run_retention_days` (existing)
+3. `DEFAULT_RUN_RETENTION_DAYS` (90, existing)
+
+The existing job pulls `(org_id, run_retention_days)` pairs per org; it now joins to `subaccounts` and groups deletions by `(org_id, subaccount_id, retention_days)` so each subaccount's window is respected. See Chunk 9b.
 
 ### 1.4 What's deleted
 
@@ -151,12 +218,18 @@ estimatedCostPence: integer('estimated_cost_pence'),  // nullable
 ### 1.5 Migration
 
 One migration file (next free sequence number) that:
-1. Adds `organisations.pulse_major_threshold` (nullable jsonb).
-2. Adds `actions.estimated_cost_pence` (nullable integer).
-3. Drops `inbox_read_states` table.
-4. Drops the three inbox indexes on `inbox_read_states`.
+1. Adds `organisations.pulse_major_threshold` (nullable jsonb — `{perActionMinor, perRunMinor}`).
+2. Adds `organisations.default_currency_code` (text NOT NULL DEFAULT 'AUD').
+3. Adds `actions.estimated_cost_minor` (nullable integer).
+4. Adds `actions.subaccount_scope` (text NOT NULL DEFAULT 'single').
+5. Adds `subaccounts.run_retention_days` (nullable integer).
+6. Adds `review_audits.major_acknowledged` (bool NOT NULL DEFAULT false).
+7. Adds `review_audits.ack_text` (text NULL).
+8. Adds `review_audits.ack_amount_minor` (integer NULL) and `review_audits.ack_currency_code` (text NULL) — snapshot at approve time.
+9. Adds `agent_runs.failure_acknowledged_at` (timestamptz NULL) — dismiss-failed-run marker.
+10. Drops `inbox_read_states` table and its indexes.
 
-Migration is forward-only; the four legacy pages are deleted in the same PR so there is no rollback window that requires the old tables.
+Migration is forward-only; the three legacy admin-scope pages are deleted in the same PR so there is no rollback window that requires the old tables. Portal keeps `ReviewQueuePage.tsx` and its supporting review-item write paths.
 
 ## Section 2 — Route surface
 
@@ -337,11 +410,12 @@ For each `PulseItemDraft`, the classifier has access to:
 |---|---|
 | `draft.kind` | `'review' \| 'task' \| 'failed_run' \| 'health_finding'` |
 | `draft.actionType` | e.g. `send_email` — present for `review` kind only |
-| `draft.estimatedCostPence` | From `actions.estimatedCostPence` (§1.3) |
-| `draft.runTotalCostPence` | Sum of `estimatedCostPence` across all pending actions in the same agent run |
-| `draft.evidenceMeta` | `{ affectsMultipleSubaccounts?: boolean }` — derived from payload inspection at fetch time |
+| `draft.estimatedCostMinor` | From `actions.estimated_cost_minor` (§1.3) — integer minor units of the org's currency |
+| `draft.runTotalCostMinor` | Sum of `estimated_cost_minor` across all pending actions in the same agent run |
+| `draft.subaccountScope` | From `actions.subaccount_scope` (`'single' \| 'multiple'`) — resolves Q9 |
 | Action registry lookup | `actionRegistry[draft.actionType]` → `{ isExternal, defaultGateLevel, mcp.annotations: { readOnlyHint, destructiveHint, idempotentHint, openWorldHint } }` |
-| Org thresholds | `organisations.pulseMajorThreshold` or `PULSE_MAJOR_THRESHOLD_DEFAULTS` |
+| Org thresholds | `organisations.pulseMajorThreshold` (`{perActionMinor, perRunMinor}`) or `PULSE_MAJOR_THRESHOLD_DEFAULTS` |
+| Org currency | `organisations.defaultCurrencyCode` (ISO 4217) — passed to `buildAckText` for currency-aware rendering |
 
 ### 4.2 The rule
 
@@ -349,28 +423,36 @@ For each `PulseItemDraft`, the classifier has access to:
 // server/services/pulseLaneClassifier.ts
 
 export function classify(draft: PulseItemDraft, thresholds: {
-  perActionPence: number;
-  perRunPence: number;
+  perActionMinor: number;
+  perRunMinor: number;
 }): 'client' | 'major' | 'internal' {
 
   // Rule 1 — Major lane first (highest-severity classification wins)
   if (draft.kind === 'review') {
+    const def = actionRegistry[draft.actionType!];
+    const isExternal   = def?.isExternal === true;
+    const destructive  = def?.mcp.annotations.destructiveHint === true;
+    const idempotent   = def?.mcp.annotations.idempotentHint === true;
+
     const costExceedsPerAction =
-      (draft.estimatedCostPence ?? 0) > thresholds.perActionPence;
+      (draft.estimatedCostMinor ?? 0) > thresholds.perActionMinor;
     const costExceedsPerRun =
-      (draft.runTotalCostPence ?? 0) > thresholds.perRunPence;
+      (draft.runTotalCostMinor ?? 0) > thresholds.perRunMinor;
     const affectsMultipleSubaccounts =
-      draft.evidenceMeta?.affectsMultipleSubaccounts === true;
-    const isIrreversible =
-      actionRegistry[draft.actionType!]?.mcp.annotations.destructiveHint === true &&
-      actionRegistry[draft.actionType!]?.mcp.annotations.idempotentHint !== true;
+      draft.subaccountScope === 'multiple';
+
+    // A2 — Irreversible rule widened:
+    //   external && (destructive || !idempotent)
+    // Catches send_email (external, not destructive, not idempotent)
+    // as well as destructive writes.
+    const isIrreversible = isExternal && (destructive || !idempotent);
 
     if (costExceedsPerAction || costExceedsPerRun || affectsMultipleSubaccounts || isIrreversible) {
       return 'major';
     }
   }
 
-  // Rule 2 — Client-facing: anything external
+  // Rule 2 — Client-facing: anything external that wasn't already Major
   if (draft.kind === 'review') {
     const def = actionRegistry[draft.actionType!];
     const isExternal = def?.isExternal === true;
@@ -405,13 +487,21 @@ When `lane === 'major'`, the classifier also produces `ackText`:
 
 ```ts
 // In pulseLaneClassifier
-function buildAckText(draft: PulseItemDraft, reason: MajorReason): string {
+function buildAckText(
+  draft: PulseItemDraft,
+  reason: MajorReason,
+  currencyCode: string,   // e.g. 'AUD' — from organisations.defaultCurrencyCode
+  thresholds: { perActionMinor: number; perRunMinor: number },
+): string {
+  const fmt = (minor: number) =>
+    new Intl.NumberFormat('en-AU', { style: 'currency', currency: currencyCode })
+      .format(minor / 100);
   // reason is one of: 'cost_per_action' | 'cost_per_run' | 'cross_subaccount' | 'irreversible'
   switch (reason) {
     case 'cost_per_action':
-      return `I understand this action will spend approximately ${formatCurrency(draft.estimatedCostPence)} on ${draft.subaccountName}.`;
+      return `I understand this action will spend approximately ${fmt(draft.estimatedCostMinor ?? 0)} on ${draft.subaccountName}.`;
     case 'cost_per_run':
-      return `I understand this run's total spend exceeds ${formatCurrency(thresholds.perRunPence)} across its actions.`;
+      return `I understand this run's total spend exceeds ${fmt(thresholds.perRunMinor)} across its actions.`;
     case 'cross_subaccount':
       return `I understand this change affects more than one client and will be visible across accounts.`;
     case 'irreversible':
@@ -420,7 +510,9 @@ function buildAckText(draft: PulseItemDraft, reason: MajorReason): string {
 }
 ```
 
-Text is generated server-side so that the string the user acknowledges is exactly the string the audit record captures. This also means changes to ack wording are a single-point change.
+Text is generated server-side so that the string the user acknowledges is exactly the string the audit record captures. This also means changes to ack wording are a single-point change. **Amount and currency are snapshotted separately** into `review_audits.ack_amount_minor` / `review_audits.ack_currency_code` so that later currency changes do not retroactively alter the audit trail.
+
+Currency locale: `en-AU` by default in v1. When multi-currency support lands, locale is derived from the currency code (GBP → `en-GB`, USD → `en-US`, etc.) via a small locale map in `server/lib/currencyLocale.ts`. Not built in v1 — the single `en-AU` locale is hard-coded until a second currency is enabled.
 
 ### 4.6 Ordering within a lane
 
@@ -663,16 +755,26 @@ Matches the current scope rule on `ActivityPage`:
 
 System scope is a power-user view — it reuses the existing system activity endpoint unchanged. Pulse only provides the UI shell around it.
 
-### 7.5 Deep link from History → detail
+### 7.5 Deep link from History → detail (A7: drawer nav)
 
-Each row has a "View" link. Behaviour mirrors `ActivityItem.detailUrl` from the existing service:
+Each row has a "View" link. Detail presentation follows the A7 decision — **drawer** for short-form detail, navigate for editor surfaces:
 
-- `review` → `/admin/subaccounts/:id/review/:id` (existing detail page survives; it's not one of the four pages being deleted).
-- `agent_run` → `/admin/subaccounts/:id/runs/:id` (existing).
-- `task` → `/admin/subaccounts/:id/tasks/:id` (existing).
-- `health_finding` → `/admin/subaccounts/:id/health?finding=:id` (existing).
-- `playbook_run` → existing route.
-- `workflow_execution` → existing route.
+| Row kind | Presentation | Target |
+|---|---|---|
+| `review` | **Drawer** (right-edge slide-in, 480–560px wide, list stays visible on the left) | `ReviewDetailDrawer` — reuses the card expansion + action bar from Attention, plus full audit history |
+| `agent_run` | **Drawer** | `AgentRunDrawer` — messages, tool calls, cost, timing |
+| `task` | **Drawer** | `TaskDrawer` — task metadata, linked review items, actions |
+| `health_finding` | **Drawer** | `HealthFindingDrawer` — detector output, suggested remediation |
+| `playbook_run` | **Navigate** full-page | existing `/admin/subaccounts/:id/playbooks/runs/:id` editor route |
+| `workflow_execution` | **Navigate** full-page | existing workflow execution detail route |
+
+**Drawer implementation notes:**
+
+- Single `PulseDrawer` shell component in `client/src/components/pulse/PulseDrawer.tsx`. Slides in from the right via CSS transform; backdrop is a partial dim (40% black) — the list behind stays interactive for closing.
+- URL sync: opening a drawer sets `?drawer=<kind>:<id>` so the drawer survives page refresh and deep links. Closing clears the param.
+- ESC closes. Click-outside closes. Drawer contents are lazy-loaded via `React.lazy` per kind.
+- The same drawer mechanism is reused from Attention tab cards — clicking an expanded card's "View full detail" button opens the drawer rather than navigating.
+- Accessibility: drawer is a `<dialog role="dialog" aria-modal="false">` — modeless so assistive tech can continue to read the list. Focus trapped inside the drawer while open.
 
 ### 7.6 What History does not do
 
@@ -680,6 +782,7 @@ Each row has a "View" link. Behaviour mirrors `ActivityItem.detailUrl` from the 
 - No export in v1 (CSV export is a v2 add-on that sits behind a permission gate).
 - No saved filter presets in v1.
 - No per-user visibility rules beyond the existing permission model.
+- **Retention footer** (A5): History tab renders a small footer note — *"Agent run detail retained per your plan's data policy. Review and task actions retained indefinitely."*
 
 ## Section 8 — Permissions
 
@@ -733,7 +836,7 @@ On the Org Pulse page, the Attention and History lists include items from **ever
 Major-lane threshold config lives in existing org settings (`/admin/settings/governance` — or wherever `requireAgentApproval` lives). Pulse adds two input fields:
 
 - "Per-action cost ceiling" (currency input, defaults to £50.00, stored in pence)
-- "Per-run cost ceiling" (currency input, defaults to £500.00, stored in pence)
+- "Per-run cost ceiling" (currency input, defaults to AUD $500.00, stored as minor units)
 
 Change takes effect on the next `GET /api/pulse/attention` fetch — no cache, no invalidation.
 
@@ -808,43 +911,46 @@ The approve route is the single point of enforcement. Bulk-approve route has the
 
 ### 9.3 Threshold configuration
 
-Two values, both per-org, both integer pence:
+Two values, both per-org, both integer minor units of the org's default currency:
 
-| Key | Default | Meaning |
+| Key | Default (AUD) | Meaning |
 |---|---|---|
-| `perActionPence` | 5000 (£50.00) | If this single action's `estimatedCostPence > perActionPence`, lane = Major |
-| `perRunPence` | 50000 (£500.00) | If the containing agent run's pending-action total exceeds this, lane = Major |
+| `perActionMinor` | 5000 (AUD $50.00) | If this single action's `estimatedCostMinor > perActionMinor`, lane = Major |
+| `perRunMinor` | 50000 (AUD $500.00) | If the containing agent run's pending-action total exceeds this, lane = Major |
 
-Stored on `organisations.pulseMajorThreshold` (jsonb, nullable). NULL falls back to `PULSE_MAJOR_THRESHOLD_DEFAULTS`.
+Stored on `organisations.pulseMajorThreshold` (jsonb, nullable). NULL falls back to `PULSE_MAJOR_THRESHOLD_DEFAULTS`. Currency is inherited from `organisations.defaultCurrencyCode`.
 
-**Editor UI** (in existing org settings page):
+**Editor UI** (in existing `OrgSettingsPage.tsx:311` Governance section):
 
-- Two currency inputs labelled "Approve-before-spend cost per action" and "Approve-before-spend cost per run".
+- Two currency inputs labelled "Approve-before-spend cost per action" and "Approve-before-spend cost per run". Each input formats via `Intl.NumberFormat` for the org's currency.
 - Minimum 0 (zero disables the rule effectively — everything becomes Major above zero, which is probably not desired; we do not impose a lower bound).
-- Maximum 1,000,000 pence = £10,000 (arbitrary sanity cap; can be lifted).
-- Help text: "Approvals above this amount require explicit acknowledgment before they go through. Applies to all subaccounts unless overridden per-subaccount (future)."
+- Maximum 1,000,000 minor = AUD $10,000 (arbitrary sanity cap; can be lifted).
+- Help text: "Approvals above this amount require explicit acknowledgment before they go through. Applies to all subaccounts in this organisation."
 - "Reset to default" button.
-- **Validation:** `perRunPence >= perActionPence` (enforced client + server). Reject with 400 if violated.
+- **Validation:** `perRunMinor >= perActionMinor` (enforced client + server). Reject with 400 if violated.
 
 ### 9.4 Audit extension
 
-The `review_audits` table already captures `decision`, `rawFeedback`, `editedArgs`. For Major approvals we add two columns:
+The `review_audits` table already captures `decision`, `rawFeedback`, `editedArgs`. For Major approvals we add four columns (A1 adds amount + currency snapshot):
 
 ```ts
 // server/db/schema/reviewAudits.ts
 majorAcknowledged: boolean('major_acknowledged').notNull().default(false),
-ackText: text('ack_text'),  // NULL for non-major, exact text shown at approve time for major
+ackText: text('ack_text'),             // NULL for non-major; exact text shown at approve time
+ackAmountMinor: integer('ack_amount_minor'),  // NULL for non-major; snapshot of the acknowledged amount
+ackCurrencyCode: text('ack_currency_code'),   // NULL for non-major; snapshot of the org currency at approve time
 ```
 
-`reviewAuditService.record(...)` takes two new optional fields and writes them. Population:
+`reviewAuditService.record(...)` takes four new optional fields and writes them. Population:
 
-- For non-Major approvals: `majorAcknowledged=false`, `ackText=null`.
-- For Major approvals: `majorAcknowledged=true`, `ackText=item.ackText`.
+- For non-Major approvals: `majorAcknowledged=false`, all ack fields NULL.
+- For Major approvals: `majorAcknowledged=true`, `ackText=item.ackText`, `ackAmountMinor=<the amount referenced in ackText>`, `ackCurrencyCode=<org currency at approve time>`. The amount snapshot protects the audit trail if org currency or thresholds change later.
 
 ### 9.5 Why not a per-subaccount threshold?
 
 - **Deferred:** v1 is per-org. A per-subaccount override is easy to add later (new column on `subaccounts` that shadows the org value) but introduces a settings UI question right now.
 - **Rejected for v1:** agents that span subaccounts (portfolio agent) would need a "whose threshold applies?" rule. Keep it simple — org threshold — and iterate.
+- **Note (A6):** per-subaccount **retention** (`subaccounts.run_retention_days`) *is* in v1 scope — it's a different axis (data lifespan, not approval ceilings) and has a clear agency-level use case.
 
 ### 9.6 Why not "require MFA" or "require a named approver"?
 
@@ -854,35 +960,36 @@ ackText: text('ack_text'),  // NULL for non-major, exact text shown at approve t
 
 | Case | Behaviour |
 |---|---|
-| `estimatedCostPence` is NULL | Treated as 0 for threshold. Item stays Client-facing or Internal unless another Major rule triggers. UI surfaces "cost unknown" in the cost summary. |
-| Action cost below ceiling but affects multiple subaccounts | Major (rule triggers on `affectsMultipleSubaccounts`). |
-| Destructive, non-idempotent action with cost = 0 | Major (irreversible rule triggers regardless of cost). Example: `delete_record`. |
+| `estimatedCostMinor` is NULL | Treated as 0 for threshold. Item stays Client-facing or Internal unless another Major rule triggers. UI surfaces "cost unknown" in the cost summary. |
+| Action cost below ceiling but affects multiple subaccounts | Major (rule triggers on `subaccountScope === 'multiple'`). |
+| External, not destructive, not idempotent, cost = 0 | Major (A2 irreversible rule: `external && !idempotent`). Example: `send_email` with no cost metadata. |
+| Destructive action with cost = 0 | Major (A2 irreversible rule: `external && destructive`). Example: `delete_record`. |
 | User changes threshold mid-session | Affects next fetch only. An item shown as Client-facing may become Major on refresh. Not a bug — threshold is a live config. |
 
 ## Section 10 — Deletions
 
-Pulse is pre-launch. When it ships, the four legacy pages and their supporting infrastructure are deleted in the same PR. No feature flag, no strangler, no migration window.
+Pulse is pre-launch. When it ships, the **three admin-scope** legacy pages and their supporting infrastructure are deleted in the same PR. **Portal review queue survives** (A3). No feature flag, no strangler, no migration window.
 
 ### 10.1 Client files to delete
 
 | File | Why |
 |---|---|
 | `client/src/pages/DashboardPage.tsx` | Replaced by Pulse landing (`/admin/pulse`). |
-| `client/src/pages/ReviewQueuePage.tsx` | Replaced by Pulse Attention tab. |
 | `client/src/pages/InboxPage.tsx` | Replaced by Pulse Attention tab. |
 | `client/src/pages/ActivityPage.tsx` | Replaced by Pulse History tab. |
-| Any unique child components in those four pages | Delete if no other importer (scan with `grep -R 'from.*<component>'` first). |
+| `client/src/pages/ReviewQueuePage.tsx` | **Kept.** Portal route `/portal/:subaccountId/review-queue` still uses this component. Removed only from admin routes. |
+| Any unique child components in those three pages (Dashboard/Inbox/Activity) | Delete if no other importer (scan with `grep -R 'from.*<component>'` first). Do not delete components also used by `ReviewQueuePage.tsx`. |
 
 ### 10.2 Client route removals
 
 In `client/src/App.tsx`:
 
 - Remove `lazy(() => import('./pages/DashboardPage'))` and its `<Route path="/" ... />`.
-- Remove all four ReviewQueuePage mounts (admin + portal).
+- Remove **admin-scope** ReviewQueuePage mounts only — `/admin/subaccounts/:subaccountId/review-queue` and any org-scope variant. **Keep** `/portal/:subaccountId/review-queue`.
 - Remove both InboxPage mounts.
-- Remove all three ActivityPage mounts (subaccount + org + system).
+- Remove all three ActivityPage mounts (subaccount + org + system — History tab absorbs them).
 - Add Pulse mounts: `<Route path="/admin/pulse" ... />` and `<Route path="/admin/subaccounts/:subaccountId/pulse" ... />`.
-- Add 301 redirects (via `<Navigate to=… replace />`) for each legacy path.
+- Add 301 redirects (via `<Navigate to=… replace />`) for each deleted legacy admin path.
 
 ### 10.3 Server routes to delete
 
@@ -891,6 +998,7 @@ In `client/src/App.tsx`:
 | `server/routes/inbox.ts` | Unused once InboxPage is gone. |
 | `server/services/inboxService.ts` | Unused once inbox route is gone. Grep for other importers first — **must confirm zero references** before deletion. |
 | Parts of `server/routes/activity.ts` | **Keep** the file — Pulse History delegates to it. Only remove the mount if redundant; the three routes (`/api/activity`, `/api/subaccounts/:id/activity`, `/api/system/activity`) are still needed as raw activity endpoints and for the system-scope History view. |
+| `server/routes/reviewItems.ts` | **Keep** — portal review queue still uses the review-item endpoints, and Pulse Attention uses them for approve/reject writes. |
 
 Server-side 301 redirects for shareable legacy paths (`/admin/activity`, `/system/activity`, `/admin/subaccounts/:id/activity`) are added in `server/index.ts` so that bookmarked or external links continue to resolve.
 
@@ -966,31 +1074,27 @@ If portal users have external links or bookmarks, removing it breaks them. Clari
 | **Q9.** What counts as "affects multiple subaccounts" for Rule 1 of the classifier? Inspect `action.payloadJson` for a subaccount array? A flag on the action row? | §4.1 — classifier input `evidenceMeta.affectsMultipleSubaccounts` |
 | **Q10.** What happens to `inboxReadStates` audit usage if anything downstream reads it (e.g. reporting, analytics)? Grep before drop. | §1.4, §10.4 |
 
+> **All ten questions resolved** in §0 Amendment log. Summary: new permission key needed (Q1); new helper needed (Q2); retry out of scope (Q3); new audit column (Q4); ~top-5 skills wired, rest NULL (Q5); portal review queue kept (Q6); Governance section exists (Q7); AUD v1, minor units, multi-currency-ready (Q8); explicit `subaccount_scope` field on actions (Q9); no downstream readers of `inbox_read_states` — safe to drop (Q10).
+
 ## Follow-up questions for the dev spec
 
-These are concrete product/architecture decisions the dev spec must nail down before a subagent-driven build starts. Grouped by urgency.
+Follow-ups 1–11 are all **resolved** by the §0 Amendment log. Summary table below for spec-writer reference.
 
-### Must-answer before spec starts
+| # | Topic | Resolution |
+|---|-------|-----------|
+| 1 | Portal review queue | Keep — portal route only (A3) |
+| 2 | Currency and locale | AUD, minor units, multi-currency-ready (A1); `en-AU` locale v1 |
+| 3 | Cost-signal backfill | Accept "cost unknown" on old actions; no sweep |
+| 4 | `EXECUTIONS_MANAGE` | New key — Chunk 1 adds it |
+| 5 | Multi-subaccount detection | Explicit `actions.subaccount_scope` field (Q9/A1) |
+| 6 | Irreversible rule | `external && (destructive \|\| !idempotent)` (A2) |
+| 7 | Default thresholds | AUD $50 / AUD $500 fixed in v1 |
+| 8 | Major ack on rejection | No — approval-only |
+| 9 | System-scope History | System admins only (A4) |
+| 10 | History retention | Inherit platform retention; UI footer note (A5); per-subaccount override in scope via Chunk 9b (A6) |
+| 11 | Detail drawer vs navigate | Drawer for review/run/task; navigate for playbook/workflow (A7) |
 
-1. **Portal review queue fate** — keep a minimal portal UI, or remove entirely? Decides whether `ReviewQueuePage.tsx` stays as portal-only or is deleted outright.
-2. **Currency and locale** — GBP only in v1? Prototype uses mixed $/£, which is fine for a mockup but not for ack text. Confirm GBP, pence storage, and UK locale formatting.
-3. **Cost-signal backfill strategy** — accept "cost unknown" forever on old actions, or run a one-time sweep where we can derive cost? Expected answer: accept unknown. Confirm.
-4. **`EXECUTIONS_MANAGE` permission** — exists, or new? If new, add to `server/lib/permissions.ts` and seed into default roles.
-5. **Multiple-subaccount action detection** — payload inspection vs explicit flag. Expected answer: an explicit `subaccountScope: 'single' | 'multiple'` field set by skill at action creation time.
-
-### Should-answer before chunk 4 (lane classifier)
-
-6. **Definition of "irreversible"** — does `destructiveHint && !idempotentHint` capture every case? What about `send_email` (destructive=false but not reversible)? Tighten the rule: probably external + destructive, or external + non-idempotent + cost-above-threshold.
-7. **Default thresholds in GBP** — £50 / £500 fixed, or regional? Confirm £50/£500 as the only default in v1.
-8. **Major threshold applied to rejection too?** — No — rejections don't cost money. Confirm the ack is approval-only.
-
-### Should-answer before chunk 7 (History tab)
-
-9. **System-scope access in Pulse** — system admins only, or also org owners with a toggle? Expected: system admins only.
-10. **History retention** — does the existing `DEFAULT_RUN_RETENTION_DAYS` (90) also bound History? Users asking "what happened three months ago" will see a cutoff.
-11. **Per-item detail drawer vs full-page detail** — Pulse shows items inline with expandable evidence. For "View run" links, open in drawer or navigate away? Expected: drawer for review/run/task, navigate for playbook/workflow.
-
-### Can-answer during build
+### Still to decide during build (design-polish, non-blocking)
 
 12. **Empty-state design** — what does Attention show when there are zero items? (Design mock needed.)
 13. **Error-state design** — 500 on `/api/pulse/attention`, what does the user see? (Design mock needed.)
@@ -1004,12 +1108,24 @@ Chunks are ordered so each is independently testable and the fleet can implement
 ### Chunk 1 — Schema + config scaffolding
 
 **Scope:**
-- Drizzle migration: `organisations.pulse_major_threshold jsonb NULL`, `actions.estimated_cost_pence integer NULL`, add `review_audits.major_acknowledged bool NOT NULL DEFAULT false`, `review_audits.ack_text text`.
-- Create `server/config/pulseThresholds.ts` with `PULSE_MAJOR_THRESHOLD_DEFAULTS`.
-- Create `server/services/pulseConfigService.ts` with `getMajorThresholds(orgId)` that reads org column and falls back to defaults.
+- One Drizzle migration covering all 10 items from §1.5:
+  - `organisations.pulse_major_threshold jsonb NULL` — `{perActionMinor, perRunMinor}`
+  - `organisations.default_currency_code text NOT NULL DEFAULT 'AUD'`
+  - `actions.estimated_cost_minor integer NULL`
+  - `actions.subaccount_scope text NOT NULL DEFAULT 'single'`
+  - `subaccounts.run_retention_days integer NULL`
+  - `review_audits.major_acknowledged bool NOT NULL DEFAULT false`
+  - `review_audits.ack_text text`
+  - `review_audits.ack_amount_minor integer NULL`
+  - `review_audits.ack_currency_code text NULL`
+  - `agent_runs.failure_acknowledged_at timestamptz NULL`
+  - DROP `inbox_read_states` and its indexes (guard behind a follow-up chunk if safer — keep here for atomicity).
+- Add `EXECUTIONS_MANAGE` permission key to `server/lib/permissions.ts`; seed into default roles.
+- Create `server/config/pulseThresholds.ts` with `PULSE_MAJOR_THRESHOLD_DEFAULTS` (`{perActionMinor: 5000, perRunMinor: 50000}`) and `CURRENCY_DEFAULT = 'AUD'`.
+- Create `server/services/pulseConfigService.ts` with `getMajorThresholds(orgId)` returning `{perActionMinor, perRunMinor, currencyCode}` — reads org column + `default_currency_code`, falls back to defaults.
 
 **Not in scope:** lane classifier, routes, UI.
-**Testable:** migration runs clean on a fresh DB; `pulseConfigService.getMajorThresholds` returns defaults when column is NULL and stored value when set; unit-tested as a pure service.
+**Testable:** migration runs clean on a fresh DB; `pulseConfigService.getMajorThresholds` returns defaults when column is NULL and stored value when set; includes correct `currencyCode`; unit-tested as a pure service. Permission key present in seeded roles.
 **Dependencies:** none.
 
 ### Chunk 2 — Lane classifier
@@ -1023,18 +1139,19 @@ Chunks are ordered so each is independently testable and the fleet can implement
 **Testable:** pure function, no DB. 100% branch coverage achievable.
 **Dependencies:** Chunk 1 (types for thresholds).
 
-### Chunk 3 — Skill wiring for `estimatedCostPence`
+### Chunk 3 — Skill wiring for `estimated_cost_minor` + `subaccount_scope`
 
 **Scope:**
-- For each external-acting skill in `server/skills/`, populate `estimatedCostPence` on action creation.
+- For each external-acting skill in `server/skills/`, populate `estimatedCostMinor` on action creation (in AUD cents).
 - `send_email` → 0 (unless carrier charge applies).
 - `update_record` → enrichment price.
 - `post_social` → 0.
 - `paid_ads_*` skills → the actual spend delta.
 - Any skill marked `isExternal: true` in the registry must at minimum write NULL explicitly (not undefined) so the column is unambiguously "unknown", not "not set".
+- Populate `subaccountScope` on action creation — `'multiple'` for skills that fan out across subaccounts (portfolio/broadcast skills); default `'single'` otherwise.
 
-**Not in scope:** skills that don't cost money and aren't external — they leave the column NULL.
-**Testable:** per-skill unit test asserts the action row is written with the expected `estimatedCostPence`.
+**Not in scope:** skills that don't cost money and aren't external — they leave the cost column NULL; `subaccountScope` defaults to `'single'` via schema default.
+**Testable:** per-skill unit test asserts the action row is written with the expected `estimatedCostMinor` and correct `subaccountScope`.
 **Dependencies:** Chunk 1.
 
 ### Chunk 4 — `pulseService` + thin lookup route
@@ -1107,29 +1224,46 @@ Chunks are ordered so each is independently testable and the fleet can implement
 ### Chunk 9 — Threshold editor UI
 
 **Scope:**
-- Add two currency inputs to the org settings governance section.
+- Add two currency inputs to the org settings Governance section at `OrgSettingsPage.tsx:311`, rendered via `Intl.NumberFormat` for the org's currency code.
 - `PUT /api/org/pulse-threshold` route (already allowed under `ORG_PERMISSIONS.SETTINGS_EDIT`) — actually: reuse the existing org settings PATCH endpoint if one exists; verify and add if not.
-- Validation: `perRunPence >= perActionPence`.
+- Validation: `perRunMinor >= perActionMinor`.
 - "Reset to default" button clears the column back to NULL.
 
-**Not in scope:** per-subaccount thresholds.
+**Not in scope:** per-subaccount thresholds; per-subaccount retention (separate chunk 9b).
 **Testable:** edit, refresh, see the new ceiling reflected in a Pulse fetch; invalid values rejected with 400.
 **Dependencies:** Chunk 1.
+
+### Chunk 9b — Per-subaccount retention override (A6)
+
+**Scope:**
+- Update `server/jobs/agentRunCleanupJob.ts` to resolve retention per-subaccount first, then fall back to org override, then default. Concretely: change the cleanup query from "per org" to "per (org, subaccount) pair grouping terminal runs by their owning subaccount's override". Preserve the 50k-rows-per-org cap semantics (per-org, not per-subaccount, so a single heavily-retained subaccount doesn't starve others).
+- Add an `agentRunCleanupJobPure.ts` helper `resolveRetentionDays(subRetention, orgRetention, defaultDays)` with unit tests for the cascade.
+- Expose the field on the Manage Subaccount page: add a **Settings** tab (new) to `AdminSubaccountDetailPage.tsx` with a single numeric input "Agent run retention (days)" — blank = inherit. Help text: "How long agent run conversation detail is retained for this subaccount. Leave blank to inherit the organisation default." Range: 7–3650 days, or blank.
+- Add `PATCH /api/subaccounts/:subaccountId` route (or extend existing) to accept the field under `SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT` (add key if not present).
+- Audit: bump existing subaccount audit trail with the setting change (who/when/old→new).
+
+**Not in scope:** the Pulse surface itself (unchanged); other subaccount settings that might also live on the new Settings tab — those are additive future work.
+**Testable:**
+- Cleanup job pure-test snapshot: subaccount 180 + org 90 + default 90 → 180 resolved; subaccount NULL + org 180 → 180; all NULL → 90.
+- Integration test: setting `subaccounts.run_retention_days = 180` and re-running the job prunes only runs older than 180d for that subaccount while pruning the rest of the org at the org's retention.
+- UI: input accepts integer/blank; save persists; reload shows persisted value; clearing to blank writes NULL.
+**Dependencies:** Chunk 1 (migration adds the column).
 
 ### Chunk 10 — Legacy page deletions + redirects
 
 **Scope:**
-- Delete `DashboardPage.tsx`, `ReviewQueuePage.tsx`, `InboxPage.tsx`, `ActivityPage.tsx`.
+- Delete `DashboardPage.tsx`, `InboxPage.tsx`, `ActivityPage.tsx`. **Keep** `ReviewQueuePage.tsx` (portal still uses it).
+- Remove admin-scope ReviewQueuePage mounts from `client/src/App.tsx`; keep `/portal/:subaccountId/review-queue` mount.
 - Delete `server/routes/inbox.ts` and `server/services/inboxService.ts` after verifying zero references.
-- Drop `inbox_read_states` table in a migration.
-- Add client `<Navigate>` 301s and server-side 301s for shareable paths.
-- Update sidebar nav.
+- Drop `inbox_read_states` table in a migration (or fold into Chunk 1's migration — decide in spec).
+- Add client `<Navigate>` 301s and server-side 301s for shareable admin paths.
+- Update sidebar nav: Dashboard/Inbox/Activity/Review-queue → single "Pulse" entry.
 - Grep notification templates for legacy paths; update.
 - Run full `pr-reviewer` and `dual-reviewer` loop before merge.
 
-**Not in scope:** anything that might break the Pulse page itself.
-**Testable:** `npm run build`, `npm run typecheck`, `npm run lint` all clean; every legacy URL redirects to the correct Pulse view; DB no longer has `inbox_read_states`.
-**Dependencies:** Chunks 6–9 (Pulse must be fully functional before deletions).
+**Not in scope:** anything that might break the Pulse page itself or the portal review queue.
+**Testable:** `npm run build`, `npm run typecheck`, `npm run lint` all clean; every legacy admin URL redirects to the correct Pulse view; DB no longer has `inbox_read_states`; portal review queue still functional at `/portal/:subaccountId/review-queue`.
+**Dependencies:** Chunks 6–9 + 9b (Pulse and retention override must be fully functional before deletions).
 
 ### Chunk 11 — Docs and capabilities registry
 
@@ -1144,4 +1278,4 @@ Chunks are ordered so each is independently testable and the fleet can implement
 
 ---
 
-**Build order summary:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11. Each chunk is mergeable on its own (the four legacy pages remain live alongside Pulse until Chunk 10 ships), so the blast radius of any individual chunk failing code review is contained.
+**Build order summary:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9b → 10 → 11. Each chunk is mergeable on its own (the legacy pages remain live alongside Pulse until Chunk 10 ships), so the blast radius of any individual chunk failing code review is contained. Chunk 9b (per-subaccount retention) is independent of the Pulse surface and can be merged in parallel with Chunks 6–9 if the cleanup job change lands before the UI.
