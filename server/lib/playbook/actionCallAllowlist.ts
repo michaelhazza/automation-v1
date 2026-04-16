@@ -61,9 +61,12 @@ export const ACTION_CALL_ALLOWED_SLUGS: ReadonlySet<string> = new Set([
   'config_run_health_check',
   'config_view_history',
 
-  // ── Phase G additions (§11.6) — ship with daily-intelligence-brief ────────
+  // ── Phase G additions (§11.6) — ship with intelligence-briefing ────────────
   'config_publish_playbook_output_to_portal',
   'config_send_playbook_email_digest',
+  // ── Memory & Briefings Phase 3 — ship with weekly-digest ───────────────────
+  'config_weekly_digest_gather',
+  'config_deliver_playbook_output',
 ]);
 
 /**

@@ -1,7 +1,23 @@
-import { pgTable, uuid, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { playbookRuns } from './playbookRuns';
+
+/**
+ * Mid-conversation progress snapshot for the 9-step onboarding arc (§8.6 S5).
+ * Null when no resume state has been captured (e.g. pre-conversation or after
+ * markReady).
+ */
+export interface OnboardingResumeState {
+  /** 1-indexed current step in the 9-step arc. */
+  currentStep: number;
+  /** Answers collected so far, keyed by ConfigQuestion.id. */
+  answers: Record<string, unknown>;
+  /** Procedural flags for the non-question steps (identity confirmed, portal mode set, etc.). */
+  proceduralFlags?: Record<string, boolean>;
+  /** ISO timestamp of the most recent update. */
+  updatedAt: string;
+}
 
 // ---------------------------------------------------------------------------
 // Subaccount Onboarding State — completion tracking per (subaccount, slug)
@@ -31,6 +47,8 @@ export const subaccountOnboardingState = pgTable(
     lastRunId: uuid('last_run_id').references(() => playbookRuns.id),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /** Mid-conversation progress for resume-from-step (migration 0135, S5). */
+    resumeState: jsonb('resume_state').$type<OnboardingResumeState | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

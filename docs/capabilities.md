@@ -264,15 +264,23 @@ Aggregated notification centre across all item types with filtering and prioriti
 
 ### Memory & Knowledge System
 
-Multi-layered memory architecture enabling agents to learn, share context, and build institutional knowledge.
+Multi-layered memory architecture enabling agents to learn, share context, and build institutional knowledge — with provenance, quality controls, and drift detection so memory stays trustworthy as it accumulates.
 
 - **Workspace memory** — Per-subaccount fact store with vector embeddings, quality scoring, hybrid retrieval (semantic + full-text + recency)
-- **Memory blocks** — Named shared context (Letta pattern) with per-agent read/write permissions
+- **Memory blocks** — Named shared context with per-agent read/write permissions and governance affordances
 - **Cross-agent search** — Agents query what other agents have learned across the org
 - **Agent briefings** — Rolling summaries generated post-run, injected into next run's context
-- **Agent beliefs** — Discrete, confidence-scored facts per agent-subaccount, auto-extracted from run outcomes. Individually addressable (add/update/reinforce/remove), user-correctable, with key normalization and oscillation guards. Injected into prompt alongside briefings. Designed for Phase 2 state evolution (supersession chains).
+- **Agent beliefs** — Discrete, confidence-scored facts per agent-subaccount, auto-extracted from run outcomes. Individually addressable (add/update/reinforce/remove), user-correctable, with key normalization and oscillation guards. Injected into prompt alongside briefings.
 - **Org-level insights** — Cross-subaccount patterns stored with scope tags for portfolio intelligence
-- Automated memory decay (90 days) and nightly deduplication; four-scope context cascading with eager/lazy loading
+- **Knowledge drop zone** — Upload documents and reference material directly into a workspace; the system extracts, classifies, and stores entries with full provenance back to the original upload
+- **Config documents** — Persistent reference material that informs every agent run in a workspace, editable in-place from the Knowledge page
+- **References** — Manually-authored or promoted insights surfaced as durable, citable knowledge separate from auto-captured run output
+- **Weekly digest** — Automated rollup that surfaces what the workspace learned in the last seven days
+- **Citation tracking** — Each memory entry tracks how often it was injected into a run and how often it was actually cited in the agent's output, creating a feedback loop that improves retrieval relevance over time
+- **Provenance at the write boundary** — Every memory entry records its source (agent run, manual entry, playbook, drop zone, or synthesis) and an optional confidence score; high-trust paths filter out unverified entries automatically
+- **Embedding drift detection** — Content changes are detected automatically; stale embeddings are flagged and recomputed in the background so semantic search never returns matches against text that no longer exists
+- **Quality-score guardrails** — Quality scores can only be mutated by sanctioned background jobs (initial scoring, decay, utility adjustment); enforced at both the database and code-architecture level
+- Automated memory decay (90 days), nightly deduplication, and four-scope context cascading with eager/lazy loading
 
 ### Workspace Health & Diagnostics
 

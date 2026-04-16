@@ -1,9 +1,31 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { workspaceMemoryEntries } from './workspaceMemories';
+
+// pgvector custom type — mirrors the convention in workspaceMemories.ts and
+// agentEmbeddings.ts.  Nullable here: embedding is populated asynchronously
+// by the memory-blocks-embedding-backfill job (Phase 2).
+const vector = customType<{ data: number[] | null }>({
+  dataType() { return 'vector(1536)'; },
+  toDriver(val: number[] | null): string | null {
+    if (val === null) return null;
+    return `[${val.join(',')}]`;
+  },
+  fromDriver(val: unknown): number[] | null {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'string') {
+      return val.replace(/^\[|\]$/g, '').split(',').map(Number);
+    }
+    return null;
+  },
+});
+
+// Typed enums for migration 0129 columns
+export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejected';
+export type MemoryBlockSource = 'manual' | 'auto_synthesised';
 
 // ---------------------------------------------------------------------------
 // Memory Blocks — shared named context blocks attached to multiple agents.
@@ -47,6 +69,35 @@ export const memoryBlocks = pgTable(
     // a new agent to the sub-account materialises read-only attachments for
     // every linked agent, tagged `source='auto_attach'`. Added in migration 0125.
     autoAttach: boolean('auto_attach').notNull().default(false),
+
+    // Memory & Briefings spec Phase 1 (migration 0129) — §5.2, §5.11
+    // status: lifecycle state; only 'active' blocks are ever injected into
+    //         agent context (global injection invariant §5.2).
+    // source: provenance — 'manual' (human-authored) or 'auto_synthesised'.
+    status: text('status').notNull().default('active').$type<MemoryBlockStatus>(),
+    source: text('source').notNull().default('manual').$type<MemoryBlockSource>(),
+
+    // Memory & Briefings spec Phase 1 (migration 0130) — §5.2 (S6)
+    // Nullable: populated by the memory-blocks-embedding-backfill job in
+    // Phase 2.  Required for relevance-driven block retrieval.
+    embedding: vector('embedding'),
+
+    // Phase 5 S24 — divergence flag for protected blocks (migration 0149).
+    // Set by protectedBlockDivergenceService daily job; null otherwise.
+    divergenceDetectedAt: timestamp('divergence_detected_at', { withTimezone: true }),
+
+    // PR Review Hardening — Item 6: explicit canonical version pointer.
+    // Set by memoryBlockVersionService.writeVersionRow() in the same transaction
+    // as each content mutation. Eliminates "latest by timestamp" ambiguity.
+    // Note: FK to memory_block_versions.id is managed by migration 0150 only —
+    // importing memoryBlockVersions here would create a circular dependency
+    // (memoryBlockVersions already imports memoryBlocks).
+    // The partial index memory_blocks_active_version_idx is likewise declared
+    // only in migration 0150 — same pattern as the HNSW index in
+    // workspaceMemories.ts (Drizzle cannot represent partial indexes on nullable
+    // FK columns where the referenced table cannot be imported here).
+    activeVersionId: uuid('active_version_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -62,6 +113,11 @@ export const memoryBlocks = pgTable(
     subaccountAutoAttachIdx: index('memory_blocks_subaccount_auto_attach_idx')
       .on(table.subaccountId)
       .where(sql`${table.autoAttach} = true AND ${table.deletedAt} IS NULL`),
+    // Partial index for fast active-block lookup during context injection
+    // (migration 0129). Mirrors the WHERE clause in memory_blocks_embedding_hnsw.
+    activeIdx: index('memory_blocks_active_idx')
+      .on(table.organisationId, table.subaccountId)
+      .where(sql`${table.status} = 'active' AND ${table.deletedAt} IS NULL`),
   })
 );
 

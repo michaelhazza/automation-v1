@@ -45,6 +45,14 @@ const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
+// Memory & Briefings Phase 2 — HITL review queue (S7)
+const MemoryReviewQueuePage = lazy(() => import('./pages/MemoryReviewQueuePage'));
+// Memory & Briefings Phase 3 — subaccount onboarding flow (S5)
+const SubaccountOnboardingPage = lazy(() => import('./pages/SubaccountOnboardingPage'));
+// Memory & Briefings Phase 3 — configuration document upload (S21)
+const ConfigDocumentUploadPage = lazy(() => import('./pages/ConfigDocumentUploadPage'));
+// Memory & Briefings Phase 5 — memory block detail + version history (S24)
+const MemoryBlockDetailPage = lazy(() => import('./pages/MemoryBlockDetailPage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
@@ -243,6 +251,13 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            {/* Memory & Briefings Phase 2 — HITL review queue (S7) */}
+            <Route path="/admin/subaccounts/:subaccountId/memory-review-queue" element={<MemoryReviewQueuePage />} />
+            {/* Memory & Briefings Phase 3 — S5 onboarding + S21 config docs */}
+            <Route path="/admin/subaccounts/:subaccountId/onboarding" element={<SubaccountOnboardingPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/config-documents/upload" element={<ConfigDocumentUploadPage />} />
+            {/* Memory & Briefings Phase 5 — block detail (S24) */}
+            <Route path="/admin/memory-blocks/:blockId" element={<MemoryBlockDetailPage />} />
             <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />

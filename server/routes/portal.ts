@@ -535,16 +535,19 @@ router.get(
   }),
 );
 
-// ─── Portal: Daily Brief card (spec §G10.4) ──────────────────────────────────
+// ─── Portal: Intelligence Briefing card (spec §G10.4, renamed in S18) ─────
 
 /**
- * GET /api/portal/:subaccountId/daily-brief-card
+ * GET /api/portal/:subaccountId/intelligence-briefing-card
  *
- * Drives the dedicated "Daily Brief" hero card on the portal dashboard.
+ * Drives the dedicated Intelligence Briefing hero card on the portal dashboard.
  * Per spec §G10.4, the card shows iff the subaccount has BOTH a completed
- * Daily Intelligence Brief run AND a currently-active scheduled task
- * producing briefs. Returning { active: false } from either side keeps the
- * card off the dashboard so stale schedules don't advertise a broken card.
+ * Intelligence Briefing run AND a currently-active scheduled task producing
+ * briefings. Returning { active: false } from either side keeps the card off
+ * the dashboard so stale schedules don't advertise a broken card.
+ *
+ * Memory & Briefings S18: renamed from /daily-brief-card. The old path is
+ * 301-redirected below for existing external consumers.
  *
  * Response shape:
  *   {
@@ -553,19 +556,16 @@ router.get(
  *     nextRunAt: string | null,
  *     scheduledTaskId: string | null,
  *   }
- *
- * The card itself is rendered by PortalPage — this endpoint is a pure
- * aggregate so the client can light it up without running its own joins.
  */
 router.get(
-  '/api/portal/:subaccountId/daily-brief-card',
+  '/api/portal/:subaccountId/intelligence-briefing-card',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const sa = await resolveSubaccount(subaccountId);
 
-    const DAILY_BRIEF_SLUG = 'daily-intelligence-brief';
+    const DAILY_BRIEF_SLUG = 'intelligence-briefing';
 
     const [latestRun] = await db
       .select({
@@ -612,6 +612,12 @@ router.get(
     });
   }),
 );
+
+// Memory & Briefings S18 — 301 tombstone for the pre-rename path so external
+// consumers (bookmarks, API clients) stop on the new canonical route.
+router.get('/api/portal/:subaccountId/daily-brief-card', (req, res) => {
+  res.redirect(301, `/api/portal/${req.params.subaccountId}/intelligence-briefing-card`);
+});
 
 /**
  * POST /api/portal/:subaccountId/playbook-runs/:runId/run-now

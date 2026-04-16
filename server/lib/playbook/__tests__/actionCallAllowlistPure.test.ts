@@ -38,7 +38,7 @@ function assert(condition: boolean, label: string) {
 
 test('allowlist covers the full 30-slug set (28 existing + 2 Phase G)', () => {
   // Spec §4.3 — the closed set for v1. 28 pre-existing config_* slugs plus
-  // the two Phase G additions shipped with daily-intelligence-brief.
+  // the two Phase G additions shipped with intelligence-briefing.
   assert(
     ACTION_CALL_ALLOWED_SLUGS.size === 30,
     `expected exactly 30 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`,

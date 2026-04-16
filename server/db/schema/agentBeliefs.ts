@@ -42,6 +42,11 @@ export const agentBeliefs = pgTable(
     supersededBy: uuid('superseded_by'),
     supersededAt: timestamp('superseded_at', { withTimezone: true }),
 
+    // Memory & Briefings spec Phase 1 (migration 0136, §4.3 S3)
+    // Named entity key enabling cross-agent conflict detection.
+    // Null = no entity scoping; conflict detection skips this belief.
+    entityKey: text('entity_key'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -53,6 +58,10 @@ export const agentBeliefs = pgTable(
     activeLookup: index('agent_beliefs_active_lookup')
       .on(table.organisationId, table.subaccountId, table.agentId)
       .where(sql`${table.deletedAt} IS NULL AND ${table.supersededBy} IS NULL`),
+    // Partial index for cross-agent conflict detection query (migration 0136)
+    entityKeyIdx: index('agent_beliefs_entity_key_idx')
+      .on(table.subaccountId, table.entityKey)
+      .where(sql`${table.deletedAt} IS NULL AND ${table.supersededBy} IS NULL AND ${table.entityKey} IS NOT NULL`),
   })
 );
 

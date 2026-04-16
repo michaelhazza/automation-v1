@@ -620,6 +620,130 @@ export const queueService = {
         }
       });
 
+      // Memory & Briefings Phase 1 — nightly memory entry quality decay + prune (S1)
+      await (boss as any).work('maintenance:memory-entry-decay', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryEntryDecay } = await import('../jobs/memoryEntryDecayJob.js');
+          const queueSend = (queue: string, data: object) => boss.send(queue, data);
+          await withTimeout(runMemoryEntryDecay(queueSend).then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-entry-decay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 1 — one-shot HNSW reindex after large prune (S1)
+      await (boss as any).work('memory-hnsw-reindex', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryHnswReindex } = await import('../jobs/memoryHnswReindexJob.js');
+          await withTimeout(runMemoryHnswReindex(job.data), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-hnsw-reindex', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 2 — one-shot memory-blocks embedding backfill (S6)
+      await (boss as any).work('memory-blocks-embedding-backfill', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryBlocksEmbeddingBackfill } = await import('../jobs/memoryBlocksEmbeddingBackfillJob.js');
+          await withTimeout(runMemoryBlocksEmbeddingBackfill(), 600_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-blocks-embedding-backfill', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Enqueue the backfill exactly once. singletonKey prevents re-enqueue on
+      // server restart if the job is still pending or already completed.
+      await (boss as any).send('memory-blocks-embedding-backfill', {}, {
+        singletonKey: 'memory-blocks-embedding-backfill-v1',
+        retryLimit: 2,
+        retryDelay: 60,
+      });
+
+      // Memory & Briefings Phase 2 — clarification timeout sweep (S8)
+      await (boss as any).work('maintenance:clarification-timeout-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runClarificationTimeoutSweep } = await import('../jobs/clarificationTimeoutJob.js');
+          await withTimeout(runClarificationTimeoutSweep(), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:clarification-timeout-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 2 — weekly quality-adjust job (S4, feature-flagged)
+      await (boss as any).work('maintenance:memory-entry-quality-adjust', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryEntryQualityAdjust } = await import('../jobs/memoryEntryQualityAdjustJob.js');
+          await withTimeout(runMemoryEntryQualityAdjust().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-entry-quality-adjust', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 4 — weekly memory-block synthesis (S11)
+      await (boss as any).work('maintenance:memory-block-synthesis', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryBlockSynthesisSweep } = await import('../jobs/memoryBlockSynthesisJob.js');
+          await withTimeout(runMemoryBlockSynthesisSweep().then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-block-synthesis', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 4 — portfolio briefing + digest rollups (S23)
+      await (boss as any).work('maintenance:portfolio-briefing', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runPortfolioRollupSweep } = await import('../jobs/portfolioRollupJob.js');
+          await withTimeout(runPortfolioRollupSweep({ kind: 'briefing' }).then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:portfolio-briefing', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      await (boss as any).work('maintenance:portfolio-digest', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runPortfolioRollupSweep } = await import('../jobs/portfolioRollupJob.js');
+          await withTimeout(runPortfolioRollupSweep({ kind: 'digest' }).then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:portfolio-digest', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 5 — daily protected-block divergence sweep (S24)
+      await (boss as any).work('maintenance:protected-block-divergence', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runDivergenceSweep } = await import('../services/protectedBlockDivergenceService.js');
+          await withTimeout(runDivergenceSweep().then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:protected-block-divergence', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -748,6 +872,19 @@ export const queueService = {
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
+      // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
+      await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
+      // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
+      await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
+      await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
+      // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
+      await boss.schedule('maintenance:memory-block-synthesis', '0 6 * * 0', {});
+      // Memory & Briefings Phase 4 — portfolio briefing (Mon 08:00) + digest (Fri 18:00)
+      await boss.schedule('maintenance:portfolio-briefing', '0 8 * * 1', {});
+      await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
+      // Memory & Briefings Phase 5 — daily protected-block divergence sweep (4am)
+      await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

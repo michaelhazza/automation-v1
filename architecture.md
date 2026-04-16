@@ -732,6 +732,29 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
 - Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
+### Provenance, Lifecycle, and Quality-Score Boundary (migration 0150)
+
+The Memory & Briefings PR review hardening pass added five durable invariants to `workspace_memory_entries`:
+
+1. **Lifecycle timestamps** — `embeddingComputedAt`, `qualityComputedAt`, `decayComputedAt`. Each async job sets its timestamp on every row it touches so downstream jobs can verify ordering. The utility-adjust job checks `decayComputedAt IS NOT NULL` before running, which guarantees decay always precedes utility adjustment.
+2. **Citation provenance at the write boundary** — `provenanceSourceType` (`agent_run | manual | playbook | drop_zone | synthesis`), `provenanceSourceId`, optional `provenanceConfidence`, and `isUnverified` (true when no provenance is supplied). High-trust paths (synthesis, utility-adjust) filter `isUnverified` rows out.
+3. **Quality-score mutation guard** — `qualityScoreUpdater` column (`initial_score | system_decay_job | system_utility_job`). Every UPDATE that changes `qualityScore` must set this field to an allowed value; a Postgres trigger declared in migration 0150 raises otherwise.
+4. **Architectural test enforces the §4.4 invariant** — `server/services/__tests__/qualityScoreMutationBoundaryTest.ts` walks the TypeScript sources and fails CI if any file outside the allowlist contains a write to `qualityScore`. The trigger and the test together close the boundary at both DB and code levels.
+5. **Allowed writers** are exclusively `memoryEntryQualityService.ts` (`applyDecay`, `adjustFromUtility`) plus `workspaceMemoryService.ts` for the initial insert path. Any new writer requires reviewer sign-off and an allowlist entry in the boundary test.
+
+### Content-Hash-Based Embedding Invalidation (migration 0151)
+
+Workspace memory entries can be mutated in-place by the dedup UPDATE path. Without a drift signal, the embedding silently goes stale relative to the new content and vector search starts returning matches against text that no longer exists in the row. Migration 0151 closes this:
+
+- **`content_hash`** — `TEXT GENERATED ALWAYS AS (md5(content)) STORED`. Auto-maintained by Postgres on every content mutation. Read-only at the application layer.
+- **`embedding_content_hash`** — set on every embedding write to the hash of the content used to compute that embedding. When `content_hash IS DISTINCT FROM embedding_content_hash`, the embedding is stale.
+- **Partial stale-index** — `workspace_memory_entries_stale_embedding_idx ON (subaccount_id) WHERE embedding IS NOT NULL AND embedding_content_hash IS DISTINCT FROM content_hash`. A backfill job can scan in O(stale) instead of O(rows).
+- **`reembedEntry({ id, content, resetContext })`** in `workspaceMemoryService.ts` — the canonical re-embed helper. Dedups concurrent re-embeds for the same entry id via a process-local `inFlightReembeds: Set<string>`. Sets `embedding`, `embeddingComputedAt`, and `embeddingContentHash` atomically; clears `embeddingContext` when `resetContext` is true.
+- **Phase 1 / Phase 2 embedding flow** — Phase 1 writes a content-only embedding immediately on insert; Phase 2 asynchronously re-embeds with the LLM-generated `embeddingContext` prefix. The Phase 2 enrichment UPDATE includes a CAS predicate (`AND content_hash = ${snapshotContentHash} AND embedding_context IS NULL`) so a concurrent Phase 1 write that mutated the content does not get overwritten with stale enrichment text.
+- **Ops helpers** — `getStaleEmbeddingsBatch({ subaccountId?, limit? })` returns up to 1000 stale rows; `recomputeStaleEmbeddings({ subaccountId?, limit? })` walks the batch and calls `reembedEntry` per row, returning `{ scanned, recomputed, skipped }`. Both filter `deleted_at IS NULL`.
+
+Treat `reembedEntry` as the only sanctioned write path for the embedding column outside of the initial insert. New callers must not write `embedding` directly without also writing `embedding_content_hash` to the matching content hash.
+
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
 `workspaceMemoryService._hybridRetrieve()` is the canonical path for injecting memory into agent prompts. It replaces the former single-CTE vector search with a multi-stage Reciprocal Rank Fusion pipeline:

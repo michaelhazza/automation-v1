@@ -1025,6 +1025,34 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     topics: [],
   },
 
+  // ── Phase 2 S8: Real-time clarification routing (§5.4) ────────────────────
+  // Distinct from ask_clarifying_question — this routes to a named role via
+  // WebSocket and supports timeout fallback for blocking urgency.
+  request_clarification: {
+    actionType: 'request_clarification',
+    description: 'Route a real-time question to a named human (subaccount manager / agency owner / client contact) via WebSocket. Blocking urgency pauses the current step until the reply or timeout; non_blocking continues with best-guess.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['question', 'urgency'],
+    parameterSchema: z.object({
+      question: z.string().min(10).max(2000).describe('The clarifying question for the recipient'),
+      contextSnippet: z.string().max(1000).optional()
+        .describe('Short context block explaining the ambiguity'),
+      urgency: z.enum(['blocking', 'non_blocking'])
+        .describe('blocking pauses the current step; non_blocking continues with best-guess'),
+      suggestedAnswers: z.array(z.string().min(1).max(500)).max(5).optional()
+        .describe('One-tap answer choices surfaced as buttons'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    isMethodology: false,
+    topics: [],
+  },
+
   read_workspace: {
     actionType: 'read_workspace',
     description: 'Read workspace memories for a subaccount. Universal context access.',
@@ -2168,6 +2196,55 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   // ── Phase G — portal + email skills (spec §11.6) — action_call only ────────
   // NOT callable from human-initiated Configuration Assistant sessions; only
   // reachable via action_call steps in playbook templates.
+
+  // ── Memory & Briefings Phase 3 — Weekly Digest gather ────────────────────
+  config_weekly_digest_gather: {
+    actionType: 'config_weekly_digest_gather',
+    description: 'Aggregates past 7 days of activity, memory events, KPI deltas, pending items, and next-week scheduled tasks for the Weekly Digest playbook.',
+    actionCategory: 'api',
+    topics: ['playbook', 'analytics'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['subaccountId'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      windowDays: z.number().int().positive().max(90).default(7),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
+  config_deliver_playbook_output: {
+    actionType: 'config_deliver_playbook_output',
+    description: 'Deliver a playbook artefact via deliveryService: always writes to inbox + dispatches portal/slack per deliveryChannels config.',
+    actionCategory: 'api',
+    topics: ['playbook', 'delivery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['subaccountId', 'artefactTitle', 'artefactContent'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      artefactTitle: z.string().describe('Title of the inbox item / artefact'),
+      artefactContent: z.string().describe('Body content (markdown)'),
+      deliveryChannels: z.object({
+        email: z.boolean().default(true),
+        portal: z.boolean().default(true),
+        slack: z.boolean().default(false),
+      }).optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'auth_error'],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
 
   config_publish_playbook_output_to_portal: {
     actionType: 'config_publish_playbook_output_to_portal',
