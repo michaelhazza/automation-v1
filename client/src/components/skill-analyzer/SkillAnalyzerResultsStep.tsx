@@ -9,7 +9,7 @@ import type {
   AvailableSystemAgent,
   ParsedCandidate,
 } from './SkillAnalyzerWizard';
-import { BLOCKING_WARNING_CODES } from './mergeTypes';
+import { evaluateApprovalState } from './mergeTypes';
 
 interface Props {
   job: AnalysisJob;
@@ -279,9 +279,11 @@ function ResultRow({
   const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
   const isDistinct = result.classification === 'DISTINCT';
   const isDecided = result.actionTaken != null;
-  const hasBlockingWarning = result.mergeWarnings?.some(
-    w => BLOCKING_WARNING_CODES.has(w.code)
-  ) ?? false;
+  const approvalState = evaluateApprovalState(
+    result.mergeWarnings ?? null,
+    result.warningResolutions ?? null,
+  );
+  const hasBlockingWarning = approvalState.blocked;
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
     setActionError(null);
@@ -733,14 +735,16 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     if ((classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') && action === 'approved') {
       eligible = sectionResults.filter((r) => {
         if (!r.proposedMergedContent) return false;
-        if (r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code))) return false;
+        const state = evaluateApprovalState(r.mergeWarnings ?? null, r.warningResolutions ?? null);
+        if (state.blocked) return false;
         return true;
       });
       skippedNone = sectionResults.filter(
         (r) => !r.proposedMergedContent,
       ).length;
       skippedCritical = sectionResults.filter(
-        (r) => r.proposedMergedContent != null && r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code)),
+        (r) => r.proposedMergedContent != null
+          && evaluateApprovalState(r.mergeWarnings ?? null, r.warningResolutions ?? null).blocked,
       ).length;
     }
     if (eligible.length === 0) {

@@ -166,6 +166,17 @@ export interface AnalysisResult {
   /** LLM-generated explanation of merge decisions. Read-only after job writes it.
    *  Null for DUPLICATE / DISTINCT or when the LLM omitted the field. */
   mergeRationale?: string | null;
+  /** v2 Fix 2/6/7: reviewer decisions per warning (dedup by warningCode,
+   *  details.field). Wiped atomically on any merge edit. */
+  warningResolutions?: import('./mergeTypes').WarningResolution[] | null;
+  /** v2 Fix 1: true when the rule-based merger produced proposedMergedContent. */
+  classifierFallbackApplied?: boolean;
+  /** v2 Fix 7: canonical name chosen via NAME_MISMATCH resolution. */
+  executionResolvedName?: string | null;
+  /** v2 §11.11.2: set on approve; presence locks the row against edits. */
+  approvedAt?: string | null;
+  /** v2 §11.12.2: surfaces "modified after previous approval" badge. */
+  wasApprovedBefore?: boolean;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';
