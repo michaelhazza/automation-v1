@@ -94,7 +94,7 @@ New endpoint, new service, no new tables.
 
 **Request validation:** `start` and `end` are ISO 8601 strings with timezone offset (UTC or explicit offset). `start` must be before `end`. Maximum window: 30 days (matching §3.1 UI maximum). Requests with invalid ISO, `start >= end`, or span > 30 days return `400 Bad Request`. Requests with a valid window that contains no occurrences return `200` with an empty `occurrences` array and `truncated: false` (not 404).
 
-**Occurrence cap:** If projection across all schedule sources yields more than 10,000 occurrences within the requested window, the service returns the first 10,000 sorted per §3.9 and sets `truncated: true` in the response. The UI surface must display a warning banner when `truncated: true` and suggest narrowing the window or applying a subaccount filter. This prevents the endpoint from becoming a silent performance sink in orgs with many high-frequency heartbeat agents across many subaccounts.
+**Occurrence cap and no pagination:** This endpoint does not support pagination; truncation is the only limiting mechanism in v1. If projection across all schedule sources yields more than 10,000 occurrences within the requested window, the service returns the first 10,000 sorted per §3.9, sets `truncated: true` and `totalsAreTruncated: true`, and computes `estimatedTotalCount` from the full projection before truncation. The UI surface must display a warning banner when `truncated: true` and suggest narrowing the window or applying a subaccount filter. This prevents the endpoint from becoming a silent performance sink in orgs with many high-frequency heartbeat agents across many subaccounts. Pagination is intentionally excluded: the truncation + narrow-window UX is simpler and sufficient for the intended calendar use case.
 
 **Service:** `server/services/scheduleCalendarService.ts` + `scheduleCalendarServicePure.ts` for the projection math (pure, unit-testable, no DB access in the pure half).
 
@@ -102,7 +102,7 @@ New endpoint, new service, no new tables.
 
 ```ts
 type ScheduleOccurrence = {
-  occurrenceId: string; // stable deterministic hash: sha256(source + ':' + sourceId + ':' + scheduledAt)[0..15]
+  occurrenceId: string; // stable deterministic hash: sha256(source + ':' + sourceId + ':' + scheduledAt)[0..31] — 128-bit hex prefix; not globally unique across all time but collision-free within any realistic response window (birthday bound: ~2^64 before collision in a 10k-item set)
   scheduledAt: string; // ISO — always UTC
   source: 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
   sourceId: string; // agent id / playbook id / scheduled_task id
@@ -120,9 +120,11 @@ type ScheduleOccurrence = {
 type ScheduleCalendarResponse = {
   windowStart: string; // ISO UTC
   windowEnd: string;   // ISO UTC
-  occurrences: ScheduleOccurrence[]; // sorted per §3.9 stable sort rule
+  occurrences: ScheduleOccurrence[]; // sorted per §3.9 stable sort rule; max 10,000 items
   truncated: boolean; // true when projection exceeded the 10,000-occurrence hard cap; client must narrow the window
-  totals: { count: number; estimatedTokens: number; estimatedCost: number }; // null per-occurrence values treated as 0 in aggregation; reflects truncated set when truncated=true
+  totalsAreTruncated: boolean; // mirrors `truncated`; separate flag so callers cannot accidentally use totals for financial forecasting when the full set is not reflected
+  estimatedTotalCount: number | null; // full projected count before truncation; null if skipped for performance; use for UI messaging only ("showing 10,000 of ~47,000")
+  totals: { count: number; estimatedTokens: number; estimatedCost: number }; // reflects the truncated set only when truncated=true; null per-occurrence estimates treated as 0; do NOT use for org-level financial forecasting when totalsAreTruncated=true
 };
 ```
 
@@ -226,6 +228,8 @@ Cron schedules and heartbeat schedules resolve DST differently:
 
 This matches how the scheduler actually executes heartbeat vs. cron jobs (pg-boss cron uses `cron-parser` with timezone; heartbeat is a fixed-offset interval job). Projection must reproduce the same behaviour so the calendar matches what actually runs.
 
+**Intentional design note:** Heartbeat schedules are UTC-anchored and will drift relative to local wall-clock time across DST boundaries. This is deliberate — heartbeats are meant to fire on a constant absolute interval, not at a fixed local time. Do not "fix" this drift; it is the correct behaviour. Cron-based schedules should be used when a fixed local-time recurrence is required.
+
 #### Estimated-cost calculation rules
 
 `estimatedTokens` and `estimatedCost` are computed per-agent in `scheduleCalendarService.ts` (stateful layer, not pure), using the agent's recent run history:
@@ -234,6 +238,7 @@ This matches how the scheduler actually executes heartbeat vs. cron jobs (pg-bos
 - **Minimum history:** if N < 3 qualifying runs exist, set `estimatedTokens = null` and `estimatedCost = null`. Do not estimate from a single noisy sample.
 - **Window:** use `min(10, N)` qualifying runs.
 - **Calculation:** `estimatedTokens = avg(promptTokens + completionTokens)` across the window. `estimatedCost = estimatedTokens × currentModelPricePerToken` (use the agent's `modelId` to look up price from the pricing table in `server/config/modelPricing.ts`).
+- **Pricing caveat:** Estimates use **current pricing** at query time, not the pricing that was in effect when the historical runs were executed. Historical run costs in `agent_runs` may differ from the estimate if pricing changed between those runs and now. This is intentional and acceptable — the estimate is a forward-looking planning figure, not a precise financial guarantee. The system must not attempt to replay historical pricing.
 - **Null propagation:** `totals.estimatedTokens` and `totals.estimatedCost` aggregate only non-null occurrences; if all are null, totals are 0.
 
 #### Stable sort order
@@ -241,10 +246,38 @@ This matches how the scheduler actually executes heartbeat vs. cron jobs (pg-bos
 Occurrences are sorted with the following multi-key rule (applied in `scheduleCalendarService.ts` before truncation):
 
 1. `scheduledAt` ascending (primary — chronological order)
-2. `source` priority ascending: `heartbeat` < `cron` < `playbook` < `scheduled_task` (secondary — deterministic tie-breaking within the same timestamp)
+2. `source` priority ascending per `SOURCE_PRIORITY` enum (secondary — deterministic tie-breaking within the same timestamp)
 3. `sourceId` lexicographic ascending (tertiary — deterministic tie-breaking within same timestamp + source)
 
-This ordering is stable and deterministic. It matches the week/month/day grid rendering order. The `occurrenceId` hash is computed **after** sorting (the hash inputs `source + sourceId + scheduledAt` are independent of sort position, so order of computation does not matter — but implementations should hash before sort to avoid confusion).
+This ordering is stable and deterministic. It matches the week/month/day grid rendering order. The `occurrenceId` hash is computed from inputs that are independent of sort position — implementations should compute hashes before sorting to keep the logic clear.
+
+**`SOURCE_PRIORITY` enum** — defined once in `scheduleCalendarServicePure.ts` as a constant; all sort logic references this constant, never inline literals:
+
+```ts
+const SOURCE_PRIORITY = {
+  heartbeat: 1,
+  cron: 2,
+  playbook: 3,
+  scheduled_task: 4,
+} as const satisfies Record<ScheduleOccurrence['source'], number>;
+```
+
+#### Projection–execution parity invariant
+
+**This is a durable maintenance contract, not just a v1 rule.**
+
+The projection functions in `scheduleCalendarServicePure.ts` must be functionally equivalent to the scheduler's actual timing logic:
+
+- `projectHeartbeatOccurrences` must match the interval arithmetic in `agentScheduleService.ts`'s heartbeat job dispatcher.
+- `projectCronOccurrences` must produce the same timestamps as `cron-parser` (the library used by pg-boss) for any given cron expression + timezone pair.
+
+**Enforcement:** Any future change to scheduler timing logic (heartbeat interval calculation, cron library upgrade, DST handling change) **must** be mirrored in the corresponding projection function in the same commit. Failure to keep them in sync means the calendar shows times that never actually fire — or misses times that do. Add a comment cross-reference in both files:
+
+```ts
+// agentScheduleService.ts
+// ⚠️ Heartbeat interval arithmetic here must stay in sync with
+//    projectHeartbeatOccurrences() in scheduleCalendarServicePure.ts
+```
 
 ---
 
@@ -307,6 +340,8 @@ Note: `target_id` carries no FK constraint — it is a polymorphic reference (ag
 
 **Orphan cleanup:** When an agent or skill is soft-deleted (`deletedAt` set), its associated fixtures must be soft-deleted in the same transaction. The agent delete path in `agentService.ts` and the skill delete path in `skillService.ts` must call `agentTestFixturesService.softDeleteByTarget(scope, targetId, orgId)` as part of their existing delete transactions. Hard-deleted or purged fixtures accumulate without this; the index `WHERE deleted_at IS NULL` keeps them invisible to queries but they still grow the table. Implement on Feature 2's build commit — do not defer.
 
+**Table growth:** Soft-deleted fixtures are never physically removed in v1. This is intentional (same pattern as all other soft-delete tables in the system). At high usage over time, the `agent_test_fixtures` table will accumulate deleted rows indefinitely. A periodic hard-purge job (e.g. `DELETE FROM agent_test_fixtures WHERE deleted_at < now() - interval '90 days'`) is the correct long-term solution and should be added to the existing nightly cleanup job in `server/jobs/nightlyCleanup.ts` as a follow-up task. Deferred from v1 scope — add to `tasks/todo.md` at build time so it is not forgotten.
+
 ### 4.5 Component refactor
 
 The existing `RunTraceViewerPage.tsx` contains the full trace rendering logic. Extract it into:
@@ -359,7 +394,7 @@ Minimal — existing run-creation paths already support manual runs. Changes:
 - Test runs **do** consume tokens and **do** get written to the LLM usage ledger. They are simply flagged so aggregate views can exclude them by default.
 - Test runs inherit the agent's existing per-run token budget ceiling. No separate limit.
 - Test runs are rate-limited per user (default 10 per hour, configurable in `server/config/limits.ts` as `TEST_RUN_RATE_LIMIT_PER_HOUR`). Enforced in the `POST .../test-run` route handler via a sliding-window counter keyed on `userId`.
-  - **Phase 1 (v1):** In-memory counter per-instance. Acceptable at low to moderate traffic and single-instance deploys. In a multi-instance setup this limit can be bypassed via load-balancer routing (each instance has an independent counter). This is a deliberate v1 trade-off: complexity is low, and test-run abuse at low traffic causes no meaningful harm.
+  - **Phase 1 (v1):** In-memory counter per-instance. Acceptable at low to moderate traffic and single-instance deploys. In a multi-instance setup this limit can be bypassed via load-balancer routing (each instance has an independent counter). Concurrent requests from multiple browser tabs or rapid bursts within a single event-loop tick may briefly exceed the per-user ceiling before the counter increments — this is bounded by request execution latency and is not a blocking concern at authoring-session traffic volumes. This is a deliberate v1 trade-off: complexity is low, and test-run abuse at low traffic causes no meaningful harm.
   - **Phase 2 (when needed):** Migrate to a Redis-backed sliding window using the existing Redis connection in the app. The `TEST_RUN_RATE_LIMIT_PER_HOUR` constant and rate-check call site remain unchanged; only the counter backend changes. Do not implement Phase 2 speculatively — trigger it when multi-instance deploys become standard.
 - Test runs on **system agents** are disallowed from the org surface (system agent editing is a platform concern; system admins have a separate surface).
 
@@ -490,9 +525,10 @@ The admin then iterates with the existing Studio skills (`playbook_validate`, `p
 
 - **No credentials are migrated.** The parser identifies credential *references* in the n8n export but never imports tokens. Admin re-authenticates via Synthetos's existing OAuth flows; the mapping report surfaces a checklist of required connections.
 - **No autonomous save.** The skill never calls `playbook_propose_save`; the admin must review and explicitly invoke it. This matches the existing Studio pattern and prevents drive-by conversions of workflows the admin hasn't fully understood.
-- **Graph validation.** The parser validates the n8n connection graph before producing any step output:
+- **Graph validation and topological ordering.** The parser validates the n8n connection graph before producing any step output, then emits steps in topological order:
   - **Cycle detection:** A directed cycle anywhere in the connection graph (any node reachable from itself via connection edges) causes immediate rejection with an error: `"Workflow contains a directed cycle at nodes: [names]. Cyclic graphs cannot be converted to a linear playbook."` Cyclic graphs have no well-defined linear-playbook representation.
-  - **Disconnected nodes:** Nodes with neither inbound nor outbound connections — excluding trigger nodes, which by definition have no inbound connections — are flagged in the mapping report as warnings (not errors). They are omitted from the draft playbook steps. The admin decides whether to wire them, discard them, or hand-convert them.
+  - **Topological order:** After cycle detection passes, playbook steps are emitted in **topological sort order** of the DAG (sources before sinks). This guarantees that the step sequence in the draft playbook matches the execution order of the original workflow and that no step references outputs from a step that has not yet run. Implemented via Kahn's algorithm in `n8nImportServicePure.ts` (iterative BFS, O(V+E), avoids recursion stack overflow on large graphs). Different valid topological orderings of the same DAG are a known non-determinism; the implementation must use a deterministic tie-breaking rule (node name lexicographic ascending) to produce the same output on repeated runs.
+  - **Disconnected nodes:** Nodes with neither inbound nor outbound connections — excluding trigger nodes, which by definition have no inbound connections — are flagged in the mapping report as `severity: 'high'` warnings. They are omitted from the draft playbook steps. The `high` severity is intentional: a disconnected non-trigger node almost certainly represents a misconfiguration or an incomplete workflow branch — the admin should explicitly decide whether to wire it, hand-convert it, or discard it. The high-severity warning ensures it is not silently lost.
 - **Side-effect class inference.** Every mapped step is tagged with a conservative default side-effect class using the `sideEffectClass` field on the playbook step object:
   - Write-class nodes (CRM writes, email sends, Slack messages, HTTP POSTs/PATCHs/DELETEs, any `action_call` targeting a managed connector that mutates state) → `'review'`
   - Read-class nodes (HTTP GETs, data fetches, trigger nodes, `prompt` steps) → `'auto'`
