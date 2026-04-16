@@ -29,7 +29,7 @@
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { eq, and, isNull, isNotNull } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, desc } from 'drizzle-orm';
 import {
   agents,
   memoryBlocks,
@@ -91,7 +91,9 @@ export async function seedConfigAgentGuidelinesForOrg(
   // uniqueness on (organisation_id, name), not per-subaccount. We look up the
   // block at the org level and reuse it regardless of which subaccount it sits
   // in, to avoid unique-index violations on INSERT.
-  const [existingBlock] = await db
+  // ORDER BY createdAt DESC ensures deterministic pick if the constraint was
+  // added after duplicate data already existed (defensive, not expected).
+  const existingBlocks = await db
     .select({
       id: memoryBlocks.id,
       content: memoryBlocks.content,
@@ -104,12 +106,19 @@ export async function seedConfigAgentGuidelinesForOrg(
         eq(memoryBlocks.name, BLOCK_NAME),
         isNull(memoryBlocks.deletedAt),
       ),
-    );
+    )
+    .orderBy(desc(memoryBlocks.createdAt));
+
+  if (existingBlocks.length > 1) {
+    console.warn(`  [warn] org ${orgId}: found ${existingBlocks.length} active blocks named '${BLOCK_NAME}' — using most recent (id=${existingBlocks[0].id}). Clean up duplicates.`);
+  }
+
+  const existingBlock = existingBlocks[0] ?? null;
 
   // If the block sits at a different subaccount scope, reuse it for attachment
   // but do NOT silently migrate. Log so ops can investigate.
   if (existingBlock && existingBlock.subaccountId !== orgSubaccount.id) {
-    log(`  [info] org ${orgId}: block '${BLOCK_NAME}' lives at subaccount ${existingBlock.subaccountId ?? 'null'} (expected ${orgSubaccount.id}) — reusing for attachment without migrating`);
+    log(`  [info] org ${orgId}: block '${BLOCK_NAME}' lives at subaccount ${existingBlock.subaccountId ?? 'null'} (expected ${orgSubaccount.id}) — reusing for attachment without migrating (block_id=${existingBlock.id})`);
   }
 
   // 4. Check for existing attachment (only relevant if block exists)
@@ -159,7 +168,10 @@ export async function seedConfigAgentGuidelinesForOrg(
   // is added with the governance UI (deferred per docs/config-agent-guidelines-spec.md §3.4).
   switch (decision.kind) {
     case 'create': {
-      const [created] = await db
+      // onConflictDoNothing handles the last-1% race: two concurrent seeds
+      // both see "no block" and both attempt INSERT. One wins, the other
+      // gets an empty RETURNING array and re-fetches the winner's row.
+      const rows = await db
         .insert(memoryBlocks)
         .values({
           organisationId: orgId,
@@ -171,12 +183,31 @@ export async function seedConfigAgentGuidelinesForOrg(
           autoAttach: false,
           confidence: 'normal',
         })
+        .onConflictDoNothing()
         .returning({ id: memoryBlocks.id });
 
-      // Attachment is also idempotent via onConflictDoUpdate — handles the
-      // unlikely race where a concurrent seed already inserted the row.
+      let blockId: string;
+      if (rows.length > 0) {
+        blockId = rows[0].id;
+      } else {
+        // Concurrent seed won the race — re-fetch the existing block
+        const [raced] = await db
+          .select({ id: memoryBlocks.id })
+          .from(memoryBlocks)
+          .where(
+            and(
+              eq(memoryBlocks.organisationId, orgId),
+              eq(memoryBlocks.name, BLOCK_NAME),
+              isNull(memoryBlocks.deletedAt),
+            ),
+          );
+        blockId = raced.id;
+        log(`  [info] org ${orgId}: block created by concurrent seed — reusing (block_id=${blockId})`);
+      }
+
+      // Attachment is also idempotent via onConflictDoUpdate.
       await db.insert(memoryBlockAttachments).values({
-        blockId: created.id,
+        blockId,
         agentId: configAgent.id,
         permission: 'read',
         source: 'manual',
@@ -185,7 +216,7 @@ export async function seedConfigAgentGuidelinesForOrg(
         set: { permission: 'read', source: 'manual', deletedAt: null },
       });
 
-      log(`  [create] org ${orgId}: block seeded and attached (block_id=${created.id}, agent_id=${configAgent.id})`);
+      log(`  [create] org ${orgId}: block seeded and attached (block_id=${blockId}, agent_id=${configAgent.id})`);
       break;
     }
 
