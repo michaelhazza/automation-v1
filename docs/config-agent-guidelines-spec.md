@@ -149,7 +149,7 @@ Settled in the brief; repeated here for the implementation session's convenience
 - **Storage:** platform-level memory block (`memory_blocks` table), scoped to the org subaccount where the Configuration Assistant runs. Canonical copy lives in-repo at `docs/agents/config-agent-guidelines.md`.
 - **Protection:** reuse the existing `isReadOnly` column (defaults `true`) plus a seeder-managed allowlist of protected block names enforced by a route guard in `server/routes/memoryBlocks.ts`. No new schema column.
 - **Runtime loading:** existing pipeline — `memoryBlockService.getBlocksForAgent()` at `server/services/agentExecutionService.ts:644`. No new plumbing.
-- **Attachment mechanism:** direct row in the `agentMemoryBlocks` join table targeting the Configuration Assistant agent. *Do not* use the schema's `autoAttach` boolean — its semantics broadcast to every agent linked to the subaccount, which is broader than intended here.
+- **Attachment mechanism:** direct row in the `memory_block_attachments` join table (verify table name against `server/db/schema/` — in current schema, exported as `memoryBlockAttachments`) targeting the Configuration Assistant agent. *Do not* use the schema's `autoAttach` boolean — its semantics broadcast to every agent linked to the subaccount, which is broader than intended here.
 - **Seeder idempotency:** create-if-absent on deploy. Runtime edits are preserved across deploys. Divergence between canonical and runtime is logged as a warning. Explicit `--force-resync` is a manual ops step until the governance UI (parent-branch spec) ships.
 - **UI for edits:** no new UI. The existing Memory Blocks tab on `client/src/pages/SubaccountKnowledgePage.tsx` is the editor. When viewing the org subaccount, the guidelines block appears in that tab.
 - **Read visibility for other system agents:** attach on-demand to other agents if and when they need it. Do not pre-attach speculatively. Read-only is the default (`isReadOnly: true`), so any future attachment is safe by default.
@@ -299,6 +299,8 @@ Surface the escalation in your plan output with the specific recipient and the s
 2. The Context Placement table (§6) is also reconstructed. The user's base draft version takes precedence if different.
 3. The Diagnostic Checklist mentioned in the brief is expressed here as the combination of §3 (Priority Order) and §4 (Restate and confirm). If the user's original draft has a distinct checklist format, merge it in as §3.5 or similar.
 4. Total draft length is ~920 words — comfortably inside the practical limit for a system-prompt-adjacent memory block. No trimming pressure.
+5. **Kickoff discussion item — Priority Order vs Three C's ordering tension.** §2 (Three C's) orders the levers as Context → Configuration → Creation. §3 (Priority Order) steps 1–3 order them as: instruction (Context) → configured differently (Configuration) → additional context (Context again). Step 3 of the Priority Order re-introduces Context after Configuration, which inverts the Three C's ordering for those two steps. This may be intentional in the user's base draft (a checklist structure that revisits Context from a different angle after ruling out configuration). Confirm the intended relationship at kickoff when the base draft is merged — if the ordering mismatch is unintentional, reconcile §3 to match §2.
+6. **Phase 1 implementation note — confidence is transparency-only.** The confidence tiers in §7 of the canonical text govern how the agent surfaces uncertainty, not whether the plan-preview-approve execution flow fires. Both the > 0.85 and 0.6–0.85 bands end in user approval of a plan; the only difference is whether an uncertainty note accompanies that plan. The 0.6–0.85 band does not produce a distinct second interaction in Phase 1. Implementers and reviewers should not assume the threshold gates execution — it gates communication style. A harder gate for the 0.6–0.85 band is deferred.
 
 ### 3.4 Seeder design
 
@@ -308,7 +310,7 @@ Surface the escalation in your plan output with the specific recipient and the s
 
 **Inputs.**
 
-- Canonical file at `docs/agents/config-agent-guidelines.md` (read from disk at seed time — not bundled into the binary, so updates to the canonical file take effect on the next deploy without a rebuild).
+- Canonical file at `docs/agents/config-agent-guidelines.md` (read from disk at seed time, not bundled into the binary — this means the initial seed always uses the latest on-disk content, but subsequent updates to this file do NOT automatically propagate on redeploy: the seeder is create-if-absent and will not overwrite a deployed block; see §3.2 and §5 for the full picture).
 - Resolver for the org subaccount ID (the system subaccount where the Configuration Assistant runs). Look up via existing system-agent resolver utilities; do not hardcode.
 - Resolver for the Configuration Assistant agent ID. Same pattern.
 
@@ -325,9 +327,11 @@ Surface the escalation in your plan output with the specific recipient and the s
    - `isReadOnly: true`
    - `autoAttach: false` (we use explicit attachment, not the broadcast flag)
    - `confidence: 'normal'`
-   Then insert a row into `agent_memory_blocks` (or whichever table is the join table — the implementer verifies the exact name) attaching the block to the Configuration Assistant agent.
+   Then insert a row into `memory_block_attachments` (verify table name against `server/db/schema/`) attaching the block to the Configuration Assistant agent, with:
+   - `permission: 'read'` (the agent reads guidelines; it does not write to them)
+   - `source: 'manual'`
 4. If **present:** do **not** overwrite content. Compare the existing block's content hash against the canonical file's hash. If different, log a structured warning (`config-agent-guidelines: runtime content diverges from canonical`) and move on. Do not modify the block.
-5. If the attachment row is missing (block exists but not attached), insert the attachment row. This handles the recovery case where the block was accidentally detached.
+5. If the attachment row is missing (block exists but not attached), insert the attachment row with `permission: 'read'` and `source: 'manual'` (same fields as step 3). This handles the recovery case where the block was accidentally detached.
 
 **Idempotency.**
 
@@ -344,7 +348,7 @@ Surface the escalation in your plan output with the specific recipient and the s
 
 ### 3.5 Attachment to the Configuration Assistant
 
-Attachment is a direct row in the `agent_memory_blocks` join table (verify the table name against `server/db/schema/`). The seeder creates this row during the initial seed or during attachment-only repair.
+Attachment is a direct row in the `memory_block_attachments` join table (verify table name against `server/db/schema/` — in current schema, exported as `memoryBlockAttachments`). The seeder creates this row during the initial seed or during attachment-only repair.
 
 **Do not** use the schema's `autoAttach: true` flag on `memory_blocks`. That flag is designed to broadcast the block to every agent linked to the subaccount — for system-agent guidelines, the attachment is targeted, not broadcast.
 
@@ -352,7 +356,7 @@ Attachment is a direct row in the `agent_memory_blocks` join table (verify the t
 
 1. Seeds the block (or mocks it into place).
 2. Calls `getBlocksForAgent(configurationAssistantAgentId, platformOrgId)`.
-3. Asserts the guidelines block is present in the returned array with `isReadOnly: true`.
+3. Asserts the guidelines block is present in the returned array with `permission: 'read'`. (Note: `getBlocksForAgent()` returns `{ name, content, permission }` — not `isReadOnly`. The `permission: 'read'` assertion is the correct runtime check.)
 
 ### 3.6 Route guard for protected blocks
 
@@ -365,13 +369,22 @@ Attachment is a direct row in the `agent_memory_blocks` join table (verify the t
 const PROTECTED_BLOCK_NAMES = new Set(['config-agent-guidelines']);
 ```
 
-Rules enforced on every DELETE and on the name-change path of every PATCH:
+Rules enforced on protected blocks:
 
+- **POST** (create) with `name` in `PROTECTED_BLOCK_NAMES` → return `409 Conflict` with `errorCode: 'PROTECTED_MEMORY_BLOCK'`. (Reserving the name on create prevents a user-authored block from squatting the name before the seeder runs — which would cause the seeder to skip seeding and never load the canonical content.)
 - **DELETE** of a memory block whose `name` is in `PROTECTED_BLOCK_NAMES` → return `409 Conflict` with `errorCode: 'PROTECTED_MEMORY_BLOCK'` and a message directing the user to platform operations.
 - **PATCH** that attempts to *rename* a block in the allowlist (changing the `name` field) → same `409`.
-- **PATCH** that edits *content* of a protected block → allowed if the caller has platform-admin permission (see §3.7). Agency admins can still edit content; platform gating is about delete + rename only, because the whole point of the runtime-editable block is that non-technical users can refine the content.
+- **PATCH** that sets `isReadOnly: false` on a protected block → same `409`. (Setting this to false would allow the agent to overwrite its own guidelines on the next run.)
+- **PATCH** that changes `ownerAgentId` on a protected block → same `409`. (Changing ownership could silently reassign write provenance.)
+- **DELETE** of the `memory_block_attachments` row linking a protected block to its owning agent → `409 Conflict` with `errorCode: 'PROTECTED_MEMORY_BLOCK_ATTACHMENT'`. (Detaching the attachment disables the guidelines until the next deploy-time reseed; active prevention removes that window.)
+- **POST demote** (`/api/subaccounts/:id/knowledge/memory-blocks/:blockId/demote`) on a protected block → `409 Conflict` with `errorCode: 'PROTECTED_MEMORY_BLOCK'`. The demote route soft-deletes the block; without this guard it bypasses the DELETE protection. Implementer: locate the demote handler (likely in `server/routes/knowledge.ts` or equivalent — verify) and apply the same `PROTECTED_BLOCK_NAMES` check before soft-deletion. Add that route file to §4 if it is not already listed.
+- **PATCH** that edits *content* of a protected block → allowed for org (agency) admins, matching existing Memory Blocks editing permissions (see §3.7). Log the edit at `info` level including block ID, actor identity, and a `source` tag (`'manual'`) distinguishing human edits from future agent-originated edits. This observability is the minimum safeguard for a block whose content cannot be independently verified by the seeder without a manual ops step — a silent content rewrite could neutralise the protection without tripping any guard. Platform gating is for the structural operations above; the whole point of the runtime-editable block is that non-technical users can refine the content without a deploy.
+
+**Demotion routing invariant.** Any mechanism that soft-deletes a memory block — present or future (bulk operation, admin tool, migration script) — must apply the same `PROTECTED_BLOCK_NAMES` check before soft-deletion. Do not introduce a bypass path. If a new demotion mechanism is added later, the implementer must either route through the existing demote handler or extract the guard into a shared utility both handlers call. Note this explicitly in the seeder and route handler code comments.
 
 The allowlist is small and static. No configuration UI. Adding a new protected block is a code change by design.
+
+All protected-block guard logic should be implemented via a shared utility where possible; duplication across routes (memoryBlocks.ts, knowledge.ts demote handler, any future handler) is discouraged. Extract the check into a helper early — it is cheaper to do this at initial build than to synchronise copies after the fact.
 
 ### 3.7 Permissions check
 
@@ -389,7 +402,7 @@ The existing Knowledge page already gates edits to memory blocks by admin role. 
 
 This is a **manual, LLM-in-the-loop** check, not a unit test. Code correctness is verified by the tests in §3.5; *behavioural* correctness — does the agent actually reason the way the guidelines tell it to — can only be tested by running the agent against scenarios and reading the output.
 
-Run the following scenarios against the Configuration Assistant in a staging environment with the new block attached. For each, record pass/fail and a one-line observation in the PR description.
+Run the following scenarios against the Configuration Assistant in your local development environment (or any environment with the block seeded and the Configuration Assistant running) with the new block attached. For each, record pass/fail and a one-line observation in the PR description.
 
 1. **Ambiguous request.** "Make it so the weekly client reports include the right stuff." Expected: agent restates the request and asks one clarifying question (per §4 of the canonical text). Fail if the agent proposes a plan without restatement.
 
@@ -403,9 +416,11 @@ Run the following scenarios against the Configuration Assistant in a staging env
 
 6. **Capability-gap escalation.** Ask for something that requires a new skill. Expected: agent refuses and escalates per §12, with a specific recipient and specific question. Fail if the agent vaguely says "this needs engineering."
 
-**If any scenario fails, the fix is in the guidelines text, not in code.** Edit the canonical file, re-seed (or directly edit the runtime block in staging), and re-run the failing scenario.
+**If any scenario fails, the fix is in the guidelines text, not in code.** Edit the canonical file, re-seed (or directly edit the runtime block in your dev environment), and re-run the failing scenario.
 
-**Acceptance bar.** All six scenarios pass before the PR is marked ready for `dual-reviewer`.
+> **Note (to add during kickoff):** Once the canonical text is finalised, add a seventh scenario here that specifically tests the confidence threshold boundary — a request that should score 0.6–0.85 confidence so that the agent surfaces its uncertainty note explicitly. The current six scenarios do not verify that the confidence-tiered action policy (§7 of the canonical text) behaves as specified.
+
+**Acceptance bar.** All scenarios pass (including the confidence-boundary scenario, once added) before the PR is marked ready for `dual-reviewer`.
 
 ## 4. File inventory
 
@@ -423,9 +438,11 @@ Run the following scenarios against the Configuration Assistant in a staging env
 | `docs/agents/config-agent-guidelines.md` | **Create** — canonical text (from §3.3, after kickoff reconciliation) |
 | `server/jobs/seedConfigAgentGuidelines.ts` | **Create** — seeder job (exact path subject to pattern-match with existing seeders) |
 | `server/jobs/index.ts` (or equivalent registration file) | **Edit** — register the new seeder in the job runner |
-| `server/routes/memoryBlocks.ts` | **Edit** — add `PROTECTED_BLOCK_NAMES` allowlist and DELETE/rename guards |
-| `server/services/__tests__/seedConfigAgentGuidelines.test.ts` (or pure-fn variant) | **Create** — unit/integration test for the seeder's idempotency and attachment |
-| `server/routes/__tests__/memoryBlocks.test.ts` (if missing; extend otherwise) | **Edit** — cover the new 409 responses for protected-block delete and rename |
+| `server/routes/memoryBlocks.ts` | **Edit** — add `PROTECTED_BLOCK_NAMES` allowlist and all route guards (block POST/CREATE, block DELETE, name-rename PATCH, isReadOnly/ownerAgentId PATCH, attachment DELETE) |
+| `server/routes/knowledge.ts` (or equivalent — verify) | **Edit** — add `PROTECTED_BLOCK_NAMES` check in the demote handler before soft-deletion |
+| `scripts/run-all-gates.sh` | **Edit** — register `verify-protected-block-names.sh` in the gates runner |
+| `server/jobs/__tests__/seedConfigAgentGuidelines.test.ts` (or pure-fn variant; track the seeder's actual location) | **Create** — unit/integration test for the seeder's idempotency and attachment |
+| `scripts/verify-protected-block-names.sh` | **Create** — static gate: (1) asserts `PROTECTED_BLOCK_NAMES` guard pattern is present in `server/routes/memoryBlocks.ts` AND that the demote handler in `server/routes/knowledge.ts` (or equivalent) includes the protected-name check before soft-deletion; (2) asserts the error code constants `PROTECTED_MEMORY_BLOCK` and `PROTECTED_MEMORY_BLOCK_ATTACHMENT` appear in the guarded handlers — this catches the failure mode where the guard structure is present but the 409 payload is wired to the wrong constant or omitted entirely; registered in `scripts/run-all-gates.sh` |
 | `docs/configuration-assistant-spec.md` | **Edit** — add one-paragraph cross-reference from §5.4 to the runtime-loaded memory block |
 | `docs/capabilities.md` | **Edit (if applicable)** — only if the guidelines work surfaces externally-visible behaviour change. Likely no-op. |
 
@@ -465,6 +482,9 @@ These need user resolution before the implementation session starts. Most are ca
 5. **Seeder convention.** Pattern-match against which existing seeder? The implementer will look at `server/jobs/` and `server/services/` — if the user already has a preferred pattern (e.g. a specific system-agent bootstrap path), call it out now.
 6. **Terminology alignment.** The existing spec uses "Configuration Assistant." The parent brief uses "Configuration Agent." This spec uses "Configuration Assistant." Confirm, and update the brief accordingly in the next pass.
 7. **Phase 1 scope appetite.** The audit is scoped to `architecture.md` + `docs/capabilities.md`. If either doc is substantially more stale than expected and the fix would balloon Phase 1 into Significant-class work, stop and return to the user rather than bundling the expansion silently.
+8. **Canonical ordering model — binary decision required before writing the canonical file.** The Priority Order vs Three C's tension (§3.3 Notes 1 and 5) must be resolved with a hard commitment, not a "we'll reconcile later": **Option A — Three C's is canonical (Context → Configuration → Creation); Priority Order steps must conform to that sequence.** **Option B — Priority Order is canonical; Three C's is explanatory framing only.** No hybrid. This decision shapes the canonical text, which cannot be safely edited post-seeding without an explicit ops step.
+9. **Block identity strategy — string match vs flag.** Current guard mechanism: `PROTECTED_BLOCK_NAMES: Set<string>`. This is correct for Phase 1 but it touches every guard point (POST create, DELETE block, PATCH fields, DELETE attachment, POST demote). At kickoff, lock whether to: **keep** the string-match allowlist (extend the `Set` as new protected blocks are added — simple, no migration) or **move to an `isSystemBlock: true` flag** (schema column, cleaner long-term, requires a migration). Do not defer — whichever model ships first becomes the de-facto standard that all future protected-block additions will follow.
+10. **Seeder write-once commitment.** At kickoff, state explicitly and record in the seeder code comment: the seeder for this block is **strictly non-propagating**. Canonical updates after initial seed require either a manual DB operation or a future `--force-resync` step. Accidental reintroduction of propagation logic (a common regression) is the most likely way the create-if-absent design breaks in practice. Lock this at kickoff so the implementer adds a `// WRITE-ONCE: do not add propagation logic here` comment at the decision point in the seeder.
 
 ## 7. Review pipeline and workflow
 
@@ -490,7 +510,7 @@ Only starts after Phase 1 merges to `main`.
 4. Implement the seeder, attachment, route guard, and tests per §3.4–3.7.
 5. Run `npm run lint` and `npm run typecheck` — must pass.
 6. Run the relevant test suite — must pass.
-7. Run the manual behavioural-verification scenarios in §3.8 — all six must pass.
+7. Run the manual behavioural-verification scenarios in §3.8 — all must pass (including the confidence-boundary scenario once added at kickoff).
 8. Run `pr-reviewer`.
 9. Run `dual-reviewer` after pr-reviewer issues are addressed.
 10. Open PR. Merge to `main` after review.
@@ -506,11 +526,15 @@ This work is complete when all of the following are true:
 1. **Phase 1 is merged to `main`.** `architecture.md` and `docs/capabilities.md` reflect current reality. Editorial rules on `docs/capabilities.md` remain uncontested.
 2. **Canonical file exists.** `docs/agents/config-agent-guidelines.md` (or agreed path) is present in the repo with the final guidelines text.
 3. **Seeder is wired and idempotent.** Running the deploy-time seed pipeline a second time produces no duplicates, no overwrites, and a `debug`-level no-op log line.
-4. **Block is attached to the Configuration Assistant.** A query against `agent_memory_blocks` returns the guidelines block for the Configuration Assistant's agent ID.
+4. **Block is attached to the Configuration Assistant.** A query against `memory_block_attachments` (schema export: `memoryBlockAttachments`) returns a row for the guidelines block and the Configuration Assistant's agent ID with `permission: 'read'`.
 5. **Runtime injection works.** `memoryBlockService.getBlocksForAgent()` returns the guidelines block in every Configuration Assistant run start.
-6. **Route guard works.** Attempting to DELETE the guidelines block via the API returns `409 Conflict` with `errorCode: 'PROTECTED_MEMORY_BLOCK'`.
+6. **Route guard works.** Each of the following returns `409 Conflict`:
+   - `POST /api/memory-blocks` with `name: 'config-agent-guidelines'` → `errorCode: 'PROTECTED_MEMORY_BLOCK'`
+   - `DELETE /api/memory-blocks/:id` (the guidelines block) → `errorCode: 'PROTECTED_MEMORY_BLOCK'`
+   - `DELETE /api/memory-blocks/:blockId/attachments/:agentId` (the attachment row) → `errorCode: 'PROTECTED_MEMORY_BLOCK_ATTACHMENT'`
+   - `POST /api/subaccounts/:id/knowledge/memory-blocks/:blockId/demote` (the guidelines block) → `errorCode: 'PROTECTED_MEMORY_BLOCK'`
 7. **Edit-from-UI works for authorised users.** Org admins can edit the content through the existing Memory Blocks tab on the Knowledge page.
-8. **All six behavioural-verification scenarios pass** in staging.
+8. **All behavioural-verification scenarios pass** in your local development environment (six base scenarios per §3.8; the confidence-boundary scenario to be added at kickoff counts once it exists).
 9. **`pr-reviewer` and `dual-reviewer` both signed off** with no blocking findings.
 10. **`docs/configuration-assistant-spec.md` §5.4 has a cross-reference** to the runtime-loaded memory block, shipped in the same commit as the canonical file.
 
