@@ -641,3 +641,10 @@ export const MAX_DECISION_BRANCHES_PER_STEP = 8;
  * Spec: docs/playbook-agent-decision-step-spec.md §11, §22.2, §25.3.
  */
 export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
+
+/**
+ * Maximum test runs a single user may trigger per rolling hour.
+ * Feature 2 (inline Run-Now test panel). Phase 1: in-memory sliding window
+ * keyed on userId. See spec §4.8 for Phase 2 Redis migration notes.
+ */
+export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
