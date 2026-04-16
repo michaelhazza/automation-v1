@@ -220,6 +220,35 @@ export async function hasOrgPermission(req: Request, permissionKey: string): Pro
   return req._orgPermissionCache.has(permissionKey);
 }
 
+// ─── hasSubaccountPermission (programmatic check) ────────────────────────────
+
+/**
+ * Programmatic subaccount permission check usable inside async handlers.
+ *
+ * Mirrors `requireSubaccountPermission` semantics:
+ *  - system_admin and org_admin always return true
+ *  - everyone else: returns true iff the permission key is in their subaccount
+ *    permission set OR they hold org.subaccounts.edit / org.subaccounts.manage
+ */
+export async function hasSubaccountPermission(
+  req: Request,
+  subaccountId: string,
+  permissionKey: string,
+): Promise<boolean> {
+  if (!req.user) return false;
+  if (req.user.role === 'system_admin' || req.user.role === 'org_admin') return true;
+  const subPerms = await loadSubaccountPermissions(req.user.id, subaccountId);
+  if (subPerms.has(permissionKey)) return true;
+  const organisationId = req.orgId ?? req.user.organisationId;
+  if (!req._orgPermissionCache) {
+    req._orgPermissionCache = await loadOrgPermissions(req.user.id, organisationId);
+  }
+  return (
+    req._orgPermissionCache.has('org.subaccounts.edit') ||
+    req._orgPermissionCache.has('org.subaccounts.manage')
+  );
+}
+
 // ─── requireOrgPermission ──────────────────────────────────────────────────────
 
 /**

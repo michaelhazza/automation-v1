@@ -3,7 +3,12 @@ import { authenticate, requireOrgPermission, hasOrgPermission } from '../middlew
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
+import { agentService } from '../services/agentService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import type { SkillTier } from '../lib/skillVisibility.js';
 
 const router = Router();
@@ -141,5 +146,77 @@ router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSI
   await skillService.deleteSkill(req.params.id, req.orgId!);
   res.json({ message: 'Skill deleted' });
 }));
+
+// ── Feature 2 — org-scoped skill test run ────────────────────────────────────
+// Resolves the org subaccount and its first active agent link, then executes a
+// test run with allowedToolSlugs=[skill.slug] so the agent actually invokes the
+// skill under test rather than its default toolset.
+router.post('/api/org/skills/:skillId/test-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    checkTestRunRateLimit(req.user!.id);
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
+    const skill = await skillService.getSkill(req.params.skillId, req.orgId!);
+
+    // Resolve the org subaccount and find an agent link within it.
+    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
+    const orgSa = await requireOrgSubaccount(req.orgId!);
+    const orgAgents = await agentService.listAgents(req.orgId!);
+    if (orgAgents.length === 0) {
+      res.status(422).json({ error: 'No active agent found to run this skill. Create and activate an agent first.' });
+      return;
+    }
+
+    // Find the first agent that has a link in the org subaccount.
+    let saLink: Awaited<ReturnType<typeof subaccountAgentService.getLinkByAgentInSubaccount>> | null = null;
+    for (const agent of orgAgents) {
+      saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, agent.id);
+      if (saLink) break;
+    }
+    if (!saLink) {
+      res.status(422).json({ error: 'No agent config found in the organisation workspace. Link an agent to the workspace first.' });
+      return;
+    }
+
+    const triggerContext: Record<string, unknown> = {
+      triggeredBy: req.user!.id,
+      source: 'test_panel',
+      isTestRun: true,
+      skillId: skill.id,
+      skillSlug: skill.slug,
+    };
+    if (prompt) triggerContext.prompt = prompt;
+    if (inputJson) triggerContext.inputJson = inputJson;
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
+      userId: req.user!.id,
+      targetType: 'org-skill',
+      targetId: skill.id,
+      input: { prompt: prompt ?? null, inputJson: inputJson ?? null },
+      clientKeyHint: idempotencyKey,
+    });
+    const result = await agentExecutionService.executeRun({
+      agentId: saLink.agentId,
+      organisationId: req.orgId!,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      isTestRun: true,
+      userId: req.user!.id,
+      triggerContext,
+      allowedToolSlugs: [skill.slug],
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
+    });
+    res.status(201).json(result);
+  })
+);
 
 export default router;

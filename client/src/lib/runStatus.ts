@@ -1,0 +1,60 @@
+// ---------------------------------------------------------------------------
+// Agent run status — client-side mirror of `shared/runStatus.ts`
+// ---------------------------------------------------------------------------
+//
+// Kept in lock-step with the shared module. The client tsconfig does not
+// currently include `shared/`, so the values are duplicated here and guarded
+// by a drift-detection test at
+// `server/services/__tests__/runStatusDriftPure.test.ts`. Add a new status in
+// both files; the drift test fails if they disagree.
+// ---------------------------------------------------------------------------
+
+export const AGENT_RUN_STATUS = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  TIMEOUT: 'timeout',
+  CANCELLED: 'cancelled',
+  LOOP_DETECTED: 'loop_detected',
+  BUDGET_EXCEEDED: 'budget_exceeded',
+  AWAITING_CLARIFICATION: 'awaiting_clarification',
+  WAITING_ON_CLARIFICATION: 'waiting_on_clarification',
+  COMPLETED_WITH_UNCERTAINTY: 'completed_with_uncertainty',
+} as const;
+
+export type AgentRunStatus = (typeof AGENT_RUN_STATUS)[keyof typeof AGENT_RUN_STATUS];
+
+export const IN_FLIGHT_RUN_STATUSES: readonly AgentRunStatus[] = [
+  AGENT_RUN_STATUS.PENDING,
+  AGENT_RUN_STATUS.RUNNING,
+];
+
+export const AWAITING_RUN_STATUSES: readonly AgentRunStatus[] = [
+  AGENT_RUN_STATUS.AWAITING_CLARIFICATION,
+  AGENT_RUN_STATUS.WAITING_ON_CLARIFICATION,
+];
+
+export const TERMINAL_RUN_STATUSES: readonly AgentRunStatus[] = [
+  AGENT_RUN_STATUS.COMPLETED,
+  AGENT_RUN_STATUS.FAILED,
+  AGENT_RUN_STATUS.TIMEOUT,
+  AGENT_RUN_STATUS.CANCELLED,
+  AGENT_RUN_STATUS.LOOP_DETECTED,
+  AGENT_RUN_STATUS.BUDGET_EXCEEDED,
+  AGENT_RUN_STATUS.COMPLETED_WITH_UNCERTAINTY,
+];
+
+const TERMINAL_SET: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
+
+export function isTerminalRunStatus(status: string): boolean {
+  return TERMINAL_SET.has(status);
+}
+
+export function isInFlightRunStatus(status: string): boolean {
+  return (IN_FLIGHT_RUN_STATUSES as readonly string[]).includes(status);
+}
+
+export function isAwaitingRunStatus(status: string): boolean {
+  return (AWAITING_RUN_STATUSES as readonly string[]).includes(status);
+}

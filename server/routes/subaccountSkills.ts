@@ -1,9 +1,13 @@
 import { Router } from 'express';
-import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
-import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission } from '../middleware/auth.js';
+import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { skillService } from '../services/skillService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
+import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import {
   createSubaccountSkillBody,
   updateSubaccountSkillBody,
@@ -106,6 +110,64 @@ router.patch(
     );
     res.json(skill);
   }),
+);
+
+// ── Feature 2 — skill test run (subaccount-scoped) ───────────────────────────
+// Finds the first active subaccount agent link and executes a test run with
+// the skill context injected. Returns { runId } so TestPanel can poll.
+router.post(
+  '/api/subaccounts/:subaccountId/skills/:skillId/test-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, skillId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    checkTestRunRateLimit(req.user!.id);
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
+    const skill = await skillService.getSubaccountSkill(skillId, req.orgId!, subaccountId);
+    const links = await subaccountAgentService.listSubaccountAgents(req.orgId!, subaccountId);
+    const activeLink = links.find((l) => l.isActive);
+    if (!activeLink) {
+      res.status(422).json({ error: 'No active agent linked to this subaccount. Link and activate an agent first.' });
+      return;
+    }
+    const triggerContext: Record<string, unknown> = {
+      triggeredBy: req.user!.id,
+      source: 'test_panel',
+      isTestRun: true,
+      skillId: skill.id,
+      skillSlug: skill.slug,
+    };
+    if (prompt) triggerContext.prompt = prompt;
+    if (inputJson) triggerContext.inputJson = inputJson;
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
+      userId: req.user!.id,
+      targetType: 'subaccount-skill',
+      targetId: skill.id,
+      input: { prompt: prompt ?? null, inputJson: inputJson ?? null, subaccountId },
+      clientKeyHint: idempotencyKey,
+    });
+    const result = await agentExecutionService.executeRun({
+      agentId: activeLink.agentId,
+      subaccountId,
+      subaccountAgentId: activeLink.id,
+      organisationId: req.orgId!,
+      executionScope: 'subaccount',
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      isTestRun: true,
+      userId: req.user!.id,
+      triggerContext,
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
+    });
+    res.status(201).json(result);
+  })
 );
 
 export default router;

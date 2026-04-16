@@ -19,11 +19,14 @@ server/
 ├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
 
+shared/
+└── runStatus.ts     Canonical agent run status enum, terminal/in-flight/awaiting sets, type guards
+
 client/
 ├── src/pages/       ~76 page components (lazy-loaded)
 ├── src/components/  Reusable UI components (~21 files)
 ├── src/hooks/       useSocket.ts (WebSocket integration)
-└── src/lib/         api.ts, auth.ts, socket.ts
+└── src/lib/         api.ts, auth.ts, socket.ts, formatMoney.ts, runStatus.ts, runPlanView.ts
 ```
 
 ---
@@ -343,6 +346,36 @@ Agent runs accept an `idempotencyKey` (migration 0040). Prevents duplicate execu
 Format: `{runType}:{agentId}:{subaccountId}:{userId}:{taskId}:{timeWindow}`
 
 System agents generate keys automatically. External callers should provide a deterministic key.
+
+### Test-run idempotency — `server/lib/testRunIdempotency.ts`
+
+Inline Run Now test runs use a server-derived idempotency key built from canonical JSON serialization of the input payload. Client-supplied UUID is downgraded to a hint that participates in the hash but cannot control it.
+
+**Canonical JSON:** `canonicalStringify()` sorts object keys recursively, drops `undefined` values in objects, replaces `undefined` in arrays and non-finite numbers with `null`. This ensures logically-equivalent payloads (same data, different key order) produce the same hash.
+
+**Dual-bucket acceptance:** Keys are time-bucketed (10s windows). `deriveTestRunIdempotencyCandidates()` returns `[currentBucketKey, previousBucketKey]` — the execution service checks both via `inArray()` on SELECT but inserts only the current-bucket key. This eliminates false misses when a retry straddles a bucket boundary.
+
+**Execution service integration:** `agentExecutionService.executeRun()` accepts `idempotencyCandidateKeys?: string[]`. When present, the SELECT deduplication check uses `inArray(agentRuns.idempotencyKey, candidates)` instead of a single `eq()`. All four test-run route files (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) use `deriveTestRunIdempotencyCandidates`.
+
+Tests: `server/lib/__tests__/testRunIdempotencyPure.test.ts` — 20 tests covering canonical serialization, key derivation, and dual-bucket boundary behaviour.
+
+### Test-run rate limiting — `server/lib/testRunRateLimit.ts`
+
+In-memory per-user rate limiter for test-run endpoints. Phase 1 design — process-local `Map<userId, timestamps[]>` with explicit limitations documented:
+
+- **Hard cap:** `MAX_TRACKED_USERS` (10,000) prevents unbounded memory growth; oldest entries evicted LRU-style when exceeded.
+- **Eviction metric:** `evictionCount` tracks total evictions; logs at threshold intervals (every 100) for operational visibility. `getTestRunRateLimitMetrics()` exposes current counts for health endpoints.
+- **Scaling note:** Effective rate multiplies by instance count under horizontal scaling. Replace with Redis/DB backing before multi-instance deployment.
+
+Tests: `server/services/__tests__/testRunRateLimitPure.test.ts` — 7 tests covering limits, boundary, window expiry, and per-user independence.
+
+### Test fixtures — `server/services/agentTestFixturesService.ts`
+
+Saved prompt/input payloads for the inline Run Now test panel. Scoped per org/subaccount with a polymorphic target (`scope: 'agent' | 'skill'`, `targetId`). No FK to `agents`/`skills` — the service handles integrity at two layers:
+
+- **Read-time filter:** `listFixtures()` verifies the polymorphic target still exists and is not soft-deleted before returning results. Orphaned fixtures are hidden on read and logged as `agentTestFixtures.orphan_target` for background cleanup.
+- **Cleanup helper:** `cleanupOrphanedFixtures(orgId)` soft-deletes fixtures whose target is missing or soft-deleted. Intended for periodic background jobs.
+- **Cascade on target delete:** `softDeleteByTarget()` called from agent/skill delete flows to proactively clean up fixtures.
 
 ---
 
@@ -975,10 +1008,22 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 ## Event-Driven Architecture
 
 - **pg-boss** — job queue for all async work (handoffs, heartbeats, scheduled tasks, slack inbound, priority feed cleanup)
-- **WebSocket (Socket.IO)** — real-time updates to client. Rooms: subaccount tasks, agent runs
-- **`useSocket` hook** — client subscribes to subaccount-scoped room for live updates
+- **WebSocket (Socket.IO)** — real-time updates to client. Rooms: subaccount tasks, agent runs, playbook runs
+- **`useSocket` / `useSocketRoom`** — client subscribes to scoped rooms for live updates (see room patterns below)
 - **Audit events** — all significant actions logged to `auditEvents` with actor, action, resource
 - **Correlation IDs** — `correlation.ts` middleware generates per-request IDs for log tracing
+
+### WebSocket room patterns
+
+| Room | Format | Events | Consumer |
+|------|--------|--------|----------|
+| Subaccount | `subaccount:{id}` | Task/board updates | Board pages, activity feed |
+| Agent run | `agent-run:{runId}` | `agent:run:started`, `agent:run:progress`, `agent:run:completed`, `agent:run:failed` | `RunTraceViewerPage`, `TestPanel` |
+| Playbook run | `playbook-run:{runId}` | Step dispatch, step completion, approval state, form-input requests, run-level transitions | `PlaybookRunDetailPage` |
+
+**Client hook:** `useSocketRoom(namespace, id, eventHandlers, onJoin)` from `client/src/hooks/useSocket.ts`. Joins the room on mount, leaves on unmount, invokes handlers per event. Typical pattern: each handler calls a REST refresh to maintain payload consistency (socket as notification, REST as source of truth).
+
+**Backstop polling:** Components that use WebSocket rooms also run a `setInterval` backstop — 15s when connected, 5s when disconnected — to cover reconnect windows. The backstop is a safety net, not the primary update path.
 
 ---
 
@@ -1037,11 +1082,15 @@ Examples: `agentExecutionServicePure.ts`, `regressionCaptureServicePure.ts`, `cr
 
 ### Runtime tests
 
-21 test files in `server/services/__tests__/` (~4350 lines). Key coverage:
+23+ test files in `server/services/__tests__/` and `server/lib/__tests__/`. Key coverage:
 - `agentExecution.smoke.test.ts` — end-to-end agent execution
 - `rls.context-propagation.test.ts` — iterates `rlsProtectedTables.ts` to assert Layer B holds
 - `agentExecutionServicePure.checkpoint.test.ts` — crash-resume parity
 - `policyEngineService.scopeValidation.test.ts` — scope violation detection
+- `testRunIdempotencyPure.test.ts` — canonical JSON, key derivation, dual-bucket boundary (20 tests)
+- `testRunRateLimitPure.test.ts` — rate limit windows, eviction, per-user independence (7 tests)
+- `runStatusDriftPure.test.ts` — shared↔client enum drift detection (5 tests)
+- `scheduleCalendarServicePure.test.ts` — heartbeat/cron/RRULE projection, sort, cost estimation (23 tests)
 - Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, `priorityFeedServicePure.test.ts`, etc.
 
 Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for deterministic testing. `server/services/__tests__/fixtures/loadFixtures.ts` — fixture loader.
@@ -1052,8 +1101,9 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items
-- **Real-time updates** — `useSocket` hook subscribes to WebSocket rooms for live board/run updates
+- **Real-time updates** — `useSocketRoom` for per-entity rooms (agent runs, playbook runs); `useSocket` for subaccount-scoped board updates. WebSocket is the primary update path; backstop polling covers reconnect windows (see Event-Driven Architecture above).
 - **API wrapper** — all HTTP calls go through `src/lib/api.ts`
+- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering). New client-wide helpers go in `src/lib/`.
 
 ---
 
@@ -1153,6 +1203,18 @@ Drives whether a skill's output body is surfaced to downstream consumers (`skill
 ### URL canonicalisation — `server/lib/canonicaliseUrl.ts`
 
 Single canonicalisation path for URLs across the system (deduplication, comparison, idempotency keys). Use it when storing or hashing URLs.
+
+### Agent run status enum — `shared/runStatus.ts`
+
+Single source of truth for the 11 agent run statuses (`queued`, `running`, `completed`, `failed`, `timeout`, `cancelled`, `budget_exceeded`, `loop_detected`, `pending_approval`, `pending_input`, `handoff`). Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `ReadonlySet`s, plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+
+**Client duplicate:** `client/src/lib/runStatus.ts` is a structural copy — the client tsconfig does not reach `shared/`. Drift between the two is caught by `server/services/__tests__/runStatusDriftPure.test.ts` (5 assertions: dict match, terminal/in-flight/awaiting array match, `isTerminalRunStatus` agreement for every value).
+
+**Usage:** Import from `shared/runStatus.ts` on the server; from `client/src/lib/runStatus.ts` on the client. Both `runPlanView.ts` and `TestPanel.tsx` use `isTerminalRunStatus` instead of local helpers.
+
+### Currency formatting — `client/src/lib/formatMoney.ts`
+
+Shared client-side money formatter. Values are in whole dollars (fractional), not cents. Default: 2dp. Opt-in `micro: true` renders sub-cent values at 4dp so costs below $0.01 are not shown as "$0.00". Handles null/undefined (returns "—"), zero, negatives. Used by `ScheduleCalendar` (per-occurrence micro, totals at standard 2dp) and available to any surface displaying dollar amounts.
 
 ### Other shared primitives
 
