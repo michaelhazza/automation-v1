@@ -36,3 +36,8 @@ export function checkTestRunRateLimit(userId: string): void {
   timestamps.push(now);
   windowStore.set(userId, timestamps);
 }
+
+/** Reset the in-process store — for use in tests only. */
+export function _resetWindowStoreForTest(): void {
+  windowStore.clear();
+}
