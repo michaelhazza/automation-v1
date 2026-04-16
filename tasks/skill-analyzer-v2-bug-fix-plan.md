@@ -47,12 +47,21 @@
   `accept_removal | restore_required | use_library_name | use_incoming_name | scope_down | flag_other | accept_overlap | acknowledge_low_confidence | acknowledge_warning | confirm_critical_phrase`.
 - `classifier_fallback_applied BOOLEAN NOT NULL DEFAULT false` — true when rule-based merger was used.
 - `execution_resolved_name TEXT` — canonical name chosen by reviewer (Fix 7); used by Execute.
+- `approved_at TIMESTAMPTZ` — set on approve; locks result against further edits (see §11.11.2).
+- `approval_decision_snapshot JSONB` — captures `evaluateApprovalState` output at approve time for debug traces (§11.11.12).
+
+**Invariant:** any write to `proposed_merged_content` (PATCH /merge or reset) clears `warning_resolutions`, `approved_at`, and `approval_decision_snapshot` in the same transaction — a fresh merge re-triggers review from scratch (§11.11.1).
 
 ### `skill_analyzer_jobs` adds:
 
 - `proposed_new_agents JSONB NOT NULL DEFAULT '[]'::jsonb` — array supporting N proposed agents.
   Entry shape: `{ id, slug, name, description, reasoning, skillSlugs: string[], status: 'proposed'|'confirmed'|'rejected', confirmedAt?, rejectedAt? }`.
   The scalar `agent_recommendation` column is preserved for backwards compat; single-agent writes populate both.
+- `config_snapshot JSONB` — full config row captured at job start. Used by validator, collision detector, and Execute guards for the job's lifetime. Replaces the version-number-only approach (§11.11.4).
+- `config_version_used INTEGER` — derived from `config_snapshot.config_version`; kept for UI display.
+- `execution_lock BOOLEAN NOT NULL DEFAULT false` — atomic Execute guard (§11.11.3).
+- `execution_started_at TIMESTAMPTZ` — set atomically when Execute takes the lock.
+- `execution_finished_at TIMESTAMPTZ` — set in Execute's `finally` block.
 
 ### New table `skill_analyzer_config`
 
@@ -66,6 +75,8 @@ scope_expansion_standard_threshold REAL NOT NULL DEFAULT 0.40,
 scope_expansion_critical_threshold REAL NOT NULL DEFAULT 0.75,
 collision_detection_threshold REAL NOT NULL DEFAULT 0.40,
 collision_max_candidates INTEGER NOT NULL DEFAULT 20,
+max_table_growth_ratio REAL NOT NULL DEFAULT 1.5,
+execution_lock_stale_seconds INTEGER NOT NULL DEFAULT 600,
 critical_warning_confirmation_phrase TEXT NOT NULL DEFAULT 'I accept this critical warning',
 warning_tier_map JSONB NOT NULL DEFAULT '{...default map...}'::jsonb,
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -282,20 +293,31 @@ Client parity is enforced by a shared snapshot test on fixture cases so the two 
 Existing `PATCH /results/:resultId` (set action) tightens server-side guard: calls `evaluateApprovalState` and rejects `action='approved'` with 409 + `reasons[]` when blocked. See §11.1.
 
 **Idempotency keys (see §11.3):**
-- `resolve-warning`: (`resultId`, `warningCode`, `details.field ?? null`). Upsert under row-level lock; optimistic concurrency via `If-Unmodified-Since`.
+- `resolve-warning`: (`resultId`, `warningCode`, `details.field ?? null`). Upsert under row-level lock. **`If-Unmodified-Since` is required** — missing → 400, mismatch → 409 (§11.11.5).
 - `proposed-agents`: (`jobId`, `proposedAgentIndex`). Last write wins.
 - Agent creation at Execute: keyed by slug via `systemAgentService.getAgentBySlug`; reuses existing drafts on retry.
+- Skill creation at Execute: on slug collision, `contentHash`-compare existing vs proposed. Match → idempotent skip. Mismatch → hard fail (§11.11.7).
+
+**Concurrency invariants:**
+- `PATCH /merge` and `POST /merge/reset` clear `warning_resolutions`, `approved_at`, and `approval_decision_snapshot` in the same transaction (§11.11.1).
+- Any result with `approved_at IS NOT NULL` rejects `PATCH /merge`, `PATCH /resolve-warning`, `POST /merge/reset` with 409 (§11.11.2). Unapprove via `PATCH /results/:resultId` with `action=null`.
+- `POST /execute` takes the job-level lock atomically; concurrent Execute → 409 (§11.11.3). Stale lock recovery via `POST /jobs/:jobId/execute/unlock` (systemAdmin only).
 
 ---
 
 ## 7. Execute step changes
 
-1. **Three-phase staged pipeline** (Fix 5 / §11.3):
+1. **Lock acquisition** (§11.11.3): atomic `UPDATE jobs SET execution_lock=true WHERE id=:id AND execution_lock=false RETURNING id`. Zero rows → 409. Lock always released in `finally`. Stale-lock unlock endpoint: systemAdmin only, min-age gate via `execution_lock_stale_seconds` config.
+2. **Config source:** read `jobs.config_snapshot` (not live config) for all thresholds during Execute (§11.11.4).
+3. **Three-phase staged pipeline** (Fix 5 / §11.3):
    - Phase 1 — soft-create proposed agents with DB `status='draft'`, idempotent via slug lookup.
    - Phase 2 — existing per-result skill transactions; attach skills to draft agents.
+     - Slug collision: hash-compare (§11.11.7) — idempotent skip if identical, hard fail if diverged.
    - Phase 3 — promote agents whose skills succeeded to `status='active'`. Any agent with zero successful attachments stays `'draft'` and is listed under `pendingDraftAgents[]` in the Execute response.
-2. **Name cascade** (Fix 7): `executionResolvedName` is the canonical source when set. `updateSystemSkill` / `createSystemSkill` overwrite both the top-level `name` and `definition.name` to match. Drift in `proposedMergedContent` is ignored when `executionResolvedName` is present.
-3. **Server-side approval guard:** at Execute entry, re-run `evaluateApprovalState` for every approved result; reject with 409 + `reasons[]` if any result is still blocked. See §11.1.
+4. **Name cascade** (Fix 7): `executionResolvedName` is the canonical source when set. `updateSystemSkill` / `createSystemSkill` overwrite both top-level `name` and `definition.name` to match. Drift in `proposedMergedContent` is ignored when `executionResolvedName` is present.
+5. **Server-side approval guard:** at Execute entry (after lock acquisition), re-run `evaluateApprovalState` for every `approved_at IS NOT NULL` result; reject with 409 + `reasons[]` if any result is still blocked. See §11.1.
+6. **Session-approved collision pass:** runs after Phase 2, writes `skill_analyzer.collision_detected_at_execute` log events and populates the Execute response's `warnings[]` array. **Does NOT block.** See §11.11.6.
+7. **Run tracing:** per-Execute `runId` (UUID) minted at the top of `executeApproved`; threaded into every structured log event (§11.11.11).
 
 ---
 
@@ -479,6 +501,115 @@ Before starting code changes:
 - [x] Retry semantics documented for fallback, embedding failure, and Execute re-runs.
 
 All items must be reflected in code + tests before their fix's todo is marked complete.
+
+---
+
+## 11.11 Second-review refinements (post-review round 2)
+
+A second architectural review flagged remaining edge-condition integrity and concurrency risks. Twelve items accepted, four deferred.
+
+### 11.11.1 Resolution invalidation on merge edit (ACCEPTED — wipe approach)
+
+`PATCH /merge` (or reset) clears `warning_resolutions` to `[]` atomically. Rationale: old resolutions can't satisfy a new merge's demoted-field set; simpler than tracking `merge_version` on every resolution entry. Client UI re-prompts for decisions after any merge edit — which matches the correct UX anyway.
+
+Implementation: inside the existing `mergeUpdatedAt`-updating transaction in `patchMergeFields` and `resetMergeToOriginal`, also set `warning_resolutions = '[]'::jsonb`.
+
+### 11.11.2 Result freeze on approval (ACCEPTED — lock approach)
+
+`skill_analyzer_results` adds `approved_at TIMESTAMPTZ` (nullable) set by `setResultAction` when `action='approved'`.
+
+- After approval, `PATCH /merge`, `PATCH /resolve-warning`, and `POST /merge/reset` return **409 — Result locked**; the client must first call `PATCH /results/:resultId` with `action=null` (unapprove) to edit.
+- `executeApproved` reads only results with `actionTaken='approved' AND approved_at IS NOT NULL`.
+
+### 11.11.3 Execute lock (ACCEPTED)
+
+`skill_analyzer_jobs` adds:
+- `execution_lock BOOLEAN NOT NULL DEFAULT false`
+- `execution_started_at TIMESTAMPTZ`
+- `execution_finished_at TIMESTAMPTZ`
+
+`POST /execute` does an atomic:
+```sql
+UPDATE skill_analyzer_jobs
+SET execution_lock = true, execution_started_at = now()
+WHERE id = :jobId AND execution_lock = false
+RETURNING id;
+```
+Zero rows → reject 409 "Execution already in progress". On completion (success or failure), set `execution_lock=false, execution_finished_at=now()` in a `finally` block.
+
+Re-runs after a crash: a separate `POST /jobs/:jobId/execute/unlock` (systemAdmin only) clears a stale lock older than `EXECUTION_LOCK_STALE_SECONDS` (default 600).
+
+### 11.11.4 Config snapshot at job start (ACCEPTED)
+
+Replaces `config_version_used INTEGER` (from §11.8) with `config_snapshot JSONB`. The full config row is captured at job start and re-used by the validator, collision detector, and Execute guards for the lifetime of the job. Live config changes mid-job do not apply.
+
+`config_version` on the config row is still useful for UI display ("this job used config v3"), so keep it — the job now stores both `config_snapshot` and `config_version_used` (derived from the snapshot).
+
+### 11.11.5 Strict `If-Unmodified-Since` enforcement (ACCEPTED)
+
+`PATCH /resolve-warning` **requires** the `If-Unmodified-Since` header (reuses the existing pattern from `PATCH /merge` at `skillAnalyzerService.ts:620`). Missing → 400. Mismatch → 409. This closes the silent-overwrite race on `warning_resolutions`.
+
+`PATCH /merge` already enforces it; the plan now mandates the same for resolve-warning and for `PATCH /results/:resultId` when transitioning to `action=approved` (so approval doesn't race with a merge edit).
+
+### 11.11.6 Execute-time collision detection is log-only (ACCEPTED)
+
+The session-approved collision pass at Execute (planned in §5 Fix 3) becomes **non-blocking**. It runs and writes structured log events (`skill_analyzer.collision_detected_at_execute`) plus an entry in the Execute response's `warnings[]` array, but does NOT block the Execute. Rationale: introducing a new blocking condition at Execute that the reviewer never saw is bad UX; the reviewer already approved under the job-time collision state, and the backup covers rollback if needed.
+
+### 11.11.7 Skill slug collision: hash-compare retry (ACCEPTED)
+
+`executeApproved` treats `createSystemSkill` slug-collision (caught at `systemSkillService.ts:308`) as follows:
+- Fetch existing skill by slug.
+- Compute `contentHash` of existing vs proposed (reuse `contentHash()` from `skillParserServicePure.ts`).
+- Identical hash → treat as idempotent retry; mark result `executionResult='skipped'` with reason `slug_collision_idempotent`.
+- Different hash → hard error; `executionResult='failed'` with reason `slug_collision_conflict`.
+
+### 11.11.8 Fragment embedding cache invalidation (ACCEPTED)
+
+The new `skill_embeddings` fragment sub-records (from §11.5) carry `content_hash TEXT NOT NULL` and `skill_updated_at TIMESTAMPTZ NOT NULL`. Cache read logic:
+- Compute current `contentHash` of the skill's instructions.
+- If any fragment row's `content_hash` doesn't match, delete all rows for that skill and recompute. Atomic under row lock.
+
+### 11.11.9 Table remediation growth cap (ACCEPTED)
+
+New config `max_table_growth_ratio REAL NOT NULL DEFAULT 1.5`. `remediateTables` tracks post-remediation word count vs pre-remediation; if `> max_table_growth_ratio × pre`, aborts auto-recovery for that candidate and emits `TABLE_ROWS_DROPPED` with `detail.growthRatioExceeded: true`.
+
+### 11.11.10 Warnings hard cap (DOCUMENTED)
+
+`validateMergeOutput` already enforces `MAX_MERGE_WARNINGS = 10` with a `WARNINGS_TRUNCATED` sentinel (see `skillAnalyzerServicePure.ts:772`). The plan keeps this; no change. Raising to 20 is unnecessary — UI rendering tests already assume ≤10.
+
+### 11.11.11 Correlation IDs on log events (ACCEPTED)
+
+Every log event introduced in §11.9 includes `{ jobId, resultId?, runId?, candidateSlug? }` as structured fields. A per-Execute `runId` (UUID) is minted at the top of `executeApproved` and threaded through all Execute-time logs.
+
+### 11.11.12 Approval decision snapshot (ACCEPTED)
+
+`skill_analyzer_results` adds `approval_decision_snapshot JSONB` (nullable). On `setResultAction(action='approved')`, the result of `evaluateApprovalState` at that moment is captured — including config snapshot hash, warning codes seen, and the resolutions that satisfied each gate. Useful for post-hoc debugging of "why was this allowed to approve?".
+
+### 11.11.13 API naming consistency (ACCEPTED — British)
+
+Existing routes use `skill-analyser` (British). The plan standardizes on that everywhere. New routes: `/api/system/skill-analyser/config`, `/api/system/skill-analyser/jobs/:jobId/proposed-agents`, etc. Any reference to `skill-analyzer` in the plan is a typo; code uses `skill-analyser`.
+
+### 11.11.14 Deferred items
+
+- **Full merge_version tracking on each resolution:** not needed given §11.11.1 (wipe-on-edit).
+- **Version field on warning_resolutions:** `If-Unmodified-Since` already solves the concurrent-write race (§11.11.5).
+- **Raising MAX_MERGE_WARNINGS to 20:** UI assumes 10; no user-visible benefit (§11.11.10).
+- **Separate `skill_analyzer_warning_resolutions` table:** deferred per §11.2.
+
+### Updated pre-implementation acceptance checklist
+
+- [x] Wipe `warning_resolutions` on any merge edit or reset.
+- [x] Lock result on approval (`approved_at` + 409 on merge writes); explicit unapprove required.
+- [x] Execute lock with atomic UPDATE guard; stale-lock unlock endpoint.
+- [x] Full `config_snapshot` on jobs (not just version).
+- [x] Strict `If-Unmodified-Since` enforcement on resolve-warning and PATCH /merge.
+- [x] Execute-time collision detection logs + warns; never blocks.
+- [x] Slug collision hash-compare for idempotent retry.
+- [x] Fragment embedding cache invalidated by `content_hash`.
+- [x] `max_table_growth_ratio` cap on auto-recovery.
+- [x] Correlation IDs on all new log events.
+- [x] `approval_decision_snapshot` persisted at approve.
+- [x] API paths use `skill-analyser` (British) consistently.
 
 
 
