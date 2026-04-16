@@ -123,6 +123,10 @@ import deliveryChannelsRouter from './routes/deliveryChannels.js';
 import clarificationsRouter from './routes/clarifications.js';
 // Memory & Briefings Phase 2 — HITL review queue route (S7)
 import memoryReviewQueueRouter from './routes/memoryReviewQueue.js';
+// Memory & Briefings Phase 3 — subaccount onboarding flow route (S5)
+import subaccountOnboardingFlowRouter from './routes/subaccountOnboardingFlow.js';
+// Memory & Briefings Phase 3 — config documents route (S21)
+import configDocumentsRouter from './routes/configDocuments.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -238,6 +242,8 @@ app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
 app.use(clarificationsRouter);
 app.use(memoryReviewQueueRouter);
+app.use(subaccountOnboardingFlowRouter);
+app.use(configDocumentsRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

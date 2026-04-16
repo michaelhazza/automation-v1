@@ -1359,6 +1359,59 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     });
   },
 
+  // ── Phase 3 S19: Weekly Digest Gather ────────────────────────────
+  weekly_digest_gather: async (input) => {
+    const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
+    return executeWeeklyDigestGather(input);
+  },
+
+  // Action-call alias used by the playbook runner (see weekly-digest.playbook.ts)
+  config_weekly_digest_gather: async (input) => {
+    const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
+    return executeWeeklyDigestGather(input);
+  },
+
+  // ── Phase 3 S22: Deliver playbook output via deliveryService ─────
+  config_deliver_playbook_output: async (input, context) => {
+    const { deliveryService } = await import('./deliveryService.js');
+    const {
+      subaccountId,
+      organisationId,
+      artefactTitle,
+      artefactContent,
+      deliveryChannels,
+    } = input as Record<string, unknown>;
+
+    if (!subaccountId || !organisationId || !artefactTitle || !artefactContent) {
+      return { success: false, error: 'subaccountId, organisationId, artefactTitle, artefactContent required' };
+    }
+
+    const config =
+      (deliveryChannels as { email?: boolean; portal?: boolean; slack?: boolean } | undefined) ??
+      { email: true, portal: true, slack: false };
+
+    const result = await deliveryService.deliver(
+      {
+        title: String(artefactTitle),
+        content: String(artefactContent),
+        createdByAgentId: context.agentId,
+      },
+      {
+        email: Boolean(config.email ?? true),
+        portal: Boolean(config.portal ?? true),
+        slack: Boolean(config.slack ?? false),
+      },
+      String(subaccountId),
+      String(organisationId),
+    );
+
+    return {
+      success: true,
+      taskId: result.taskId,
+      channels: result.channels,
+    };
+  },
+
   // ── Sprint 5 P4.2: Memory block write path ─────────────────────
   update_memory_block: async (input, context) => {
     const { updateBlock } = await import('./memoryBlockService.js');

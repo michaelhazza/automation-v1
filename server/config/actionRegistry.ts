@@ -2197,6 +2197,55 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   // NOT callable from human-initiated Configuration Assistant sessions; only
   // reachable via action_call steps in playbook templates.
 
+  // ── Memory & Briefings Phase 3 — Weekly Digest gather ────────────────────
+  config_weekly_digest_gather: {
+    actionType: 'config_weekly_digest_gather',
+    description: 'Aggregates past 7 days of activity, memory events, KPI deltas, pending items, and next-week scheduled tasks for the Weekly Digest playbook.',
+    actionCategory: 'api',
+    topics: ['playbook', 'analytics'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['subaccountId'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      windowDays: z.number().int().positive().max(90).default(7),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
+  config_deliver_playbook_output: {
+    actionType: 'config_deliver_playbook_output',
+    description: 'Deliver a playbook artefact via deliveryService: always writes to inbox + dispatches portal/slack per deliveryChannels config.',
+    actionCategory: 'api',
+    topics: ['playbook', 'delivery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['subaccountId', 'artefactTitle', 'artefactContent'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      artefactTitle: z.string().describe('Title of the inbox item / artefact'),
+      artefactContent: z.string().describe('Body content (markdown)'),
+      deliveryChannels: z.object({
+        email: z.boolean().default(true),
+        portal: z.boolean().default(true),
+        slack: z.boolean().default(false),
+      }).optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'auth_error'],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
   config_publish_playbook_output_to_portal: {
     actionType: 'config_publish_playbook_output_to_portal',
     description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_briefs row for this run and marks the run portal-visible.',

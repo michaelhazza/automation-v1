@@ -1,10 +1,10 @@
 /**
  * scripts/seedOnboardingModules.ts
  *
- * Sets `onboarding_playbook_slugs = ['daily-intelligence-brief']` on the
- * `client_pulse` module (the default "reporting" module) so that any
- * sub-account belonging to a ClientPulse subscription is offered the Daily
- * Intelligence Brief during onboarding.
+ * Sets `onboarding_playbook_slugs = ['intelligence-briefing', 'weekly-digest']`
+ * on the `client_pulse` module (the default "reporting" module) so that any
+ * sub-account belonging to a ClientPulse subscription is offered the
+ * Intelligence Briefing and Weekly Digest during onboarding.
  *
  * Idempotent — safe to re-run. Already includes the slug → no-op.
  *
@@ -18,7 +18,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { modules } from '../server/db/schema/modules.js';
 
 const REPORTING_MODULE_SLUG = 'client_pulse';
-const PLAYBOOK_SLUG = 'daily-intelligence-brief';
+const PLAYBOOK_SLUGS = ['intelligence-briefing', 'weekly-digest'] as const;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -35,22 +35,27 @@ async function seedOnboardingModules(): Promise<void> {
     return;
   }
 
-  const already = (mod.onboardingPlaybookSlugs ?? []).includes(PLAYBOOK_SLUG);
-  if (already) {
-    console.log(`[seedOnboardingModules] '${PLAYBOOK_SLUG}' already in '${REPORTING_MODULE_SLUG}' — no-op`);
+  const existing = mod.onboardingPlaybookSlugs ?? [];
+  const toAdd = PLAYBOOK_SLUGS.filter((s) => !existing.includes(s));
+  if (toAdd.length === 0) {
+    console.log(`[seedOnboardingModules] all slugs already in '${REPORTING_MODULE_SLUG}' — no-op`);
     return;
   }
 
-  // Append slug using Postgres array concatenation to preserve any extras.
+  // Append missing slugs one at a time so existing extras are preserved.
+  let current = existing;
+  for (const slug of toAdd) {
+    current = [...current, slug];
+  }
   await db
     .update(modules)
     .set({
-      onboardingPlaybookSlugs: sql`array_append(${modules.onboardingPlaybookSlugs}, ${PLAYBOOK_SLUG})`,
+      onboardingPlaybookSlugs: current,
       updatedAt: new Date(),
     })
     .where(eq(modules.id, mod.id));
 
-  console.log(`[seedOnboardingModules] added '${PLAYBOOK_SLUG}' to '${REPORTING_MODULE_SLUG}'`);
+  console.log(`[seedOnboardingModules] added ${JSON.stringify(toAdd)} to '${REPORTING_MODULE_SLUG}'`);
 }
 
 // ── Run standalone ─────────────────────────────────────────────────────────────

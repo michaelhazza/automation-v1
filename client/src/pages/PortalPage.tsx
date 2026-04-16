@@ -69,7 +69,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
       // §G10.4 — gated on completed-run + active-schedule server-side, so
       // the client just reads `active` without running its own joins.
       api
-        .get<DailyBriefCard>(`/api/portal/${subaccountId}/daily-brief-card`)
+        .get<DailyBriefCard>(`/api/portal/${subaccountId}/intelligence-briefing-card`)
         .catch(() => ({ data: null as DailyBriefCard | null })),
     ])
       .then(([processRes, runsRes, briefRes]) => {
@@ -128,9 +128,9 @@ export default function PortalPage({ user: _user }: { user: User }) {
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-wider opacity-80">
-                Daily Intelligence Brief
+                Intelligence Briefing
               </div>
-              <div className="text-[20px] font-bold mt-0.5">Today's brief is ready</div>
+              <div className="text-[20px] font-bold mt-0.5">This week's briefing is ready</div>
               <div className="text-[13px] opacity-90 mt-1">
                 {dailyBriefCard.latestRun.completedAt
                   ? `Delivered ${new Date(dailyBriefCard.latestRun.completedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
@@ -163,7 +163,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
           this list to avoid showing it twice. */}
       {(() => {
         const otherRuns = dailyBriefCard?.active
-          ? portalRuns.filter((r) => r.playbookSlug !== 'daily-intelligence-brief')
+          ? portalRuns.filter((r) => r.playbookSlug !== 'intelligence-briefing')
           : portalRuns;
         if (otherRuns.length === 0) return null;
         return (
