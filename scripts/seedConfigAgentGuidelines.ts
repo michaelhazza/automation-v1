@@ -29,7 +29,7 @@
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull } from 'drizzle-orm';
 import {
   agents,
   memoryBlocks,
@@ -102,6 +102,7 @@ export async function seedConfigAgentGuidelinesForOrg(
 
   // 4. Check for existing attachment (only relevant if block exists)
   let attachmentExists = false;
+  let attachmentIsTombstoned = false;
   if (existingBlock) {
     const [existingAttachment] = await db
       .select({ id: memoryBlockAttachments.id })
@@ -114,6 +115,24 @@ export async function seedConfigAgentGuidelinesForOrg(
         ),
       );
     attachmentExists = !!existingAttachment;
+
+    // Detect tombstoned attachment so the reattach case can warn ops.
+    // A tombstoned row means someone soft-deleted it deliberately — the
+    // seeder will still revive it (protected block, route guard prevents
+    // user-initiated detach), but ops should know it happened.
+    if (!attachmentExists) {
+      const [tombstoned] = await db
+        .select({ id: memoryBlockAttachments.id })
+        .from(memoryBlockAttachments)
+        .where(
+          and(
+            eq(memoryBlockAttachments.blockId, existingBlock.id),
+            eq(memoryBlockAttachments.agentId, configAgent.id),
+            isNotNull(memoryBlockAttachments.deletedAt),
+          ),
+        );
+      attachmentIsTombstoned = !!tombstoned;
+    }
   }
 
   const contentMatches = existingBlock?.content === canonicalContent;
@@ -123,6 +142,9 @@ export async function seedConfigAgentGuidelinesForOrg(
     contentMatches,
   });
 
+  // WRITE-ONCE: do not add propagation logic to 'noop' or 'warn_divergence' cases.
+  // Runtime edits survive redeploys. Resync is a manual ops step until --force-resync
+  // is added with the governance UI (deferred per docs/config-agent-guidelines-spec.md §3.4).
   switch (decision.kind) {
     case 'create': {
       const [created] = await db
@@ -151,6 +173,12 @@ export async function seedConfigAgentGuidelinesForOrg(
     }
 
     case 'reattach': {
+      if (attachmentIsTombstoned) {
+        // The row was soft-deleted by a direct DB operation (the route guard
+        // blocks API-level detaches on protected blocks). Warn so ops can
+        // verify the detach was not intentional before the seeder revives it.
+        console.warn(`  [warn] org ${orgId}: reviving soft-deleted attachment — was this detach intentional? (block_id=${existingBlock!.id}, agent_id=${configAgent.id})`);
+      }
       await db.insert(memoryBlockAttachments).values({
         blockId: existingBlock!.id,
         agentId: configAgent.id,
@@ -165,7 +193,8 @@ export async function seedConfigAgentGuidelinesForOrg(
     }
 
     case 'warn_divergence': {
-      log(`  [warn] org ${orgId}: runtime content diverges from canonical — no overwrite (block_id=${existingBlock!.id})`);
+      // Use console.warn directly so log aggregators can filter on severity.
+      console.warn(`  [warn] org ${orgId}: runtime content diverges from canonical — no overwrite (block_id=${existingBlock!.id})`);
       break;
     }
 

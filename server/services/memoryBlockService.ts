@@ -28,13 +28,11 @@ import {
   type BlockConfidence,
 } from './memoryBlockUpsertPure.js';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types + pure helpers (re-exported for callers) ─────────────────────────
 
-export interface MemoryBlockForPrompt {
-  name: string;
-  content: string;
-  permission: 'read' | 'read_write';
-}
+export type { MemoryBlockForPrompt } from './memoryBlockServicePure.js';
+export { formatBlocksForPrompt } from './memoryBlockServicePure.js';
+import type { MemoryBlockForPrompt } from './memoryBlockServicePure.js';
 
 // ─── Read path (agent run hot path) ──────────────────────────────────────────
 
@@ -73,19 +71,6 @@ export async function getBlocksForAgent(
   }));
 }
 
-/**
- * Format memory blocks for system prompt injection.
- * Returns null if no blocks are attached.
- */
-export function formatBlocksForPrompt(blocks: MemoryBlockForPrompt[]): string | null {
-  if (blocks.length === 0) return null;
-
-  const sections = blocks.map(
-    (b) => `### ${b.name}\n${b.content}`,
-  );
-
-  return `## Shared Context\n\n${sections.join('\n\n')}`;
-}
 
 // ─── Write path (skill handler) ──────────────────────────────────────────────
 
@@ -534,11 +519,24 @@ export { MEMORY_BLOCKS_PER_RUN_MAX };
 /**
  * Fetch the name of a memory block by ID, scoped to the caller's org.
  * Returns null if the block does not exist or belongs to a different org.
- * Used by route guards that need the block name before mutating.
+ * Used by route guards that need only the block name before mutating.
  */
 export async function getBlockName(blockId: string, orgId: string): Promise<string | null> {
+  const meta = await getBlockMeta(blockId, orgId);
+  return meta?.name ?? null;
+}
+
+/**
+ * Fetch name + ownerAgentId for a memory block, scoped to the caller's org.
+ * Returns null if the block does not exist or belongs to a different org.
+ * Used by route guards that need to compare field values before mutating.
+ */
+export async function getBlockMeta(
+  blockId: string,
+  orgId: string,
+): Promise<{ name: string; ownerAgentId: string | null } | null> {
   const [row] = await db
-    .select({ name: memoryBlocks.name })
+    .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId })
     .from(memoryBlocks)
     .where(
       and(
@@ -547,7 +545,7 @@ export async function getBlockName(blockId: string, orgId: string): Promise<stri
         isNull(memoryBlocks.deletedAt),
       ),
     );
-  return row?.name ?? null;
+  return row ?? null;
 }
 
 export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {

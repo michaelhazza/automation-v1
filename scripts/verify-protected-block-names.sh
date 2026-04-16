@@ -64,7 +64,7 @@ check \
 check \
   "returns PROTECTED_MEMORY_BLOCK error code" \
   "server/routes/memoryBlocks.ts" \
-  "PROTECTED_MEMORY_BLOCK[^_]"
+  "'PROTECTED_MEMORY_BLOCK'"
 
 check \
   "returns PROTECTED_MEMORY_BLOCK_ATTACHMENT error code" \

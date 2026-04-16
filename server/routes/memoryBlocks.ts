@@ -107,12 +107,12 @@ router.patch(
     const { name, content, isReadOnly, ownerAgentId } = req.body;
     const blockId = req.params.id;
 
-    // Fetch block name only when one of the guarded fields is present
+    // Fetch block meta only when one of the guarded fields is present
     const needsGuardCheck = name !== undefined || isReadOnly !== undefined || ownerAgentId !== undefined || content !== undefined;
     if (needsGuardCheck) {
-      const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
-      if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
-        if (name !== undefined && name !== blockName) {
+      const blockMeta = await memoryBlockService.getBlockMeta(blockId, req.orgId!);
+      if (blockMeta && PROTECTED_BLOCK_NAMES.has(blockMeta.name)) {
+        if (name !== undefined && name !== blockMeta.name) {
           rejectProtectedBlock(res);
           return;
         }
@@ -120,7 +120,9 @@ router.patch(
           rejectProtectedBlock(res);
           return;
         }
-        if (ownerAgentId !== undefined) {
+        // Only reject if ownerAgentId is actually changing — a PATCH that
+        // sends the same value as the current owner is a no-op structurally.
+        if (ownerAgentId !== undefined && ownerAgentId !== blockMeta.ownerAgentId) {
           rejectProtectedBlock(res);
           return;
         }
@@ -128,7 +130,7 @@ router.patch(
         if (content !== undefined) {
           logger.info('protected_block.content_edited', {
             blockId,
-            blockName,
+            blockName: blockMeta.name,
             orgId: req.orgId,
             actorUserId: req.user?.id ?? null,
             source: 'manual',
