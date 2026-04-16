@@ -110,7 +110,7 @@ The memory system is a multi-table architecture with five complementary stores:
 | S11 | Auto-synthesised memory blocks from recurring entries | B |
 | S12 | Self-tuning retrieval metrics (cited-vs-ignored tracking) | B |
 | S13 | Natural-language memory inspector | B |
-| S14 | Memory health digest (per-subaccount + portfolio rollup) | B |
+| S14 | Memory health data (per-subaccount data-generation step, included as a section within the Weekly Digest) | B |
 | S15 | Four-tier visibility model (System / Org / Subaccount / Client Portal) | C |
 | S16 | Per-client portal toggles (Hidden / Transparency / Collaborative) | C |
 | S17 | Per-feature, per-client visibility gating | C |
@@ -146,16 +146,16 @@ The memory system is a multi-table architecture with five complementary stores:
 Implementation should follow this order to minimise risk and maximise incremental value:
 
 **Phase 1 — Foundations (no user-facing changes, de-risks everything else)**
-S1 (decay/pruning), S2 (recency boost), S3 (conflict resolution), S22 (DeliveryChannels component), S15 (tier model data layer)
+S1 (decay/pruning), S2 (recency boost), S3 (conflict resolution), S22 (DeliveryChannels component), S15 (tier model data layer), **`memory_blocks` schema migration** (add `status` and `source` columns — required by S6 in Phase 2; default `status: 'active'` preserves backward compatibility for all existing blocks), **`portalMode` column on `subaccounts`** (text, default `'hidden'`) — required by Phase 3 onboarding (S5 step 8 sets this column); the S16 UI, toggle grid, and per-feature activation logic remain in Phase 4
 
 **Phase 2 — Core automation (user-facing, high-value)**
 S6 (relevance retrieval), S7 (confidence HITL), S8 (real-time clarification), S12 (self-tuning metrics), S4 (self-tuning quality adjustment)
 
 **Phase 3 — Playbooks & onboarding**
-S18 (rename briefing), S19 (new digest), S20 (default schedules), S5 (onboarding mode), S10 (chat-based task creation), S21 (config doc workflow)
+S18 (rename briefing), S19 (new digest — memory health section ships as a stub until S14 lands), S20 (default schedules), S5 (onboarding mode), S10 (chat-based task creation), S21 (config doc workflow)
 
 **Phase 4 — Portal & rollups**
-S16 (portal toggles), S17 (per-feature gating), S23 (portfolio rollups), S14 (health digests), S9 (drop zone), S11 (auto-synthesised blocks), S13 (NL inspector)
+S16 (portal toggles), S17 (per-feature gating), S23 (portfolio rollups), S14 (memory health data — fully populates the Weekly Digest memory health section shipped in Phase 3), S9 (drop zone), S11 (auto-synthesised blocks), S13 (NL inspector)
 
 **Phase 5 — Governance**
 S24 (memory block version history, diff, reset-to-canonical)
@@ -164,7 +164,7 @@ S24 (memory block version history, diff, reset-to-canonical)
 
 ## 4. Memory Scaling Fixes
 
-These are invisible infrastructure changes. No user-facing UI. They prevent retrieval quality degradation as memory volume grows.
+These are largely invisible infrastructure changes that prevent retrieval quality degradation as memory volume grows. The exception is S24 (memory block governance affordances — version history, diff vs canonical, reset-to-canonical), which is a UI feature listed under Workstream A for dependency reasons. S24 ships in Phase 5 and its design is in the phasing note for Phase 5 (Section 3); it does not require a dedicated design subsection here beyond what Section 3 states.
 
 ### 4.1 Entry Decay Scoring & Pruning (S1)
 
@@ -174,21 +174,21 @@ These are invisible infrastructure changes. No user-facing UI. They prevent retr
 
 A pg-boss background job (`memory-entry-decay`) runs nightly per subaccount:
 
-1. **Decay pass:** For each entry, compute a decay factor based on `lastAccessedAt` and `createdAt`. Entries not accessed within `DECAY_WINDOW_DAYS` (default 90) have their `qualityScore` reduced by `DECAY_RATE` (default 0.05 per week of inactivity). Minimum floor: 0.1 (entries never auto-decay to zero — only explicit deletion removes them).
+1. **Decay pass:** For each entry, compute a decay factor based on `lastAccessedAt` and `createdAt`. Entries not accessed within `DECAY_WINDOW_DAYS` (default 90) have their `qualityScore` reduced by `DECAY_RATE` (default 0.05 per week of inactivity). Minimum floor: 0.1 (decay alone never reduces a score to zero — separate pruning may still soft-delete entries that fall below the pruning threshold, as described below).
 
 2. **Pruning pass:** Entries with `qualityScore` below `PRUNE_THRESHOLD` (default 0.15) and `lastAccessedAt` older than `PRUNE_AGE_DAYS` (default 180) are soft-deleted. A weekly summary of pruned entries is logged for audit.
 
-3. **HNSW re-index trigger:** If more than `REINDEX_THRESHOLD` (default 500) entries were pruned in a single run, schedule a background HNSW re-index job.
+3. **HNSW re-index trigger:** If more than `REINDEX_THRESHOLD` (default 500) entries were pruned in a single run, schedule the `memory-hnsw-reindex` background job (pg-boss, one-shot, per-subaccount).
 
 **Config location:** All thresholds in `server/config/limits.ts` alongside existing memory constants.
 
 ### 4.2 Recency Boost in RRF Scoring (S2)
 
-**Problem:** `lastAccessedAt` is tracked but unused in retrieval scoring. Old, stale entries can outrank fresh, relevant signal.
+**Problem:** `lastAccessedAt` is tracked and incorporated in candidate ordering and final score weighting in `_hybridRetrieve()`, but the recency contribution is modest and tied to the overall `weights.recency` blend factor. The current formula applies a smooth inverse-time decay across all candidates equally — there is no explicit post-fusion boost that preferentially surfaces entries accessed very recently. Old, stale entries can still outrank fresh, relevant signal when their RRF rank is higher.
 
 **Design:**
 
-Modify the RRF fusion step in `workspaceMemoryService.getRelevantMemories()` to add a recency boost factor:
+Modify the RRF fusion step in `workspaceMemoryService.getRelevantMemories()` (the internal helper called by the public entry point `getMemoryForPrompt()`) to add a recency boost factor:
 
 ```
 recencyBoost = max(0, 1 - (daysSinceLastAccess / RECENCY_BOOST_WINDOW))
@@ -205,9 +205,11 @@ Where `RECENCY_BOOST_WINDOW` defaults to 60 days and `RECENCY_BOOST_WEIGHT` defa
 
 The `agent_beliefs` table already has `supersededBy` and `supersededAt` columns (scaffolded but unwired). Wire the supersession logic:
 
+**Column relationship:** `entityKey` is a new nullable indexed column on `agent_beliefs` that identifies the real-world entity being described (e.g., `contact:alice@acme.com`, `client:acme-corp`). It is distinct from `beliefKey`, which is the per-agent unique identifier (the existing unique constraint `(organisationId, subaccountId, agentId, beliefKey)` is unchanged). `entityKey` enables cross-agent conflict detection: multiple agents may hold beliefs about the same entity, identified by the same `entityKey`, even though their `beliefKey` values differ. Conflict queries run on `(subaccountId, entityKey)` across all agents.
+
 1. **On belief write:** Before inserting, query existing active beliefs for the same `subaccountId` + `entityKey` (a new indexed column, derived from the belief's subject). If a match exists with contradicting content:
    - If the new belief's `confidence` > existing by more than `CONFLICT_CONFIDENCE_GAP` (default 0.2): auto-supersede the old belief, log the action.
-   - If confidence gap is <= 0.2: flag both as `conflicted`, add to the review queue (S7), and inject a real-time clarification (S8) if an agent run is in progress.
+   - If confidence gap is <= 0.2: flag both as `conflicted`, add to the `memory_review_queue` table (see Section 5.3 for schema, owning service: `memoryReviewQueueService`, `itemType: 'belief_conflict'`), and inject a real-time clarification (S8) if an agent run is in progress. **Phase note:** In Phase 1, only the queue-entry path is active (S8 ships in Phase 2). The real-time injection is a no-op in Phase 1 and activates automatically when S8 lands in Phase 2.
 
 2. **On belief read:** Filter out superseded beliefs. For conflicted beliefs, present both with a note: "These contradict each other — which is current?"
 
@@ -218,6 +220,14 @@ The `agent_beliefs` table already has `supersededBy` and `supersededAt` columns 
 **Design (two parts):**
 
 **S12 — Utility tracking:** After each agent run, compare the memory entries that were injected into context against what the agent actually cited or used in its output (tool calls, generated text). Track a `citedCount` and `injectedCount` per entry. Compute `utilityRate = citedCount / injectedCount` over a rolling window.
+
+**Citation detection contract:** The owning service is `memoryCitationDetector` (`server/services/memoryCitationDetector.ts`). After each run it:
+1. Receives the set of injected entry IDs and the completed run's tool calls + generated output.
+2. Uses a text-matching heuristic — checks whether each entry's key phrases appear in the tool call arguments or generated text.
+3. Stores the result as `citedEntryIds: string[]` (JSONB) on the `agent_runs` row for that run.
+4. Increments `citedCount` on each cited entry and `injectedCount` on all injected entries.
+
+The initial implementation uses text-matching only (no additional LLM cost). A lightweight post-run LLM pass is available as a graduated fallback if text-matching proves insufficient in practice — the service contract is unchanged in either case.
 
 **S4 — Quality adjustment:** A weekly background job adjusts `qualityScore` based on `utilityRate`:
 - Entries with `utilityRate` > 0.5 get a quality boost (capped at 1.0)
@@ -252,7 +262,9 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 
 **Manual pinning preserved as override:** Explicit attachments via `memory_block_attachments` still work and are always included (they bypass relevance scoring). This handles cases where the agency knows a block is always relevant regardless of task context. Protected blocks (e.g., `config-agent-guidelines`) are always included via their explicit attachment — the relevance engine never drops them.
 
-**Migration:** Add an `embedding` column (vector(1536)) to `memory_blocks`. Backfill embeddings for existing blocks via a one-time migration job.
+**Draft block exclusion:** The relevance engine excludes blocks where `status` is `draft` or `pending_review` — exclusion is at query time (`WHERE status = 'active'`). This enforces the invariant that auto-synthesised draft blocks are not surfaced to agents before review.
+
+**Migration:** Add an `embedding` column (vector(1536)) to `memory_blocks`. Backfill embeddings for existing blocks via a one-time pg-boss job named `memory-blocks-embedding-backfill`, scheduled on deploy in Phase 2.
 
 ### 5.3 Confidence-Tiered HITL (S7)
 
@@ -262,13 +274,28 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 
 | Confidence | Action | User experience |
 |---|---|---|
-| **High** (>0.85) | Auto-apply, log it, surface in weekly digest only | Zero friction |
-| **Medium** (0.6-0.85) | Batched into weekly review queue, one-click approve/reject per item | Low friction, batched |
+| **High** (>0.85) | Auto-process with no human gate (belief supersessions: immediately active; block proposals: auto-create at `status: draft`, excluded from retrieval until approval or passive aging), surface in weekly digest only | Zero friction |
+| **Medium** (0.6-0.85) | Batched into weekly review queue (`memory_review_queue`), one-click approve/reject per item | Low friction, batched |
 | **Low** (<0.6) | Discard or ask the agent to re-verify on next run | Zero friction (auto-handled) |
 
-**Trust-builds-over-time mechanism:** Track approval rate per agent per domain. After N consecutive auto-applies are retrospectively validated (not overridden within 30 days), raise that agent's auto-threshold by 0.05. Cap at 0.95. This means the review queue shrinks every week as the system earns trust.
+**Trust-builds-over-time mechanism:** Track approval rate per agent per domain. After N consecutive auto-applies are retrospectively validated (not overridden within 30 days), lower that agent's auto-threshold by 0.05 (from 0.85 toward 0.80), so more items qualify for auto-apply and the review queue shrinks. Floor at 0.70. This means the review queue shrinks every week as the system earns trust.
 
 **Queue location:** Lives at subaccount level. Agency staff see their assigned subaccounts' queues. An org-level rollup view shows counts + flagged items across all subaccounts (not individual items — prevents flooding).
+
+**Storage model:** The review queue is persisted in a `memory_review_queue` table. A new table is required because the existing `review_items` table enforces a non-null `actionId` foreign key — it is scoped to plan-approve-execute action review. Memory-system events (belief conflicts, block proposals, clarification requests) have no action ID and cannot be stored there without weakening existing constraints. Schema:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Primary key |
+| `subaccountId` | uuid | FK to `subaccounts` |
+| `itemType` | enum | `belief_conflict \| block_proposal \| clarification_pending` (note: `clarification_pending` rows are audit/state records; real-time delivery is handled separately by the WebSocket path in S8 and does not go through the queue) |
+| `payload` | JSONB | Item-specific data (conflicting beliefs, candidate block content, clarification context) |
+| `confidence` | float | The confidence score that triggered the queue entry |
+| `status` | enum | `pending \| approved \| rejected \| auto_applied \| expired` |
+| `createdAt` | timestamp | — |
+| `expiresAt` | timestamp | Items expire if not actioned within the configured window |
+
+Owning service: `memoryReviewQueueService`. Org rollup reads counts grouped by `subaccountId`. Cross-referenced in Section 4.3 (S3 conflict resolution) as the target queue for low-gap belief conflicts.
 
 ### 5.4 Real-Time Clarification Routing (S8)
 
@@ -276,13 +303,13 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 
 **Design:**
 
-1. Agents can call a `request_clarification` tool during a run. Parameters: question text, context snippet, urgency (blocking / non-blocking), suggested answers (optional).
+1. Agents can call a `request_clarification` tool during a run. Parameters: question text, context snippet, urgency (blocking / non-blocking), suggested answers (optional). Implementation: new skill file `server/skills/request_clarification.md` with handler key `request_clarification` registered in `server/config/actionRegistry.ts`. This is distinct from the existing `ask_clarifying_question` skill (which pauses in-conversation for user input) — `request_clarification` routes to a named human via WebSocket notification and supports asynchronous timeout fallback.
 
 2. **Routing logic:**
    - Default route: subaccount manager (the agency staffer assigned to this client).
    - If subaccount manager is offline and urgency is blocking: escalate to agency owner.
    - If client portal mode is Collaborative and the question is client-domain (brand, product, audience): route to the client contact via portal notification.
-   - Routing rules are configurable per subaccount.
+   - Routing rules are configurable per subaccount, stored as a `clarificationRoutingConfig` JSONB column on the `subaccounts` table. Keys: `defaultRecipientRole` (enum: `subaccount_manager` | `agency_owner` | `client_contact`), `blockingEscalationRole` (enum: same), `clientDomainTopics` (string array used to classify client-domain questions). The defaults encode the fallback chain described above and need not be set explicitly unless the agency wants custom routing.
 
 3. **Delivery:** Real-time notification via WebSocket (existing `useSocket` infrastructure) + email fallback if no WebSocket session is active. The notification includes the question, context, and one-tap answer buttons (for suggested answers) or a free-text reply field.
 
@@ -308,7 +335,9 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 
 4. **One-click confirm:** User reviews the checkboxes, adjusts if needed, confirms. System files the document to all selected destinations in one transaction.
 
-5. **Client portal exposure:** If portal mode is Collaborative, the client sees the drop zone and can upload. Routing proposals are shown to the agency staffer for approval (the client does not self-file — the agency approves the filing).
+5. **Client portal exposure:** If portal mode is Collaborative, the client sees the drop zone and can upload. A trust-builds-over-time model governs filing: for the first 5 uploads from a new client, routing proposals are shown to the agency staffer for approval before any document is filed. After 5 uploads have been approved without rejection, subsequent uploads are auto-filed to the proposed destinations and the agency staffer receives a notification (not a blocking approval request). The 5-upload threshold resets if a filing is rejected. This mirrors the S7 confidence-tiered model and keeps the approval queue lightweight for established clients.
+
+**Trust state storage:** The per-client trust counter is stored as a `clientUploadTrustState` JSONB column on the `subaccounts` table with shape `{ approvedCount: number, trustedAt: string | null, resetAt: string | null }`. Owning service: `portalUploadService`. The JSONB column avoids an additional table while keeping the state co-located with the subaccount record it governs.
 
 ---
 
@@ -326,7 +355,7 @@ The agent:
 3. Asks the DeliveryChannels question (Section 10) for task outputs.
 4. On approval, creates the scheduled task via existing `config_create_scheduled_task` tool.
 
-No new infrastructure — this uses the existing Configuration Assistant toolset and the existing scheduled task creation path. The enhancement is a guided system prompt that translates natural language → structured task config.
+No new agent or service infrastructure — this uses the existing Configuration Assistant toolset and the existing scheduled task creation path. The enhancement is a guided system prompt that translates natural language → structured task config. Note: task outputs collected via the DeliveryChannels step require the `deliveryChannels` JSONB column on `scheduled_tasks` (defined in Section 10.3); that schema change is counted under S22, not this item.
 
 ### 5.7 Auto-Synthesised Memory Blocks (S11)
 
@@ -342,7 +371,11 @@ A weekly background job (`memory-block-synthesis`) per subaccount:
 4. Scores candidate confidence based on cluster coherence, entry quality, and citation frequency.
 5. Applies confidence-tiered HITL (S7): high-confidence candidates auto-create as draft blocks; medium go to the review queue; low are discarded.
 
-Draft blocks are flagged `source: 'auto_synthesised'` and are not auto-attached to agents until reviewed or until they survive 2 weekly cycles without being rejected.
+**Schema migration (S11):** Add two columns to `memory_blocks`: `source text` (enum: `manual | auto_synthesised`) and `status text` (enum: `active | draft | pending_review | rejected`, default `'active'` for backward compatibility). This migration is required by Phase 2 (S6) and must run in Phase 1.
+
+**Reconciliation with existing provenance fields:** The existing `memory_blocks` columns `sourceRunId`, `sourceReferenceId`, `lastWrittenByPlaybookSlug`, and `confidence` track the provenance of block *content* — which run wrote it, which Reference it was promoted from, which playbook authored it, and whether the content is trustworthy. The new `source` column (`manual | auto_synthesised`) tracks the *creation origin* of the block itself — whether it was created by a human or by the synthesis job (S11). These are orthogonal concerns: a block created by the synthesis job (`source: 'auto_synthesised'`) still uses `sourceRunId` to point to the run that triggered synthesis. The `memory_block_attachments.source` column (`manual | auto_attach`) is a separate concept on a separate table — it describes how an attachment was created, not the block's creation origin.
+
+Draft blocks are flagged `source: 'auto_synthesised'` and carry a `status` field from the enum `active | draft | pending_review | rejected` on `memory_blocks`. A newly synthesised block starts at `status: 'draft'`. Blocks are not auto-attached to agents and are excluded from relevance retrieval (S6) until `status` is `'active'`. Activation occurs via one of two paths: (a) explicit agency approval via the review queue, or (b) passive aging — surviving 2 weekly synthesis cycles without being rejected (treated as implicit approval). Both paths are valid. `pending_review` is set when a block is promoted to the medium-confidence review queue (S7) and awaiting agency decision. The invariant is: no block with `status != 'active'` is ever surfaced by S6.
 
 ### 5.8 Self-Tuning Retrieval Metrics (S12)
 
@@ -358,7 +391,7 @@ A chat interface (accessible per-subaccount) where the user asks questions like:
 
 The inspector agent:
 1. Parses the question and identifies the relevant scope (specific run, specific agent, general memory).
-2. If run-specific: retrieves the run's injected context, the retrieved memories, the reasoning chain, and the actions taken. Walks through the chain and explains in plain English.
+2. If run-specific: retrieves the run's injected context, the retrieved memories, and the tool calls and actions taken. Walks through these and explains in plain English. Reasoning chain (LLM internal chain-of-thought) is not currently persisted — this is out of scope for S13 and deferred.
 3. If memory-specific: runs a semantic search over the subaccount's memory entries, beliefs, and blocks. Presents what the system "knows" with provenance (which run wrote it, when, confidence).
 4. Presents results in a structured, readable format with citations.
 
@@ -366,9 +399,11 @@ The inspector agent:
 - Agency staff: always available per subaccount.
 - Client portal (Transparency or Collaborative mode): available as a "Ask about your agent" chat box. The inspector's responses are filtered to exclude internal operational details (task configurations, agent instructions) and only show memory-derived facts and actions taken.
 
-### 5.10 Memory Health Digest (S14)
+### 5.10 Memory Health Data (S14)
 
-See [Section 11](#11-portfolio-rollup-briefings--digests) for the portfolio rollup design. Per-subaccount digest is a weekly summary:
+S14 is the data-generation step that produces memory health metrics for the Weekly Digest (Section 7.2, step 5 — "Memory health summary"). It is not a standalone delivery artefact and does not produce a separate inbox item. The memory health data is gathered as part of the weekly digest's Step 1 (Gather) and rendered as Section 5 of the digest output.
+
+The data S14 generates:
 
 - New memories captured (count + top 3 by quality)
 - Conflicts auto-resolved (count + summary of most significant)
@@ -377,7 +412,7 @@ See [Section 11](#11-portfolio-rollup-briefings--digests) for the portfolio roll
 - Block proposals pending review (count, link to queue)
 - Memory coverage gaps ("No memories about [topic] despite 3 recent tasks in that area")
 
-Delivered via the DeliveryChannels component (Section 10). Default: inbox only. Agency can enable email delivery.
+A standalone memory health delivery mode (separate inbox item, separate DeliveryChannels config) is deferred until agencies explicitly request it. The portfolio rollup also includes aggregated memory health data — see [Section 11](#11-portfolio-rollup-briefings--digests). This keeps scheduled work at two items per subaccount per week (intelligence briefing + weekly digest), not three.
 
 ---
 
@@ -394,9 +429,18 @@ Every feature in this spec fires at one or more tiers. This model formalises whe
 | **Subaccount** | Agency staff acting for one client | Day-to-day: that client's agents, tasks, runs, deliverables, memory inspector, HITL queue, drop zone, Configuration Assistant subaccount mode. |
 | **Client Portal** | The client themselves (opt-in, agency-controlled) | A configurable window into the subaccount — from nothing to full collaboration. |
 
-**Data layer:** Add a `visibility_tier` enum column to relevant tables (or a `tier_config` JSONB column on features that need per-client gating). Each UI surface declares which tiers it can render in. Visibility at each tier is gated by (a) the surface's declared support and (b) the per-client portal toggle.
+**Data layer — two-layer split:**
+
+- **`visibility_tier` (static / build-time):** A static code registry — `server/config/portalFeatureRegistry.ts` — that maps each feature key to its minimum required portal tier. This file is updated when a new feature is built; no DB column, no migration per new feature. It defines the floor — a feature with `visibility_tier = 'collaborative'` is never shown to Hidden or Transparency clients regardless of other settings.
+- **`portalFeatures` JSONB (dynamic / run-time):** A per-client override column on `subaccounts` (Section 6.3) that enables or disables individual features within the tier floor. This is set by the agency and can be changed at any time.
+
+Gate-checks consult both layers: a feature is visible only if `portalMode >= visibility_tier` AND `portalFeatures[featureKey] !== false`. Each UI surface declares which tiers it can render in and registers a key in the `portalFeatures` schema.
+
+**Enforcement helper:** `server/lib/portalGate.ts` exports `canRenderPortalFeature(subaccountId: string, featureKey: string): Promise<boolean>`. It reads the minimum required tier from `server/config/portalFeatureRegistry.ts` (static code registry — see below) and the runtime state from the subaccount's `portalMode` + `portalFeatures` JSONB column. All portal-scoped API routes call this helper before returning data. A false result returns 403.
 
 ### 6.2 Per-Client Portal Toggles (S16)
+
+**Phasing note:** The `portalMode` column on `subaccounts` (text, default `'hidden'`) ships in Phase 1 as part of the S15 data layer — it is required by Phase 3 onboarding (S5 step 8). The S16 UI (toggle grid, per-feature activation controls) ships in Phase 4 as originally planned. Nothing about the user-facing portal feature changes; only the column migration is pulled forward.
 
 Three modes per subaccount, stored as a `portalMode` column on the `subaccounts` table:
 
@@ -404,7 +448,7 @@ Three modes per subaccount, stored as a `portalMode` column on the `subaccounts`
 |---|---|---|
 | **Hidden** | No portal — client sees nothing | All new subaccounts (default) |
 | **Transparency** | Read-only: deliverables, "what your agent learned this week" digest, memory inspector ("why did my agent do X?"), run status | Hands-off retainer clients |
-| **Collaborative** | All of Transparency + drop zone (uploads filed by agency approval), clarification questions routed to client, task requests | Engaged clients who want to participate |
+| **Collaborative** | All of Transparency + drop zone (uploads require agency approval for first 5, then auto-filed with notification — see Section 5.5), clarification questions routed to client, task requests | Engaged clients who want to participate |
 
 **Setting portal mode:** Configured during subaccount onboarding (Section 8, step 8) or updated anytime via Configuration Assistant or subaccount settings page.
 
@@ -426,6 +470,8 @@ Defaults: all features ON when portal mode is Collaborative. Agency can turn ind
 
 **UI pattern:** A simple toggle grid on the subaccount settings page. Each row is a feature; each has an on/off switch. Only shown when portal mode is Collaborative.
 
+**Server-side enforcement:** All portal-scoped API routes call `canRenderPortalFeature()` from `server/lib/portalGate.ts` (see Section 6.1). The gate reads both `portalMode` and `portalFeatures` and returns 403 if the feature is gated for this subaccount. The client-side toggle grid is a UX convenience only — the server is authoritative. Client-side state has no bearing on what the server will return.
+
 **Inheritance:** Every new UI surface built in the future must declare its minimum portal mode (Hidden / Transparency / Collaborative) and register in the `portalFeatures` schema. This ensures future features inherit the gating model automatically.
 
 ---
@@ -437,6 +483,11 @@ Defaults: all features ON when portal mode is Collaborative. Agency can turn ind
 **Current state:** `server/playbooks/daily-intelligence-brief.playbook.ts` — schedule-configurable, `autoStartOnOnboarding: true`, steps: research → draft → publish to portal → email digest.
 
 **Change:** Rename to `intelligence-briefing.playbook.ts`. Update all references (imports, seed data, UI labels). The playbook remains cadence-agnostic — the RRULE schedule is set during configuration, not hardcoded. Internal name: `intelligence-briefing`. User-facing label: "Intelligence Briefing."
+
+**Migration checklist (S18):** After completing the rename:
+- Run `rg 'daily-intelligence-brief|daily-brief'` across the repo and resolve all non-comment references.
+- Portal route `/daily-brief-card` (in `server/routes/portal.ts`) must be updated to `/intelligence-briefing-card` or tombstoned with a 301 redirect.
+- Update any seed data, test fixtures, and migration files that reference the old slug.
 
 **Default schedule when autostarted:** `RRULE:FREQ=WEEKLY;BYDAY=MO` at 07:00 in the subaccount's configured timezone. Configurable during onboarding (Section 8) and anytime via Configuration Assistant.
 
@@ -457,7 +508,7 @@ Defaults: all features ON when portal mode is Collaborative. Agency can turn ind
 
 | Step | Type | Description |
 |---|---|---|
-| 1. Gather | `skill_call` | Aggregate run logs, memory events, KPI data, pending items for the subaccount over the past 7 days |
+| 1. Gather | `skill_call` | Aggregate run logs, memory events, KPI data, pending items, and memory health data (S14: new entries, conflicts, pruned entries, coverage gaps) for the subaccount over the past 7 days |
 | 2. Draft | `skill_call` | LLM generates a structured digest from the gathered data |
 | 3. Deliver | `action_call` | Route via DeliveryChannels (Section 10) — default: inbox + email |
 
@@ -498,7 +549,7 @@ The Configuration Assistant gets a new `mode` parameter. In `subaccount-onboardi
 
 - A different system prompt (the structured conversation arc below)
 - A scoped toolset (memory block creation, playbook autostart, integration kickoff, portal config, DeliveryChannels, Configuration Document generation)
-- A different completion criterion (subaccount must be in "ready" state with both playbooks configured, not just "agent answered the question")
+- A different completion criterion (subaccount must be in "ready" state with all playbooks in the bundle configured and autostarted, not just "agent answered the question" — the bundle defaults to `[intelligence-briefing, weekly-digest]` per Section 8.7; memory bootstrap, integration setup, and portal config are procedural steps, not bundle entries)
 
 Same plumbing as the existing Configuration Assistant org-admin mode. New mode, not new agent. The agent inherits its runtime guidelines from the platform-level memory block (`config-agent-guidelines` — shipped, canonical doc at `docs/agents/config-agent-guidelines.md`). The guidelines encode the Three C's diagnostic framework, priority order (configure existing > create new skills > create new agents), tier-edit permissions, confidence-tiered action policy, and safety gates. The onboarding mode's system prompt builds on top of these guidelines, not replaces them.
 
@@ -532,7 +583,7 @@ If the agent can infer an answer from context already provided (e.g., brand voic
 
 ### 8.6 Drop-Out and Resume
 
-If the conversation is interrupted (browser closed, session timeout), state persists per-subaccount. When the user returns, the agent resumes from the last completed step. State is stored in a `onboarding_state` JSONB column on the subaccount record (or a dedicated `onboarding_sessions` table if cleaner).
+If the conversation is interrupted (browser closed, session timeout), state persists per-subaccount. When the user returns, the agent resumes from the last completed step. State is stored using the existing `subaccount_onboarding_state` table (`server/db/schema/subaccountOnboardingState.ts`), which already tracks per-playbook-slug completion status. To support mid-conversation resume (last completed step of the 9-step arc and answers already collected), add a `resumeState` JSONB column to this table. No new table is introduced — extending the existing table keeps the source of truth for all onboarding state consolidated.
 
 ### 8.7 Onboarding as a Playbook Bundle
 
@@ -543,7 +594,9 @@ This means:
 - The Configuration Document for onboarding (Path B) automatically includes the new playbook's questions.
 - No changes to the onboarding conversation logic — the Config Assistant reads the bundle manifest and asks the right questions.
 
-**Bundle manifest:** A configuration file or database record listing which playbooks are included in onboarding and in what order. Default bundle: `[memory-bootstrap, intelligence-briefing, weekly-digest, integration-setup, portal-config]`. Customisable per organisation (agencies can add their own playbooks to onboarding).
+**Bundle manifest:** Stored as a database table (`onboarding_bundle_configs`) — one row per organisation, with a `playbookSlugs` JSONB array and an `order` integer per entry. The default bundle is `[intelligence-briefing, weekly-digest]` — the two playbooks that actually get autostarted. Memory bootstrap, integration setup, and portal configuration are procedural phases of the onboarding conversation (Sections 8.4 steps 1–5 and 8) — they are not playbooks with files and are not registered in the bundle manifest. A database record allows agencies to customise their onboarding bundle without code changes (see Open Question 8).
+
+`modules.onboardingPlaybookSlugs` is a module-level declaration of which playbooks a module can offer during onboarding — it is the source of available playbooks per module. `onboarding_bundle_configs` is an org-level configuration that selects and orders from those available playbooks into a custom bundle for that agency. They are two layers of a pull-from-registry model: modules declare what is available; orgs configure what they want.
 
 ---
 
@@ -551,7 +604,7 @@ This means:
 
 ### 9.1 Concept
 
-Every playbook declares a **Configuration Schema** — a structured declaration of the questions it needs answered before it can run. This schema is the single source of truth for both the live conversational path and the async document path.
+Every playbook declares a **Configuration Schema** — a structured declaration of the questions it needs answered before it can run. This schema is the single source of truth for question-answer steps only — both the live conversational path and the async document path draw from the same schema to ensure consistency. Action steps (OAuth initiation, block creation, portal mode setting) are handled procedurally by the onboarding engine and are not represented in the Configuration Schema. The `ConfigQuestion` interface and document generation contract remain unchanged.
 
 From any Configuration Schema (or a bundle of them), the system can generate a **Configuration Document** — a downloadable file the agency can send to a client, have them fill out offline, and upload back for automated processing.
 
@@ -565,7 +618,9 @@ interface ConfigQuestion {
   section: string;                     // Grouping label, e.g. "Intelligence Briefing"
   question: string;                    // Human-readable question text
   helpText?: string;                   // Additional context / examples
-  type: 'text' | 'select' | 'multiselect' | 'datetime' | 'url' | 'email' | 'boolean';
+  type: 'text' | 'select' | 'multiselect' | 'datetime' | 'url' | 'email' | 'boolean' | 'deliveryChannels';
+  // 'deliveryChannels' renders the DeliveryChannels component in the live path and decomposes
+  // into named sub-questions (channel, recipients) in the async document path.
   options?: string[];                  // For select/multiselect types
   default?: string | string[];         // Default value
   required: boolean;
@@ -607,7 +662,7 @@ Schemas live alongside their playbook files: e.g., `server/playbooks/intelligenc
 1. **Extract text** from uploaded file (DOCX parser, PDF OCR, or plain text).
 2. **LLM parsing:** Map extracted answers back to Configuration Schema field IDs. The LLM receives the schema + the document text and returns a structured JSON of `{ fieldId: answer }` pairs.
 3. **Validation:** Check each answer against its schema constraints (required, type, validation hints). Flag invalid or missing answers.
-4. **Confidence scoring:** Each parsed answer gets a confidence score based on extraction clarity.
+4. **Confidence scoring:** Each parsed answer gets a confidence score (0–1) based on extraction clarity, assigned by the LLM parser in step 2 as part of its JSON output (e.g., `{ fieldId, answer, confidence }`). The threshold for auto-apply is 0.7 (consistent with the risk note in Section 13). Owning service: `configDocumentParserService` (`server/services/configDocumentParserService.ts`).
 5. **Gap analysis:** Identify unanswered required questions.
 
 **Outcome routing:**
@@ -693,7 +748,9 @@ A `deliveryService.deliver(artefact, deliveryConfig, subaccountId)` function tha
 3. Logs delivery attempts and outcomes per channel.
 4. Retries failed deliveries (email: 3 retries with backoff; Slack/Teams: 2 retries; SMS: 1 retry).
 
-This service is called by every playbook's "Deliver" step, by the health digest job, and by any future feature that produces deliverables.
+This service is called by every playbook's "Deliver" step and by any future feature that produces deliverables. (Memory health data is gathered inline by the Weekly Digest's Gather step — there is no separate health digest delivery job.)
+
+**Enforcement boundary:** All playbook deliver steps must route through `deliveryService.deliver(...)`. Direct writes to inbox outside this service are prohibited — the service is the enforcement boundary for the inbox guarantee.
 
 ---
 
@@ -712,6 +769,8 @@ Agency owners with 50-180+ subaccounts cannot read individual briefings and dige
 
 **Two inbox items per week, not N * 2.** Agency owner sees the forest; subaccount managers see the trees.
 
+**Delivery target:** Portfolio artefacts route to the org subaccount's inbox — the existing subaccount in which the Configuration Assistant already runs in org-admin mode. The org subaccount is identified by querying `subaccounts WHERE isOrgSubaccount = true AND organisationId = ?` — a unique constraint ensures exactly one result per org. No schema change required. No new inbox entity or schema changes are required.
+
 ### 11.3 Portfolio Briefing Content
 
 1. **Portfolio health overview:** X clients healthy, Y at risk, Z need attention. Traffic-light indicators.
@@ -725,7 +784,7 @@ Agency owners with 50-180+ subaccounts cannot read individual briefings and dige
 1. **Week in numbers:** Total deliverables shipped, total runs completed, total memories captured across all clients.
 2. **Highlights and lowlights:** Best-performing client this week, most-improved, client with most issues.
 3. **Memory system health:** Conflicts resolved, entries pruned, blocks synthesised, coverage gaps — aggregated across portfolio.
-4. **Review queue summary:** N items pending across all clients, N auto-resolved, N rejected.
+4. **Memory review queue summary:** N items pending across all clients, N auto-resolved, N rejected. (This refers to the `memory_review_queue` from S7 — not the existing `review_items` HITL queue, which covers agent action approvals.)
 5. **Drill-through:** Same as Portfolio Briefing — client names link to individual digests.
 
 ### 11.5 Auto-Enable Threshold
@@ -734,7 +793,7 @@ Portfolio rollups are available to all organisations. Auto-enabled (opt-out) whe
 
 ### 11.6 Delivery
 
-Uses the DeliveryChannels component (Section 10). Default: inbox + email to the agency owner. Configurable — agency owner can add other recipients (e.g., operations manager, account leads).
+The portfolio rollup job reads the org subaccount's persisted `deliveryChannels` configuration and calls `deliveryService.deliver(artefact, deliveryConfig, orgSubaccountId)` — the same server-side delivery service used by all other playbook deliver steps (Section 10.5). The `DeliveryChannels` UI component (Section 10) is used to configure those preferences at setup time; the server job reads the persisted config, not the component. Default: org subaccount inbox + email to the agency owner. Configurable — the agency owner sets preferred channels via the portfolio rollup settings page using the DeliveryChannels component.
 
 ### 11.7 Implementation
 
@@ -758,13 +817,13 @@ The job:
 | F2 | New subaccount can be fully onboarded via async Configuration Document round-trip | Upload a completed doc, verify all config is applied |
 | F3 | Intelligence Briefing lands in inbox at configured time (default Mon 7am) | Scheduled task + delivery log |
 | F4 | Weekly Digest lands in inbox at configured time (default Fri 5pm) | Scheduled task + delivery log |
-| F5 | Portfolio Briefing and Digest each produce exactly one inbox item for the agency owner | Run with 10+ subaccounts, verify 2 items not 20+ |
-| F6 | Document drop zone proposes multi-destination checkboxes with confidence scores | Upload a test doc, verify proposals render |
+| F5 | Portfolio Briefing and Digest each produce exactly one inbox item in the org subaccount inbox | Run with 10+ subaccounts, verify 2 items in org subaccount inbox, not 20+ individual items |
+| F6 | Document drop zone proposes multi-destination checkboxes with confidence scores | Upload a test doc; verify: (a) destinations >0.8 are pre-ticked, (b) destinations 0.5–0.8 are shown unticked, (c) destinations <0.5 are hidden behind "Show more", (d) confirming selections files to all ticked destinations in one transaction |
 | F7 | Real-time clarification reaches the correct recipient within 30 seconds | Trigger a clarification, verify WebSocket delivery |
-| F8 | Confidence-tiered HITL auto-applies high-confidence items and queues medium | Generate test items at various confidence levels, verify routing |
+| F8 | Confidence-tiered HITL auto-applies high-confidence items and queues medium | Generate test items at each confidence tier; verify: (a) >0.85 → auto-applied (belief superseded immediately / block draft created) with digest log entry, (b) 0.6–0.85 → appears in weekly review queue with no auto-apply, (c) <0.6 → discarded with no queue entry. After N consecutive approved high-confidence items, verify the auto-threshold decreases by 0.05 (trust-builds-over-time mechanism). |
 | F9 | Memory entries decay over time and pruned entries no longer appear in retrieval | Seed entries with old timestamps, run decay job, query retrieval |
 | F10 | Self-tuning retrieval adjusts quality scores based on citation data | Run 10+ agent runs, verify quality scores change |
-| F11 | Client portal respects mode toggles (Hidden shows nothing, Transparency is read-only, Collaborative allows interaction) | Test each mode with a client-role user |
+| F11 | Client portal respects mode toggles (Hidden shows nothing, Transparency is read-only, Collaborative allows interaction) | Test each mode with a client-role user. Additionally, in Collaborative mode: toggle individual `portalFeatures` flags and verify each surface appears/disappears in the client portal; verify server returns 403 for disabled features regardless of client-side state. |
 | F12 | DeliveryChannels component renders conditionally based on connected integrations | Connect/disconnect Slack, verify channel appears/disappears |
 
 ### Non-Functional
@@ -776,7 +835,7 @@ The job:
 | NF3 | Configuration Document generation (DOCX) < 5s | Benchmark with 20-question schema |
 | NF4 | Configuration Document upload processing < 30s | Benchmark with 5-page filled doc |
 | NF5 | Portfolio rollup generation < 30s for 200 subaccounts | Load test |
-| NF6 | Zero human involvement required for standard weekly operation (briefing + digest + memory maintenance) | Observe a 4-week period with no manual intervention |
+| NF6 | Zero human involvement required for standard weekly operation (briefing + digest + memory maintenance) | Run a scripted 4-week-equivalent scenario (mocked time): 4 briefing runs, 4 digest runs, 1 decay pass, 1 HITL queue flush, 1 block synthesis run. Count operations requiring unscheduled human intervention. Target: zero. |
 
 ---
 
@@ -800,10 +859,10 @@ The job:
 | # | Question | Impact | Recommended default |
 |---|---|---|---|
 | 1 | Should the `recall(query, k)` tool (lazy memory retrieval mid-run) be included in this spec or deferred? | Would reduce upfront memory injection and improve token budget under pressure | Defer — evaluate after this spec ships. Current upfront injection is adequate for current run complexity. |
-| 2 | Should belief conflict resolution (S3) trigger a real-time clarification (S8) during an active run, or only queue for batch review? | Real-time is better UX but adds complexity to the run loop | Real-time for blocking conflicts (same entity, opposing facts); batch for non-blocking (different entity or low-impact) |
+| 2 | ~~Should belief conflict resolution (S3) trigger a real-time clarification (S8) during an active run, or only queue for batch review?~~ **Resolved.** Section 4.3 specifies: queue entry always; real-time clarification (S8) also fires if a run is in progress and the confidence gap is ≤ 0.2. Real-time injection is a no-op in Phase 1; activates when S8 lands in Phase 2. | Real-time is better UX but adds complexity to the run loop | Real-time for blocking conflicts (same entity, opposing facts); batch for non-blocking (different entity or low-impact) |
 | 3 | What is the maximum number of memory blocks the relevance-driven retrieval (S6) should inject? | Too many wastes tokens; too few misses context | Default 5, configurable in limits.ts, same as memory entries |
-| 4 | Should the Configuration Document workflow support Google Docs native creation in Phase 3, or defer to a later phase? | Google Docs is better UX for agencies already in Google Workspace | Include in Phase 3 if Google Workspace integration exists; otherwise defer |
+| 4 | ~~Should the Configuration Document workflow support Google Docs native creation in Phase 3, or defer to a later phase?~~ **Resolved.** Section 9.3 includes Google Docs as a defined output format behind an integration check — "If Google Workspace integration is connected, created via Google Docs API." This is part of the Phase 3 design and is not tentative. | Google Docs is better UX for agencies already in Google Workspace | Include in Phase 3 if Google Workspace integration exists; otherwise defer |
 | 5 | Should the portfolio rollup be a playbook (configurable, extensible) or a hardcoded background job? | Playbook is more flexible; background job is simpler to implement | Start as background job in Phase 4; migrate to playbook if agencies request customisation |
-| 6 | Should the health digest (S14) be merged into the weekly digest (S19) as a section, or remain a separate artefact? | Separate is cleaner but adds another inbox item | Merge as a section within the weekly digest; offer a standalone version only if agencies request it |
+| 6 | ~~Should the health digest (S14) be merged into the weekly digest (S19) as a section, or remain a separate artefact?~~ **Resolved.** Scope defines S14 as "included as a section within the Weekly Digest." Section 10.5 explicitly states "there is no separate health digest delivery job." Phase 3 ships the digest with a stub memory-health section until S14 lands in Phase 4. | Separate is cleaner but adds another inbox item | Merge as a section within the weekly digest; offer a standalone version only if agencies request it |
 | 7 | For the document drop zone (S9), should client uploads via Collaborative portal require agency approval before filing, or auto-file with notification? | Auto-file is faster; approval prevents misfiling | Require agency approval for first 5 uploads from a new client; after that, auto-file with notification (trust-builds-over-time, same pattern as S7) |
-| 8 | Should the onboarding bundle manifest be stored in code (static, version-controlled) or in the database (dynamic, per-org customisable)? | Static is simpler; dynamic lets agencies customise their onboarding | Database — agencies should be able to add their own playbooks to onboarding without code changes |
+| 8 | ~~Should the onboarding bundle manifest be stored in code (static, version-controlled) or in the database (dynamic, per-org customisable)?~~ **Resolved.** Section 8.7 specifies "Stored as a database table (`onboarding_bundle_configs`) — one row per organisation." The two-layer model (modules declare available playbooks via `onboardingPlaybookSlugs`; orgs configure their bundle via `onboarding_bundle_configs`) is the settled design. | Static is simpler; dynamic lets agencies customise their onboarding | Database — agencies should be able to add their own playbooks to onboarding without code changes |
