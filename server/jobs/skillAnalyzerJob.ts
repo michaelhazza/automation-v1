@@ -44,6 +44,7 @@ import {
   richnessScore,
   buildRuleBasedMerge,
   remediateTables,
+  detectSkillGraphCollision,
   type LibrarySkillSummary,
   type MergeWarning,
 } from '../services/skillAnalyzerServicePure.js';
@@ -953,6 +954,34 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 },
                 ...mergeWarnings,
               ];
+            }
+
+            // v2 Fix 3: cross-library skill-graph collision detection.
+            // Compares merged capabilities to every other library skill
+            // (top-K bigram pre-filter + hard pair budget).
+            const collisions = detectSkillGraphCollision({
+              merged: storedMerge!,
+              libraryCatalog: librarySkills.map(s => ({
+                id: s.id,
+                slug: s.slug,
+                name: s.name,
+                instructions: s.instructions,
+              })),
+              excludedId: matchedLib.id ?? null,
+            });
+            for (const c of collisions) {
+              mergeWarnings.push({
+                code: 'SKILL_GRAPH_COLLISION',
+                severity: 'warning',
+                message: `Merged skill overlaps ~${Math.round(c.overlapRatio * 100)}% with "${c.collidingName}".`,
+                detail: JSON.stringify({
+                  collidingSkillId: c.collidingSkillId,
+                  collidingSlug: c.collidingSlug,
+                  collidingName: c.collidingName,
+                  overlapRatio: c.overlapRatio,
+                  overlappingFragments: c.overlappingFragments,
+                }),
+              });
             }
 
             if (mergeWarnings.length > 0) {
