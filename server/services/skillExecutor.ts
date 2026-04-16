@@ -1554,6 +1554,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     const { executeConfigSendPlaybookEmailDigest } = await import('../tools/config/playbookSkillHandlers.js');
     return executeWithActionAudit('config_send_playbook_email_digest', input, context, () => executeConfigSendPlaybookEmailDigest(input, context));
   },
+
+  // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
+  // Implementation pending; returns a not-yet-available error so onboarding
+  // falls back to asking the question directly.
+  smart_skip_from_website: async (_input, _context) => {
+    return { success: false, error: 'smart_skip_from_website is not yet implemented' };
+  },
 };
 
 export const skillExecutor = {
