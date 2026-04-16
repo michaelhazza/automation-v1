@@ -7,8 +7,25 @@ import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
+import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
+import { createHash } from 'crypto';
+
+/** Deterministic JSON stringify (sorted keys) for hashing. */
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet();
+  const stringify = (v: unknown): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (seen.has(v as object)) return '"[circular]"';
+    seen.add(v as object);
+    if (Array.isArray(v)) return '[' + v.map(stringify).join(',') + ']';
+    const keys = Object.keys(v as object).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + stringify((v as Record<string, unknown>)[k])).join(',') + '}';
+  };
+  return stringify(value);
+}
 
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
@@ -236,13 +253,14 @@ export async function setResultAction(params: {
   jobId: string;
   organisationId: string;
   userId: string;
-  action: 'approved' | 'rejected' | 'skipped';
+  // action=null unapproves a previously-approved result (clears approved_at).
+  action: 'approved' | 'rejected' | 'skipped' | null;
 }): Promise<void> {
   const { resultId, jobId, organisationId, userId, action } = params;
 
   // Verify job belongs to org
   const jobRows = await db
-    .select({ id: skillAnalyzerJobs.id })
+    .select({ id: skillAnalyzerJobs.id, configSnapshot: skillAnalyzerJobs.configSnapshot })
     .from(skillAnalyzerJobs)
     .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
     .limit(1);
@@ -251,42 +269,79 @@ export async function setResultAction(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  // Server-side blocking enforcement — prevents approving a merge with
-  // critical unresolved warnings via a direct API call.
+  // Server-side blocking enforcement via canonical evaluateApprovalState.
+  // PARTIAL_OVERLAP / IMPROVEMENT results with unresolved decision_required
+  // or critical warnings cannot transition to approved.
   if (action === 'approved') {
     const resultRows = await db
-      .select({
-        classification: skillAnalyzerResults.classification,
-        mergeWarnings: skillAnalyzerResults.mergeWarnings,
-      })
+      .select()
       .from(skillAnalyzerResults)
       .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
       .limit(1);
 
     const resultRow = resultRows[0];
+    if (!resultRow) {
+      throw { statusCode: 404, message: 'Result not found' };
+    }
+
     if (
-      resultRow &&
-      (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
+      resultRow.classification === 'PARTIAL_OVERLAP' ||
+      resultRow.classification === 'IMPROVEMENT'
     ) {
-      // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
-      // scope creep and name collisions can be resolved by the reviewer editing the
-      // merged content. They are not safety gates like missing HITL gates or dropped
-      // required fields.
-      // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
-      const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
-      const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
-      if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
-        throw { statusCode: 422, message: 'Cannot approve: merge has critical warnings that must be resolved first.', errorCode: 'MERGE_CRITICAL_WARNINGS' };
+      const warnings = (resultRow.mergeWarnings ?? []) as MergeWarning[];
+      const resolutions = (resultRow.warningResolutions ?? []) as WarningResolution[];
+      const snapshot = jobRows[0].configSnapshot as { warningTierMap?: Record<string, WarningTier> } | null;
+      const tierMap = skillAnalyzerConfigService.effectiveTierMap(snapshot);
+      const state = evaluateApprovalState(warnings, resolutions, tierMap);
+      if (state.blocked) {
+        throw {
+          statusCode: 422,
+          message: 'Cannot approve: merge has unresolved blocking warnings.',
+          errorCode: 'MERGE_CRITICAL_WARNINGS',
+          reasons: state.reasons,
+        };
       }
+
+      // Approval snapshot + drift-detection hash (§11.11.12, §11.12.1).
+      const approvalSnapshot = {
+        warnings,
+        resolutions,
+        state,
+        configVersion: (snapshot as { configVersion?: number } | null)?.configVersion ?? null,
+        evaluatedAt: new Date().toISOString(),
+      };
+      const approvalHash = createHash('sha256')
+        .update(stableStringify(approvalSnapshot))
+        .digest('hex');
+
+      await db
+        .update(skillAnalyzerResults)
+        .set({
+          actionTaken: 'approved',
+          actionTakenAt: new Date(),
+          actionTakenBy: userId,
+          approvedAt: new Date(),
+          approvalDecisionSnapshot: approvalSnapshot,
+          approvalHash,
+          wasApprovedBefore: true,
+        })
+        .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)));
+      return;
     }
   }
 
+  // reject / skip / unapprove (null) path. For 'approved' on non-PARTIAL_OVERLAP
+  // classifications (DISTINCT, DUPLICATE) we simply update actionTaken without
+  // the approval gate — those don't have merge warnings to resolve.
   await db
     .update(skillAnalyzerResults)
     .set({
       actionTaken: action,
-      actionTakenAt: new Date(),
-      actionTakenBy: userId,
+      actionTakenAt: action === null ? null : new Date(),
+      actionTakenBy: action === null ? null : userId,
+      // Unapprove clears approved_at so edits are permitted again.
+      // was_approved_before stays true (§11.12.2 UX signal).
+      approvedAt: action === 'approved' ? new Date() : null,
     })
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)));
 }
@@ -313,41 +368,16 @@ export async function bulkSetResultAction(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  // Server-side blocking enforcement for bulk approval — mirrors setResultAction.
-  // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
-  // scope creep and name collisions can be resolved by the reviewer editing the
-  // merged content. They are not safety gates like missing HITL gates or dropped
-  // required fields.
-  if (action === 'approved' && resultIds.length > 0) {
-    // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
-    const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
-    const blockedRows = await db
-      .select({
-        id: skillAnalyzerResults.id,
-        classification: skillAnalyzerResults.classification,
-        mergeWarnings: skillAnalyzerResults.mergeWarnings,
-      })
-      .from(skillAnalyzerResults)
-      .where(and(
-        inArray(skillAnalyzerResults.id, resultIds),
-        eq(skillAnalyzerResults.jobId, jobId),
-      ));
-
-    const hasBlocked = blockedRows.some(row =>
-      (row.classification === 'PARTIAL_OVERLAP' || row.classification === 'IMPROVEMENT') &&
-      (row.mergeWarnings as MergeWarning[] | null)
-        ?.some(w => BLOCKING_CODES.has(w.code))
-    );
-
-    if (hasBlocked) {
-      throw {
-        statusCode: 422,
-        message: 'Cannot approve: one or more selected merges have critical warnings that must be resolved first.',
-        errorCode: 'MERGE_CRITICAL_WARNINGS',
-      };
+  // Delegate to the per-row setResultAction so approval snapshot + drift hash
+  // + was_approved_before get written consistently for every row.
+  if (action === 'approved') {
+    for (const resultId of resultIds) {
+      await setResultAction({ resultId, jobId, organisationId, userId, action });
     }
+    return;
   }
 
+  // reject / skip: bulk update without approval snapshot logic.
   await db
     .update(skillAnalyzerResults)
     .set({
@@ -361,6 +391,139 @@ export async function bulkSetResultAction(params: {
         eq(skillAnalyzerResults.jobId, jobId)
       )
     );
+}
+
+// ---------------------------------------------------------------------------
+// Warning resolution — v2 §11.2
+// ---------------------------------------------------------------------------
+
+export interface ResolveWarningParams {
+  resultId: string;
+  jobId: string;
+  organisationId: string;
+  userId: string;
+  /** Required header; missing → 400, mismatch → 409. See §11.11.5. */
+  ifUnmodifiedSince: string;
+  warningCode: MergeWarningCode;
+  resolution: WarningResolutionKind;
+  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
+}
+
+/** Append (or upsert-by-composite-key) a reviewer decision on a warning.
+ *  Dedup key: (warningCode, details.field ?? null). Newer entry replaces
+ *  the prior one for the same key.
+ *
+ *  Enforces: result is not locked (approvedAt null); If-Unmodified-Since
+ *  matches the row's mergeUpdatedAt exactly (or is newer — we reject if the
+ *  row was modified after the client's snapshot). */
+export async function resolveWarning(params: ResolveWarningParams): Promise<void> {
+  const { resultId, jobId, organisationId, userId, ifUnmodifiedSince, warningCode, resolution, details } = params;
+
+  if (!ifUnmodifiedSince || typeof ifUnmodifiedSince !== 'string') {
+    throw { statusCode: 400, message: 'If-Unmodified-Since is required for resolve-warning.' };
+  }
+  const clientStamp = new Date(ifUnmodifiedSince);
+  if (Number.isNaN(clientStamp.getTime())) {
+    throw { statusCode: 400, message: 'If-Unmodified-Since must be a valid ISO timestamp.' };
+  }
+
+  await db.transaction(async (tx) => {
+    // Row-lock read to avoid concurrent resolve-warning overwrites.
+    const rows = await tx
+      .select()
+      .from(skillAnalyzerResults)
+      .where(and(
+        eq(skillAnalyzerResults.id, resultId),
+        eq(skillAnalyzerResults.jobId, jobId),
+      ))
+      .for('update')
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) throw { statusCode: 404, message: 'Result not found' };
+
+    // Org ownership check via job.
+    const jobRows = await tx
+      .select({ id: skillAnalyzerJobs.id })
+      .from(skillAnalyzerJobs)
+      .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+      .limit(1);
+    if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+
+    if (row.approvedAt) {
+      throw {
+        statusCode: 409,
+        message: 'Result is locked — unapprove before resolving warnings.',
+        errorCode: 'RESULT_LOCKED',
+      };
+    }
+
+    const rowStamp = row.mergeUpdatedAt ? new Date(row.mergeUpdatedAt) : null;
+    if (rowStamp && rowStamp > clientStamp) {
+      throw {
+        statusCode: 409,
+        message: 'Result was modified since you opened it — reload and retry.',
+        errorCode: 'STALE_RESOLVE',
+      };
+    }
+
+    const existing = Array.isArray(row.warningResolutions)
+      ? (row.warningResolutions as WarningResolution[])
+      : [];
+
+    // Dedup by composite (warningCode, details.field ?? null). Newer wins.
+    const fieldKey = details?.field ?? null;
+    const filtered = existing.filter(r => {
+      const rField = r.details?.field ?? null;
+      return !(r.warningCode === warningCode && rField === fieldKey);
+    });
+
+    const entry: WarningResolution = {
+      warningCode,
+      resolution,
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: userId,
+    };
+    if (details && (details.field || details.disambiguationNote || details.collidingSkillId)) {
+      entry.details = details;
+    }
+    filtered.push(entry);
+
+    // Fix 7 cascade: NAME_MISMATCH resolutions cascade the chosen name into
+    // proposedMergedContent and set execution_resolved_name atomically so
+    // the merge preview matches what Execute will write.
+    const updates: Record<string, unknown> = {
+      warningResolutions: filtered,
+      mergeUpdatedAt: new Date(),
+    };
+    if (warningCode === 'NAME_MISMATCH' && row.proposedMergedContent) {
+      const merged = row.proposedMergedContent as { name: string; definition: object | null; description: string; instructions: string | null };
+      const defName = (merged.definition as Record<string, unknown> | null | undefined)?.name;
+      let chosen: string | null = null;
+      if (resolution === 'use_library_name') {
+        // Dominant source is the library by construction; use schema name if
+        // present, else top-level name.
+        chosen = typeof defName === 'string' && defName.trim().length > 0
+          ? defName
+          : (merged.name ?? '').trim() || null;
+      } else if (resolution === 'use_incoming_name') {
+        chosen = (merged.name ?? '').trim() || (typeof defName === 'string' ? defName : null);
+      }
+      if (chosen) {
+        const newDefinition = {
+          ...(merged.definition as Record<string, unknown> | null ?? {}),
+          name: chosen,
+        };
+        updates.proposedMergedContent = { ...merged, name: chosen, definition: newDefinition };
+        updates.executionResolvedName = chosen;
+      }
+    }
+
+    await tx
+      .update(skillAnalyzerResults)
+      .set(updates)
+      .where(eq(skillAnalyzerResults.id, resultId));
+  });
 }
 
 /** Body for the PATCH /jobs/:jobId/results/:resultId/agents endpoint.
@@ -629,6 +792,16 @@ export async function patchMergeFields(
     }
   }
 
+  // v2 §11.11.2: a result locked by approval may not be edited. The reviewer
+  // must first unapprove (PATCH action=null).
+  if (row.approvedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Result is locked — unapprove before editing the merge.',
+      errorCode: 'RESULT_LOCKED',
+    };
+  }
+
   // Per spec §7.3: merge edits only valid for PARTIAL_OVERLAP / IMPROVEMENT.
   if (row.classification !== 'PARTIAL_OVERLAP' && row.classification !== 'IMPROVEMENT') {
     throw {
@@ -656,12 +829,21 @@ export async function patchMergeFields(
     instructions: patch.instructions !== undefined ? patch.instructions : current.instructions,
   };
 
+  // v2 §11.11.1: any merge edit wipes warning_resolutions + approval state so
+  // stale decisions can't satisfy a new merge's warnings.
   await db
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: next,
       userEditedMerge: true,
       mergeUpdatedAt: new Date(),
+      warningResolutions: [],
+      executionResolvedName: null,
+      approvedAt: null,
+      approvalDecisionSnapshot: null,
+      approvalHash: null,
+      actionTaken: row.actionTaken === 'approved' ? null : row.actionTaken,
+      actionTakenAt: row.actionTaken === 'approved' ? null : row.actionTakenAt,
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
@@ -744,16 +926,34 @@ export async function resetMergeToOriginal(params: {
     };
   }
 
+  // v2 §11.11.2: locked result can't be reset without first unapproving.
+  if (row.approvedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Result is locked — unapprove before resetting the merge.',
+      errorCode: 'RESULT_LOCKED',
+    };
+  }
+
   if (!row.originalProposedMerge) {
     throw { statusCode: 409, message: 'no original merge proposal to reset from' };
   }
 
+  // v2 §11.11.1: reset wipes resolutions + approval state identically to
+  // PATCH /merge to keep invariants consistent.
   await db
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: row.originalProposedMerge,
       userEditedMerge: false,
       mergeUpdatedAt: new Date(),
+      warningResolutions: [],
+      executionResolvedName: null,
+      approvedAt: null,
+      approvalDecisionSnapshot: null,
+      approvalHash: null,
+      actionTaken: row.actionTaken === 'approved' ? null : row.actionTaken,
+      actionTakenAt: row.actionTaken === 'approved' ? null : row.actionTakenAt,
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
@@ -1532,6 +1732,7 @@ export const skillAnalyzerService = {
   updateAgentProposal,
   patchMergeFields,
   resetMergeToOriginal,
+  resolveWarning,
   executeApproved,
   updateJobProgress,
   retryClassification,

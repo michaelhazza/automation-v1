@@ -397,6 +397,59 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/resolve-warning
+// Record reviewer decision on a merge warning. §11.2
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/resolve-warning',
+  asyncHandler(async (req, res) => {
+    const { jobId, resultId } = req.params;
+    const orgId = req.orgId!;
+    const userId = req.user!.id;
+
+    // If-Unmodified-Since is strictly required for resolve-warning. §11.11.5
+    const ifUnmodifiedSince = req.header('if-unmodified-since');
+    if (!ifUnmodifiedSince) {
+      return res
+        .status(400)
+        .json({ error: 'If-Unmodified-Since header is required.' });
+    }
+
+    const body = (req.body ?? {}) as {
+      warningCode?: string;
+      resolution?: string;
+      details?: Record<string, unknown>;
+    };
+    if (!body.warningCode || typeof body.warningCode !== 'string') {
+      return res.status(400).json({ error: 'warningCode is required.' });
+    }
+    if (!body.resolution || typeof body.resolution !== 'string') {
+      return res.status(400).json({ error: 'resolution is required.' });
+    }
+
+    const details = body.details ?? {};
+
+    await skillAnalyzerService.resolveWarning({
+      resultId,
+      jobId,
+      organisationId: orgId,
+      userId,
+      ifUnmodifiedSince,
+      warningCode: body.warningCode as never,
+      resolution: body.resolution as never,
+      details: {
+        field: typeof details.field === 'string' ? details.field : undefined,
+        disambiguationNote: typeof details.disambiguationNote === 'string' ? details.disambiguationNote : undefined,
+        collidingSkillId: typeof details.collidingSkillId === 'string' ? details.collidingSkillId : undefined,
+      },
+    });
+
+    return res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // GET /api/system/skill-analyser/config — Read config singleton
 // ---------------------------------------------------------------------------
 

@@ -947,6 +947,80 @@ interface ExtractedTable {
   rowCount: number;    // data rows only (header + separator excluded)
 }
 
+/** Name-mismatch detection (Fix 7).
+ *
+ * Compares the four locations where a skill name appears:
+ *   - top-level merged.name (file-level)
+ *   - merged.definition.name (tool schema)
+ *   - any name reference inside merged.description
+ *   - any name reference inside merged.instructions
+ *
+ * Returns null if all four are consistent (or fewer than two distinct names
+ * appear). Otherwise, returns a structured mismatch object the UI resolution
+ * picker consumes.
+ */
+export interface NameMismatch {
+  topLevel: string;
+  schemaName: string | null;
+  distinctNames: string[];
+  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions'>;
+}
+
+export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
+  const topLevel = (merged.name ?? '').trim();
+  const schemaNameRaw = (merged.definition as Record<string, unknown> | null | undefined)?.name;
+  const schemaName = typeof schemaNameRaw === 'string' && schemaNameRaw.trim().length > 0
+    ? schemaNameRaw.trim()
+    : null;
+  if (!topLevel && !schemaName) return null;
+
+  const normalise = (s: string) => s.toLowerCase().replace(/[-_]+/g, '_').trim();
+  const candidates = new Set<string>();
+  if (topLevel) candidates.add(normalise(topLevel));
+  if (schemaName) candidates.add(normalise(schemaName));
+
+  // Look for either name used as a bare identifier in description / instructions.
+  // Only flag when a DIFFERENT name appears there, not the same one.
+  const allBareNames = collectBareNames(merged.description)
+    .concat(collectBareNames(merged.instructions))
+    .map(normalise);
+  for (const n of allBareNames) {
+    candidates.add(n);
+  }
+
+  if (candidates.size < 2) return null;
+
+  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions'> = [];
+  if (topLevel) sources.push('top_level');
+  if (schemaName) sources.push('schema');
+  if (merged.description && collectBareNames(merged.description).length > 0) sources.push('description');
+  if (merged.instructions && collectBareNames(merged.instructions).length > 0) sources.push('instructions');
+
+  return {
+    topLevel,
+    schemaName,
+    distinctNames: [...candidates],
+    candidates: sources,
+  };
+}
+
+/** Collect bare-identifier name-like tokens (lowercase letters / digits /
+ *  underscores / hyphens, ≥3 chars) that look like skill slugs or tool names.
+ *  Used as a heuristic for detecting stale references inside prose. */
+function collectBareNames(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const out: string[] = [];
+  const re = /`([a-z][a-z0-9_-]{2,})`|\b([a-z][a-z0-9_]{3,})\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const token = (m[1] ?? m[2] ?? '').trim();
+    if (token.length >= 3 && /[_-]/.test(token)) {
+      out.push(token);
+    }
+  }
+  return out;
+}
+
 /** Extract markdown tables from text, keyed by their normalized header row.
  *  headerKey is used for matching across source and merged text. */
 export function extractTables(text: string | null): ExtractedTable[] {
@@ -986,10 +1060,20 @@ export function extractTables(text: string | null): ExtractedTable[] {
 
 const MAX_MERGE_WARNINGS = 10;
 
+/** Thresholds injected into validateMergeOutput from the config snapshot. */
+export interface ValidationThresholds {
+  scopeExpansionStandardPct?: number;   // decimal fraction, e.g. 0.40
+  scopeExpansionCriticalPct?: number;   // decimal fraction, e.g. 0.75
+  tierMap?: Record<string, WarningTier>;
+}
+
 /**
  * Post-processing validator for LLM-generated merge output.
  * Pure — no DB, no clock. Returns an array of structured warnings.
  * An empty array means no issues were detected.
+ *
+ * Thresholds are read from the optional `thresholds` parameter (captured from
+ * the job's config_snapshot). Defaults preserve pre-v2 behaviour when absent.
  */
 export function validateMergeOutput(
   base: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
@@ -999,8 +1083,12 @@ export function validateMergeOutput(
   allLibrarySlugs: ReadonlySet<string>,
   allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
   excludedId: string | null,
+  thresholds: ValidationThresholds = {},
 ): MergeWarning[] {
   const warnings: MergeWarning[] = [];
+  const scopeStd = Math.round((thresholds.scopeExpansionStandardPct ?? 0.30) * 100);
+  const scopeCrit = Math.round((thresholds.scopeExpansionCriticalPct ?? 0.60) * 100);
+  const tierMap = thresholds.tierMap ?? DEFAULT_WARNING_TIER_MAP;
 
   // --- Bug 1: Required field demotion ---
   const baseRequired: string[] = (base.definition as Record<string, unknown> | null)?.input_schema
@@ -1020,7 +1108,10 @@ export function validateMergeOutput(
       code: 'REQUIRED_FIELD_DEMOTED',
       severity: 'critical',
       message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
-      detail: demoted.join(', '),
+      // Structured detail so the client can render per-field Accept/Restore UI.
+      // parseDemotedFields() still accepts the legacy comma-delimited form for
+      // backwards compatibility.
+      detail: JSON.stringify({ demotedFields: demoted }),
     });
   }
 
@@ -1055,21 +1146,21 @@ export function validateMergeOutput(
     }
   }
 
-  // --- Bug 8: Scope expansion ---
+  // --- Bug 8: Scope expansion (thresholds from config snapshot) ---
   const baseWords = wordCount(base.instructions);
   const nonBaseWords = wordCount(nonBase.instructions);
   const richerSourceWords = Math.max(baseWords, nonBaseWords);
   const mergedWords = wordCount(merged.instructions);
   if (richerSourceWords > 0) {
     const pct = Math.round((mergedWords / richerSourceWords - 1) * 100);
-    if (pct > 60) {
+    if (pct > scopeCrit) {
       warnings.push({
         code: 'SCOPE_EXPANSION_CRITICAL',
         severity: 'critical',
         message: `Merged instructions are ${pct}% longer than the richer source skill — likely out-of-scope content was imported.`,
         detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
       });
-    } else if (pct > 30) {
+    } else if (pct > scopeStd) {
       warnings.push({
         code: 'SCOPE_EXPANSION',
         severity: 'warning',
@@ -1141,9 +1232,29 @@ export function validateMergeOutput(
     });
   }
 
-  // Safety cap: prevent unbounded warning list from malformed input
+  // --- Fix 7: Name mismatch across file name / schema name / references ---
+  const mismatch = detectNameMismatch(merged);
+  if (mismatch) {
+    warnings.push({
+      code: 'NAME_MISMATCH',
+      severity: 'critical',
+      message: `Skill name is inconsistent across ${mismatch.candidates.length} locations. Reviewer must choose one.`,
+      detail: JSON.stringify({
+        topLevel: mismatch.topLevel,
+        schemaName: mismatch.schemaName,
+        distinctNames: mismatch.distinctNames,
+        candidates: mismatch.candidates,
+      }),
+    });
+  }
+
+  // Safety cap: prevent unbounded warning list from malformed input.
+  // Sort by severity + tier priority so critical codes survive truncation,
+  // then cap.
   if (warnings.length > MAX_MERGE_WARNINGS) {
-    warnings.splice(MAX_MERGE_WARNINGS - 1);
+    const sorted = sortWarningsBySeverity(warnings, tierMap);
+    warnings.length = 0;
+    for (let i = 0; i < MAX_MERGE_WARNINGS - 1 && i < sorted.length; i++) warnings.push(sorted[i]);
     warnings.push({
       code: 'WARNINGS_TRUNCATED',
       severity: 'warning',
