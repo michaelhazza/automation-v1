@@ -175,3 +175,6 @@ export * from './onboardingBundleConfigs.js';
 
 // Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
 export * from './memoryBlockVersions.js';
+
+// Feature 2 — test-input fixtures for inline Run-Now test panel (migration 0153)
+export * from './agentTestFixtures.js';
