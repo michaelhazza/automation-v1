@@ -2,6 +2,7 @@ import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
+import { softDeleteByTarget } from './agentTestFixturesService.js';
 import type { AnthropicTool } from './llmService.js';
 import { systemSkillService } from './systemSkillService.js';
 import {
@@ -652,6 +653,8 @@ export const skillService = {
 
     const now = new Date();
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
+    // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this skill.
+    await softDeleteByTarget(organisationId, 'skill', id);
     return { message: 'Skill deleted' };
   },
 
