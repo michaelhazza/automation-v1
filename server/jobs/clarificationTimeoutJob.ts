@@ -86,6 +86,9 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
           await db
             .update(agentRuns)
             .set({
+              // Restore to 'running' so the execution loop can resume with
+              // best-guess. Without this the run stays stuck indefinitely.
+              status: 'running',
               runMetadata: {
                 ...prior,
                 hadUncertainty: true,

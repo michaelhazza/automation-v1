@@ -659,6 +659,13 @@ export const queueService = {
           throw err;
         }
       });
+      // Enqueue the backfill exactly once. singletonKey prevents re-enqueue on
+      // server restart if the job is still pending or already completed.
+      await (boss as any).send('memory-blocks-embedding-backfill', {}, {
+        singletonKey: 'memory-blocks-embedding-backfill-v1',
+        retryLimit: 2,
+        retryDelay: 60,
+      });
 
       // Memory & Briefings Phase 2 — clarification timeout sweep (S8)
       await (boss as any).work('maintenance:clarification-timeout-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {

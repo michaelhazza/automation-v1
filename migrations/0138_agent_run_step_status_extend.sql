@@ -33,6 +33,7 @@ ALTER TABLE agent_runs
       'cancelled',
       'timeout',
       'budget_exceeded',
+      'loop_detected',
       'awaiting_clarification',
       'waiting_on_clarification',
       'completed_with_uncertainty'

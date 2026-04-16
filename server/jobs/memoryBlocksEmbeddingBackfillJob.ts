@@ -12,7 +12,7 @@
  * Spec: docs/memory-and-briefings-spec.md §5.2 (S6)
  */
 
-import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { eq, and, isNull, inArray, notInArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks } from '../db/schema/index.js';
 import { generateEmbedding, formatVectorLiteral } from '../lib/embeddings.js';
@@ -42,6 +42,11 @@ export async function runMemoryBlocksEmbeddingBackfill(
   let skipped = 0;
   let failed = 0;
 
+  // Track IDs of empty-content blocks so they are excluded from subsequent
+  // batches. Without this exclusion the while-true loop would re-fetch the
+  // same empty row on every iteration and never terminate.
+  const skippedIds: string[] = [];
+
   while (true) {
     if (limit !== undefined && scanned >= limit) break;
 
@@ -49,16 +54,22 @@ export async function runMemoryBlocksEmbeddingBackfill(
       ? Math.min(BATCH_SIZE, limit - scanned)
       : BATCH_SIZE;
 
-    // Fetch a batch of blocks without embeddings
+    // Fetch a batch of blocks without embeddings, excluding already-skipped rows
+    const whereClause = skippedIds.length > 0
+      ? and(
+          isNull(memoryBlocks.embedding),
+          isNull(memoryBlocks.deletedAt),
+          notInArray(memoryBlocks.id, skippedIds),
+        )
+      : and(
+          isNull(memoryBlocks.embedding),
+          isNull(memoryBlocks.deletedAt),
+        );
+
     const batch = await db
       .select({ id: memoryBlocks.id, content: memoryBlocks.content })
       .from(memoryBlocks)
-      .where(
-        and(
-          isNull(memoryBlocks.embedding),
-          isNull(memoryBlocks.deletedAt),
-        ),
-      )
+      .where(whereClause)
       .limit(batchLimit);
 
     if (batch.length === 0) break;
@@ -68,6 +79,7 @@ export async function runMemoryBlocksEmbeddingBackfill(
     for (const row of batch) {
       if (!row.content || row.content.trim().length === 0) {
         skipped += 1;
+        skippedIds.push(row.id);
         continue;
       }
 

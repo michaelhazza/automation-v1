@@ -8,7 +8,7 @@
  * Spec: docs/memory-and-briefings-spec.md §5.3 (S7)
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { trustCalibrationState } from '../db/schema/index.js';
 import {
@@ -46,28 +46,13 @@ export async function recordTrustEvent(params: TrustEventParams): Promise<TrustE
         eq(trustCalibrationState.subaccountId, params.subaccountId),
         eq(trustCalibrationState.agentId, params.agentId),
         domain === null
-          ? eq(trustCalibrationState.domain, '' /* sentinel */) // replaced below
+          ? isNull(trustCalibrationState.domain)
           : eq(trustCalibrationState.domain, domain),
       ),
     )
     .limit(1);
 
-  // The above eq does not handle null-domain correctly in Drizzle. Re-query
-  // with a raw filter when domain is null.
-  const row = existing
-    ? existing
-    : (
-        await db
-          .select()
-          .from(trustCalibrationState)
-          .where(
-            and(
-              eq(trustCalibrationState.subaccountId, params.subaccountId),
-              eq(trustCalibrationState.agentId, params.agentId),
-            ),
-          )
-          .limit(1)
-      )[0];
+  const row = existing;
 
   let state: TrustState;
   let created = false;

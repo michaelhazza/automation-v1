@@ -32,7 +32,7 @@ import {
   type ClarificationRecipientRole,
   type PortalMode,
 } from './clarificationServicePure.js';
-import { emitSubaccountUpdate, emitAwaitingClarification } from '../websocket/emitters.js';
+import { emitSubaccountUpdate, emitAwaitingClarification, emitAgentRunUpdate } from '../websocket/emitters.js';
 import {
   CLARIFICATION_TIMEOUT_BLOCKING_MINUTES,
   CLARIFICATION_TIMEOUT_NON_BLOCKING_MINUTES,
@@ -257,6 +257,7 @@ export async function resolveClarification(
 
   const priorPayload = (row.payload as Record<string, unknown>) ?? {};
   const activeRunId = (priorPayload.activeRunId as string | null) ?? null;
+  const urgency = (priorPayload.urgency as string | null) ?? null;
   const stepId = (priorPayload.stepId as string | null) ?? null;
 
   await db
@@ -273,6 +274,53 @@ export async function resolveClarification(
       },
     })
     .where(eq(memoryReviewQueue.id, input.clarificationId));
+
+  // For blocking clarifications, transition the paused run back to 'running'
+  // so the agent execution loop can resume. Mirrors receiveClarification() on
+  // the legacy /api/agent-runs/:id/clarify path.
+  if (activeRunId && urgency === 'blocking') {
+    const [runRow] = await db
+      .select({ id: agentRuns.id, runMetadata: agentRuns.runMetadata })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.id, activeRunId),
+          eq(agentRuns.organisationId, input.organisationId),
+        ),
+      )
+      .limit(1);
+
+    if (runRow) {
+      const existingMetadata = (runRow.runMetadata as Record<string, unknown> | null) ?? {};
+      await db
+        .update(agentRuns)
+        .set({
+          status: 'running',
+          runMetadata: {
+            ...existingMetadata,
+            clarificationAnswer: input.answer,
+            clarificationAnswerSource: input.answerSource ?? 'free_text',
+            clarificationId: input.clarificationId,
+          },
+          updatedAt: resolvedAt,
+        })
+        .where(eq(agentRuns.id, activeRunId));
+
+      try {
+        emitAgentRunUpdate(activeRunId, 'agent:run:status', {
+          status: 'running',
+          clarificationReceived: true,
+          clarificationId: input.clarificationId,
+          answer: input.answer,
+        });
+      } catch (emitErr) {
+        logger.warn('clarificationService.ws_emit_run_resume_failed', {
+          activeRunId,
+          error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+        });
+      }
+    }
+  }
 
   // Notify the run so its paused step wakes and consumes the answer.
   try {

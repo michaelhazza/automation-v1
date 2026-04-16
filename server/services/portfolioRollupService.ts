@@ -20,7 +20,7 @@
  * Spec: docs/memory-and-briefings-spec.md §11 (S23)
  */
 
-import { and, eq, gte, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   subaccounts,
@@ -117,7 +117,7 @@ export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRoll
           gte(playbookRuns.createdAt, windowStart),
         ),
       )
-      .orderBy(playbookRuns.createdAt)
+      .orderBy(desc(playbookRuns.createdAt))
       .limit(1);
 
     rollupRows.push({
