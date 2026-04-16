@@ -329,8 +329,9 @@ export default function App() {
           {/* Review queue (portal access) */}
           <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
 
-          {/* Run trace viewer */}
+          {/* Run trace viewer — subaccount-scoped and org-level (admin agent test runs) */}
           <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+          <Route path="/admin/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />

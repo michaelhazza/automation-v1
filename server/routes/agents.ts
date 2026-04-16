@@ -2,10 +2,12 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateMultipart, validateBody } from '../middleware/validate.js';
 import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
 
 const router = Router();
 
@@ -127,6 +129,38 @@ router.delete('/api/agents/:id/conversations/:convId', authenticate, requireOrgP
   const result = await conversationService.deleteConversation(req.params.convId, req.params.id, req.user!.id, req.orgId!);
   res.json(result);
 }));
+
+// ── Feature 2 — org-level agent test run ─────────────────────────────────────
+// POST /api/agents/:id/test-run
+// Starts a flagged test run for an org-level agent. Rate-limited per user.
+
+router.post('/api/agents/:id/test-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    checkTestRunRateLimit(req.user!.id);
+    const { prompt, inputJson } = req.body as { prompt?: string; inputJson?: Record<string, unknown> };
+    const triggerContext: Record<string, unknown> = {
+      triggeredBy: req.user!.id,
+      source: 'test_panel',
+      isTestRun: true,
+    };
+    if (prompt) triggerContext.prompt = prompt;
+    if (inputJson) triggerContext.inputJson = inputJson;
+    const result = await agentExecutionService.executeRun({
+      agentId: id,
+      organisationId: req.orgId!,
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      isTestRun: true,
+      userId: req.user!.id,
+      triggerContext,
+    });
+    res.status(201).json(result);
+  })
+);
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
