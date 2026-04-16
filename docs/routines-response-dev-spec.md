@@ -92,7 +92,9 @@ New endpoint, new service, no new tables.
 
 **Route:** `GET /api/org/schedule-calendar?start=ISO&end=ISO&subaccountId=?` (org-wide roll-up, filterable)
 
-**Request validation:** `start` and `end` are ISO 8601 strings with timezone offset (UTC or explicit offset). `start` must be before `end`. Maximum window: 30 days (matching §3.1 UI maximum). Requests with invalid ISO, `start >= end`, or span > 30 days return `400 Bad Request`. Requests with a valid window that contains no occurrences return `200` with an empty `occurrences` array (not 404).
+**Request validation:** `start` and `end` are ISO 8601 strings with timezone offset (UTC or explicit offset). `start` must be before `end`. Maximum window: 30 days (matching §3.1 UI maximum). Requests with invalid ISO, `start >= end`, or span > 30 days return `400 Bad Request`. Requests with a valid window that contains no occurrences return `200` with an empty `occurrences` array and `truncated: false` (not 404).
+
+**Occurrence cap:** If projection across all schedule sources yields more than 10,000 occurrences within the requested window, the service returns the first 10,000 sorted per §3.9 and sets `truncated: true` in the response. The UI surface must display a warning banner when `truncated: true` and suggest narrowing the window or applying a subaccount filter. This prevents the endpoint from becoming a silent performance sink in orgs with many high-frequency heartbeat agents across many subaccounts.
 
 **Service:** `server/services/scheduleCalendarService.ts` + `scheduleCalendarServicePure.ts` for the projection math (pure, unit-testable, no DB access in the pure half).
 
@@ -100,7 +102,8 @@ New endpoint, new service, no new tables.
 
 ```ts
 type ScheduleOccurrence = {
-  scheduledAt: string; // ISO
+  occurrenceId: string; // stable deterministic hash: sha256(source + ':' + sourceId + ':' + scheduledAt)[0..15]
+  scheduledAt: string; // ISO — always UTC
   source: 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
   sourceId: string; // agent id / playbook id / scheduled_task id
   sourceName: string; // agent name / playbook name / task name
@@ -109,16 +112,17 @@ type ScheduleOccurrence = {
   agentId?: string;
   agentName?: string;
   runType: 'scheduled'; // always 'scheduled' — these are projected future occurrences, not yet-run events
-  estimatedTokens: number | null; // from agent's last-10-run avg; null for playbook/scheduled_task sources with no direct agent
-  estimatedCost: number | null; // from agent's last-10-run avg, USD; null for same
+  estimatedTokens: number | null; // see §3.9 cost-estimate rules; null when insufficient history
+  estimatedCost: number | null; // derived from estimatedTokens × current pricing; null when tokens null
   scopeTag: 'system' | 'org' | 'subaccount';
 };
 
 type ScheduleCalendarResponse = {
-  windowStart: string;
-  windowEnd: string;
-  occurrences: ScheduleOccurrence[]; // sorted ascending
-  totals: { count: number; estimatedTokens: number; estimatedCost: number }; // null estimatedTokens/Cost per occurrence treated as 0 in aggregation
+  windowStart: string; // ISO UTC
+  windowEnd: string;   // ISO UTC
+  occurrences: ScheduleOccurrence[]; // sorted per §3.9 stable sort rule
+  truncated: boolean; // true when projection exceeded the 10,000-occurrence hard cap; client must narrow the window
+  totals: { count: number; estimatedTokens: number; estimatedCost: number }; // null per-occurrence values treated as 0 in aggregation; reflects truncated set when truncated=true
 };
 ```
 
@@ -199,6 +203,49 @@ Existing files modified by Feature 1:
 - **Drag to reschedule.** Deferred; existing cron/heartbeat editors are the single source of truth.
 - **Historical overlay** (showing what *did* run). Deferred to a post-v1 enhancement that overlays `agent_runs` on the same grid.
 
+### 3.9 Projection invariants
+
+These rules are **non-negotiable contracts** for `scheduleCalendarServicePure.ts`. All tests use them as assertions; all future changes to the pure layer must preserve them.
+
+#### Determinism
+
+Projection functions must be deterministic:
+
+- **No `Date.now()` inside pure functions.** All time calculations are anchored to the request's `windowStart` parameter.
+- **No external I/O** inside pure functions. All necessary data (agent config, schedule config, timezone strings) is passed as arguments.
+- Same inputs → identical outputs, always. This invariant enables UI caching, pagination, and debugging.
+
+#### DST handling contract
+
+Cron schedules and heartbeat schedules resolve DST differently:
+
+| Schedule type | DST rule |
+|---|---|
+| **Cron** | Follows **wall-clock time** (interpreted in `cronTimezone`). When DST moves the clock forward, the skipped hour is skipped (no occurrence). When DST moves the clock backward, the repeated hour fires **once** (the first occurrence in wall-clock time). |
+| **Heartbeat** | Follows **absolute interval time** (UTC-anchored). DST shifts do not change when the next occurrence fires — the interval is constant in UTC. |
+
+This matches how the scheduler actually executes heartbeat vs. cron jobs (pg-boss cron uses `cron-parser` with timezone; heartbeat is a fixed-offset interval job). Projection must reproduce the same behaviour so the calendar matches what actually runs.
+
+#### Estimated-cost calculation rules
+
+`estimatedTokens` and `estimatedCost` are computed per-agent in `scheduleCalendarService.ts` (stateful layer, not pure), using the agent's recent run history:
+
+- **Qualifying runs:** last N completed runs where `is_test_run = false` AND `status IN ('completed', 'timeout')`. Exclude `failed` (might have 0 tokens, skewing low), `cancelled`, and test runs.
+- **Minimum history:** if N < 3 qualifying runs exist, set `estimatedTokens = null` and `estimatedCost = null`. Do not estimate from a single noisy sample.
+- **Window:** use `min(10, N)` qualifying runs.
+- **Calculation:** `estimatedTokens = avg(promptTokens + completionTokens)` across the window. `estimatedCost = estimatedTokens × currentModelPricePerToken` (use the agent's `modelId` to look up price from the pricing table in `server/config/modelPricing.ts`).
+- **Null propagation:** `totals.estimatedTokens` and `totals.estimatedCost` aggregate only non-null occurrences; if all are null, totals are 0.
+
+#### Stable sort order
+
+Occurrences are sorted with the following multi-key rule (applied in `scheduleCalendarService.ts` before truncation):
+
+1. `scheduledAt` ascending (primary — chronological order)
+2. `source` priority ascending: `heartbeat` < `cron` < `playbook` < `scheduled_task` (secondary — deterministic tie-breaking within the same timestamp)
+3. `sourceId` lexicographic ascending (tertiary — deterministic tie-breaking within same timestamp + source)
+
+This ordering is stable and deterministic. It matches the week/month/day grid rendering order. The `occurrenceId` hash is computed **after** sorting (the hash inputs `source + sourceId + scheduledAt` are independent of sort position, so order of computation does not matter — but implementations should hash before sort to avoid confusion).
+
 ---
 
 ## 4. Feature 2 — Inline Run Now test UX
@@ -258,6 +305,8 @@ Note: `target_id` carries no FK constraint — it is a polymorphic reference (ag
 
 **Access matrix:** Org admins can read/write all fixtures within their `organisation_id`. Subaccount users (including roles at the subaccount tier) can read/write only fixtures where `subaccount_id` matches their own subaccount — they cannot see org-level fixtures (where `subaccount_id IS NULL`) or fixtures belonging to other subaccounts. `client_user` is excluded (no access). Enforced via `assertScope()` in `agentTestFixturesService`. Mirrors the pattern on `agent_runs` and other subaccount-scoped tables. RLS policy entry required in `rlsProtectedTables.ts` plus a policy migration.
 
+**Orphan cleanup:** When an agent or skill is soft-deleted (`deletedAt` set), its associated fixtures must be soft-deleted in the same transaction. The agent delete path in `agentService.ts` and the skill delete path in `skillService.ts` must call `agentTestFixturesService.softDeleteByTarget(scope, targetId, orgId)` as part of their existing delete transactions. Hard-deleted or purged fixtures accumulate without this; the index `WHERE deleted_at IS NULL` keeps them invisible to queries but they still grow the table. Implement on Feature 2's build commit — do not defer.
+
 ### 4.5 Component refactor
 
 The existing `RunTraceViewerPage.tsx` contains the full trace rendering logic. Extract it into:
@@ -309,7 +358,9 @@ Minimal — existing run-creation paths already support manual runs. Changes:
 
 - Test runs **do** consume tokens and **do** get written to the LLM usage ledger. They are simply flagged so aggregate views can exclude them by default.
 - Test runs inherit the agent's existing per-run token budget ceiling. No separate limit.
-- Test runs are rate-limited per user (default 10 per hour, configurable in `server/config/limits.ts` as `TEST_RUN_RATE_LIMIT_PER_HOUR`). Enforced in the `POST .../test-run` route handler via an in-memory sliding-window counter keyed on `userId`, checked before delegating to `agentExecutionService`. Prevents accidental infinite loops during authoring.
+- Test runs are rate-limited per user (default 10 per hour, configurable in `server/config/limits.ts` as `TEST_RUN_RATE_LIMIT_PER_HOUR`). Enforced in the `POST .../test-run` route handler via a sliding-window counter keyed on `userId`.
+  - **Phase 1 (v1):** In-memory counter per-instance. Acceptable at low to moderate traffic and single-instance deploys. In a multi-instance setup this limit can be bypassed via load-balancer routing (each instance has an independent counter). This is a deliberate v1 trade-off: complexity is low, and test-run abuse at low traffic causes no meaningful harm.
+  - **Phase 2 (when needed):** Migrate to a Redis-backed sliding window using the existing Redis connection in the app. The `TEST_RUN_RATE_LIMIT_PER_HOUR` constant and rate-check call site remain unchanged; only the counter backend changes. Do not implement Phase 2 speculatively — trigger it when multi-instance deploys become standard.
 - Test runs on **system agents** are disallowed from the org surface (system agent editing is a platform concern; system admins have a separate surface).
 
 **Enforcement points for `is_test_run` default exclusion** — the following endpoints and aggregates must apply `WHERE is_test_run = false` by default; a `?includeTestRuns=true` query param overrides the filter where noted:
@@ -322,16 +373,26 @@ Minimal — existing run-creation paths already support manual runs. Changes:
 | Agency P&L aggregation in `reportingService.ts` | exclude test runs | not overridable |
 | `GET /api/subaccounts/:id/agent-runs/:runId` (individual run detail) | included (test badge shown) | N/A — always visible |
 
-### 4.8 Verification
+### 4.8 Failure behavior
+
+The test panel must handle two distinct failure modes:
+
+**Run failure (terminal error from the agent):** When the streaming run reaches a terminal status of `failed` or `timeout`, the `<RunTraceView>` component renders a red failure badge with the terminal error message surfaced from `agent_runs.errorMessage`. An inline **Retry** button starts a new test run (calls `POST .../test-run` again with the same fixture inputs). The failed run is archived in the run-history viewer with a "Test" badge and can be inspected there.
+
+**WebSocket disconnect (mid-run connection drop):** When the WebSocket connection drops while a run is in progress, the test panel displays a disconnection banner: *"Connection interrupted — your run is still processing."* A **Check status** button polls `GET .../agent-runs/:runId` once and updates the panel to the run's current state. If the run has already completed, the trace is loaded from the REST endpoint. If it is still running, the panel offers a re-subscribe option. The run is never abandoned server-side; only the real-time feed is disrupted.
+
+### 4.9 Verification
 
 - Extract `RunTraceView` — verify existing `RunTraceViewerPage` still renders identically by running the app
 - Unit tests on new endpoint error shapes (missing body, over budget, over rate limit)
 - Integration: save an agent, hit `POST .../test-run`, assert the response includes a run id, assert the persisted row has `is_test_run=true`, and assert the row is excluded from the default LLM usage aggregate endpoint response
 - Integration: exhaust the per-user rate limit by hitting `POST .../test-run` 11 times in rapid succession, assert 429 on the 11th request (rate-limit window: 10 per hour per user, per §4.7)
+- Failure mode: simulate a run that reaches `status=failed`; assert the test panel shows the failure badge + error message + Retry button
+- Failure mode: simulate a WebSocket disconnect mid-run; assert the disconnection banner appears and the Check status button polls the REST endpoint correctly
 - Regression: existing run-history, trace viewer, and LLM usage explorer are unaffected (all guarded with the `is_test_run` filter)
 - UI verification: see §10.3 demo rehearsal.
 
-### 4.9 Out of scope
+### 4.10 Out of scope
 
 - **"Compare with previous version"** — a diff view between the current edit and the last saved version is valuable but deferred.
 - **Prompt playgrounds** — no general-purpose LLM playground UI. The test panel is scoped to agents and skills; it is not a chat with the model.
@@ -401,6 +462,16 @@ The mapping table uses the exact `type` string from the n8n export JSON (fully q
 | `openAi`, `lmAnthropicClaude` | `n8n-nodes-langchain.openAi`, `n8n-nodes-langchain.lmAnthropicClaude` | `prompt` step with model-agnostic routing | Model selection preserved in a comment; actual routing deferred to Synthetos's per-skill resolver |
 | (any other short key) | — | Emitted as a `user_input` step with a TODO comment | The admin resolves before saving |
 
+**Confidence criteria** — used in the mapping report column and returned on each mapped step object:
+
+| Value | Criteria |
+|---|---|
+| `high` | Deterministic 1:1 mapping. The source node type is in the known mapping table, no field transformation was required, and the emitted step type is directly supported with no heuristic interpretation. |
+| `medium` | Partial or assumption-based mapping. The node type is known but one or more fields required a heuristic interpretation: e.g. a complex JS expression was simplified to a literal, a credential was matched by provider name rather than verified by ID, or optional fields were defaulted. |
+| `low` | Incomplete or unknown mapping. The node type had no direct table entry, was emitted as a `user_input` step with a TODO comment, or the conversion logic could not be verified. Admin must review before saving. |
+
+All `low`-confidence steps must appear in the **Action required** column of the mapping report as `rewrite` or `review`. `medium` steps appear as `review`. `high` steps appear as `none`.
+
 **What we deliberately do not map:**
 
 - n8n's "function" nodes (arbitrary JavaScript). These are flagged as unconvertible and surfaced in the mapping report; the admin rewrites the logic as a Synthetos skill or decides not to migrate that branch.
@@ -419,12 +490,22 @@ The admin then iterates with the existing Studio skills (`playbook_validate`, `p
 
 - **No credentials are migrated.** The parser identifies credential *references* in the n8n export but never imports tokens. Admin re-authenticates via Synthetos's existing OAuth flows; the mapping report surfaces a checklist of required connections.
 - **No autonomous save.** The skill never calls `playbook_propose_save`; the admin must review and explicitly invoke it. This matches the existing Studio pattern and prevents drive-by conversions of workflows the admin hasn't fully understood.
-- **Side-effect class inference.** Every mapped step is tagged with a conservative default side-effect class using the `sideEffectClass` field on the playbook step object (write-class nodes default to `'review'`, read-class nodes default to `'auto'`) — the same field consumed by the existing `playbook_validate` step schema. Written by `n8nImportServicePure.ts` during node-to-step mapping. The admin can downgrade gates after validation via the existing Playbook Studio interface.
+- **Graph validation.** The parser validates the n8n connection graph before producing any step output:
+  - **Cycle detection:** A directed cycle anywhere in the connection graph (any node reachable from itself via connection edges) causes immediate rejection with an error: `"Workflow contains a directed cycle at nodes: [names]. Cyclic graphs cannot be converted to a linear playbook."` Cyclic graphs have no well-defined linear-playbook representation.
+  - **Disconnected nodes:** Nodes with neither inbound nor outbound connections — excluding trigger nodes, which by definition have no inbound connections — are flagged in the mapping report as warnings (not errors). They are omitted from the draft playbook steps. The admin decides whether to wire them, discard them, or hand-convert them.
+- **Side-effect class inference.** Every mapped step is tagged with a conservative default side-effect class using the `sideEffectClass` field on the playbook step object:
+  - Write-class nodes (CRM writes, email sends, Slack messages, HTTP POSTs/PATCHs/DELETEs, any `action_call` targeting a managed connector that mutates state) → `'review'`
+  - Read-class nodes (HTTP GETs, data fetches, trigger nodes, `prompt` steps) → `'auto'`
+  - **Override:** if the mapped step targets an external system and the scope or permissions required cannot be determined from the source node's credential reference or URL (e.g. the credential is of an unknown provider type, or the HTTP method is a variable expression), the step defaults to `'review'` regardless of the read/write classification. When in doubt, gate it.
+  - The `sideEffectClass` field is the same field consumed by `playbook_validate`'s step schema. The admin can relax gates after validation via the existing Playbook Studio interface.
 - **Import size cap.** Workflows over 100 nodes are rejected with a clear error pointing at the manual-conversion path. Keeps LLM cost bounded and prevents pathological imports.
 
 ### 5.7 Verification
 
 - Unit tests on `n8nImportServicePure.ts` covering: schedule trigger, webhook trigger, if/switch branching, unknown node flagging, function-node rejection, credential reference extraction, 100-node cap
+- Unit test: provide a workflow JSON containing a directed cycle (A → B → C → A); assert the parser returns a rejection error citing the cycling nodes by name, and returns no draft playbook steps
+- Unit test: provide a workflow JSON with a non-trigger node that has no inbound or outbound connections; assert it is absent from the draft playbook steps and appears in the mapping report with a `warning` classification
+- Unit test: side-effect inference — provide a workflow with an HTTP POST node and assert the mapped step has `sideEffectClass: 'review'`; provide an HTTP GET node and assert `sideEffectClass: 'auto'`; provide an HTTP node with a method set to a JS variable expression and assert `sideEffectClass: 'review'` (unknown-scope override)
 - Integration: invoke the `import_n8n_workflow` skill via the existing skill simulation path (`skill_simulate` with slug `import_n8n_workflow`), supplying a real n8n export (Hacker News scraper from the reference transcript as the golden input); assert the response contains a draft playbook definition and a mapping report, and assert the draft passes `playbook_validate`
 - Integration: POST a workflow exceeding 100 nodes, assert a 400 error response with the expected message
 - Regression: existing Studio flow is untouched for playbooks authored from scratch
