@@ -43,6 +43,7 @@ import {
   extractInvocationBlock,
   richnessScore,
   buildRuleBasedMerge,
+  remediateTables,
   type LibrarySkillSummary,
   type MergeWarning,
 } from '../services/skillAnalyzerServicePure.js';
@@ -911,6 +912,25 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             const allLibrarySlugs = new Set(
               librarySkills.filter(s => s.id !== excludedId).map(s => s.slug.toLowerCase())
             );
+
+            // v2 Fix 4: auto-recover dropped table rows before validation so
+            // TABLE_ROWS_DROPPED warnings report actual remaining gaps.
+            if (storedMerge!.instructions && (baseSkill.instructions || nonBaseSkill.instructions)) {
+              const remediated = remediateTables({
+                mergedInstructions: storedMerge!.instructions,
+                baseInstructions: baseSkill.instructions,
+                incomingInstructions: nonBaseSkill.instructions,
+              });
+              if (remediated.autoRecoveredRows > 0 && !remediated.growthRatioExceeded) {
+                storedMerge = { ...storedMerge!, instructions: remediated.instructions };
+                logger.info('skill_analyzer_table_remediation', {
+                  candidateSlug: candidate.slug,
+                  autoRecoveredRows: remediated.autoRecoveredRows,
+                  skippedDueToColumnMismatch: remediated.skippedDueToColumnMismatch,
+                  skippedDueToKeyConflict: remediated.skippedDueToKeyConflict,
+                });
+              }
+            }
 
             mergeWarnings = validateMergeOutput(
               { definition: baseSkill.definition, instructions: baseSkill.instructions, invocationBlock: baseInvocation },

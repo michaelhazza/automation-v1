@@ -1060,6 +1060,210 @@ export function extractTables(text: string | null): ExtractedTable[] {
 
 const MAX_MERGE_WARNINGS = 10;
 
+/** Full-row table representation used by remediateTables. */
+interface ExtractedTableRows {
+  headerLine: string;           // the raw header line (with pipes)
+  headerKey: string;            // normalized pipe-joined header
+  separatorLine: string;        // the |---|---| row
+  columnCount: number;
+  rows: string[];               // raw row lines
+  startLineIndex: number;       // line index of the header in source text
+  endLineIndex: number;         // line index of last row (exclusive)
+}
+
+/** Extract tables with full row content, keyed by normalized header. */
+export function extractTablesWithRows(text: string | null): ExtractedTableRows[] {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const tables: ExtractedTableRows[] = [];
+  let current: ExtractedTableRows | null = null;
+  let linePos = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('|')) {
+      if (!current) {
+        const headerCells = trimmed.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        current = {
+          headerLine: line,
+          headerKey: headerCells.map(c => c.toLowerCase()).join('|'),
+          separatorLine: '',
+          columnCount: headerCells.length,
+          rows: [],
+          startLineIndex: i,
+          endLineIndex: i + 1,
+        };
+        linePos = 0;
+      } else {
+        linePos++;
+        if (linePos === 1 && /^\|[\s\-:|]+\|/.test(trimmed)) {
+          current.separatorLine = line;
+          current.endLineIndex = i + 1;
+          continue;
+        }
+        current.rows.push(line);
+        current.endLineIndex = i + 1;
+      }
+    } else if (current) {
+      tables.push(current);
+      current = null;
+    }
+  }
+  if (current) tables.push(current);
+  return tables;
+}
+
+/** First-column key for row deduplication. Strips leading/trailing pipes
+ *  and lowercases the first cell. Empty cells return ''. */
+function firstColumnKey(rowLine: string): string {
+  const trimmed = rowLine.trim().replace(/^\|/, '');
+  const firstPipe = trimmed.indexOf('|');
+  const cell = firstPipe >= 0 ? trimmed.slice(0, firstPipe) : trimmed;
+  return cell.trim().toLowerCase();
+}
+
+/** Whether a row already carries a [SOURCE: ...] marker (skip to prevent
+ *  recursive inflation on retries). */
+function hasSourceMarker(rowLine: string): boolean {
+  return /\[SOURCE:\s*(library|incoming)\]/i.test(rowLine);
+}
+
+/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row. */
+function withSourceMarker(rowLine: string, source: 'library' | 'incoming'): string {
+  const trimmed = rowLine.trimEnd();
+  if (hasSourceMarker(trimmed)) return trimmed;
+  // Find position before the trailing pipe (if any) to inject marker cleanly.
+  if (trimmed.endsWith('|')) {
+    return trimmed.slice(0, -1).trimEnd() + ` [SOURCE: ${source}] |`;
+  }
+  return `${trimmed} [SOURCE: ${source}]`;
+}
+
+export interface RemediateTablesInput {
+  mergedInstructions: string;
+  baseInstructions: string | null;          // library skill instructions
+  incomingInstructions: string | null;      // candidate skill instructions
+  /** Abort auto-recovery if remediated word count exceeds this multiple of
+   *  the pre-remediation word count (§11.11.9). */
+  maxGrowthRatio?: number;
+}
+
+export interface RemediateTablesOutput {
+  instructions: string;
+  autoRecoveredRows: number;
+  skippedDueToColumnMismatch: number;
+  skippedDueToKeyConflict: number;
+  growthRatioExceeded: boolean;
+}
+
+/**
+ * Post-process merged instructions to append missing table rows from the
+ * source skills, marking each recovered row with [SOURCE: library|incoming].
+ * Refuses to merge when column schemas differ or when first-column keys
+ * conflict across sources (§11.11.6). Honors max_table_growth_ratio.
+ */
+export function remediateTables(input: RemediateTablesInput): RemediateTablesOutput {
+  const { mergedInstructions, baseInstructions, incomingInstructions } = input;
+  const maxGrowthRatio = input.maxGrowthRatio ?? 1.5;
+
+  const baseTables = extractTablesWithRows(baseInstructions);
+  const incomingTables = extractTablesWithRows(incomingInstructions);
+  const mergedTables = extractTablesWithRows(mergedInstructions);
+
+  // Source table lookup: header -> { source, rows }
+  const sourceByHeader = new Map<string, Array<{ source: 'library' | 'incoming'; table: ExtractedTableRows }>>();
+  for (const t of baseTables) {
+    const list = sourceByHeader.get(t.headerKey) ?? [];
+    list.push({ source: 'library', table: t });
+    sourceByHeader.set(t.headerKey, list);
+  }
+  for (const t of incomingTables) {
+    const list = sourceByHeader.get(t.headerKey) ?? [];
+    list.push({ source: 'incoming', table: t });
+    sourceByHeader.set(t.headerKey, list);
+  }
+
+  let autoRecovered = 0;
+  let skippedColumn = 0;
+  let skippedKeyConflict = 0;
+
+  // Process tables in reverse line order so line-index splices stay valid.
+  const lines = mergedInstructions.split('\n');
+  const sortedMergedTables = [...mergedTables].sort((a, b) => b.startLineIndex - a.startLineIndex);
+
+  for (const mergedTable of sortedMergedTables) {
+    const sources = sourceByHeader.get(mergedTable.headerKey) ?? [];
+    if (sources.length === 0) continue;
+
+    // Guard 1: column mismatch (any source with different column count).
+    if (sources.some(s => s.table.columnCount !== mergedTable.columnCount)) {
+      skippedColumn++;
+      continue;
+    }
+
+    const existingKeys = new Set(
+      mergedTable.rows
+        .filter(r => !hasSourceMarker(r))
+        .map(firstColumnKey),
+    );
+
+    // Collect candidate rows to append, skipping those whose first-column
+    // key is already present (or conflicts across sources).
+    const seenSourceKey = new Map<string, 'library' | 'incoming'>();
+    const toAppend: Array<{ row: string; source: 'library' | 'incoming' }> = [];
+    for (const { source, table } of sources) {
+      for (const row of table.rows) {
+        if (hasSourceMarker(row)) continue;
+        const key = firstColumnKey(row);
+        if (!key) continue;
+        if (existingKeys.has(key)) continue;
+        const prior = seenSourceKey.get(key);
+        if (prior && prior !== source) {
+          // Cross-source conflict: skip this row entirely.
+          skippedKeyConflict++;
+          continue;
+        }
+        seenSourceKey.set(key, source);
+        toAppend.push({ row, source });
+      }
+    }
+
+    if (toAppend.length === 0) continue;
+
+    // Append the new rows to the merged table in-place.
+    const markedRows = toAppend.map(({ row, source }) => withSourceMarker(row, source));
+    // Splice after the last merged-table row (mergedTable.endLineIndex).
+    lines.splice(mergedTable.endLineIndex, 0, ...markedRows);
+    autoRecovered += markedRows.length;
+  }
+
+  let nextText = lines.join('\n');
+
+  // Guard 2: aggregate growth ratio.
+  const preWords = countWords(mergedInstructions);
+  const postWords = countWords(nextText);
+  const growthRatioExceeded = preWords > 0 && postWords / preWords > maxGrowthRatio;
+  if (growthRatioExceeded) {
+    // Abort: return original.
+    nextText = mergedInstructions;
+    autoRecovered = 0;
+  }
+
+  return {
+    instructions: nextText,
+    autoRecoveredRows: autoRecovered,
+    skippedDueToColumnMismatch: skippedColumn,
+    skippedDueToKeyConflict: skippedKeyConflict,
+    growthRatioExceeded,
+  };
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+
 /** Thresholds injected into validateMergeOutput from the config snapshot. */
 export interface ValidationThresholds {
   scopeExpansionStandardPct?: number;   // decimal fraction, e.g. 0.40
