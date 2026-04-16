@@ -203,6 +203,12 @@ export interface AgentRunRequest {
    * skill set is used.
    */
   allowedToolSlugs?: string[];
+  /**
+   * Feature 2 — inline Run-Now test panel. When true the run is flagged as a
+   * test run: excluded from agency P&L and LLM usage aggregates by default,
+   * and shown with a "Test" badge in run history. Default false.
+   */
+  isTestRun?: boolean;
 }
 
 export interface AgentRunResult {
@@ -329,6 +335,7 @@ export const agentExecutionService = {
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         playbookStepRunId: request.playbookStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
