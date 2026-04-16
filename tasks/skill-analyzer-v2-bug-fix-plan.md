@@ -658,6 +658,8 @@ When `PATCH /merge` or `POST /merge/reset` returns and the previous state had no
 ```ts
 interface ExecuteResponse {
   runId: string;                           // §11.11.11
+  runFingerprint: string;                  // see §11.12.11 — sha256 of stable-stringified {jobId, config_snapshot, approvedResultIds sorted, approvalHashes}. Deterministic: identical inputs on a re-run yield the same fingerprint.
+  isPartialSuccess: boolean;               // see §11.12.12 — true when summary.failed > 0 || pendingDraftAgents.length > 0
   summary: {
     total: number;
     created: number;
@@ -709,6 +711,31 @@ Default **off** because auto-unlock is the classic "zombie process" risk — a s
 - [x] Formalized `ExecuteResponse` shape.
 - [x] `config_snapshot` immutable after job INSERT.
 - [x] Auto-unlock gated behind explicit config flag (default off).
+
+### 11.12.11 Run fingerprint (ACCEPTED)
+
+`executeApproved` computes a deterministic `runFingerprint: string` at the top of the function:
+
+```ts
+runFingerprint = sha256(stableStringify({
+  jobId,
+  configSnapshot,
+  approvedResultIds: sortedApprovedIds,
+  approvalHashes: sortedApprovalHashSnapshots,
+}));
+```
+
+Returned on `ExecuteResponse` (§11.12.6) and attached to every Execute-time structured log event. Two re-runs with identical approved state and identical config produce identical fingerprints — makes duplicate-run detection and "was this the same input?" debugging trivial.
+
+### 11.12.12 Partial-success flag (ACCEPTED)
+
+`ExecuteResponse.isPartialSuccess` is computed as `failed > 0 || pendingDraftAgents.length > 0`. Client UI renders a distinct "⚠️ Partial execution" state when true, so reviewers aren't misled by a 200 status on a run that technically succeeded but is semantically incomplete. No behaviour change server-side — pure response field.
+
+### 11.12.13 Rejected: `execution_strict_mode` flag
+
+The fourth review suggested adding an `execution_strict_mode BOOLEAN DEFAULT false` now to enable future behaviour (block on drift, block on collisions, fail on partial success). Rejected on CLAUDE.md §6 Surgical Changes: adding a DB column with no wiring is exactly the dead-code pattern the global playbook forbids ("Don't design for hypothetical future requirements").
+
+Retrofitting a boolean config column is a one-line migration when the strict behaviour is actually required. No meaningful cost deferred by saying no.
 
 
 
