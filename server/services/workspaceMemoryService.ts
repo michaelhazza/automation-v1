@@ -790,7 +790,10 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
           };
         });
 
-      // Apply UPDATE and DELETE ops
+      // Apply UPDATE and DELETE ops. Track UPDATE targets so we can
+      // re-embed them — content has changed, so the existing embedding
+      // (and its embedding_content_hash) is now stale (review §2.1).
+      const reembedTargets: Array<{ id: string; content: string }> = [];
       for (const op of dedupedEntries.filter(e => e.op === 'UPDATE' || e.op === 'DELETE')) {
         if (!op.existingId) continue;
         if (op.op === 'DELETE') {
@@ -806,7 +809,34 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
               qualityScoreUpdater: 'initial_score',
             })
             .where(eq(workspaceMemoryEntries.id, op.existingId));
+          reembedTargets.push({ id: op.existingId, content: op.updatedContent });
         }
+      }
+
+      // Fire-and-forget re-embed of updated entries so vector search reflects
+      // the new content. Same degrade-gracefully pattern used for inserts below.
+      if (reembedTargets.length > 0) {
+        Promise.all(
+          reembedTargets.map(async (target) => {
+            try {
+              const embedding = await generateEmbedding(target.content);
+              if (embedding) {
+                const contentHash = createHash('md5').update(target.content).digest('hex');
+                await db.execute(
+                  sql`UPDATE workspace_memory_entries
+                         SET embedding = ${formatVectorLiteral(embedding)}::vector,
+                             embedding_computed_at = NOW(),
+                             embedding_content_hash = ${contentHash},
+                             embedding_context = NULL
+                       WHERE id = ${target.id}`
+                );
+              }
+            } catch {
+              // Non-fatal — stale embedding remains and will be flagged by the
+              // workspace_memory_entries_stale_embedding_idx index.
+            }
+          })
+        ).catch((err) => console.error('[WorkspaceMemory] Failed to re-embed updated entries:', err));
       }
 
       const values = baseValues;
@@ -820,10 +850,15 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             try {
               const embedding = await generateEmbedding(entry.content);
               if (embedding) {
+                // External review §2.1: stamp embedding_content_hash with the
+                // hash of the exact content embedded, so later content
+                // mutations can be detected as stale.
+                const contentHash = createHash('md5').update(entry.content).digest('hex');
                 await db.execute(
                   sql`UPDATE workspace_memory_entries
                          SET embedding = ${formatVectorLiteral(embedding)}::vector,
-                             embedding_computed_at = NOW()
+                             embedding_computed_at = NOW(),
+                             embedding_content_hash = ${contentHash}
                        WHERE id = ${entry.id}`
                 );
               }
@@ -1730,11 +1765,17 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
 
       // CAS guard: only update if still NULL
       if (embedding) {
+        // External review §2.1: stamp embedding_content_hash with the hash of
+        // entry.content (not the full embedding input) — content is the
+        // mutable surface that drift detection cares about; the context
+        // prefix is generated once and never changes.
+        const contentHash = createHash('md5').update(entry.content).digest('hex');
         await db.execute(
           sql`UPDATE workspace_memory_entries
               SET embedding_context = ${context},
                   embedding = ${formatVectorLiteral(embedding)}::vector,
-                  embedding_computed_at = NOW()
+                  embedding_computed_at = NOW(),
+                  embedding_content_hash = ${contentHash}
               WHERE id = ${entry.id}
                 AND embedding_context IS NULL`
         );

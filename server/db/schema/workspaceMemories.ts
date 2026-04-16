@@ -163,6 +163,20 @@ export const workspaceMemoryEntries = pgTable(
     // allowed value; the trigger in migration 0150 raises otherwise.
     qualityScoreUpdater: text('quality_score_updater')
       .$type<'initial_score' | 'system_decay_job' | 'system_utility_job'>(),
+
+    // External review §2.1 — migration 0151 ————————————————————————————————
+    //
+    // contentHash: STORED GENERATED column — `md5(content)` — auto-maintained
+    //   by Postgres on every content mutation. Drizzle does not support
+    //   GENERATED ALWAYS columns natively, so this is declared as a regular
+    //   text field; the actual storage is managed by migration 0151. Treat
+    //   this column as read-only at the application layer.
+    // embeddingContentHash: hash of the content used to compute the current
+    //   embedding. Set on every embedding write. When `contentHash !=
+    //   embeddingContentHash`, the embedding is stale and should be
+    //   recomputed.
+    contentHash:          text('content_hash'),
+    embeddingContentHash: text('embedding_content_hash'),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB
