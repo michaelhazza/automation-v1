@@ -95,8 +95,8 @@ if (!process.env.DATABASE_URL) {
   console.log('\n  0 tests: 0 passed, 0 failed (skipped)');
 } else {
   // Dynamic imports to avoid loading DB modules in pure/unit test contexts.
-  const { Pool } = await import('pg');
-  const { drizzle } = await import('drizzle-orm/node-postgres');
+  const postgres = (await import('postgres')).default;
+  const { drizzle } = await import('drizzle-orm/postgres-js');
   const { eq, and, isNull } = await import('drizzle-orm');
   const {
     memoryBlocks,
@@ -105,8 +105,8 @@ if (!process.env.DATABASE_URL) {
   } = await import('../../db/schema/index.js');
   const { getBlocksForAgent } = await import('../memoryBlockService.js');
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const db = drizzle(pool);
+  const sql = postgres(process.env.DATABASE_URL!);
+  const db = drizzle(sql);
 
   const CONFIG_ASSISTANT_SLUG = 'configuration-assistant';
   const BLOCK_NAME = 'config-agent-guidelines';
@@ -184,7 +184,7 @@ if (!process.env.DATABASE_URL) {
     if (iFailed > 0) process.exitCode = 1;
   }
 
-  await pool.end();
+  await sql.end();
 }
 
 if (pureResults.failed > 0) process.exitCode = 1;

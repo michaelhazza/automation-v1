@@ -87,7 +87,28 @@ export async function seedConfigAgentGuidelinesForOrg(
     return;
   }
 
-  // 3. Check for existing block
+  // 3. Guard: check org-wide for any live block with this name first.
+  // The unique index memory_blocks_org_name_idx enforces uniqueness on
+  // (organisation_id, name) across the whole org (not scoped to subaccount).
+  // If a stray block exists at a different subaccount scope, the INSERT would
+  // crash on the unique index. Warn and skip instead.
+  const [orgWideName] = await db
+    .select({ id: memoryBlocks.id, subaccountId: memoryBlocks.subaccountId })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, orgId),
+        eq(memoryBlocks.name, BLOCK_NAME),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+
+  if (orgWideName && orgWideName.subaccountId !== orgSubaccount.id) {
+    console.warn(`  [warn] org ${orgId}: found '${BLOCK_NAME}' block at a different subaccount scope (block_id=${orgWideName.id}, subaccountId=${orgWideName.subaccountId}) — skipping seed to avoid unique-index conflict. Move or delete the stray block to allow seeding.`);
+    return;
+  }
+
+  // 4. Check for existing block at the expected org-subaccount scope
   const [existingBlock] = await db
     .select({ id: memoryBlocks.id, content: memoryBlocks.content })
     .from(memoryBlocks)
@@ -100,7 +121,7 @@ export async function seedConfigAgentGuidelinesForOrg(
       ),
     );
 
-  // 4. Check for existing attachment (only relevant if block exists)
+  // 5. Check for existing attachment (only relevant if block exists)
   let attachmentExists = false;
   let attachmentIsTombstoned = false;
   if (existingBlock) {

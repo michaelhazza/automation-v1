@@ -205,8 +205,9 @@ router.post(
 );
 
 // ─── Detach a block from an agent ───────────────────────────────────────────
-// Guard: cannot detach the owning agent from a protected block. Detaching
-// disables the guidelines until the next deploy-time reseed.
+// Guard: cannot detach the *owning agent* from a protected block. Detaching
+// the owner disables the guidelines until the next deploy-time reseed.
+// Non-owner agents that have been spuriously attached can still be detached.
 
 router.delete(
   '/api/memory-blocks/:blockId/attachments/:agentId',
@@ -215,8 +216,8 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { blockId, agentId } = req.params;
 
-    const blockName = await memoryBlockService.getBlockName(blockId, req.orgId!);
-    if (blockName && PROTECTED_BLOCK_NAMES.has(blockName)) {
+    const blockMeta = await memoryBlockService.getBlockMeta(blockId, req.orgId!);
+    if (blockMeta && PROTECTED_BLOCK_NAMES.has(blockMeta.name) && blockMeta.ownerAgentId === agentId) {
       res.status(409).json({
         error: 'This attachment is protected and cannot be removed. Contact platform operations.',
         errorCode: 'PROTECTED_MEMORY_BLOCK_ATTACHMENT',
