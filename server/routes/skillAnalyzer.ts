@@ -4,6 +4,7 @@ import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillAnalyzerService } from '../services/skillAnalyzerService.js';
 import { configBackupService } from '../services/configBackupService.js';
+import * as skillAnalyzerConfigService from '../services/skillAnalyzerConfigService.js';
 
 const router = Router();
 
@@ -392,6 +393,31 @@ router.post(
     });
 
     return res.json(result);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/system/skill-analyser/config — Read config singleton
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/system/skill-analyser/config',
+  asyncHandler(async (_req, res) => {
+    const config = await skillAnalyzerConfigService.getConfig();
+    return res.json(config);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/config — Update config singleton
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/config',
+  asyncHandler(async (req, res) => {
+    const body = (req.body ?? {}) as skillAnalyzerConfigService.ConfigPatch;
+    const updated = await skillAnalyzerConfigService.updateConfig(body, req.user!.id);
+    return res.json(updated);
   }),
 );
 
