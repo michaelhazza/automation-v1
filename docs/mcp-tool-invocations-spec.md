@@ -200,6 +200,8 @@ let durationMs = 0;
 
 **5. `finally` covers:** success, truncated-success, and non-retryable errors. For the **retryable path**: `finally` fires after the recursive `callTool()` call returns. The retry's row is written first (by the recursive call's own `finally`); the outer `finally` then writes the first-attempt row using the first attempt's `status` and `durationMs`. Both rows are written in correct `callIndex` order.
 
+**Ordering invariant:** invocation rows MUST be written in ascending `callIndex` order. Implementations that refactor recursion into a loop or introduce concurrency must preserve this guarantee — higher-`callIndex` rows (retries) persist before lower-`callIndex` rows (earlier attempts) only via the described recursion order; any other control flow must replicate it explicitly.
+
 ### Pre-execution exit contract
 
 These paths return before instance resolution and cannot use `finally`. Each MUST call `writeMcpInvocation()` directly:
@@ -214,6 +216,10 @@ These paths return before instance resolution and cannot use `finally`. Each MUS
 **Why not increment for pre-execution exits:** the counter represents calls that consumed a budget slot. Budget-blocked calls are rejected before consuming a slot; the other three fail before the call executes. Incrementing would misrepresent budget consumption.
 
 **`callIndex` non-null invariant:** when `runId` is non-null, `callIndex` MUST also be non-null. The capture-before-increment rule guarantees this for all paths. No DB constraint is added — this is service-layer enforcement.
+
+**Non-empty strings invariant:** `serverSlug` and `toolName` MUST be non-empty strings in every row. Use `'unknown'` when parsing fails — never write an empty string. Empty values silently poison aggregation grouping.
+
+**`failureReason` invariant:** `failureReason` MUST be set (non-null) when `status !== 'success'`, and MUST be null when `status === 'success'`. The TypeScript signature makes this optional (`failureReason?`) for brevity; the implementation must enforce it explicitly.
 
 ---
 
