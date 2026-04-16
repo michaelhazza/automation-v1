@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-16 (Execution infrastructure hardening — canonical-hash idempotency, dual-bucket boundary tolerance, per-user rate limiting, WebSocket-first real-time streaming, shared run status enum, fixture read-time integrity)
+> **Last updated:** 2026-04-16 (Execution infrastructure hardening — exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -118,7 +118,7 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 | **Client portal and white-label surface** | LLM providers will not build this — their buyer is the producer, not the consumer of the producer's work. A permanent wedge for agencies serving end-clients. |
 | **Agency economics** | LLM usage ledger with full org → subaccount → run → skill cost attribution, org-level margin configuration, pre-reserved budgets, and cost circuit breakers. Agency P&L (revenue, per-client pricing, per-client margin reporting) is on the roadmap as a first-class surface. LLM providers sell tokens; they do not care what agencies bill. |
 | **Integration framework with managed connectors** | Generic integration protocols are just protocols. Synthetos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
-| **Execution infrastructure maturity** | Canonical-hash idempotency with dual-bucket boundary tolerance on every run path, per-user rate limiting with eviction metrics, WebSocket-first real-time execution streaming with adaptive polling backstop, pre-reserved budgets with advisory locks, dead-letter queues, loop detection, crash-resume checkpoints, correlation IDs for tracing, workspace health detectors surfacing configuration drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
+| **Execution infrastructure maturity** | Every agent action is guaranteed to run exactly once — even on retries, network hiccups, or rapid clicks. Real-time execution streaming delivers instant feedback as agents work, not delayed polling. Pre-reserved budgets with hard cost ceilings, automatic failure recovery, crash-resume, and proactive configuration health monitoring. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
 | **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Synthetos ships solutions. Verticals compound into pricing power. |
 | **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Synthetos routes to the best model per task and insulates agencies from provider shifts. |
 | **Portfolio-wide scheduled-work visibility** | A single calendar surface shows every scheduled agent run, recurring playbook, and scheduled task across every client for the next 7–30 days — roll up org-wide, drill down per client, and expose a "here's what we're doing for you next week" card inside the client portal. Hosted-routine and scheduled-prompt products show a calendar for *one user's* automations; Synthetos shows an agency's entire book of client work on one screen. Agencies pitch it on discovery calls; clients see it in their portal. |
@@ -129,7 +129,7 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 | Objection | Response |
 |---|---|
 | *"I'll manage my clients in a shared team chat product."* | Shared team chat is built for internal teams sharing context — your clients would see each other's data. Synthetos enforces strict isolation at every layer so per-client data, memory, and configuration never cross. |
-| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, parallel step execution, **and a portfolio-wide calendar that shows an agency's entire book of client work on one screen**. Different product category — and one of them is demoable inside a client portal. |
+| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step playbooks with human approvals, cost ceilings, retry policies, exactly-once execution guarantees, parallel step execution, **and a portfolio-wide calendar that shows an agency's entire book of client work on one screen**. Different product category — and one of them is demoable inside a client portal. |
 | *"I'll use a hosted routines product from an LLM provider."* | Hosted routines are a prompt on a schedule, with connectors, for *one user*. The moment you're running them across many clients, you need multi-tenant isolation, approval gates on CRM/ads/accounting writes, per-client billing and margin tracking, and a white-label surface where your client can see what's being done for them. Those are structural agency requirements a provider's hosted product doesn't build — their buyer is the producer, not the consumer. Synthetos uses provider primitives as supply and adds the operations layer on top, model-agnostic across every provider. |
 | *"Hosted agents are autonomous — perfect."* | Which is exactly why agencies can't put them on a client's CRM, ad account, or accounting system. 42+ review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
 | *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering not spent on client work. |
@@ -167,58 +167,56 @@ Three-tier hierarchy that isolates data and configuration at every level — so 
 - **System tier** — Platform-wide defaults, system-managed agents, global skill library, playbook templates
 - **Organisation tier** — Agency-level workspace with its own users, agents, skills, memory, branding, and billing
 - **Subaccount tier** — Per-client workspace with its own agent links, task board, review queue, data sources, and memory
-- Strict data isolation enforced at every layer (database, service, and API) with full audit history preserved
-- Subaccount tags for cohort queries; guided onboarding wizard for new orgs
+- Strict data isolation enforced at every layer with full audit history preserved
+- Client tags for portfolio segmentation and cohort analysis; guided onboarding wizard for new agencies
 
 ### Authentication & Access Control
 
 Five roles, granular permission keys, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
 
-- **Roles:** `system_admin`, `org_admin`, `manager`, `user`, `client_user`
-- Custom permission sets assignable to roles; access enforced at both API and UI level
-- Secure auth with rate-limited login, email invitations, and self-service password reset
-- Permissions-driven UI — buttons, tabs, and pages hidden when the user lacks the required key
+- **Five roles** from platform administrator to client viewer — each sees exactly the right level of access
+- Custom permission sets assignable to any role; access enforced across the entire platform
+- Secure authentication with rate-limited login, email invitations, and self-service password reset
+- Permissions-driven interface — buttons, tabs, and pages automatically hidden when a user lacks access
 
 ### AI Agent System
 
 Autonomous AI agents organised in a three-tier hierarchy (system > org > subaccount) with configurable models, skills, and execution policies.
 
-- **Three-tier model:** System agents (platform-managed, immutable prompts) cascade to Org agents (full control) and Subaccount agents (per-client overrides)
+- **Three-tier model:** Platform agents cascade to agency agents and per-client agents — each level can override scheduling, skills, and budgets without duplicating the agent
 - **Hierarchical roles:** CEO, Orchestrator, Specialist, Worker — agents can hand off work up to 5 levels deep
 - **Real-time chat** — Conversational interface with tool result cards, typing indicators, and session history
-- **Flexible scheduling:** Heartbeat polling (minute-level precision), cron expressions with timezone, or event triggers (`task_created`, `task_moved`, `agent_completed`)
+- **Flexible scheduling:** Recurring intervals (minute-level precision), cron expressions with timezone, or event triggers (task created, task moved, agent completed)
 - **Execution control:** Per-run token budgets, cost ceilings, tool call limits, concurrency policies, and catch-up policies
-- **Knowledge sources:** Per-agent data files (R2, S3, HTTP, Google Docs, Dropbox, uploads) with token budgets and caching
-- Agent templates for rapid team deployment; full run history with execution traces; idempotent deduplication on all run paths
+- **Knowledge sources:** Per-agent data files from cloud storage, HTTP, Google Docs, Dropbox, or direct uploads — with token budgets and caching
+- Agent templates for rapid team deployment; full run history with execution traces; exactly-once deduplication on all run paths
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
-- **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with WebSocket-streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill with read-time integrity checks. Server-derived canonical-hash idempotency prevents duplicate runs on rapid double-click; per-user rate limiting caps test run volume.
+- **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with real-time streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill. Rapid clicks and retries are automatically deduplicated; per-user rate limits prevent runaway test costs.
 
 ### Configuration Assistant
 
 AI-powered conversational configuration for agents, skills, schedules, and data sources. Helps org admins set up and manage their platform through natural language.
 
-- **Org-scoped system agent** — runs at org level with read/write access to all subaccounts
-- **28 dedicated tools** — 15 mutation (review-gated), 9 read-only, 4 validation/history
-- **Plan-approve-execute flow** — agent proposes a structured plan; user reviews and approves; server executes deterministically
-- **Config history** — generic JSONB changelog tracking 14 entity types with version restore
-- **Knowledge architecture** — three-layer knowledge (platform docs, skill descriptions, existing org config) enables cold-start and pattern replication
-- **Safety guards** — self-modification prevention, org subaccount restriction, four-layer scope enforcement
-- **Module-gated** — available in automation_os, agency_suite, and internal subscriptions
+- **Agency-wide scope** — one assistant that can configure any client workspace from a single conversation
+- **28 dedicated actions** — 15 require human approval, 9 read-only, 4 for validation and history
+- **Plan-approve-execute flow** — the assistant proposes a structured plan; you review and approve; the platform executes exactly what was agreed
+- **Full change history** — every configuration change tracked across 14 entity types with one-click restore to any previous version
+- **Works from day one** — built-in knowledge of the platform, your existing configuration, and available skills means no setup learning curve
+- **Safety guards** — cannot modify itself, respects client isolation, multi-layer scope enforcement
+- **Module-gated** — available on qualifying subscription tiers
 
 ### Skill System
 
-100 modular skills across 13 categories, cascading from system to org to subaccount.
+100+ modular skills across 13 categories, cascading from platform to agency to per-client workspace.
 
-- **Four-tier resolution:** System skills (system_skills table) -> Built-in skills (skills table, org=null) -> Org skills (custom) -> Subaccount skills (custom, workspace-scoped)
-- **Subaccount-level skills** — Workspaces can create custom skills that shadow org/system skills by slug. Managed via dedicated API routes and SubaccountSkillsPage
-- **Per-agent allowlists** — Each subaccount-agent link specifies exactly which skills are available
-- **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback. Supports system, org, and subaccount scopes
-- **Comprehensive version history** — Every skill mutation (create, update, merge, restore, deactivate) writes an immutable `skill_versions` row via `skillVersioningHelper`. Parent-row locking prevents version number races. Idempotency keys on retry-prone paths (analyzer, restore)
-- **Batch resolution** — `resolveSkillsForAgent` resolves all slugs in a single query with in-memory precedence, replacing N+1 per-slug queries
-- **Instruction payload guard** — Total skill instructions capped at 100K chars to prevent LLM context blowout
-- **Config backup/restore** — Skill analyzer jobs produce point-in-time backups; restore writes version history with `changeType: 'restore'` / `'deactivate'`
-- **Review gating** — 42+ skills require human approval; 6 deterministic skills run without LLM
-- Topic filtering dynamically reorders skills per message; skill modules enable bulk management
+- **Four-tier resolution:** Platform skills → built-in skills → agency-custom skills → per-client workspace skills — each level can override or extend the one above
+- **Per-client skill customisation** — Workspaces can create custom skills that replace platform defaults, so each client gets exactly the behaviour they need
+- **Per-agent allowlists** — Each agent link specifies exactly which skills are available — no accidental access to capabilities a client shouldn't use
+- **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback across all scopes
+- **Full version history** — Every skill change is tracked with immutable versions; restore any previous version with one click
+- **Built-in safeguards** — Total skill instructions are capped to prevent runaway costs; backup/restore built in for safe experimentation
+- **Review gating** — 42+ skills require human approval before execution; 6 deterministic skills run instantly without AI involvement
+- Smart skill selection dynamically prioritises relevant skills per conversation; skill modules enable bulk management
 - See [Skills Reference](#skills-reference) for the full catalogue
 
 ### Playbook Engine
@@ -226,33 +224,33 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 Multi-step workflow automation with dependency graphs, parallel execution, branching logic, and human review gates.
 
 - **Seven step types:**
-    - `user_input` — structured form captured from a human operator or client
-    - `prompt` — direct one-shot LLM generation
-    - `agent_call` — hand the step off to a full agent with its skill surface
-    - `action_call` — invoke a registered platform action directly (e.g. publish to client portal, send email digest, create a scheduled task); side-effect class and idempotency enforced by the allowlist
-    - `agent_decision` — small, schema-bound agent call that returns a structured choice (e.g. routing, classification, approve/edit/reject) the engine uses to branch
-    - `conditional` — deterministic branching on expressions over prior step outputs
-    - `approval` — blocking human review gate before downstream steps run
-- **Five run modes:** `auto` (hands-off), `supervised` (pauses at every approval), `background` (silent batch), `bulk` (one run per item in a list), `replay` (re-execute a prior run with the same inputs)
-- **DAG execution** — Steps declare dependencies; independent branches run in parallel; templating passes outputs between steps
-- **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares a side-effect class; concurrency guards prevent double execution
+    - **Human input** — structured form captured from a human operator or client
+    - **AI prompt** — direct one-shot AI generation
+    - **Agent handoff** — delegate the step to a full agent with its complete skill set
+    - **Platform action** — invoke a built-in action directly (e.g. publish to client portal, send email digest, create a scheduled task) with safety classification enforced automatically
+    - **AI decision** — a focused AI call that returns a structured choice (e.g. routing, classification, approve/edit/reject) the workflow uses to branch
+    - **Conditional** — deterministic branching on results from prior steps
+    - **Approval gate** — pauses the workflow for human review before downstream steps run
+- **Five run modes:** hands-off, supervised (pauses at every approval gate), background (silent batch), bulk (one run per item in a list), and replay (re-execute a prior run with the same inputs)
+- **Parallel execution** — Independent branches run simultaneously; results flow between steps automatically
+- **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares its risk level; concurrent execution guards prevent double actions
 - **Run-now + schedule** — Any recurring playbook can be launched immediately on setup; the normal schedule continues afterward
-- **Portal publishing** — Playbooks can publish their output to the client portal card via `action_call` steps; the portal card displays the most recent published brief per subaccount
+- **Portal publishing** — Playbooks can publish their output directly to the client portal as a summary card; the portal always displays the most recent published brief per client
 - **Email digest delivery** — Playbooks can send markdown email digests to configured recipients with deduplication (no double-sends on retry)
-- **Knowledge bindings** — Steps can write their output back to Workspace Memory Blocks on completion; `firstRunOnly` option captures baseline facts once
-- **Onboarding auto-start** — Playbooks with `autoStartOnOnboarding: true` are automatically launched in supervised mode when a new sub-account is created under an org whose module set includes the playbook slug; the Onboarding tab on the sub-account detail page tracks progress
-- **Playbook Studio** — Chat-based authoring with validation, simulation, and cost estimation; system and org templates with versioning; fork-and-parameterise per org; self-healing watchdog sweeps stuck runs
+- **Knowledge bindings** — Steps can write their output back to shared memory on completion; optional "first run only" mode captures baseline facts once without overwriting on subsequent runs
+- **Onboarding auto-start** — Designated playbooks launch automatically in supervised mode when a new client workspace is created — the Onboarding tab tracks progress so nothing falls through the cracks
+- **Playbook Studio** — Chat-based authoring with validation, simulation, and cost estimation; platform and agency templates with versioning; fork and customise per agency; automatic recovery sweeps for stuck runs
 - **No-code workflow migration wedge** — One-shot converter that ingests a no-code workflow JSON export and produces a draft supervised playbook, mapping each source node to a step with appropriate side-effect classification, approval gates, and a mapping report flagging anything the admin needs to review or rewrite. Credentials are never migrated; the admin re-authenticates via managed OAuth flows. Net effect: an agency's existing workflow library becomes multi-tenant, supervised, and cost-attributed in hours rather than a re-platforming project.
 
 ### Human-in-the-Loop
 
 Review queue and approval system ensuring humans stay in control of sensitive agent actions.
 
-- **Three gate levels:** `auto` (proceed), `review` (pause for approval), `block` (disallow)
+- **Three gate levels:** Auto (proceed immediately), Review (pause for human approval), Block (disallow entirely)
 - **42+ review-gated actions:** email, CRM updates, code patches, page publishing, budget changes, campaign pauses, and more
 - **Approve with edits** — Reviewers can modify proposals before approving; rejection feedback trains the agent
 - **Confidence escape** — Low-confidence tool calls automatically redirected to ask a clarifying question
-- Agents can proactively escalate via the `request_approval` skill; review items grouped by run for context
+- Agents can proactively escalate decisions to humans; review items are grouped by run for full context
 
 ### Task Board & Workspace
 
@@ -267,28 +265,28 @@ Kanban-style task management with agent assignment, deliverables, and workflow t
 Aggregated notification centre across all item types with filtering and prioritisation.
 
 - **Tabs:** All, Tasks, Reviews, Failed Runs — with sort, search, and subaccount filtering
-- Priority feed with TTL-based claim/release; org-level and per-subaccount scoped views
+- Priority feed with automatic claim/release; agency-wide and per-client scoped views
 - Unread/archived tracking with colour-coded subaccount badges
 
 ### Memory & Knowledge System
 
 Multi-layered memory architecture enabling agents to learn, share context, and build institutional knowledge — with provenance, quality controls, and drift detection so memory stays trustworthy as it accumulates.
 
-- **Workspace memory** — Per-subaccount fact store with vector embeddings, quality scoring, hybrid retrieval (semantic + full-text + recency)
-- **Memory blocks** — Named shared context with per-agent read/write permissions and governance affordances
+- **Workspace memory** — Per-client fact store with intelligent retrieval that combines meaning, keywords, and recency for accurate recall
+- **Memory blocks** — Named shared context with per-agent read/write permissions and governance controls
 - **Cross-agent search** — Agents query what other agents have learned across the org
 - **Agent briefings** — Rolling summaries generated post-run, injected into next run's context
-- **Agent beliefs** — Discrete, confidence-scored facts per agent-subaccount, auto-extracted from run outcomes. Individually addressable (add/update/reinforce/remove), user-correctable, with key normalization and oscillation guards. Injected into prompt alongside briefings.
+- **Agent beliefs** — Confidence-scored facts per agent per client, automatically extracted from run outcomes. Each belief can be individually added, updated, reinforced, or removed — and corrected by users when agents get something wrong. Built-in guards prevent belief flip-flopping.
 - **Org-level insights** — Cross-subaccount patterns stored with scope tags for portfolio intelligence
 - **Knowledge drop zone** — Upload documents and reference material directly into a workspace; the system extracts, classifies, and stores entries with full provenance back to the original upload
 - **Config documents** — Persistent reference material that informs every agent run in a workspace, editable in-place from the Knowledge page
 - **References** — Manually-authored or promoted insights surfaced as durable, citable knowledge separate from auto-captured run output
 - **Weekly digest** — Automated rollup that surfaces what the workspace learned in the last seven days
 - **Citation tracking** — Each memory entry tracks how often it was injected into a run and how often it was actually cited in the agent's output, creating a feedback loop that improves retrieval relevance over time
-- **Provenance at the write boundary** — Every memory entry records its source (agent run, manual entry, playbook, drop zone, or synthesis) and an optional confidence score; high-trust paths filter out unverified entries automatically
-- **Embedding drift detection** — Content changes are detected automatically; stale embeddings are flagged and recomputed in the background so semantic search never returns matches against text that no longer exists
-- **Quality-score guardrails** — Quality scores can only be mutated by sanctioned background jobs (initial scoring, decay, utility adjustment); enforced at both the database and code-architecture level
-- Automated memory decay (90 days), nightly deduplication, and four-scope context cascading with eager/lazy loading
+- **Full provenance** — Every memory entry records its source (agent run, manual entry, playbook, upload, or synthesis) and a confidence score; high-trust paths automatically filter out unverified entries
+- **Automatic accuracy maintenance** — When content changes, the system detects stale data and refreshes it in the background — search always returns matches against current information, not outdated text
+- **Quality safeguards** — Memory quality scores are managed by the platform, not individual agents — preventing any single run from corrupting the knowledge base
+- Automated memory decay (90 days), nightly deduplication, and multi-scope context cascading so agents always have the right context at the right level
 
 ### Workspace Health & Diagnostics
 
@@ -306,56 +304,56 @@ Unified operational view across all activity types with advanced filtering and r
 - **Multi-scope:** system-wide, org-level, and per-subaccount with filtering by type, status, date, agent, severity
 - **LLM usage tracking** — Every call logged with tokens, cost, model; usage explorer with cost trends and margin calculations
 - **Dashboard metrics** — Active agents, success rate, total runs, token usage with daily trend indicators
-- Real-time WebSocket updates; CSV/JSON execution export; column-header sort and filter on every table
+- Real-time live updates; CSV/JSON execution export; column-header sort and filter on every table
 
 ### Client Portal
 
 White-label client-facing interface scoped per subaccount, enabling agencies to give clients self-service access.
 
 - Subaccount selector, workflow browser with category filtering, self-service execution, and run history
-- `client_user` role sees only portal routes; per-org brand colour inherited by portal styling
+- Client users see only their own portal; agency brand colours carry through to the portal styling
 - **Playbook brief cards** — Published playbook outputs appear on the portal as rich summary cards (headline bullets, full brief in modal); each card shows status and last-run timestamp; "Run now" triggers a fresh run and navigates to results
-- Portal briefs are isolated per subaccount; retracted briefs do not appear; most-recent non-retracted brief per (subaccount, playbook slug) is displayed
+- Portal briefs are isolated per client; retracted briefs disappear automatically; clients always see the most recent published version
 
 ### Pages & Content Builder
 
 CMS-style page creation and publishing with analytics tracking and form submission handling.
 
-- Page projects, HTML content with meta tags and forms, draft-to-published workflow with HITL approval
-- Public serving at `/pages/:slug` with view analytics and form submission handling
+- Page projects with rich content, meta tags, and forms — draft-to-published workflow with mandatory human approval
+- Public pages with built-in view analytics and form submission handling
 - Agents can create, update, and publish pages via dedicated skills
 
 ### Integration Framework
 
-Extensible connector architecture supporting OAuth, API keys, webhooks, and MCP servers.
+Pre-built connectors for the tools agencies already use — connect once, use across every agent and playbook.
 
 - **OAuth providers:** Gmail, Slack, HubSpot, Go High Level (GHL), Teamwork Desk, GitHub App
-- **Connection scoping** — Org-level (shared) or subaccount-level (client-specific); multiple connections per provider
-- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with configurable sync lifecycle (backfill > transition > live)
-- **MCP servers** — Model Context Protocol via stdio or HTTP; credential binding to any OAuth provider; per-tool gate overrides
-- **Webhooks** — HMAC-SHA256 signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
-- Token encryption with versioned key rotation; credential management UI with tool browser
+- **Connection scoping** — Agency-wide (shared) or per-client (isolated); multiple connections per provider
+- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with managed sync lifecycle (initial import → transition → live)
+- **MCP servers** — Model Context Protocol for extending agent capabilities with any external tool; credential binding to any OAuth provider; per-tool approval overrides
+- **Webhooks** — Signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
+- Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
 - See [Integrations Reference](#integrations-reference) for the full list
 
 ### Execution Infrastructure
 
 Production-grade reliability — agents run consistently, recover from failures, and never double-execute.
 
-- **Job queue:** pg-boss or BullMQ; 24+ job types across 10 priority tiers with DLQ and nightly cleanup
-- **Idempotency:** canonical-hash deduplication with dual-bucket boundary tolerance — safe to retry without side effects, even across time-window boundaries
-- **Rate limiting:** per-user test-run rate limiter with bounded memory, eviction tracking, and operational metrics
-- **Real-time execution streaming:** WebSocket-first with adaptive polling backstop (15s connected / 5s disconnected) — replaces legacy polling for lower infra load and faster UX
+- **Reliable job processing:** 24+ background job types across 10 priority tiers with automatic retry, failure recovery, and nightly cleanup
+- **Exactly-once execution:** every action is deduplicated — safe to retry without side effects, even on network hiccups or rapid clicks
+- **Usage guardrails:** per-user rate limits on test runs prevent runaway costs during development and QA
+- **Real-time execution streaming:** live progress updates as agents work — instant feedback without page refreshes or manual polling
 - **Budget enforcement:** hard ceilings on tokens, cost, tool calls, and timeouts per run
 - **Security:** data isolation enforced at three independent layers; every tool call authorisation logged
-- Loop detection, crash-resume checkpoints, correlation IDs for cross-service tracing
+- Infinite loop detection, automatic crash recovery, and full execution tracing for debugging
 
 ### Sandboxed Runtime (IEE)
 
 Integrated Execution Environment for running agent work in isolated Docker containers — primarily for browser automation on client systems, with a secondary mode for organisation-level extensibility.
 
-- **Primary mode — `iee_browser`** (Playwright): agents execute multi-step browser automation (logins, form submissions, structured scrapes, artefact downloads, paywalled content fetches) inside a fully sandboxed container with per-run cost attribution and budget reservations. This is how agents "do work on systems that don't have APIs."
-- **Secondary mode — `iee_dev`** (workspace/shell): organisation-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a code review workflow enforced in middleware, with whitelisted shell commands and test execution. Not positioned as a standalone IDE.
-- Stateful agentic loops with **dual cost attribution** (LLM tokens + runtime seconds) surfaced in the usage explorer, so agency economics reflect full COGS — not just model spend.
+- **Browser automation mode:** Agents execute multi-step browser tasks (logins, form submissions, structured scrapes, file downloads, paywalled content access) inside fully sandboxed containers with per-run cost tracking and budget controls. This is how agents do work on systems that don't have APIs.
+- **Development mode:** Agency-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a mandatory code review workflow with approved command lists and test execution. Not positioned as a standalone IDE.
+- **Full cost visibility** — both AI token costs and runtime costs are tracked per execution in the usage explorer, so agencies see their true cost of delivery — not just model spend.
 - All executions run in isolation with enforced gating; no agent touches host state.
 
 ---
@@ -523,8 +521,8 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | **Trigger** | Scheduled cadence, ad-hoc research request, or automated change detection on competitor URLs |
 | **Deliverable** | Intelligence brief covering pricing, features, recent news, and positioning analysis in a consistent format |
 
-- **Automated page monitoring** — `monitor_webpage` watches competitor pricing pages, feature lists, or job boards; agent is triggered immediately when content changes
-- **Structured field extraction** — `scrape_structured` extracts specific fields (e.g. pricing tiers, plan names) on every run without re-paying LLM costs after the first scrape
+- **Automated page monitoring** — Watch competitor pricing pages, feature lists, or job boards; agents are triggered immediately when content changes
+- **Structured field extraction** — Extract specific fields (e.g. pricing tiers, plan names) automatically on every run without re-paying AI costs after the first extraction
 - **Tiered scraping engine** — HTTP fetch → stealth Playwright browser → Scrapling anti-bot bypass; automatically escalates through tiers when a site blocks simpler methods
 
 ### Portfolio Intelligence
@@ -799,7 +797,7 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
-| 2026-04-16 | Execution infrastructure hardening: canonical-hash idempotency with dual-bucket boundary tolerance, per-user rate limiting with eviction metrics, WebSocket-first real-time execution streaming (replacing polling), shared run status enum. Update Inline Run Now bullet with WebSocket streaming, fixture integrity, and idempotency detail. Expand Execution Infrastructure product section with rate limiting and real-time streaming. | — |
+| 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
 | 2026-04-16 | Hosted-routine / scheduled-prompt product-category positioning refresh: add Portfolio-wide scheduled-work visibility and Supervised migration from no-code workflow tools to Structural Differentiators; add "I'll use a hosted routines product from an LLM provider" objection row; sharpen existing scheduled-prompt objection row with portfolio-calendar and client-portal proof points; expand Replaces / Consolidates with hosted-routine and no-code migration rows; add portfolio calendar + inline Run Now test bullets to AI Agent System; add no-code migration wedge bullet to Playbook Engine; add discovery-call demo and "why not hosted routines" conversation bullets to GTM guidance. Ships in the same commit as `docs/routines-response-dev-spec.md`. | — |
 | 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_playbook_output_to_portal` and `config_send_playbook_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
 | 2026-04-14 | Apply Editorial Rules across customer-facing sections — scrub all named LLM / AI providers and their products from Positioning, Replaces / Consolidates, and Product Capabilities; rewrite in generic, vendor-neutral, marketing-appropriate language. Add Editorial Rules section and neutralise "default provider" language in Integrations Reference. Persist editorial rules in `CLAUDE.md`. | — |
