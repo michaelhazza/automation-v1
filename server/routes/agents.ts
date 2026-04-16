@@ -9,7 +9,7 @@ import { validateMultipart, validateBody } from '../middleware/validate.js';
 import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
-import { deriveTestRunIdempotencyKey } from '../lib/testRunIdempotency.js';
+import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 
 const router = Router();
 
@@ -166,7 +166,7 @@ router.post('/api/agents/:id/test-run',
     };
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
-    const derivedIdempotencyKey = deriveTestRunIdempotencyKey({
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
       userId: req.user!.id,
       targetType: 'agent',
       targetId: id,
@@ -185,7 +185,8 @@ router.post('/api/agents/:id/test-run',
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
-      idempotencyKey: derivedIdempotencyKey,
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
     });
     res.status(201).json(result);
   })

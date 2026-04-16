@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { useMemo, useState } from 'react';
+import { formatMoney } from '../lib/formatMoney';
 
 export type OccurrenceSource = 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
 export type ScopeTag = 'system' | 'org' | 'subaccount';
@@ -65,12 +66,6 @@ const SOURCE_BADGE_STYLES: Record<OccurrenceSource, string> = {
   playbook: 'bg-amber-50 text-amber-700 border-amber-200',
   scheduled_task: 'bg-sky-50 text-sky-700 border-sky-200',
 };
-
-function formatMoney(cents: number | null): string {
-  if (cents === null) return '—';
-  if (cents === 0) return '$0.00';
-  return `$${cents.toFixed(4)}`;
-}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -359,7 +354,7 @@ export default function ScheduleCalendar({
                       )}
                       {showCost && (
                         <td className="px-4 py-2 text-right font-mono text-xs text-slate-700">
-                          {formatMoney(occ.estimatedCost)}
+                          {formatMoney(occ.estimatedCost, { micro: true })}
                         </td>
                       )}
                     </tr>

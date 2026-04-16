@@ -33,6 +33,16 @@ const windowStore = new Map<string, number[]>();
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_TRACKED_USERS = 10_000;
 
+// Eviction churn counters — surfaced via `getTestRunRateLimitMetrics()` for
+// the operator dashboard and logged periodically so sustained pressure is
+// visible even without a scrape. When `evictionCount` climbs rapidly it
+// signals either a high-cardinality attack or natural growth past the Phase 1
+// ceiling; either way the response is to move to the Redis/DB-backed
+// implementation called out in TODO(PROD-RATE-LIMIT).
+let evictionCount = 0;
+let evictionsSinceLastLog = 0;
+const EVICTION_LOG_THRESHOLD = 100;
+
 let startupWarningEmitted = false;
 function emitStartupWarningOnce(): void {
   if (startupWarningEmitted) return;
@@ -55,7 +65,39 @@ function evictOldestIfOverCap(): void {
       oldestUserId = uid;
     }
   }
-  if (oldestUserId !== null) windowStore.delete(oldestUserId);
+  if (oldestUserId !== null) {
+    windowStore.delete(oldestUserId);
+    evictionCount++;
+    evictionsSinceLastLog++;
+    if (evictionsSinceLastLog >= EVICTION_LOG_THRESHOLD) {
+      logger.warn('testRunRateLimit.evictions_since_last_log', {
+        evictionsSinceLastLog,
+        evictionCount,
+        trackedUsers: windowStore.size,
+        note: 'High eviction rate — consider moving off in-memory rate limit (see TODO(PROD-RATE-LIMIT)).',
+      });
+      evictionsSinceLastLog = 0;
+    }
+  }
+}
+
+/**
+ * Observability surface: total evictions since process start and current
+ * tracked user count. Intended for `/admin/health` or Prometheus-style
+ * scraping in a later wiring PR.
+ */
+export function getTestRunRateLimitMetrics(): {
+  trackedUsers: number;
+  evictionCount: number;
+  maxTrackedUsers: number;
+  windowMs: number;
+} {
+  return {
+    trackedUsers: windowStore.size,
+    evictionCount,
+    maxTrackedUsers: MAX_TRACKED_USERS,
+    windowMs: WINDOW_MS,
+  };
 }
 
 /**
@@ -83,4 +125,6 @@ export function checkTestRunRateLimit(userId: string): void {
 export function _resetWindowStoreForTest(): void {
   windowStore.clear();
   startupWarningEmitted = false;
+  evictionCount = 0;
+  evictionsSinceLastLog = 0;
 }

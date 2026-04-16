@@ -10,7 +10,7 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
-import { deriveTestRunIdempotencyKey } from '../lib/testRunIdempotency.js';
+import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import { db } from '../db/index.js';
 import { agents, subaccounts, systemAgents } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
@@ -300,7 +300,7 @@ router.post(
     };
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
-    const derivedIdempotencyKey = deriveTestRunIdempotencyKey({
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
       userId: req.user!.id,
       targetType: 'subaccount-agent',
       targetId: linkId,
@@ -319,7 +319,8 @@ router.post(
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
-      idempotencyKey: derivedIdempotencyKey,
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
     });
     res.status(201).json(result);
   })

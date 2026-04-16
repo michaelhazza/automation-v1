@@ -7,7 +7,7 @@ import { skillService } from '../services/skillService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
-import { deriveTestRunIdempotencyKey } from '../lib/testRunIdempotency.js';
+import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import {
   createSubaccountSkillBody,
   updateSubaccountSkillBody,
@@ -144,7 +144,7 @@ router.post(
     };
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
-    const derivedIdempotencyKey = deriveTestRunIdempotencyKey({
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
       userId: req.user!.id,
       targetType: 'subaccount-skill',
       targetId: skill.id,
@@ -163,7 +163,8 @@ router.post(
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
-      idempotencyKey: derivedIdempotencyKey,
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
     });
     res.status(201).json(result);
   })

@@ -1,3 +1,5 @@
+import { isTerminalRunStatus } from './runStatus';
+
 /**
  * runPlanView.ts — Brain Tree OS adoption P2.
  *
@@ -193,7 +195,7 @@ function deriveStatus(
 ): PlanItemView['status'] {
   if (evidenceIndex == null) {
     // No matching call found.
-    if (isTerminalStatus(runStatus)) return 'skipped';
+    if (isTerminalRunStatus(runStatus)) return 'skipped';
     return 'pending';
   }
   const tc = toolCalls[evidenceIndex];
@@ -215,6 +217,3 @@ function inferSuccess(tc: ToolCallEntry): boolean | null {
   return true;
 }
 
-function isTerminalStatus(status: string): boolean {
-  return ['completed', 'failed', 'timeout', 'cancelled', 'loop_detected', 'budget_exceeded'].includes(status);
-}

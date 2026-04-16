@@ -8,10 +8,12 @@
 // State (open/closed) is persisted in localStorage keyed on panelKey.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import RunTraceView, { type RunDetail } from './RunTraceView';
+import { useSocketRoom, useSocketConnected } from '../../hooks/useSocket';
+import { isTerminalRunStatus } from '../../lib/runStatus';
 
 export interface TestFixture {
   id: string;
@@ -75,27 +77,55 @@ export default function TestPanel({
       .catch(() => setFixtures([]));
   }, [open, fixturesEndpoint]);
 
-  // Poll run status until terminal
+  // WebSocket-first live updates with a long-interval backstop poll. The
+  // per-run `agent-run:<runId>` room receives agent:run:progress /
+  // agent:run:completed / agent:run:failed; each triggers a REST refresh so
+  // the TestPanel re-renders with full payload consistency (tool calls,
+  // tokens, deliverables). Polling only fires every 10s as a reconnect-gap
+  // safety net, matching the pattern in PlaybookRunDetailPage.
+  const refreshRun = useCallback(async () => {
+    if (!runId) return;
+    try {
+      const r = await api.get<RunDetail>(`/api/agent-runs/${runId}`);
+      setRun(r.data);
+      if (isTerminalRunStatus(r.data.status)) {
+        setRunning(false);
+      }
+    } catch {
+      setRunning(false);
+    }
+  }, [runId]);
+
+  // Initial fetch + socket-driven refresh on any run event.
   useEffect(() => {
     if (!runId) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const r = await api.get<RunDetail>(`/api/agent-runs/${runId}`);
-        if (!cancelled) {
-          setRun(r.data);
-          const terminal = ['completed', 'failed', 'timeout', 'cancelled', 'budget_exceeded', 'loop_detected'];
-          if (!terminal.includes(r.data.status)) {
-            setTimeout(poll, 2000);
-          } else {
-            setRunning(false);
-          }
-        }
-      } catch { if (!cancelled) setRunning(false); }
-    };
-    poll();
-    return () => { cancelled = true; };
-  }, [runId]);
+    refreshRun();
+  }, [runId, refreshRun]);
+
+  useSocketRoom(
+    'agent-run',
+    runId ?? null,
+    {
+      'agent:run:started': refreshRun,
+      'agent:run:progress': refreshRun,
+      'agent:run:completed': refreshRun,
+      'agent:run:failed': refreshRun,
+    },
+    refreshRun,
+  );
+
+  const socketConnected = useSocketConnected();
+
+  // Backstop poll — only active while running and either the socket is
+  // disconnected or the initial connect is still settling. 10s cadence (vs
+  // the previous 2s) keeps server pressure negligible while covering
+  // reconnect windows.
+  useEffect(() => {
+    if (!runId || !running) return;
+    if (run && isTerminalRunStatus(run.status)) return;
+    const id = setInterval(refreshRun, socketConnected ? 15000 : 5000);
+    return () => clearInterval(id);
+  }, [runId, running, run, socketConnected, refreshRun]);
 
   const handleFixtureChange = (id: string) => {
     setSelectedFixture(id);
@@ -150,12 +180,33 @@ export default function TestPanel({
     }
   };
 
+  const [cancelRequested, setCancelRequested] = useState(false);
+
+  // Cancel is best-effort on the backend — the run may already be mid-step
+  // when the request lands. We flag `cancelRequested` immediately so the UI
+  // stops offering the button, but we leave `running` truthy until a
+  // terminal WebSocket/REST update confirms the backend actually transitioned.
+  // This eliminates the "UI says cancelled, backend still executing" mismatch
+  // the reviewer flagged.
   const handleCancel = async () => {
-    if (!runId) return;
-    try { await api.post(`/api/agent-runs/${runId}/cancel`); }
-    catch { /* best-effort */ }
-    setRunning(false);
+    if (!runId || cancelRequested) return;
+    setCancelRequested(true);
+    try {
+      await api.post(`/api/agent-runs/${runId}/cancel`);
+    } catch {
+      // Best-effort; next refresh reflects actual state.
+    }
+    // Trigger an immediate REST refresh so we pick up whichever terminal
+    // status the backend settles on (cancelled / completed / failed).
+    void refreshRun();
   };
+
+  // Clear the cancel-requested flag once the run reaches a terminal state,
+  // so the panel can be re-used for a subsequent test run.
+  useEffect(() => {
+    if (!run) return;
+    if (isTerminalRunStatus(run.status)) setCancelRequested(false);
+  }, [run]);
 
   return (
     <div className="flex flex-col border-l border-slate-200 bg-white" style={{ width: open ? 380 : 40, flexShrink: 0, transition: 'width 0.2s' }}>
@@ -240,9 +291,10 @@ export default function TestPanel({
               {running && (
                 <button
                   onClick={handleCancel}
-                  className="px-3 py-1.5 border border-red-200 text-red-600 text-[12px] font-medium rounded-lg bg-white hover:bg-red-50"
+                  disabled={cancelRequested}
+                  className="px-3 py-1.5 border border-red-200 text-red-600 text-[12px] font-medium rounded-lg bg-white hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Cancel run
+                  {cancelRequested ? 'Cancelling…' : 'Cancel run'}
                 </button>
               )}
             </div>
