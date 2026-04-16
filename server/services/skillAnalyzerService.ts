@@ -1134,6 +1134,15 @@ export async function executeApproved(params: {
         await failResult(result.id, 'merge proposal unavailable — re-run analysis');
         continue;
       }
+      // v2 Fix 7: execution_resolved_name overrides any drift in merge.name
+      // that may have occurred between NAME_MISMATCH resolution and Execute.
+      // Cascade to definition.name so the schema and file name stay in sync.
+      const canonicalName = result.executionResolvedName && result.executionResolvedName.trim().length > 0
+        ? result.executionResolvedName.trim()
+        : merge.name;
+      const canonicalDefinition = canonicalName !== merge.name
+        ? { ...(merge.definition as Record<string, unknown>), name: canonicalName }
+        : merge.definition;
       // Apply the merge inside a transaction. In Phase 1 this is a single-
       // statement transaction; the wrapping is in place for Phase 2's
       // multi-statement extensions.
@@ -1142,9 +1151,9 @@ export async function executeApproved(params: {
           const updated_skill = await systemSkillService.updateSystemSkill(
             result.matchedSkillId!,
             {
-              name: merge.name,
+              name: canonicalName,
               description: merge.description,
-              definition: merge.definition as never,
+              definition: canonicalDefinition as never,
               instructions: merge.instructions,
             },
             { tx, skipVersionWrite: true, externalVersionWrite: true },
