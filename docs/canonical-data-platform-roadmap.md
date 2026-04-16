@@ -30,7 +30,7 @@ Six rules that shape how the program is sequenced.
 
 ## Execution model
 
-This spec inherits the at-least-once / idempotent-handlers contract from `docs/improvements-roadmap-spec.md` and `docs/run-continuity-and-workspace-health-spec.md`. No new rules at the program level. Phase-specific async work (scheduled polling registration, backfill jobs, ingestion filter application) is defined in each phase's section and must be idempotent by design.
+This spec inherits the at-least-once / idempotent-handlers contract from `docs/improvements-roadmap-spec.md` and `docs/run-continuity-and-workspace-health-spec.md`. It also inherits the **three-layer fail-closed isolation** model already shipped under improvements-roadmap §P1.1: Layer A = ALS-driven `withOrgTx` / `getOrgScopedDb` request scoping (`server/middleware/orgScoping.ts`, `server/instrumentation.ts`); Layer B = Postgres RLS default-deny via `app.organisation_id` session variable (manifest in `server/config/rlsProtectedTables.ts`, gates `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh`); Layer C = explicit `withAdminConnection` bypass via `admin_role`. P3 extends this model with principal-scoped predicates rather than introducing it from scratch. No new rules at the program level. Phase-specific async work (scheduled polling registration, backfill jobs, ingestion filter application) is defined in each phase's section and must be idempotent by design.
 
 New async work introduced by this program:
 
@@ -285,18 +285,18 @@ Every other third-party read path is either converted to canonical-backed or del
 
 ### D10 — Tenancy is enforced by Postgres RLS keyed to the principal context, with service-layer checks retained as defence-in-depth
 
-**Decision.** Every canonical table and every principal/connection table ships with Postgres Row-Level Security policies. The policies are keyed to session-level variables that carry the current `organisationId`, `subaccountId`, and principal context (type, ID, delegation grant). The application sets these variables at the start of every database session via `SET LOCAL`; session pooling is configured so variables are scoped to the logical session, not the physical connection. Service-layer scope checks (the existing pattern — services require `organisationId` arguments, filter in the query) are retained as defence-in-depth and as the primary error-surface for developers.
+**Decision.** Every canonical table and every principal/connection table ships with Postgres Row-Level Security policies. **Org-level RLS already exists on this codebase** — Sprint 2 P1.1 (migrations 0079–0082, plus every tenant-table migration since) shipped Layer 1 RLS keyed on `current_setting('app.organisation_id', true)`, with the manifest in `server/config/rlsProtectedTables.ts` and the gates `scripts/gates/verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh`. P3 **extends** that infrastructure with principal-scoped predicates (owner / visibility / principal_type) and adds the `withPrincipalContext` wrapper on top of the existing `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` primitives. Service-layer scope checks (the existing pattern — services require `organisationId` arguments, filter in the query) are retained as defence-in-depth and as the primary error-surface for developers.
 
 **Why.** Service-layer-only isolation survives the common case but loses to the uncommon case: a new query path that forgets the scope filter, a helper that fetches by primary key without re-checking tenancy, a one-off admin script that runs against production. RLS at the database makes the database itself the last line of defence: if a query slips past the service layer without a scope filter, Postgres returns zero rows rather than cross-tenant data. The service-layer check is kept because RLS errors are opaque (the query "succeeds" but returns fewer rows than expected) — developers need explicit "you forgot to pass `organisationId`" errors at the service layer to catch mistakes during development, before RLS saves them in production.
 
 **Implications.**
-- P3 is the phase that introduces RLS. Every canonical table, every connection table, every principal table, and every table holding personal-principal data gains a policy.
-- RLS policies are defined in migration files alongside the schema, not in separate "apply policies" migrations. A table that gains RLS in one migration and policies in another is a failure mode that static gates must catch.
-- Session-variable setup is centralised in a single middleware/helper (`withPrincipalContext` or similar) that every route, every job handler, and every skill invocation passes through. Direct database access that bypasses this helper is a static-gate violation.
-- RLS is not applied to administrative tables where cross-tenant access is required for operation (e.g. system config, feature registry, platform-level tables). These are explicitly named in P3 and excluded.
-- Tests for RLS are written at the pure-function level for the policy predicate logic (principal → row visibility) and at the integration level for a small, exhaustive fixture set. Runtime tests for every query path are explicitly out of scope — we rely on the static gate that enforces principal-context propagation.
+- P3 is the phase that **extends** the existing org-level RLS to cover principal-scoped predicates. Every canonical table, every connection table, every principal table, and every table holding personal-principal data gains policies that key on principal type/ID and visibility scope, in addition to the org-level policies they already inherit from the existing manifest.
+- RLS policies are defined in migration files alongside the schema, not in separate "apply policies" migrations. A table that gains RLS in one migration and policies in another is a failure mode that static gates must catch. New canonical tables MUST be added to `RLS_PROTECTED_TABLES` in the same migration that creates them — this is an existing gate, not a new one.
+- Session-variable setup is layered on the existing `withOrgTx` / `getOrgScopedDb` plumbing: P3 introduces `withPrincipalContext` as a thin extension that sets `app.current_principal_type` / `app.current_principal_id` / `app.current_subaccount_id` alongside the already-shipped `app.organisation_id`. Direct database access that bypasses this helper is a static-gate violation.
+- RLS is not applied to administrative tables where cross-tenant access is required for operation (e.g. system config, feature registry, platform-level tables). These are explicitly named in P3 and excluded — the existing `withAdminConnection` / `admin_role` bypass remains the only escape hatch.
+- Tests for RLS are written at the pure-function level for the policy predicate logic (principal → row visibility) and at the integration level for a small, exhaustive fixture set, extending the existing `server/services/__tests__/rls.context-propagation.test.ts` harness. Runtime tests for every query path are explicitly out of scope — we rely on the static gate that enforces principal-context propagation.
 
-**What this forecloses.** "We'll add RLS later when we need it." RLS is the precondition for every phase that exposes canonical data to principal-scoped queries, including Gmail (P4), Calendar (P5), and the NL→SQL surface (P6). Deferring it makes every one of those phases harder to ship safely. RLS lands in P3 and is not deferred.
+**What this forecloses.** "We'll add principal-scoped RLS later when we need it." The org-level layer is already there; principal-scoped policies are the precondition for every phase that exposes canonical data to principal-scoped queries, including Gmail (P4), Calendar (P5), and the NL→SQL surface (P6). Deferring it makes every one of those phases harder to ship safely. The principal-scoped extension lands in P3 and is not deferred.
 
 ---
 
@@ -512,6 +512,8 @@ A single `pg-boss` cron job `connector-polling-tick` runs every minute. Its hand
 
 Both jobs use `createWorker()` (the project's existing pg-boss wrapper primitive). Concurrency is bounded per connector to prevent one slow connection from starving others. Global concurrency is bounded to prevent API-rate-limit spikes across the fleet.
 
+**Reuse existing scheduling primitives.** `server/services/scheduleCalendarServicePure.ts` (Feature 1, 2026-04) already owns cron-parser / rrule / heartbeat-offset projection math via the `SOURCE_PRIORITY` and `computeNextHeartbeatAt` helpers, and `server/services/scheduleCalendarService.ts` projects upcoming agent runs. The polling scheduler MUST reuse the same cron-parser library version and treat `scheduleCalendarService` as the read model for "what is due / upcoming"; do not invent a parallel projection. If the connector-polling cadence model legitimately differs from agent-run scheduling (e.g. needs per-connection per-tenant rate-limit windows), that divergence is documented in the P1 implementation spec with a justification.
+
 **Stale-connector health detector:**
 
 A new detector file at `server/services/workspaceHealth/detectors/staleConnectorDetector.ts` following the existing detector convention. Re-exported from `detectors/index.ts`. Returns findings with severity:
@@ -701,6 +703,7 @@ Agents that need schema awareness (reporting agents, analytics agents, the NL→
 - NL→SQL query planning (P6).
 - Dynamic cost estimation or query-plan hints in the dictionary. The dictionary is semantic; cost concerns belong to the query planner.
 - Self-serve human-facing schema documentation (e.g. a web page listing all canonical tables). Useful but separate; the dictionary is for agent consumption.
+- **Non-canonical RLS-protected tables.** The dictionary covers `canonical_*` tables only. The following existing RLS-protected tables are agent-state or app-surface, NOT canonical data, and are explicitly excluded: `agent_test_fixtures`, `agent_beliefs`, `agent_briefings`, `subaccount_state_summaries`, `memory_review_queue`, `trust_calibration_state`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `memory_blocks`, `regression_cases`, `tool_call_security_events`. They live in `RLS_PROTECTED_TABLES` for tenant isolation but are not exposed via `canonicalDataService` and have no `readPath` tag.
 
 #### Entry criteria
 
@@ -815,6 +818,8 @@ CREATE INDEX agent_runs_principal_idx ON agent_runs (principal_type, principal_i
 
 Existing runs are backfilled: rows with `user_id` populated → `principal_type = 'user', principal_id = user_id::text`; rows triggered by scheduled jobs (identified by source) → `principal_type = 'service', principal_id = '<inferred service id>'`.
 
+`agent_runs` already gained `is_test_run boolean` in migration 0153 (Feature 2 — inline Run Now test UX). **Principal type is orthogonal to test-run status**: a `user`-principal run can also be `is_test_run = true`, and a `service`-principal scheduled run cannot. P3A must not collapse the two — treat `is_test_run` as a runtime mode flag and `principal_type` as the identity of the actor. The `agent_test_fixtures` table (migration 0153) is app-surface user-authored data and is **not** a canonical_* table — it is already in `RLS_PROTECTED_TABLES` and out of scope for the canonical data dictionary.
+
 On every canonical table, the columns defined in [Canonical data model conventions](#canonical-data-model-conventions) — `owner_user_id`, `visibility_scope`, `source_connection_id` — are added if not already present. Backfill rules per table are documented in the P3 implementation spec, not here.
 
 **Principal context helper.**
@@ -883,26 +888,30 @@ Postgres Row-Level Security enforces tenancy and principal-scoped visibility on 
 - All tables carry the required scoping columns.
 - Principal context is constructed at entry points and passed through service calls.
 - `canonicalDataService` enforces scope at the service layer.
-- No RLS policies exist on any table.
+- **Org-level RLS already exists** (Sprint 2 P1.1, migrations 0079–0082+) on 25+ tables — manifest in `server/config/rlsProtectedTables.ts`, keyed on `current_setting('app.organisation_id', true)`. P3B extends those existing policies with principal-scoped predicates; it does not introduce RLS from scratch.
+- No principal-scoped RLS predicates exist on any table.
+- No RLS policies exist on any canonical_* table (canonical tables themselves are introduced by P2 / P4 / P5 and inherit RLS as they ship).
 
 #### Design
 
 **Session-variable convention.**
 
-Four `SET LOCAL` variables, set at the start of every logical database session:
+`SET LOCAL` variables, set at the start of every logical database session:
 
-| Variable | Type | Value |
-|---|---|---|
-| `app.current_organisation_id` | uuid | Always required |
-| `app.current_subaccount_id` | uuid | Null = org-level run |
-| `app.current_principal_type` | text | `'user' \| 'service' \| 'delegated'` |
-| `app.current_principal_id` | text | userId, serviceId, or acting-as-userId |
+| Variable | Type | Value | Status |
+|---|---|---|---|
+| `app.organisation_id` | uuid | Always required | **Already shipped** — used by existing org-RLS policies |
+| `app.current_subaccount_id` | uuid | Null = org-level run | New in P3B |
+| `app.current_principal_type` | text | `'user' \| 'service' \| 'delegated'` | New in P3B |
+| `app.current_principal_id` | text | userId, serviceId, or acting-as-userId | New in P3B |
+
+**Naming-decision deferred to P3B implementation spec:** the shipped variable is `app.organisation_id` (no `current_` prefix). The new principal variables introduced here use the `app.current_*` family. Two options the implementation spec must pick between: (a) accept the asymmetry — keep `app.organisation_id` as-is and ship the three new variables under `app.current_*`; (b) rename `app.organisation_id` → `app.current_organisation_id` in a migration that also rewrites every existing policy and updates `server/middleware/orgScoping.ts`. Option (a) is the cheap default; option (b) is cosmetic-only and has wide blast radius. **Listed as an open question** below.
 
 Teams are resolved to a derived variable `app.current_team_ids` populated from a join against `team_members`, cached per session.
 
 **Session lifecycle.**
 
-Centralised in `server/db/withPrincipalContext.ts`:
+Centralised in `server/db/withPrincipalContext.ts`, layered on top of the existing `withOrgTx` / `getOrgScopedDb` plumbing in `server/middleware/orgScoping.ts` + `server/instrumentation.ts`:
 
 ```typescript
 export async function withPrincipalContext<T>(
@@ -911,7 +920,7 @@ export async function withPrincipalContext<T>(
 ): Promise<T>
 ```
 
-Every route handler wraps its DB work in this helper. Every job handler wraps its DB work. Every webhook handler wraps its DB work. Direct database access that does not go through `withPrincipalContext` is a static-gate violation.
+Internally this calls into the existing `withOrgTx` helper (which already sets `app.organisation_id` and opens a transaction) and additionally issues `SET LOCAL` for the three new principal variables. Every route handler, job handler, and webhook handler that previously called `withOrgTx` directly is migrated to `withPrincipalContext`. Direct database access that does not go through `withPrincipalContext` is a static-gate violation — extending the existing `verify-rls-contract-compliance.sh` gate rather than duplicating it.
 
 Connection pooling: pg-boss and the app share a pool configured to use transaction-mode pooling, which makes `SET LOCAL` variables session-safe. The helper begins a transaction, sets the variables, runs the work, commits. If a call does not need a transaction, the helper still opens one for the duration of the variable scope — this is the standard Postgres RLS pattern, and the overhead is negligible.
 
@@ -923,7 +932,7 @@ Representative policy for a 1:1-scoped canonical table (`canonical_contacts`):
 CREATE POLICY canonical_contacts_read ON canonical_contacts
   FOR SELECT
   USING (
-    organisation_id = current_setting('app.current_organisation_id', true)::uuid
+    organisation_id = current_setting('app.organisation_id', true)::uuid
     AND (
       -- service principals: shared-scope only
       (current_setting('app.current_principal_type', true) = 'service' AND visibility_scope IN ('shared-subaccount','shared-org')
@@ -962,10 +971,10 @@ Platform-level tables that legitimately need cross-tenant access (system config,
 
 **Role separation.**
 
-- `app_reader` — the role used by most application queries. RLS applies.
-- `canonical_writer` — used only by adapter write paths. Bypasses RLS on INSERT/UPDATE/DELETE (RLS on writes is enforced by the service layer that runs as this role, which only adapters can invoke).
+- `app_reader` — the role used by most application queries. RLS applies. (Most existing app traffic already runs under the default app role with RLS enforced; `app_reader` here is a clarifying name for that posture, not necessarily a new Postgres role.)
+- `canonical_writer` — new in P3B. Used only by adapter write paths. Bypasses RLS on INSERT/UPDATE/DELETE (RLS on writes is enforced by the service layer that runs as this role, which only adapters can invoke). Narrower than the existing `admin_role` — it can write canonical_* tables but cannot bypass RLS for reads of app-surface tables.
 - `migration_runner` — used only for schema migrations. Bypasses RLS entirely.
-- `admin_breakglass` — named but not wired to the application. Exists for operator-only break-glass access via a dedicated audited path. Not an application role.
+- `admin_role` — **already exists** (used by `withAdminConnection`, migrations 0079+, agent-run cleanup, memory-blocks maintenance). The full break-glass role. P3B does not replace or rename it; it remains the only escape hatch for cross-tenant operations and is not an application role for normal request paths.
 
 #### Pure helpers + tests
 
@@ -974,9 +983,9 @@ Platform-level tables that legitimately need cross-tenant access (system config,
 
 #### Static gates
 
-- `scripts/verify-rls-coverage.sh` — every canonical, connection, principal, and personal-data table has at least one SELECT policy unless it is in the exclusion registry.
-- `scripts/verify-visibility-parity.sh` — runs the parity harness; fails if pure predicate and SQL policy diverge on any fixture.
-- `scripts/verify-with-principal-context.sh` — direct database access outside `withPrincipalContext` is forbidden; grep-based enforcement.
+- `scripts/gates/verify-rls-coverage.sh` — **already exists** (Sprint 2 P1.1). P3B extends the underlying `RLS_PROTECTED_TABLES` manifest with every new canonical, connection, principal, and personal-data table; the gate continues to enforce that every manifest entry has a matching `CREATE POLICY` migration.
+- `scripts/verify-visibility-parity.sh` — new in P3B. Runs the parity harness; fails if pure predicate and SQL policy diverge on any fixture.
+- `scripts/gates/verify-rls-contract-compliance.sh` — **already exists**. P3B extends it (or adds a sibling `verify-with-principal-context.sh`) so direct database access outside `withPrincipalContext` is forbidden; grep-based enforcement on top of the existing `withOrgTx` enforcement.
 
 #### Out of scope for P3B
 
@@ -1535,6 +1544,8 @@ Every migration that adds a canonical column or table ships with: indexes (per c
 
 Any ingestion-time LLM call (the cheap classification passes in P4 and P5) attributes cost to the org owning the connection. `llmRouter` already supports org attribution; the classification pipeline passes `organisationId` through.
 
+**Test-run exclusion follows the existing pattern.** Per Feature 2 (`agent_runs.is_test_run`), `costAggregateService.upsertAggregates` skips org/subaccount P&L aggregate writes for test runs and writes only per-run dimensions. Any classification or live-fetch path that runs in a test-run context (e.g. test-running an agent that touches Gmail) MUST follow the same posture: per-run cost telemetry yes, P&L aggregates no. The classification job and the `fetch_email_body` skill respect `is_test_run` from the run context.
+
 Classification failures do not block ingestion. If the classifier is unavailable or returns malformed output, the row is ingested without classifications; a scheduled job `canonical-reclassify-missing` retries classification for rows with null classification within the last N days.
 
 ### Observability invariants
@@ -1622,12 +1633,6 @@ Items that appear in adjacent discussions but are explicitly NOT in scope for th
 
 ---
 
-## Deferred items with rationale
-
-*Chunk placeholder — written in chunk 8.*
-
----
-
 ## Open questions not yet decided
 
 Questions that are intentionally unresolved at the program level and will be decided by the implementation spec of the phase that needs the answer. Resolved answers should be folded back into this document as decisions or contracts.
@@ -1637,6 +1642,7 @@ Questions that are intentionally unresolved at the program level and will be dec
 - **Shape of `shared_team_ids` on connections vs. a join through `team_members`.** The spec sketches an array column on connections for speed; an alternative is a dedicated `connection_team_visibilities` join table. Decide during P3A based on team-membership volatility.
 - **Whether delegation grants should support per-canonical-row overrides** (e.g. "read my calendar but not events labelled private") vs. table-level-only. The current design is table + action only; row-level overrides add significant complexity. Open for P3A.
 - **Session-variable transaction scope exact pattern.** The spec assumes `SET LOCAL` within a transaction; the transaction scope for routes that span multiple service calls is not fully specified. Resolve during P3B with an integration test.
+- **Session-variable naming asymmetry vs. rename.** The shipped variable is `app.organisation_id`; the new principal variables are sketched as `app.current_subaccount_id` / `app.current_principal_type` / `app.current_principal_id`. Either accept the asymmetry (cheap; ship as-is) or rename `app.organisation_id` → `app.current_organisation_id` in a coordinated migration that also rewrites every existing RLS policy and updates `server/middleware/orgScoping.ts`. Blast radius of rename: every entry in `RLS_PROTECTED_TABLES` (~25 policies) plus the org-scoping middleware. Default recommendation is "accept asymmetry" unless a reviewer has a strong argument for the cosmetic win. Resolve before P3B's first migration lands.
 
 ### Pending for P4 implementation
 
@@ -1708,15 +1714,3 @@ Consolidated table of gate criteria. Each row names the phase, its entry depende
 | P6 | P3, P4, P5 | `query_canonical` skill end-to-end for representative question set; HITL gates firing for wide-scope and over-budget queries; validator rejects every write; per-principal caps enforced; `verify-query-allowlist.sh` + `verify-query-surface-write-refusal.sh` in CI; reviewers passed |
 
 Every phase also carries the standing expectations: docs updated in the same commit, `tasks/todo.md` entry closed, `tasks/lessons.md` appended if anything unexpected surfaced.
-
----
-
-## Glossary
-
-*Chunk placeholder — written in chunk 8.*
-
----
-
-## Appendix: Phase entry/exit criteria
-
-*Chunk placeholder — written in chunk 8.*

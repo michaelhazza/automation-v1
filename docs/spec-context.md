@@ -8,7 +8,7 @@ This file is the ground-truth framing reference for the `spec-reviewer` agent. E
 
 ## Framing statements
 
-Current as of 2026-04-08. Update the date whenever any of the statements below change.
+Current as of 2026-04-16. Update the date whenever any of the statements below change.
 
 ```yaml
 # Deployment context
@@ -51,6 +51,13 @@ accepted_primitives:
   - createWorker() (server/lib/createWorker.ts)
   - assertScope() (server/lib/scopeAssertion.ts) — per P1.1
   - mutateActiveToolsPreservingUniversal() (server/services/agentExecutionServicePure.ts) — per P4.1
+  - withOrgTx / getOrgScopedDb / withAdminConnection (server/middleware/orgScoping.ts, server/instrumentation.ts) — three-layer fail-closed isolation entry points
+  - RLS_PROTECTED_TABLES manifest (server/config/rlsProtectedTables.ts) — single source of truth for tenant-isolated tables; new tenant tables MUST be added in the same migration that creates them
+  - verify-rls-coverage.sh + verify-rls-contract-compliance.sh (scripts/gates/) — CI gates that enforce RLS manifest coverage and direct-DB-access prohibition
+  - rls.context-propagation.test.ts (server/services/__tests__/) — integration test harness for Layer B RLS default-deny posture
+  - scheduleCalendarServicePure (server/services/scheduleCalendarServicePure.ts) — cron-parser / rrule / heartbeat-offset projection math; SOURCE_PRIORITY + computeNextHeartbeatAt
+  - agent_runs.is_test_run + testRunIdempotency + testRunRateLimit (server/lib/) — test-run dual-bucket idempotency and rate limiting
+  - shared/runStatus.ts — TERMINAL_RUN_STATUSES / IN_FLIGHT_RUN_STATUSES / AWAITING_RUN_STATUSES sets, single source of truth for run-status semantics
 
 # Conventions the spec-reviewer should reject findings against
 convention_rejections:
