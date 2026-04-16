@@ -201,6 +201,7 @@ export async function seedConfigAgentGuidelinesForOrg(
               isNull(memoryBlocks.deletedAt),
             ),
           );
+        if (!raced) throw new Error(`Seeder race: block '${BLOCK_NAME}' expected to exist after conflict for org ${orgId}`);
         blockId = raced.id;
         log(`  [info] org ${orgId}: block created by concurrent seed — reusing (block_id=${blockId})`);
       }
