@@ -250,15 +250,15 @@ Vector indexes are **not** shipped as part of any phase in this program. This de
 
 ### D8 — Bundled-tier pricing for integration connections; engineering must keep per-connection costs observable
 
-**Decision.** Integration connections are priced to customers as a bundled allowance per agency tier (base tier ~10 connections, mid-tier ~25, enterprise 100+), with optional add-on packs. Usage-based per-connection line items and unlimited-connection offers are out of scope. Engineering responsibility: make per-connection cost (API calls, ingestion compute, storage) observable internally so tier economics can be tuned without customer-facing pricing changes.
+**Decision.** Integration connections are priced to customers as a bundled allowance per agency tier (base tier ~10 connections, mid-tier ~25, enterprise 100+), with optional add-on packs. Usage-based per-connection line items and unlimited-connection offers are out of scope. Engineering responsibility: make per-connection cost (API calls, ingestion compute, and row throughput) observable internally so tier economics can be tuned without customer-facing pricing changes.
 
-This is primarily a commercial decision, captured here only because it has engineering implications — it is documented for the record, not for a phase deliverable.
+This is primarily a commercial decision. The pricing and billing motion (meters, dashboards, tier-enforcement gates) is not a phase deliverable of this program. The engineering observability table (`integration_ingestion_stats`) that makes internal cost tuning possible is a P1 deliverable — it must exist before scheduled ingestion runs start producing data to record.
 
 **Why.** Per-connection metering creates buying friction at every hire, is unpredictable for customer budgeting, and is the top SaaS churn driver in the category. Unlimited-connection pricing is operationally catastrophic at enterprise scale. Bundled tiers with soft caps match how agencies actually plan staffing, keep customer bills predictable, and let internal cost variance (Gmail cheap, Zoom expensive) be absorbed by tier margin rather than exposed line-by-line.
 
 **Implications.**
 - Every connection row records `createdAt`, `provider`, and (after P1) `lastSuccessfulSyncAt`. This is already true for existing connections.
-- Every ingestion run records approximate API-call count and row-count ingested, written to an `integration_ingestion_stats` table (rolling window, not per-event history). Sufficient for internal cost tuning; not exposed to customers.
+- Every ingestion run records approximate API-call count, row-count ingested, and sync duration, written to an `integration_ingestion_stats` table (rolling window, not per-event history). Row throughput (`rows_ingested`) is the per-tier storage proxy — tier economics are evaluated from aggregate row counts across rolling windows, not from per-sync byte estimates. Sufficient for internal cost tuning; not exposed to customers.
 - Every canonical-backed skill invocation is already logged to `tool_call_security_events`. Per-connection cost attribution can join through `sourceConnectionId` on canonical rows.
 - Soft caps are enforced at the application layer: when an agency reaches its connection allowance, the UI prompts upsell rather than hard-blocking mid-workflow. Hard limits exist only at very high thresholds (e.g. 500 connections per org) to prevent abuse-scale ingestion.
 
@@ -351,9 +351,11 @@ A row's visibility to a principal is decided by a pure function `isVisibleTo(row
 | `visibilityScope = private`, `ownerUserId = P.userId` | Yes | No | Only if `ownerUserId = P.actingAsUserId` AND grant covers the canonical table |
 | `visibilityScope = private`, `ownerUserId ≠ P.userId` | No | No | No |
 | `visibilityScope = shared-team`, user in scope teams | Yes | No | No |
-| `visibilityScope = shared-subaccount`, row in current subaccount scope | Yes | Yes | Yes |
-| `visibilityScope = shared-org` | Yes | Yes | Yes |
+| `visibilityScope = shared-subaccount`, row in current subaccount scope | Yes | Yes | No¹ |
+| `visibilityScope = shared-org` | Yes | Yes | No¹ |
 | Row's `organisationId ≠ P.organisationId` | No (always) | No (always) | No (always) |
+
+¹ Delegated principals access the grantor's private data only. Shared-subaccount and shared-org rows are accessible to service and user principals directly without a delegation grant — there is no need for delegation to reach them, and expanding delegated scope to shared rows would make grants over-powerful relative to their stated purpose.
 
 The function is implemented in `server/services/principal/visibilityPredicatePure.ts` and tested exhaustively via fixtures. RLS policies in P3 express the same predicate in SQL; the pure helper and the RLS policy are kept in sync by a static gate that compares the fixture outputs against a SQL-replay harness.
 
@@ -414,7 +416,8 @@ Every new canonical table introduced by this program must honour the conventions
 | `source_connection_id` | uuid nullable | FK to `integration_connections` — identifies which connection produced this row; null for rows computed from other canonical sources (health snapshots, etc.) |
 | `owner_user_id` | uuid nullable | Owning user for personal-scope rows (Gmail, Calendar under personal connections); null for shared/org/service rows |
 | `visibility_scope` | enum not null | `private` \| `shared-team` \| `shared-subaccount` \| `shared-org` |
-| `external_id` | text nullable | Provider's ID for this row, for idempotent upsert; unique per `(source_connection_id, external_id)` where present |
+| `shared_team_ids` | uuid[] not null default '{}' | Teams that can see this row when `visibility_scope = shared-team`. Populated from the connection's team visibility at ingest time. Empty array = no team can see the row (even with `shared-team` scope). **Stale-data limitation:** if a connection's `shared_team_ids` is later changed via the admin UI, existing canonical rows retain stale values until reprocessed — team-visibility changes take effect for newly ingested rows only. The visibility-management UI task (deferred) must include a background job that propagates connection visibility changes to canonical rows; see Deferred items. |
+| `external_id` (or provider-specific equivalent) | text nullable / not null | Provider's ID for this row, for idempotent upsert. Use `external_id` for generic adapters; use a provider-specific name where clearer (e.g. `provider_message_id` for email, `provider_event_id` for calendar). The uniqueness guarantee — `UNIQUE (source_connection_id, <id_column>)` — is required regardless of the column name. |
 | `ingested_at` | timestamptz not null | When this row was written to canonical |
 | `source_updated_at` | timestamptz nullable | When the provider last modified this row, if the provider exposes it |
 | `deleted_at` | timestamptz nullable | Soft-delete pattern used elsewhere in the codebase |
@@ -426,10 +429,13 @@ Every new canonical table introduced by this program must honour the conventions
 | `(organisation_id)` | Every read filters by org |
 | `(organisation_id, subaccount_id)` | Subaccount-scoped queries |
 | `(organisation_id, owner_user_id)` | User-scoped queries (private data) |
-| `(source_connection_id, external_id)` unique partial where `external_id IS NOT NULL` | Idempotent upsert on reprocess |
+| `(shared_team_ids) using gin` | Fast array-overlap check in `shared-team` RLS policy |
+| `UNIQUE (source_connection_id, <id_column>)` where `<id_column>` is `external_id` or the provider-specific equivalent | Idempotent upsert on reprocess |
 | `(source_connection_id, ingested_at)` | Per-connection ingestion history and debugging |
 
 Tables with entity links (e.g. `canonical_emails` linking to `canonical_contacts`) additionally index each FK column.
+
+**Multi-subaccount-scoped tables skip the `(organisation_id, subaccount_id)` index.** For tables where `subaccount_id` is always null (emails, calendar events — see next section), this index is meaningless and must be omitted. Scope queries for those tables go through `canonical_row_subaccount_scopes`.
 
 ### Multi-subaccount-scoped tables (per D4)
 
@@ -542,6 +548,27 @@ Findings carry a stable `resourceId = connectionId` so repeat runs do not create
 
 - `scripts/verify-connector-scheduler.sh` — greps for direct calls to `connectorPollingService.syncConnector` outside the manual-sync route and the scheduler handler; fails if found. Prevents ad-hoc callers bypassing the scheduler and its principal-context wrapper.
 
+### Schema additions — `integration_ingestion_stats`
+
+```sql
+CREATE TABLE integration_ingestion_stats (
+  id uuid PRIMARY KEY,
+  connection_id uuid NOT NULL REFERENCES integration_connections(id),
+  sync_started_at timestamptz NOT NULL,
+  api_calls_approx int NOT NULL DEFAULT 0,
+  rows_ingested int NOT NULL DEFAULT 0,
+  sync_duration_ms int NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX integration_ingestion_stats_connection_idx
+  ON integration_ingestion_stats (connection_id, sync_started_at DESC);
+CREATE INDEX integration_ingestion_stats_created_at_idx
+  ON integration_ingestion_stats (created_at);
+```
+
+Rolling retention: rows older than 90 days are deleted by the nightly `canonical-*-purge` family job (or a dedicated `ingestion-stats-purge` job — implementation spec decides).
+
 ### Out of scope for P1
 
 - Per-connector rate-limit budgets (token buckets per provider). Noted as a P2 or later concern if a real rate-limit incident surfaces during P1.
@@ -554,8 +581,9 @@ Findings carry a stable `resourceId = connectionId` so repeat runs do not create
 
 ### Exit criteria
 
-- Migration landed with indexes.
+- All P1 migrations landed with indexes (integration_connections additions + integration_ingestion_stats).
 - Scheduled polling job running in dev/staging without manual intervention.
+- `integration_ingestion_stats` rows being written by the per-connection sync worker.
 - Stale-connector detector emitting findings for seeded stale fixtures.
 - Static gate in `scripts/run-all-gates.sh`.
 - `pr-reviewer` + `dual-reviewer` passed.
@@ -820,7 +848,7 @@ Existing runs are backfilled: rows with `user_id` populated → `principal_type 
 
 `agent_runs` already gained `is_test_run boolean` in migration 0153 (Feature 2 — inline Run Now test UX). **Principal type is orthogonal to test-run status**: a `user`-principal run can also be `is_test_run = true`, and a `service`-principal scheduled run cannot. P3A must not collapse the two — treat `is_test_run` as a runtime mode flag and `principal_type` as the identity of the actor. The `agent_test_fixtures` table (migration 0153) is app-surface user-authored data and is **not** a canonical_* table — it is already in `RLS_PROTECTED_TABLES` and out of scope for the canonical data dictionary.
 
-On every canonical table, the columns defined in [Canonical data model conventions](#canonical-data-model-conventions) — `owner_user_id`, `visibility_scope`, `source_connection_id` — are added if not already present. Backfill rules per table are documented in the P3 implementation spec, not here.
+On every canonical table, the columns defined in [Canonical data model conventions](#canonical-data-model-conventions) — `owner_user_id`, `visibility_scope`, `shared_team_ids`, `source_connection_id` — are added if not already present. Backfill rules per table are documented in the P3 implementation spec, not here.
 
 **Principal context helper.**
 
@@ -904,10 +932,9 @@ Postgres Row-Level Security enforces tenancy and principal-scoped visibility on 
 | `app.current_subaccount_id` | uuid | Null = org-level run | New in P3B |
 | `app.current_principal_type` | text | `'user' \| 'service' \| 'delegated'` | New in P3B |
 | `app.current_principal_id` | text | userId, serviceId, or acting-as-userId | New in P3B |
+| `app.current_team_ids` | uuid[] | Team IDs the current user belongs to; derived from a join against `team_members` and set per-session. Empty array for service/delegated principals. | New in P3B |
 
 **Naming-decision deferred to P3B implementation spec:** the shipped variable is `app.organisation_id` (no `current_` prefix). The new principal variables introduced here use the `app.current_*` family. Two options the implementation spec must pick between: (a) accept the asymmetry — keep `app.organisation_id` as-is and ship the three new variables under `app.current_*`; (b) rename `app.organisation_id` → `app.current_organisation_id` in a migration that also rewrites every existing policy and updates `server/middleware/orgScoping.ts`. Option (a) is the cheap default; option (b) is cosmetic-only and has wide blast radius. **Listed as an open question** below.
-
-Teams are resolved to a derived variable `app.current_team_ids` populated from a join against `team_members`, cached per session.
 
 **Session lifecycle.**
 
@@ -990,7 +1017,7 @@ Platform-level tables that legitimately need cross-tenant access (system config,
 #### Out of scope for P3B
 
 - Per-row encryption. Separate concern; noted in deferred items.
-- Admin UIs for teams, delegation grants, visibility changes on connections. Named requirement; built in a UI-focused follow-on, not blocking P3B exit.
+- Admin UIs for teams, delegation grants, visibility changes on connections. Named requirement; built in a UI-focused follow-on, not blocking P3B exit. **Note:** this task is not UI-only — changing a connection's team visibility requires a background job to propagate the new `shared_team_ids` to all canonical rows ingested from that connection (see stale-data limitation in Required columns). The follow-on spec must include that backfill job.
 - Auditing UI for "who has read my data." The audit log exists from P3A; a user-facing view of it is separate.
 
 #### Entry criteria
@@ -1125,6 +1152,7 @@ CREATE TABLE canonical_emails (
   source_connection_id uuid NOT NULL REFERENCES integration_connections(id),
   owner_user_id uuid REFERENCES users(id),            -- set for personal-owned connections
   visibility_scope scope_enum NOT NULL,
+  shared_team_ids uuid[] NOT NULL DEFAULT '{}',       -- teams with visibility (shared-team scope only; {} for private rows)
   provider text NOT NULL,                             -- 'gmail' (future: 'outlook')
   provider_message_id text NOT NULL,
   provider_thread_id text NOT NULL,
@@ -1158,6 +1186,7 @@ CREATE INDEX canonical_emails_owner_idx ON canonical_emails (organisation_id, ow
 CREATE INDEX canonical_emails_thread_idx ON canonical_emails (organisation_id, provider_thread_id);
 CREATE INDEX canonical_emails_sent_idx ON canonical_emails (organisation_id, sent_at DESC);
 CREATE INDEX canonical_emails_labels_gin ON canonical_emails USING gin (labels);
+CREATE INDEX canonical_emails_shared_team_gin ON canonical_emails USING gin (shared_team_ids);
 CREATE INDEX canonical_emails_source_idx ON canonical_emails (source_connection_id, ingested_at DESC);
 ```
 
@@ -1311,6 +1340,7 @@ CREATE TABLE canonical_calendar_events (
   source_connection_id uuid NOT NULL REFERENCES integration_connections(id),
   owner_user_id uuid REFERENCES users(id),
   visibility_scope scope_enum NOT NULL,
+  shared_team_ids uuid[] NOT NULL DEFAULT '{}',       -- teams with visibility (shared-team scope only; {} for personal rows)
   provider text NOT NULL,                             -- 'google_calendar'
   provider_event_id text NOT NULL,
   provider_series_id text,                            -- null for non-recurring
@@ -1343,6 +1373,7 @@ CREATE INDEX canonical_calendar_events_org_idx ON canonical_calendar_events (org
 CREATE INDEX canonical_calendar_events_owner_idx ON canonical_calendar_events (organisation_id, owner_user_id) WHERE deleted_at IS NULL AND owner_user_id IS NOT NULL;
 CREATE INDEX canonical_calendar_events_time_idx ON canonical_calendar_events (organisation_id, start_at);
 CREATE INDEX canonical_calendar_events_series_idx ON canonical_calendar_events (provider_series_id) WHERE provider_series_id IS NOT NULL;
+CREATE INDEX canonical_calendar_events_shared_team_gin ON canonical_calendar_events USING gin (shared_team_ids);
 CREATE INDEX canonical_calendar_events_source_idx ON canonical_calendar_events (source_connection_id, ingested_at DESC);
 ```
 
@@ -1704,13 +1735,13 @@ Consolidated table of gate criteria. Each row names the phase, its entry depende
 
 | Phase | Entry depends on | Exit conditions |
 |---|---|---|
-| P1 | (none) | Migration landed with indexes; scheduler running; stale-connector detector emitting findings; static gate in CI; pr-reviewer + dual-reviewer passed; architecture doc updated |
+| P1 | (none) | Migrations landed with indexes (`integration_connections` additions + `integration_ingestion_stats`); scheduler running; `integration_ingestion_stats` rows being written per sync; stale-connector detector emitting findings; static gate in CI; pr-reviewer + dual-reviewer passed; architecture doc updated |
 | P2A | P1 | Every action tagged `readPath`; every direct-API-reading skill refactored, reclassified, or deleted; `verify-skill-read-paths.sh` + `verify-canonical-read-interface.sh` in CI; reviewers passed |
 | P2B | P2A | Dictionary covers every canonical table; `canonical_dictionary` skill available; `verify-canonical-dictionary.sh` in CI; at least one agent consuming dictionary context; reviewers passed |
 | P3A | P2A, P2B | Additive migrations landed with indexes + backfill; `canonicalDataService` takes principal context; principal populated at all entry points; `verify-principal-context-propagation.sh` + `verify-canonical-required-columns.sh` + `verify-connection-shape.sh` in CI; dictionary updated; reviewers passed |
 | P3B | P3A | RLS policies on every in-scope table; `withPrincipalContext` helper used everywhere; parity harness passes; `verify-rls-coverage.sh` + `verify-visibility-parity.sh` + `verify-with-principal-context.sh` in CI; exclusion registry documents platform tables; reviewers passed |
 | P4 | P3A, P3B, P2A, P2B | Gmail OAuth (personal + shared-mailbox); ingestion lifecycle (backfill → transition → live) running; `canonical_emails` populated with correct principal/ownership/visibility; `fetch_email_body` working with HITL; `canonical-email-purge` job running; dictionary entry; `verify-email-thin-canonical.sh` + `verify-live-fetch-skill.sh` in CI; reviewers passed |
 | P5 | P4 | Calendar OAuth (scope-add to Gmail connections + standalone); ingestion lifecycle running; `canonical_calendar_events` populated with correct scoping; event-visibility filter working; dictionary entry; `verify-calendar-classification-versions.sh` in CI; reviewers passed |
-| P6 | P3, P4, P5 | `query_canonical` skill end-to-end for representative question set; HITL gates firing for wide-scope and over-budget queries; validator rejects every write; per-principal caps enforced; `verify-query-allowlist.sh` + `verify-query-surface-write-refusal.sh` in CI; reviewers passed |
+| P6 | P3, P2B, P4, P5 | `query_canonical` skill end-to-end for representative question set; HITL gates firing for wide-scope and over-budget queries; validator rejects every write; per-principal caps enforced; `verify-query-allowlist.sh` + `verify-query-surface-write-refusal.sh` in CI; reviewers passed |
 
 Every phase also carries the standing expectations: docs updated in the same commit, `tasks/todo.md` entry closed, `tasks/lessons.md` appended if anything unexpected surfaced.
