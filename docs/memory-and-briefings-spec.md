@@ -66,7 +66,9 @@ The memory system is a multi-table architecture with five complementary stores:
 
 **Existing playbook**: `daily-intelligence-brief.playbook.ts` — schedule-configurable briefing with `autoStartOnOnboarding: true`. Steps: research, draft, publish to portal, email digest.
 
-**Existing Configuration Assistant**: Fully architected system agent with 28 configuration tools, plan-approve-execute flow, config history, and restore capability. Runs in org subaccount. Frontend at `ConfigAssistantPage.tsx`.
+**Existing Configuration Assistant**: Fully architected system agent with 28 configuration tools, plan-approve-execute flow, config history, and restore capability. Runs in org subaccount. Frontend at `ConfigAssistantPage.tsx`. Runtime guidelines loaded from the `config-agent-guidelines` protected memory block (Three C's framework, priority order, tier model, safety gates).
+
+**Protected memory blocks infrastructure**: `server/lib/protectedBlocks.ts` defines an allowlist of system-managed block names. Route guards in `server/routes/memoryBlocks.ts` prevent creation with reserved names, deletion, rename, ownership change, and detachment of protected blocks. Content edits are permitted for org admins and logged for observability. Seed mechanism (`scripts/seedConfigAgentGuidelines.ts`) performs idempotent create-if-absent on deploy, logs divergence warnings if runtime content differs from canonical. This infrastructure is reusable for any future protected blocks.
 
 ### What does not exist
 
@@ -87,7 +89,7 @@ The memory system is a multi-table architecture with five complementary stores:
 - Async Configuration Document workflow (offline doc generation and upload)
 - Reusable DeliveryChannels component
 - Portfolio-level rollup briefings/digests
-- Memory block governance affordances (version history, diff vs canonical, reset-to-canonical, sandbox testing)
+- Memory block governance UI affordances (version history, diff vs canonical, reset-to-canonical, sandbox testing) — note: the protection layer (allowlist, route guards, seed-with-divergence-logging) is already shipped; what remains is the UI for version history, diff, and reset
 
 ## 3. Scope & Dependencies
 
@@ -118,11 +120,10 @@ The memory system is a multi-table architecture with five complementary stores:
 | S21 | Configuration Document workflow (async doc generation + upload + parse) | D |
 | S22 | Reusable DeliveryChannels component | D |
 | S23 | Portfolio rollup briefings and digests for agency owners | D |
-| S24 | Memory block governance affordances (version history, diff vs canonical, reset-to-canonical) | A |
+| S24 | Memory block governance affordances (version history, diff vs canonical, reset-to-canonical) — builds on existing protected blocks infrastructure | A |
 
 ### Out of scope
 
-- Configuration Agent runtime guidelines (separate branch, ships first — see `tasks/brief-config-agent-guidelines.md`)
 - Cross-subaccount memory sharing / org-wide memory pool (future)
 - ML-based domain/topic classification (current keyword-based approach is adequate for now)
 - Dynamic memory adjustment mid-run (briefing/beliefs injected upfront; lazy-load via `recall(query, k)` tool is a future enhancement to evaluate after this spec ships)
@@ -133,7 +134,7 @@ The memory system is a multi-table architecture with five complementary stores:
 
 | Dependency | Required by | Status |
 |---|---|---|
-| Configuration Agent runtime guidelines branch merged | S5 (onboarding mode), S10 (chat-based task creation) | In progress — see `tasks/brief-config-agent-guidelines.md` |
+| Configuration Agent runtime guidelines branch merged | S5 (onboarding mode), S10 (chat-based task creation) | **Shipped** — canonical doc at `docs/agents/config-agent-guidelines.md`, seeded as protected memory block `config-agent-guidelines`, auto-attached to Configuration Agent |
 | Existing memory block infrastructure (service, routes, schema, UI tab) | S6, S7, S11, S24 | Shipped |
 | Existing `daily-intelligence-brief.playbook.ts` | S18 | Shipped |
 | Existing Configuration Assistant (28 tools, plan-approve-execute) | S5, S10 | Shipped |
@@ -249,7 +250,7 @@ See [Section 8](#8-subaccount-onboarding-flow) for full design. Summary: when a 
 4. Return top-K blocks (default 5) above a similarity threshold (default 0.65, lower than memory entries because blocks are curated and generally higher quality).
 5. Token budget enforcement: blocks are added in relevance order until the block token budget is exhausted.
 
-**Manual pinning preserved as override:** Explicit attachments via `memory_block_attachments` still work and are always included (they bypass relevance scoring). This handles cases where the agency knows a block is always relevant regardless of task context.
+**Manual pinning preserved as override:** Explicit attachments via `memory_block_attachments` still work and are always included (they bypass relevance scoring). This handles cases where the agency knows a block is always relevant regardless of task context. Protected blocks (e.g., `config-agent-guidelines`) are always included via their explicit attachment — the relevance engine never drops them.
 
 **Migration:** Add an `embedding` column (vector(1536)) to `memory_blocks`. Backfill embeddings for existing blocks via a one-time migration job.
 
@@ -499,7 +500,7 @@ The Configuration Assistant gets a new `mode` parameter. In `subaccount-onboardi
 - A scoped toolset (memory block creation, playbook autostart, integration kickoff, portal config, DeliveryChannels, Configuration Document generation)
 - A different completion criterion (subaccount must be in "ready" state with both playbooks configured, not just "agent answered the question")
 
-Same plumbing as the existing Configuration Assistant org-admin mode. New mode, not new agent. The agent inherits its runtime guidelines from the platform-level memory block (see `tasks/brief-config-agent-guidelines.md` — ships in a separate branch first).
+Same plumbing as the existing Configuration Assistant org-admin mode. New mode, not new agent. The agent inherits its runtime guidelines from the platform-level memory block (`config-agent-guidelines` — shipped, canonical doc at `docs/agents/config-agent-guidelines.md`). The guidelines encode the Three C's diagnostic framework, priority order (configure existing > create new skills > create new agents), tier-edit permissions, confidence-tiered action policy, and safety gates. The onboarding mode's system prompt builds on top of these guidelines, not replaces them.
 
 ### 8.3 Two Paths — Live and Async
 
@@ -746,8 +747,6 @@ The job:
 4. Delivers via DeliveryChannels.
 
 ---
-
-## 12. Success Criteria
 
 ## 12. Success Criteria
 
