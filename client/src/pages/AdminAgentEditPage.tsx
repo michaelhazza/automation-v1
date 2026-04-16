@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { RunActivityChart } from '../components/ActivityCharts';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
+import TestPanel from '../components/runs/TestPanel';
 
 interface OrgAgentOption {
   id: string;
@@ -286,10 +287,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   // Agent state
   const [agent, setAgent] = useState<Agent | null>(null);
   const [form, setForm] = useState<AgentForm>(EMPTY_AGENT_FORM);
+  const [savedForm, setSavedForm] = useState<AgentForm>(EMPTY_AGENT_FORM);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState('');
   const [saveError, setSaveError] = useState('');
+  const isDirty = !isNew && JSON.stringify(form) !== JSON.stringify(savedForm);
 
   // Tab
   const [agentTab, setAgentTab] = useState<'config' | 'behaviour' | 'capabilities' | 'scheduling' | 'runs' | 'budget'>('config');
@@ -327,7 +330,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     try {
       const { data } = await api.get(`/api/agents/${agentId}`);
       setAgent(data);
-      setForm({
+      const loaded: AgentForm = {
         name: data.name ?? '',
         description: data.description ?? '',
         icon: data.icon ?? '',
@@ -352,7 +355,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         parentAgentId: data.parentAgentId ?? '',
         agentRole: data.agentRole ?? '',
         agentTitle: data.agentTitle ?? '',
-      });
+      };
+      setForm(loaded);
+      setSavedForm(loaded);
       setDataSources(data.dataSources ?? []);
     } finally {
       setLoading(false);
@@ -880,7 +885,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const agentInitial = agent?.name ? agent.name[0].toUpperCase() : (form.name ? form.name[0].toUpperCase() : '?');
 
   return (
-    <>
+    <div className="flex items-start gap-0 -mx-6 -my-7">
+      <div className="flex-1 min-w-0 py-7 px-6">
       {/* ── Breadcrumb ─────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1.5 text-[13px] text-slate-400 mb-5">
         <Link to="/admin/agents" className="text-slate-400 no-underline hover:text-indigo-600 transition-colors">
@@ -1592,7 +1598,21 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         />
       )}
 
-    </>
+      </div>{/* end main content */}
+
+      {/* ── Test panel (right-hand) ─────────────────────────────────────── */}
+      {!isNew && id && (
+        <TestPanel
+          panelKey={`test-panel:agent:${id}`}
+          label="Test"
+          testRunEndpoint={`/api/agents/${id}/test-run`}
+          fixturesEndpoint={`/api/org/agents/${id}/test-fixtures`}
+          saveFixtureEndpoint={`/api/org/agents/${id}/test-fixtures`}
+          hasUnsavedChanges={isDirty}
+          traceViewerBasePath="/admin/runs"
+        />
+      )}
+    </div>
   );
 }
 

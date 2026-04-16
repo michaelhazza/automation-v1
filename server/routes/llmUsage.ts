@@ -329,6 +329,8 @@ router.get(
           eq(costAggregates.periodType, 'run'),
           eq(agentRuns.subaccountId, subaccountId),
           eq(agentRuns.organisationId, req.orgId!),
+          // Feature 2 §4.7 — exclude test runs by default
+          eq(agentRuns.isTestRun, false),
         ),
       )
       .orderBy(desc(costAggregates.updatedAt))

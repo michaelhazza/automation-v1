@@ -206,6 +206,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0142_onboarding_bundle_configs.sql',
     rationale: 'Per-org onboarding bundle manifest — must stay tenant-isolated to prevent cross-org bundle leak.',
   },
+  // 0153 — Feature 2: test-input fixtures for inline Run-Now test panel
+  {
+    tableName: 'agent_test_fixtures',
+    schemaFile: 'agentTestFixtures.ts',
+    policyMigration: '0153_agent_test_fixtures.sql',
+    rationale: 'Test-input fixtures contain prompt text and JSON payloads authored by org/subaccount users — must stay tenant-isolated.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

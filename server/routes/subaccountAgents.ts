@@ -5,9 +5,11 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentBeliefService } from '../services/agentBeliefService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
+import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
 import { db } from '../db/index.js';
 import { agents, subaccounts, systemAgents } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
@@ -268,6 +270,50 @@ router.put(
       { value, category, subject },
     );
     res.json(belief);
+  })
+);
+
+// ── Feature 2 — inline test run ──────────────────────────────────────────────
+// POST .../agents/:linkId/test-run
+// Starts a flagged test run (is_test_run=true, runType='manual'). Rate-limited
+// to TEST_RUN_RATE_LIMIT_PER_HOUR per user (spec §4.8). Accepts an optional
+// client-provided idempotencyKey to deduplicate rapid double-clicks.
+router.post(
+  '/api/subaccounts/:subaccountId/agents/:linkId/test-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, linkId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    checkTestRunRateLimit(req.user!.id);
+    const link = await subaccountAgentService.getLinkById(req.orgId!, subaccountId, linkId);
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
+    const triggerContext: Record<string, unknown> = {
+      triggeredBy: req.user!.id,
+      source: 'test_panel',
+      isTestRun: true,
+    };
+    if (prompt) triggerContext.prompt = prompt;
+    if (inputJson) triggerContext.inputJson = inputJson;
+    const result = await agentExecutionService.executeRun({
+      agentId: link.agentId,
+      subaccountId,
+      subaccountAgentId: link.id,
+      organisationId: req.orgId!,
+      executionScope: 'subaccount',
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      isTestRun: true,
+      userId: req.user!.id,
+      triggerContext,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+    res.status(201).json(result);
   })
 );
 

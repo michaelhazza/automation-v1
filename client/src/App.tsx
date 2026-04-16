@@ -55,6 +55,8 @@ const ConfigDocumentUploadPage = lazy(() => import('./pages/ConfigDocumentUpload
 const MemoryBlockDetailPage = lazy(() => import('./pages/MemoryBlockDetailPage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
+const ScheduleCalendarPage = lazy(() => import('./pages/ScheduleCalendarPage'));
+const SubaccountScheduleCalendarPage = lazy(() => import('./pages/SubaccountScheduleCalendarPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
@@ -250,6 +252,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<SubaccountKnowledgePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
+            {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
+            <Route path="/admin/subaccounts/:subaccountId/schedule-calendar" element={<SubaccountScheduleCalendarPage user={user!} />} />
+            <Route path="/admin/schedule-calendar" element={<ScheduleCalendarPage user={user!} />} />
+            <Route path="/portal/:subaccountId/schedule-calendar" element={<SubaccountScheduleCalendarPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
             {/* Memory & Briefings Phase 2 — HITL review queue (S7) */}
             <Route path="/admin/subaccounts/:subaccountId/memory-review-queue" element={<MemoryReviewQueuePage />} />
@@ -323,8 +329,8 @@ export default function App() {
           {/* Review queue (portal access) */}
           <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
 
-          {/* Run trace viewer */}
-          <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+          {/* Run trace viewer — org-level (admin agent and skill test runs) */}
+          <Route path="/admin/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
