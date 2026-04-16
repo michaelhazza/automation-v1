@@ -512,6 +512,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   playbook_propose_save: async (input, context) => {
     return executePlaybookProposeSave(input, context);
   },
+  import_n8n_workflow: async (input) => {
+    return executeImportN8nWorkflow(input);
+  },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
   send_email: async (input, context) => {
@@ -4763,6 +4766,20 @@ async function executePlaybookProposeSave(
         'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
     };
   }
+  // Feature 3 §5.6 — high-severity gate for n8n imports.
+  // If the caller passes unresolved_high_severity_count > 0, the import
+  // session still has unacknowledged high-severity mapping items (disconnected
+  // nodes, unconvertible code/function nodes). Block until the admin resolves
+  // or explicitly dismisses each item.
+  if (
+    typeof input.unresolved_high_severity_count === 'number' &&
+    input.unresolved_high_severity_count > 0
+  ) {
+    return {
+      success: false,
+      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call playbook_propose_save again with unresolved_high_severity_count: 0.`,
+    };
+  }
   // Strict user-scope enforcement (review finding #3 from the previous
   // round). The agent run's initiating principal MUST be present on the
   // SkillExecutionContext; if it's missing (e.g. a scheduled / system
@@ -4809,5 +4826,47 @@ async function executePlaybookProposeSave(
       'Candidate rendered and recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
     sessionId,
     definitionHash: rendered.definitionHash,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Feature 3 — n8n Workflow Import (admin-callable Studio skill)
+// ---------------------------------------------------------------------------
+
+async function executeImportN8nWorkflow(
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { importN8nWorkflow, renderMappingReport } = await import('./n8nImportServicePure.js');
+
+  const workflowJsonRaw = input.workflow_json;
+  if (!workflowJsonRaw || typeof workflowJsonRaw !== 'string') {
+    return { success: false, error: 'workflow_json is required and must be a string' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(workflowJsonRaw);
+  } catch {
+    return { success: false, error: 'workflow_json is not valid JSON. Paste the full exported n8n workflow JSON.' };
+  }
+
+  const result = importN8nWorkflow(parsed);
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+
+  const reportMarkdown = renderMappingReport(result.report);
+  const highSeverityCount = result.report.filter(
+    (r) => r.warning?.severity === 'high',
+  ).length;
+
+  return {
+    success: true,
+    workflowName: result.workflowName,
+    steps: result.steps,
+    report: reportMarkdown,
+    credentialChecklist: result.credentialChecklist,
+    highSeverityCount,
+    summary: `Imported "${result.workflowName}": ${result.steps.length} steps, ${highSeverityCount} high-severity items requiring resolution before save.`,
   };
 }

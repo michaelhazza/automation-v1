@@ -191,6 +191,8 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'config_view_history',
   'config_publish_playbook_output_to_portal',
   'config_send_playbook_email_digest',
+  // Feature 3 — n8n Workflow Import
+  'import_n8n_workflow',
 ];
 
 // ---------------------------------------------------------------------------
