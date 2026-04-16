@@ -575,7 +575,7 @@ New config `max_table_growth_ratio REAL NOT NULL DEFAULT 1.5`. `remediateTables`
 
 ### 11.11.10 Warnings hard cap (DOCUMENTED)
 
-`validateMergeOutput` already enforces `MAX_MERGE_WARNINGS = 10` with a `WARNINGS_TRUNCATED` sentinel (see `skillAnalyzerServicePure.ts:772`). The plan keeps this; no change. Raising to 20 is unnecessary — UI rendering tests already assume ≤10.
+`validateMergeOutput` already enforces `MAX_MERGE_WARNINGS = 10` with a `WARNINGS_TRUNCATED` sentinel (see `skillAnalyzerServicePure.ts:772`). Plan retains the cap but adds severity-ordered truncation so critical warnings are never dropped in favour of informational ones (see §11.12.3). Raising the cap itself is unnecessary — UI rendering tests assume ≤10.
 
 ### 11.11.11 Correlation IDs on log events (ACCEPTED)
 
@@ -610,6 +610,105 @@ Existing routes use `skill-analyser` (British). The plan standardizes on that ev
 - [x] Correlation IDs on all new log events.
 - [x] `approval_decision_snapshot` persisted at approve.
 - [x] API paths use `skill-analyser` (British) consistently.
+
+---
+
+## 11.12 Third-review refinements (diminishing-returns polish)
+
+A third review raised ten ultra-edge items. Six accepted, two already covered, two deferred. The plan is now feature-complete — further review rounds will deliver diminishing returns.
+
+### 11.12.1 Approval drift detection (ACCEPTED — non-blocking)
+
+`skill_analyzer_results.approval_decision_snapshot` (§11.11.12) gains a `snapshotHash TEXT` sibling column computed from the stable-stringified snapshot at approve time. At Execute, `evaluateApprovalState` runs again; if the new snapshot hashes differently, the Execute response gets a structured log event `skill_analyzer.approval_drift_detected { runId, resultId, approvedHash, currentHash }` and a non-blocking entry in the response's `warnings[]`. **Execute does not abort** — drift is audit signal, not gate.
+
+### 11.12.2 Post-approval edit state (ACCEPTED — simple flag)
+
+`skill_analyzer_results` adds `was_approved_before BOOLEAN NOT NULL DEFAULT false`. Set `true` on the first approval; never reset. When a result is later unapproved (via `PATCH /results/:resultId` with `action=null`), `was_approved_before` stays `true` and UI renders a "⚠️ Modified after previous approval — re-review required" badge.
+
+No new state enum needed; the existing `actionTaken` triplet (`approved | rejected | skipped | null`) plus `was_approved_before` covers all UX cases.
+
+### 11.12.3 Warning severity ordering before truncation (ACCEPTED)
+
+`validateMergeOutput` in `skillAnalyzerServicePure.ts` currently truncates by insertion order (lines ~929–937). Change to sort by severity priority **before** applying `MAX_MERGE_WARNINGS = 10`:
+
+```
+critical > warning
+```
+
+Within the same severity, sort by tier (`decision_required > standard > informational`) using the `warning_tier_map` snapshot. The `WARNINGS_TRUNCATED` sentinel (lowest priority) is always appended last and never itself truncated. Prevents a flood of low-priority `TABLE_ROWS_DROPPED` from crowding out critical codes.
+
+### 11.12.4 Canonical content hashing for slug collision (ACCEPTED)
+
+`§11.11.7` hash compare at Execute uses a **canonical form** before hashing, not raw strings:
+- Trim trailing whitespace; normalize line endings to `\n`.
+- Collapse runs of blank lines to exactly one.
+- Stable JSON stringify for `definition` (sorted keys; array order preserved).
+- Strip `[SOURCE: ...]` markers from table cells (so Fix 4 auto-recovery doesn't cause false hash mismatch).
+
+A new pure helper `canonicalContentHash(content): string` lives in `skillParserServicePure.ts` next to the existing `contentHash`. Tests compare the two on equivalent-with-whitespace fixtures.
+
+### 11.12.5 Merge-wipe UI banner (ACCEPTED)
+
+When `PATCH /merge` or `POST /merge/reset` returns and the previous state had non-empty `warning_resolutions`, the response includes `resolutionsCleared: true`. Client renders a toast: "Review decisions reset because the merge changed. Re-review required before approval." Banner persists until the reviewer interacts with any warning resolution UI.
+
+### 11.12.6 Formalized Execute response shape (ACCEPTED)
+
+`executeApproved` already returns `{ created, updated, failed, errors, backupId }`. Plan formalizes the full response:
+
+```ts
+interface ExecuteResponse {
+  runId: string;                           // §11.11.11
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    warnings: number;                      // non-blocking warnings accumulated
+  };
+  errors: Array<{ resultId: string; error: string }>;
+  pendingDraftAgents: Array<{ agentId: string; slug: string; name: string }>;
+  approvalDriftDetected: Array<{ resultId: string; approvedHash: string; currentHash: string }>;
+  backupId: string | null;
+}
+```
+
+### 11.12.7 Config snapshot immutability (ACCEPTED — code invariant)
+
+`jobs.config_snapshot` and `jobs.config_version_used` are written **only at job row INSERT** (first persistence of the job) and never again. Documented as a comment on the column. No endpoint exposes an update path. Enforcement: a unit test asserts that no code path under `server/jobs/` or `server/services/skillAnalyzer*` issues an UPDATE touching these columns. A DB CHECK constraint is considered but not enforced (Postgres CHECK can't compare old-vs-new; a trigger is overkill at this scale).
+
+### 11.12.8 Per-result retry already covered (DOCUMENTED)
+
+Item 3 on the review list (`execution_state` per result, retry only failed/pending) is already in code at `skillAnalyzerService.ts:832`:
+
+```ts
+const approvedResults = results.filter(
+  (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
+);
+```
+
+`executionResult` already provides the state enum (`created | updated | skipped | failed | null`). Plan documents this; no change needed.
+
+### 11.12.9 Auto-unlock stale execution lock (ACCEPTED — opt-in)
+
+New config flag `execution_auto_unlock_enabled BOOLEAN NOT NULL DEFAULT false`. When enabled, `POST /execute` on a job whose `execution_lock=true` AND `execution_started_at < now() - execution_lock_stale_seconds` atomically reclaims the lock rather than 409-ing.
+
+Default **off** because auto-unlock is the classic "zombie process" risk — a slow DB or paused container could still be executing and we'd happily start a second run. Manual unlock via `POST /jobs/:jobId/execute/unlock` (§11.11.3) stays as the recovery default.
+
+### 11.12.10 Deferred
+
+- **Collision-cache TTL / retention:** at current library size (<1000 skills × ~10 fragments each = 10k rows), the fragment cache is small. Revisit when library exceeds 5000 skills.
+
+### Updated pre-implementation acceptance checklist
+
+- [x] `approval_hash` + drift detection at Execute (non-blocking).
+- [x] `was_approved_before` flag for post-approval-edit UX.
+- [x] Sort warnings by severity before truncation.
+- [x] `canonicalContentHash` for slug-collision idempotency.
+- [x] Merge-wipe UI banner signals resolution reset.
+- [x] Formalized `ExecuteResponse` shape.
+- [x] `config_snapshot` immutable after job INSERT.
+- [x] Auto-unlock gated behind explicit config flag (default off).
 
 
 
