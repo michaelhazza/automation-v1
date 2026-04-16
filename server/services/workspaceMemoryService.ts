@@ -779,6 +779,14 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             domain,
             topic,
             createdAt: new Date(),
+            // Citation provenance — PR Review Hardening Item 2
+            provenanceSourceType: runId ? ('agent_run' as const) : null,
+            provenanceSourceId: runId ?? null,
+            provenanceConfidence: null,
+            // runId is always a string here; !runId guards future call sites
+            // (e.g. manual/drop-zone inserts) where runId may be null.
+            isUnverified: !runId,
+            qualityScoreUpdater: 'initial_score' as const,
           };
         });
 
@@ -790,7 +798,13 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             .where(eq(workspaceMemoryEntries.id, op.existingId));
         } else if (op.op === 'UPDATE' && op.updatedContent) {
           await db.update(workspaceMemoryEntries)
-            .set({ content: op.updatedContent, qualityScore: scoreMemoryEntry({ content: op.updatedContent, entryType: op.entryType }) })
+            .set({
+              content: op.updatedContent,
+              qualityScore: scoreMemoryEntry({ content: op.updatedContent, entryType: op.entryType }),
+              // 'initial_score' is the closest available value — no 'dedup_update'
+              // variant exists. Required so the quality_score_guard trigger passes.
+              qualityScoreUpdater: 'initial_score',
+            })
             .where(eq(workspaceMemoryEntries.id, op.existingId));
         }
       }
@@ -807,7 +821,10 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
               const embedding = await generateEmbedding(entry.content);
               if (embedding) {
                 await db.execute(
-                  sql`UPDATE workspace_memory_entries SET embedding = ${formatVectorLiteral(embedding)}::vector WHERE id = ${entry.id}`
+                  sql`UPDATE workspace_memory_entries
+                         SET embedding = ${formatVectorLiteral(embedding)}::vector,
+                             embedding_computed_at = NOW()
+                       WHERE id = ${entry.id}`
                 );
               }
             } catch {
@@ -1716,7 +1733,8 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
         await db.execute(
           sql`UPDATE workspace_memory_entries
               SET embedding_context = ${context},
-                  embedding = ${formatVectorLiteral(embedding)}::vector
+                  embedding = ${formatVectorLiteral(embedding)}::vector,
+                  embedding_computed_at = NOW()
               WHERE id = ${entry.id}
                 AND embedding_context IS NULL`
         );

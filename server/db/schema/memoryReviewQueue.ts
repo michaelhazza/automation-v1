@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, real, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, real, jsonb, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
@@ -55,6 +55,11 @@ export const memoryReviewQueue = pgTable(
     resolvedByUserId: uuid('resolved_by_user_id'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // PR Review Hardening — Item 4: clarification dependency flag.
+    // When true the run that triggered this clarification must not have its
+    // outputs used by synthesis if the clarification timed out.
+    requiresClarification: boolean('requires_clarification').notNull().default(false),
   },
   (table) => ({
     // Primary query path: per-subaccount queue sorted by recency

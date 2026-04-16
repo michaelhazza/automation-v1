@@ -52,6 +52,12 @@ export interface RequestClarificationInput {
   contextSnippet?: string | null;
   urgency: ClarificationUrgency;
   suggestedAnswers?: string[];
+  /**
+   * When true, downstream synthesis must not use outputs from this run if the
+   * clarification times out (hadUncertainty=true in runMetadata).
+   * Defaults to false.
+   */
+  requiresClarification?: boolean;
 }
 
 export interface RequestClarificationResult {
@@ -143,7 +149,9 @@ export async function requestClarification(
         stepId: input.stepId ?? null,
         askingAgentId: input.askingAgentId,
         routingConfigSnapshot: config,
+        requiresClarification: input.requiresClarification ?? false,
       },
+      requiresClarification: input.requiresClarification ?? false,
     })
     .returning({ id: memoryReviewQueue.id });
 

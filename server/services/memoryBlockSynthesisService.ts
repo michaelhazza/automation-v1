@@ -122,6 +122,8 @@ export async function runSynthesisForSubaccount(
         isNull(workspaceMemoryEntries.deletedAt),
         gt(workspaceMemoryEntries.qualityScore, 0.7),
         gt(workspaceMemoryEntries.citedCount, 2),
+        // Provenance guard: do not synthesise from unverified entries.
+        eq(workspaceMemoryEntries.isUnverified, false),
       ),
     )
     .limit(500);

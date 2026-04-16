@@ -86,6 +86,18 @@ export const memoryBlocks = pgTable(
     // Set by protectedBlockDivergenceService daily job; null otherwise.
     divergenceDetectedAt: timestamp('divergence_detected_at', { withTimezone: true }),
 
+    // PR Review Hardening — Item 6: explicit canonical version pointer.
+    // Set by memoryBlockVersionService.writeVersionRow() in the same transaction
+    // as each content mutation. Eliminates "latest by timestamp" ambiguity.
+    // Note: FK to memory_block_versions.id is managed by migration 0150 only —
+    // importing memoryBlockVersions here would create a circular dependency
+    // (memoryBlockVersions already imports memoryBlocks).
+    // The partial index memory_blocks_active_version_idx is likewise declared
+    // only in migration 0150 — same pattern as the HNSW index in
+    // workspaceMemories.ts (Drizzle cannot represent partial indexes on nullable
+    // FK columns where the referenced table cannot be imported here).
+    activeVersionId: uuid('active_version_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

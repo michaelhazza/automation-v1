@@ -17,6 +17,7 @@ import {
   computeBackoffDelay,
   canAttempt,
   shouldDispatchChannel,
+  resolveDeliveryEligibility,
   type DeliveryChannel,
 } from '../deliveryServicePure.js';
 
@@ -277,6 +278,67 @@ test('spec §10.5: email has most retries, portal has fewest', () => {
     'slack retries > portal retries per spec',
   );
   assertEqual(getMaxRetries('portal'), 0, 'portal has 0 retries');
+});
+
+// ---------------------------------------------------------------------------
+// resolveDeliveryEligibility — single source of truth for final channel set
+// ---------------------------------------------------------------------------
+
+console.log('resolveDeliveryEligibility:');
+
+test('email is always eligible regardless of availability or config', () => {
+  const result = resolveDeliveryEligibility(
+    { email: false, portal: false, slack: false },
+    { email: false, portal: false, slack: false },
+  );
+  assertTrue(result.email, 'email must be true even when available=false and config=false');
+});
+
+test('portal requires both available and config enabled — all three cases', () => {
+  // available + config on → true
+  const bothOn = resolveDeliveryEligibility(
+    { email: true, portal: true,  slack: false },
+    { email: true, portal: true,  slack: false },
+  );
+  assertTrue(bothOn.portal, 'portal: available=true + config=true → true');
+
+  // not available → false even if config on
+  const notAvail = resolveDeliveryEligibility(
+    { email: true, portal: false, slack: false },
+    { email: true, portal: true,  slack: false },
+  );
+  assertFalse(notAvail.portal, 'portal: available=false + config=true → false');
+
+  // available but config off → false
+  const configOff = resolveDeliveryEligibility(
+    { email: true, portal: true,  slack: false },
+    { email: true, portal: false, slack: false },
+  );
+  assertFalse(configOff.portal, 'portal: available=true + config=false → false');
+});
+
+test('slack requires both available and config enabled — available+config→true', () => {
+  const result = resolveDeliveryEligibility(
+    { email: true, portal: false, slack: true },
+    { email: true, portal: false, slack: true },
+  );
+  assertTrue(result.slack, 'slack: available=true + config=true → true');
+});
+
+test('slack requires both available and config enabled — not available→false', () => {
+  const result = resolveDeliveryEligibility(
+    { email: true, portal: false, slack: false },
+    { email: true, portal: false, slack: true },
+  );
+  assertFalse(result.slack, 'slack: available=false + config=true → false');
+});
+
+test('slack requires both available and config enabled — config off→false', () => {
+  const result = resolveDeliveryEligibility(
+    { email: true, portal: false, slack: true },
+    { email: true, portal: false, slack: false },
+  );
+  assertFalse(result.slack, 'slack: available=true + config=false → false');
 });
 
 // ---------------------------------------------------------------------------

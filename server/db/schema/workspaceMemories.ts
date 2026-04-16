@@ -133,6 +133,36 @@ export const workspaceMemoryEntries = pgTable(
     // plain uuid because the ORM's builder does not support forward-
     // references to the same table cleanly.
     promotedFromEntryId: uuid('promoted_from_entry_id'),
+
+    // PR Review Hardening — migration 0150 ————————————————————————————————
+
+    // Item 1: lifecycle timestamps. Each async job sets its timestamp on every
+    // row it touches so downstream jobs can verify ordering.
+    // decayComputedAt: set by nightly decay job. Utility-adjust job checks IS NOT
+    //   NULL before running — ensures decay always precedes utility adjustment.
+    // qualityComputedAt: set by both decay and utility jobs when qualityScore changes.
+    // embeddingComputedAt: set when the entry's embedding vector is written.
+    embeddingComputedAt: timestamp('embedding_computed_at', { withTimezone: true }),
+    qualityComputedAt:   timestamp('quality_computed_at',   { withTimezone: true }),
+    decayComputedAt:     timestamp('decay_computed_at',     { withTimezone: true }),
+
+    // Item 2: citation provenance at write boundary.
+    // provenanceSourceType: who created this entry. NULL => isUnverified=true.
+    // provenanceSourceId:   UUID of the specific run/upload/playbook.
+    // provenanceConfidence: optional [0,1] confidence score.
+    // isUnverified: true when no provenance supplied. High-trust paths
+    //   (synthesis, utility-adjust) filter these out.
+    provenanceSourceType: text('provenance_source_type')
+      .$type<'agent_run' | 'manual' | 'playbook' | 'drop_zone' | 'synthesis'>(),
+    provenanceSourceId:   uuid('provenance_source_id'),
+    provenanceConfidence: real('provenance_confidence'),
+    isUnverified:         boolean('is_unverified').notNull().default(false),
+
+    // Item 7: DB-level qualityScore mutation guard.
+    // Every UPDATE that changes qualityScore must also set this field to an
+    // allowed value; the trigger in migration 0150 raises otherwise.
+    qualityScoreUpdater: text('quality_score_updater')
+      .$type<'initial_score' | 'system_decay_job' | 'system_utility_job'>(),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB

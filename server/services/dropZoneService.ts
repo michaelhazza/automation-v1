@@ -23,6 +23,9 @@ import { db } from '../db/index.js';
 import {
   subaccounts,
   dropZoneUploadAudit,
+  dropZoneProcessingLog,
+  type DropZoneProcessingStep,
+  type DropZoneProcessingStatus,
 } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -240,6 +243,15 @@ export async function confirm(input: ConfirmInput): Promise<ConfirmResult> {
     auditRowId = row?.id ?? '';
   });
 
+  // Log parse step outside the transaction so the audit row FK is guaranteed
+  // to exist (transaction committed) before log rows are inserted. Uses the
+  // top-level db connection intentionally — log failures are non-fatal.
+  // Deeper pipeline stages (synthesize, index) add their own calls.
+  if (auditRowId) {
+    await logProcessingStep({ auditId: auditRowId, step: 'parse', status: 'started' });
+    await logProcessingStep({ auditId: auditRowId, step: 'parse', status: 'completed' });
+  }
+
   const auditId = auditRowId;
 
   proposalCache.delete(input.uploadId);
@@ -267,4 +279,41 @@ export function getProposal(uploadId: string): UploadProposal | null {
   const { buffer: _b, ...rest } = cached;
   void _b;
   return rest;
+}
+
+// ---------------------------------------------------------------------------
+// logProcessingStep — append a pipeline step event for observability
+// ---------------------------------------------------------------------------
+
+/**
+ * Append one row to drop_zone_processing_log for the given audit row.
+ *
+ * Call at the start and end of each pipeline stage (parse, synthesize, index)
+ * so we can answer "did this upload actually become memory?" and
+ * "where did it fail?". Non-fatal: a warning is logged on DB error so a
+ * logging failure never blocks the actual pipeline work.
+ */
+export async function logProcessingStep(params: {
+  auditId: string;
+  step: DropZoneProcessingStep;
+  status: DropZoneProcessingStatus;
+  errorCode?: string;
+  durationMs?: number;
+}): Promise<void> {
+  try {
+    await db.insert(dropZoneProcessingLog).values({
+      uploadAuditId: params.auditId,
+      step: params.step,
+      status: params.status,
+      errorCode: params.errorCode ?? null,
+      durationMs: params.durationMs ?? null,
+    });
+  } catch (err) {
+    logger.warn('dropZoneService.logProcessingStep.failed', {
+      auditId: params.auditId,
+      step: params.step,
+      status: params.status,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

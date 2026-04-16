@@ -40,6 +40,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
       payload: memoryReviewQueue.payload,
       expiresAt: memoryReviewQueue.expiresAt,
       organisationId: memoryReviewQueue.organisationId,
+      requiresClarification: memoryReviewQueue.requiresClarification,
     })
     .from(memoryReviewQueue)
     .where(
@@ -61,6 +62,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
       const payload = (row.payload as Record<string, unknown>) ?? {};
       const activeRunId = (payload.activeRunId as string | null) ?? null;
       const urgency = (payload.urgency as string | null) ?? null;
+      const requiresClarification = row.requiresClarification ?? false;
 
       if (activeRunId && urgency === 'blocking') {
         // Mark the run as having uncertainty and update status so the
@@ -97,6 +99,8 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
                   {
                     clarificationId: row.id,
                     timedOutAt: now.toISOString(),
+                    urgency,
+                    requiresClarification,
                   },
                 ],
               },

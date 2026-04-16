@@ -16,7 +16,7 @@
  * Spec: docs/memory-and-briefings-spec.md §4.1 (S1)
  */
 
-import { eq, and, isNull, lt, inArray, sql } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workspaceMemoryEntries } from '../db/schema/index.js';
 import {
@@ -86,9 +86,21 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
           const newScore = Math.max(0.1, currentScore * factor);
           await db
             .update(workspaceMemoryEntries)
-            .set({ qualityScore: newScore })
+            .set({
+              qualityScore: newScore,
+              qualityScoreUpdater: 'system_decay_job',
+              qualityComputedAt: now,
+              decayComputedAt: now,
+            })
             .where(eq(workspaceMemoryEntries.id, entry.id));
           decayed += 1;
+        } else {
+          // Score unchanged — still stamp decayComputedAt so the utility-adjust
+          // job knows decay has run on this entry (ordering guard).
+          await db
+            .update(workspaceMemoryEntries)
+            .set({ decayComputedAt: now })
+            .where(eq(workspaceMemoryEntries.id, entry.id));
         }
         processed += 1;
       }
@@ -215,6 +227,7 @@ export interface UtilityAdjustmentSummary {
  */
 export async function adjustFromUtility(subaccountId: string): Promise<UtilityAdjustmentSummary> {
   const started = Date.now();
+  const now = new Date();
   let scanned = 0;
   let boosted = 0;
   let reduced = 0;
@@ -232,6 +245,11 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
       and(
         eq(workspaceMemoryEntries.subaccountId, subaccountId),
         isNull(workspaceMemoryEntries.deletedAt),
+        // Ordering guard: only adjust entries that have had at least one
+        // decay pass. Ensures decay always precedes utility adjustment.
+        isNotNull(workspaceMemoryEntries.decayComputedAt),
+        // Skip unverified entries — no provenance = no reliable utility signal.
+        eq(workspaceMemoryEntries.isUnverified, false),
       ),
     );
 
@@ -248,7 +266,11 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
     if (decision.action === 'boost' || decision.action === 'reduce') {
       await db
         .update(workspaceMemoryEntries)
-        .set({ qualityScore: decision.newScore })
+        .set({
+          qualityScore: decision.newScore,
+          qualityScoreUpdater: 'system_utility_job',
+          qualityComputedAt: now,
+        })
         .where(eq(workspaceMemoryEntries.id, entry.id));
       if (decision.action === 'boost') boosted += 1;
       else reduced += 1;

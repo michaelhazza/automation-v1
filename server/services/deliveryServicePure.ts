@@ -121,3 +121,31 @@ export function shouldDispatchChannel(
   if (channel === 'email') return true; // always-on inbox invariant
   return Boolean(config[channel]);
 }
+
+// ---------------------------------------------------------------------------
+// Eligibility resolver — single source of truth for final channel set
+// ---------------------------------------------------------------------------
+
+/**
+ * Combine channel *availability* (from DB/integrations) with user *config*
+ * (per-subaccount delivery preferences) to return the final set of enabled
+ * channels for a delivery run.
+ *
+ * Rules:
+ *   email  — always true (always-on inbox invariant §10.5)
+ *   portal — true only when available.portal AND config.portal
+ *   slack  — true only when available.slack AND config.slack
+ *
+ * All callers (routes, backend validation, execution layer) must use this
+ * function — no caller should re-implement the logic. PR Review Item 5.
+ */
+export function resolveDeliveryEligibility(
+  available: DeliveryChannelConfig,
+  config: DeliveryChannelConfig,
+): DeliveryChannelConfig {
+  return {
+    email:  true,
+    portal: available.portal && config.portal,
+    slack:  available.slack  && config.slack,
+  };
+}

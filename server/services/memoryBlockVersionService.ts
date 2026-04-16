@@ -87,6 +87,16 @@ export async function writeVersionRow(params: WriteVersionParams): Promise<Memor
     })
     .returning();
 
+  if (inserted) {
+    // Keep activeVersionId in sync. All callers (memoryBlockService content
+    // mutations, resetToCanonical) share this path so the pointer is always
+    // authoritative — no caller needs to resolve "latest by timestamp".
+    await dbh
+      .update(memoryBlocks)
+      .set({ activeVersionId: inserted.id })
+      .where(eq(memoryBlocks.id, params.blockId));
+  }
+
   return inserted ?? null;
 }
 

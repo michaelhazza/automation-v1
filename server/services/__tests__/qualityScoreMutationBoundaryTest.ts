@@ -39,6 +39,8 @@ const ALLOWED_WRITER_PATHS = new Set<string>([
   'server/services/__tests__/memoryBlockUpsertPure.test.ts',
   // Migration SQL + Drizzle schemas declare the column.
   'server/db/schema/workspaceMemories.ts',
+  // Migration 0150 declares the quality_score_updater column, backfill, and trigger.
+  'migrations/0150_pr_review_hardening.sql',
 ]);
 
 // Mutation patterns we look for. The first catches the Drizzle `.set({...})`
