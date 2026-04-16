@@ -237,6 +237,8 @@ The `agent_beliefs` table already has `supersededBy` and `supersededAt` columns 
 
 Both thresholds are tunable in `limits.ts`. The initial implementation uses deterministic text-matching only (no additional LLM cost). A lightweight post-run LLM pass is available as a graduated fallback if text-matching proves insufficient in practice — the service contract (citation score + threshold) is unchanged in either case; only the scoring engine is swapped.
 
+**Calibration note.** `CITATION_THRESHOLD = 0.7`, `CITATION_TEXT_OVERLAP_MIN = 0.35`, and `CITATION_TEXT_TOKEN_MIN = 8` are sensible starting defaults, not proven operating values. Treat them as launch calibration knobs — the first 2–4 weeks after S12 ships should include a review of the observed cited/injected ratio distribution and a threshold-tuning pass before S4's quality-adjustment loop is given full authority to reduce `qualityScore`. The tuning pass is a Phase 2 exit-criterion, not a Phase 3 blocker.
+
 **S4 — Quality adjustment:** A weekly background job adjusts `qualityScore` based on `utilityRate`:
 - Entries with `utilityRate` > 0.5 get a quality boost (capped at 1.0)
 - Entries with `utilityRate` < 0.1 over 10+ injections get a quality reduction
@@ -354,6 +356,8 @@ Owning service: `memoryReviewQueueService`. Org rollup reads counts grouped by `
 **Trust state storage:** The per-client trust counter is stored as a `clientUploadTrustState` JSONB column on the `subaccounts` table with shape `{ approvedCount: number, trustedAt: string | null, resetAt: string | null }`. Owning service: `portalUploadService`. The JSONB column avoids an additional table while keeping the state co-located with the subaccount record it governs.
 
 **Audit log (per upload).** Every drop-zone upload — agency-initiated or client-initiated via the portal — writes one row to a new `drop_zone_upload_audit` table. Columns: `id`, `subaccountId`, `uploaderUserId` (nullable — null for client-portal uploads), `uploaderRole` (`agency_staff | client_contact`), `fileName`, `fileHash` (sha256, for dedupe detection), `proposedDestinations` (JSONB — the system's suggestion with confidence scores), `selectedDestinations` (JSONB — what the user actually ticked), `appliedDestinations` (JSONB — what actually got filed after transaction), `requiredApproval` (boolean — whether trust-builds-over-time gate was active), `approvedByUserId` (nullable), `createdAt`, `appliedAt` (nullable — null if rejected or still pending). This table is the source of truth for: (a) the Weekly Digest "uploads this week" summary, (b) the trust-builds-over-time counter recomputation if the JSONB state is ever lost, and (c) compliance review for agencies handling regulated client data. No soft-delete — audit rows are immutable and retained indefinitely.
+
+**Required indexes.** This is an append-only, forever-growth table — indexing must be deliberate or queries quietly become expensive. Ship the migration with: `(subaccountId, createdAt DESC)` composite for the digest and per-client timeline queries, `(fileHash)` for dedupe detection, and `(subaccountId, uploaderRole, createdAt DESC)` for compliance-review splits by uploader type. No index on `uploaderUserId` alone — uploader-scoped queries always run within a subaccount. Revisit if query patterns demand it.
 
 ---
 
