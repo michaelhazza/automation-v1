@@ -121,6 +121,10 @@ export const SUBACCOUNT_PERMISSIONS = {
   // Skills (subaccount-scoped skill management; migration 0117)
   SKILLS_VIEW: 'subaccount.skills.view',
   SKILLS_MANAGE: 'subaccount.skills.manage',
+  // Schedule visibility (Scheduled Runs Calendar portal surface; Feature 1
+  // of docs/routines-response-dev-spec.md §3.4). Grants client users the
+  // "Upcoming Work" card path without granting general workspace.view.
+  SCHEDULE_VIEW_CALENDAR: 'subaccount.schedule.view_calendar',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -234,6 +238,10 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.skills (subaccount-scoped skill management; migration 0117)
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,   description: 'View subaccount-scoped skills',                          groupName: 'subaccount.skills' },
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE, description: 'Create, edit, and delete subaccount-scoped skills',      groupName: 'subaccount.skills' },
+  // subaccount.schedule (Scheduled Runs Calendar portal surface; Feature 1)
+  { key: SUBACCOUNT_PERMISSIONS.SCHEDULE_VIEW_CALENDAR,
+    description: 'View the upcoming-runs calendar via the client portal',
+    groupName: 'subaccount.schedule' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
@@ -317,6 +325,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
       SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
+      // Portal-specific grant for the "Upcoming Work" card — clients can see
+      // what the agency will do for them next week without needing general
+      // workspace-management access.
+      SUBACCOUNT_PERMISSIONS.SCHEDULE_VIEW_CALENDAR,
     ],
   },
 ];

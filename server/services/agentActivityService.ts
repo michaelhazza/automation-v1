@@ -19,12 +19,16 @@ export const agentActivityService = {
     status?: string;
     limit?: number;
     offset?: number;
+    /** When false (default), test runs are excluded. Pass true to include them. */
+    includeTestRuns?: boolean;
   }) {
     const conditions: ReturnType<typeof eq>[] = [];
     if (params.organisationId) conditions.push(eq(agentRuns.organisationId, params.organisationId));
     if (params.subaccountId) conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
     if (params.agentId) conditions.push(eq(agentRuns.agentId, params.agentId));
     if (params.status) conditions.push(eq(agentRuns.status, params.status as 'completed' | 'failed'));
+    // Default: exclude test runs (spec §4.7). Pass includeTestRuns=true to show them.
+    if (!params.includeTestRuns) conditions.push(eq(agentRuns.isTestRun, false));
 
     const limit = Math.min(params.limit ?? 50, 100);
     const offset = params.offset ?? 0;

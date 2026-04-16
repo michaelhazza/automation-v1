@@ -155,6 +155,12 @@ export const agentRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
 
+    // Feature 2 (Inline Run Now test UX) classifier — when true, the run was
+    // fired from an authoring-surface test panel. Excluded from Agency P&L
+    // aggregates and from the Scheduled Runs Calendar's cost estimator by
+    // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
+    isTestRun: boolean('is_test_run').notNull().default(false),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

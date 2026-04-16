@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { eq, and, desc, isNull, count } from 'drizzle-orm';
+import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -165,6 +165,14 @@ export interface AgentRunRequest {
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
   idempotencyKey?: string;
+  /**
+   * Additional keys to check for an existing run before inserting. When the
+   * caller wants boundary-tolerant dedup (e.g. dual-bucket for test runs) it
+   * passes `[currentBucketKey, previousBucketKey]` here. The SELECT treats
+   * the set as an OR; the INSERT always uses `idempotencyKey` as the write
+   * value. If absent, behaviour falls back to checking only `idempotencyKey`.
+   */
+  idempotencyCandidateKeys?: string[];
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
   /**
@@ -203,6 +211,12 @@ export interface AgentRunRequest {
    * skill set is used.
    */
   allowedToolSlugs?: string[];
+  /**
+   * Feature 2 — inline Run-Now test panel. When true the run is flagged as a
+   * test run: excluded from agency P&L and LLM usage aggregates by default,
+   * and shown with a "Test" badge in run history. Default false.
+   */
+  isTestRun?: boolean;
 }
 
 export interface AgentRunResult {
@@ -286,11 +300,19 @@ export const agentExecutionService = {
     const isOrgSubaccountRun = subaccountRow?.isOrgSubaccount ?? false;
 
     // ── 0d. Idempotency check — return existing run if key already used ───
-    if (request.idempotencyKey) {
+    // Candidate set: explicit list (e.g. dual-bucket for test runs) falls
+    // through to a single-key lookup if absent.
+    const idempotencyLookupKeys =
+      request.idempotencyCandidateKeys && request.idempotencyCandidateKeys.length > 0
+        ? Array.from(new Set(request.idempotencyCandidateKeys))
+        : request.idempotencyKey
+          ? [request.idempotencyKey]
+          : [];
+    if (idempotencyLookupKeys.length > 0) {
       const [existing] = await db
         .select()
         .from(agentRuns)
-        .where(eq(agentRuns.idempotencyKey, request.idempotencyKey))
+        .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))
         .limit(1);
 
       if (existing) {
@@ -329,6 +351,7 @@ export const agentExecutionService = {
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         playbookStepRunId: request.playbookStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),

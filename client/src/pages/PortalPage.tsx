@@ -6,6 +6,7 @@ import { Link, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import HelpHint from '../components/ui/HelpHint';
+import UpcomingWorkCard from '../components/portal/UpcomingWorkCard';
 import { toast } from 'sonner';
 
 interface PortalProcess {
@@ -55,6 +56,10 @@ export default function PortalPage({ user: _user }: { user: User }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [portalRuns, setPortalRuns] = useState<PortalRun[]>([]);
   const [dailyBriefCard, setDailyBriefCard] = useState<DailyBriefCard | null>(null);
+  // Feature 1 (docs/routines-response-dev-spec.md §3.5) — portal-card access
+  // is gated on `subaccount.schedule.view_calendar`. `client_user` carries it
+  // by default so the card shows up without needing the broader workspace.view.
+  const [canViewCalendar, setCanViewCalendar] = useState(false);
   const [runningNow, setRunningNow] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,13 +76,19 @@ export default function PortalPage({ user: _user }: { user: User }) {
       api
         .get<DailyBriefCard>(`/api/portal/${subaccountId}/intelligence-briefing-card`)
         .catch(() => ({ data: null as DailyBriefCard | null })),
+      api
+        .get<{ permissions: string[] }>(`/api/subaccounts/${subaccountId}/my-permissions`)
+        .catch(() => ({ data: { permissions: [] as string[] } })),
     ])
-      .then(([processRes, runsRes, briefRes]) => {
+      .then(([processRes, runsRes, briefRes, permsRes]) => {
         setSubaccount(processRes.data.subaccount);
         setProcesses(processRes.data.processes ?? []);
         setCategories(processRes.data.categories ?? []);
         setPortalRuns(runsRes.data.runs ?? []);
         setDailyBriefCard(briefRes.data ?? null);
+        setCanViewCalendar(
+          (permsRes.data?.permissions ?? []).includes('subaccount.schedule.view_calendar')
+        );
       })
       .catch((err) => {
         const e = err as { response?: { data?: { error?: string } } };
@@ -155,6 +166,15 @@ export default function PortalPage({ user: _user }: { user: User }) {
               Read latest brief →
             </Link>
           </div>
+        </div>
+      )}
+
+      {/* Feature 1 — Upcoming Work card (docs/routines-response-dev-spec.md §3.5)
+          Gated server-side by `subaccount.schedule.view_calendar`; we also skip
+          rendering when the permission is absent to avoid a dangling frame. */}
+      {canViewCalendar && subaccountId && (
+        <div className="mb-8">
+          <UpcomingWorkCard subaccountId={subaccountId} hasPermission={canViewCalendar} />
         </div>
       )}
 
