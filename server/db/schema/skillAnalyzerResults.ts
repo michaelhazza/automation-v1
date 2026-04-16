@@ -92,12 +92,35 @@ export const skillAnalyzerResults = pgTable(
     // Null when no warnings raised or classification is DUPLICATE/DISTINCT.
     mergeWarnings: jsonb('merge_warnings'),
 
+    // v2 fixes — see migration 0154.
+    // Reviewer decisions per warning, deduped by (warningCode, details.field).
+    // Each entry: { warningCode, resolution, resolvedAt, resolvedBy, details? }.
+    // Wiped atomically on any merge edit or reset.
+    warningResolutions: jsonb('warning_resolutions').notNull().default([]),
+    // True when the rule-based fallback merger produced proposedMergedContent
+    // (classifier unavailable or LLM parse failure).
+    classifierFallbackApplied: boolean('classifier_fallback_applied').notNull().default(false),
+    // Canonical skill name chosen via NAME_MISMATCH resolution. When set,
+    // Execute uses this over any drift in proposedMergedContent.name.
+    executionResolvedName: text('execution_resolved_name'),
+
     // User action
     actionTaken: text('action_taken')
       .$type<'approved' | 'rejected' | 'skipped'>(),
     actionTakenAt: timestamp('action_taken_at', { withTimezone: true }),
     actionTakenBy: uuid('action_taken_by')
       .references(() => users.id),
+    // Set on approve; presence locks the row against merge / resolution edits.
+    // Cleared on unapprove (action=null).
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    // Snapshot of evaluateApprovalState result at approve time (debug trace).
+    approvalDecisionSnapshot: jsonb('approval_decision_snapshot'),
+    // sha256 of stable-stringified approval_decision_snapshot. Compared at
+    // Execute to surface drift (§11.12.1, non-blocking).
+    approvalHash: text('approval_hash'),
+    // Set true on first approval; never reset. UI surfaces "modified after
+    // previous approval" badge on unapprove→edit→re-approve cycles.
+    wasApprovedBefore: boolean('was_approved_before').notNull().default(false),
 
     // Optimistic concurrency for merge edits — set by patchMergeFields and
     // resetMergeToOriginal. Null on rows that have never been merge-edited.

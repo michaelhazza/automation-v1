@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  boolean,
   index,
 } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
@@ -63,7 +64,29 @@ export const skillAnalyzerJobs = pgTable(
     // Agent cluster recommendation — populated by Stage 8b after results are
     // written. Shape: { shouldCreateAgent, agentName?, agentSlug?,
     // agentDescription?, reasoning, skillSlugs? }. See migration 0114.
+    // Preserved for backwards-compat; plural proposedNewAgents is the
+    // canonical source going forward (§11 Fix 5).
     agentRecommendation: jsonb('agent_recommendation'),
+
+    // Array of proposed agent entries supporting N-per-job. Entry shape:
+    // { proposedAgentIndex, slug, name, description, reasoning, skillSlugs,
+    //   status: 'proposed'|'confirmed'|'rejected', confirmedAt?, rejectedAt? }
+    // Retro-injected into result.agentProposals so per-skill panels can
+    // offer the proposed agent (§11 Fix 5, §11.11.1 coupling).
+    proposedNewAgents: jsonb('proposed_new_agents').notNull().default([]),
+
+    // Full skill_analyzer_config row captured at job start. Immutable after
+    // INSERT. Validator, collision detector, and Execute guards read from
+    // here — never the live config table (§11.11.4 / §11.12.7).
+    configSnapshot: jsonb('config_snapshot'),
+    // Derived from configSnapshot.config_version; kept for UI display.
+    configVersionUsed: integer('config_version_used'),
+
+    // Atomic guard against concurrent Execute. POST /execute acquires via
+    // UPDATE … WHERE execution_lock=false; concurrent calls see 409.
+    executionLock: boolean('execution_lock').notNull().default(false),
+    executionStartedAt: timestamp('execution_started_at', { withTimezone: true }),
+    executionFinishedAt: timestamp('execution_finished_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

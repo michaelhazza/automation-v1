@@ -306,7 +306,11 @@ export type MergeWarningCode =
   | 'INVOCATION_LOST'
   | 'HITL_LOST'
   | 'OUTPUT_FORMAT_LOST'
-  | 'WARNINGS_TRUNCATED';
+  | 'WARNINGS_TRUNCATED'
+  // v2 fix-cycle additions
+  | 'CLASSIFIER_FALLBACK'
+  | 'NAME_MISMATCH'
+  | 'SKILL_GRAPH_COLLISION';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -315,6 +319,217 @@ export interface MergeWarning {
   severity: MergeWarningSeverity;
   message: string;
   detail?: string;
+}
+
+/** Warning tier — read from skill_analyzer_config.warning_tier_map.
+ *  Controls how the Approve button gates on each warning. See plan §4. */
+export type WarningTier =
+  | 'informational'         // display only
+  | 'standard'              // single-click acknowledgment
+  | 'decision_required'     // structured resolution needed
+  | 'critical';             // edit merge OR type confirmation phrase
+
+/** Default tier map used when config snapshot is absent (e.g., legacy jobs).
+ *  Mirrors the DB default in migration 0154. */
+export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
+  REQUIRED_FIELD_DEMOTED:   'decision_required',
+  NAME_MISMATCH:            'decision_required',
+  SKILL_GRAPH_COLLISION:    'decision_required',
+  INVOCATION_LOST:          'decision_required',
+  HITL_LOST:                'decision_required',
+  CLASSIFIER_FALLBACK:      'decision_required',
+  SCOPE_EXPANSION_CRITICAL: 'critical',
+  SCOPE_EXPANSION:          'standard',
+  CAPABILITY_OVERLAP:       'standard',
+  TABLE_ROWS_DROPPED:       'informational',
+  OUTPUT_FORMAT_LOST:       'informational',
+  WARNINGS_TRUNCATED:       'informational',
+};
+
+/** Severity priority used when sorting warnings before MAX-count truncation.
+ *  Higher number = higher priority; survives when warnings are capped. */
+const WARNING_SEVERITY_PRIORITY: Record<MergeWarningSeverity, number> = {
+  critical: 2,
+  warning: 1,
+};
+
+/** Tier priority used as secondary sort. Higher = kept during truncation. */
+const WARNING_TIER_PRIORITY: Record<WarningTier, number> = {
+  critical: 4,
+  decision_required: 3,
+  standard: 2,
+  informational: 1,
+};
+
+/** Sort warnings in-place by severity and tier priority so the highest-value
+ *  ones survive MAX_MERGE_WARNINGS truncation. Exported for tests. */
+export function sortWarningsBySeverity(
+  warnings: MergeWarning[],
+  tierMap: Record<string, WarningTier> = DEFAULT_WARNING_TIER_MAP,
+): MergeWarning[] {
+  return warnings.slice().sort((a, b) => {
+    const sev = WARNING_SEVERITY_PRIORITY[b.severity] - WARNING_SEVERITY_PRIORITY[a.severity];
+    if (sev !== 0) return sev;
+    const aTier = tierMap[a.code] ?? DEFAULT_WARNING_TIER_MAP[a.code as MergeWarningCode] ?? 'informational';
+    const bTier = tierMap[b.code] ?? DEFAULT_WARNING_TIER_MAP[b.code as MergeWarningCode] ?? 'informational';
+    return WARNING_TIER_PRIORITY[bTier] - WARNING_TIER_PRIORITY[aTier];
+  });
+}
+
+/** Reviewer resolution recorded against a warning. Append-only JSONB array
+ *  on skill_analyzer_results.warning_resolutions, deduped by composite key
+ *  (warningCode, details.field ?? null). Wiped on merge edit. */
+export type WarningResolutionKind =
+  | 'accept_removal'
+  | 'restore_required'
+  | 'use_library_name'
+  | 'use_incoming_name'
+  | 'scope_down'
+  | 'flag_other'
+  | 'accept_overlap'
+  | 'acknowledge_low_confidence'
+  | 'acknowledge_warning'
+  | 'confirm_critical_phrase';
+
+export interface WarningResolution {
+  warningCode: MergeWarningCode;
+  resolution: WarningResolutionKind;
+  resolvedAt: string;    // ISO timestamp
+  resolvedBy: string;    // userId
+  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
+}
+
+export interface ApprovalBlockingReason {
+  warningCode: MergeWarningCode;
+  tier: WarningTier;
+  message: string;
+  field?: string;
+}
+
+export interface RequiredResolution {
+  warningCode: MergeWarningCode;
+  allowedResolutions: WarningResolutionKind[];
+  field?: string;
+}
+
+export interface ApprovalState {
+  blocked: boolean;
+  reasons: ApprovalBlockingReason[];
+  requiredResolutions: RequiredResolution[];
+}
+
+/** Allowed resolution kinds per warning code. */
+const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = {
+  REQUIRED_FIELD_DEMOTED:   ['accept_removal', 'restore_required'],
+  NAME_MISMATCH:            ['use_library_name', 'use_incoming_name'],
+  SKILL_GRAPH_COLLISION:    ['scope_down', 'flag_other', 'accept_overlap'],
+  INVOCATION_LOST:          ['acknowledge_warning'],
+  HITL_LOST:                ['acknowledge_warning'],
+  CLASSIFIER_FALLBACK:      ['acknowledge_low_confidence'],
+  SCOPE_EXPANSION_CRITICAL: ['confirm_critical_phrase'],
+  SCOPE_EXPANSION:          ['acknowledge_warning'],
+  CAPABILITY_OVERLAP:       ['acknowledge_warning'],
+  TABLE_ROWS_DROPPED:       [],
+  OUTPUT_FORMAT_LOST:       [],
+  WARNINGS_TRUNCATED:       [],
+};
+
+/** Parse demoted field list out of a REQUIRED_FIELD_DEMOTED warning's detail.
+ *  Accepts both the legacy comma-delimited string and the structured JSON form. */
+export function parseDemotedFields(detail: string | undefined): string[] {
+  if (!detail) return [];
+  const trimmed = detail.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed?.demotedFields)) return parsed.demotedFields.filter((f: unknown) => typeof f === 'string');
+    } catch {
+      // fall through to legacy split
+    }
+  }
+  return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+/** Return true if a resolution satisfies a given warning/field pair. */
+function isResolvedBy(
+  code: MergeWarningCode,
+  field: string | undefined,
+  resolutions: WarningResolution[],
+): boolean {
+  const allowed = RESOLUTIONS_FOR_CODE[code] ?? [];
+  return resolutions.some(r =>
+    r.warningCode === code
+    && (allowed.length === 0 || allowed.includes(r.resolution))
+    && (field === undefined || r.details?.field === field));
+}
+
+/**
+ * Canonical approval-gate evaluator. Server is authoritative; client imports
+ * this for optimistic preview only. Covers all v2 fix-cycle tiers.
+ *
+ * - `informational`: never blocks.
+ * - `standard`:      blocks unless an `acknowledge_warning` resolution exists.
+ * - `decision_required`:
+ *     - REQUIRED_FIELD_DEMOTED: per-field `accept_removal` or `restore_required`.
+ *     - Otherwise: any allowed resolution for the code.
+ * - `critical`: blocks unless `confirm_critical_phrase` resolution exists
+ *     (or scope-expansion is already within threshold — the validator just
+ *     won't re-emit the warning in that case).
+ */
+export function evaluateApprovalState(
+  warnings: MergeWarning[] | null | undefined,
+  resolutions: WarningResolution[] | null | undefined,
+  tierMap: Record<string, WarningTier> = DEFAULT_WARNING_TIER_MAP,
+): ApprovalState {
+  const reasons: ApprovalBlockingReason[] = [];
+  const required: RequiredResolution[] = [];
+  const safeWarnings = warnings ?? [];
+  const safeResolutions = resolutions ?? [];
+
+  for (const w of safeWarnings) {
+    const tier = (tierMap[w.code] ?? DEFAULT_WARNING_TIER_MAP[w.code]) ?? 'informational';
+    if (tier === 'informational') continue;
+
+    // Per-field decision gate for REQUIRED_FIELD_DEMOTED.
+    if (w.code === 'REQUIRED_FIELD_DEMOTED') {
+      const fields = parseDemotedFields(w.detail);
+      for (const field of fields) {
+        if (!isResolvedBy('REQUIRED_FIELD_DEMOTED', field, safeResolutions)) {
+          reasons.push({
+            warningCode: w.code,
+            tier,
+            message: `Field "${field}" — choose Accept removal or Restore required.`,
+            field,
+          });
+          required.push({
+            warningCode: w.code,
+            allowedResolutions: RESOLUTIONS_FOR_CODE.REQUIRED_FIELD_DEMOTED,
+            field,
+          });
+        }
+      }
+      continue;
+    }
+
+    // Generic gate: code must be resolved at least once.
+    if (!isResolvedBy(w.code, undefined, safeResolutions)) {
+      reasons.push({
+        warningCode: w.code,
+        tier,
+        message: w.message,
+      });
+      required.push({
+        warningCode: w.code,
+        allowedResolutions: RESOLUTIONS_FOR_CODE[w.code] ?? ['acknowledge_warning'],
+      });
+    }
+  }
+
+  return {
+    blocked: reasons.length > 0,
+    reasons,
+    requiredResolutions: required,
+  };
 }
 
 /** Result returned by parseClassificationResponseWithMerge. The classification
