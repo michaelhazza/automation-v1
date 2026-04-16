@@ -13,32 +13,15 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { memoryBlocks } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
 import {
   listVersions,
   diffVersions,
   diffAgainstCanonical,
   resetToCanonical,
+  ensureBlockInOrg,
 } from '../services/memoryBlockVersionService.js';
 
 const router = Router();
-
-async function ensureBlockInOrg(blockId: string, orgId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: memoryBlocks.id })
-    .from(memoryBlocks)
-    .where(
-      and(
-        eq(memoryBlocks.id, blockId),
-        eq(memoryBlocks.organisationId, orgId),
-        isNull(memoryBlocks.deletedAt),
-      ),
-    )
-    .limit(1);
-  return Boolean(row);
-}
 
 router.get(
   '/api/memory-blocks/:blockId/versions',
@@ -46,8 +29,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const ok = await ensureBlockInOrg(req.params.blockId, orgId);
-    if (!ok) return res.status(404).json({ error: 'Block not found' });
+    await ensureBlockInOrg(req.params.blockId, orgId);
     const versions = await listVersions(req.params.blockId);
     return res.json({ versions });
   }),
@@ -64,8 +46,7 @@ router.get(
     if (!Number.isFinite(v1) || !Number.isFinite(v2)) {
       return res.status(400).json({ error: 'Invalid version numbers' });
     }
-    const ok = await ensureBlockInOrg(req.params.blockId, orgId);
-    if (!ok) return res.status(404).json({ error: 'Block not found' });
+    await ensureBlockInOrg(req.params.blockId, orgId);
     const diff = await diffVersions(req.params.blockId, v1, v2);
     return res.json(diff);
   }),

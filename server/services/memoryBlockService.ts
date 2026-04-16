@@ -37,6 +37,7 @@ import {
   BLOCK_RELEVANCE_TOP_K,
   BLOCK_TOKEN_BUDGET,
 } from '../config/limits.js';
+import { logger } from '../lib/logger.js';
 
 // ─── Types + pure helpers (re-exported for callers) ─────────────────────────
 
@@ -397,32 +398,32 @@ export async function createBlock(input: {
 }): Promise<MemoryBlock> {
   const autoAttach = input.autoAttach === true && !!input.subaccountId;
 
-  const [created] = await db
-    .insert(memoryBlocks)
-    .values({
-      organisationId: input.organisationId,
-      subaccountId: input.subaccountId ?? null,
-      name: input.name,
-      content: input.content,
-      ownerAgentId: input.ownerAgentId ?? null,
-      isReadOnly: input.isReadOnly ?? false,
-      autoAttach,
-    })
-    .returning();
+  // eslint-disable-next-line prefer-const
+  let created!: MemoryBlock;
+  const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(memoryBlocks)
+      .values({
+        organisationId: input.organisationId,
+        subaccountId: input.subaccountId ?? null,
+        name: input.name,
+        content: input.content,
+        ownerAgentId: input.ownerAgentId ?? null,
+        isReadOnly: input.isReadOnly ?? false,
+        autoAttach,
+      })
+      .returning();
+    created = row;
 
-  // Phase 5 S24 — write initial version row for the new block
-  try {
-    const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+    // Phase 5 S24 — write initial version row atomically with the insert
     await writeVersionRow({
-      blockId: created.id,
+      blockId: row.id,
       content: input.content,
       changeSource: 'seed',
+      tx,
     });
-  } catch (err) {
-    // Version write is best-effort for admin creation; the block itself is
-    // committed regardless.
-    console.warn('[memoryBlockService.createBlock] version write failed', err);
-  }
+  });
 
   if (autoAttach && input.subaccountId) {
     await materialiseAutoAttachForBlock(created.id, input.subaccountId, input.organisationId);
@@ -517,31 +518,33 @@ export async function updateBlockAdmin(
   if (updates.isReadOnly !== undefined) set.isReadOnly = updates.isReadOnly;
   if (updates.ownerAgentId !== undefined) set.ownerAgentId = updates.ownerAgentId;
 
-  const [updated] = await db
-    .update(memoryBlocks)
-    .set(set)
-    .where(
-      and(
-        eq(memoryBlocks.id, blockId),
-        eq(memoryBlocks.organisationId, organisationId),
-        isNull(memoryBlocks.deletedAt),
-      ),
-    )
-    .returning();
+  let updated: MemoryBlock | undefined;
+  const { writeVersionRow } = await import('./memoryBlockVersionService.js');
 
-  // Phase 5 S24 — write version row when content changed
-  if (updated && updates.content !== undefined) {
-    try {
-      const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(memoryBlocks)
+      .set(set)
+      .where(
+        and(
+          eq(memoryBlocks.id, blockId),
+          eq(memoryBlocks.organisationId, organisationId),
+          isNull(memoryBlocks.deletedAt),
+        ),
+      )
+      .returning();
+    updated = row;
+
+    // Phase 5 S24 — write version row atomically when content changed
+    if (row && updates.content !== undefined) {
       await writeVersionRow({
-        blockId: updated.id,
+        blockId: row.id,
         content: updates.content,
         changeSource: 'manual_edit',
+        tx,
       });
-    } catch (err) {
-      console.warn('[memoryBlockService.updateBlockAdmin] version write failed', err);
     }
-  }
+  });
 
   return updated ?? null;
 }
@@ -747,71 +750,77 @@ export async function upsertFromPlaybook(
         previewContent: decision.previewContent,
       };
     case 'create': {
-      const [created] = await db
-        .insert(memoryBlocks)
-        .values({
-          organisationId,
-          subaccountId,
-          name: label,
-          content: decision.content,
-          isReadOnly: false,
-          sourceRunId,
-          lastEditedByAgentId: actorAgentId,
-          lastWrittenByPlaybookSlug: playbookSlug,
-          confidence,
-          autoAttach,
-        })
-        .returning({ id: memoryBlocks.id });
+      let upsertCreatedId!: string;
+      const { writeVersionRow: wvr } = await import('./memoryBlockVersionService.js');
 
-      // Phase 5 S24 — version row for playbook-created blocks
-      try {
-        const { writeVersionRow } = await import('./memoryBlockVersionService.js');
-        await writeVersionRow({
+      await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(memoryBlocks)
+          .values({
+            organisationId,
+            subaccountId,
+            name: label,
+            content: decision.content,
+            isReadOnly: false,
+            sourceRunId,
+            lastEditedByAgentId: actorAgentId,
+            lastWrittenByPlaybookSlug: playbookSlug,
+            confidence,
+            autoAttach,
+          })
+          .returning({ id: memoryBlocks.id });
+
+        upsertCreatedId = created.id;
+
+        // Phase 5 S24 — version row atomically with insert
+        await wvr({
           blockId: created.id,
           content: decision.content,
           changeSource: 'playbook_upsert',
           notes: `Created by playbook ${playbookSlug}`,
+          tx,
         });
-      } catch (err) {
-        console.warn('[memoryBlockService.upsertFromPlaybook.create] version write failed', err);
-      }
+      });
 
       if (autoAttach) {
-        await materialiseAutoAttachForBlock(created.id, subaccountId, organisationId);
+        await materialiseAutoAttachForBlock(upsertCreatedId, subaccountId, organisationId);
       }
-      return { kind: 'created', blockId: created.id, truncated: decision.truncated };
+      return { kind: 'created', blockId: upsertCreatedId, truncated: decision.truncated };
     }
     case 'update': {
-      const [updated] = await db
-        .update(memoryBlocks)
-        .set({
-          content: decision.content,
-          sourceRunId,
-          lastEditedByAgentId: actorAgentId,
-          lastWrittenByPlaybookSlug: playbookSlug,
-          // Do not touch `confidence` on update — a previously-'low' block can
-          // remain 'low' until a human saves it manually. Spec §8.4 last bullet.
-          updatedAt: new Date(),
-        })
-        .where(eq(memoryBlocks.id, existingRow!.id))
-        .returning({ id: memoryBlocks.id });
+      let upsertUpdatedId!: string;
+      const { writeVersionRow: wvrUpdate } = await import('./memoryBlockVersionService.js');
 
-      // Phase 5 S24 — version row for playbook-updated blocks
-      try {
-        const { writeVersionRow } = await import('./memoryBlockVersionService.js');
-        await writeVersionRow({
+      await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(memoryBlocks)
+          .set({
+            content: decision.content,
+            sourceRunId,
+            lastEditedByAgentId: actorAgentId,
+            lastWrittenByPlaybookSlug: playbookSlug,
+            // Do not touch `confidence` on update — a previously-'low' block can
+            // remain 'low' until a human saves it manually. Spec §8.4 last bullet.
+            updatedAt: new Date(),
+          })
+          .where(eq(memoryBlocks.id, existingRow!.id))
+          .returning({ id: memoryBlocks.id });
+
+        upsertUpdatedId = updated.id;
+
+        // Phase 5 S24 — version row atomically with update
+        await wvrUpdate({
           blockId: updated.id,
           content: decision.content,
           changeSource: 'playbook_upsert',
           notes: `Updated by playbook ${playbookSlug}`,
+          tx,
         });
-      } catch (err) {
-        console.warn('[memoryBlockService.upsertFromPlaybook.update] version write failed', err);
-      }
+      });
 
       return {
         kind: 'updated',
-        blockId: updated.id,
+        blockId: upsertUpdatedId,
         truncated: decision.truncated,
         mergeFallback: decision.mergeFallback,
       };

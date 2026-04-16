@@ -19,8 +19,9 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { subaccounts, organisations } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { organisations } from '../db/schema/index.js';
+import { eq } from 'drizzle-orm';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import {
   generateConfigurationDocument,
   resolveBundleSchemas,
@@ -31,7 +32,9 @@ import type { ConfigDocumentSummary } from '../types/configSchema.js';
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-// Phase 3 in-memory cache — swapped for a table-backed cache in Phase 4
+// Phase 3 in-memory cache — swapped for a table-backed cache in Phase 4.
+// Each entry has a 10-min TTL to bound memory growth.
+const CACHE_TTL_MS = 10 * 60 * 1000;
 const parsedCache = new Map<string, ConfigDocumentSummary>();
 
 router.post(
@@ -43,18 +46,7 @@ router.post(
     const { subaccountId } = req.params;
     const { bundleSlugs, format } = req.body ?? {};
 
-    const [sa] = await db
-      .select({ id: subaccounts.id, name: subaccounts.name })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, orgId),
-          isNull(subaccounts.deletedAt),
-        ),
-      )
-      .limit(1);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    const sa = await resolveSubaccount(subaccountId, orgId);
 
     const [org] = await db
       .select({ name: organisations.name })
@@ -94,18 +86,7 @@ router.post(
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
 
-    const [sa] = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, orgId),
-          isNull(subaccounts.deletedAt),
-        ),
-      )
-      .limit(1);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    await resolveSubaccount(subaccountId, orgId);
 
     if (!req.file) return res.status(400).json({ error: 'file upload is required' });
 
@@ -126,6 +107,7 @@ router.post(
 
     const id = randomUUID();
     parsedCache.set(id, summary);
+    setTimeout(() => parsedCache.delete(id), CACHE_TTL_MS);
 
     return res.json({
       id,

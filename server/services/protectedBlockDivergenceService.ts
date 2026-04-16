@@ -17,10 +17,8 @@ import { resolve as resolvePath } from 'path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks } from '../db/schema/index.js';
-import { getCanonicalPath } from './memoryBlockVersionService.js';
+import { getCanonicalPath, PROTECTED_BLOCK_NAMES } from './memoryBlockVersionService.js';
 import { logger } from '../lib/logger.js';
-
-const PROTECTED_BLOCK_NAMES = ['config-agent-guidelines'] as const;
 
 export interface DivergenceSweepSummary {
   scanned: number;

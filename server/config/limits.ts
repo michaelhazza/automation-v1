@@ -133,10 +133,10 @@ export const PRUNE_AGE_DAYS = 180;
 export const REINDEX_THRESHOLD = 500;
 
 /**
- * Entries accessed within this many minutes receive a recency boost during
+ * Entries accessed within this many days receive a recency boost during
  * RRF fusion — ranking-time only; never written back to qualityScore. (S2)
  */
-export const RECENCY_BOOST_WINDOW = 60;
+export const RECENCY_BOOST_WINDOW_DAYS = 60;
 
 /**
  * Additive weight applied to the RRF combined_score for recently-accessed

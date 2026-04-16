@@ -181,6 +181,7 @@ export async function confirm(input: ConfirmInput): Promise<ConfirmResult> {
   if (!cached) throw { statusCode: 404, message: 'Upload not found' };
 
   const applied: ProposedDestination[] = [];
+  let auditRowId = '';
 
   await db.transaction(async (tx) => {
     // Each destination kind maps to a distinct side effect. For Phase 4 we
@@ -236,10 +237,10 @@ export async function confirm(input: ConfirmInput): Promise<ConfirmResult> {
       );
     }
 
-    void row;
+    auditRowId = row?.id ?? '';
   });
 
-  const auditId = '';
+  const auditId = auditRowId;
 
   proposalCache.delete(input.uploadId);
 

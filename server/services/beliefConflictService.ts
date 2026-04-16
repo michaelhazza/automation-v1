@@ -129,7 +129,7 @@ export async function checkAndResolveConflicts(
           supersededAt: now,
           updatedAt: now,
         })
-        .where(eq(agentBeliefs.id, existing.id));
+        .where(and(eq(agentBeliefs.id, existing.id), eq(agentBeliefs.organisationId, newBelief.organisationId)));
       autoSuperseded += 1;
     } else if (decision.action === 'auto_supersede_new') {
       // Existing belief has higher confidence; supersede the new one
@@ -140,7 +140,7 @@ export async function checkAndResolveConflicts(
           supersededAt: now,
           updatedAt: now,
         })
-        .where(eq(agentBeliefs.id, newBelief.id));
+        .where(and(eq(agentBeliefs.id, newBelief.id), eq(agentBeliefs.organisationId, newBelief.organisationId)));
       autoSuperseded += 1;
     } else {
       // Gap too small to auto-resolve → queue for human review

@@ -181,8 +181,10 @@ async function loadState(subaccountId: string, organisationId: string): Promise<
   const answers = resume.answers ?? {};
   const completedStepIds = new Set<OnboardingStepId>();
   for (const step of ONBOARDING_STEPS) {
-    const hasAnswer = Object.keys(answers).some((k) => k.startsWith(`${step.id}.`));
-    if (hasAnswer || resume.proceduralFlags?.[step.id]) {
+    // Trust proceduralFlags as the authoritative source — it is written by
+    // persistResumeState after every recordAnswer call, so it is always
+    // up-to-date and avoids the fragile key-prefix scan.
+    if (resume.proceduralFlags?.[step.id]) {
       completedStepIds.add(step.id);
     }
   }

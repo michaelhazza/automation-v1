@@ -14,7 +14,7 @@
  *   npx tsx server/services/__tests__/workspaceMemoryServicePure.test.ts
  */
 
-import { RECENCY_BOOST_WINDOW, RECENCY_BOOST_WEIGHT } from '../../config/limits.js';
+import { RECENCY_BOOST_WINDOW_DAYS, RECENCY_BOOST_WEIGHT } from '../../config/limits.js';
 
 let passed = 0;
 let failed = 0;
@@ -74,7 +74,7 @@ function applyRecencyBoost(
   rows: TestResult[],
   now: Date,
 ): TestResult[] {
-  const cutoff = new Date(now.getTime() - RECENCY_BOOST_WINDOW * 60 * 1000);
+  const cutoff = new Date(now.getTime() - RECENCY_BOOST_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   return rows.map(row => {
     if (row.last_accessed_at !== null) {
       const accessedAt = new Date(row.last_accessed_at);
@@ -93,8 +93,8 @@ function applyRecencyBoost(
 
 const NOW = new Date('2026-04-16T12:00:00.000Z');
 const WITHIN_WINDOW = new Date(NOW.getTime() - 10 * 60 * 1000).toISOString(); // 10min ago
-const AT_BOUNDARY = new Date(NOW.getTime() - RECENCY_BOOST_WINDOW * 60 * 1000).toISOString(); // exactly at boundary
-const BEYOND_WINDOW = new Date(NOW.getTime() - (RECENCY_BOOST_WINDOW + 1) * 60 * 1000).toISOString(); // 1min past window
+const AT_BOUNDARY = new Date(NOW.getTime() - RECENCY_BOOST_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString(); // exactly at boundary
+const BEYOND_WINDOW = new Date(NOW.getTime() - (RECENCY_BOOST_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString(); // 1 day past window
 
 // ---------------------------------------------------------------------------
 // Tests

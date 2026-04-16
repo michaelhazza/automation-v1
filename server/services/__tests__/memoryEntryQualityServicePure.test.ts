@@ -102,21 +102,21 @@ test('accessed 1 day over window → decays by DECAY_RATE', () => {
   assertApprox(factor, expected, 0.001, `1 day over window → ${expected}`);
 });
 
-test('accessed far over window → factor clamps to 0', () => {
+test('accessed far over window → factor clamps to 0.1 minimum (spec §4.1 floor)', () => {
   const lastAccessedAt = new Date(
     now.getTime() - (DECAY_WINDOW_DAYS + 1000) * 24 * 60 * 60 * 1000,
   );
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt, now });
-  assertEqual(factor, 0, 'factor clamped to 0 — never negative');
+  assertEqual(factor, 0.1, 'factor floored at 0.1 — decay alone never zeros a score');
 });
 
 // ---------------------------------------------------------------------------
 // computeDecayFactor — never accessed
 // ---------------------------------------------------------------------------
 
-test('never accessed (null) → factor reflects full-window decay', () => {
+test('never accessed (null) → factor reflects full-window decay (floor 0.1)', () => {
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt: null, now });
-  const expected = Math.max(0, 1 - DECAY_RATE * DECAY_WINDOW_DAYS);
+  const expected = Math.max(0.1, 1 - DECAY_RATE * DECAY_WINDOW_DAYS);
   assertApprox(factor, expected, 0.001, `null → ${expected}`);
 });
 
@@ -137,34 +137,41 @@ const oldDate = new Date(now.getTime() - (PRUNE_AGE_DAYS + 10) * 24 * 60 * 60 * 
 const freshDate = new Date(now.getTime() - (PRUNE_AGE_DAYS - 10) * 24 * 60 * 60 * 1000);
 
 test('low score + old entry → prune eligible', () => {
-  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: oldDate, now });
+  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: oldDate, lastAccessedAt: null, now });
   assertTrue(result, 'old low-quality entry is prune eligible');
 });
 
 test('low score + fresh entry → NOT prune eligible', () => {
-  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: freshDate, now });
+  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: freshDate, lastAccessedAt: null, now });
   assertFalse(result, 'young low-quality entry is NOT pruned');
 });
 
 test('high score + old entry → NOT prune eligible', () => {
-  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD + 0.1, createdAt: oldDate, now });
+  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD + 0.1, createdAt: oldDate, lastAccessedAt: null, now });
   assertFalse(result, 'old high-quality entry is NOT pruned');
 });
 
 test('score exactly at threshold → NOT prune eligible (threshold is exclusive lower)', () => {
-  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD, createdAt: oldDate, now });
+  const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD, createdAt: oldDate, lastAccessedAt: null, now });
   assertFalse(result, 'score == PRUNE_THRESHOLD → NOT pruned');
 });
 
 test('score 0 + old entry → prune eligible', () => {
-  const result = isPruneEligible({ qualityScore: 0, createdAt: oldDate, now });
+  const result = isPruneEligible({ qualityScore: 0, createdAt: oldDate, lastAccessedAt: null, now });
   assertTrue(result, 'zero-score old entry is pruned');
 });
 
 test('entry exactly at PRUNE_AGE_DAYS → prune eligible', () => {
   const exactDate = new Date(now.getTime() - PRUNE_AGE_DAYS * 24 * 60 * 60 * 1000);
-  const result = isPruneEligible({ qualityScore: 0, createdAt: exactDate, now });
+  const result = isPruneEligible({ qualityScore: 0, createdAt: exactDate, lastAccessedAt: null, now });
   assertTrue(result, 'entry at exact PRUNE_AGE_DAYS boundary is pruned');
+});
+
+test('lastAccessedAt provided and recent → uses lastAccessedAt (not createdAt) for age check', () => {
+  // Entry is old by createdAt but was accessed recently — not prune eligible
+  const recentAccess = new Date(now.getTime() - (PRUNE_AGE_DAYS - 10) * 24 * 60 * 60 * 1000);
+  const result = isPruneEligible({ qualityScore: 0, createdAt: oldDate, lastAccessedAt: recentAccess, now });
+  assertFalse(result, 'old entry accessed recently is NOT pruned (lastAccessedAt is pivot)');
 });
 
 // ---------------------------------------------------------------------------

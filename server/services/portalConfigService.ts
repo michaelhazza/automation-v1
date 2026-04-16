@@ -98,7 +98,7 @@ export async function updatePortalConfig(
     }
   }
 
-  // Persist
+  // Persist (include organisationId in where for defence-in-depth)
   await db
     .update(subaccounts)
     .set({
@@ -106,7 +106,7 @@ export async function updatePortalConfig(
       portalFeatures: nextFeatures,
       updatedAt: new Date(),
     })
-    .where(eq(subaccounts.id, input.subaccountId));
+    .where(and(eq(subaccounts.id, input.subaccountId), eq(subaccounts.organisationId, input.organisationId)));
 
   // Audit log
   await auditService.log({
@@ -153,4 +153,36 @@ export async function updatePortalConfig(
     portalFeatures: nextFeatures,
     effectiveFeatures: effective,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Read path — no writes, no audit log
+// ---------------------------------------------------------------------------
+
+export async function getPortalConfig(
+  subaccountId: string,
+  organisationId: string,
+): Promise<UpdatePortalConfigResult> {
+  const [row] = await db
+    .select({
+      portalMode: subaccounts.portalMode,
+      portalFeatures: subaccounts.portalFeatures,
+    })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.id, subaccountId),
+        eq(subaccounts.organisationId, organisationId),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) throw { statusCode: 404, message: 'Subaccount not found' };
+
+  const portalMode = (row.portalMode as PortalMode) ?? 'hidden';
+  const portalFeatures = (row.portalFeatures as Record<string, boolean> | null) ?? {};
+  const effectiveFeatures = resolveAllPortalFeatures(portalMode, portalFeatures);
+
+  return { subaccountId, portalMode, portalFeatures, effectiveFeatures };
 }

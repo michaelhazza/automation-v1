@@ -59,10 +59,11 @@ export function computeDecayFactor(params: DecayParams): number {
   // Never accessed — treat as accessed at entry creation time = high decay risk.
   // Since we don't have createdAt here, use now - DECAY_WINDOW_DAYS as worst case.
   if (lastAccessedAt === null) {
-    // Entry has never been accessed; apply one full window's worth of decay.
-    const daysOverWindow = DECAY_WINDOW_DAYS; // worst-case: treat as stale immediately
+    // Entry has never been accessed; treat as if last accessed exactly
+    // DECAY_WINDOW_DAYS ago (worst safe starting point).
+    const daysOverWindow = DECAY_WINDOW_DAYS;
     const factor = 1 - DECAY_RATE * daysOverWindow;
-    return Math.max(0, factor);
+    return Math.max(0.1, factor);
   }
 
   const msSinceAccess = now.getTime() - lastAccessedAt.getTime();
@@ -75,7 +76,7 @@ export function computeDecayFactor(params: DecayParams): number {
 
   const daysOverWindow = daysSinceAccess - DECAY_WINDOW_DAYS;
   const factor = 1 - DECAY_RATE * daysOverWindow;
-  return Math.max(0, factor);
+  return Math.max(0.1, factor);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,28 +86,32 @@ export function computeDecayFactor(params: DecayParams): number {
 export interface PruneParams {
   /** Current (post-decay) qualityScore (0.0–1.0) */
   qualityScore: number;
-  /** Entry creation date */
+  /** Entry creation date (fallback pivot when lastAccessedAt is null) */
   createdAt: Date;
+  /** When the entry was last accessed. Null = never — use createdAt as fallback. */
+  lastAccessedAt: Date | null;
   /** Reference time */
   now: Date;
 }
 
 /**
- * Returns true when ALL three pruning conditions are met (§4.1):
+ * Returns true when ALL pruning conditions are met (§4.1):
  *   1. qualityScore < PRUNE_THRESHOLD
- *   2. Entry is older than PRUNE_AGE_DAYS
+ *   2. Entry's lastAccessedAt (or createdAt if never accessed) is older than
+ *      PRUNE_AGE_DAYS
  *
  * Both conditions must be true — low quality alone doesn't prune a fresh
  * entry, and old age alone doesn't prune a high-quality one.
  */
 export function isPruneEligible(params: PruneParams): boolean {
-  const { qualityScore, createdAt, now } = params;
+  const { qualityScore, createdAt, lastAccessedAt, now } = params;
 
   if (qualityScore >= PRUNE_THRESHOLD) {
     return false;
   }
 
-  const msAge = now.getTime() - createdAt.getTime();
+  const agePivot = lastAccessedAt ?? createdAt;
+  const msAge = now.getTime() - agePivot.getTime();
   const daysAge = msAge / (1000 * 60 * 60 * 24);
 
   return daysAge >= PRUNE_AGE_DAYS;

@@ -17,9 +17,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import {
   startOnboarding,
   getNextStep,
@@ -30,21 +28,6 @@ import type { OnboardingStepId } from '../services/subaccountOnboardingServicePu
 
 const router = Router();
 
-async function resolveSubaccountOrFail(subaccountId: string, orgId: string) {
-  const [sa] = await db
-    .select({ id: subaccounts.id })
-    .from(subaccounts)
-    .where(
-      and(
-        eq(subaccounts.id, subaccountId),
-        eq(subaccounts.organisationId, orgId),
-        isNull(subaccounts.deletedAt),
-      ),
-    )
-    .limit(1);
-  return sa ?? null;
-}
-
 router.post(
   '/api/subaccounts/:subaccountId/onboarding/start',
   authenticate,
@@ -52,8 +35,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccountOrFail(subaccountId, orgId);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    await resolveSubaccount(subaccountId, orgId);
 
     const { websiteScrape } = req.body ?? {};
     const status = await startOnboarding({
@@ -73,8 +55,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccountOrFail(subaccountId, orgId);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    await resolveSubaccount(subaccountId, orgId);
 
     const status = await getNextStep(subaccountId, orgId);
     return res.json({ status });
@@ -97,8 +78,7 @@ router.post(
       return res.status(400).json({ error: 'answers must be an object' });
     }
 
-    const sa = await resolveSubaccountOrFail(subaccountId, orgId);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    await resolveSubaccount(subaccountId, orgId);
 
     const status = await recordAnswer({
       subaccountId,
@@ -117,8 +97,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccountOrFail(subaccountId, orgId);
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    await resolveSubaccount(subaccountId, orgId);
 
     const outcome = await markReady({ subaccountId, organisationId: orgId });
 

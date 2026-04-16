@@ -12,7 +12,7 @@
  * Spec: docs/memory-and-briefings-spec.md §5.10 (S14)
  */
 
-import { and, eq, gte, isNull, isNotNull, sql, count } from 'drizzle-orm';
+import { and, eq, gte, isNull, isNotNull, lt, sql, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workspaceMemoryEntries,
@@ -115,6 +115,8 @@ export async function getMemoryHealthForSubaccount(
       ),
     );
 
+  // Uncertain = recently updated beliefs whose confidence is below the midpoint.
+  // supersededBy IS NOT NULL means the belief was REPLACED, not that it is uncertain.
   const uncertainRows = await db
     .select({ value: count() })
     .from(agentBeliefs)
@@ -123,7 +125,8 @@ export async function getMemoryHealthForSubaccount(
         eq(agentBeliefs.subaccountId, subaccountId),
         isNull(agentBeliefs.deletedAt),
         gte(agentBeliefs.updatedAt, windowStart),
-        isNotNull(agentBeliefs.supersededBy),
+        isNull(agentBeliefs.supersededBy),
+        lt(agentBeliefs.confidence, 0.5),
       ),
     );
   const uncertainCount = Number(uncertainRows[0]?.value ?? 0);

@@ -38,13 +38,7 @@ export default function PortalConfigEditor({ subaccountId }: PortalConfigEditorP
 
   const load = async () => {
     try {
-      // Initialise from a GET subaccount (returns portalMode + portalFeatures)
-      // via the existing /api/subaccounts/:id endpoint. Here we post a no-op
-      // PATCH to read back the current effective config.
-      const res = await api.patch<PortalConfig>(
-        `/api/subaccounts/${subaccountId}/portal`,
-        {},
-      );
+      const res = await api.get<PortalConfig>(`/api/subaccounts/${subaccountId}/portal`);
       setConfig(res.data);
     } catch {
       setError('Failed to load portal config.');

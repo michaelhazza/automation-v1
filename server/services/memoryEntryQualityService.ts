@@ -24,7 +24,7 @@ import {
   isPruneEligible,
   decideUtilityAdjustment,
 } from './memoryEntryQualityServicePure.js';
-import { REINDEX_THRESHOLD } from '../config/limits.js';
+import { REINDEX_THRESHOLD, PRUNE_THRESHOLD } from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
 // applyDecay
@@ -83,7 +83,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
         });
 
         if (factor < 1.0) {
-          const newScore = Math.max(0, currentScore * factor);
+          const newScore = Math.max(0.1, currentScore * factor);
           await db
             .update(workspaceMemoryEntries)
             .set({ qualityScore: newScore })
@@ -138,6 +138,7 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
         id: workspaceMemoryEntries.id,
         qualityScore: workspaceMemoryEntries.qualityScore,
         createdAt: workspaceMemoryEntries.createdAt,
+        lastAccessedAt: workspaceMemoryEntries.lastAccessedAt,
       })
       .from(workspaceMemoryEntries)
       .where(
@@ -145,7 +146,7 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
           eq(workspaceMemoryEntries.subaccountId, subaccountId),
           isNull(workspaceMemoryEntries.deletedAt),
           // Pre-filter: only rows with low score (index assist)
-          lt(workspaceMemoryEntries.qualityScore, 0.3),
+          lt(workspaceMemoryEntries.qualityScore, PRUNE_THRESHOLD),
         ),
       );
 
@@ -155,6 +156,7 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
         isPruneEligible({
           qualityScore: entry.qualityScore ?? 0,
           createdAt: entry.createdAt,
+          lastAccessedAt: entry.lastAccessedAt,
           now,
         })
       ) {

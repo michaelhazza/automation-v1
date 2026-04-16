@@ -17,6 +17,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { canRenderPortalFeatureForSubaccount } from '../lib/portalGate.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { askInspector } from '../services/memoryInspectorService.js';
 
 const router = Router();
@@ -29,6 +30,8 @@ router.post(
     const orgId = req.orgId!;
     const userId = req.userId!;
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, orgId);
+
     const { question, runId, audience } = req.body ?? {};
 
     if (!question || typeof question !== 'string' || question.trim().length === 0) {

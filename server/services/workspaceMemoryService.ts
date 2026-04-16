@@ -39,7 +39,7 @@ import {
   HYDE_MAX_TOKENS,
   DOMINANCE_THRESHOLD,
   EXPANSION_MIN_SCORE,
-  RECENCY_BOOST_WINDOW,
+  RECENCY_BOOST_WINDOW_DAYS,
   RECENCY_BOOST_WEIGHT,
   type EntryType,
 } from '../config/limits.js';
@@ -353,14 +353,14 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
 
   // ── Memory & Briefings §4.2 (S2): short-window recency boost ──────────────
   //
-  // Entries accessed within the last RECENCY_BOOST_WINDOW minutes receive an
+  // Entries accessed within the last RECENCY_BOOST_WINDOW_DAYS days receive an
   // additive RECENCY_BOOST_WEIGHT boost to their combined_score.
   //
   // INVARIANT (§4.4): this boost is NEVER written back to qualityScore or any
   // persisted column. It exists only for ranking within this request.
   // The access-count update at the bottom of this function (db.update) sets
   // lastAccessedAt and accessCount — it does NOT touch qualityScore.
-  const recencyBoostCutoff = new Date(Date.now() - RECENCY_BOOST_WINDOW * 60 * 1000);
+  const recencyBoostCutoff = new Date(Date.now() - RECENCY_BOOST_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   for (const row of rrfRows) {
     if (row.last_accessed_at !== null) {
       const accessedAt = new Date(row.last_accessed_at);

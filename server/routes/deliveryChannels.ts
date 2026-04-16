@@ -13,9 +13,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { getAvailableChannels } from '../services/deliveryChannelService.js';
 
 const router = Router();
@@ -37,23 +35,7 @@ router.get(
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
 
-    // Verify subaccount belongs to this org
-    const [sa] = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, orgId),
-          isNull(subaccounts.deletedAt),
-        ),
-      )
-      .limit(1);
-
-    if (!sa) {
-      return res.status(404).json({ error: 'Subaccount not found' });
-    }
-
+    await resolveSubaccount(subaccountId, orgId);
     const channels = await getAvailableChannels(subaccountId, orgId);
     return res.json(channels);
   }),

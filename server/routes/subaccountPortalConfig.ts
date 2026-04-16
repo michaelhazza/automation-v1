@@ -12,9 +12,24 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { updatePortalConfig } from '../services/portalConfigService.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { updatePortalConfig, getPortalConfig } from '../services/portalConfigService.js';
 
 const router = Router();
+
+router.get(
+  '/api/subaccounts/:subaccountId/portal',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId!;
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, orgId);
+
+    const result = await getPortalConfig(subaccountId, orgId);
+    return res.json(result);
+  }),
+);
 
 router.patch(
   '/api/subaccounts/:subaccountId/portal',
@@ -24,6 +39,8 @@ router.patch(
     const orgId = req.orgId!;
     const userId = req.userId!;
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, orgId);
+
     const { portalMode, portalFeatures } = req.body ?? {};
 
     const result = await updatePortalConfig({

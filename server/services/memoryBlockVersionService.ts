@@ -16,7 +16,7 @@
 
 import { readFile } from 'fs/promises';
 import { resolve as resolvePath } from 'path';
-import { and, desc, eq, max, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   memoryBlocks,
@@ -35,6 +35,9 @@ import { logger } from '../lib/logger.js';
 const PROTECTED_BLOCK_CANONICAL_PATHS: Readonly<Record<string, string>> = Object.freeze({
   'config-agent-guidelines': 'docs/agents/config-agent-guidelines.md',
 });
+
+/** Keys of all protected blocks. Imported by protectedBlockDivergenceService. */
+export const PROTECTED_BLOCK_NAMES: readonly string[] = Object.keys(PROTECTED_BLOCK_CANONICAL_PATHS);
 
 export function getCanonicalPath(blockName: string): string | null {
   return PROTECTED_BLOCK_CANONICAL_PATHS[blockName] ?? null;
@@ -85,6 +88,30 @@ export async function writeVersionRow(params: WriteVersionParams): Promise<Memor
     .returning();
 
   return inserted ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Authz helper — used by routes to validate block belongs to org
+// ---------------------------------------------------------------------------
+
+/**
+ * Throws { statusCode: 404 } if the block is not found in the organisation
+ * or has been soft-deleted. Routes use this instead of accessing `db` directly.
+ */
+export async function ensureBlockInOrg(blockId: string, organisationId: string): Promise<void> {
+  const [row] = await db
+    .select({ id: memoryBlocks.id })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, organisationId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) throw { statusCode: 404, message: 'Block not found' };
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +192,7 @@ export async function diffAgainstCanonical(
   const [block] = await db
     .select({ id: memoryBlocks.id, name: memoryBlocks.name, content: memoryBlocks.content })
     .from(memoryBlocks)
-    .where(and(eq(memoryBlocks.id, blockId), eq(memoryBlocks.organisationId, organisationId)))
+    .where(and(eq(memoryBlocks.id, blockId), eq(memoryBlocks.organisationId, organisationId), isNull(memoryBlocks.deletedAt)))
     .limit(1);
 
   if (!block) throw { statusCode: 404, message: 'Block not found' };
@@ -174,7 +201,12 @@ export async function diffAgainstCanonical(
   if (!canonicalPath) return null; // not a protected block
 
   const abs = resolvePath(process.cwd(), canonicalPath);
-  const canonicalContent = await readFile(abs, 'utf-8');
+  let canonicalContent: string;
+  try {
+    canonicalContent = await readFile(abs, 'utf-8');
+  } catch {
+    throw { statusCode: 503, message: 'Canonical file unavailable — cannot diff.', errorCode: 'CANONICAL_FILE_MISSING' };
+  }
 
   return {
     blockId: block.id,
@@ -214,6 +246,7 @@ export async function resetToCanonical(
       and(
         eq(memoryBlocks.id, input.blockId),
         eq(memoryBlocks.organisationId, input.organisationId),
+        isNull(memoryBlocks.deletedAt),
       ),
     )
     .limit(1);
@@ -230,7 +263,12 @@ export async function resetToCanonical(
   }
 
   const abs = resolvePath(process.cwd(), canonicalPath);
-  const canonicalContent = await readFile(abs, 'utf-8');
+  let canonicalContent: string;
+  try {
+    canonicalContent = await readFile(abs, 'utf-8');
+  } catch {
+    throw { statusCode: 503, message: 'Canonical file unavailable — cannot reset.', errorCode: 'CANONICAL_FILE_MISSING' };
+  }
 
   // Transaction: update block content + write version row + clear divergence flag
   let versionWritten: MemoryBlockVersion | null = null;
