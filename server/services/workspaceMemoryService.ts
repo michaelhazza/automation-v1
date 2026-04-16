@@ -1766,16 +1766,20 @@ export async function getStaleEmbeddingsBatch(params: {
 
 /**
  * Recompute up to `limit` stale embeddings serially. Returns scan vs success
- * counts so callers can monitor convergence. Serial (not parallel) on purpose:
- * embedding generation is rate-limited at the provider, and a 100-entry batch
- * already takes long enough that bursting is wasteful.
+ * vs skipped counts so callers can monitor convergence and distinguish
+ * transient failures from in-flight collisions.
+ *
+ * Serial (not parallel) on purpose: embedding generation is rate-limited at
+ * the provider, and a 100-entry batch already takes long enough that
+ * bursting is wasteful.
  */
 export async function recomputeStaleEmbeddings(params: {
   subaccountId?: string;
   limit?: number;
-} = {}): Promise<{ scanned: number; recomputed: number }> {
+} = {}): Promise<{ scanned: number; recomputed: number; skipped: number }> {
   const stale = await getStaleEmbeddingsBatch(params);
   let recomputed = 0;
+  let skipped = 0;
   for (const entry of stale) {
     const ok = await reembedEntry({
       id: entry.id,
@@ -1783,8 +1787,9 @@ export async function recomputeStaleEmbeddings(params: {
       resetContext: true,
     });
     if (ok) recomputed++;
+    else skipped++;
   }
-  return { scanned: stale.length, recomputed };
+  return { scanned: stale.length, recomputed, skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,24 +1856,29 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
       const context = parsed.contexts[i];
       if (!context || entry.embeddingContext) continue; // skip if already enriched (race condition)
 
+      // Snapshot the content hash we generated context for. If the row's
+      // content has drifted between the SELECT above and this UPDATE (e.g. a
+      // dedup re-embed ran in parallel), the CAS will no-op and the fresh
+      // post-dedup embedding stays intact (review §2.1 race fix).
+      const snapshotContentHash = createHash('md5').update(entry.content).digest('hex');
+
       const embeddingInput = `${context}\n\n${entry.content}`.slice(0, MAX_EMBEDDING_INPUT_CHARS);
       const embedding = await generateEmbedding(embeddingInput);
 
-      // CAS guard: only update if still NULL
+      // CAS guards:
+      //   AND embedding_context IS NULL — another Phase 2 didn't already win
+      //   AND content_hash = ${snapshotContentHash} — content hasn't drifted
+      //                                               since we read it
       if (embedding) {
-        // External review §2.1: stamp embedding_content_hash with the hash of
-        // entry.content (not the full embedding input) — content is the
-        // mutable surface that drift detection cares about; the context
-        // prefix is generated once and never changes.
-        const contentHash = createHash('md5').update(entry.content).digest('hex');
         await db.execute(
           sql`UPDATE workspace_memory_entries
               SET embedding_context = ${context},
                   embedding = ${formatVectorLiteral(embedding)}::vector,
                   embedding_computed_at = NOW(),
-                  embedding_content_hash = ${contentHash}
+                  embedding_content_hash = ${snapshotContentHash}
               WHERE id = ${entry.id}
-                AND embedding_context IS NULL`
+                AND embedding_context IS NULL
+                AND content_hash = ${snapshotContentHash}`
         );
       }
     }
