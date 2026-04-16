@@ -4,6 +4,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
 import type { SkillTier } from '../lib/skillVisibility.js';
 
 const router = Router();
@@ -141,5 +142,22 @@ router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSI
   await skillService.deleteSkill(req.params.id, req.orgId!);
   res.json({ message: 'Skill deleted' });
 }));
+
+// ── Feature 2 — org-scoped skill test run ────────────────────────────────────
+router.post('/api/org/skills/:skillId/test-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    checkTestRunRateLimit(req.user!.id);
+    const { prompt, inputJson } = req.body as { prompt?: string; inputJson?: Record<string, unknown> };
+    const skill = await skillService.getSkill(req.params.skillId, req.orgId!);
+    res.status(201).json({
+      skillId: skill.id,
+      skillSlug: skill.slug,
+      isTestRun: true,
+      triggerContext: { prompt, inputJson, source: 'test_panel', skillId: skill.id },
+    });
+  })
+);
 
 export default router;
