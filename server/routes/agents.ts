@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission, hasOrgPermission } from '../middlew
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateMultipart, validateBody } from '../middleware/validate.js';
 import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
@@ -133,6 +134,8 @@ router.delete('/api/agents/:id/conversations/:convId', authenticate, requireOrgP
 // ── Feature 2 — org-level agent test run ─────────────────────────────────────
 // POST /api/agents/:id/test-run
 // Starts a flagged test run for an org-level agent. Rate-limited per user.
+// Runs via the org subaccount (isOrgSubaccount=true) to satisfy the
+// subaccountId + subaccountAgentId requirement in agentExecutionService.
 
 router.post('/api/agents/:id/test-run',
   authenticate,
@@ -145,6 +148,16 @@ router.post('/api/agents/:id/test-run',
       inputJson?: Record<string, unknown>;
       idempotencyKey?: string;
     };
+
+    // Resolve the org subaccount and the agent link within it.
+    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
+    const orgSa = await requireOrgSubaccount(req.orgId!);
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, id);
+    if (!saLink) {
+      res.status(404).json({ error: 'No agent config found for this agent in the organisation workspace' });
+      return;
+    }
+
     const triggerContext: Record<string, unknown> = {
       triggeredBy: req.user!.id,
       source: 'test_panel',
@@ -155,6 +168,9 @@ router.post('/api/agents/:id/test-run',
     const result = await agentExecutionService.executeRun({
       agentId: id,
       organisationId: req.orgId!,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: 'api',
       runSource: 'manual',

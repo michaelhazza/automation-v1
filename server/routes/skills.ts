@@ -4,6 +4,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
 import { agentService } from '../services/agentService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
@@ -146,8 +147,9 @@ router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSI
 }));
 
 // ── Feature 2 — org-scoped skill test run ────────────────────────────────────
-// Finds the first active org agent and executes a test run with the skill
-// context injected. Returns { runId } so TestPanel can poll for completion.
+// Resolves the org subaccount and its first active agent link, then executes a
+// test run with allowedToolSlugs=[skill.slug] so the agent actually invokes the
+// skill under test rather than its default toolset.
 router.post('/api/org/skills/:skillId/test-run',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
@@ -159,12 +161,27 @@ router.post('/api/org/skills/:skillId/test-run',
       idempotencyKey?: string;
     };
     const skill = await skillService.getSkill(req.params.skillId, req.orgId!);
+
+    // Resolve the org subaccount and find an agent link within it.
+    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
+    const orgSa = await requireOrgSubaccount(req.orgId!);
     const orgAgents = await agentService.listAgents(req.orgId!);
     if (orgAgents.length === 0) {
       res.status(422).json({ error: 'No active agent found to run this skill. Create and activate an agent first.' });
       return;
     }
-    const agent = orgAgents[0];
+
+    // Find the first agent that has a link in the org subaccount.
+    let saLink: Awaited<ReturnType<typeof subaccountAgentService.getLinkByAgentInSubaccount>> | null = null;
+    for (const agent of orgAgents) {
+      saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, agent.id);
+      if (saLink) break;
+    }
+    if (!saLink) {
+      res.status(422).json({ error: 'No agent config found in the organisation workspace. Link an agent to the workspace first.' });
+      return;
+    }
+
     const triggerContext: Record<string, unknown> = {
       triggeredBy: req.user!.id,
       source: 'test_panel',
@@ -175,14 +192,18 @@ router.post('/api/org/skills/:skillId/test-run',
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
     const result = await agentExecutionService.executeRun({
-      agentId: agent.id,
+      agentId: saLink.agentId,
       organisationId: req.orgId!,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: 'api',
       runSource: 'manual',
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
+      allowedToolSlugs: [skill.slug],
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     res.status(201).json(result);

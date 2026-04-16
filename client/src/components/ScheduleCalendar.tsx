@@ -159,6 +159,18 @@ export default function ScheduleCalendar({
   const anyFilter =
     filter.source.size > 0 || filter.scopeTag.size > 0 || filter.subaccountId.size > 0;
 
+  // Recompute tokens + cost from the filtered set so the totals strip always
+  // reflects what's visible — not the full unfiltered server response.
+  const filteredTotals = useMemo(() => {
+    let estimatedTokens = 0;
+    let estimatedCost = 0;
+    for (const o of filteredOccurrences) {
+      estimatedTokens += o.estimatedTokens ?? 0;
+      estimatedCost += o.estimatedCost ?? 0;
+    }
+    return { estimatedTokens, estimatedCost };
+  }, [filteredOccurrences]);
+
   if (loading) {
     return <div className="p-6 text-sm text-slate-500">Loading calendar…</div>;
   }
@@ -268,18 +280,18 @@ export default function ScheduleCalendar({
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-slate-500">Est. tokens</div>
                 <div className="text-xl font-semibold text-slate-900">
-                  {Math.round(data.totals.estimatedTokens).toLocaleString()}
+                  {Math.round(filteredTotals.estimatedTokens).toLocaleString()}
                 </div>
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-slate-500">Est. cost</div>
                 <div className="text-xl font-semibold text-slate-900">
-                  {formatMoney(data.totals.estimatedCost)}
+                  {formatMoney(filteredTotals.estimatedCost)}
                 </div>
               </div>
             </>
           )}
-          {data.totalsAreTruncated && (
+          {data.totalsAreTruncated && !anyFilter && (
             <div className="self-center text-xs text-amber-700">
               Totals reflect only the first {data.occurrences.length.toLocaleString()} occurrences.
             </div>
