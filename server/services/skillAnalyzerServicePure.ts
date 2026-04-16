@@ -1266,6 +1266,161 @@ export function validateMergeOutput(
 }
 
 // ---------------------------------------------------------------------------
+// Rule-based fallback merger — v2 Fix 1
+// ---------------------------------------------------------------------------
+
+export interface RuleBasedMergeInput {
+  candidate: { name: string; description: string; definition: object | null; instructions: string | null };
+  library:   { name: string; description: string; definition: object | null; instructions: string | null };
+}
+
+export interface RuleBasedMergeOutput {
+  merge: ProposedMerge;
+  mergeRationale: string;
+}
+
+/**
+ * Deterministic merge produced when the LLM classifier is unavailable or
+ * returns an invalid response. Preserves invocation blocks, HITL gates, and
+ * tool-definition schemas without any model call.
+ *
+ * Dominant source is chosen as: (1) definition-bearing skill > definition-less,
+ * else (2) higher richnessScore of instructions, else (3) library (stable tie-break).
+ *
+ * Name behaviour (§11.4): always defaults to the library name for DB slug
+ * stability; a NAME_MISMATCH warning is emitted separately by
+ * validateMergeOutput when candidate and library names differ, and the
+ * reviewer resolves that via the normal Fix 7 UI.
+ */
+export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput): RuleBasedMergeOutput {
+  const candidateHasDef = !!candidate.definition && typeof candidate.definition === 'object';
+  const libraryHasDef = !!library.definition && typeof library.definition === 'object';
+
+  let dominantKey: 'candidate' | 'library';
+  if (libraryHasDef && !candidateHasDef) dominantKey = 'library';
+  else if (candidateHasDef && !libraryHasDef) dominantKey = 'candidate';
+  else {
+    const candidateScore = richnessScore(candidate.instructions);
+    const libraryScore = richnessScore(library.instructions);
+    dominantKey = candidateScore >= libraryScore ? 'candidate' : 'library';
+  }
+  const dominant = dominantKey === 'candidate' ? candidate : library;
+  const secondary = dominantKey === 'candidate' ? library : candidate;
+
+  // Name: library default (keeps DB slug predictable). NAME_MISMATCH handles UX.
+  const name = library.name || candidate.name;
+
+  // Description: prefer the shorter of the two if both present; else whichever exists.
+  let description = '';
+  if (candidate.description && library.description) {
+    description = candidate.description.length <= library.description.length
+      ? candidate.description
+      : library.description;
+  } else {
+    description = candidate.description || library.description || '';
+  }
+
+  // Definition: dominant's schema wins; if dominant has none but secondary
+  // does, adopt secondary's. When dominant has a definition, overwrite its
+  // name field to match the chosen merge name for consistency.
+  let definition: object;
+  if (dominantKey === 'candidate' && candidateHasDef) definition = candidate.definition as object;
+  else if (dominantKey === 'library' && libraryHasDef) definition = library.definition as object;
+  else if (candidateHasDef) definition = candidate.definition as object;
+  else if (libraryHasDef) definition = library.definition as object;
+  else {
+    // Neither source has a schema — synthesise a minimal valid shape so
+    // downstream validators don't explode.
+    definition = {
+      name,
+      description,
+      input_schema: { type: 'object', properties: {}, required: [] as string[] },
+    };
+  }
+
+  const instructions = mergeInstructionsRuleBased(dominant.instructions, secondary.instructions);
+
+  const sectionCount = (instructions.match(/^##\s+/gm)?.length ?? 0);
+  const mergeRationale =
+    `Rule-based merge applied — classifier unavailable or output invalid. `
+    + `Dominant source: ${dominantKey === 'library' ? 'library' : 'incoming'}. `
+    + `Merged instructions have ${sectionCount} top-level section(s). `
+    + `Review carefully; confidence is low by default.`;
+
+  return {
+    merge: {
+      name,
+      description,
+      definition,
+      instructions,
+    },
+    mergeRationale,
+  };
+}
+
+/** Merge two instruction bodies by (a) taking the dominant text as base and
+ *  (b) appending any `## heading` sections from the secondary that the
+ *  dominant doesn't already contain (case-insensitive heading match). Keeps
+ *  the dominant's invocation block at the top untouched. */
+function mergeInstructionsRuleBased(
+  dominant: string | null,
+  secondary: string | null,
+): string {
+  const base = (dominant ?? '').trimEnd();
+  if (!secondary || secondary.trim().length === 0) return base;
+
+  // Collect existing H2 headings (normalized) in the dominant.
+  const existingHeadings = new Set<string>();
+  const h2Re = /^##\s+(.+?)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = h2Re.exec(base)) !== null) existingHeadings.add(normaliseHeading(m[1]));
+
+  // Split secondary into H2 sections and append any not already present.
+  const sections = splitH2Sections(secondary);
+  const appendParts: string[] = [];
+  for (const section of sections) {
+    const norm = normaliseHeading(section.heading);
+    if (norm && !existingHeadings.has(norm)) {
+      appendParts.push(section.body);
+    }
+  }
+  if (appendParts.length === 0) return base;
+  return `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+}
+
+function normaliseHeading(h: string): string {
+  return h.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function splitH2Sections(text: string): Array<{ heading: string; body: string }> {
+  const lines = text.split('\n');
+  const sections: Array<{ heading: string; body: string }> = [];
+  let currentHeading = '';
+  let buf: string[] = [];
+  const flush = () => {
+    if (buf.length === 0) return;
+    sections.push({
+      heading: currentHeading,
+      body: `${currentHeading ? `## ${currentHeading}\n` : ''}${buf.join('\n').trimEnd()}`,
+    });
+    buf = [];
+  };
+  for (const line of lines) {
+    const h = line.match(/^##\s+(.+?)\s*$/);
+    if (h) {
+      flush();
+      currentHeading = h[1];
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  // Drop the implicit "preface" section with empty heading — we only want to
+  // append real headings from the secondary.
+  return sections.filter(s => s.heading.length > 0);
+}
+
+// ---------------------------------------------------------------------------
 // Diff Summary
 // ---------------------------------------------------------------------------
 

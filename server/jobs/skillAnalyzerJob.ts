@@ -42,6 +42,7 @@ import {
   validateMergeOutput,
   extractInvocationBlock,
   richnessScore,
+  buildRuleBasedMerge,
   type LibrarySkillSummary,
   type MergeWarning,
 } from '../services/skillAnalyzerServicePure.js';
@@ -544,6 +545,56 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       }
 
       const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+      // v2 Fix 1: rule-based fallback merge so the reviewer sees a concrete
+      // proposal instead of a dead state. Always emits CLASSIFIER_FALLBACK
+      // plus whatever validateMergeOutput surfaces.
+      const fallbackOutput = buildRuleBasedMerge({
+        candidate: {
+          name: candidate.name,
+          description: candidate.description,
+          definition: (candidate.definition as object | null) ?? null,
+          instructions: candidate.instructions ?? null,
+        },
+        library: {
+          name: matchedLib.name,
+          description: matchedLib.description,
+          definition: (matchedLib.definition as object | null) ?? null,
+          instructions: matchedLib.instructions ?? null,
+        },
+      });
+
+      // Validate the rule-based merge so NAME_MISMATCH / SCOPE_EXPANSION /
+      // TABLE_ROWS_DROPPED etc. still surface.
+      const baseSkill = richnessScore(candidate.instructions) >= richnessScore(matchedLib.instructions) ? candidate : matchedLib;
+      const nonBaseSkill = baseSkill === candidate ? matchedLib : candidate;
+      const baseInvocation = extractInvocationBlock(baseSkill.instructions);
+      const nonBaseInvocation = extractInvocationBlock(nonBaseSkill.instructions);
+      const excludedId = matchedLib.id ?? null;
+      const allLibraryNames = new Set(
+        librarySkills.filter(s => s.id !== excludedId).map(s => s.name.toLowerCase()),
+      );
+      const allLibrarySlugs = new Set(
+        librarySkills.filter(s => s.id !== excludedId).map(s => s.slug.toLowerCase()),
+      );
+
+      const fallbackWarnings: MergeWarning[] = [
+        {
+          code: 'CLASSIFIER_FALLBACK',
+          severity: 'warning',
+          message: 'Rule-based fallback merge applied — classifier unavailable. Review carefully.',
+        },
+        ...validateMergeOutput(
+          { definition: baseSkill.definition as object | null, instructions: baseSkill.instructions, invocationBlock: baseInvocation },
+          { definition: nonBaseSkill.definition as object | null, instructions: nonBaseSkill.instructions, invocationBlock: nonBaseInvocation },
+          fallbackOutput.merge,
+          allLibraryNames,
+          allLibrarySlugs,
+          librarySkills,
+          excludedId,
+        ),
+      ];
+
       classifiedResults.push({
         candidateIndex: match.candidateIndex,
         candidate,
@@ -551,14 +602,12 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         confidence: 0.3,
         similarityScore: match.similarity,
         classificationReasoning:
-          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - rule-based fallback merge applied for human review.',
         libraryId: matchedLib.id,
         librarySlug: matchedLib.slug,
         libraryName: matchedLib.name,
         diffSummary,
-        // No LLM = no merge proposal. Row will fail the null guard on
-        // execute (spec §6.3 LLM-fallback path).
-        proposedMerge: null,
+        proposedMerge: fallbackOutput.merge,
         classificationFailed: false,
         classificationFailureReason: null,
       });
@@ -575,8 +624,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           confidence: 0.3,
           similarityScore: match.similarity ?? undefined,
           classificationReasoning:
-            'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+            'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - rule-based fallback merge applied for human review.',
           diffSummary: diffSummary ?? undefined,
+          proposedMergedContent: fallbackOutput.merge,
+          originalProposedMerge: fallbackOutput.merge,
+          mergeWarnings: fallbackWarnings,
+          mergeRationale: fallbackOutput.mergeRationale,
+          classifierFallbackApplied: true,
           classificationFailed: false,
           classificationFailureReason: null,
           isDocumentationFile: flags?.isDocumentationFile ?? false,
@@ -754,16 +808,72 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             });
           }
 
-          // Fallback: classification failed entirely (LLM error or
-          // unparseable output). Tag the row as PARTIAL_OVERLAP for human
-          // review with a null merge — execute will fail the null guard
-          // with the spec's standard "merge proposal unavailable" error.
-          const finalResult = classificationResult ?? {
-            classification: 'PARTIAL_OVERLAP' as const,
-            confidence: 0.3,
-            reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
-            proposedMerge: null,
+          // v2 Fix 1: when the LLM call failed or parsed to null, apply the
+          // rule-based fallback so the reviewer gets a concrete proposal
+          // instead of a dead state.
+          let classifierFallbackApplied = false;
+          let finalResult: {
+            classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+            confidence: number;
+            reasoning: string;
+            proposedMerge: ({ mergeRationale?: string | null } & Record<string, unknown>) | null;
           };
+          if (classificationResult) {
+            finalResult = classificationResult as typeof finalResult;
+            // Even a "successful" LLM response can have proposedMerge=null
+            // (DUPLICATE / DISTINCT legitimately). Only synth a fallback if
+            // the classifier returned PARTIAL_OVERLAP / IMPROVEMENT WITH a
+            // null merge — that indicates a parse edge case.
+            if (
+              finalResult.proposedMerge === null &&
+              (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT')
+            ) {
+              const fallback = buildRuleBasedMerge({
+                candidate: {
+                  name: candidate.name,
+                  description: candidate.description,
+                  definition: (candidate.definition as object | null) ?? null,
+                  instructions: candidate.instructions ?? null,
+                },
+                library: {
+                  name: matchedLib.name,
+                  description: matchedLib.description,
+                  definition: (matchedLib.definition as object | null) ?? null,
+                  instructions: matchedLib.instructions ?? null,
+                },
+              });
+              finalResult = {
+                ...finalResult,
+                confidence: Math.min(finalResult.confidence, 0.3),
+                reasoning: finalResult.reasoning + ' — LLM merge missing; rule-based fallback applied.',
+                proposedMerge: { ...fallback.merge, mergeRationale: fallback.mergeRationale },
+              };
+              classifierFallbackApplied = true;
+            }
+          } else {
+            // LLM call failed or parse error — synth rule-based merge.
+            const fallback = buildRuleBasedMerge({
+              candidate: {
+                name: candidate.name,
+                description: candidate.description,
+                definition: (candidate.definition as object | null) ?? null,
+                instructions: candidate.instructions ?? null,
+              },
+              library: {
+                name: matchedLib.name,
+                description: matchedLib.description,
+                definition: (matchedLib.definition as object | null) ?? null,
+                instructions: matchedLib.instructions ?? null,
+              },
+            });
+            finalResult = {
+              classification: 'PARTIAL_OVERLAP' as const,
+              confidence: 0.3,
+              reasoning: 'LLM classification failed — rule-based fallback merge applied for human review.',
+              proposedMerge: { ...fallback.merge, mergeRationale: fallback.mergeRationale },
+            };
+            classifierFallbackApplied = true;
+          }
 
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
@@ -812,10 +922,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               excludedId,
             );
 
+            // Prepend CLASSIFIER_FALLBACK when the rule-based path ran, so
+            // the UI banner + approval gate both activate.
+            if (classifierFallbackApplied) {
+              mergeWarnings = [
+                {
+                  code: 'CLASSIFIER_FALLBACK',
+                  severity: 'warning',
+                  message: 'Rule-based fallback merge applied — classifier unavailable. Review carefully.',
+                },
+                ...mergeWarnings,
+              ];
+            }
+
             if (mergeWarnings.length > 0) {
               console.info('[SkillAnalyzer] merge_warnings_summary', {
                 candidateSlug: candidate.slug,
                 codes: mergeWarnings.map(w => w.code),
+                classifierFallbackApplied,
               });
             }
           }
@@ -857,6 +981,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               originalProposedMerge: storedMerge ?? undefined,
               mergeWarnings: mergeWarnings.length > 0 ? mergeWarnings : null,
               mergeRationale: mergeRationale,
+              classifierFallbackApplied,
               classificationFailed,
               classificationFailureReason: classificationFailureReason ?? null,
               isDocumentationFile: flags?.isDocumentationFile ?? false,
