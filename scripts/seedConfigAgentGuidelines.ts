@@ -87,13 +87,16 @@ export async function seedConfigAgentGuidelinesForOrg(
     return;
   }
 
-  // 3. Guard: check org-wide for any live block with this name first.
-  // The unique index memory_blocks_org_name_idx enforces uniqueness on
-  // (organisation_id, name) across the whole org (not scoped to subaccount).
-  // If a stray block exists at a different subaccount scope, the INSERT would
-  // crash on the unique index. Warn and skip instead.
-  const [orgWideName] = await db
-    .select({ id: memoryBlocks.id, subaccountId: memoryBlocks.subaccountId })
+  // 3. Org-wide lookup — the unique index memory_blocks_org_name_idx enforces
+  // uniqueness on (organisation_id, name), not per-subaccount. We look up the
+  // block at the org level and reuse it regardless of which subaccount it sits
+  // in, to avoid unique-index violations on INSERT.
+  const [existingBlock] = await db
+    .select({
+      id: memoryBlocks.id,
+      content: memoryBlocks.content,
+      subaccountId: memoryBlocks.subaccountId,
+    })
     .from(memoryBlocks)
     .where(
       and(
@@ -103,25 +106,13 @@ export async function seedConfigAgentGuidelinesForOrg(
       ),
     );
 
-  if (orgWideName && orgWideName.subaccountId !== orgSubaccount.id) {
-    console.warn(`  [warn] org ${orgId}: found '${BLOCK_NAME}' block at a different subaccount scope (block_id=${orgWideName.id}, subaccountId=${orgWideName.subaccountId}) — skipping seed to avoid unique-index conflict. Move or delete the stray block to allow seeding.`);
-    return;
+  // If the block sits at a different subaccount scope, reuse it for attachment
+  // but do NOT silently migrate. Log so ops can investigate.
+  if (existingBlock && existingBlock.subaccountId !== orgSubaccount.id) {
+    log(`  [info] org ${orgId}: block '${BLOCK_NAME}' lives at subaccount ${existingBlock.subaccountId ?? 'null'} (expected ${orgSubaccount.id}) — reusing for attachment without migrating`);
   }
 
-  // 4. Check for existing block at the expected org-subaccount scope
-  const [existingBlock] = await db
-    .select({ id: memoryBlocks.id, content: memoryBlocks.content })
-    .from(memoryBlocks)
-    .where(
-      and(
-        eq(memoryBlocks.organisationId, orgId),
-        eq(memoryBlocks.subaccountId, orgSubaccount.id),
-        eq(memoryBlocks.name, BLOCK_NAME),
-        isNull(memoryBlocks.deletedAt),
-      ),
-    );
-
-  // 5. Check for existing attachment (only relevant if block exists)
+  // 4. Check for existing attachment (only relevant if block exists)
   let attachmentExists = false;
   let attachmentIsTombstoned = false;
   if (existingBlock) {
@@ -182,11 +173,16 @@ export async function seedConfigAgentGuidelinesForOrg(
         })
         .returning({ id: memoryBlocks.id });
 
+      // Attachment is also idempotent via onConflictDoUpdate — handles the
+      // unlikely race where a concurrent seed already inserted the row.
       await db.insert(memoryBlockAttachments).values({
         blockId: created.id,
         agentId: configAgent.id,
         permission: 'read',
         source: 'manual',
+      }).onConflictDoUpdate({
+        target: [memoryBlockAttachments.blockId, memoryBlockAttachments.agentId],
+        set: { permission: 'read', source: 'manual', deletedAt: null },
       });
 
       log(`  [create] org ${orgId}: block seeded and attached (block_id=${created.id}, agent_id=${configAgent.id})`);
@@ -215,7 +211,10 @@ export async function seedConfigAgentGuidelinesForOrg(
 
     case 'warn_divergence': {
       // Use console.warn directly so log aggregators can filter on severity.
-      console.warn(`  [warn] org ${orgId}: runtime content diverges from canonical — no overwrite (block_id=${existingBlock!.id})`);
+      // Include blockId and content lengths for structured debugging.
+      const runtimeLen = existingBlock!.content?.length ?? 0;
+      const canonicalLen = canonicalContent.length;
+      console.warn(`  [warn] org ${orgId}: runtime content diverges from canonical — no overwrite (block_id=${existingBlock!.id}, canonical_len=${canonicalLen}, runtime_len=${runtimeLen})`);
       break;
     }
 
