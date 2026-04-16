@@ -140,7 +140,11 @@ router.post('/api/agents/:id/test-run',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     checkTestRunRateLimit(req.user!.id);
-    const { prompt, inputJson } = req.body as { prompt?: string; inputJson?: Record<string, unknown> };
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
     const triggerContext: Record<string, unknown> = {
       triggeredBy: req.user!.id,
       source: 'test_panel',
@@ -157,6 +161,7 @@ router.post('/api/agents/:id/test-run',
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     res.status(201).json(result);
   })

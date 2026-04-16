@@ -3,6 +3,8 @@ import { authenticate, requireOrgPermission, hasOrgPermission } from '../middlew
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
+import { agentService } from '../services/agentService.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
 import type { SkillTier } from '../lib/skillVisibility.js';
@@ -144,19 +146,46 @@ router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSI
 }));
 
 // ── Feature 2 — org-scoped skill test run ────────────────────────────────────
+// Finds the first active org agent and executes a test run with the skill
+// context injected. Returns { runId } so TestPanel can poll for completion.
 router.post('/api/org/skills/:skillId/test-run',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     checkTestRunRateLimit(req.user!.id);
-    const { prompt, inputJson } = req.body as { prompt?: string; inputJson?: Record<string, unknown> };
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
     const skill = await skillService.getSkill(req.params.skillId, req.orgId!);
-    res.status(201).json({
+    const orgAgents = await agentService.listAgents(req.orgId!);
+    if (orgAgents.length === 0) {
+      res.status(422).json({ error: 'No active agent found to run this skill. Create and activate an agent first.' });
+      return;
+    }
+    const agent = orgAgents[0];
+    const triggerContext: Record<string, unknown> = {
+      triggeredBy: req.user!.id,
+      source: 'test_panel',
+      isTestRun: true,
       skillId: skill.id,
       skillSlug: skill.slug,
+    };
+    if (prompt) triggerContext.prompt = prompt;
+    if (inputJson) triggerContext.inputJson = inputJson;
+    const result = await agentExecutionService.executeRun({
+      agentId: agent.id,
+      organisationId: req.orgId!,
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
       isTestRun: true,
-      triggerContext: { prompt, inputJson, source: 'test_panel', skillId: skill.id },
+      userId: req.user!.id,
+      triggerContext,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+    res.status(201).json(result);
   })
 );
 

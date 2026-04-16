@@ -246,41 +246,41 @@ function stepIdFromNode(node: N8nNode): string {
 
 /**
  * detectCycles — returns the IDs of nodes involved in directed cycles.
- * Uses DFS with a three-colour mark (white/grey/black).
+ * Uses Kahn's algorithm: any node that cannot be processed (never reaches
+ * in-degree 0) is part of a cycle. O(V+E).
  * Returns an empty array if the graph is a DAG.
  */
 export function detectCycles(nodes: N8nNode[], connections: N8nConnection[]): string[] {
+  const inDegree = new Map<string, number>();
   const adj = new Map<string, string[]>();
-  for (const n of nodes) adj.set(n.id, []);
+  for (const n of nodes) {
+    adj.set(n.id, []);
+    inDegree.set(n.id, 0);
+  }
   for (const c of connections) {
     const out = adj.get(c.source);
     if (out) out.push(c.target);
+    inDegree.set(c.target, (inDegree.get(c.target) ?? 0) + 1);
   }
 
-  const WHITE = 0, GREY = 1, BLACK = 2;
-  const colour = new Map<string, number>();
-  for (const n of nodes) colour.set(n.id, WHITE);
-  const cycleIds = new Set<string>();
+  // Seed with zero-in-degree nodes
+  const queue: string[] = nodes
+    .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
+    .map((n) => n.id);
+  const processed = new Set<string>();
 
-  function dfs(id: string) {
-    colour.set(id, GREY);
-    for (const neighbour of (adj.get(id) ?? [])) {
-      const c = colour.get(neighbour) ?? WHITE;
-      if (c === GREY) {
-        cycleIds.add(id);
-        cycleIds.add(neighbour);
-      } else if (c === WHITE) {
-        dfs(neighbour);
-        if (cycleIds.has(neighbour)) cycleIds.add(id);
-      }
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    processed.add(id);
+    for (const nid of (adj.get(id) ?? [])) {
+      const deg = (inDegree.get(nid) ?? 0) - 1;
+      inDegree.set(nid, deg);
+      if (deg === 0) queue.push(nid);
     }
-    colour.set(id, BLACK);
   }
 
-  for (const n of nodes) {
-    if ((colour.get(n.id) ?? WHITE) === WHITE) dfs(n.id);
-  }
-  return Array.from(cycleIds);
+  // Nodes not reachable by Kahn's = members of a cycle
+  return nodes.filter((n) => !processed.has(n.id)).map((n) => n.id);
 }
 
 /**
@@ -350,6 +350,14 @@ export function topologicalSort(
         if (!inserted) queue.push(neighbour);
       }
     }
+  }
+
+  // Defensive assertion: if cycle detection passed, all nodes must be sorted.
+  // If this fires, detectCycles has a bug.
+  if (order.length !== nodes.length) {
+    return {
+      error: `Internal error: topological sort produced ${order.length} nodes from ${nodes.length} input nodes after cycle check passed. Please report this.`,
+    };
   }
 
   return { order };
@@ -503,11 +511,15 @@ export function importN8nWorkflow(workflowJson: unknown): ImportResult {
     connectedIds.add(c.source);
     connectedIds.add(c.target);
   }
-  const disconnectedNonTriggers = sortedNodes.filter((n) => {
-    const key = normaliseNodeType(n.type);
-    const isTrigger = N8N_NODE_MAP[key]?.isTrigger === true;
-    return !isTrigger && !connectedIds.has(n.id);
-  });
+  const disconnectedNonTriggerIds = new Set<string>(
+    sortedNodes
+      .filter((n) => {
+        const key = normaliseNodeType(n.type);
+        const isTrigger = N8N_NODE_MAP[key]?.isTrigger === true;
+        return !isTrigger && !connectedIds.has(n.id);
+      })
+      .map((n) => n.id)
+  );
 
   // 8. Map each node to a step
   const steps: MappedStep[] = [];
@@ -518,7 +530,7 @@ export function importN8nWorkflow(workflowJson: unknown): ImportResult {
     const shortKey = normaliseNodeType(node.type);
 
     // Disconnected non-trigger → high-severity warning, omit from steps
-    if (disconnectedNonTriggers.find((n) => n.id === node.id)) {
+    if (disconnectedNonTriggerIds.has(node.id)) {
       report.push({
         n8nNodeId: node.id,
         n8nNodeName: node.name,

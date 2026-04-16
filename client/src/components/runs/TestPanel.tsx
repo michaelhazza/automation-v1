@@ -113,8 +113,11 @@ export default function TestPanel({
       try { inputJson = JSON.parse(prompt); }
       catch { inputJson = { prompt }; }
     }
+    // Generate a per-click idempotency key so rapid double-clicks return the
+    // same run rather than creating duplicates.
+    const idempotencyKey = crypto.randomUUID();
     try {
-      const r = await api.post<{ runId: string }>(testRunEndpoint, { prompt, inputJson });
+      const r = await api.post<{ runId: string }>(testRunEndpoint, { prompt, inputJson, idempotencyKey });
       setRunId(r.data.runId);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string; message?: string } } };

@@ -653,7 +653,8 @@ export const skillService = {
 
     const now = new Date();
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
-    // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this skill.
+    // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this skill
+    // (best-effort — not in the same DB transaction as the skill soft-delete above).
     await softDeleteByTarget(organisationId, 'skill', id);
     return { message: 'Skill deleted' };
   },

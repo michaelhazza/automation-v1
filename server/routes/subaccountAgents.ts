@@ -276,8 +276,8 @@ router.put(
 // ── Feature 2 — inline test run ──────────────────────────────────────────────
 // POST .../agents/:linkId/test-run
 // Starts a flagged test run (is_test_run=true, runType='manual'). Rate-limited
-// to TEST_RUN_RATE_LIMIT_PER_HOUR per user (spec §4.8). Never re-uses an
-// idempotency key across test runs so each trigger starts a fresh run.
+// to TEST_RUN_RATE_LIMIT_PER_HOUR per user (spec §4.8). Accepts an optional
+// client-provided idempotencyKey to deduplicate rapid double-clicks.
 router.post(
   '/api/subaccounts/:subaccountId/agents/:linkId/test-run',
   authenticate,
@@ -287,7 +287,11 @@ router.post(
     await resolveSubaccount(subaccountId, req.orgId!);
     checkTestRunRateLimit(req.user!.id);
     const link = await subaccountAgentService.getLinkById(req.orgId!, subaccountId, linkId);
-    const { prompt, inputJson } = req.body as { prompt?: string; inputJson?: Record<string, unknown> };
+    const { prompt, inputJson, idempotencyKey } = req.body as {
+      prompt?: string;
+      inputJson?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
     const triggerContext: Record<string, unknown> = {
       triggeredBy: req.user!.id,
       source: 'test_panel',
@@ -307,6 +311,7 @@ router.post(
       isTestRun: true,
       userId: req.user!.id,
       triggerContext,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     res.status(201).json(result);
   })

@@ -137,8 +137,10 @@ export async function deleteFixture(orgId: string, fixtureId: string) {
 
 /**
  * Soft-delete all fixtures for a given target (agent or skill).
- * Called from agentService / skillService when the target is soft-deleted,
- * within the same transaction as the parent delete (spec §9 orphan cleanup).
+ * Called from agentService / skillService when the target is soft-deleted
+ * (spec §9 orphan cleanup). Runs as a separate statement — not in the same
+ * DB transaction as the parent delete. Partial failure leaves orphaned rows
+ * with deletedAt=null, which are harmless (filtered on read) but untidy.
  */
 export async function softDeleteByTarget(
   orgId: string,

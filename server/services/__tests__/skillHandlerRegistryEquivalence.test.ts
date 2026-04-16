@@ -39,7 +39,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (114 entries)
+// Canonical handler key set (149 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -140,6 +140,7 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'fetch_paywalled_content',
   'send_to_slack',
   'ask_clarifying_question',
+  'request_clarification',
   'update_memory_block',
   'search_agent_history',
   'read_priority_feed',
@@ -193,6 +194,10 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'config_send_playbook_email_digest',
   // Feature 3 — n8n Workflow Import
   'import_n8n_workflow',
+  // Phase 3 — Weekly Digest + Playbook Delivery
+  'weekly_digest_gather',
+  'config_weekly_digest_gather',
+  'config_deliver_playbook_output',
 ];
 
 // ---------------------------------------------------------------------------
@@ -228,11 +233,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 144 keys', () => {
+test('SKILL_HANDLERS has exactly 149 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 144) {
+  if (count !== 149) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 144. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 149. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }
