@@ -6,3 +6,6 @@ dist/
 .superpowers/brainstorm/
 .test-runs/
 shared/iee/*.js
+.claude/*.lock
+tasks/codex-iter*.txt
+.vs/
