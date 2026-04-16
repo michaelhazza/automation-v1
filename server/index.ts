@@ -132,6 +132,8 @@ import subaccountPortalConfigRouter from './routes/subaccountPortalConfig.js';
 import dropZoneRouter from './routes/dropZone.js';
 import memoryInspectorRouter from './routes/memoryInspector.js';
 import portfolioRollupRouter from './routes/portfolioRollup.js';
+// Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
+import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -253,6 +255,7 @@ app.use(subaccountPortalConfigRouter);
 app.use(dropZoneRouter);
 app.use(memoryInspectorRouter);
 app.use(portfolioRollupRouter);
+app.use(memoryBlockVersionsRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

@@ -724,6 +724,19 @@ export const queueService = {
         }
       });
 
+      // Memory & Briefings Phase 5 — daily protected-block divergence sweep (S24)
+      await (boss as any).work('maintenance:protected-block-divergence', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runDivergenceSweep } = await import('../services/protectedBlockDivergenceService.js');
+          await withTimeout(runDivergenceSweep().then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:protected-block-divergence', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -863,6 +876,8 @@ export const queueService = {
       // Memory & Briefings Phase 4 — portfolio briefing (Mon 08:00) + digest (Fri 18:00)
       await boss.schedule('maintenance:portfolio-briefing', '0 8 * * 1', {});
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
+      // Memory & Briefings Phase 5 — daily protected-block divergence sweep (4am)
+      await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

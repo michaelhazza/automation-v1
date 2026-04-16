@@ -82,6 +82,10 @@ export const memoryBlocks = pgTable(
     // Phase 2.  Required for relevance-driven block retrieval.
     embedding: vector('embedding'),
 
+    // Phase 5 S24 — divergence flag for protected blocks (migration 0149).
+    // Set by protectedBlockDivergenceService daily job; null otherwise.
+    divergenceDetectedAt: timestamp('divergence_detected_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

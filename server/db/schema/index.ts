@@ -171,3 +171,6 @@ export * from './dropZoneUploadAudit.js';
 
 // Memory & Briefings spec Phase 4 — onboarding bundle configs (migration 0142)
 export * from './onboardingBundleConfigs.js';
+
+// Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
+export * from './memoryBlockVersions.js';

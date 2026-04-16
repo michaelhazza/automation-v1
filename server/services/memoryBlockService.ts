@@ -360,10 +360,21 @@ export async function updateBlock(
     return { success: false, error: `Agent does not have write permission on block '${blockName}'` };
   }
 
-  await db
-    .update(memoryBlocks)
-    .set({ content: newContent, updatedAt: new Date() })
-    .where(eq(memoryBlocks.id, block.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(memoryBlocks)
+      .set({ content: newContent, updatedAt: new Date() })
+      .where(eq(memoryBlocks.id, block.id));
+
+    // Phase 5 S24 — version write in same transaction
+    const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+    await writeVersionRow({
+      blockId: block.id,
+      content: newContent,
+      changeSource: 'manual_edit',
+      tx,
+    });
+  });
 
   return { success: true };
 }
@@ -398,6 +409,20 @@ export async function createBlock(input: {
       autoAttach,
     })
     .returning();
+
+  // Phase 5 S24 — write initial version row for the new block
+  try {
+    const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+    await writeVersionRow({
+      blockId: created.id,
+      content: input.content,
+      changeSource: 'seed',
+    });
+  } catch (err) {
+    // Version write is best-effort for admin creation; the block itself is
+    // committed regardless.
+    console.warn('[memoryBlockService.createBlock] version write failed', err);
+  }
 
   if (autoAttach && input.subaccountId) {
     await materialiseAutoAttachForBlock(created.id, input.subaccountId, input.organisationId);
@@ -503,6 +528,20 @@ export async function updateBlockAdmin(
       ),
     )
     .returning();
+
+  // Phase 5 S24 — write version row when content changed
+  if (updated && updates.content !== undefined) {
+    try {
+      const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+      await writeVersionRow({
+        blockId: updated.id,
+        content: updates.content,
+        changeSource: 'manual_edit',
+      });
+    } catch (err) {
+      console.warn('[memoryBlockService.updateBlockAdmin] version write failed', err);
+    }
+  }
 
   return updated ?? null;
 }
@@ -723,6 +762,20 @@ export async function upsertFromPlaybook(
           autoAttach,
         })
         .returning({ id: memoryBlocks.id });
+
+      // Phase 5 S24 — version row for playbook-created blocks
+      try {
+        const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+        await writeVersionRow({
+          blockId: created.id,
+          content: decision.content,
+          changeSource: 'playbook_upsert',
+          notes: `Created by playbook ${playbookSlug}`,
+        });
+      } catch (err) {
+        console.warn('[memoryBlockService.upsertFromPlaybook.create] version write failed', err);
+      }
+
       if (autoAttach) {
         await materialiseAutoAttachForBlock(created.id, subaccountId, organisationId);
       }
@@ -742,6 +795,20 @@ export async function upsertFromPlaybook(
         })
         .where(eq(memoryBlocks.id, existingRow!.id))
         .returning({ id: memoryBlocks.id });
+
+      // Phase 5 S24 — version row for playbook-updated blocks
+      try {
+        const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+        await writeVersionRow({
+          blockId: updated.id,
+          content: decision.content,
+          changeSource: 'playbook_upsert',
+          notes: `Updated by playbook ${playbookSlug}`,
+        });
+      } catch (err) {
+        console.warn('[memoryBlockService.upsertFromPlaybook.update] version write failed', err);
+      }
+
       return {
         kind: 'updated',
         blockId: updated.id,

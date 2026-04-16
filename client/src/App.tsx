@@ -51,6 +51,8 @@ const MemoryReviewQueuePage = lazy(() => import('./pages/MemoryReviewQueuePage')
 const SubaccountOnboardingPage = lazy(() => import('./pages/SubaccountOnboardingPage'));
 // Memory & Briefings Phase 3 — configuration document upload (S21)
 const ConfigDocumentUploadPage = lazy(() => import('./pages/ConfigDocumentUploadPage'));
+// Memory & Briefings Phase 5 — memory block detail + version history (S24)
+const MemoryBlockDetailPage = lazy(() => import('./pages/MemoryBlockDetailPage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
@@ -254,6 +256,8 @@ export default function App() {
             {/* Memory & Briefings Phase 3 — S5 onboarding + S21 config docs */}
             <Route path="/admin/subaccounts/:subaccountId/onboarding" element={<SubaccountOnboardingPage />} />
             <Route path="/admin/subaccounts/:subaccountId/config-documents/upload" element={<ConfigDocumentUploadPage />} />
+            {/* Memory & Briefings Phase 5 — block detail (S24) */}
+            <Route path="/admin/memory-blocks/:blockId" element={<MemoryBlockDetailPage />} />
             <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
