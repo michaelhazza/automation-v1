@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17
+> **Last updated:** 2026-04-17 (revision 2 — integrates external review findings: decomposition validation, Path A coverage semantics, Integration Reference confidence, Config Assistant handoff contract, feedback loop)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -106,6 +106,43 @@ The Orchestrator calls capability discovery skills (§4) to answer _"are these a
 Capability decomposition is an LLM step (the Orchestrator uses its model to turn natural-language task text into a required-capability list), but the _classification_ that follows is not. Given the list, the skills return yes/no answers and the routing decision is a pure function of those answers.
 
 This matters because the classification must be auditable and reproducible. A human reviewing a routing decision should be able to see: _"here is the list of required capabilities the Orchestrator extracted, here is the availability map, here is the resulting path."_ If the LLM got the decomposition wrong, that is fixable and observable. If routing itself was fuzzy, it would not be.
+
+### Decomposition is a three-stage pipeline, not a single LLM call
+
+Treating decomposition as one freeform LLM step is the single biggest failure mode in this design. An LLM asked for "required capabilities" will produce synonyms, misspelled slugs, extra capabilities that aren't really needed, or miss capabilities that are. Any of those failures corrupts the classification that follows.
+
+To contain the risk, decomposition runs as a deterministic three-stage pipeline:
+
+1. **LLM decomposition** — The Orchestrator's LLM turn extracts a draft required-capability list from the task text. Output is a list of `{kind, slug}` pairs along with a free-text `rationale` per capability.
+2. **Normalisation** — Draft slugs are mapped to canonical slugs via a **capability taxonomy registry** (see §3.7). Synonyms (`"gmail-api"` → `"gmail"`, `"inbox_reading"` → `"inbox_read"`) and known aliases are resolved deterministically. Any slug that does not resolve is carried forward with a `normalisation_status: 'unresolved'` flag rather than silently dropped.
+3. **Validation** — The normalised list is cross-checked against `list_platform_capabilities` output. Every slug must either exist in the Integration Reference or be marked `validation_status: 'unknown'`. Unknown slugs trigger a one-shot re-decomposition turn (§6.4.2) where the LLM is re-prompted with the platform's actual catalogue and asked to reconcile. If re-decomposition still leaves unknown slugs, the task is treated as Path D (unsupported) — the platform reliably does not support what the user is asking for.
+
+Only after the pipeline succeeds does the Orchestrator call `check_capability_gap`. The pipeline output — draft list, normalisations applied, validation results, retries consumed — is written into the decision record (§6.5) so post-hoc debugging of a bad route is straightforward: you see exactly where the pipeline made each choice.
+
+This converts the LLM from _"extract the correct answer"_ to _"propose an answer the deterministic layer can verify"_. The deterministic layer always has the last word.
+
+### Path A requires explicit capability coverage, not LLM judgement
+
+The decision model's most tempting failure mode is _"this agent is probably in the right domain, let's route to it"_. That's keyword routing wearing a new coat. Path A is gated by explicit subset matching, not fuzzy coverage.
+
+Every linked agent has a **capability map** computed from its active skill set and the integrations it references:
+
+```typescript
+agent_capability_map = {
+  agentId: string;
+  integrations: string[];         // slugs of integrations the agent's skills rely on
+  read_capabilities: string[];    // from skills_enabled declarations in the Integration Reference
+  write_capabilities: string[];
+  skills: string[];
+  primitives: string[];
+}
+```
+
+The capability map is a **derived view** computed from existing state (the agent's linked skills, the skills' Integration Reference entries, and the agent's trigger configuration). It is not a new source of truth — it is a lookup the Orchestrator performs deterministically at routing time.
+
+Path A fires only when every entry in the `required_capabilities` list appears in the candidate agent's capability map, for every capability kind. Partial coverage is _not_ Path A; partial coverage routes to Path B so the Configuration Assistant can close the gap explicitly. A task that needs `{integration: gmail, write: modify_labels}` against an agent whose map contains `{integration: gmail, read: inbox_read, skill: classify_email}` but not `write: modify_labels` is Path B, not Path A. The difference is the one between _"executes correctly"_ and _"starts and fails mid-run"_.
+
+If multiple agents pass the coverage check, the Orchestrator picks the most specific: fewer extra capabilities beyond the required set, most recently updated, or explicitly preferred via a per-org routing hint. Ties fall through to a Configuration Assistant handoff (Path B) so the user can decide.
 
 ### The three knowledge layers the Orchestrator reads
 
@@ -238,7 +275,57 @@ This is the hardest part of the spec to get right. A stale Integration Reference
 4. **The schema itself is versioned.** Changes to the field list bump `schema_version` in the meta block. The `list_platform_capabilities` parser asserts schema compatibility and falls back to the nearest compatible version if necessary.
 5. **Drift detection is a static gate.** A simple script (`scripts/verify-integration-reference.ts`) cross-checks: every OAuth provider in `oauthProviders.ts` has a block; every MCP preset in `mcpPresets.ts` has a block; every skill in `server/skills/` that declares an integration dependency is listed in the corresponding block's `skills_enabled`. Script runs in `run-all-gates.sh` and fails the gate if drift is detected. Implementation details are in §9.3.
 
-### 3.6 What the doc is NOT
+### 3.6 Confidence levels and graceful degradation
+
+The Integration Reference is a **single source of truth** for platform capability, which makes it a **single point of failure** if it gets stale, corrupt, or out of sync with the runtime. The spec protects against this with explicit confidence handling rather than hoping the static gate catches everything.
+
+Every integration block carries an implicit confidence level derived from its metadata:
+
+| Confidence | Trigger | Routing behaviour |
+|---|---|---|
+| `high` | `status: fully_supported` **and** `last_verified` within the last 30 days **and** the static gate (§3.5) is green at parse time | Orchestrator uses the entry authoritatively |
+| `stale` | Any other `status` value, or `last_verified` older than 30 days | Orchestrator uses the entry but downgrades decisions: Path A still fires if coverage matches, but Path D (unsupported) requires a second LLM pass with the entry context before filing a feature request — the doc may simply be behind reality |
+| `unknown` | The block fails schema validation, or the slug is referenced by a skill but has no corresponding block | Orchestrator treats the slug as present-but-unverified — does not fire Path D, routes to Path B or human review |
+
+`list_platform_capabilities` (§4.2) returns the confidence level per integration in its output, so downstream skills (`check_capability_gap`) can reason about it without re-deriving.
+
+If the entire reference fails to parse (file missing, YAML malformed, schema version incompatible), the Orchestrator does **not** default to Path D for every task. Instead:
+
+1. A synthetic feature request is filed with `category: 'infrastructure_alert'` (a new category added to the `feature_requests` enum — see §5.2 update) so the Synthetos team is notified immediately.
+2. The Orchestrator falls back to **legacy routing** — the pre-existing keyword table and agent roster memory block, kept in the prompt as a dormant fallback branch for exactly this reason (see §6.6).
+3. All routing decisions made during the fallback window are tagged `reference_degraded: true` in the decision record so post-incident analysis can isolate them.
+
+This inverts the worst behaviour of a single-source-of-truth system: a broken reference degrades gracefully rather than blocking every inbound task.
+
+### 3.7 Capability taxonomy registry
+
+Capabilities appear as string slugs across multiple integrations. Without a shared taxonomy, one integration's `"read_inbox"` and another's `"inbox_read"` silently fail to match in the coverage check — the Orchestrator thinks neither is configured.
+
+The **capability taxonomy registry** is a single canonical list of capability slugs maintained at `docs/integration-reference.md` under a dedicated `capability_taxonomy` YAML block (separate from the per-integration blocks). Every `read_capabilities`, `write_capabilities`, `skills_enabled`, and `primitives_required` slug referenced in any integration block must appear in the taxonomy. The static gate (§3.5) adds a fourth check enforcing this.
+
+The taxonomy block shape:
+
+```yaml
+capability_taxonomy:
+  read_capabilities:
+    - slug: inbox_read
+      aliases: [read_inbox, inbox_reading, email_read]
+      description: Read message headers and metadata from a provider's inbox
+    - slug: contact_list
+      aliases: [contacts_read, list_contacts]
+      description: ...
+  write_capabilities:
+    - slug: modify_labels
+      aliases: [apply_label, label_email, change_labels]
+      description: ...
+  # ... primitives, skills follow the same shape
+```
+
+The `aliases` list is what the normalisation step (§2) uses to canonicalise LLM-produced slugs. A new integration introducing a new capability kind must extend the taxonomy in the same PR, not in a follow-up. The taxonomy is a small file; the discipline is the point.
+
+Adding or renaming a capability slug is a schema-level change and bumps `schema_version` in the meta block, same as any other breaking change to the reference.
+
+### 3.8 What the doc is NOT
 
 - **Not a marketing asset.** This lives alongside `docs/architecture.md` as developer- and agent-facing documentation. The customer-facing integration list lives in `docs/capabilities.md` and is narrative, not structured. The two stay aligned but the audiences and tones are different.
 - **Not a substitute for per-skill documentation.** Each skill still has its own markdown file in `server/skills/`. The Integration Reference refers to skills by slug; it does not duplicate their content.
@@ -334,7 +421,18 @@ All four are registered in `server/config/actionRegistry.ts`, have handler imple
     implemented_since: string;
     last_verified: string;
     owner: string;
+
+    // Runtime-computed confidence (see §3.6)
+    confidence: 'high' | 'stale' | 'unknown';
+    confidence_reason: string;      // short explanation for audit
   }>;
+  capability_taxonomy: {            // the §3.7 taxonomy, parsed once, returned with every response
+    read_capabilities: Array<{ slug: string; aliases: string[]; description: string }>;
+    write_capabilities: Array<{ slug: string; aliases: string[]; description: string }>;
+    skills: Array<{ slug: string; aliases: string[]; description: string }>;
+    primitives: Array<{ slug: string; aliases: string[]; description: string }>;
+  };
+  reference_state: 'healthy' | 'degraded' | 'unavailable';  // rollup signal for graceful fallback
   schema_meta?: { schema_version: string; last_updated: string };
 }
 ```
@@ -343,7 +441,9 @@ All four are registered in `server/config/actionRegistry.ts`, have handler imple
 
 **Permissions:** Available to any authenticated agent. The information in the reference is not org-scoped and is not sensitive (it's what the doc already says to engineers). A stricter gate can be added later if any field becomes sensitive.
 
-**Failure modes:** If the file is missing or the schema is invalid, the skill returns `{ integrations: [], error: 'integration_reference_invalid', error_detail: <parser error> }`. The Orchestrator, on receiving this response, classifies the calling task as Path D (unsupported) with a synthetic feature request noting the infrastructure failure — the user sees a clear error and the Synthetos team sees that the reference is broken.
+**Failure modes:** If the file is missing or the schema is invalid, the skill returns `{ integrations: [], capability_taxonomy: {...empty lists...}, reference_state: 'unavailable', error: 'integration_reference_invalid', error_detail: <parser error> }`. The Orchestrator, on receiving `reference_state: 'unavailable'`, does **not** default to Path D — instead it falls back to legacy keyword routing (§6.6) and files a `category: 'infrastructure_alert'` feature request. On `reference_state: 'degraded'` (one or more blocks stale or invalid but the overall file parsed), the skill returns the healthy blocks and flags the bad ones per-integration; the Orchestrator continues routing with per-entry confidence downgrades (§3.6).
+
+**Normalisation helper:** The skill also exposes a companion pure function `normalize_capability_slugs(input, taxonomy)` (not a separately-registered skill — a utility imported by `check_capability_gap` and by the Orchestrator's decomposition pipeline). Given a list of draft `{kind, slug}` pairs and the taxonomy, it returns each pair with a canonical slug plus a `normalisation_status: 'canonical' | 'aliased' | 'unresolved'`. Unresolved slugs are preserved as-is so the caller can handle them explicitly (the Orchestrator re-prompts the LLM; `check_capability_gap` marks coverage as unknown).
 
 ### 4.3 Reused existing skills
 
@@ -404,26 +504,38 @@ These files describe the skill's purpose, inputs, outputs, and example invocatio
 
 ```typescript
 {
-  verdict: 'configured' | 'configurable' | 'unsupported';
+  verdict: 'configured' | 'configurable' | 'unsupported' | 'unknown';
   per_capability: Array<{
     kind: string;
-    slug: string;
-    availability: 'configured' | 'configurable' | 'unsupported';
+    slug: string;                   // canonical slug after normalisation
+    original_slug: string;          // what the caller passed in (pre-normalisation)
+    availability: 'configured' | 'configurable' | 'unsupported' | 'unknown';
+    confidence: 'high' | 'stale' | 'unknown';  // from the underlying reference entry
     source: 'integration_reference' | 'live_connection' | 'linked_agent' | 'system_skill' | 'not_found';
     detail: string;                 // short human-readable explanation
   }>;
+  candidate_agents: Array<{
+    agent_id: string;
+    agent_name: string;
+    coverage: 'full' | 'partial';
+    matched: string[];              // capability slugs this agent covers
+    missing: string[];               // capability slugs this agent is missing
+  }>;
   missing_for_configurable: string[]; // slugs the user would need to set up (e.g. ['gmail:oauth'])
   missing_for_unsupported: string[];  // slugs the platform does not support at all
+  reference_state: 'healthy' | 'degraded' | 'unavailable'; // surfaced from list_platform_capabilities
 }
 ```
 
 **Logic:** For each required capability, the skill checks (in order):
 
-1. **Configured** — is there an active connection (`list_connections`) and/or a linked agent (`config_list_agents` / `config_list_links`) that covers this capability?
-2. **Configurable** — does the Integration Reference (`list_platform_capabilities`) declare that this capability is available at the platform level with `status: fully_supported` or `partial`?
-3. **Unsupported** — neither of the above.
+1. **Configured** — is there a linked agent whose **capability map** (§2) contains this capability _and_ an active connection (`list_connections`) for the relevant integration? Coverage is subset matching: the full `required_capabilities` list must be a subset of the agent's map for that agent to count as configured. Partial coverage is _not_ configured.
+2. **Configurable** — does the Integration Reference (`list_platform_capabilities`) declare that this capability is available at the platform level with `status: fully_supported` or `status: partial` (confidence `high` or `stale` per §3.6)?
+3. **Unsupported** — neither of the above, _and_ the reference's `reference_state` is `healthy` (so the negative answer is trustworthy). If `reference_state` is `degraded` or `unavailable`, the per-capability availability is returned as `unknown` rather than `unsupported`, so the Orchestrator does not confidently file a feature request based on a bad reference read.
 
-The skill rolls up the per-capability answers into a single `verdict`: `configured` if every capability is configured; `configurable` if at least one is not configured but all are configurable; `unsupported` if any capability is unsupported.
+The skill rolls up the per-capability answers into a single `verdict`: `configured` if every capability is configured against a single candidate agent (not scattered across multiple agents); `configurable` if at least one is not configured but all are configurable; `unsupported` if any capability is unsupported with a healthy reference; `unknown` if any capability resolves to unknown and none are unsupported.
+
+The skill also returns `candidate_agents: Array<{agent_id, coverage: 'full' | 'partial', missing: string[]}>` so the Orchestrator can see which agents were considered, why each was accepted or rejected, and whether partial coverage (Path B) is worth proposing against a specific agent rather than a fresh Configuration Assistant run.
 
 **Implementation:** Pure aggregation skill. Internally calls `list_connections`, `list_platform_capabilities`, `config_list_agents`, `config_list_links`. Runs in a single round-trip from the agent's perspective. No new data required — it's a composition of existing queries. Cache TTL for its inputs is short (60s from `list_platform_capabilities`; live for the others).
 
@@ -447,8 +559,12 @@ export const featureRequests = pgTable('feature_requests', {
   sourceTaskId: uuid('source_task_id').references(() => tasks.id),             // nullable — originating task if filed from task board
 
   // Classification
-  category: text('category').notNull(),                                        // 'new_capability' | 'system_promotion_candidate'
+  category: text('category').notNull(),                                        // 'new_capability' | 'system_promotion_candidate' | 'infrastructure_alert'
   status: text('status').notNull().default('open'),                            // 'open' | 'triaged' | 'accepted' | 'rejected' | 'shipped' | 'duplicate'
+
+  // Lightweight dedupe (see §5.4)
+  dedupe_hash: text('dedupe_hash').notNull(),                                  // sha256(category + '|' + canonical_capability_slugs.sorted.join(','))
+  dedupe_group_count: integer('dedupe_group_count').notNull().default(1),      // incremented instead of inserting a row when the same hash appears in the same org within a 30-day window
 
   // Content
   summary: text('summary').notNull(),                                          // short title, orchestrator-generated
@@ -470,7 +586,7 @@ export const featureRequests = pgTable('feature_requests', {
 });
 ```
 
-**Indexes:** `(organisationId, createdAt)`, `(category, status)`, `(status)`. Soft-delete column follows the convention in CLAUDE.md.
+**Indexes:** `(organisationId, createdAt)`, `(category, status)`, `(status)`, `(organisationId, dedupe_hash)` for the dedupe lookup. Soft-delete column follows the convention in CLAUDE.md.
 
 **RLS:** Added to `rlsProtectedTables.ts`. Org members see their own org's rows; system admins see all rows.
 
@@ -518,15 +634,27 @@ Both channels are best-effort. The durable record is the `feature_requests` row.
 
 **Permissions:** `feature_request_submit`. System and org agents can file; subaccount agents cannot (to prevent feature-request spam from client_user-facing flows). The Orchestrator, which runs at org scope, always has permission.
 
-### 5.4 What NOT to build in this spec
+### 5.4 Lightweight dedupe (per-org, single category, 30-day window)
 
-- **No dedupe logic.** If two users in the same org file the same request twice, two rows are written. The Synthetos team deduplicates at triage time.
-- **No clustering across orgs.** Feature requests are single-org facts. Cross-org analytics comes later if volume justifies.
+The spec does **not** build full clustering or cross-org dedupe, but a small hash-based suppression prevents the obvious spam case (a noisy trigger or a prompt bug filing the same request hundreds of times).
+
+The dedupe key is `sha256(category + '|' + canonical_capability_slugs.sorted.join(','))`. On insert:
+
+1. `request_feature` computes the hash from the already-normalised capability slugs (same pipeline as §2).
+2. It looks up `(organisationId, dedupe_hash)` on rows where `category` matches and `createdAt` is within the last 30 days.
+3. If a match exists, the existing row's `dedupe_group_count` is incremented and its `updatedAt` is bumped — no new row is written, no outbound notification fires again.
+4. If no match exists, a new row is written and the standard notification fires.
+
+The window is deliberately short — repeated signal over months is genuine signal and should re-surface to the Synthetos team. The same-org constraint keeps the logic simple; cross-org clustering is still deferred. Infrastructure alerts follow the same rule so one broken reference read doesn't page the team 500 times.
+
+### 5.5 What NOT to build in this spec
+
+- **No full clustering or cross-org dedupe.** Feature requests are single-org facts beyond the simple per-org hash above. Cross-org analytics comes later if volume justifies.
 - **No automatic promotion.** A `system_promotion_candidate` row does not trigger any automated system-agent creation. The Synthetos team reads the signal and makes the call by hand.
 - **No user-facing feature-request browser.** Users see their own feature-request filings via the task comment (§8). An admin dashboard can be added later if needed.
 - **No SLA enforcement.** Rows remain `open` until a Synthetos team member triages them. No deadlines, no escalation. This is a signal channel, not a ticket queue.
 
-### 5.5 Notification content
+### 5.6 Notification content
 
 Both Slack and email include:
 
@@ -567,7 +695,9 @@ The Orchestrator's system prompt is restructured into five sections (existing wo
 4. **Narrow-vs-broad pattern heuristics** — new. Prompt-level guidance for classifying a configurable request as Path B or Path C (see §6.3).
 5. **Handoff mechanics** — rewritten. Describes how to hand off to the Configuration Assistant via `spawn_sub_agents` for Paths B/C, how to route to an existing linked agent for Path A, and how to file a feature request and close the task for Path D.
 
-The old keyword-routing table is removed. The `orchestrator_team_roster` memory block is repurposed: instead of a static list of agents, it becomes a cache of recent agent-routing successes — populated automatically when `spawn_sub_agents` succeeds against a given agent for a given task shape. Treated as a hint, not authority.
+The old keyword-routing table is **not deleted** — it is moved into a dormant "legacy fallback" prompt section that the Orchestrator uses only when `list_platform_capabilities` returns `reference_state: 'unavailable'` (§3.6, §4.2). Under normal operation the fallback is inert. When the reference is broken, the Orchestrator routes using keyword matching and the `orchestrator_team_roster` memory block as before, tags the decision record with `path: 'legacy_fallback'`, and files an `infrastructure_alert` feature request so the degraded state surfaces immediately.
+
+The `orchestrator_team_roster` memory block is repurposed beyond legacy fallback: under normal operation it becomes a cache of recent agent-routing successes — populated automatically when `spawn_sub_agents` succeeds against a given agent for a given task shape (§9.5 Feedback loop). Treated as a hint, not authority.
 
 The Orchestrator's prompt file lives at `server/config/configAssistantPrompts/` alongside other system-agent prompts. (Actual filename TBD during implementation — the architect can propose; the current file should be discoverable via a grep for the Orchestrator's existing prompt text.)
 
@@ -592,19 +722,58 @@ Classifying a configurable request as Path B (narrow, just configure it) or Path
 
 The heuristics live in the prompt, not in code. Tuning is a prompt-edit exercise. Future improvements (e.g. an explicit classifier skill) are deferred until the volume of feature requests justifies the investment.
 
-### 6.4 Decision record
+### 6.4 Decomposition pipeline and re-decomposition
+
+Per §2, decomposition is a three-stage pipeline (LLM draft → normalise → validate). The Orchestrator drives this pipeline inside its own run — it is not a separately-registered skill. The prompt describes the pipeline explicitly so the LLM understands it is producing a _draft_ for the deterministic layer to verify, not the final answer.
+
+#### 6.4.1 Pipeline execution
+
+1. **LLM draft turn.** Prompt asks the LLM to list required capabilities as `{kind, slug, rationale}` triples. The prompt includes the capability taxonomy from `list_platform_capabilities` so the LLM sees the canonical slug universe _before_ emitting. This is not a guarantee but it materially reduces hallucinated slugs.
+2. **Normalise.** The Orchestrator calls the `normalize_capability_slugs` helper (§4.2) with the draft list and the taxonomy. Result: each slug is `canonical`, `aliased` (caller slug mapped to a canonical), or `unresolved`.
+3. **Validate.** The Orchestrator checks every canonical/aliased slug against `list_platform_capabilities` output. Slugs that don't match are marked `unknown`.
+
+#### 6.4.2 One-shot re-decomposition
+
+If any slugs emerge from stages 2 or 3 as `unresolved` or `unknown`, the Orchestrator runs a single re-decomposition LLM turn with:
+
+- The original task text.
+- The draft list and its unresolved/unknown markers.
+- The full capability taxonomy (canonical slugs + aliases + descriptions).
+- A brief instruction: _"Some slugs in your draft don't exist in the platform. Re-produce the list using only canonical slugs from the taxonomy. If a capability you originally wanted doesn't appear in the taxonomy, say so explicitly."_
+
+The result is re-run through normalise + validate. If slugs are still unresolved/unknown after this second pass, they are treated as genuinely absent — the Orchestrator classifies the task as Path D and files a feature request with the unresolved slugs as the missing-capability list. This is the deterministic guarantee: the platform does not try a third LLM turn, it concludes the capability is not available.
+
+Re-decomposition is bounded at **one retry per task** so a pathological prompt can't loop indefinitely. The retry count is in the decision record so repeated retry patterns become visible in observability (§9.5).
+
+#### 6.4.3 Per-run capability-query budget
+
+Every Orchestrator run has a fixed budget of capability-discovery skill calls (`list_connections`, `list_platform_capabilities`, `check_capability_gap`, `normalize_capability_slugs`). Default: **8 calls per run**. The budget exists because an LLM with read-only skills tends to re-query the same data multiple times across a single reasoning loop, inflating latency and token cost without improving the decision.
+
+The budget is enforced at the skill-registry level: each call decrements a per-run counter; when the counter hits zero, further calls return `{ error: 'capability_query_budget_exhausted', last_results: <cached>... }` using in-run cached results so the Orchestrator can still complete. The budget value is configurable via `systemSettings.orchestrator_capability_query_budget` so the Synthetos team can tune it per-environment.
+
+Four calls are typically enough for a straightforward run (one each of `list_platform_capabilities`, `list_connections`, `check_capability_gap`, plus one `normalize_capability_slugs`). The 8-call default leaves headroom for the one-shot re-decomposition path and a handful of retries, with room to grow before the budget bites.
+
+### 6.5 Decision record
 
 Every time the Orchestrator runs the decision procedure, it emits a structured decision record into the agent run transcript:
 
 ```typescript
 {
-  path: 'A' | 'B' | 'C' | 'D';
-  required_capabilities: Array<{ kind: string; slug: string }>;
-  availability_map: { [slug: string]: 'configured' | 'configurable' | 'unsupported' };
-  selected_target_agent_id: string | null;     // for Path A
-  selected_handoff_target: 'config_assistant' | null;  // for Paths B / C
-  feature_request_id: string | null;           // for Paths C / D
-  reasoning: string;                           // one paragraph
+  path: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed';
+  decomposition: {
+    draft: Array<{ kind: string; slug: string; rationale: string }>;
+    normalised: Array<{ kind: string; canonical_slug: string; original_slug: string; normalisation_status: 'canonical' | 'aliased' | 'unresolved' }>;
+    validated: Array<{ kind: string; canonical_slug: string; validation_status: 'valid' | 'unknown' }>;
+    redecomposition_used: boolean;              // true if the one-shot retry fired
+  };
+  availability_map: { [slug: string]: 'configured' | 'configurable' | 'unsupported' | 'unknown' };
+  candidate_agents_considered: Array<{ agent_id: string; coverage: 'full' | 'partial'; missing: string[] }>;
+  selected_target_agent_id: string | null;       // for Path A
+  selected_handoff_target: 'config_assistant' | null; // for Paths B / C
+  feature_request_id: string | null;             // for Paths C / D
+  reference_degraded: boolean;                   // true if routing ran with a stale/unavailable reference
+  capability_query_budget_used: number;          // how many of the 8 budget slots were consumed
+  reasoning: string;                             // one paragraph
   timestamp: string;
 }
 ```
@@ -613,7 +782,7 @@ This record serves three purposes: audit (any support escalation can replay the 
 
 The decision record is written to the existing agent run transcript table (`agentRunMessages` or equivalent), flagged with a `messageType: 'routing_decision'` so it can be filtered out of user-facing run logs while remaining visible in system-admin views.
 
-### 6.5 Config Assistant handoff via `spawn_sub_agents`
+### 6.6 Config Assistant handoff via `spawn_sub_agents`
 
 The Orchestrator hands off to the Configuration Assistant using the existing `spawn_sub_agents` skill. No new primitive.
 
@@ -638,12 +807,53 @@ The Orchestrator hands off to the Configuration Assistant using the existing `sp
 }
 ```
 
-3. The Configuration Assistant runs its standard plan-approve-execute loop against this context. It does not need any modifications — the context above fits within its existing input shape (user request + org/subaccount resolution). The only new awareness is that it should back-reference the `source_task_id` so the user can see the connection on the task board.
-4. When the Configuration Assistant finishes, control returns to the Orchestrator, which updates the source task's status (e.g. `configured` or `awaiting_user_approval`).
+3. The Configuration Assistant runs its standard plan-approve-execute loop against this context. It does not need major modifications — the context above fits within its existing input shape (user request + org/subaccount resolution). It does, however, need to conform to an **explicit output contract** (§6.6.1) so the Orchestrator can verify completion deterministically rather than trusting a free-form response.
+4. When the Configuration Assistant finishes, the Orchestrator reads its structured output, verifies it against the original required-capability list, updates the source task's status accordingly (e.g. `configured`, `awaiting_user_approval`, `configuration_failed`), and — if the Configuration Assistant reports partial completion — decides whether to re-route (e.g. file a feature request for any capabilities the Configuration Assistant reported as out of reach).
 
-**Why `spawn_sub_agents` over a new primitive:** `spawn_sub_agents` already handles cross-agent context passing, run attribution, and result reporting. Adding a dedicated `handoff_to_config_assistant` skill would duplicate that machinery for a single caller. The existing primitive's extensibility (via the `context` field) is enough.
+**Why `spawn_sub_agents` over a new primitive:** `spawn_sub_agents` already handles cross-agent context passing, run attribution, and result reporting. Adding a dedicated `handoff_to_config_assistant` skill would duplicate that machinery for a single caller. The existing primitive's extensibility (via the `context` field) is enough — the output contract below layers on top without changing the primitive itself.
 
-### 6.6 Config Assistant changes
+#### 6.6.1 Configuration Assistant output contract
+
+When the Configuration Assistant finishes an Orchestrator-initiated run, it must return a structured result:
+
+```typescript
+{
+  status: 'success' | 'partial' | 'failed' | 'user_abandoned';
+  agent_created: boolean;
+  agent_id: string | null;                        // the linked agent ID, if one was created or re-linked
+  connections_established: string[];              // integration slugs that now have active connections
+  capabilities_satisfied: string[];               // canonical capability slugs the Configuration Assistant confirms are now available
+  capabilities_unsatisfied: Array<{
+    slug: string;
+    reason: 'user_declined' | 'provider_error' | 'out_of_scope' | 'needs_feature_request';
+    detail: string;
+  }>;
+  schedule_created: boolean;
+  schedule_id: string | null;
+  source_task_id: string;                         // echoed back for correlation
+  summary_comment: string;                        // human-readable summary posted to the source task
+}
+```
+
+**`status` semantics:**
+
+- `success` — every capability in the original required list appears in `capabilities_satisfied`; the agent is linked and scheduled.
+- `partial` — at least one capability is satisfied; at least one is in `capabilities_unsatisfied` with a non-terminal reason. The Orchestrator can decide whether to re-route or escalate.
+- `failed` — nothing satisfied (e.g. user rejected the plan, provider-level error on every integration).
+- `user_abandoned` — the plan-approve-execute loop was opened but the user never approved; the Configuration Assistant closed after timeout.
+
+**Orchestrator post-handoff verification:** The Orchestrator does not trust the `status` flag alone. After receiving the result, it re-runs `check_capability_gap` against the original required-capability list. If the result contradicts the Configuration Assistant's report (e.g. `status: success` but `check_capability_gap` returns `verdict: configurable`), the Orchestrator:
+
+1. Logs the discrepancy in the decision record as `post_handoff_verification_mismatch: true`.
+2. Posts a task comment explaining the mismatch plainly (_"The Configuration Assistant reported success, but I verified the capabilities afterward and the inbox_read capability is still not available. I've flagged this for our team."_).
+3. Files an `infrastructure_alert` feature request.
+4. Sets the task status to `configuration_failed`.
+
+This closes the "non-deterministic completion" failure mode: the Configuration Assistant self-reports, but the Orchestrator independently verifies. The contract is enforceable because both sides agree on canonical capability slugs.
+
+**`capabilities_unsatisfied` with `reason: 'needs_feature_request'`:** if the Configuration Assistant discovers mid-run that a capability the Orchestrator initially classified as `configurable` is actually not supported (e.g. an integration ships but a specific scope isn't available yet), it marks that capability with this reason. The Orchestrator then files a new-capability feature request for that specific slug, rather than leaving the user stranded.
+
+### 6.7 Config Assistant changes
 
 The Configuration Assistant itself needs two small updates to cooperate with the new flow:
 
@@ -692,6 +902,17 @@ Tasks created by direct agent-to-agent handoff, subtasks, and admin-created-for-
 ### 7.4 Idempotency
 
 Trigger events are keyed on `(task.id, trigger.id)` with a uniqueness constraint. Replaying a job does not spawn a second Orchestrator run for the same task. If the user edits the task description after the Orchestrator has already routed it, that's a separate concern handled by task-update triggers (deferred — §10).
+
+### 7.4.1 Per-org rate limiting
+
+High-volume orgs can produce bursts of tasks that would spawn many concurrent Orchestrator runs. To keep cost and latency bounded, the trigger supports per-org rate limiting at the job-queue level:
+
+- **Default:** 10 concurrent Orchestrator runs per org, 100 runs per 10-minute window.
+- **Enforcement:** the job worker checks a per-org counter before invoking the Orchestrator. Exceeding the burst window puts the trigger event into a debounce queue; once the window resets, queued events drain in order.
+- **Configurability:** both limits are stored in `systemSettings.orchestrator_per_org_concurrency` and `orchestrator_per_org_burst_window` so the Synthetos team can tune per-environment.
+- **Observability:** every debounce event is logged so a flood pattern becomes visible in operations.
+
+Rate limiting is additive to the existing job-queue primitives — no new infrastructure.
 
 ### 7.5 Opt-out
 
@@ -842,15 +1063,58 @@ Per spec-context.md, rollout is `commit_and_revert` — no staged rollout, no fe
 
 No behaviour-mode feature flag is needed. The Orchestrator's new behaviour is default-on as soon as its prompt is updated; the reason the new code doesn't cause regressions is that pre-existing agent routing via direct assignment (`task.assigned_to_agent_id IS NOT NULL`) bypasses the trigger (per §7.3).
 
-### 9.5 Observability
+### 9.5 Observability and the routing feedback loop
 
-Three new dashboards / queries (not part of P1–P5 but captured here so they're not forgotten):
+The spec logs a lot of data about every routing decision. That data is worthless if nothing reads it. Two tiers of use:
+
+#### 9.5.1 Passive observability (SQL queries, shipped with P4)
 
 1. **Routing decision distribution** — how many tasks hit each path A/B/C/D, over time. Signal for prompt tuning.
 2. **Feature request volume and triage time** — how many rows per category, how long `open → triaged` takes. Signal for Synthetos-team staffing.
 3. **Integration Reference drift frequency** — how often the static gate catches a drift. Signal for whether the maintenance discipline is working.
+4. **Decomposition quality** — what fraction of runs trigger re-decomposition, what fraction still have unresolved slugs after the retry. Signal for taxonomy gaps and prompt tuning.
+5. **Budget exhaustion rate** — how often runs hit the capability-query budget. Signal for budget tuning or Orchestrator-prompt inefficiency.
 
-These are SQL queries the Synthetos team can run on demand. Building them into a standing admin dashboard is deferred until the spec has shipped and the team knows what it actually wants to watch.
+These are SQL queries the Synthetos team can run on demand. Standing dashboards are deferred until the team knows what it wants to watch over time.
+
+#### 9.5.2 Active feedback loop (shipped incrementally after P5)
+
+Every Orchestrator run produces a decision record. A run also produces downstream outcomes:
+
+- Did the selected target agent (Path A) actually complete the task successfully, or did it fail mid-run?
+- Did the Configuration Assistant handoff (Paths B/C) end with `status: success`, or did it partial/fail?
+- Did the user intervene on the task after the Orchestrator routed (renaming, reassigning, editing the description, closing as "wrong agent")?
+
+These outcomes are the ground-truth signal for routing quality. A new `routing_outcomes` table (added in a post-P5 phase, call it P6) joins decision records to downstream outcomes:
+
+```typescript
+{
+  decision_record_id: string;
+  task_id: string;
+  path_taken: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed';
+  outcome: 'success' | 'partial' | 'failed' | 'user_intervened' | 'abandoned';
+  user_intervention_detail: string | null;
+  time_to_outcome_ms: number;
+  downstream_errors: Array<{ stage: string; error: string }>;
+  captured_at: timestamp;
+}
+```
+
+Two feedback mechanisms use this data:
+
+1. **Path A pattern reinforcement.** Successful Path A routes for a given `(task_shape, target_agent_id)` pair increment a confidence score on the `orchestrator_team_roster` memory block. Failed or user-intervened Path A routes decrement it. The Orchestrator prompt uses the score as a tiebreaker when multiple candidate agents pass the coverage check. This is a memory-block-level update, not a prompt rewrite — no code churn.
+2. **Decomposition correction.** If the Configuration Assistant consistently reports `capabilities_unsatisfied` with `reason: 'needs_feature_request'` for a specific capability slug, the decomposition retry prompt (§6.4.2) can be augmented to tell the LLM _"previous runs found this slug commonly mis-derives as X; confirm before including it"_. Implementation: a small lookup table of "commonly-misderived slugs" rendered into the re-decomposition prompt. Managed by the Synthetos team.
+
+Neither mechanism auto-tunes. Both produce signals the team can act on manually — that's the right level of sophistication for a pre-production system and stays within the spec-context.md framing of `stage: rapid_evolution` and `testing_posture: static_gates_primary`.
+
+#### 9.5.3 Out of scope
+
+- Automated prompt tuning pipelines.
+- Reinforcement learning against routing outcomes.
+- Cross-org pattern mining.
+- Continuous evaluation harnesses.
+
+These would be appropriate after the platform moves out of rapid evolution. Flag for revisit when `docs/spec-context.md` shifts.
 
 ---
 
