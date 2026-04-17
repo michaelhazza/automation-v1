@@ -24,7 +24,7 @@ let cached: { row: SkillAnalyzerConfig; expiresAt: number } | null = null;
 const DEFAULT_KEY = 'default';
 
 /** Zero-arg reader: returns the current default config, consulting cache first.
- *  Creates the row if missing (migration 0154 should seed it, but defensive). */
+ *  Creates the row if missing (migration 0155 should seed it, but defensive). */
 async function loadDefault(): Promise<SkillAnalyzerConfig> {
   if (cached && cached.expiresAt > Date.now()) return cached.row;
 

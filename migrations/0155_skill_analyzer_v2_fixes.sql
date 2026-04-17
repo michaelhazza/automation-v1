@@ -1,5 +1,7 @@
--- Migration 0154 — skill_analyzer v2 bug-fix cycle
+-- Migration 0155 — skill_analyzer v2 bug-fix cycle
 -- See tasks/skill-analyzer-v2-bug-fix-plan.md for the full rationale.
+-- Renumbered from 0154 to 0155 after merging main's
+-- 0154_mcp_tool_invocations.sql.
 -- Adds resolution tracking, approval freeze, execution lock, config snapshot,
 -- proposed-new-agents support, and the skill_analyzer_config singleton.
 

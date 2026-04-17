@@ -839,7 +839,14 @@
       "idx": 154,
       "version": "7",
       "when": 1780819205000,
-      "tag": "0154_skill_analyzer_v2_fixes",
+      "tag": "0154_mcp_tool_invocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1780819206000,
+      "tag": "0155_skill_analyzer_v2_fixes",
       "breakpoints": true
     }
   ]

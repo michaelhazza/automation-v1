@@ -330,7 +330,7 @@ export type WarningTier =
   | 'critical';             // edit merge OR type confirmation phrase
 
 /** Default tier map used when config snapshot is absent (e.g., legacy jobs).
- *  Mirrors the DB default in migration 0154. */
+ *  Mirrors the DB default in migration 0155. */
 export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   REQUIRED_FIELD_DEMOTED:   'decision_required',
   NAME_MISMATCH:            'decision_required',

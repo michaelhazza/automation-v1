@@ -11,7 +11,7 @@ import {
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Config — singleton row (key='default') holding tunable
-// thresholds for the analyzer pipeline. Migration 0154.
+// thresholds for the analyzer pipeline. Migration 0155.
 //
 // INVARIANT: jobs.config_snapshot captures this row at job start. Runtime
 // pipeline reads the snapshot, NOT this live table. Updates here only
@@ -59,7 +59,7 @@ export const skillAnalyzerConfig = pgTable('skill_analyzer_config', {
     .notNull()
     .default('I accept this critical warning'),
 
-  // Default aligned with migration 0154's DB-level default. When a row is
+  // Default aligned with migration 0155's DB-level default. When a row is
   // inserted via Drizzle ORM (e.g., the lazy seed in skillAnalyzerConfigService),
   // the column default fires only when this field is omitted — which matches
   // the behaviour expected by effectiveTierMap(). The explicit map is written

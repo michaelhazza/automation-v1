@@ -92,7 +92,7 @@ export const skillAnalyzerResults = pgTable(
     // Null when no warnings raised or classification is DUPLICATE/DISTINCT.
     mergeWarnings: jsonb('merge_warnings'),
 
-    // v2 fixes — see migration 0154.
+    // v2 fixes — see migration 0155.
     // Reviewer decisions per warning, deduped by (warningCode, details.field).
     // Each entry: { warningCode, resolution, resolvedAt, resolvedBy, details? }.
     // Wiped atomically on any merge edit or reset.
