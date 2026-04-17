@@ -37,16 +37,16 @@ export async function runConnectorPollingSync(
   }
 
   const leaseRow = leaseResult.rows[0] as { sync_lock_token: string; sync_phase: string };
-  const validPhases = ['backfill', 'transition', 'live'] as const;
-  const rawPhase = leaseRow.sync_phase;
-  if (!validPhases.includes(rawPhase as typeof validPhases[number])) {
-    throw new Error(`connectorPollingSync: unexpected sync_phase '${rawPhase}' on connection ${connectionId}`);
-  }
-  const currentSyncPhase = rawPhase;
+  const currentSyncPhase = leaseRow.sync_phase;
   const syncStartedAt = new Date();
   let errorMessage: string | null = null;
 
   try {
+    const validPhases = ['backfill', 'transition', 'live'] as const;
+    if (!validPhases.includes(currentSyncPhase as typeof validPhases[number])) {
+      throw new Error(`connectorPollingSync: unexpected sync_phase '${currentSyncPhase}' on connection ${connectionId}`);
+    }
+
     const result = await withBackoff(
       () => syncConnector(connectionId, organisationId),
       {
