@@ -189,12 +189,13 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { name, slug, status, settings, includeInOrgInbox } = req.body as {
+    const { name, slug, status, settings, includeInOrgInbox, runRetentionDays } = req.body as {
       name?: string;
       slug?: string;
       status?: string;
       settings?: Record<string, unknown>;
       includeInOrgInbox?: boolean;
+      runRetentionDays?: number | null;
     };
 
     // Guard: org subaccount cannot have its status changed
@@ -217,6 +218,12 @@ router.patch(
     if (includeInOrgInbox !== undefined) {
       if (typeof includeInOrgInbox !== 'boolean') throw { statusCode: 400, message: 'includeInOrgInbox must be a boolean' };
       update.includeInOrgInbox = includeInOrgInbox;
+    }
+    if (runRetentionDays !== undefined) {
+      if (runRetentionDays !== null && (typeof runRetentionDays !== 'number' || runRetentionDays < 1)) {
+        throw { statusCode: 400, message: 'runRetentionDays must be a positive integer or null' };
+      }
+      update.runRetentionDays = runRetentionDays;
     }
 
     const [updated] = await db

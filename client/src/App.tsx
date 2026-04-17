@@ -14,6 +14,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ProcessesPage = lazy(() => import('./pages/TasksPage'));
 const ProcessExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage'));
+const PulsePage = lazy(() => import('./pages/PulsePage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminProcessesPage = lazy(() => import('./pages/AdminTasksPage'));
@@ -213,12 +214,12 @@ export default function App() {
         } />
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
-          <Route path="/" element={<DashboardPage user={user!} />} />
+          <Route path="/" element={<Navigate to="/admin/pulse" replace />} />
           <Route path="/processes" element={<ProcessesPage user={user!} />} />
           <Route path="/processes/:id" element={<ProcessExecutionPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
-          <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/inbox" element={<Navigate to="/admin/pulse" replace />} />
           <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
           <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
           {/* §9.2 — subaccount-scoped run page (envelope endpoint + WS live). */}
@@ -282,9 +283,12 @@ export default function App() {
             <Route path="/admin/health-findings" element={<AdminHealthFindingsPage user={user!} />} />
             {/* Per-subaccount action audit log */}
             <Route path="/admin/subaccounts/:subaccountId/actions" element={<AdminActionLogPage user={user!} />} />
-            {/* Activity — org scope */}
-            <Route path="/admin/activity" element={<ActivityPage user={user!} />} />
-            {/* Activity — subaccount scope */}
+            {/* Pulse — supervision surface */}
+            <Route path="/admin/pulse" element={<PulsePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/pulse" element={<PulsePage user={user!} />} />
+            {/* Activity — org scope (redirects to Pulse history) */}
+            <Route path="/admin/activity" element={<Navigate to="/admin/pulse" replace />} />
+            {/* Activity — subaccount scope (still rendered for deep links) */}
             <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />

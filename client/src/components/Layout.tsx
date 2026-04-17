@@ -658,16 +658,15 @@ export default function Layout({ user, children }: LayoutProps) {
                 <span><Icons.bolt /></span>
                 <span className="flex-1">New Issue</span>
               </button>
-              <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined} />
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/inbox`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
+                <NavItem to="/admin/pulse" icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
               )}
             </>
           )}
 
-          {/* ── Fallback dashboard when no client selected */}
+          {/* ── Fallback when no client selected */}
           {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
+            <NavItem to="/admin/pulse" exact icon={<Icons.inbox />} label="Pulse" />
           )}
 
           {/* ── Work section */}
@@ -777,7 +776,6 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
-              {hasSidebarItem('inbox') && (hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
               {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
               {hasSidebarItem('config_assistant') && <NavItem to="/admin/config-assistant" icon={<Icons.settings />} label="Config Assistant" />}
               {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
@@ -786,7 +784,6 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasSidebarItem('ops') && hasOrgPerm('org.executions.view') && <NavItem to="/admin/activity" icon={<Icons.activity />} label="Activity" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
             </>

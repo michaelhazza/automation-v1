@@ -51,7 +51,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
-  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active', timezone: 'UTC', includeInOrgInbox: true });
+  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active', timezone: 'UTC', includeInOrgInbox: true, runRetentionDays: '' });
   const [settingsSaved, setSettingsSaved] = useState('');
 
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
@@ -71,7 +71,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
-      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC', includeInOrgInbox: saRes.data.includeInOrgInbox ?? true });
+      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC', includeInOrgInbox: saRes.data.includeInOrgInbox ?? true, runRetentionDays: saRes.data.runRetentionDays != null ? String(saRes.data.runRetentionDays) : '' });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -137,8 +137,9 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const handleSaveSettings = async () => {
     setError(''); setSettingsSaved('');
     try {
-      const { timezone, includeInOrgInbox, ...rest } = settingsForm;
-      await api.patch(`/api/subaccounts/${subaccountId}`, { ...rest, includeInOrgInbox, settings: { timezone } });
+      const { timezone, includeInOrgInbox, runRetentionDays, ...rest } = settingsForm;
+      const retentionVal = runRetentionDays ? parseInt(runRetentionDays, 10) : null;
+      await api.patch(`/api/subaccounts/${subaccountId}`, { ...rest, includeInOrgInbox, runRetentionDays: retentionVal, settings: { timezone } });
       setSettingsSaved('Saved successfully'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -471,6 +472,19 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                     <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Run retention (days)</label>
+                <p className="text-[12px] text-slate-400 mb-1.5">Override the default retention period for agent run data. Leave blank to use the organisation default.</p>
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  placeholder="Org default"
+                  value={settingsForm.runRetentionDays}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, runRetentionDays: e.target.value })}
+                  className={`${inputCls} max-w-[180px]`}
+                />
               </div>
               <div>
                 <label className="flex items-center gap-3 cursor-pointer">

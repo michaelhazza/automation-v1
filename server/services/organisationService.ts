@@ -118,12 +118,18 @@ export class OrganisationService {
       status: org.status,
       settings: org.settings,
       createdAt: org.createdAt,
+      brandColor: org.brandColor ?? null,
+      requireAgentApproval: org.requireAgentApproval ?? false,
+      pulseMajorThreshold: org.pulseMajorThreshold ?? null,
+      defaultCurrencyCode: org.defaultCurrencyCode ?? 'AUD',
     };
   }
 
   async updateOrganisation(id: string, data: {
     name?: string; plan?: string; status?: string; settings?: unknown;
     logoUrl?: string | null; brandColor?: string | null; requireAgentApproval?: boolean;
+    pulseMajorThreshold?: { perActionMinor: number; perRunMinor: number } | null;
+    defaultCurrencyCode?: string;
   }) {
     const [org] = await db
       .select()
@@ -150,6 +156,17 @@ export class OrganisationService {
     }
     // Governance
     if (data.requireAgentApproval !== undefined) update.requireAgentApproval = data.requireAgentApproval;
+    // Pulse thresholds
+    if (data.pulseMajorThreshold !== undefined) {
+      if (data.pulseMajorThreshold !== null) {
+        const { perActionMinor, perRunMinor } = data.pulseMajorThreshold;
+        if (typeof perActionMinor !== 'number' || perActionMinor < 0 || typeof perRunMinor !== 'number' || perRunMinor < 0) {
+          throw { statusCode: 400, message: 'Pulse thresholds must be non-negative numbers' };
+        }
+      }
+      update.pulseMajorThreshold = data.pulseMajorThreshold;
+    }
+    if (data.defaultCurrencyCode !== undefined) update.defaultCurrencyCode = data.defaultCurrencyCode;
 
     const [updated] = await db
       .update(organisations)
@@ -162,6 +179,10 @@ export class OrganisationService {
       name: updated.name,
       plan: updated.plan,
       status: updated.status,
+      brandColor: updated.brandColor ?? null,
+      requireAgentApproval: updated.requireAgentApproval ?? false,
+      pulseMajorThreshold: updated.pulseMajorThreshold ?? null,
+      defaultCurrencyCode: updated.defaultCurrencyCode ?? 'AUD',
     };
   }
 

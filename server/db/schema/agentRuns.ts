@@ -155,6 +155,9 @@ export const agentRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
 
+    // ── Pulse — failure acknowledgment (migration 0160) ──────────────
+    failureAcknowledgedAt: timestamp('failure_acknowledged_at', { withTimezone: true }),
+
     // Feature 2 (Inline Run Now test UX) classifier — when true, the run was
     // fired from an authoring-surface test panel. Excluded from Agency P&L
     // aggregates and from the Scheduled Runs Calendar's cost estimator by

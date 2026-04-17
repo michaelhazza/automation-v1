@@ -68,6 +68,13 @@ export const actions = pgTable(
     // Comment required on rejection (no silent rejections)
     rejectionComment: text('rejection_comment'),
 
+    // ── Pulse — cost + scope for lane classification (migration 0160) ──
+    estimatedCostMinor: integer('estimated_cost_minor'),
+    subaccountScope: text('subaccount_scope')
+      .notNull()
+      .default('single')
+      .$type<'single' | 'multiple'>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -62,6 +62,8 @@ export interface ProposeActionInput {
    * closed). See server/config/limits.ts → CONFIDENCE_GATE_THRESHOLD.
    */
   toolIntentConfidence?: number | null;
+  estimatedCostMinor?: number | null;
+  subaccountScope?: 'single' | 'multiple';
 }
 
 export interface ProposeActionResult {
@@ -124,6 +126,8 @@ export const actionService = {
         payloadJson: input.payload,
         metadataJson: input.metadata ?? null,
         maxRetries: definition.retryPolicy.maxRetries,
+        estimatedCostMinor: input.estimatedCostMinor ?? null,
+        subaccountScope: input.subaccountScope ?? 'single',
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -301,6 +305,17 @@ export const actionService = {
       throw Object.assign(new Error('Action not found'), { statusCode: 404 });
     }
     return action;
+  },
+
+  async getActionsBulk(actionIds: string[], organisationId: string) {
+    if (actionIds.length === 0) return [];
+    return db
+      .select()
+      .from(actions)
+      .where(and(
+        inArray(actions.id, actionIds),
+        eq(actions.organisationId, organisationId),
+      ));
   },
 
   /**

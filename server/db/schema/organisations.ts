@@ -16,6 +16,12 @@ export const organisations = pgTable(
     brandColor: text('brand_color'), // hex colour e.g. '#6366f1'
     // ── Governance ────────────────────────────────────────────────────
     requireAgentApproval: boolean('require_agent_approval').notNull().default(false),
+    // ── Pulse — Major-lane thresholds (migration 0160) ──────────────
+    pulseMajorThreshold: jsonb('pulse_major_threshold')
+      .$type<{ perActionMinor: number; perRunMinor: number }>(),
+    defaultCurrencyCode: text('default_currency_code')
+      .notNull()
+      .default('AUD'),
     // ── Sprint 2 — P1.1 Layer 3 ────────────────────────────────────────
     // Per-org override for tool_call_security_events retention. NULL uses
     // DEFAULT_SECURITY_EVENT_RETENTION_DAYS from server/config/limits.ts.
