@@ -10,6 +10,7 @@ import {
   detectNameMismatch,
   detectSkillGraphCollision,
   evaluateApprovalState,
+  checkConcurrencyStamp,
   DEFAULT_WARNING_TIER_MAP,
 } from '../skillAnalyzerServicePure.js';
 import type { ProposedMerge, MergeWarning } from '../skillAnalyzerServicePure.js';
@@ -256,6 +257,56 @@ Replace {{first_name}} with contact data.`,
     threshold: 0.30,
   });
   assert(result.some(c => c.collidingSlug === 'draft-sequence'), 'should flag draft-sequence');
+});
+
+// ---------------------------------------------------------------------------
+// resolveWarning concurrency guard (pure helper)
+// ---------------------------------------------------------------------------
+
+test('checkConcurrencyStamp: exact match returns ok', () => {
+  const t = '2026-04-17T12:00:00.000Z';
+  assertEq(checkConcurrencyStamp(t, null, t), 'ok', 'exact match');
+});
+
+test('checkConcurrencyStamp: within 2s skew returns ok', () => {
+  const rowTs = new Date('2026-04-17T12:00:00.000Z');
+  const clientTs = new Date('2026-04-17T12:00:01.500Z');    // +1.5s
+  assertEq(checkConcurrencyStamp(rowTs, null, clientTs), 'ok', 'within skew');
+});
+
+test('checkConcurrencyStamp: >2s drift returns stale', () => {
+  const rowTs = new Date('2026-04-17T12:00:00.000Z');
+  const clientTs = new Date('2026-04-17T12:00:05.000Z');    // +5s
+  assertEq(checkConcurrencyStamp(rowTs, null, clientTs), 'stale', 'beyond skew');
+});
+
+test('checkConcurrencyStamp: falls back to createdAt when mergeUpdatedAt null', () => {
+  const createdAt = '2026-04-17T12:00:00.000Z';
+  assertEq(checkConcurrencyStamp(null, createdAt, createdAt), 'ok', 'createdAt fallback');
+});
+
+test('checkConcurrencyStamp: missing both returns missing', () => {
+  assertEq(checkConcurrencyStamp(null, null, new Date()), 'missing', 'no row stamp');
+});
+
+test('checkConcurrencyStamp: simulates second-writer lose — stale after first write', () => {
+  // Scenario: two reviewers open a never-edited result at T0 (createdAt).
+  // Both hold clientStamp = T0. Reviewer A writes first, bumping
+  // mergeUpdatedAt to T0+10s. Reviewer B's subsequent call still carries
+  // clientStamp = T0; the guard MUST reject.
+  const createdAt = new Date('2026-04-17T12:00:00.000Z');
+  const afterFirstWrite = new Date('2026-04-17T12:00:10.000Z');
+  const clientStampB = createdAt;
+  assertEq(
+    checkConcurrencyStamp(afterFirstWrite, createdAt, clientStampB),
+    'stale',
+    'second writer rejected',
+  );
+});
+
+test('checkConcurrencyStamp: invalid stamps return stale (not crash)', () => {
+  assertEq(checkConcurrencyStamp('not a date', null, new Date()), 'stale', 'bad row stamp');
+  assertEq(checkConcurrencyStamp(new Date(), null, 'not a date'), 'stale', 'bad client stamp');
 });
 
 // ---------------------------------------------------------------------------

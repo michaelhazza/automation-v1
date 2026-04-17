@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { logger } from '../lib/logger.js';
 import { skillAnalyzerConfig } from '../db/schema/index.js';
 import type { SkillAnalyzerConfig, WarningTierMap } from '../db/schema/skillAnalyzerConfig.js';
 import {
@@ -159,9 +160,13 @@ export async function updateConfig(
     }
   }
 
-  // Cross-field invariant: standard < critical. Reject a patch that would
-  // invert them — validated against the effective value after the patch is
-  // applied (so partial updates work).
+  // Cross-field invariants. Validated against the effective (post-patch)
+  // values so partial updates work.
+  //   1. standard < critical
+  //   2. critical - standard >= MIN_THRESHOLD_DELTA — prevents degenerate
+  //      configurations like { standard: 0.80, critical: 0.80001 } where the
+  //      standard and critical tiers collapse into the same gate.
+  const MIN_THRESHOLD_DELTA = 0.05;
   const current = await loadDefault();
   const effectiveStandard = patch.scopeExpansionStandardThreshold
     ?? current.scopeExpansionStandardThreshold;
@@ -171,6 +176,12 @@ export async function updateConfig(
     throw {
       statusCode: 400,
       message: 'scopeExpansionStandardThreshold must be strictly less than scopeExpansionCriticalThreshold',
+    };
+  }
+  if (effectiveCritical - effectiveStandard < MIN_THRESHOLD_DELTA) {
+    throw {
+      statusCode: 400,
+      message: `scopeExpansionCriticalThreshold must exceed scopeExpansionStandardThreshold by at least ${MIN_THRESHOLD_DELTA}`,
     };
   }
 
@@ -191,6 +202,28 @@ export async function updateConfig(
 
   if (!updated) {
     throw { statusCode: 500, message: 'skillAnalyzerConfigService: update returned no rows' };
+  }
+
+  // Observability — log the diff so post-hoc "why did behaviour change?"
+  // traces are easy. `current` was captured above for the cross-field
+  // invariant check; reuse it as the `before` snapshot.
+  const changedFields = Object.entries(patch)
+    .filter(([k, v]) => v !== undefined && (current as Record<string, unknown>)[k] !== v)
+    .map(([k]) => k);
+  if (changedFields.length > 0) {
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    for (const k of changedFields) {
+      before[k] = (current as Record<string, unknown>)[k];
+      after[k] = (updated as Record<string, unknown>)[k];
+    }
+    logger.info('skill_analyzer_config_updated', {
+      updatedBy,
+      configVersion: updated.configVersion,
+      changedFields,
+      before,
+      after,
+    });
   }
 
   invalidateCache();

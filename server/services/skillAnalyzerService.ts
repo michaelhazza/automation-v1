@@ -9,7 +9,7 @@ import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
 import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
-import { evaluateApprovalState } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
 import { createHash } from 'crypto';
@@ -503,23 +503,18 @@ export async function resolveWarning(params: ResolveWarningParams): Promise<void
       };
     }
 
-    const rowStamp = row.mergeUpdatedAt
-      ? new Date(row.mergeUpdatedAt)
-      : (row.createdAt ? new Date(row.createdAt) : null);
-    // Canonical concurrency token: mergeUpdatedAt when set, else createdAt.
-    // Client must echo back the value surfaced by GET /jobs/:id for the row.
-    // Any divergence means either (a) another session wrote first, or (b) the
-    // client invented a timestamp. Both warrant a 409.
-    if (!rowStamp) {
+    const concurrencyResult = checkConcurrencyStamp(
+      row.mergeUpdatedAt,
+      row.createdAt,
+      clientStamp,
+    );
+    if (concurrencyResult === 'missing') {
       throw {
         statusCode: 500,
         message: 'Result has no createdAt timestamp — cannot verify concurrency.',
       };
     }
-    // Allow ±2s of clock skew between app servers; anything beyond that
-    // indicates a stale or fabricated token.
-    const SKEW_MS = 2_000;
-    if (Math.abs(rowStamp.getTime() - clientStamp.getTime()) > SKEW_MS) {
+    if (concurrencyResult === 'stale') {
       throw {
         statusCode: 409,
         message: 'Result was modified since you opened it, or the If-Unmodified-Since token does not match. Reload and retry.',
