@@ -48,14 +48,16 @@ function hasCode(warnings: { code: MergeWarningCode }[], code: MergeWarningCode)
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const baseDef = (required: string[]) => ({
-  name: 'base_skill',
+const baseDef = (required: string[], name: string = 'merged_skill') => ({
+  name,
   description: 'desc',
   input_schema: { type: 'object', properties: {}, required },
 });
 
 const cleanMerge = (overrides: Partial<ProposedMerge> = {}): ProposedMerge => ({
-  name: 'merged-skill',
+  // Top-level name matches definition.name so the v2 NAME_MISMATCH
+  // detector doesn't fire on "clean" baselines.
+  name: 'merged_skill',
   description: 'a focused merged skill description',
   definition: baseDef(['prompt']),
   instructions: 'Do the thing.',
@@ -331,6 +333,29 @@ test('richnessScore: headings boost score above word count', () => {
   const withHeadings = '## Section\nword word word\n## Section 2\nword word word';
   const withoutHeadings = 'word word word word word word';
   assert(richnessScore(withHeadings) > richnessScore(withoutHeadings), 'headings should boost score');
+});
+
+// ---------------------------------------------------------------------------
+// v2 Fix 7: NAME_MISMATCH
+// ---------------------------------------------------------------------------
+
+test('NAME_MISMATCH: top-level name differs from definition.name', () => {
+  const base = { definition: baseDef([]), instructions: 'Do.' };
+  const nonBase = { definition: baseDef([]), instructions: 'Also.' };
+  const merged = cleanMerge({
+    name: 'incoming_name',
+    definition: baseDef([], 'library_name'),
+  });
+  const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
+  assert(hasCode(result, 'NAME_MISMATCH'), 'should emit NAME_MISMATCH');
+});
+
+test('no NAME_MISMATCH when names align', () => {
+  const base = { definition: baseDef([]), instructions: 'Do.' };
+  const nonBase = { definition: baseDef([]), instructions: 'Also.' };
+  const merged = cleanMerge();
+  const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
+  assert(!hasCode(result, 'NAME_MISMATCH'), 'should not emit NAME_MISMATCH on aligned names');
 });
 
 // ---------------------------------------------------------------------------

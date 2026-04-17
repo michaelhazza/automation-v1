@@ -1,7 +1,11 @@
 // ---------------------------------------------------------------------------
-// mergeTypes.ts — client-side merge warning types + utilities
+// mergeTypes.ts — client-side merge warning types + approval-gate utilities.
 // These mirror the server-side types in skillAnalyzerServicePure.ts but are
 // duplicated here to avoid importing server code into the client bundle.
+//
+// The server is authoritative for approval decisions; this module provides
+// optimistic UI preview via evaluateApprovalState — the server re-checks
+// on every approve / execute.
 // ---------------------------------------------------------------------------
 
 export type MergeWarningCode =
@@ -13,7 +17,10 @@ export type MergeWarningCode =
   | 'INVOCATION_LOST'
   | 'HITL_LOST'
   | 'OUTPUT_FORMAT_LOST'
-  | 'WARNINGS_TRUNCATED';
+  | 'WARNINGS_TRUNCATED'
+  | 'CLASSIFIER_FALLBACK'
+  | 'NAME_MISMATCH'
+  | 'SKILL_GRAPH_COLLISION';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -24,25 +31,160 @@ export interface MergeWarning {
   detail?: string;
 }
 
-/** Merge warning codes that block approval until resolved.
- *  SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
- *  scope creep and name collisions can be resolved by the reviewer editing the
- *  merged content — they are not safety gates.
- *  REQUIRED_FIELD_DEMOTED, INVOCATION_LOST, and HITL_LOST represent safety-critical
- *  regressions (broken API contracts, lost routing signals, removed human review gates)
- *  that must be fixed before approving.
- *  MUST stay in sync with BLOCKING_CODES in server/services/skillAnalyzerService.ts */
-export const BLOCKING_WARNING_CODES = new Set<MergeWarningCode>([
-  'REQUIRED_FIELD_DEMOTED',
-  'INVOCATION_LOST',
-  'HITL_LOST',
-]);
+export type WarningTier =
+  | 'informational'
+  | 'standard'
+  | 'decision_required'
+  | 'critical';
+
+export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
+  REQUIRED_FIELD_DEMOTED:   'decision_required',
+  NAME_MISMATCH:            'decision_required',
+  SKILL_GRAPH_COLLISION:    'decision_required',
+  INVOCATION_LOST:          'decision_required',
+  HITL_LOST:                'decision_required',
+  CLASSIFIER_FALLBACK:      'decision_required',
+  SCOPE_EXPANSION_CRITICAL: 'critical',
+  SCOPE_EXPANSION:          'standard',
+  CAPABILITY_OVERLAP:       'standard',
+  TABLE_ROWS_DROPPED:       'informational',
+  OUTPUT_FORMAT_LOST:       'informational',
+  WARNINGS_TRUNCATED:       'informational',
+};
+
+export type WarningResolutionKind =
+  | 'accept_removal'
+  | 'restore_required'
+  | 'use_library_name'
+  | 'use_incoming_name'
+  | 'scope_down'
+  | 'flag_other'
+  | 'accept_overlap'
+  | 'acknowledge_low_confidence'
+  | 'acknowledge_warning'
+  | 'confirm_critical_phrase';
+
+export interface WarningResolution {
+  warningCode: MergeWarningCode;
+  resolution: WarningResolutionKind;
+  resolvedAt: string;
+  resolvedBy: string;
+  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
+}
+
+export interface ApprovalBlockingReason {
+  warningCode: MergeWarningCode;
+  tier: WarningTier;
+  message: string;
+  field?: string;
+}
+
+export interface RequiredResolution {
+  warningCode: MergeWarningCode;
+  allowedResolutions: WarningResolutionKind[];
+  field?: string;
+}
+
+export interface ApprovalState {
+  blocked: boolean;
+  reasons: ApprovalBlockingReason[];
+  requiredResolutions: RequiredResolution[];
+}
+
+const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = {
+  REQUIRED_FIELD_DEMOTED:   ['accept_removal', 'restore_required'],
+  NAME_MISMATCH:            ['use_library_name', 'use_incoming_name'],
+  SKILL_GRAPH_COLLISION:    ['scope_down', 'flag_other', 'accept_overlap'],
+  INVOCATION_LOST:          ['acknowledge_warning'],
+  HITL_LOST:                ['acknowledge_warning'],
+  CLASSIFIER_FALLBACK:      ['acknowledge_low_confidence'],
+  SCOPE_EXPANSION_CRITICAL: ['confirm_critical_phrase'],
+  SCOPE_EXPANSION:          ['acknowledge_warning'],
+  CAPABILITY_OVERLAP:       ['acknowledge_warning'],
+  TABLE_ROWS_DROPPED:       [],
+  OUTPUT_FORMAT_LOST:       [],
+  WARNINGS_TRUNCATED:       [],
+};
+
+export function parseDemotedFields(detail: string | undefined): string[] {
+  if (!detail) return [];
+  const trimmed = detail.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed?.demotedFields)) {
+        return parsed.demotedFields.filter((f: unknown) => typeof f === 'string') as string[];
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+function isResolvedBy(
+  code: MergeWarningCode,
+  field: string | undefined,
+  resolutions: WarningResolution[],
+): boolean {
+  const allowed = RESOLUTIONS_FOR_CODE[code] ?? [];
+  return resolutions.some(r =>
+    r.warningCode === code
+    && (allowed.length === 0 || allowed.includes(r.resolution))
+    && (field === undefined || r.details?.field === field));
+}
+
+/** Canonical client-side preview of approval state. Mirrors the server
+ *  implementation in skillAnalyzerServicePure.ts. */
+export function evaluateApprovalState(
+  warnings: MergeWarning[] | null | undefined,
+  resolutions: WarningResolution[] | null | undefined,
+  tierMap: Record<string, WarningTier> = DEFAULT_WARNING_TIER_MAP,
+): ApprovalState {
+  const reasons: ApprovalBlockingReason[] = [];
+  const required: RequiredResolution[] = [];
+  const safeWarnings = warnings ?? [];
+  const safeResolutions = resolutions ?? [];
+
+  for (const w of safeWarnings) {
+    const tier = (tierMap[w.code] ?? DEFAULT_WARNING_TIER_MAP[w.code]) ?? 'informational';
+    if (tier === 'informational') continue;
+
+    if (w.code === 'REQUIRED_FIELD_DEMOTED') {
+      const fields = parseDemotedFields(w.detail);
+      for (const field of fields) {
+        if (!isResolvedBy('REQUIRED_FIELD_DEMOTED', field, safeResolutions)) {
+          reasons.push({
+            warningCode: w.code,
+            tier,
+            message: `Field "${field}" — choose Accept removal or Restore required.`,
+            field,
+          });
+          required.push({
+            warningCode: w.code,
+            allowedResolutions: RESOLUTIONS_FOR_CODE.REQUIRED_FIELD_DEMOTED,
+            field,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (!isResolvedBy(w.code, undefined, safeResolutions)) {
+      reasons.push({ warningCode: w.code, tier, message: w.message });
+      required.push({
+        warningCode: w.code,
+        allowedResolutions: RESOLUTIONS_FOR_CODE[w.code] ?? ['acknowledge_warning'],
+      });
+    }
+  }
+
+  return { blocked: reasons.length > 0, reasons, requiredResolutions: required };
+}
 
 /**
  * Compute a confidence score (0–1) from a warnings array.
- * Deductions are taken per unique warning code.
- * Floor: 0.2 (even a heavily-warned merge is reviewable).
- * Critical cap: 0.5 (any critical warning forces amber or red).
+ * Deductions are taken per unique warning code. Floor 0.2; critical cap 0.5.
  */
 export function computeMergeConfidence(warnings: MergeWarning[] | null | undefined): number {
   if (!warnings || warnings.length === 0) return 1.0;
@@ -55,6 +197,9 @@ export function computeMergeConfidence(warnings: MergeWarning[] | null | undefin
     HITL_LOST:                0.3,
     OUTPUT_FORMAT_LOST:       0.1,
     TABLE_ROWS_DROPPED:       0.1,
+    CLASSIFIER_FALLBACK:      0.4,
+    NAME_MISMATCH:            0.2,
+    SKILL_GRAPH_COLLISION:    0.2,
   };
   const seen = new Set<MergeWarningCode>();
   let score = 1.0;
@@ -81,6 +226,9 @@ export function warningLabel(code: MergeWarningCode): string {
     case 'HITL_LOST':                return 'Review gate lost';
     case 'OUTPUT_FORMAT_LOST':       return 'Output format lost';
     case 'WARNINGS_TRUNCATED':       return 'Warnings truncated';
+    case 'CLASSIFIER_FALLBACK':      return 'Classifier fallback — low confidence';
+    case 'NAME_MISMATCH':            return 'Name mismatch';
+    case 'SKILL_GRAPH_COLLISION':    return 'Skill graph collision';
   }
 }
 
@@ -96,5 +244,8 @@ export function warningBadgeClass(code: MergeWarningCode): string {
     case 'HITL_LOST':                return 'bg-red-100 text-red-800';
     case 'OUTPUT_FORMAT_LOST':       return 'bg-amber-100 text-amber-800';
     case 'WARNINGS_TRUNCATED':       return 'bg-slate-100 text-slate-600';
+    case 'CLASSIFIER_FALLBACK':      return 'bg-red-100 text-red-800';
+    case 'NAME_MISMATCH':            return 'bg-red-100 text-red-800';
+    case 'SKILL_GRAPH_COLLISION':    return 'bg-orange-100 text-orange-800';
   }
 }

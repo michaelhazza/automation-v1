@@ -4,6 +4,7 @@ import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillAnalyzerService } from '../services/skillAnalyzerService.js';
 import { configBackupService } from '../services/configBackupService.js';
+import * as skillAnalyzerConfigService from '../services/skillAnalyzerConfigService.js';
 
 const router = Router();
 
@@ -161,10 +162,12 @@ router.get(
 router.patch(
   '/api/system/skill-analyser/jobs/:jobId/results/:resultId',
   asyncHandler(async (req, res) => {
-    const { action } = req.body as { action: string };
+    // v2 §11.11.2: action=null is the unapprove path — required so a
+    // reviewer can edit a locked (approved) result.
+    const { action } = req.body as { action: string | null };
 
-    if (!['approved', 'rejected', 'skipped'].includes(action)) {
-      return res.status(400).json({ error: 'Invalid action. Must be approved, rejected, or skipped.' });
+    if (action !== null && !['approved', 'rejected', 'skipped'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Must be approved, rejected, skipped, or null (unapprove).' });
     }
 
     await skillAnalyzerService.setResultAction({
@@ -172,7 +175,7 @@ router.patch(
       jobId: req.params.jobId,
       organisationId: req.orgId!,
       userId: req.user!.id,
-      action: action as 'approved' | 'rejected' | 'skipped',
+      action: action as 'approved' | 'rejected' | 'skipped' | null,
     });
 
     return res.json({ ok: true });
@@ -392,6 +395,111 @@ router.post(
     });
 
     return res.json(result);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/proposed-agents
+// Confirm or reject a proposed new agent. §11 Fix 5
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/proposed-agents',
+  asyncHandler(async (req, res) => {
+    const { jobId } = req.params;
+    const orgId = req.orgId!;
+    const body = (req.body ?? {}) as { proposedAgentIndex?: number; action?: string };
+    if (typeof body.proposedAgentIndex !== 'number') {
+      return res.status(400).json({ error: 'proposedAgentIndex is required (number).' });
+    }
+    if (body.action !== 'confirm' && body.action !== 'reject') {
+      return res.status(400).json({ error: 'action must be "confirm" or "reject".' });
+    }
+    await skillAnalyzerService.updateProposedAgent({
+      jobId,
+      organisationId: orgId,
+      proposedAgentIndex: body.proposedAgentIndex,
+      action: body.action,
+    });
+    return res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/resolve-warning
+// Record reviewer decision on a merge warning. §11.2
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/resolve-warning',
+  asyncHandler(async (req, res) => {
+    const { jobId, resultId } = req.params;
+    const orgId = req.orgId!;
+    const userId = req.user!.id;
+
+    // If-Unmodified-Since is strictly required for resolve-warning. §11.11.5
+    const ifUnmodifiedSince = req.header('if-unmodified-since');
+    if (!ifUnmodifiedSince) {
+      return res
+        .status(400)
+        .json({ error: 'If-Unmodified-Since header is required.' });
+    }
+
+    const body = (req.body ?? {}) as {
+      warningCode?: string;
+      resolution?: string;
+      details?: Record<string, unknown>;
+    };
+    if (!body.warningCode || typeof body.warningCode !== 'string') {
+      return res.status(400).json({ error: 'warningCode is required.' });
+    }
+    if (!body.resolution || typeof body.resolution !== 'string') {
+      return res.status(400).json({ error: 'resolution is required.' });
+    }
+
+    const details = body.details ?? {};
+
+    await skillAnalyzerService.resolveWarning({
+      resultId,
+      jobId,
+      organisationId: orgId,
+      userId,
+      ifUnmodifiedSince,
+      warningCode: body.warningCode as never,
+      resolution: body.resolution as never,
+      details: {
+        field: typeof details.field === 'string' ? details.field : undefined,
+        disambiguationNote: typeof details.disambiguationNote === 'string' ? details.disambiguationNote : undefined,
+        collidingSkillId: typeof details.collidingSkillId === 'string' ? details.collidingSkillId : undefined,
+      },
+    });
+
+    return res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/system/skill-analyser/config — Read config singleton
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/system/skill-analyser/config',
+  asyncHandler(async (_req, res) => {
+    const config = await skillAnalyzerConfigService.getConfig();
+    return res.json(config);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/config — Update config singleton
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/config',
+  asyncHandler(async (req, res) => {
+    const body = (req.body ?? {}) as skillAnalyzerConfigService.ConfigPatch;
+    const updated = await skillAnalyzerConfigService.updateConfig(body, req.user!.id);
+    return res.json(updated);
   }),
 );
 

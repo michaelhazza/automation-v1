@@ -24,11 +24,21 @@ export interface MatchedSkillContent {
  *  agent-propose pipeline stage. systemAgentId is the stable identity key —
  *  slug and name are display-only snapshots captured at analysis time. */
 export interface AgentProposal {
-  systemAgentId: string;
+  /** null for a proposed-new-agent entry retro-injected by Stage 8b. The
+   *  Execute step resolves this via proposedAgentIndex → newly created agent. */
+  systemAgentId: string | null;
   slugSnapshot: string;
   nameSnapshot: string;
   score: number;
   selected: boolean;
+  /** v2 Fix 5: true when this proposal was retro-injected from a cluster-
+   *  recommended new agent. UI renders a "Proposed (not yet created)" badge. */
+  isProposedNewAgent?: boolean;
+  /** v2 Fix 5: index into AnalysisJob.proposedNewAgents. */
+  proposedAgentIndex?: number;
+  /** Stage 7b enrichment — present when Haiku confirmed a top proposal. */
+  llmReasoning?: string;
+  llmConfirmed?: boolean;
 }
 
 /** LLM-generated merge proposal for PARTIAL_OVERLAP / IMPROVEMENT results.
@@ -97,6 +107,20 @@ export interface AnalysisJob {
     reasoning: string;
     skillSlugs?: string[];
   } | null;
+  /** v2 Fix 5: plural proposed-new-agents array. Each entry carries status
+   *  so the UI can render Confirm/Reject controls and surface the agent in
+   *  per-skill assignment panels via retro-injected agentProposals. */
+  proposedNewAgents?: Array<{
+    proposedAgentIndex: number;
+    slug: string;
+    name: string;
+    description: string;
+    reasoning: string;
+    skillSlugs: string[];
+    status: 'proposed' | 'confirmed' | 'rejected';
+    confirmedAt?: string;
+    rejectedAt?: string;
+  }> | null;
 }
 
 export interface AnalysisResult {
@@ -144,6 +168,9 @@ export interface AnalysisResult {
    *  Null on rows that have never been merge-edited. Echoed back on PATCH requests
    *  as ifUnmodifiedSince for optimistic concurrency. */
   mergeUpdatedAt?: string | null;
+  /** Row creation timestamp — used as the concurrency token when
+   *  mergeUpdatedAt is null (i.e., the row has never been edited). */
+  createdAt?: string | null;
   /** Task 3: true when the Anthropic classification call failed (rate limit or
    *  parse error). Distinguishes retryable API failures from genuine
    *  PARTIAL_OVERLAP model output. */
@@ -166,6 +193,17 @@ export interface AnalysisResult {
   /** LLM-generated explanation of merge decisions. Read-only after job writes it.
    *  Null for DUPLICATE / DISTINCT or when the LLM omitted the field. */
   mergeRationale?: string | null;
+  /** v2 Fix 2/6/7: reviewer decisions per warning (dedup by warningCode,
+   *  details.field). Wiped atomically on any merge edit. */
+  warningResolutions?: import('./mergeTypes').WarningResolution[] | null;
+  /** v2 Fix 1: true when the rule-based merger produced proposedMergedContent. */
+  classifierFallbackApplied?: boolean;
+  /** v2 Fix 7: canonical name chosen via NAME_MISMATCH resolution. */
+  executionResolvedName?: string | null;
+  /** v2 §11.11.2: set on approve; presence locks the row against edits. */
+  approvedAt?: string | null;
+  /** v2 §11.12.2: surfaces "modified after previous approval" badge. */
+  wasApprovedBefore?: boolean;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

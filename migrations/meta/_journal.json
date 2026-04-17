@@ -820,6 +820,34 @@
       "when": 1780819202000,
       "tag": "0151_memory_embedding_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1780819203000,
+      "tag": "0152_agent_runs_is_test_run",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1780819204000,
+      "tag": "0153_agent_test_fixtures",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1780819205000,
+      "tag": "0154_mcp_tool_invocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1780819206000,
+      "tag": "0155_skill_analyzer_v2_fixes",
+      "breakpoints": true
     }
   ]
 }
