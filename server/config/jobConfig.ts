@@ -372,6 +372,27 @@ export const JOB_CONFIG = {
     deadLetter: 'playbook-bulk-parent-check__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
   },
+
+  // ── Canonical Data Platform P1: Connector polling ──────────────────
+  // Tick job: every-minute cron that selects connections due for sync
+  // and fan-outs one connector-polling-sync per connection.
+  'connector-polling-tick': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 55,
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+  // Per-connection sync job: acquires a lease, runs the adapter, records
+  // ingestion stats. Lease pattern handles dedup at the handler level.
+  'connector-polling-sync': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'connector-polling-sync__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

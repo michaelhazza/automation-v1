@@ -16,7 +16,8 @@ export type WorkspaceHealthResourceKind =
   | 'subaccount_agent'
   | 'process'
   | 'subaccount'
-  | 'org';
+  | 'org'
+  | 'connection';
 
 export interface WorkspaceHealthFinding {
   detector: string;

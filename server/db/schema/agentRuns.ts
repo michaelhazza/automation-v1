@@ -5,6 +5,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
+import { users } from './users';
 
 // ---------------------------------------------------------------------------
 // Agent Runs — logs of autonomous agent executions
@@ -155,11 +156,20 @@ export const agentRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
 
+    // ── Pulse — failure acknowledgment (migration 0160) ──────────────
+    failureAcknowledgedAt: timestamp('failure_acknowledged_at', { withTimezone: true }),
+
     // Feature 2 (Inline Run Now test UX) classifier — when true, the run was
     // fired from an authoring-surface test panel. Excluded from Agency P&L
     // aggregates and from the Scheduled Runs Calendar's cost estimator by
     // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
     isTestRun: boolean('is_test_run').notNull().default(false),
+
+    // P3A: Principal model fields (migration 0164)
+    principalType: text('principal_type').notNull().default('user').$type<'user' | 'service' | 'delegated'>(),
+    principalId: text('principal_id').notNull().default(''),
+    actingAsUserId: uuid('acting_as_user_id').references(() => users.id),
+    delegationGrantId: uuid('delegation_grant_id'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -191,6 +201,9 @@ export const agentRuns = pgTable(
     latestHandoffIdx: index('agent_runs_latest_handoff_idx')
       .on(table.agentId, table.subaccountId, table.createdAt)
       .where(sql`${table.handoffJson} IS NOT NULL`),
+    // P3A: principal model index (migration 0164)
+    principalIdx: index('agent_runs_principal_idx')
+      .on(table.principalType, table.principalId),
   })
 );
 

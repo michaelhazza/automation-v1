@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, isNull } from 'drizzle-orm';
+import { eq, and, or, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
@@ -75,45 +75,55 @@ export const reviewService = {
     userId: string,
     edits?: Record<string, unknown>
   ) {
-    // Transaction: lock review item and action, apply approval
-    const [item] = await db
-      .select()
-      .from(reviewItems)
-      .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
+    const pendingGuard = and(
+      eq(reviewItems.id, reviewItemId),
+      eq(reviewItems.organisationId, organisationId),
+      or(
+        eq(reviewItems.reviewStatus, 'pending'),
+        eq(reviewItems.reviewStatus, 'edited_pending'),
+      ),
+    );
 
-    if (!item) {
-      throw Object.assign(new Error('Review item not found'), { statusCode: 404 });
-    }
+    const item = await db.transaction(async (tx) => {
+      const setFields: Record<string, unknown> = {
+        reviewStatus: 'approved',
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+      };
+      if (edits) setFields.humanEditJson = edits;
 
-    if (item.reviewStatus !== 'pending' && item.reviewStatus !== 'edited_pending') {
-      throw Object.assign(new Error(`Review item already resolved: ${item.reviewStatus}`), { statusCode: 409 });
-    }
+      const [updated] = await tx.update(reviewItems)
+        .set(setFields)
+        .where(pendingGuard)
+        .returning();
 
-    // Apply edits and transition in a single transaction to avoid partial state
-    await db.transaction(async (tx) => {
+      if (!updated) {
+        const [existing] = await tx
+          .select({ id: reviewItems.id, reviewStatus: reviewItems.reviewStatus })
+          .from(reviewItems)
+          .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
+
+        if (!existing) {
+          throw Object.assign(new Error('Review item not found'), { statusCode: 404 });
+        }
+        throw Object.assign(
+          new Error(`Review item already resolved: ${existing.reviewStatus}`),
+          { statusCode: 409, errorCode: 'ALREADY_RESOLVED' },
+        );
+      }
+
       if (edits) {
-        const action = await actionService.getAction(item.actionId, organisationId);
+        const action = await actionService.getAction(updated.actionId, organisationId);
         const currentPayload = action.payloadJson as Record<string, unknown>;
         const mergedPayload = { ...currentPayload, ...edits };
 
         await tx.update(actions).set({
           payloadJson: mergedPayload,
           updatedAt: new Date(),
-        }).where(eq(actions.id, item.actionId));
-
-        await tx.update(reviewItems).set({
-          humanEditJson: edits,
-          reviewStatus: 'approved',
-          reviewedBy: userId,
-          reviewedAt: new Date(),
-        }).where(eq(reviewItems.id, reviewItemId));
-      } else {
-        await tx.update(reviewItems).set({
-          reviewStatus: 'approved',
-          reviewedBy: userId,
-          reviewedAt: new Date(),
-        }).where(eq(reviewItems.id, reviewItemId));
+        }).where(eq(actions.id, updated.actionId));
       }
+
+      return updated;
     });
 
     if (edits) {
@@ -195,34 +205,45 @@ export const reviewService = {
     userId: string,
     comment?: string,
   ) {
-    const [item] = await db
-      .select()
-      .from(reviewItems)
-      .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
-
-    if (!item) {
-      throw Object.assign(new Error('Review item not found'), { statusCode: 404 });
-    }
-
-    if (item.reviewStatus !== 'pending' && item.reviewStatus !== 'edited_pending') {
-      throw Object.assign(new Error(`Review item already resolved: ${item.reviewStatus}`), { statusCode: 409 });
-    }
-
     const rejectionComment = comment?.trim() || 'No reason provided';
 
-    // Update review item and action comment in a single transaction
-    await db.transaction(async (tx) => {
-      await tx.update(reviewItems).set({
+    const pendingGuard = and(
+      eq(reviewItems.id, reviewItemId),
+      eq(reviewItems.organisationId, organisationId),
+      or(
+        eq(reviewItems.reviewStatus, 'pending'),
+        eq(reviewItems.reviewStatus, 'edited_pending'),
+      ),
+    );
+
+    const item = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(reviewItems).set({
         reviewStatus: 'rejected',
         reviewedBy: userId,
         reviewedAt: new Date(),
-      }).where(eq(reviewItems.id, reviewItemId));
+      }).where(pendingGuard).returning();
 
-      // Store comment on the action for the agent to receive
+      if (!updated) {
+        const [existing] = await tx
+          .select({ id: reviewItems.id, reviewStatus: reviewItems.reviewStatus })
+          .from(reviewItems)
+          .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
+
+        if (!existing) {
+          throw Object.assign(new Error('Review item not found'), { statusCode: 404 });
+        }
+        throw Object.assign(
+          new Error(`Review item already resolved: ${existing.reviewStatus}`),
+          { statusCode: 409, errorCode: 'ALREADY_RESOLVED' },
+        );
+      }
+
       await tx.update(actions).set({
         rejectionComment,
         updatedAt: new Date(),
-      }).where(eq(actions.id, item.actionId));
+      }).where(eq(actions.id, updated.actionId));
+
+      return updated;
     });
 
     await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);

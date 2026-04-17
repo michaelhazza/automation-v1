@@ -46,7 +46,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Playbook Engine](#playbook-engine)
   - [Human-in-the-Loop](#human-in-the-loop)
   - [Task Board & Workspace](#task-board--workspace)
-  - [Unified Inbox](#unified-inbox)
+  - [Pulse — Supervision Home](#pulse--supervision-home)
   - [Memory & Knowledge System](#memory--knowledge-system)
   - [Workspace Health & Diagnostics](#workspace-health--diagnostics)
   - [Activity & Analytics](#activity--analytics)
@@ -135,7 +135,7 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 | *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step playbooks with human approvals, cost ceilings, retry policies, exactly-once execution guarantees, parallel step execution, **and a portfolio-wide calendar that shows an agency's entire book of client work on one screen**. Different product category — and one of them is demoable inside a client portal. |
 | *"I'll use a hosted routines product from an LLM provider."* | Hosted routines are a prompt on a schedule, with connectors, for *one user*. The moment you're running them across many clients, you need multi-tenant isolation, approval gates on CRM/ads/accounting writes, per-client billing and margin tracking, and a white-label surface where your client can see what's being done for them. Those are structural agency requirements a provider's hosted product doesn't build — their buyer is the producer, not the consumer. Synthetos uses provider primitives as supply and adds the operations layer on top, model-agnostic across every provider. |
 | *"Hosted agents are autonomous — perfect."* | Which is exactly why agencies can't put them on a client's CRM, ad account, or accounting system. 42+ review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
-| *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering not spent on client work. |
+| *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a supervision home. That is 18+ months of engineering not spent on client work. |
 | *"What if an LLM provider ships multi-tenant?"* | They won't — their buyer is not agencies. Even if one did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
 | *"What if a better model ships?"* | Synthetos routes to it per skill. No migration. Build on a single provider's managed stack and that question becomes a year-long project. |
 | *"We already use a commodity workflow automation tool."* | Those are stateless trigger-action chains. Synthetos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
@@ -175,10 +175,13 @@ Three-tier hierarchy that isolates data and configuration at every level — so 
 
 ### Authentication & Access Control
 
-Five roles, granular permission keys, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
+Five roles, granular permission keys, principal-based data isolation, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
 
 - **Five roles** from platform administrator to client viewer — each sees exactly the right level of access
 - Custom permission sets assignable to any role; access enforced across the entire platform
+- **Principal-based data access** — three principal types (user, service, delegated) control what agents and users can see. Personal connections and private data are invisible to service processes and other users unless explicitly shared
+- **Delegation grants** — temporary, scoped access for agents acting on behalf of a user, with automatic expiry and revocation
+- **Visibility scoping** — data classified as private, shared-team, shared-subaccount, or shared-org; enforced at the database layer so no application bug can leak across boundaries
 - Secure authentication with rate-limited login, email invitations, and self-service password reset
 - Permissions-driven interface — buttons, tabs, and pages automatically hidden when a user lacks access
 
@@ -289,13 +292,19 @@ Kanban-style task management with agent assignment, deliverables, and workflow t
 - Full task lifecycle: create, move, reassign, add deliverables, complete — with priority levels and categories
 - Per-task activity stream for team visibility; workflow transitions follow defined column rules
 
-### Unified Inbox
+### Pulse — Supervision Home
 
-Aggregated notification centre across all item types with filtering and prioritisation.
+Single-screen operational command centre that replaces the legacy inbox, dashboard, and activity pages. Everything that needs human attention surfaces here automatically.
 
-- **Tabs:** All, Tasks, Reviews, Failed Runs — with sort, search, and subaccount filtering
-- Priority feed with automatic claim/release; agency-wide and per-client scoped views
-- Unread/archived tracking with colour-coded subaccount badges
+- **Three-lane classifier** — Actions are deterministically sorted into Client-facing, Major, and Internal lanes based on impact: irreversibility, cross-subaccount scope, per-action cost, and per-run cost
+- **Major-lane safeguards** — High-cost or irreversible actions require explicit acknowledgment before approval, with configurable cost thresholds per organisation
+- **Attention tab** — Live feed of pending review items, failed runs, health findings, and tasks needing decisions, with optimistic UI updates and real-time WebSocket push
+- **History tab** — Full activity timeline with column-header sort, type/status/severity filters, search, and date-range filtering — delegates to the unified activity service
+- **Bulk approve** — Select and approve multiple items at once; Major-lane items are automatically held back with a split response showing what was approved vs. blocked
+- **Scoped views** — Organisation-wide and per-subaccount views with the same lane structure
+- **Threshold editor** — Organisation admins configure per-action and per-run cost thresholds that control Major-lane routing, with currency selection
+- **Per-subaccount retention** — Override the default run data retention period on a per-client basis
+- **409 concurrency guard** — Prevents double-approval of already-resolved items with graceful UI recovery
 
 ### Memory & Knowledge System
 
@@ -321,7 +330,7 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 
 Automated configuration auditing that detects drift, misconfigurations, and operational issues.
 
-- **6 active detectors:** inactive agents, empty skill allowlists, missing schedules, broken connections, missing engines, unsynced system agents
+- **7 active detectors:** inactive agents, empty skill allowlists, missing schedules, broken connections, stale connectors (ingestion overdue or recent errors), missing engines, unsynced system agents
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
 
@@ -357,8 +366,11 @@ CMS-style page creation and publishing with analytics tracking and form submissi
 Pre-built connectors for the tools agencies already use — connect once, use across every agent and playbook.
 
 - **OAuth providers:** Gmail, Slack, HubSpot, Go High Level (GHL), Teamwork Desk, GitHub App
-- **Connection scoping** — Agency-wide (shared) or per-client (isolated); multiple connections per provider
-- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with managed sync lifecycle (initial import → transition → live)
+- **Connection ownership** — Connections can be user-owned (personal Gmail, Calendar), per-client (isolated), or agency-wide (shared). Personal connections default to private visibility with explicit sharing controls
+- **Scheduled ingestion** — Every connector polls on a configurable schedule without operator intervention. Sync phases (initial import → transition → live) track maturity automatically
+- **Cost observability** — Per-connection API call counts, row throughput, and sync duration recorded for cost attribution and tier economics tuning
+- **Canonical data layer** — Provider-specific records normalised into a shared schema. Agents query consolidated data via the data dictionary skill rather than making live API calls for every question
+- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with managed ingestion and deduplication
 - **MCP servers** — Model Context Protocol for extending agent capabilities with any external tool; credential binding to any OAuth provider; per-tool approval overrides
 - **Webhooks** — Signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
 - Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
@@ -404,7 +416,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | Scheduled-prompt and hosted-routine tools | Playbook Engine + portfolio-wide scheduled-work calendar | Multi-step workflows with approval gates, cost ceilings, templating, retry policies, and idempotent execution — plus a single calendar that shows every scheduled agent run, playbook, and scheduled task across every client, rolled up org-wide and exposed inside the client portal. Scheduled-prompt and hosted-routine tools run one prompt on a cadence for one user; Synthetos runs an agency's entire book of client work on one supervised surface. |
 | Hosted single-agent platforms and hosted-agent products | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — hosted single-agent and hosted-agent products have no multi-client operations layer because their buyer is an individual or an internal team, not an agency |
 | Hand-maintained no-code workflow libraries | Supervised-migration converter + Playbook Engine | One-shot import of no-code workflow JSON into a draft supervised playbook with approval gates and cost simulation mapped from the source nodes — not a transliteration, an upgrade from stateless trigger/action chains to a multi-client operations system |
-| Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, unified inbox |
+| Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, supervision home |
 | Single-provider LLM lock-in | Model-agnostic per-skill routing | Route across every frontier and open-source LLM per skill; insulated from any one provider's pricing or roadmap shifts |
 
 ---
@@ -699,6 +711,7 @@ Complete list of all 110 skills.
 | `fetch_paywalled_content` | Log into paywalled site and download artifact | Deterministic | — |
 | `fetch_url` | Make HTTP request to URL and return response body | Deterministic | — |
 | `monitor_webpage` | Set up recurring change detection on a URL — fires an agent run each time content changes | Hybrid | HITL |
+| `canonical_dictionary` | Query the canonical data dictionary for table metadata, columns, relationships, and freshness expectations | Deterministic | — |
 | `read_data_source` | List and read context data sources (agent, subaccount, task scopes) | Deterministic | Universal |
 | `scrape_structured` | Extract structured fields from any URL with LLM-assisted first run and adaptive selector healing on subsequent runs | Hybrid | — |
 | `scrape_url` | Scrape a URL with automatic tier escalation (HTTP → stealth browser → anti-bot bypass) | Deterministic | — |

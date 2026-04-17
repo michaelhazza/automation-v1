@@ -21,6 +21,11 @@ export interface ReviewAuditInput {
   rawFeedback?: string;
   editedArgs?: Record<string, unknown>;
   proposedAt: Date;
+  majorAcknowledged?: boolean;
+  majorReason?: 'irreversible' | 'cross_subaccount' | 'cost_per_action' | 'cost_per_run';
+  ackText?: string;
+  ackAmountMinor?: number;
+  ackCurrencyCode?: string;
 }
 
 export const reviewAuditService = {
@@ -45,6 +50,11 @@ export const reviewAuditService = {
         decision: input.decision,
         rawFeedback: input.rawFeedback ?? null,
         editedArgs: input.editedArgs ?? null,
+        majorAcknowledged: input.majorAcknowledged ?? false,
+        majorReason: input.majorReason ?? null,
+        ackText: input.ackText ?? null,
+        ackAmountMinor: input.ackAmountMinor ?? null,
+        ackCurrencyCode: input.ackCurrencyCode ?? null,
         proposedAt: input.proposedAt,
         decidedAt,
         waitDurationMs,

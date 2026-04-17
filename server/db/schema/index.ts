@@ -187,3 +187,13 @@ export * from './mcpToolInvocations.js';
 // docs/orchestrator-capability-routing-spec.md.
 export * from './featureRequests.js';
 export * from './routingOutcomes.js';
+
+// P1 — Canonical Data Platform: scheduled polling ingestion stats (migration 0160)
+export * from './integrationIngestionStats.js';
+
+// P3A — Principal model tables (migrations 0162-0165)
+export * from './servicePrincipals.js';
+export * from './teams.js';
+export * from './teamMembers.js';
+export * from './delegationGrants.js';
+export * from './canonicalRowSubaccountScopes.js';

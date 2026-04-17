@@ -226,6 +226,105 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0156_orchestrator_capability_routing.sql',
     rationale: 'Per-run routing decision outcomes — leak would reveal how competitors\' agents are configured and what tasks they run.',
   },
+  // 0160 — P1: scheduled polling stats
+  {
+    tableName: 'integration_ingestion_stats',
+    schemaFile: 'integrationIngestionStats.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Per-connection sync metrics — cross-tenant leak reveals integration activity patterns and connector health.',
+  },
+  // 0167 — P3B: principal tables RLS
+  {
+    tableName: 'service_principals',
+    schemaFile: 'servicePrincipals.ts',
+    policyMigration: '0167_p3b_principal_rls.sql',
+    rationale: 'Non-human identities scoped per org — leak reveals automation topology and integration credentials.',
+  },
+  {
+    tableName: 'teams',
+    schemaFile: 'teams.ts',
+    policyMigration: '0167_p3b_principal_rls.sql',
+    rationale: 'Org-scoped team groups — leak reveals internal team structure and staffing.',
+  },
+  {
+    tableName: 'team_members',
+    schemaFile: 'teamMembers.ts',
+    policyMigration: '0167_p3b_principal_rls.sql',
+    rationale: 'Team membership junction — leak reveals which users belong to which teams.',
+  },
+  {
+    tableName: 'delegation_grants',
+    schemaFile: 'delegationGrants.ts',
+    policyMigration: '0167_p3b_principal_rls.sql',
+    rationale: 'Time-bounded permission grants — leak reveals delegation topology and allowed actions.',
+  },
+  {
+    tableName: 'canonical_row_subaccount_scopes',
+    schemaFile: 'canonicalRowSubaccountScopes.ts',
+    policyMigration: '0167_p3b_principal_rls.sql',
+    rationale: 'Multi-tenant row attribution — leak reveals which data is shared across subaccounts.',
+  },
+  // 0168 — P3B: canonical tables RLS + canonical_writer role
+  {
+    tableName: 'canonical_accounts',
+    schemaFile: 'canonicalAccounts.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Core CRM accounts — principal-scoped visibility protects client relationship data.',
+  },
+  {
+    tableName: 'canonical_contacts',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Contact records — PII (names, emails, phones) requires principal-scoped isolation.',
+  },
+  {
+    tableName: 'canonical_opportunities',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Sales pipeline data — deal values and stages are commercially sensitive.',
+  },
+  {
+    tableName: 'canonical_conversations',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Communication records — message content and response times are sensitive.',
+  },
+  {
+    tableName: 'canonical_revenue',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Revenue transactions — cross-tenant leak reveals billing amounts and financial state.',
+  },
+  {
+    tableName: 'health_snapshots',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Computed health scores — leak reveals client relationship health assessments.',
+  },
+  {
+    tableName: 'anomaly_events',
+    schemaFile: 'canonicalEntities.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Metric deviations — leak reveals operational anomalies and alert configurations.',
+  },
+  {
+    tableName: 'canonical_metrics',
+    schemaFile: 'canonicalMetrics.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Latest metric snapshots — cross-tenant leak reveals current KPI values.',
+  },
+  {
+    tableName: 'canonical_metric_history',
+    schemaFile: 'canonicalMetrics.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'Append-only metric history — leak reveals historical performance trends.',
+  },
+  {
+    tableName: 'integration_connections',
+    schemaFile: 'integrationConnections.ts',
+    policyMigration: '0168_p3b_canonical_rls.sql',
+    rationale: 'External service credentials — principal-scoped visibility protects connection ownership and tokens.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

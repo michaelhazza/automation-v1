@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { actions } from './actions';
@@ -36,6 +36,13 @@ export const reviewAuditRecords = pgTable(
     /** Workflow context — populated when this review item came from a workflow step. */
     workflowRunId: uuid('workflow_run_id').references(() => workflowRuns.id),
     workflowStepId: text('workflow_step_id'),
+
+    // ── Pulse — Major-lane acknowledgment (migration 0160) ──────────
+    majorAcknowledged: boolean('major_acknowledged').notNull().default(false),
+    majorReason: text('major_reason').$type<'irreversible' | 'cross_subaccount' | 'cost_per_action' | 'cost_per_run'>(),
+    ackText: text('ack_text'),
+    ackAmountMinor: integer('ack_amount_minor'),
+    ackCurrencyCode: text('ack_currency_code'),
 
     proposedAt: timestamp('proposed_at', { withTimezone: true }).notNull(),
     decidedAt: timestamp('decided_at', { withTimezone: true }).defaultNow().notNull(),
