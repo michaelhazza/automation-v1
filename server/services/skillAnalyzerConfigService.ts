@@ -111,19 +111,35 @@ export async function updateConfig(
   patch: ConfigPatch,
   updatedBy: string,
 ): Promise<SkillAnalyzerConfig> {
-  const validThresholds: Array<keyof ConfigPatch> = [
+  // Ratio / probability fields must live in [0, 1]. Allowing >1 (e.g., the
+  // previous [0, 10] range) lets an operator silently disable warnings —
+  // e.g., setting scopeExpansionStandardThreshold to 5 means merged
+  // instructions would need to be 500% longer than the source before the
+  // warning fires, which is effectively never.
+  const ratioFields: Array<keyof ConfigPatch> = [
     'classifierFallbackConfidenceScore',
     'scopeExpansionStandardThreshold',
     'scopeExpansionCriticalThreshold',
     'collisionDetectionThreshold',
-    'maxTableGrowthRatio',
   ];
-  for (const key of validThresholds) {
+  for (const key of ratioFields) {
     const v = patch[key];
     if (v !== undefined) {
-      if (typeof v !== 'number' || v < 0 || v > 10) {
-        throw { statusCode: 400, message: `${String(key)} must be a number in [0, 10]` };
+      if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > 1) {
+        throw { statusCode: 400, message: `${String(key)} must be a number in [0, 1]` };
       }
+    }
+  }
+  // Table growth ratio is multiplicative and only makes sense at >= 1 — any
+  // value below that would abort every remediation including 0-row recovery.
+  if (patch.maxTableGrowthRatio !== undefined) {
+    if (
+      typeof patch.maxTableGrowthRatio !== 'number'
+      || Number.isNaN(patch.maxTableGrowthRatio)
+      || patch.maxTableGrowthRatio < 1
+      || patch.maxTableGrowthRatio > 10
+    ) {
+      throw { statusCode: 400, message: 'maxTableGrowthRatio must be a number in [1, 10]' };
     }
   }
   if (patch.collisionMaxCandidates !== undefined) {
@@ -141,6 +157,21 @@ export async function updateConfig(
       || patch.criticalWarningConfirmationPhrase.trim().length < 3) {
       throw { statusCode: 400, message: 'criticalWarningConfirmationPhrase must be ≥ 3 characters' };
     }
+  }
+
+  // Cross-field invariant: standard < critical. Reject a patch that would
+  // invert them — validated against the effective value after the patch is
+  // applied (so partial updates work).
+  const current = await loadDefault();
+  const effectiveStandard = patch.scopeExpansionStandardThreshold
+    ?? current.scopeExpansionStandardThreshold;
+  const effectiveCritical = patch.scopeExpansionCriticalThreshold
+    ?? current.scopeExpansionCriticalThreshold;
+  if (effectiveStandard >= effectiveCritical) {
+    throw {
+      statusCode: 400,
+      message: 'scopeExpansionStandardThreshold must be strictly less than scopeExpansionCriticalThreshold',
+    };
   }
 
   const updateValues: Record<string, unknown> = {

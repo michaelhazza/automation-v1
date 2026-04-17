@@ -539,7 +539,12 @@ function WarningResolutionBlock({
   const resolutions = (result.warningResolutions ?? []) as WarningResolution[];
   const approvalState = evaluateApprovalState(warnings, resolutions);
   const isLocked = !!result.approvedAt;
-  const mergeUpdatedAt = result.mergeUpdatedAt ?? new Date().toISOString();
+  // Concurrency token. Prefer mergeUpdatedAt (set after any merge edit);
+  // fall back to the row's createdAt for never-edited rows. The server
+  // requires an exact match (within ~2s skew) against the same derivation,
+  // so inventing a "now" timestamp would fail by design.
+  const mergeUpdatedAt =
+    result.mergeUpdatedAt ?? result.createdAt ?? new Date().toISOString();
   const isFallback = !!result.classifierFallbackApplied
     || warnings.some(w => w.code === 'CLASSIFIER_FALLBACK');
 

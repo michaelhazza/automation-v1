@@ -168,6 +168,9 @@ export interface AnalysisResult {
    *  Null on rows that have never been merge-edited. Echoed back on PATCH requests
    *  as ifUnmodifiedSince for optimistic concurrency. */
   mergeUpdatedAt?: string | null;
+  /** Row creation timestamp — used as the concurrency token when
+   *  mergeUpdatedAt is null (i.e., the row has never been edited). */
+  createdAt?: string | null;
   /** Task 3: true when the Anthropic classification call failed (rate limit or
    *  parse error). Distinguishes retryable API failures from genuine
    *  PARTIAL_OVERLAP model output. */

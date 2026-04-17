@@ -503,30 +503,28 @@ export async function resolveWarning(params: ResolveWarningParams): Promise<void
       };
     }
 
-    const rowStamp = row.mergeUpdatedAt ? new Date(row.mergeUpdatedAt) : null;
-    // Equality check, not staleness only: when mergeUpdatedAt is null the
-    // client must send a sentinel matching row.createdAt or the earlier
-    // mergeUpdatedAt. This closes the §11.11.5 gap where never-edited rows
-    // bypass the concurrency check entirely.
-    if (rowStamp) {
-      if (rowStamp > clientStamp) {
-        throw {
-          statusCode: 409,
-          message: 'Result was modified since you opened it — reload and retry.',
-          errorCode: 'STALE_RESOLVE',
-        };
-      }
-    } else {
-      // Row has never been merge-edited; require the client timestamp to be
-      // no older than the row's creation (within a small skew window).
-      const createdAt = row.createdAt ? new Date(row.createdAt) : null;
-      if (createdAt && clientStamp.getTime() < createdAt.getTime() - 60_000) {
-        throw {
-          statusCode: 409,
-          message: 'If-Unmodified-Since predates this result. Reload and retry.',
-          errorCode: 'STALE_RESOLVE',
-        };
-      }
+    const rowStamp = row.mergeUpdatedAt
+      ? new Date(row.mergeUpdatedAt)
+      : (row.createdAt ? new Date(row.createdAt) : null);
+    // Canonical concurrency token: mergeUpdatedAt when set, else createdAt.
+    // Client must echo back the value surfaced by GET /jobs/:id for the row.
+    // Any divergence means either (a) another session wrote first, or (b) the
+    // client invented a timestamp. Both warrant a 409.
+    if (!rowStamp) {
+      throw {
+        statusCode: 500,
+        message: 'Result has no createdAt timestamp — cannot verify concurrency.',
+      };
+    }
+    // Allow ±2s of clock skew between app servers; anything beyond that
+    // indicates a stale or fabricated token.
+    const SKEW_MS = 2_000;
+    if (Math.abs(rowStamp.getTime() - clientStamp.getTime()) > SKEW_MS) {
+      throw {
+        statusCode: 409,
+        message: 'Result was modified since you opened it, or the If-Unmodified-Since token does not match. Reload and retry.',
+        errorCode: 'STALE_RESOLVE',
+      };
     }
 
     const existing = Array.isArray(row.warningResolutions)
