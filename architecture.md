@@ -196,6 +196,104 @@ Every override column is validated by `server/schemas/subaccountAgents.ts` (Zod)
 
 ---
 
+## Orchestrator Capability-Aware Routing
+
+System-managed agent that classifies inbound tasks into one of four deterministic routes. Full spec at [`docs/orchestrator-capability-routing-spec.md`](./docs/orchestrator-capability-routing-spec.md). Implemented in migrations 0156 (schema), 0157 (agent seed), 0158 (hardening), 0159 (revert forever-unique index).
+
+### Four routing paths
+
+Every task picked up by the Orchestrator is classified atomically:
+
+| Path | Trigger | Action |
+|------|---------|--------|
+| **A** — already configured | A linked agent's `capabilityMap` covers every required capability AND every integration has an active connection AND every required scope is granted (all three, single agent) | `reassign_task` to the existing agent |
+| **B** — configurable, narrow | Platform supports all required capabilities but no agent has them; request pattern is client-specific | `reassign_task` to the Configuration Assistant with structured `handoffContext` |
+| **C** — configurable, broad | Same as B, but request pattern matches a `broadly_useful_patterns` entry in the Integration Reference | Path B handoff AND `request_feature` with `category: 'system_promotion_candidate'` |
+| **D** — unsupported | At least one required capability absent from the Integration Reference, with `reference_state: healthy` | `request_feature` with `category: 'new_capability'`; task status → `blocked_on_feature_request` |
+
+### Decomposition pipeline (before classification)
+
+The LLM never decides a route directly. Every run runs a three-stage pipeline:
+
+1. **Draft** — LLM extracts `[{kind, slug, rationale}]` from task text. `list_platform_capabilities` is called first so the canonical taxonomy is in view during drafting.
+2. **Normalise + validate** — `check_capability_gap` resolves aliases against the capability taxonomy, validates each canonical slug against the live reference, and returns per-capability availability.
+3. **One-shot retry** — if any slug is `unknown` or `not_found`, the LLM re-runs once with the taxonomy explicitly in view. After the single retry, unknowns are treated as genuinely absent (Path D).
+
+Classification is then a pure function of the `check_capability_gap` verdict.
+
+### Integration Reference (machine-readable capability catalogue)
+
+`docs/integration-reference.md` — one fenced `yaml integration` block per integration plus a `capability_taxonomy` block. Parsed at runtime by `server/services/integrationReferenceService.ts` (60s TTL in-process cache). Schema validated against the parser's `REQUIRED_INTEGRATION_FIELDS` list; drift between the doc and the code-level `OAUTH_PROVIDERS` + `MCP_PRESETS` is caught by `scripts/verify-integration-reference.mjs` at CI time (exit 1 blocking, exit 2 warning).
+
+Every integration carries a runtime-computed `confidence`: `high` (fully_supported + verified in last 30 days), `stale` (otherwise), `unknown` (malformed `last_verified`). The rollup `reference_state` (`healthy` / `degraded` / `unavailable`) is surfaced on every `list_platform_capabilities` response.
+
+When `reference_state === 'unavailable'`, routing falls back to legacy keyword patterns and files an `infrastructure_alert` feature request — it never blocks every task as Path D on a broken reference.
+
+### Capability map (per agent, derived)
+
+`subaccountAgents.capabilityMap` is a derived JSON column (added in migration 0156) mirroring the shape `{ computedAt, referenceLastUpdated, integrations[], read_capabilities[], write_capabilities[], skills[], primitives[] }`. Computed by `server/services/capabilityMapService.ts`:
+
+- **Synchronously** on skill-link changes (`addSkill` / `removeSkill` / `setSkills` / `setAllowedSkillSlugs`).
+- **Asynchronously** on reference-version change via `recomputeOrgCapabilityMaps(orgId)`.
+
+`NULL` = not yet computed; `check_capability_gap` treats a null map as zero-capability so Path A cannot fire against uncomputed state. The stored `referenceLastUpdated` is string-exact-compared against the current reference's `schema_meta.last_updated`; mismatch disqualifies the map from Path A and forces Path B (re-verification by the Configuration Assistant).
+
+### Capability discovery skills
+
+Four new system skills, all `idempotencyStrategy: 'read_only'` except `request_feature` (`keyed_write`). Registered in `server/config/actionRegistry.ts` and dispatched in `server/services/skillExecutor.ts`. Handlers at `server/tools/capabilities/`.
+
+| Skill | Purpose |
+|-------|---------|
+| `list_platform_capabilities` | Return the parsed Integration Reference — catalogue, taxonomy, reference_state |
+| `list_connections` | Active integration connections for an org or subaccount (subaccount scope inherits org-level connections; subaccount-specific rows override). Never returns secrets. |
+| `check_capability_gap` | Atomic Path A determination: capability subset + active connection + granted scopes across a single candidate agent. Returns verdict + per-capability detail + candidate agents with `combined_coverage_possible` flag |
+| `request_feature` | Writes a `feature_requests` row with per-org 30-day dedupe (advisory lock + app-level lookup), fires Slack/email/Synthetos-task notifications |
+
+All four decrement `SkillExecutionContext.capabilityQueryCallCount`. When the counter exceeds `systemSettings.orchestrator_capability_query_budget` (default 8), the skill returns `{ error: 'capability_query_budget_exhausted' }` so the Orchestrator halts the decomposition loop rather than burning tokens. Identical in-run calls are cached on `sha256(skill_name + stableStringify(input))` at zero budget cost.
+
+### Orchestrator link resolution (org sentinel model)
+
+The Orchestrator is linked ONCE per org, attached to the org's sentinel subaccount (seeded in migration 0157). When a task fires the `org_task_created` trigger, `server/jobs/orchestratorFromTaskJob.ts` uses a two-step link lookup:
+
+1. If the task has a `subaccountId`, prefer an active Orchestrator link on that exact subaccount (supports future per-subaccount Orchestrators).
+2. Fall back to any active Orchestrator link for the org, ordered by `(createdAt, id)` for deterministic selection.
+
+The task's `subaccountId` is passed through `triggerContext.taskSubaccountId` so downstream capability queries can scope correctly even when the Orchestrator itself runs from its org-level link.
+
+### Feature request pipeline
+
+`feature_requests` table (migration 0156): per-org signal with 30-day dedupe keyed on canonical capability slugs. The dedupe hash is computed over post-normalisation canonical slugs so aliases collapse (`inbox_read` and `email_read` produce the same hash). Race-safe via `pg_advisory_xact_lock(orgId + dedupeHash)` inside the insert transaction.
+
+Categories: `new_capability` (Path D), `system_promotion_candidate` (Path C), `infrastructure_alert` (reference-parse failures). Notifications fire in parallel via `featureRequestNotificationService`:
+
+- **Slack** — incoming webhook via `SYNTHETOS_INTERNAL_SLACK_WEBHOOK` env var
+- **Email** — `emailService.sendGenericEmail` to the address in `systemSettings.feature_request_email_address`
+- **Synthetos-internal task** — cross-org admin-bypass insert (`withAdminConnection` + `admin_role`) into the subaccount configured via `systemSettings.synthetos_internal_subaccount_id`. The task's `createdByAgentId` is set so the `org_task_created` trigger handler drops the event (no auto-routing of feature-request tasks).
+
+### Routing outcomes + observability
+
+`routing_outcomes` table (migration 0156) pairs decision records to downstream outcomes for the feedback loop (§9.5.2 of the spec). Every capability discovery skill emits structured logs at `info` level — `check_capability_gap` in particular emits the full decision telemetry (`verdict`, `required_capabilities`, `missing_for_configurable`, `missing_for_unsupported`, `candidate_agent_count`, `configured_by_agent_id`, `combined_coverage_possible`, `budget_used`). These feed the Orchestrator decision distribution queries.
+
+### Trigger wiring
+
+`taskService.createTask` fires `enqueueOrchestratorRoutingIfEligible(task)` (non-blocking) after the existing `triggerService.checkAndFire`. Eligibility predicate (`isEligibleForOrchestratorRouting`): `status === 'inbox'` AND `assignedAgentId === null` AND `!isSubTask` AND `createdByAgentId === null` AND description ≥ 10 chars. The pg-boss worker for `orchestrator-from-task` is registered in `server/services/queueService.ts`; the sender is injected via `setOrchestratorJobSender` at startup.
+
+Eligibility is re-checked inside `processOrchestratorFromTask` before dispatch so a task that was reassigned or moved out of inbox between enqueue and execution drops silently.
+
+### Versioned idempotency
+
+The Orchestrator dispatch idempotency key is `orchestrator-from-task:${taskId}:${task.updatedAt.getTime()}` — user edits to the task description produce a fresh run rather than dedup-ing against a stale one. Pure pg-boss replays (same task + same updatedAt) still dedup.
+
+### Task status values
+
+Migration 0156 does not constrain the `tasks.status` text column, so new statuses land additively via client-side rendering in `client/src/lib/statusBadge.tsx`:
+
+- `routed`, `awaiting_configuration`, `blocked_on_feature_request` (outcomes)
+- `routing_failed`, `routing_timeout` (failure states — distinct reasons for ops)
+- `configuration_partial`, `configuration_failed` (post-handoff verification outcomes)
+
+---
+
 ## Task System
 
 ### Core schema

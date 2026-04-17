@@ -1,9 +1,10 @@
 # Orchestrator Capability-Aware Routing — Development Specification
 
-> **Status:** Draft
+> **Status:** Implemented (P1–P5 shipped on branch `claude/orchestrator-spec-doc-sEY3w`, commits d58fdc4 → baf0195)
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 7 — Synthetos-internal task creation: request_feature now creates a task in the Synthetos subaccount for HITL triage before any analysis fires; dedicated feature-request admin page deferred in favour of task board)
-> **Branch:** `claude/orchestrator-spec-doc-sEY3w`
+> **Last updated:** 2026-04-17 (revision 8 — implementation complete: migrations 0156–0159 landed, four capability discovery skills registered, Orchestrator system agent seeded, task-trigger wired end-to-end, PR-review findings across three rounds addressed)
+> **Implementation notes:** see `architecture.md` → "Orchestrator Capability-Aware Routing" for the deep reference on the as-built system. Customer-facing summary in `docs/capabilities.md` → "Capability-Aware Orchestrator" and "Platform Feature Request Pipeline".
+> **Deferred items:** task-update triggers, dedicated feature-request admin page, automatic dedupe clustering, cross-org routing analytics — tracked in §10.
 
 ---
 
