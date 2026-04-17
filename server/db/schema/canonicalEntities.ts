@@ -1,6 +1,9 @@
 import { pgTable, uuid, text, integer, numeric, jsonb, real, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { canonicalAccounts } from './canonicalAccounts.js';
+import { users } from './users.js';
+import { integrationConnections } from './integrationConnections.js';
 
 // ---------------------------------------------------------------------------
 // Canonical Contacts
@@ -19,6 +22,11 @@ export const canonicalContacts = pgTable(
     phone: text('phone'),
     tags: jsonb('tags').$type<string[]>(),
     source: text('source'),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     externalCreatedAt: timestamp('external_created_at', { withTimezone: true }),
@@ -27,6 +35,14 @@ export const canonicalContacts = pgTable(
     accountExternalUnique: uniqueIndex('canonical_contacts_account_external_unique').on(table.accountId, table.externalId),
     accountIdx: index('canonical_contacts_account_idx').on(table.accountId),
     orgIdx: index('canonical_contacts_org_idx').on(table.organisationId),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('canonical_contacts_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('canonical_contacts_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('canonical_contacts_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 
@@ -48,6 +64,11 @@ export const canonicalOpportunities = pgTable(
     status: text('status').notNull().default('open').$type<'open' | 'won' | 'lost' | 'abandoned'>(),
     stageEnteredAt: timestamp('stage_entered_at', { withTimezone: true }),
     stageHistory: jsonb('stage_history').$type<Array<{ stage: string; enteredAt: string; exitedAt?: string }>>(),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     externalCreatedAt: timestamp('external_created_at', { withTimezone: true }),
@@ -57,6 +78,14 @@ export const canonicalOpportunities = pgTable(
     accountIdx: index('canonical_opportunities_account_idx').on(table.accountId),
     orgIdx: index('canonical_opportunities_org_idx').on(table.organisationId),
     statusIdx: index('canonical_opportunities_status_idx').on(table.accountId, table.status),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('canonical_opportunities_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('canonical_opportunities_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('canonical_opportunities_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 
@@ -76,6 +105,11 @@ export const canonicalConversations = pgTable(
     messageCount: integer('message_count').notNull().default(0),
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
     lastResponseTimeSeconds: integer('last_response_time_seconds'),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     externalCreatedAt: timestamp('external_created_at', { withTimezone: true }),
@@ -84,6 +118,14 @@ export const canonicalConversations = pgTable(
     accountExternalUnique: uniqueIndex('canonical_conversations_account_external_unique').on(table.accountId, table.externalId),
     accountIdx: index('canonical_conversations_account_idx').on(table.accountId),
     orgIdx: index('canonical_conversations_org_idx').on(table.organisationId),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('canonical_conversations_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('canonical_conversations_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('canonical_conversations_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 
@@ -103,6 +145,11 @@ export const canonicalRevenue = pgTable(
     type: text('type').notNull().default('one_time').$type<'one_time' | 'recurring' | 'refund'>(),
     status: text('status').notNull().default('completed').$type<'pending' | 'completed' | 'failed' | 'refunded'>(),
     transactionDate: timestamp('transaction_date', { withTimezone: true }),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -110,6 +157,14 @@ export const canonicalRevenue = pgTable(
     accountExternalUnique: uniqueIndex('canonical_revenue_account_external_unique').on(table.accountId, table.externalId),
     accountIdx: index('canonical_revenue_account_idx').on(table.accountId),
     orgIdx: index('canonical_revenue_org_idx').on(table.organisationId),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('canonical_revenue_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('canonical_revenue_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('canonical_revenue_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 
@@ -129,11 +184,24 @@ export const healthSnapshots = pgTable(
     confidence: real('confidence').notNull().default(0.5),
     configVersion: text('config_version'),
     algorithmVersion: text('algorithm_version'),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     accountTimeIdx: index('health_snapshots_account_time_idx').on(table.accountId, table.createdAt),
     orgIdx: index('health_snapshots_org_idx').on(table.organisationId),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('health_snapshots_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('health_snapshots_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('health_snapshots_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 
@@ -157,11 +225,24 @@ export const anomalyEvents = pgTable(
     algorithmVersion: text('algorithm_version'),
     configVersion: text('config_version'),
     acknowledged: boolean('acknowledged').notNull().default(false),
+    // P3A: ownership & visibility (migration 0165)
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     accountTimeIdx: index('anomaly_events_account_time_idx').on(table.accountId, table.createdAt),
     orgSeverityIdx: index('anomaly_events_org_severity_idx').on(table.organisationId, table.severity, table.acknowledged),
+    // P3A indexes (migration 0165)
+    ownerUserIdx: index('anomaly_events_owner_user_id_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
+    sharedTeamGinIdx: index('anomaly_events_shared_team_gin_idx').using('gin', table.sharedTeamIds),
+    sourceConnectionIdx: index('anomaly_events_source_connection_idx')
+      .on(table.sourceConnectionId, table.createdAt)
+      .where(sql`${table.sourceConnectionId} IS NOT NULL`),
   })
 );
 

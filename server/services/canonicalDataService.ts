@@ -53,19 +53,28 @@ export const canonicalDataService = {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
+    const recentConditions = [
+      eq(canonicalContacts.accountId, accountId),
+      gte(canonicalContacts.externalCreatedAt, thirtyDaysAgo),
+    ];
+    if (organisationId) recentConditions.push(eq(canonicalContacts.organisationId, organisationId));
+
+    const previousConditions = [
+      eq(canonicalContacts.accountId, accountId),
+      gte(canonicalContacts.externalCreatedAt, sixtyDaysAgo),
+      sql`${canonicalContacts.externalCreatedAt} < ${thirtyDaysAgo}`,
+    ];
+    if (organisationId) previousConditions.push(eq(canonicalContacts.organisationId, organisationId));
+
     const [recentResult] = await db
       .select({ count: count() })
       .from(canonicalContacts)
-      .where(and(eq(canonicalContacts.accountId, accountId), gte(canonicalContacts.externalCreatedAt, thirtyDaysAgo)));
+      .where(and(...recentConditions));
 
     const [previousResult] = await db
       .select({ count: count() })
       .from(canonicalContacts)
-      .where(and(
-        eq(canonicalContacts.accountId, accountId),
-        gte(canonicalContacts.externalCreatedAt, sixtyDaysAgo),
-        sql`${canonicalContacts.externalCreatedAt} < ${thirtyDaysAgo}`
-      ));
+      .where(and(...previousConditions));
 
     const recent = Number(recentResult?.count ?? 0);
     const previous = Number(previousResult?.count ?? 0);

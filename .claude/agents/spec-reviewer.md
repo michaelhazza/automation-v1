@@ -312,7 +312,16 @@ Exact format — do not paraphrase, do not omit sections:
 **Iteration:** N of MAX_ITERATIONS
 **Timestamp:** <ISO 8601>
 
-This checkpoint blocks the review loop. The loop will not proceed to iteration N+1 until every finding below is resolved by the human. Resolve by editing this file in place and changing the `Decision:` line for each finding, then re-invoking the spec-reviewer agent.
+This checkpoint blocks the review loop. The loop will not proceed to iteration N+1 until every finding below is resolved. Resolve by editing the `Decision:` line for each finding, then re-invoking the spec-reviewer agent.
+
+---
+
+## Summary
+
+| # | Finding | Question | Recommendation | Why |
+|---|---------|----------|----------------|-----|
+| N.1 | <one-phrase title> | <the specific question the human needs to answer> | <recommended action in one sentence> | <core reason in one sentence> |
+| N.2 | ... | ... | ... | ... |
 
 ---
 
@@ -323,17 +332,21 @@ This checkpoint blocks the review loop. The loop will not proceed to iteration N
 **Source:** Codex | Rubric-<category>
 **Spec section:** <section heading or line range>
 
-### Codex's finding (verbatim)
+### Finding (verbatim)
 
-> <quote Codex's finding exactly — do not summarise>
+> <quote exactly — Codex output verbatim, or rubric finding description — do not summarise>
 
-### Tentative recommendation (non-authoritative)
+### Recommendation
 
-If this were mechanical, I would apply the following change: <describe the change in concrete terms — file, section, approximate edit>. This is marked as tentative because the finding is directional/ambiguous and the human must decide.
+<Concrete recommended action: which option to take, which section to edit, what to change. Be specific — name the file, section, and approximate edit. Do not hedge.>
 
-### Reasoning
+### Why
 
-<one paragraph explaining why this finding was classified as directional or ambiguous, which signal matched, and what the downstream impact of each option would be>
+<One paragraph: why this recommendation is preferred, what the spec already decided that supports it, what breaks if left unresolved, why the alternatives are worse.>
+
+### Classification reasoning
+
+<One sentence: why this is directional or ambiguous rather than mechanical — which signal matched.>
 
 ### Decision
 
@@ -366,7 +379,7 @@ If you want to stop the loop entirely without resolving findings, set any decisi
 
 #### The four decision options, in detail
 
-**`apply`** — apply the finding as the tentative recommendation described. The loop proceeds to iteration N+1 after applying.
+**`apply`** — apply the finding as the Recommendation section describes. The loop proceeds to iteration N+1 after applying.
 
 **`apply-with-modification`** — apply a modified version of the recommendation. The human writes the modification inline. You apply the human's version verbatim, not the tentative recommendation. Loop proceeds.
 

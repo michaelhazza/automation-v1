@@ -96,6 +96,25 @@ run_gate "$SCRIPT_DIR/verify-playbook-portal-presentation.mjs"
 # ── Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md) gates ──
 run_gate "$SCRIPT_DIR/verify-integration-reference.mjs"
 
+# ── P1: Canonical Data Platform — Scheduled Polling ──
+run_gate "$SCRIPT_DIR/verify-connector-scheduler.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-idempotency.sh"
+
+# ── P2A: Canonical Data Platform — Read Path Consolidation ──
+run_gate "$SCRIPT_DIR/verify-skill-read-paths.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-read-interface.sh"
+
+# ── P2B: Canonical Data Platform — Data Dictionary ──
+run_gate "$SCRIPT_DIR/verify-canonical-dictionary.sh"
+
+# ── P3A: Canonical Data Platform — Principal Context Propagation ──
+run_gate "$SCRIPT_DIR/verify-principal-context-propagation.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-required-columns.sh"
+run_gate "$SCRIPT_DIR/verify-connection-shape.sh"
+
+# ── P3B: Canonical Data Platform — RLS + Visibility Parity ──
+run_gate "$SCRIPT_DIR/verify-visibility-parity.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

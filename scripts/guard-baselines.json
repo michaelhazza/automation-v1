@@ -16,5 +16,6 @@
   "job-idempotency-keys": 0,
   "reflection-loop-wired": 0,
   "tool-intent-convention": 0,
-  "no-silent-failures": 10
+  "no-silent-failures": 10,
+  "principal-context-propagation": 4
 }

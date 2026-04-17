@@ -1082,13 +1082,74 @@ Runs per tool call, in order:
 
 ---
 
+## Canonical Data Platform
+
+Normalised data layer that consolidates provider-specific records into a shared canonical schema. Full spec: `docs/canonical-data-platform-roadmap.md`. Implementation details: `docs/canonical-data-platform-p1-p2-p3-impl.md`.
+
+### P1 — Scheduled polling infrastructure (migrations 0161)
+
+Every connector polls on a configurable schedule without operator intervention.
+
+- **Tick job** (`server/jobs/connectorPollingTick.ts`) — 1-minute pg-boss cron. Queries all active connections with valid `syncPhase` (`backfill | transition | live`), delegates to `connectorPollingSchedulerPure.ts` to decide which are due, enqueues a sync job per connection.
+- **Sync job** (`server/jobs/connectorPollingSync.ts`) — per-connection job with lease-based concurrency control. Acquires a tokened lease via `sync_lock_token` (atomic `UPDATE...RETURNING`), releases in a `finally` block scoped to the acquired token. Safety window: `DEFAULT_POLL_INTERVAL_MINUTES × SYNC_LEASE_SAFETY_MULTIPLIER` (30 min) auto-expires stale locks.
+- **Ingestion stats** (`integration_ingestion_stats` table) — one row per sync execution. Tracks API calls, rows ingested, duration, phase, errors. Dedup via `UNIQUE(connection_id, sync_started_at)` with `ON CONFLICT DO UPDATE` for pg-boss retry safety.
+- **Stale-connector detector** (`server/services/workspaceHealth/detectors/`) — workspace health finding when a connection exceeds 5× its poll interval without a successful sync or has a recent error.
+
+### P2 — Read-path consolidation & data dictionary (migrations 0162)
+
+- **Canonical schema** — `canonical_fields`, `canonical_row_versions`, `canonical_metric_history` tables normalise provider data. Convention: `UNIQUE(organisation_id, provider_type, external_id)` per table for idempotent upsert.
+- **Read-path tagging** — every action in `server/config/actionRegistry.ts` declares `readPath: 'canonical' | 'liveFetch' | 'none'`. Static gate `verify-skill-read-paths.sh` enforces all entries have a value; `verify-canonical-read-interface.sh` ensures no raw Drizzle queries on `canonical_*` tables outside `canonicalDataService`.
+- **Data dictionary skill** — `canonical_dictionary` action registered in `actionRegistry.ts`. `CANONICAL_DICTIONARY_REGISTRY` in `server/config/canonicalDictionary.ts` is the machine-readable catalogue of tables, columns, relationships, and freshness expectations. Static gate `verify-canonical-dictionary.sh` keeps registry and schema in sync.
+
+### P3A — Connection ownership & principal model (migrations 0162–0165)
+
+New tables: `service_principals`, `teams`, `team_members`, `delegation_grants`, `canonical_row_subaccount_scopes`.
+
+New columns on `integration_connections`: `ownership_scope` (`user | subaccount | organisation`), `owner_user_id`, `classification` (`personal | shared_mailbox | service_account`), `visibility_scope` (`private | shared_team | shared_subaccount | shared_org`), `shared_team_ids`.
+
+New columns on canonical tables: `owner_user_id`, `visibility_scope`, `shared_team_ids`, `source_connection_id`.
+
+New columns on `agent_runs`: `principal_type` (`user | service | delegated`), `principal_id`, `acting_as_user_id`, `delegation_grant_id`.
+
+Multi-subaccount rows (e.g. emails CC'd to multiple clients) use `canonical_row_subaccount_scopes` linkage table with attribution (`primary | mentioned | shared`).
+
+### P3B — Principal-scoped RLS (migrations 0167–0169)
+
+RLS policies on all canonical and integration tables enforcing visibility based on principal type and scope. See the [RLS section](#row-level-security-rls--three-layer-fail-closed-data-isolation) for policy details.
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `server/jobs/connectorPollingTick.ts` | 1-min cron — selects due connections |
+| `server/jobs/connectorPollingSync.ts` | Per-connection sync with lease lifecycle |
+| `server/services/connectorPollingSchedulerPure.ts` | Pure logic: which connections are due |
+| `server/services/connectorPollingService.ts` | Adapter-level sync execution |
+| `server/config/connectorPollingConfig.ts` | Poll intervals, safety multiplier |
+| `server/config/canonicalDictionary.ts` | Machine-readable data dictionary registry |
+| `server/db/withPrincipalContext.ts` | Sets RLS session variables for principal |
+| `server/config/rlsProtectedTables.ts` | Canonical manifest of all RLS-protected tables |
+
+---
+
 ## Row-Level Security (RLS) — Three-Layer Fail-Closed Data Isolation
 
 Sprint 2 introduces a defence-in-depth data isolation model. All three layers are required; no single layer is sufficient alone.
 
 ### Layer 1 — Postgres RLS policies
 
-10 tables protected (migrations 0079–0081): `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
+**Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
+
+**Principal-scoped (migrations 0167–0169):** P3B extends org-level RLS with visibility predicates on canonical data and integration tables. Tables: `integration_connections`, `integration_ingestion_stats`, `canonical_fields`, `canonical_row_versions`, `canonical_metric_history`, `canonical_row_subaccount_scopes`, `service_principals`, `teams`, `team_members`, `delegation_grants`, `agent_runs` (extended). Policies enforce:
+
+- **Org isolation** — all rows scoped to `app.organisation_id`
+- **Visibility predicates** — `private` rows visible only to `app.current_principal_id`; `shared_team` rows visible when `shared_team_ids && app.current_team_ids`; `shared_subaccount` and `shared_org` rows visible to all principals in scope
+- **Service principal restriction** — service principals (`app.current_principal_type = 'service'`) never see `private` or `shared_team` user data
+- **Delegation grants** — delegated principals see the grantor's private data within the grant's scope and expiry
+
+Session variables are set via `server/db/withPrincipalContext.ts` which wraps `withOrgTx` and sets `app.current_principal_type`, `app.current_principal_id`, `app.current_team_ids`.
+
+**Legacy compat (migration 0169):** Fallback policies allow access when `app.current_principal_type` is NULL/empty, covering callers not yet migrated to `withPrincipalContext`. These will be removed in P3C when all callers are migrated.
 
 The canonical manifest lives in `server/config/rlsProtectedTables.ts`. Every new tenant-owned table must be added to this manifest in the same commit as its `CREATE POLICY` migration. CI gate `verify-rls-coverage.sh` fails if the manifest references a table without a corresponding policy in any migration.
 

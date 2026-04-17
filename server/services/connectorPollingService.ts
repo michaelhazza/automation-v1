@@ -12,6 +12,28 @@ import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 // Connector Polling Service — scheduled data ingestion from external platforms
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Standalone named export consumed by connectorPollingSync job handler.
+// The job handler deals in integration_connections.id (not connector_configs.id)
+// and expects a { apiCallsApprox, rowsIngested, durationMs } result shape.
+// Adapters will be wired here in P4+; for now returns a no-op result so the
+// job infrastructure can be tested end-to-end.
+// ---------------------------------------------------------------------------
+
+export interface SyncResult {
+  apiCallsApprox: number;
+  rowsIngested: number;
+  durationMs: number;
+}
+
+export async function syncConnector(
+  _connectionId: string,
+  _organisationId: string,
+): Promise<SyncResult> {
+  // Stub — adapters will be wired here in P4+
+  return { apiCallsApprox: 0, rowsIngested: 0, durationMs: 0 };
+}
+
 export const connectorPollingService = {
   /**
    * Execute a full sync for a connector config.

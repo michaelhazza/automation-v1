@@ -175,10 +175,13 @@ Three-tier hierarchy that isolates data and configuration at every level — so 
 
 ### Authentication & Access Control
 
-Five roles, granular permission keys, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
+Five roles, granular permission keys, principal-based data isolation, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
 
 - **Five roles** from platform administrator to client viewer — each sees exactly the right level of access
 - Custom permission sets assignable to any role; access enforced across the entire platform
+- **Principal-based data access** — three principal types (user, service, delegated) control what agents and users can see. Personal connections and private data are invisible to service processes and other users unless explicitly shared
+- **Delegation grants** — temporary, scoped access for agents acting on behalf of a user, with automatic expiry and revocation
+- **Visibility scoping** — data classified as private, shared-team, shared-subaccount, or shared-org; enforced at the database layer so no application bug can leak across boundaries
 - Secure authentication with rate-limited login, email invitations, and self-service password reset
 - Permissions-driven interface — buttons, tabs, and pages automatically hidden when a user lacks access
 
@@ -327,7 +330,7 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 
 Automated configuration auditing that detects drift, misconfigurations, and operational issues.
 
-- **6 active detectors:** inactive agents, empty skill allowlists, missing schedules, broken connections, missing engines, unsynced system agents
+- **7 active detectors:** inactive agents, empty skill allowlists, missing schedules, broken connections, stale connectors (ingestion overdue or recent errors), missing engines, unsynced system agents
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
 
@@ -363,8 +366,11 @@ CMS-style page creation and publishing with analytics tracking and form submissi
 Pre-built connectors for the tools agencies already use — connect once, use across every agent and playbook.
 
 - **OAuth providers:** Gmail, Slack, HubSpot, Go High Level (GHL), Teamwork Desk, GitHub App
-- **Connection scoping** — Agency-wide (shared) or per-client (isolated); multiple connections per provider
-- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with managed sync lifecycle (initial import → transition → live)
+- **Connection ownership** — Connections can be user-owned (personal Gmail, Calendar), per-client (isolated), or agency-wide (shared). Personal connections default to private visibility with explicit sharing controls
+- **Scheduled ingestion** — Every connector polls on a configurable schedule without operator intervention. Sync phases (initial import → transition → live) track maturity automatically
+- **Cost observability** — Per-connection API call counts, row throughput, and sync duration recorded for cost attribution and tier economics tuning
+- **Canonical data layer** — Provider-specific records normalised into a shared schema. Agents query consolidated data via the data dictionary skill rather than making live API calls for every question
+- **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with managed ingestion and deduplication
 - **MCP servers** — Model Context Protocol for extending agent capabilities with any external tool; credential binding to any OAuth provider; per-tool approval overrides
 - **Webhooks** — Signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
 - Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
@@ -705,6 +711,7 @@ Complete list of all 110 skills.
 | `fetch_paywalled_content` | Log into paywalled site and download artifact | Deterministic | — |
 | `fetch_url` | Make HTTP request to URL and return response body | Deterministic | — |
 | `monitor_webpage` | Set up recurring change detection on a URL — fires an agent run each time content changes | Hybrid | HITL |
+| `canonical_dictionary` | Query the canonical data dictionary for table metadata, columns, relationships, and freshness expectations | Deterministic | — |
 | `read_data_source` | List and read context data sources (agent, subaccount, task scopes) | Deterministic | Universal |
 | `scrape_structured` | Extract structured fields from any URL with LLM-assisted first run and adaptive selector healing on subsequent runs | Hybrid | — |
 | `scrape_url` | Scrape a URL with automatic tier escalation (HTTP → stealth browser → anti-bot bypass) | Deterministic | — |

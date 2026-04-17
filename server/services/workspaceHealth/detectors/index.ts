@@ -7,6 +7,10 @@
  *
  * Detectors are pure functions and can be unit-tested independently. The
  * runner walks this list and concatenates the results.
+ *
+ * Async (impure) detectors that perform their own DB reads are exported
+ * separately via ASYNC_DETECTORS. The impure runner invokes them after the
+ * pure sweep and merges the results.
  */
 
 import type { Detector } from '../detectorTypes';
@@ -16,6 +20,7 @@ import { subaccountAgentNoSchedule } from './subaccountAgentNoSchedule';
 import { processBrokenConnectionMapping } from './processBrokenConnectionMapping';
 import { processNoEngine } from './processNoEngine';
 import { systemAgentLinkNeverSynced } from './systemAgentLinkNeverSynced';
+import { detectStaleConnectors } from './staleConnectorDetector';
 
 export const ALL_DETECTORS: Detector[] = [
   agentNoRecentRuns,
@@ -26,6 +31,14 @@ export const ALL_DETECTORS: Detector[] = [
   systemAgentLinkNeverSynced,
 ];
 
+/**
+ * Async detectors that query the DB directly. Each entry is a function
+ * that takes (organisationId) and returns WorkspaceHealthFinding[].
+ */
+export const ASYNC_DETECTORS = [
+  detectStaleConnectors,
+] as const;
+
 export {
   agentNoRecentRuns,
   subaccountAgentNoSkills,
@@ -33,4 +46,5 @@ export {
   processBrokenConnectionMapping,
   processNoEngine,
   systemAgentLinkNeverSynced,
+  detectStaleConnectors,
 };
