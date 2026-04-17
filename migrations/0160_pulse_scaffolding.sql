@@ -66,7 +66,8 @@ CREATE INDEX agent_runs_unack_failed_idx
   WHERE status IN ('failed', 'timeout', 'budget_exceeded', 'loop_detected')
     AND failure_acknowledged_at IS NULL;
 
--- 6. Drop inbox_read_states (only inboxService reads it; Pulse replaces inbox)
-DROP TABLE IF EXISTS inbox_read_states CASCADE;
+-- NOTE: inbox_read_states intentionally NOT dropped here — the inbox router
+-- (server/routes/inbox.ts) still mounts and queries it. Drop in a follow-up
+-- migration after the inbox route is fully removed.
 
 COMMIT;

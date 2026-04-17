@@ -159,14 +159,23 @@ export class OrganisationService {
     // Pulse thresholds
     if (data.pulseMajorThreshold !== undefined) {
       if (data.pulseMajorThreshold !== null) {
+        const MAX = 1_000_000;
         const { perActionMinor, perRunMinor } = data.pulseMajorThreshold;
         if (typeof perActionMinor !== 'number' || perActionMinor < 0 || typeof perRunMinor !== 'number' || perRunMinor < 0) {
           throw { statusCode: 400, message: 'Pulse thresholds must be non-negative numbers' };
         }
+        if (perActionMinor > MAX || perRunMinor > MAX) {
+          throw { statusCode: 400, message: `Pulse thresholds must not exceed ${MAX} minor units ($${MAX / 100})` };
+        }
       }
       update.pulseMajorThreshold = data.pulseMajorThreshold;
     }
-    if (data.defaultCurrencyCode !== undefined) update.defaultCurrencyCode = data.defaultCurrencyCode;
+    if (data.defaultCurrencyCode !== undefined) {
+      if (!/^[A-Z]{3}$/.test(data.defaultCurrencyCode)) {
+        throw { statusCode: 400, message: 'defaultCurrencyCode must be a 3-character uppercase ISO 4217 code' };
+      }
+      update.defaultCurrencyCode = data.defaultCurrencyCode;
+    }
 
     const [updated] = await db
       .update(organisations)

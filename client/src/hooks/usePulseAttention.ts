@@ -71,6 +71,12 @@ export function usePulseAttention({ scope, subaccountId }: UsePulseAttentionArgs
 
   useEffect(() => {
     fetchData();
+    return () => {
+      if (mergeTimerRef.current) {
+        clearTimeout(mergeTimerRef.current);
+        mergeTimerRef.current = null;
+      }
+    };
   }, [fetchData]);
 
   // WebSocket merge — debounced to absorb event storms

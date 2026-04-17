@@ -9,7 +9,7 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getMajorThresholds } from '../services/pulseConfigService.js';
-import { buildDraftFromAction, getRunTotalCostMinor } from '../services/pulseService.js';
+import { buildDraftFromAction, getRunTotalCostMinor, getRunTotalCostMinorBatch } from '../services/pulseService.js';
 import { classify, buildAckText } from '../services/pulseLaneClassifier.js';
 
 const router = Router();
@@ -106,10 +106,6 @@ router.post(
           statusCode: 412,
           message: 'Major-lane approval requires acknowledgment',
           errorCode: 'MAJOR_ACK_REQUIRED',
-          ackText: ack.text,
-          ackAmountMinor: ack.amountMinor,
-          ackCurrencyCode: thresholds.currencyCode,
-          majorReason,
         };
       }
       const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
@@ -227,6 +223,11 @@ router.post(
       : [];
     const actionMap = new Map(actionsLoaded.map(a => [a.id, a]));
 
+    const runIds = actionsLoaded.map(a => a.agentRunId).filter(Boolean) as string[];
+    const runTotalsMap = runIds.length > 0
+      ? await getRunTotalCostMinorBatch(runIds, req.orgId!)
+      : new Map<string, number>();
+
     const approvable: string[] = [];
     const blocked: Array<{ id: string; majorReason: string }> = [];
     const alreadyResolved: string[] = [];
@@ -244,7 +245,7 @@ router.post(
       if (!action) continue;
 
       const runTotal = action.agentRunId
-        ? await getRunTotalCostMinor(action.agentRunId, req.orgId!)
+        ? runTotalsMap.get(action.agentRunId) ?? null
         : null;
       const draft = buildDraftFromAction(action, runTotal);
       const { lane, majorReason } = classify(draft, thresholds);

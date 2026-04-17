@@ -249,17 +249,18 @@ async function loadSubaccountNames(orgId: string, subaccountIds: string[]): Prom
     .where(and(
       inArray(subaccounts.id, unique),
       eq(subaccounts.organisationId, orgId),
+      isNull(subaccounts.deletedAt),
     ));
   return new Map(rows.map(r => [r.id, r.name]));
 }
 
-async function loadAgentNames(agentIds: string[]): Promise<Map<string, string>> {
+async function loadAgentNames(orgId: string, agentIds: string[]): Promise<Map<string, string>> {
   if (agentIds.length === 0) return new Map();
   const unique = [...new Set(agentIds)];
   const rows = await db
     .select({ id: agents.id, name: agents.name })
     .from(agents)
-    .where(inArray(agents.id, unique));
+    .where(and(inArray(agents.id, unique), eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
   return new Map(rows.map(r => [r.id, r.name ?? 'Unnamed Agent']));
 }
 
@@ -338,7 +339,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
 
   const [subaccountNameMap, agentNameMap] = await Promise.all([
     loadSubaccountNames(scope.orgId, allSubaccountIds),
-    loadAgentNames(allAgentIds),
+    loadAgentNames(scope.orgId, allAgentIds),
   ]);
 
   const items: PulseItem[] = [];
@@ -493,20 +494,123 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
   };
 }
 
-// ── getItem ────────────────────────────────────────────────────────
+// ── getItem (direct single-record lookup per kind) ────────────────
 
 export async function getItem(
   scope: PulseScope,
   kind: PulseItem['kind'],
   id: string,
 ): Promise<PulseItem | null> {
-  const response = await getAttention(scope);
-  const allItems = [
-    ...response.lanes.client,
-    ...response.lanes.major,
-    ...response.lanes.internal,
-  ];
-  return allItems.find(item => item.id === id && item.kind === kind) || null;
+  const orgId = scope.orgId;
+
+  if (kind === 'review') {
+    const [row] = await db
+      .select({
+        id: reviewItems.id,
+        actionId: reviewItems.actionId,
+        agentRunId: reviewItems.agentRunId,
+        subaccountId: reviewItems.subaccountId,
+        reviewPayloadJson: reviewItems.reviewPayloadJson,
+        createdAt: reviewItems.createdAt,
+      })
+      .from(reviewItems)
+      .where(and(
+        eq(reviewItems.id, id),
+        eq(reviewItems.organisationId, orgId),
+        inArray(reviewItems.reviewStatus, ['pending', 'edited_pending']),
+      ))
+      .limit(1);
+    if (!row) return null;
+
+    const [action] = await loadActions([row.actionId].filter(Boolean) as string[], orgId);
+    if (!action) return null;
+
+    const thresholds = await getMajorThresholds(orgId);
+    const runTotal = row.agentRunId ? await getRunTotalCostMinor(row.agentRunId, orgId) : null;
+    const subMap = await loadSubaccountNames(orgId, [row.subaccountId].filter(Boolean) as string[]);
+    const subName = (row.subaccountId && subMap.get(row.subaccountId)) || '';
+    const draft = buildDraftFromAction(action, runTotal, subName);
+    const { lane, majorReason } = classify(draft, thresholds);
+    let ackText: string | null = null;
+    let ackAmountMinor: number | null = null;
+    if (lane === 'major' && majorReason) {
+      const ack = buildAckText(draft, majorReason, thresholds.currencyCode, thresholds);
+      ackText = ack.text;
+      ackAmountMinor = ack.amountMinor;
+    }
+    const payload = row.reviewPayloadJson as Record<string, unknown> | null;
+    return {
+      id: row.id, kind: 'review', lane,
+      title: (payload?.actionType as string) || action.actionType,
+      reasoning: (payload?.reasoning as string) || null,
+      evidence: payload?.originalContext as Record<string, unknown> || null,
+      costSummary: action.estimatedCostMinor != null
+        ? new Intl.NumberFormat('en-AU', { style: 'currency', currency: thresholds.currencyCode }).format(action.estimatedCostMinor / 100)
+        : '',
+      estimatedCostMinor: action.estimatedCostMinor,
+      reversible: !majorReason || majorReason !== 'irreversible',
+      ackText, ackAmountMinor, ackCurrencyCode: lane === 'major' ? thresholds.currencyCode : null,
+      subaccountId: row.subaccountId || '', subaccountName: subName,
+      agentId: null, agentName: null,
+      createdAt: row.createdAt.toISOString(), detailUrl: `review:${row.id}`,
+      actionType: action.actionType, runId: row.agentRunId || null,
+    };
+  }
+
+  if (kind === 'task') {
+    const [row] = await db
+      .select({ id: tasks.id, title: tasks.title, description: tasks.description, subaccountId: tasks.subaccountId, assignedAgentId: tasks.assignedAgentId, createdAt: tasks.createdAt })
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, orgId), eq(tasks.status, 'inbox'), isNull(tasks.deletedAt)))
+      .limit(1);
+    if (!row) return null;
+    const subMap = await loadSubaccountNames(orgId, [row.subaccountId].filter(Boolean) as string[]);
+    return {
+      id: row.id, kind: 'task', lane: 'internal', title: row.title, reasoning: row.description,
+      evidence: null, costSummary: '', estimatedCostMinor: null, reversible: true,
+      ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
+      subaccountId: row.subaccountId, subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
+      agentId: row.assignedAgentId, agentName: null, createdAt: row.createdAt.toISOString(),
+      detailUrl: `task:${row.id}`, actionType: null, runId: null,
+    };
+  }
+
+  if (kind === 'failed_run') {
+    const [row] = await db
+      .select({ id: agentRuns.id, subaccountId: agentRuns.subaccountId, agentId: agentRuns.agentId, status: agentRuns.status, errorMessage: agentRuns.errorMessage, summary: agentRuns.summary, createdAt: agentRuns.createdAt })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, id), eq(agentRuns.organisationId, orgId), inArray(agentRuns.status, ['failed', 'timeout', 'budget_exceeded', 'loop_detected']), isNull(agentRuns.failureAcknowledgedAt)))
+      .limit(1);
+    if (!row) return null;
+    const subMap = await loadSubaccountNames(orgId, [row.subaccountId].filter(Boolean) as string[]);
+    const agMap = await loadAgentNames(orgId, [row.agentId].filter(Boolean) as string[]);
+    return {
+      id: row.id, kind: 'failed_run', lane: 'internal', title: `Agent run ${row.status}`,
+      reasoning: row.errorMessage || row.summary || null, evidence: null, costSummary: '',
+      estimatedCostMinor: null, reversible: true, ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
+      subaccountId: row.subaccountId || '', subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
+      agentId: row.agentId, agentName: agMap.get(row.agentId) || null,
+      createdAt: row.createdAt.toISOString(), detailUrl: `run:${row.id}`, actionType: null, runId: row.id,
+    };
+  }
+
+  if (kind === 'health_finding') {
+    const [row] = await db
+      .select({ id: workspaceHealthFindings.id, message: workspaceHealthFindings.message, recommendation: workspaceHealthFindings.recommendation, detectedAt: workspaceHealthFindings.detectedAt })
+      .from(workspaceHealthFindings)
+      .where(and(eq(workspaceHealthFindings.id, id), eq(workspaceHealthFindings.organisationId, orgId), isNull(workspaceHealthFindings.resolvedAt)))
+      .limit(1);
+    if (!row) return null;
+    return {
+      id: row.id, kind: 'health_finding', lane: 'internal', title: row.message,
+      reasoning: row.recommendation, evidence: null, costSummary: '', estimatedCostMinor: null,
+      reversible: true, ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
+      subaccountId: '', subaccountName: '', agentId: null, agentName: null,
+      createdAt: row.detectedAt.toISOString(), detailUrl: `health:${row.id}`, actionType: null, runId: null,
+    };
+  }
+
+  return null;
 }
 
 // ── getCounts ──────────────────────────────────────────────────────
