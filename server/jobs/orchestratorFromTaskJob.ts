@@ -178,6 +178,9 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   }
 
   if (!orchestratorLink) {
+    // Deterministic selection: in the intended model there is exactly one
+    // active Orchestrator link per org (the sentinel). If somehow multiple
+    // are present we pick the oldest so routing is stable across restarts.
     const [any] = await db
       .select({
         subaccountAgentId: subaccountAgents.id,
@@ -187,6 +190,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
       .from(subaccountAgents)
       .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
       .where(and(...baseConditions))
+      .orderBy(subaccountAgents.createdAt, subaccountAgents.id)
       .limit(1);
     orchestratorLink = any;
   }
