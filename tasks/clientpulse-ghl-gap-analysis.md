@@ -29,6 +29,7 @@
 11. Cross-reference to existing specs + open questions
 12. Current state of the GHL Agency seed + required template extension
 13. Intelligence Briefing + Weekly Digest integration
+14. Plain-English delivery summary (read this first)
 
 ---
 
@@ -1419,6 +1420,94 @@ Extend the per-sub rollup loop to include `reportService.getLatestReport(subacco
 ### 13.8 Dedicated ClientPulse page is still the primary surface
 
 The dashboard stays the primary Monday-morning surface (one screen, drill-down, intervention queue, real-time WebSocket updates). The briefings are async companions — they arrive in Kel's inbox, hit him with the headline, and deep-link into the dashboard for action. The two surfaces reinforce each other rather than compete.
+
+---
+
+## 14. Plain-English delivery summary (read this first)
+
+This section is the architectural TL;DR for any future session reading this doc. The full detail is in §1–§13; this is the simple picture.
+
+### 14.1 The four mockups
+
+There are four mockup HTML files in `tasks/`:
+
+1. `clientpulse-mockup-dashboard.html` — the org-level portfolio grid that Kel opens on Monday morning
+2. `clientpulse-mockup-drilldown.html` — per-client deep dive (one row in the grid → click → this view)
+3. `clientpulse-mockup-intelligence-briefing.html` — Monday 07:00 email (forward-looking)
+4. `clientpulse-mockup-weekly-digest.html` — Friday 17:00 email (backward-looking)
+
+### 14.2 How each one is delivered
+
+| Mockup | Delivery mechanism | Build cost |
+|---|---|---|
+| Dashboard | **React page** at `/clientpulse`. Already exists in router (`ClientPulseDashboardPage.tsx`); main query returns `[]`. Wire queries against canonical tables. | Edit existing |
+| Drill-down | **React page** at new route `/clientpulse/subaccount/:id`. Doesn't exist. | New page |
+| Monday Briefing email | **NEW org-level playbook** `intelligence-briefing-org.playbook.ts`. Runs on the org-subaccount (one playbook run per org per Monday). | New playbook file |
+| Friday Digest email | **NEW org-level playbook** `weekly-digest-org.playbook.ts`. Same shape, Friday cadence. | New playbook file |
+
+### 14.3 Why org-level playbooks "just work" without engine changes
+
+Every organisation has one special sub-account row with `isOrgSubaccount = true` (shipped in `migrations/0106_org_subaccount.sql`) — this is the agency's own internal workspace, where the Orchestrator and other cross-client agents already live.
+
+An "org-level briefing" is just a regular sub-account-scoped playbook that happens to **run on the org-subaccount**. Its step logic queries across the agency's *other* sub-accounts (the actual client accounts) and produces an org-wide rendering. From the playbook engine's perspective it's identical to any other run — same `playbook_runs` table, same scheduling, same delivery primitives, same RLS, same idempotency.
+
+No engine changes. No nullable foreign keys. No new permissions model. No special "org playbook" code path.
+
+### 14.4 Where the work happens (sub-account level, per your preference)
+
+All real computation happens at the per-client sub-account level:
+
+- `canonical_subaccount_mutations` — one row per staff-attributed mutation per client
+- `client_pulse_health_snapshots` — one row per client per scan
+- `client_pulse_churn_assessments` — one row per client per scan
+- `integration_detections` — one row per client per detected integration
+- `subaccount_staff_activity_snapshots` — one row per client per scan
+
+The org-level playbooks don't compute anything new. They aggregate and project the per-client data into one organisation-wide view. The "org-level" framing is a rendering scope, not a separate computation layer. The dashboard, drill-down, briefing, and digest are all four different views over the same per-sub-account substrate.
+
+### 14.5 What `portfolioRollupService.ts` is, and what happens to it
+
+Today, `portfolioRollupService.ts` does both aggregation AND delivery for an org-wide weekly rollup, triggered by `portfolioRollupJob.ts` (a pg-boss job). It's effectively a half-finished org-level digest implemented as a service-with-job rather than a playbook.
+
+**Refactor path (clean, no big-bang):**
+
+1. **Extract the aggregation logic** into pure functions: `aggregateForBriefing(orgId): BriefingData` and `aggregateForDigest(orgId): DigestData`. No side effects, no delivery calls.
+2. **Two new org-level playbooks** call those aggregator functions in their `aggregate_org_data` step, then deliver via the standard `publish_portal` + `send_email` step types that every existing playbook already uses.
+3. **`portfolioRollupJob.ts` keeps running during the transition**, then gets deleted once the org-level playbooks are seeded and stable. No parallel code path long-term.
+
+### 14.6 Briefing vs Digest — the role split
+
+Both org-level playbooks use the same engine, but their content respects different roles:
+
+- **Briefing (Monday 07:00) = forward-looking.** Drives Monday-morning action. ClientPulse contribution: predictive forecasts (which clients will enter a worse band this week), interventions awaiting approval, tier-downgrade windows closing, trial milestone deadlines, intervention cooldown windows ending.
+- **Digest (Friday 17:00) = backward-looking.** Drives Friday-afternoon reflection + proposer-template iteration. ClientPulse contribution: WoW band movement, intervention outcome attribution, pattern learnings ("check-in 2/2; funnel-nurture 0/1"), top movers, forecast-accuracy retrospective, Monday watchlist handoff.
+
+Same playbook engine, same step library, same delivery primitives — different rendering emphasis. The forward/backward split is enforced in the rendering steps, not in the engine.
+
+### 14.7 Module-agnostic guarantee
+
+All four playbooks (per-client briefing, per-client digest, org briefing, org digest) work for any organisation regardless of which modules are enabled. ClientPulse contributes one optional section to each, gated by `skipWhen: !modules.client_pulse.enabled`. Without ClientPulse, the playbooks still produce useful output from other content sources (research findings, memory blocks, weekly work summary, KPI movement, pending HITL items).
+
+The same guarantee applies CRM-wide. The playbook engine and step library are CRM-agnostic. A future HubSpot Agency template would seed the same playbook templates with HubSpot-specific configuration values; same code, different config.
+
+### 14.8 Total net-new code to ship the four mockups
+
+Assuming Phases 0–4 from §10 are in place (canonical tables, signal ingestion, scoring, churn assessment, intervention pipeline):
+
+| Item | Type |
+|---|---|
+| `intelligence-briefing-org.playbook.ts` | New playbook file |
+| `weekly-digest-org.playbook.ts` | New playbook file |
+| `ClientPulseSubaccountDrilldownPage.tsx` (or similar) | New React page |
+| Wire `clientpulseReports.ts` queries (replace the `[]` stub) | Edit existing |
+| Refactor `portfolioRollupService.ts` to pure aggregator | Edit existing |
+| Seed migration for all four playbook templates | New migration |
+
+Five new code files / edits + one migration = the complete delivery surface for everything the four mockups show.
+
+### 14.9 The architectural win
+
+Adding a fifth playbook later (Monthly Board Report, Quarterly Business Review, Daily Critical Alert, etc.) is **just another `.playbook.ts` file**. No new infrastructure. The shape established by these four — per-client + org variants, shared step library, `skipWhen` module gating, org-subaccount as the canonical home for org-level work — is the template for everything that comes after.
 
 ---
 
