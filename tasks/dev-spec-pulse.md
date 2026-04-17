@@ -258,9 +258,16 @@ ALTER TABLE subaccounts
 -- 4. Review audits: Major-lane ack columns
 ALTER TABLE review_audits
   ADD COLUMN major_acknowledged boolean NOT NULL DEFAULT false,
+  ADD COLUMN major_reason text NULL,
   ADD COLUMN ack_text text NULL,
   ADD COLUMN ack_amount_minor integer NULL,
   ADD COLUMN ack_currency_code text NULL;
+
+ALTER TABLE review_audits
+  ADD CONSTRAINT review_audits_major_reason_chk
+    CHECK (major_reason IS NULL OR major_reason IN (
+      'irreversible', 'cross_subaccount', 'cost_per_action', 'cost_per_run'
+    ));
 
 ALTER TABLE review_audits
   ADD CONSTRAINT review_audits_ack_currency_format_chk
@@ -322,6 +329,7 @@ runRetentionDays: integer('run_retention_days'),
 ```ts
 // server/db/schema/reviewAudits.ts  (add)
 majorAcknowledged: boolean('major_acknowledged').notNull().default(false),
+majorReason: text('major_reason').$type<'irreversible' | 'cross_subaccount' | 'cost_per_action' | 'cost_per_run'>(),
 ackText: text('ack_text'),
 ackAmountMinor: integer('ack_amount_minor'),
 ackCurrencyCode: text('ack_currency_code'),
@@ -479,6 +487,13 @@ export function classify(
   }
 
   const def = draft.actionType ? actionRegistry[draft.actionType] : undefined;
+
+  // Fail safe: unknown action types go to Major. An unrecognised action
+  // could be dangerous — better to require ack than silently classify as Internal.
+  if (draft.actionType && !def) {
+    return { lane: 'major', majorReason: 'irreversible' };
+  }
+
   const isExternal  = def?.isExternal === true;
   const destructive = def?.mcp?.annotations?.destructiveHint === true;
   const idempotent  = def?.mcp?.annotations?.idempotentHint === true;
@@ -570,6 +585,8 @@ export function buildAckText(
 | Health finding | health_finding | — | — | — | — | `internal` |
 | Priority order: irreversible + expensive | review | `send_email` (external, !idempotent) | 6000 | 6000 | single | `major` (irreversible — wins over cost_per_action because irreversible is evaluated first) |
 | Priority order: cross-sub + expensive | review | `broadcast_social` (external, idempotent) | 6000 | 6000 | multiple | `major` (cross_subaccount — wins over cost_per_action) |
+| Unknown action type | review | `unknown_skill_xyz` (not in registry) | 0 | 0 | single | `major` (irreversible — fail safe for unknown actions) |
+| NULL action type | review | null | 0 | 0 | single | `internal` (no actionType = non-review-like; falls through to Internal) |
 
 `buildAckText` tests:
 
@@ -731,6 +748,8 @@ pulseService
 │   │   ├─ agentRunService.listUnackedFailures(scope)            // 50 max
 │   │   └─ workspaceHealthService.listOpenFindings(scope)        // 50 max
 │   ├─ mergeToDrafts(...)
+│   ├─ getRunTotalCostMinorBatch(runIds, orgId)                  // 1 query
+│   ├─ buildDraftFromAction(action, runTotalsMap.get(runId)) each
 │   ├─ laneClassifier.classify(draft, thresholds) for each
 │   ├─ buildAckText for major lane items
 │   └─ group by lane, sort newest first
@@ -745,7 +764,7 @@ pulseService
 - `Promise.allSettled` (not `all`) so a single-source failure doesn't nuke the whole fetch. Failed fetchers produce an empty array for that source and a typed `PulseWarning` entry in `warnings[]`. If any warning exists, `isPartial = true`. Counts reflect only the items actually returned.
 - Per-fetcher 2-second hard timeout via `Promise.race` against a sentinel.
 - Hard cap of 50 items per source → 200 max items per Attention response.
-- Aggregated `counts.total` may exceed the sum of the three lane arrays — it reflects the underlying source counts, capped at 1000 for the nav badge.
+- `counts` reflect only the items actually returned and classified. `counts.total` = `counts.client + counts.major + counts.internal`. When `isPartial` is true (a source timed out / errored), counts are lower than reality — the client shows a "Some data may be missing" banner. The `/api/pulse/counts` endpoint (used for the nav badge) makes the same 4 queries independently, capped at 1000 total.
 
 ### Cross-subaccount fan-out (org scope)
 
@@ -956,6 +975,7 @@ router.post(
         comment: req.body.comment,
         majorAck: {
           acknowledged: true,
+          reason: majorReason!,
           text: ack.text,
           amountMinor: ack.amountMinor,
           currencyCode: thresholds.currencyCode,
@@ -977,6 +997,7 @@ interface ApproveOptions {
   comment?: string;
   majorAck?: {
     acknowledged: true;
+    reason: MajorReason;
     text: string;
     amountMinor: number | null;
     currencyCode: string;
@@ -991,6 +1012,7 @@ export async function approve(id: string, userId: string, opts: ApproveOptions):
     decision: 'approved',
     rawFeedback: opts.comment ?? null,
     majorAcknowledged: opts.majorAck?.acknowledged ?? false,
+    majorReason: opts.majorAck?.reason ?? null,
     ackText: opts.majorAck?.text ?? null,
     ackAmountMinor: opts.majorAck?.amountMinor ?? null,
     ackCurrencyCode: opts.majorAck?.currencyCode ?? null,
@@ -1054,25 +1076,61 @@ router.post(
 );
 ```
 
-### `pulseService.buildDraftFromAction(action)` — helper
+### `pulseService.getRunTotalCostMinor(runId, orgId)` — centralised helper
 
-Reused by both the approve route and the aggregator. Takes a loaded `actions` row and returns `PulseItemDraft`. Handles loading `runTotalCostMinor` via a single aggregated query. Pure function of its inputs except for the run-total query.
+**This is the single source of truth for run-level cost aggregation.** Every path that needs `runTotalCostMinor` — the classifier inputs, the approve path, the getAttention aggregator, and bulk-approve — calls this function. Never inline the query.
 
-**`runTotalCostMinor` definition (explicit):**
+```ts
+// server/services/pulseService.ts
+export async function getRunTotalCostMinor(
+  runId: string,
+  orgId: string,
+): Promise<number | null> {
+  if (!runId) return null;
+  const [row] = await db
+    .select({ total: sql<number>`COALESCE(SUM(COALESCE(${actions.estimatedCostMinor}, 0)), 0)` })
+    .from(actions)
+    .where(and(
+      eq(actions.agentRunId, runId),
+      inArray(actions.status, ['pending', 'pending_approval', 'approved', 'executing', 'completed']),
+      eq(actions.organisationId, orgId),
+    ));
+  return row?.total ?? null;
+}
 
-```sql
-SELECT COALESCE(SUM(estimated_cost_minor), 0) AS run_total_cost_minor
-FROM actions
-WHERE agent_run_id = $1
-  AND status IN ('pending', 'pending_approval', 'approved', 'executing', 'completed')
-  AND organisation_id = $2
+// Batch variant for aggregation paths (avoids N+1).
+export async function getRunTotalCostMinorBatch(
+  runIds: string[],
+  orgId: string,
+): Promise<Map<string, number>> {
+  if (runIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      runId: actions.agentRunId,
+      total: sql<number>`COALESCE(SUM(COALESCE(${actions.estimatedCostMinor}, 0)), 0)`,
+    })
+    .from(actions)
+    .where(and(
+      inArray(actions.agentRunId, runIds),
+      inArray(actions.status, ['pending', 'pending_approval', 'approved', 'executing', 'completed']),
+      eq(actions.organisationId, orgId),
+    ))
+    .groupBy(actions.agentRunId);
+  return new Map(rows.map(r => [r.runId!, r.total]));
+}
 ```
 
 Scope rules:
 - **Includes** pending, approved, and completed actions — represents the full cost exposure of the run.
 - **Excludes** rejected, failed, blocked, skipped actions — those costs were avoided.
-- NULL `estimated_cost_minor` values are treated as 0 (via `COALESCE` on each row, not on the SUM — a row with NULL cost contributes 0, not missing).
-- If the action has no `agent_run_id`, `runTotalCostMinor` is NULL and the `cost_per_run` Major reason is never triggered.
+- NULL `estimated_cost_minor` values are treated as 0 (via inner `COALESCE` on each row).
+- If the action has no `agent_run_id`, returns `null` and the `cost_per_run` Major reason is never triggered.
+
+### `pulseService.buildDraftFromAction(action, runTotalCostMinor?)` — helper
+
+Reused by both the approve route and the aggregator. Takes a loaded `actions` row and an **optional pre-loaded** `runTotalCostMinor` value, returning a `PulseItemDraft`. If `runTotalCostMinor` is not provided, the function calls `getRunTotalCostMinor(action.agentRunId, action.organisationId)` internally.
+
+**For batch paths** (getAttention aggregation, bulk-approve), callers should preload run totals via `getRunTotalCostMinorBatch()` and pass them in to avoid N+1 queries. For single-item paths (approve route), the internal lookup is acceptable.
 
 ### Tests
 
@@ -1080,7 +1138,7 @@ Scope rules:
 
 1. Approve a non-Major item with no ack → 200; audit row has `major_acknowledged=false`, ack fields NULL.
 2. Approve a Major item without ack → 412 `MAJOR_ACK_REQUIRED`; audit row not created; review item still pending.
-3. Approve a Major item with `majorAcknowledgment: true` → 200; audit row has `major_acknowledged=true`, `ack_text` matches classifier output, `ack_amount_minor` and `ack_currency_code` populated.
+3. Approve a Major item with `majorAcknowledgment: true` → 200; audit row has `major_acknowledged=true`, `major_reason` matches classifier output, `ack_text` matches classifier output, `ack_amount_minor` and `ack_currency_code` populated.
 4. Approve a Major item via `cost_per_run` reason → audit captures `ack_amount_minor = runTotalMinor`, not the per-action cost.
 5. Bulk-approve with all non-Major → 200; `approved` contains all ids, `blocked` is empty.
 6. Bulk-approve with one Major in a batch of 5 → 200; `approved` contains 4 ids, `blocked` contains 1 with `majorReason`. The 4 non-Major items are approved; the Major item is untouched.
@@ -1210,6 +1268,18 @@ export function usePulseAttention({ scope, subaccountId }: Args) {
   // debouncedMerge: fetch targeted item via GET /api/pulse/item/:kind/:id
   //                 and splice into local state; max 1 merge per 300ms
   //                 to absorb event storms.
+  //
+  // WebSocket merge rules:
+  //   1. Fetch the updated item via getItem(). If 404 → remove from
+  //      local state (item was approved/resolved elsewhere).
+  //   2. If the item exists, re-read its `lane` from the response.
+  //      - Same lane as before → update in place.
+  //      - Different lane → remove from old lane, insert into new lane.
+  //      - Item is new (not in any lane) → insert into the correct lane.
+  //   3. After merge, recalculate local counts from the actual lane
+  //      arrays (counts.client = lanes.client.length, etc.).
+  //   4. Never trust stale local state — the server response is
+  //      authoritative for lane assignment.
 
   return { attention: data, isLoading, error };
 }
@@ -1253,6 +1323,8 @@ Evidence collapsed-by-default — matches the prototype's final state.
 | `internal` (task) | Mark complete · Reassign · View task |
 
 Bulk-approve button sits above the Internal lane; disabled when any selected item is Major (defensive — Major items shouldn't appear in Internal lane, but guard anyway).
+
+**Optimistic removal on approve:** When the user clicks Approve (single or bulk), immediately remove the item(s) from the lane and decrement counts before the server responds. On success — no further action needed. On failure (network error or non-409 status) — refetch the full attention payload to restore accurate state. On 409 `ALREADY_RESOLVED` — item stays removed (it was already resolved elsewhere). This keeps the UI snappy and avoids the card lingering while the round-trip completes.
 
 ### Empty and error states
 
