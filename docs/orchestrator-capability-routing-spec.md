@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 5 — final sharp-edge pass: decision_record stable ID defined; check_capability_gap configured rule made atomic (3-condition AND); combined_coverage_possible signal added to candidate_agents; capability query cache keyed on input signature; dedupe hash made explicit about post-normalisation canonical slugs; routing_timeout added as distinct failure state; post-handoff verification trigger tightened to match task_id AND assigned_agent_id)
+> **Last updated:** 2026-04-17 (revision 6 — final micro-fixes: combined_coverage_possible carried into decision record; routing_timeout_reason field for observability; cache key uses deterministic stableStringify not JSON.stringify)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -823,7 +823,7 @@ Every Orchestrator run has a fixed budget of capability-discovery skill calls (`
 
 The budget is enforced at the skill-registry level: each **unique** call decrements a per-run counter; when the counter hits zero, further calls return `{ error: 'capability_query_budget_exhausted', last_results: <cached>... }` using in-run cached results so the Orchestrator can still complete. The budget value is configurable via `systemSettings.orchestrator_capability_query_budget` so the Synthetos team can tune it per-environment.
 
-**In-run call deduplication:** Calls are keyed by `sha256(skill_name + '|' + JSON.stringify(sorted_input))`. An identical call (same skill, same serialised input) within the same run returns the cached result from the first call at zero budget cost. This prevents the common LLM pattern of re-querying the same data across reasoning steps — without deduplication, a multi-step prompt could burn the entire 8-call budget on repeated identical `list_platform_capabilities` reads. The cache is per-run only (not cross-run) and is never persisted.
+**In-run call deduplication:** Calls are keyed by `sha256(skill_name + '|' + stableStringify(input))` where `stableStringify` deep-sorts all object keys before serialising (so `{a:1,b:2}` and `{b:2,a:1}` produce the same key). A standard deterministic-stringify utility (e.g. `fast-json-stable-stringify`) handles this — do not use `JSON.stringify` directly, which has non-deterministic key ordering in some runtimes. An identical call (same skill, same serialised input) within the same run returns the cached result from the first call at zero budget cost. This prevents the common LLM pattern of re-querying the same data across reasoning steps — without deduplication, a multi-step prompt could burn the entire 8-call budget on repeated identical `list_platform_capabilities` reads. The cache is per-run only (not cross-run) and is never persisted.
 
 Four calls are typically enough for a straightforward run (one each of `list_platform_capabilities`, `list_connections`, `check_capability_gap`, plus one `normalize_capability_slugs`). The 8-call default leaves headroom for the one-shot re-decomposition path, with room to grow before the budget bites.
 
@@ -835,6 +835,7 @@ Every time the Orchestrator runs the decision procedure, it emits a structured d
 {
   id: string;                                          // uuid generated at the start of the routing run, before any skill calls; this is the stable join key threaded into handoff_context, feature_requests, and routing_outcomes
   path: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed' | 'routing_timeout';
+  routing_timeout_reason?: 'budget_exhausted' | 'llm_failure';  // set when path === 'routing_timeout'; ops/tuning signal, not user-facing
   decomposition: {
     draft: Array<{ kind: string; slug: string; rationale: string }>;
     normalised: Array<{ kind: string; canonical_slug: string; original_slug: string; normalisation_status: 'canonical' | 'aliased' | 'unresolved' }>;
@@ -842,7 +843,7 @@ Every time the Orchestrator runs the decision procedure, it emits a structured d
     redecomposition_used: boolean;              // true if the one-shot retry fired
   };
   availability_map: { [slug: string]: 'configured' | 'configurable' | 'unsupported' | 'unknown' };
-  candidate_agents_considered: Array<{ agent_id: string; coverage: 'full' | 'partial'; missing: string[] }>;
+  candidate_agents_considered: Array<{ agent_id: string; coverage: 'full' | 'partial'; missing: string[]; combined_coverage_possible: boolean }>;  // combined_coverage_possible carried from check_capability_gap for future routing upgrades
   selected_target_agent_id: string | null;       // for Path A
   selected_handoff_target: 'config_assistant' | null; // for Paths B / C
   feature_request_id: string | null;             // for Paths C / D
