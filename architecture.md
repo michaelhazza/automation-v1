@@ -1003,6 +1003,22 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 - `llmPricing` table — model + provider pricing reference
 - `llmRequests` table — every LLM call logged with tokens, cost, model
 
+### MCP Tool Invocations (migration 0154)
+
+Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one row per attempt including retries. Key design points:
+
+- **`mcpClientManager.writeInvocation()`** — fire-and-forget, never throws, never blocks the agent loop. Called from four sites: pre-execution exits (budget-blocked, invalid slug, connect failure), catch (retry path — writes the first attempt before recursing), and finally (covers success + non-retryable errors).
+- **`wroteInCatch` flag** — prevents double-write: when catch writes the first attempt's row and recurses, the outer finally skips its write. The retry gets its own row via its own finally.
+- **`callIndex`** — canonical ordering key within a run; null for pre-execution exits (avoids UNIQUE constraint); incremented before the try block so a retry gets `callIndex = N+1` with no collision.
+- **`isRetry`** — `true` only in the finally block when `retryCount > 0`; pre-execution exits and the catch-path write for the first attempt always use `false`.
+- **`failureReason`** — `'pre_execution_failure'` for routing failures (invalid slug, no connected instance); transport failure values (`timeout`, `process_crash`, `invalid_response`, `auth_error`, `rate_limited`, `unknown`) for error/timeout rows. DB CHECK enforces `null` for `success`/`budget_blocked`, non-null for `error`/`timeout`.
+- **`isTestRun`** — denormalised from `agentRun.isTestRun`; test-run rows skip `mcp_org`/`mcp_subaccount`/`mcp_server` aggregate writes to keep P&L clean.
+- **`budget_blocked`** — policy exit (not infra failure); `failure_reason IS NULL`, `duration_ms = 0`, excluded from `errorCount` in all aggregate and summary queries.
+- **`responseSizeBytes` / `wasTruncated`** — `Buffer.byteLength(serialised, 'utf8')` is the basis for both; char count diverges for multibyte characters.
+- **`mcpAggregateService.upsertMcpAggregates()`** — called fire-and-forget after each successful ledger insert. Reuses `cost_aggregates` with four MCP-specific entityTypes: `mcp_org` (monthly+daily), `mcp_subaccount` (monthly+daily), `mcp_run` (lifetime), `mcp_server` (monthly, org-scoped). Only `requestCount` and `errorCount` carry signal; LLM cost columns are zero.
+- **Deduplication** — `onConflictDoNothing()` on `(run_id, call_index)` unique index prevents double-writes; aggregate upsert is skipped when no row was inserted, preserving the "recomputable from ledger" guarantee.
+- **`mcpCallSummary`** in `agentActivityService.getRunDetail()` — grouped by `server_slug`, `errorCount` uses `filter (where status in ('error', 'timeout'))` — `budget_blocked` excluded.
+
 ---
 
 ## Event-Driven Architecture
