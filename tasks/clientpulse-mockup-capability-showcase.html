@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClientPulse — Capability Showcase (exhaustive item-type reference)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+
+  /* Top annotation + header */
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 10px 24px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .site-header {
+    background: linear-gradient(135deg, #1e1b4b 0%, #4338ca 100%);
+    color: #fff; padding: 32px 48px;
+  }
+  .site-header h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.5px; margin-bottom: 6px; }
+  .site-header .sub { font-size: 14px; color: #c7d2fe; max-width: 820px; }
+  .site-header .sub strong { color: #fff; }
+
+  /* TOC */
+  .toc {
+    max-width: 1100px; margin: 24px auto 0; padding: 18px 24px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  }
+  .toc h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #6b7280; margin-bottom: 10px; letter-spacing: 0.5px; }
+  .toc ul { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 16px; }
+  .toc li a { font-size: 13px; color: #4338ca; text-decoration: none; }
+  .toc li a:hover { text-decoration: underline; }
+  .toc .muted { color: #6b7280; font-size: 12px; }
+
+  /* Sections */
+  .page { max-width: 1100px; margin: 24px auto; padding: 0 24px 64px; }
+  .section-block {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 24px 28px; margin-bottom: 20px;
+  }
+  .section-block h2 {
+    font-size: 18px; font-weight: 700; color: #1a1d23; margin-bottom: 4px; letter-spacing: -0.3px;
+  }
+  .section-block .lead {
+    font-size: 13px; color: #6b7280; margin-bottom: 18px;
+  }
+  .section-block .lead code {
+    background: #f5f3ff; color: #5b21b6; padding: 1px 6px; border-radius: 3px; font-size: 11px;
+  }
+
+  /* Generic card list (reused across sections) */
+  .card-list { display: grid; gap: 10px; }
+  .card-list.cols-2 { grid-template-columns: 1fr 1fr; }
+  .card {
+    padding: 14px 16px; border: 1px solid #f0f1f3; border-radius: 6px; background: #fafbfc;
+    display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: flex-start;
+  }
+  .card .marker {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+    flex-shrink: 0;
+  }
+  .card .body .slug {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px; color: #5b21b6; background: #f5f3ff; padding: 1px 6px; border-radius: 3px; display: inline-block;
+    margin-bottom: 4px;
+  }
+  .card .body .title { font-weight: 600; font-size: 13px; color: #1a1d23; margin-bottom: 3px; }
+  .card .body .example { font-size: 12px; color: #374151; margin-bottom: 3px; }
+  .card .body .example strong { color: #1a1d23; }
+  .card .body .desc { font-size: 11px; color: #6b7280; line-height: 1.5; }
+
+  /* Marker colours per category */
+  .m-intervene { background: #0e7490; }
+  .m-event     { background: #7c3aed; }
+  .m-blindspot { background: #d97706; }
+  .m-outcome   { background: #059669; }
+  .m-outcome-fail { background: #dc2626; }
+  .m-outcome-flat { background: #6b7280; }
+  .m-memory    { background: #a855f7; }
+  .m-handoff   { background: #06b6d4; }
+  .m-integration{ background: #4338ca; }
+  .m-mover-up   { background: #15803d; }
+  .m-mover-down { background: #b91c1c; }
+  .m-review    { background: #c2410c; }
+  .m-kpi       { background: #0891b2; }
+
+  /* Tag chip used in memory items */
+  .tag-chip {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 3px; font-weight: 700;
+    letter-spacing: 0.4px; text-transform: uppercase; margin-right: 6px;
+  }
+  .tag-chip.belief       { background: #ede9fe; color: #6b21a8; }
+  .tag-chip.pattern      { background: #dcfce7; color: #166534; }
+  .tag-chip.cooldown     { background: #e0e7ff; color: #3730a3; }
+  .tag-chip.correction   { background: #fef2f2; color: #b91c1c; }
+  .tag-chip.relationship { background: #fef3c7; color: #92400e; }
+  .tag-chip.preference   { background: #cffafe; color: #155e75; }
+  .tag-chip.constraint   { background: #f3f4f6; color: #1f2937; }
+  .tag-chip.opportunity  { background: #d1fae5; color: #065f46; }
+  .tag-chip.risk         { background: #ffedd5; color: #9a3412; }
+  .tag-chip.insight      { background: #fae8ff; color: #86198f; }
+  .tag-chip.decision     { background: #e0f2fe; color: #075985; }
+  .tag-chip.hypothesis   { background: #fdf4ff; color: #701a75; }
+
+  /* Integration chip */
+  .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 14px; font-size: 12px; font-weight: 500;
+    border: 1px solid; white-space: nowrap;
+  }
+  .chip .cat { font-size: 10px; opacity: 0.65; }
+  .chip.ai      { background: #faf5ff; color: #6b21a8; border-color: #e9d5ff; }
+  .chip.ads     { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+  .chip.pay     { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+  .chip.auto    { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+  .chip.msg     { background: #ecfeff; color: #155e75; border-color: #a5f3fc; }
+  .chip.sched   { background: #fef3c7; color: #854d0e; border-color: #fde68a; }
+  .chip.native  { background: #f5f3ff; color: #4c1d95; border-color: #ddd6fe; }
+  .chip.unk     { background: #fafbfc; color: #4b5563; border-color: #e5e7eb; border-style: dashed; }
+
+  /* KPI grid */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .kpi-card {
+    padding: 12px; border: 1px solid #f0f1f3; border-radius: 6px; background: #fafbfc;
+  }
+  .kpi-card .val { font-size: 18px; font-weight: 700; color: #0e7490; line-height: 1.1; }
+  .kpi-card .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-top: 4px; font-weight: 600; }
+  .kpi-card .slug {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 10px; color: #5b21b6; margin-top: 3px;
+  }
+  .kpi-card .src { font-size: 10px; color: #9ca3af; margin-top: 3px; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 CAPABILITY SHOWCASE · Exhaustive reference of the item types ClientPulse + Automation OS can surface to a user. Each section lists real example items; slugs in <code>monospace</code> match backend keys where one exists. Use this to check what the product already covers and what's still on the roadmap.</div>
+
+<div class="site-header">
+  <h1>ClientPulse — Capability Showcase</h1>
+  <div class="sub">
+    Every "arbitrary item" from the four delivery mockups, enumerated against the <strong>current Automation OS capability surface</strong>.
+    Source: <code>docs/capabilities.md</code> · <code>server/config/actionRegistry.ts</code> · <code>docs/memory-and-briefings-spec.md</code> · <code>docs/integration-reference.md</code> · schema audits.
+    Items flagged <strong>[spec only]</strong> exist in design docs but aren't yet built.
+  </div>
+</div>
+
+<div class="toc">
+  <h3>Sections</h3>
+  <ul>
+    <li><a href="#s1">1. Pending intervention types</a></li>
+    <li><a href="#s2">2. Upcoming event types</a></li>
+    <li><a href="#s3">3. Blind-spot / "team forgetting" patterns</a></li>
+    <li><a href="#s4">4. Intervention outcome narratives</a></li>
+    <li><a href="#s5">5. Memory block tag types</a></li>
+    <li><a href="#s6">6. Monday handoff teasers</a></li>
+    <li><a href="#s7">7. Integration fingerprints (detectable)</a></li>
+    <li><a href="#s8">8. Top movers (health drivers)</a></li>
+    <li><a href="#s9">9. Per-client KPI types</a></li>
+    <li><a href="#s10">10. Review-queue item types</a></li>
+    <li><a href="#s11">11. Cold-start / insufficient-data states</a></li>
+    <li><a href="#s12">12. Tier-migration events</a></li>
+  </ul>
+  <p class="muted" style="margin-top:10px;">Agent action types (50+ slugs) are listed in the chat cheatsheet rather than the mockup — too long to render usefully here.</p>
+</div>
+
+<div class="page">
+
+  <!-- Sections appended here -->
+
+  <!-- Section 1 — Pending intervention types -->
+  <div class="section-block" id="s1">
+    <h2>1. Pending intervention types</h2>
+    <p class="lead">What the proposer can queue for a sub-account. Each one becomes an <code>actions</code> row + a <code>reviewItems</code> card awaiting your one-click approval. Action type is <code>client_pulse_intervention</code>; the template slug (shown below each) controls trigger condition + message copy.</p>
+
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-intervene">✉︎</div>
+        <div class="body">
+          <div class="slug">dormant_staff_activity_checkin</div>
+          <div class="title">Check-in email — "Everything okay?"</div>
+          <div class="example"><strong>Trigger:</strong> Staff activity ≥14 days silent</div>
+          <div class="desc">Agency-branded email to the client asking a light-touch question. Non-threatening; designed to surface problems before cancellation.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">▶︎</div>
+        <div class="body">
+          <div class="slug">no_funnel_nurture</div>
+          <div class="title">4-video funnel-setup nurture sequence</div>
+          <div class="example"><strong>Trigger:</strong> 0 funnels built, client ≥30 days onboarded</div>
+          <div class="desc">4-day email drip teaching funnel-build basics; first funnel is the stickiest onboarding milestone.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">📅</div>
+        <div class="body">
+          <div class="slug">calendar_setup_guide</div>
+          <div class="title">Calendar setup guide + optional VA-help offer</div>
+          <div class="example"><strong>Trigger:</strong> Calendar quality below team-size ratio threshold</div>
+          <div class="desc">Step-by-step guide email; optional "reply YES to have our VA set it up for you" CTA.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">📞</div>
+        <div class="body">
+          <div class="slug">tier_downgrade_retention_alert</div>
+          <div class="title">Retention-call task to VA</div>
+          <div class="example"><strong>Trigger:</strong> Tier decreased in last 90 days (typical 90-day re-downgrade window)</div>
+          <div class="desc">Creates an internal task assigned to a VA; includes "offer 30-day DFY funnel audit" as the hook angle.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">🤖</div>
+        <div class="body">
+          <div class="slug">third_party_ai_upsell</div>
+          <div class="title">AI comparison + upsell (native vs third-party)</div>
+          <div class="example"><strong>Trigger:</strong> CloseBot or similar third-party AI detected</div>
+          <div class="desc">Comparison info for GHL's native AI Studio vs the third-party tool; usually framed as a consolidation-saves-money angle.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">🎯</div>
+        <div class="body">
+          <div class="slug">trial_milestone_nudge</div>
+          <div class="title">Trial-milestone nudge (per incomplete step)</div>
+          <div class="example"><strong>Trigger:</strong> Trial user stalled ≥72h on a milestone</div>
+          <div class="desc">Specific nudge per incomplete step (first funnel, first calendar, first campaign…). Reuses Kel's 25-email sequence.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">📉</div>
+        <div class="body">
+          <div class="slug">follow_up_overdue_deal</div>
+          <div class="title">Follow-up task on stalled opportunity</div>
+          <div class="example"><strong>Trigger:</strong> Opportunity ≥30 days in same stage, beyond cohort baseline</div>
+          <div class="desc">Creates operator task; win-rate drops 48% after 14 days at this stage — nudge fast.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">💰</div>
+        <div class="body">
+          <div class="slug">ad_campaign_optimization</div>
+          <div class="title">Pause-or-pivot on underperforming ad</div>
+          <div class="example"><strong>Trigger:</strong> CPL >2× target for 7 days</div>
+          <div class="desc">Recommends specific action: pause campaign, reallocate budget, or swap creative. Reads from Uphex/GHL ads data.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">🔁</div>
+        <div class="body">
+          <div class="slug">reactivation_offer</div>
+          <div class="title">Win-back offer to churned contact</div>
+          <div class="example"><strong>Trigger:</strong> Contact cancelled ≥90 days ago, hasn't been reached since</div>
+          <div class="desc">Reactivation email with discount or limited-time offer. Configurable incentive.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">🛠️</div>
+        <div class="body">
+          <div class="slug">workflow_fix_recommendation</div>
+          <div class="title">Broken workflow / automation repair</div>
+          <div class="example"><strong>Trigger:</strong> Workflow error rate spike detected by anomaly</div>
+          <div class="desc">Operator task with diagnostic details and a suggested fix; links directly to the workflow editor.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">📈</div>
+        <div class="body">
+          <div class="slug">tier_upgrade_recommendation</div>
+          <div class="title">Upsell — usage supports a tier upgrade</div>
+          <div class="example"><strong>Trigger:</strong> Contact/deal volume >50% over current tier cap for 30 days</div>
+          <div class="desc">Agency-branded email framing the upgrade around the client's demonstrated growth. Data-driven sales play.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-intervene">🧹</div>
+        <div class="body">
+          <div class="slug">integration_adoption_nudge</div>
+          <div class="title">"You're not using integration X — here's why it matters"</div>
+          <div class="example"><strong>Trigger:</strong> Integration connected but <5 events in last 30 days</div>
+          <div class="desc">Flags installed-but-dormant integrations. Frames adoption around a specific comparable client with similar profile.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2 — Upcoming event types -->
+  <div class="section-block" id="s2">
+    <h2>2. Upcoming event types (per sub-account, this week)</h2>
+    <p class="lead">Scheduled items surfaced in the "Upcoming this week" block of the per-client briefing. Sources include GHL calendars, campaigns, workflows, pg-boss scheduled jobs, and the agency's internal task board.</p>
+
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-event">📆</div>
+        <div class="body">
+          <div class="slug">appointment_scheduled</div>
+          <div class="title">Calendar appointment booked</div>
+          <div class="example"><strong>Tue 14:00</strong> · Onboarding call — Mountain Ridge Clinic (Ben, owner)</div>
+          <div class="desc">Any GHL calendar event or externally-synced Google Calendar appointment touching this client.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">📧</div>
+        <div class="body">
+          <div class="slug">email_campaign_scheduled_send</div>
+          <div class="title">Broadcast email scheduled to send</div>
+          <div class="example"><strong>Wed 10:00</strong> · April Newsletter · 1,240 contacts · draft ready</div>
+          <div class="desc">GHL email campaigns with future send-time.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">📱</div>
+        <div class="body">
+          <div class="slug">sms_campaign_scheduled_send</div>
+          <div class="title">SMS campaign scheduled to send</div>
+          <div class="example"><strong>Thu 09:00</strong> · Promo blast · 820 recipients · $42 est. cost</div>
+          <div class="desc">GHL SMS campaigns or Twilio-scheduled dispatches.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">🎯</div>
+        <div class="body">
+          <div class="slug">ad_campaign_budget_ending</div>
+          <div class="title">Paid-ads budget expires</div>
+          <div class="example"><strong>Thu</strong> · Facebook "Spring Promo" · $340/day · Uphex</div>
+          <div class="desc">Facebook/Google ad-spend windows closing, surfaced from Uphex or native GHL ad integrations.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">⚙️</div>
+        <div class="body">
+          <div class="slug">workflow_scheduled_trigger</div>
+          <div class="title">GHL workflow scheduled to run</div>
+          <div class="example"><strong>Mon 00:00</strong> · "Weekly review request" workflow · 87 eligible contacts</div>
+          <div class="desc">Time-based workflow triggers surfaced so the operator knows what's about to fire.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">📣</div>
+        <div class="body">
+          <div class="slug">funnel_launch_scheduled</div>
+          <div class="title">Funnel / landing page go-live</div>
+          <div class="example"><strong>Wed</strong> · "Summer bootcamp" funnel scheduled publish at 09:00</div>
+          <div class="desc">Funnel drafts with a scheduled publication date.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">💳</div>
+        <div class="body">
+          <div class="slug">billing_invoice_due</div>
+          <div class="title">Client subscription renewal / invoice due</div>
+          <div class="example"><strong>Fri</strong> · $347 monthly renewal · autocharge scheduled</div>
+          <div class="desc">Read from GHL revenue records or connected Stripe.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">🚨</div>
+        <div class="body">
+          <div class="slug">clientpulse_window_deadline</div>
+          <div class="title">ClientPulse-derived deadline closing</div>
+          <div class="example"><strong>Fri</strong> · Retention-call window closes · Act today</div>
+          <div class="desc">Tier-downgrade windows, trial-milestone deadlines, intervention-cooldown windows ending — all surface here.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">📋</div>
+        <div class="body">
+          <div class="slug">internal_task_deadline</div>
+          <div class="title">Internal agency task due</div>
+          <div class="example"><strong>Thu</strong> · "Draft Q2 review deck" · assigned to Sarah</div>
+          <div class="desc">From the agency's board/scheduled_tasks table. Filtered to this client's tasks only.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">📝</div>
+        <div class="body">
+          <div class="slug">contract_renewal_window</div>
+          <div class="title">Contract / retainer renewal window opens</div>
+          <div class="example"><strong>Wed</strong> · 12-month retainer renewal window opens (90 days out)</div>
+          <div class="desc">Computed from historical subscription data or manual renewal-date fields.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">🎉</div>
+        <div class="body">
+          <div class="slug">milestone_anniversary</div>
+          <div class="title">Client anniversary / milestone date</div>
+          <div class="example"><strong>Sat</strong> · 2-year anniversary with Productivity Hub</div>
+          <div class="desc">Great reminder to send a thank-you touchpoint; can auto-trigger an anniversary email template.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-event">🔄</div>
+        <div class="body">
+          <div class="slug">integration_sync_scheduled</div>
+          <div class="title">Integration sync or health check running</div>
+          <div class="example"><strong>Daily 02:00</strong> · GHL full contact re-sync (nightly)</div>
+          <div class="desc">Maintenance windows and scheduled diagnostic jobs that touch this client's data.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3 — Blind-spot / "team forgetting" patterns -->
+  <div class="section-block" id="s3">
+    <h2>3. Blind-spot patterns ("what your team might be forgetting")</h2>
+    <p class="lead">Pattern-detection insights surfaced per sub-account. Each one is an <em>implicit observation</em> — the system looked across the account's data (plus the portfolio baseline) and noticed something nobody was tracking. Sourced from the anomaly detection skill + comparative cohort analysis.</p>
+
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-blindspot">📵</div>
+        <div class="body">
+          <div class="slug">silent_channel</div>
+          <div class="title">Silent channel (no outbound for N days)</div>
+          <div class="example"><strong>"Last outbound SMS from your team to any Bright contact was Sarah, 8 days ago."</strong> Every other client of theirs with healthy retention has weekly staff-to-contact SMS. This client's silence is your silence.</div>
+          <div class="desc">Per-channel silence detection (email, SMS, phone, in-app). Compared against this client's historical cadence AND portfolio baseline.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">⏰</div>
+        <div class="body">
+          <div class="slug">unread_conversation_aging</div>
+          <div class="title">Unread inbound conversation aging</div>
+          <div class="example"><strong>"3 inbound messages from client contacts are sitting unread &gt;24h."</strong> Longest: Maria @ Highland, sent Mon 09:14, marked seen but not replied.</div>
+          <div class="desc">Tracks unread / unanswered customer-side messages across all channels. Flags the oldest.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">⏳</div>
+        <div class="body">
+          <div class="slug">pipeline_stage_stall</div>
+          <div class="title">Deal stalled past stage baseline</div>
+          <div class="example"><strong>"Chavez Auto is 12 days in 'Proposal Sent' — your baseline for this stage is 6 days."</strong> Win rate halves after day 14.</div>
+          <div class="desc">Per-stage duration anomaly vs this client's historical stage-velocity baseline.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">💳</div>
+        <div class="body">
+          <div class="slug">failed_payment_unresolved</div>
+          <div class="title">Payment failure not retried</div>
+          <div class="example"><strong>"A $247 subscription charge failed 4 days ago and nobody's retried."</strong> Default retry cadence is 24h; this is silent past that.</div>
+          <div class="desc">Declined cards, failed renewals, bounced invoices that nobody's followed up on.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">📭</div>
+        <div class="body">
+          <div class="slug">campaign_performance_drift</div>
+          <div class="title">Campaign performance quietly degrading</div>
+          <div class="example"><strong>"Email open rate dropped from 28% to 19% over the last 3 sends."</strong> Subject-line drift or list fatigue; worth a diagnostic.</div>
+          <div class="desc">Campaign KPIs silently trending worse than the account's 30-day baseline.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🧑‍💼</div>
+        <div class="body">
+          <div class="slug">team_capacity_bottleneck</div>
+          <div class="title">Single staff member holds most overdue work</div>
+          <div class="example"><strong>"Sarah owns 43% of overdue tasks for this client."</strong> Reassign or escalate — she's the bottleneck.</div>
+          <div class="desc">Detects workload concentration that predicts miss-deadlines.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🔌</div>
+        <div class="body">
+          <div class="slug">feature_adoption_gap</div>
+          <div class="title">Integration installed but dormant</div>
+          <div class="example"><strong>"CloseBot is installed on Bright, but only 2 messages in 30 days."</strong> Either configure it properly or consider disconnecting.</div>
+          <div class="desc">Integration detection says it's there; usage intensity says it's not being used. Signal it.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🏁</div>
+        <div class="body">
+          <div class="slug">renewal_unaddressed</div>
+          <div class="title">Contract renewal approaching with no discussion</div>
+          <div class="example"><strong>"Contract renewal window opens in 14 days — no renewal conversation found in the last 90 days."</strong></div>
+          <div class="desc">Scans conversation history for renewal-keyword activity; flags silent approach.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🕵️</div>
+        <div class="body">
+          <div class="slug">competitor_mention_detected</div>
+          <div class="title">Competitor mentioned in client conversations</div>
+          <div class="example"><strong>"'HubSpot' mentioned twice by Ben this week — might be evaluating alternatives."</strong></div>
+          <div class="desc">Keyword scanning over conversation metadata. Configurable competitor watchlist per org.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🎰</div>
+        <div class="body">
+          <div class="slug">multi_signal_churn_composite</div>
+          <div class="title">Multi-signal composite risk emerged</div>
+          <div class="example"><strong>"3 negative signals co-occurred this week: failed payment + 14d silence + stage regression."</strong> Any one alone is noise; together they're a churn signal.</div>
+          <div class="desc">Composite risk detection; only fires when ≥3 indicators cluster within a short window.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">📉</div>
+        <div class="body">
+          <div class="slug">cohort_deviation</div>
+          <div class="title">Outlier vs comparable-client cohort</div>
+          <div class="example"><strong>"Contact-create rate this week is 20% of the cohort average."</strong> 8 similar clients (same vertical, same tier) averaged 43 new contacts; Bright added 9.</div>
+          <div class="desc">Cross-client cohort comparison surfaces accounts lagging peers on key metrics.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-blindspot">🗂️</div>
+        <div class="body">
+          <div class="slug">data_freshness_lag</div>
+          <div class="title">Data sync stale / integration unhealthy</div>
+          <div class="example"><strong>"GHL sync for this client hasn't run successfully in 36 hours."</strong> All signals based on stale data.</div>
+          <div class="desc">Operational blind spot — flags when the health score itself might be wrong because the connector isn't pulling.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 4 — Intervention outcome narratives -->
+  <div class="section-block" id="s4">
+    <h2>4. Intervention outcome narratives</h2>
+    <p class="lead">Schema-level outcome (<code>improved</code> | <code>unchanged</code> | <code>worsened</code>) plus a narrative category explaining <em>why</em> the health-score delta happened. Source: <code>server/db/schema/interventionOutcomes.ts</code> + the measurement loop that runs <code>measurementWindowHours</code> after <code>action.completedAt</code>.</p>
+
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-outcome">✓</div>
+        <div class="body">
+          <div class="slug">conversion_completed</div>
+          <div class="title">Intervention → conversion event</div>
+          <div class="example"><strong>Retention call → audit booked, +$4,200 deal closed within 7 days.</strong> Health +6.</div>
+          <div class="desc">The intervention correlates with a measurable revenue event. Strongest possible outcome.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome">📈</div>
+        <div class="body">
+          <div class="slug">engagement_increased</div>
+          <div class="title">Measurable engagement spike</div>
+          <div class="example"><strong>Check-in email → Ben replied within 4h, 3 follow-up messages that day.</strong> Staff activity density doubled WoW. Health +3.</div>
+          <div class="desc">No deal yet but the account came back to life — message volume, activity, opens, clicks all spiked.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome">🛟</div>
+        <div class="body">
+          <div class="slug">churn_prevented</div>
+          <div class="title">Churn risk averted / band held</div>
+          <div class="example"><strong>Forecast was Projected Critical by Wed; band held at At Risk (31).</strong> Forecast averted.</div>
+          <div class="desc">The intervention stopped a forecast band deterioration from materialising. Not a recovery, but a successful holding action.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome">🛠️</div>
+        <div class="body">
+          <div class="slug">process_fixed</div>
+          <div class="title">Process or workflow repaired</div>
+          <div class="example"><strong>Broken workflow repair → error rate 12% → 0%, automation completed 1,840 contacts.</strong> Health +2.</div>
+          <div class="desc">Targeted operational fix (workflow, funnel, calendar, integration). Immediate observable improvement.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome-flat">→</div>
+        <div class="body">
+          <div class="slug">no_effect_observed</div>
+          <div class="title">Executed, no downstream signal</div>
+          <div class="example"><strong>Nurture sequence sent to 1,240 contacts. 24% open / 3.2% click. No band movement, no engagement spike.</strong></div>
+          <div class="desc">The action shipped but didn't correlate with any observable change in the account. Common; worth tracking to refine the template.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome-flat">📭</div>
+        <div class="body">
+          <div class="slug">no_response</div>
+          <div class="title">No response from client</div>
+          <div class="example"><strong>Check-in email sent Mon. 0 opens, 0 replies, 0 subsequent activity.</strong> Switch to a different channel next cycle.</div>
+          <div class="desc">Specific sub-case of "no effect" where the client didn't engage at all. Signals to try a different channel or copy angle.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome-fail">✗</div>
+        <div class="body">
+          <div class="slug">negative_signal</div>
+          <div class="title">Accelerated decline post-intervention</div>
+          <div class="example"><strong>Tier-upgrade upsell → client immediately downgraded from $647 to $147 two days later.</strong> Wrong timing.</div>
+          <div class="desc">Rare and valuable — the intervention may have actively harmed the relationship. Triggers a pattern-learning entry so the proposer avoids this trigger condition in future.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome-flat">⏳</div>
+        <div class="body">
+          <div class="slug">insufficient_measurement_window</div>
+          <div class="title">Outcome deferred — not enough time</div>
+          <div class="example"><strong>Funnel nurture sequence is 4 days in; measurement window closes at 14 days. Check back Fri next week.</strong></div>
+          <div class="desc">Some interventions (long drip sequences, retention tasks) have slower feedback loops. Outcome row is created as "pending" and finalised later.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome">🎓</div>
+        <div class="body">
+          <div class="slug">pattern_candidate</div>
+          <div class="title">Successful outcome → template promotion candidate</div>
+          <div class="example"><strong>"Funnel-refresh with hero + social proof moved conversion 1.8% → 3.1% in 3 days."</strong> Second similar lift this month — Orchestrator flags it as a portfolio-wide template candidate.</div>
+          <div class="desc">When an outcome pattern recurs across clients, the intervention template graduates from one-off to library-grade.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-outcome-fail">🛑</div>
+        <div class="body">
+          <div class="slug">halted_by_operator</div>
+          <div class="title">Operator rejected the proposal before execution</div>
+          <div class="example"><strong>Tier-upgrade upsell proposal rejected — "Client's main contact is out on leave this month."</strong> Cooldown extended.</div>
+          <div class="desc">Rejection is itself a valuable signal. The rejection comment gets stored + weighted into future proposer behaviour for that account.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5 — Memory tag types -->
+  <div class="section-block" id="s5">
+    <h2>5. Memory block tag types ("what the system learned this week")</h2>
+    <p class="lead">Memory blocks drive what the system remembers about a sub-account / client. They come from two sources — <code>manual</code> (human-authored) and <code>auto_synthesised</code> (system-generated from clustered observations). Four status states: <code>active</code>, <code>draft</code>, <code>pending_review</code>, <code>rejected</code>. Schema: <code>server/db/schema/memoryBlocks.ts</code>.</p>
+
+    <div class="card-list">
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip belief">Belief</span>
+          <strong>Ben (Bright Marketing, owner) responds to text, not email.</strong>
+          <div class="desc" style="margin-top:6px;">Discrete fact with a confidence score. Influences future intervention proposals for this account (e.g. proposer picks SMS over email). Source: <code>manual</code> or <code>auto_synthesised</code> from ≥3 citations.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip pattern">Pattern</span>
+          <strong>Funnel refresh (hero + social proof) moved conversion 1.8% → 3.1% in 3 days.</strong>
+          <div class="desc" style="margin-top:6px;">Recurring behavioural signal derived from ≥5 entries. If a similar lift appears for 2 more clients, Orchestrator proposes it as a standard intervention template portfolio-wide.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip cooldown">Cooldown</span>
+          <strong>Next retention-touch not permitted until Tue 9 May</strong> (18-day cooldown on retention-call interventions).
+          <div class="desc" style="margin-top:6px;">Intervention suppression state. Prevents the proposer from repeatedly hammering the same trigger.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip correction">Correction</span>
+          <strong>Earlier belief "$347 tier is Bright's growth tier" is wrong — their plan budget is $147; $347 was a one-month promo.</strong>
+          <div class="desc" style="margin-top:6px;">Human override that invalidates a prior belief. The old belief is soft-deleted but kept for audit.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip relationship">Relationship</span>
+          <strong>Ben is the decision-maker at Bright; Sarah (account manager) is the day-to-day contact; Chris (admin) handles billing.</strong>
+          <div class="desc" style="margin-top:6px;">Contact hierarchy mapping. Influences who receives which type of agency-branded outreach.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip preference">Preference</span>
+          <strong>Bright prefers weekly digests delivered Thursday, not Friday (Ben's team does week-in-review on Thu).</strong>
+          <div class="desc" style="margin-top:6px;">Stylistic or process choice. Overrides defaults — the per-client digest schedule gets adjusted.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip constraint">Constraint</span>
+          <strong>This client has a no-automated-outbound policy; all agency-branded messages require explicit per-send approval.</strong>
+          <div class="desc" style="margin-top:6px;">Hard operational limitation. Blocks the Operate-tier proposer from auto-sending even with an approval; forces HITL on every message.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip decision">Decision</span>
+          <strong>Paused paid ads for Bright in March; switching to organic funnel strategy for Q2.</strong>
+          <div class="desc" style="margin-top:6px;">Historical choice with rationale. Audit-trail entry so next quarter's review has context.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip opportunity">Opportunity</span>
+          <strong>Bright only monitors one location; they actually have three storefronts — 2 un-onboarded. Upsell candidate.</strong>
+          <div class="desc" style="margin-top:6px;">Unmet capability / expansion signal. Gets surfaced to the operator as a growth-play candidate.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip risk">Risk</span>
+          <strong>Support response time degraded to 8h avg; was 4h. Trending worse for 3 weeks.</strong>
+          <div class="desc" style="margin-top:6px;">Anomaly-driven threshold breach. Worth surfacing even if the account's band hasn't dropped yet — leading indicator.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip insight">Insight</span>
+          <strong>Bright's email campaigns with subject-line &lt;10 chars convert 40% higher than their typical 30-char lines.</strong>
+          <div class="desc" style="margin-top:6px;">Non-obvious correlation found by the synthesis step. Gets shown in the digest; can be cited by the proposer.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body" style="grid-column: 1 / -1;">
+          <span class="tag-chip hypothesis">Hypothesis</span>
+          <strong>Bright's recent CPL spike may correlate with the Meta algorithm change on 8 April — unverified; check again next week.</strong>
+          <div class="desc" style="margin-top:6px;">Tentative explanation awaiting more evidence. Shown in digest with explicit confidence marker. Promoted to <code>insight</code> or <code>pattern</code> once validated.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 14px; padding: 12px 14px; background: #f5f3ff; border-radius: 6px; font-size: 12px; color: #4c1d95;">
+      <strong>Confidence-tier routing</strong> (from memory-and-briefings spec §5.7):
+      auto-synthesised blocks with confidence <strong>&gt;0.85</strong> → <code>active</code> immediately;
+      <strong>0.6–0.85</strong> → <code>pending_review</code> (HITL queue);
+      <strong>&lt;0.6</strong> → dropped. Manual blocks always start <code>active</code> unless marked <code>draft</code>.
+    </div>
+  </div>
+
+  <!-- Section 6 — Monday handoff teasers -->
+  <div class="section-block" id="s6">
+    <h2>6. Monday handoff teasers (the forward bridge in Friday's digest)</h2>
+    <p class="lead">Short look-ahead bullets at the end of the Friday digest that tee up Monday's briefing. Small enough not to break the digest's backward-looking role; specific enough that the operator knows what's coming.</p>
+
+    <div class="card-list">
+      <div class="card">
+        <div class="marker m-handoff">📅</div>
+        <div class="body">
+          <div class="slug">upcoming_event_preview</div>
+          <div class="title">Scheduled event preview</div>
+          <div class="example"><strong>"Prep for the DFY funnel audit (Tue 25 Apr, 11:00) — suggested pre-work: pull latest conversion data + competitor landing pages."</strong></div>
+          <div class="desc">A specific upcoming event + suggested pre-work so Monday morning isn't a scramble.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">💡</div>
+        <div class="body">
+          <div class="slug">pre_work_suggestion</div>
+          <div class="title">Pre-work suggestion for known deadline</div>
+          <div class="example"><strong>"Review updated client brand guidelines before next Thursday's call — 3 pages, uploaded by Ben on Wed."</strong></div>
+          <div class="desc">The system saw a document come in that matters for an upcoming event; flags the reading time.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">🤔</div>
+        <div class="body">
+          <div class="slug">decision_pending</div>
+          <div class="title">Ambiguous decision awaiting your call</div>
+          <div class="example"><strong>"Should we escalate the stalled Mountain Ridge deal to a discovery call, or close it as lost? Monday's briefing will surface this for you."</strong></div>
+          <div class="desc">When the proposer can't decide between two reasonable paths, it teases the decision for you to resolve Monday.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">🚨</div>
+        <div class="body">
+          <div class="slug">deadline_alert</div>
+          <div class="title">Hard deadline reminder</div>
+          <div class="example"><strong>"Bright's retention window closes Friday 25 Apr — Monday's briefing will be the last reminder before it's too late."</strong></div>
+          <div class="desc">Forcing-function deadlines surface here so they're not buried.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">📥</div>
+        <div class="body">
+          <div class="slug">recommended_prep</div>
+          <div class="title">Data-driven prep for new inputs</div>
+          <div class="example"><strong>"3 new contacts imported overnight from Bright's Uphex ads — prepare outreach sequence? Template suggested."</strong></div>
+          <div class="desc">Fresh data that warrants action; the briefing will surface a proposer suggestion.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">💬</div>
+        <div class="body">
+          <div class="slug">follow_up_pending</div>
+          <div class="title">Waiting on someone</div>
+          <div class="example"><strong>"Waiting on client response to Thursday's proposal — if no reply by Monday midday, briefing will propose a nudge."</strong></div>
+          <div class="desc">Conversation state that tees up an escalation if silence continues.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">👥</div>
+        <div class="body">
+          <div class="slug">team_capacity_note</div>
+          <div class="title">Team-availability note</div>
+          <div class="example"><strong>"Sarah and David on holiday next week — Monday briefing will redistribute the 11 tasks assigned to them."</strong></div>
+          <div class="desc">Known capacity constraints so Monday's task redistribution isn't a surprise.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">🔁</div>
+        <div class="body">
+          <div class="slug">proposer_next_cycle</div>
+          <div class="title">Proposer will surface on next cycle</div>
+          <div class="example"><strong>"Ad spend reallocation — Spring Promo ended under CPL target; the proposer will suggest Google-Ads redirect on Monday."</strong></div>
+          <div class="desc">Pre-signals that a specific proposal is already queued for Monday so you know what to expect.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">📈</div>
+        <div class="body">
+          <div class="slug">upsell_candidate</div>
+          <div class="title">Upsell setup for the week ahead</div>
+          <div class="example"><strong>"Tier-re-upgrade conversation — band trajectory supports a case for $347→$647 upgrade at the Tuesday audit."</strong></div>
+          <div class="desc">Framing for a specific pitch the next week, with the data to back it.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="marker m-handoff">🎉</div>
+        <div class="body">
+          <div class="slug">milestone_celebration</div>
+          <div class="title">Milestone worth celebrating</div>
+          <div class="example"><strong>"2-year anniversary with Bright is this Saturday — Monday's briefing will surface a thank-you template."</strong></div>
+          <div class="desc">Relationship-strengthening touchpoints that the system doesn't want the operator to miss.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 7 — Integration fingerprints -->
+  <div class="section-block" id="s7">
+    <h2>7. Integration fingerprints — what we can detect in a sub-account</h2>
+    <p class="lead">Chips rendered on the portfolio dashboard + per-client drill-down. Each chip = one detected integration. Matching happens via the fingerprint library (seeded per-CRM) against canonical artefacts: <code>canonical_conversation_providers</code>, <code>canonical_workflow_definitions.actionTypes</code>, outbound webhook domains, custom-field / tag prefixes, contact sources. The library is editable per-org and learns from unclassified signals.</p>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Native GHL primitives (always present, always detectable)</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip native">🏢 Sub-accounts <span class="cat">· native</span></span>
+      <span class="chip native">👥 Contacts <span class="cat">· native</span></span>
+      <span class="chip native">📊 Pipelines <span class="cat">· native</span></span>
+      <span class="chip native">💬 Conversations <span class="cat">· native</span></span>
+      <span class="chip native">📅 Calendars <span class="cat">· native</span></span>
+      <span class="chip native">📄 Funnels & pages <span class="cat">· native</span></span>
+      <span class="chip native">⚙️ Workflows <span class="cat">· native</span></span>
+      <span class="chip native">📋 Forms <span class="cat">· native</span></span>
+      <span class="chip native">☎️ Call tracking <span class="cat">· native</span></span>
+      <span class="chip native">💸 Payments <span class="cat">· native</span></span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Third-party AI (conversation provider ID + workflow action type)</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip ai">🤖 CloseBot · 168 msgs/30d</span>
+      <span class="chip ai">🤖 SparkChat · 42 msgs/30d</span>
+      <span class="chip ai">🤖 Chat2Lead · 0 msgs/30d <span class="cat">· dormant</span></span>
+      <span class="chip ai">🤖 ManyChat · 840 msgs/30d</span>
+      <span class="chip ai">🤖 Leadsales · 23 msgs/30d</span>
+      <span class="chip ai">🤖 Botpress · 5 msgs/30d</span>
+      <span class="chip ai">🤖 VoiceAI · 18 calls/30d</span>
+      <span class="chip ai">🤖 Open AI via webhook · 302 calls/30d</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Paid ads (webhook domain + workflow action type)</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip ads">📊 Uphex · 6 ads active</span>
+      <span class="chip ads">📊 Facebook Ads · $340/day spend</span>
+      <span class="chip ads">📊 Google Ads · 3 campaigns</span>
+      <span class="chip ads">📊 TikTok Ads · 1 campaign</span>
+      <span class="chip ads">📊 LinkedIn Ads · paused</span>
+      <span class="chip ads">📊 AdEspresso · 2 split-tests</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Messaging / voice providers</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip msg">📞 Twilio · 120 SMS/30d</span>
+      <span class="chip msg">📞 Plivo · 45 calls/30d</span>
+      <span class="chip msg">📞 Vonage · 8 calls/30d</span>
+      <span class="chip msg">💬 WhatsApp Business · 310 msgs/30d</span>
+      <span class="chip msg">💬 Messenger · 56 msgs/30d</span>
+      <span class="chip msg">💬 Instagram DM · 24 msgs/30d</span>
+      <span class="chip msg">📧 Mailgun · 2,400 sends/30d</span>
+      <span class="chip msg">📧 SendGrid · 1,820 sends/30d</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Payment processors</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip pay">💳 Stripe · $12,400 processed</span>
+      <span class="chip pay">💳 PayPal · $2,180 processed</span>
+      <span class="chip pay">💳 Authorize.net · $820 processed</span>
+      <span class="chip pay">💳 Square · 14 transactions</span>
+      <span class="chip pay">💳 NMI · 23 transactions</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Automation / no-code platforms</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip auto">🔌 Zapier · 8 active zaps</span>
+      <span class="chip auto">🔌 Make · 14 ops/30d</span>
+      <span class="chip auto">🔌 Pabbly · 3 workflows</span>
+      <span class="chip auto">🔌 n8n · 2 workflows</span>
+      <span class="chip auto">🔌 IFTTT · 1 applet</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Scheduling / productivity</div>
+    <div class="chip-grid" style="margin-bottom: 18px;">
+      <span class="chip sched">📅 Calendly · 36 bookings/30d</span>
+      <span class="chip sched">📅 Acuity · 14 bookings/30d</span>
+      <span class="chip sched">📅 Google Calendar · synced</span>
+      <span class="chip sched">📅 Outlook Calendar · synced</span>
+      <span class="chip sched">📝 Google Docs · 3 embedded</span>
+      <span class="chip sched">📝 Notion · 2 embedded</span>
+      <span class="chip sched">🗂️ Airtable · 1 base</span>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Unclassified (awaiting your one-click label — the flywheel)</div>
+    <div class="chip-grid">
+      <span class="chip unk">❓ Unknown provider <code style="font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;border-radius:3px;">prov_w8a2zz</code> · 847 msgs across 23 subs</span>
+      <span class="chip unk">❓ Unknown webhook <code style="font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;border-radius:3px;">hooks.funnel-lift.io</code> · 120 events/30d</span>
+      <span class="chip unk">❓ Unknown field prefix <code style="font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;border-radius:3px;">retnv_*</code> · 14 custom fields</span>
+    </div>
+
+    <div style="margin-top: 16px; padding: 12px 14px; background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 6px; font-size: 12px; color: #155e75;">
+      <strong>The learning flywheel:</strong> each unclassified signal that crosses the occurrence threshold (default: 50 events across ≥3 sub-accounts) gets surfaced as a one-click "what is this?" prompt. Your answer becomes an org-scope fingerprint and retroactively tags every sub-account. If marked broadly applicable, it promotes to system-scope and benefits every future customer's first-day detection.
+    </div>
+  </div>
+
+  <!-- Section 8 — Top movers -->
+  <div class="section-block" id="s8">
+    <h2>8. Top movers — why health scores change</h2>
+    <p class="lead">Every health-score delta carries an attribution reason. Rendered in the Friday digest's "Top movers" section and per-client drill-down "what changed" panel. Both directions matter equally — positive movers show what's working, negative movers show what to watch.</p>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Positive movers (health score rising)</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">intervention_effective</div>
+          <div class="title">Intervention correlated with improvement</div>
+          <div class="example"><strong>Cairns Solar · 82 → 87 (+5)</strong> · check-in email correlated with new funnel published 48h later.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">staff_activity_recovered</div>
+          <div class="title">Staff activity returned to baseline</div>
+          <div class="example"><strong>Highland Fitness · 79 → 82 (+3)</strong> · team logged 47 staff actions this week after 2 weeks of silence.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">tier_upgraded</div>
+          <div class="title">Client paid tier upgrade</div>
+          <div class="example"><strong>Pioneer Realty · 70 → 76 (+6)</strong> · upgraded $347 → $647. More features, more activity.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">new_integration_connected</div>
+          <div class="title">New integration connected</div>
+          <div class="example"><strong>Vista Roofing · 57 → 61 (+4)</strong> · CloseBot activity doubled; Calendly integration added.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">deal_conversion_spike</div>
+          <div class="title">Multiple deals closed in window</div>
+          <div class="example"><strong>Bright Marketing · 28 → 31 (+3)</strong> · Chavez Auto deal closed $4,200.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">funnel_published</div>
+          <div class="title">New funnel went live</div>
+          <div class="example"><strong>Edmonton Tax · 42 → 48 (+6)</strong> · "Tax-season consult" funnel published; 34 leads in 7 days.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">response_time_improved</div>
+          <div class="title">Support/response time tightened</div>
+          <div class="example"><strong>Granite Bay Therapy · 68 → 72 (+4)</strong> · avg reply 8h → 2h after reassignment.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">payment_recovered</div>
+          <div class="title">Failed payment retried + succeeded</div>
+          <div class="example"><strong>Coastal Plumbing · 52 → 55 (+3)</strong> · 2 failed charges retried and recovered; churn risk eased.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Negative movers (health score declining)</div>
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">tier_downgraded</div>
+          <div class="title">Client downgraded their tier</div>
+          <div class="example"><strong>Smith Dental · 30 → 12 (−18)</strong> · $647 → $147 over 90 days.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">prolonged_silence</div>
+          <div class="title">Prolonged staff / contact silence</div>
+          <div class="example"><strong>Apex Realty · 24 → 15 (−9)</strong> · no staff activity for 42 days.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">engagement_drop</div>
+          <div class="title">Engagement collapsed week-over-week</div>
+          <div class="example"><strong>Bright Marketing · 34 → 28 (−6)</strong> · activity dropped 60% WoW after tier change.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">payment_failure_unresolved</div>
+          <div class="title">Payment failure not retried</div>
+          <div class="example"><strong>Northwood Pediatrics · 12 → 8 (−4)</strong> · 3 declined charges sitting open.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">team_capacity_reduced</div>
+          <div class="title">Staff left / reassigned</div>
+          <div class="example"><strong>Riverside Wellness · 34 → 31 (−3)</strong> · account manager Sarah rotated off; 11 tasks unassigned.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">ad_spend_paused</div>
+          <div class="title">Paid campaign shutdown without replacement</div>
+          <div class="example"><strong>Maple Veterinary · 58 → 52 (−6)</strong> · Facebook spend cut to $0; no organic fallback.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">deal_regression</div>
+          <div class="title">Opportunities moved backward</div>
+          <div class="example"><strong>Pioneer Realty · 76 → 70 (−6)</strong> · 3 deals moved from "Proposal Sent" back to "Negotiation".</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">integration_sync_error</div>
+          <div class="title">Integration broke — data stale</div>
+          <div class="example"><strong>Chavez Auto · 65 → 62 (−3)</strong> · GHL OAuth token expired; sync stopped for 4 days.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">multi_signal_composite</div>
+          <div class="title">Multi-signal composite drop</div>
+          <div class="example"><strong>Coastal Plumbing · 52 → 44 (−8)</strong> · payment fail + silence + stage regression co-occurred.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">seasonal_expected_decline</div>
+          <div class="title">Seasonal pattern (expected — flagged for context)</div>
+          <div class="example"><strong>Highland Fitness · 82 → 78 (−4)</strong> · seasonal Q2 slowdown; matches prior years' baseline.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 9 — Per-client KPIs -->
+  <div class="section-block" id="s9">
+    <h2>9. Per-client KPI types (drill-down metric cards)</h2>
+    <p class="lead">Metrics rendered in per-client views. Pulled from GHL canonical entities + computed inside the Reporting Agent's analysis steps. Configurable per org — the template chooses which KPIs surface on the drill-down for a given vertical.</p>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Contact & engagement</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">1,420</div><div class="lbl">Total contacts</div><div class="slug">total_contacts</div></div>
+      <div class="kpi-card"><div class="val">+82</div><div class="lbl">New / month</div><div class="slug">new_contacts_month</div></div>
+      <div class="kpi-card"><div class="val">76%</div><div class="lbl">Reply rate 24h</div><div class="slug">contact_response_rate</div></div>
+      <div class="kpi-card"><div class="val">2.4h</div><div class="lbl">Avg reply time</div><div class="slug">response_time_avg</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Pipeline</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">$48k</div><div class="lbl">Pipeline value</div><div class="slug">pipeline_value</div></div>
+      <div class="kpi-card"><div class="val">18</div><div class="lbl">Open deals</div><div class="slug">deal_count_open</div></div>
+      <div class="kpi-card"><div class="val">$2,650</div><div class="lbl">Avg deal size</div><div class="slug">average_deal_size</div></div>
+      <div class="kpi-card"><div class="val">11d</div><div class="lbl">Sales cycle</div><div class="slug">sales_cycle_length</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Revenue</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">$347</div><div class="lbl">MRR</div><div class="slug">monthly_recurring_revenue</div></div>
+      <div class="kpi-card"><div class="val">$42k</div><div class="lbl">Revenue YTD</div><div class="slug">total_revenue_ytd</div></div>
+      <div class="kpi-card"><div class="val">$8,340</div><div class="lbl">Avg CLV</div><div class="slug">customer_lifetime_value</div></div>
+      <div class="kpi-card"><div class="val">28%</div><div class="lbl">Churn risk</div><div class="slug">churn_risk_score</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Campaigns & marketing</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">24%</div><div class="lbl">Email open rate</div><div class="slug">email_open_rate</div></div>
+      <div class="kpi-card"><div class="val">3.2%</div><div class="lbl">Email click rate</div><div class="slug">email_click_rate</div></div>
+      <div class="kpi-card"><div class="val">8%</div><div class="lbl">SMS click rate</div><div class="slug">sms_click_through_rate</div></div>
+      <div class="kpi-card"><div class="val">72%</div><div class="lbl">Meeting attendance</div><div class="slug">meeting_attendance_rate</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Team activity</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">47</div><div class="lbl">Staff actions / wk</div><div class="slug">outbound_contact_frequency</div></div>
+      <div class="kpi-card"><div class="val">88%</div><div class="lbl">Task completion</div><div class="slug">task_completion_rate</div></div>
+      <div class="kpi-card"><div class="val">3</div><div class="lbl">Staff assigned</div><div class="slug">staff_assigned_count</div></div>
+      <div class="kpi-card"><div class="val">6</div><div class="lbl">Days since activity</div><div class="slug">staff_activity_last_days</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Cost & efficiency</div>
+    <div class="kpi-grid" style="margin-bottom: 16px;">
+      <div class="kpi-card"><div class="val">$42</div><div class="lbl">Cost per lead</div><div class="slug">cost_per_lead</div></div>
+      <div class="kpi-card"><div class="val">$620</div><div class="lbl">CAC</div><div class="slug">customer_acquisition_cost</div></div>
+      <div class="kpi-card"><div class="val">$840</div><div class="lbl">Ad spend / mo</div><div class="slug">marketing_spend_month</div></div>
+      <div class="kpi-card"><div class="val">13×</div><div class="lbl">CLV / CAC</div><div class="slug">clv_cac_ratio</div></div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Quality & operations</div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="val">31</div><div class="lbl">Health score</div><div class="slug">health_score</div></div>
+      <div class="kpi-card"><div class="val">2</div><div class="lbl">Anomalies / wk</div><div class="slug">anomaly_flags_week</div></div>
+      <div class="kpi-card"><div class="val">17m</div><div class="lbl">Data freshness</div><div class="slug">data_freshness_minutes</div></div>
+      <div class="kpi-card"><div class="val">4</div><div class="lbl">Integrations active</div><div class="slug">active_integrations_count</div></div>
+    </div>
+  </div>
+
+  <!-- Section 10 — Review queue item types -->
+  <div class="section-block" id="s10">
+    <h2>10. Review-queue item types (HITL approval surface)</h2>
+    <p class="lead">What can show up in the pending-review queue beyond ClientPulse interventions. Two underlying tables: <code>review_items</code> (action-scoped — any action with <code>gateLevel='review'</code>) and <code>memory_review_queue</code> (memory-specific). Lifecycle: <code>pending</code> → <code>approved</code> / <code>rejected</code> / <code>auto_applied</code> / <code>expired</code>.</p>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Action-scoped (from <code>review_items</code>)</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-review">✉︎</div>
+        <div class="body">
+          <div class="slug">send_email_pending</div>
+          <div class="title">Outbound email awaiting approval</div>
+          <div class="example"><strong>Smith Dental · Check-in email</strong> · "Hey, noticed you haven't been in for a bit — everything okay?"</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">📱</div>
+        <div class="body">
+          <div class="slug">send_sms_pending</div>
+          <div class="title">Outbound SMS awaiting approval</div>
+          <div class="example"><strong>Bright Marketing · SMS nudge to Ben</strong> · "Hi Ben — free for a quick call Thu?"</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">🏷️</div>
+        <div class="body">
+          <div class="slug">update_contact_pending</div>
+          <div class="title">Contact field modification</div>
+          <div class="example"><strong>Chavez Auto contact</strong> · set <code>lifecycle_stage = customer</code>, add tag <code>closed-won-q2</code></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">💼</div>
+        <div class="body">
+          <div class="slug">create_deal_pending</div>
+          <div class="title">Deal creation</div>
+          <div class="example"><strong>New opportunity for Mountain Ridge</strong> · $2,800 · "Website redesign"</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">📄</div>
+        <div class="body">
+          <div class="slug">create_page_pending</div>
+          <div class="title">Landing-page draft preview</div>
+          <div class="example"><strong>Bright Marketing</strong> · "Spring promo" funnel draft ready for approval before publish.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">📋</div>
+        <div class="body">
+          <div class="slug">create_task_pending</div>
+          <div class="title">Operator task creation</div>
+          <div class="example"><strong>Assign Sarah:</strong> "Call Ben @ Bright re: plan fit, offer 30d DFY audit."</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">⚙️</div>
+        <div class="body">
+          <div class="slug">workflow_change_pending</div>
+          <div class="title">Workflow modification</div>
+          <div class="example"><strong>Apex Realty</strong> · proposed fix to "welcome sequence" workflow (removes broken step).</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">💻</div>
+        <div class="body">
+          <div class="slug">write_patch_pending</div>
+          <div class="title">Code patch (dev-scoped)</div>
+          <div class="example">Internal: agent-suggested code change awaiting engineer review.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Memory-scoped (from <code>memory_review_queue</code>)</div>
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-review">🧠</div>
+        <div class="body">
+          <div class="slug">belief_conflict</div>
+          <div class="title">Two agents hold contradictory beliefs</div>
+          <div class="example"><strong>Agent A:</strong> "Ben prefers email." <strong>Agent B:</strong> "Ben only replies to SMS." Pick canonical.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">💭</div>
+        <div class="body">
+          <div class="slug">block_proposal</div>
+          <div class="title">Auto-synthesised memory block awaiting activation</div>
+          <div class="example"><strong>Confidence 0.72:</strong> "Bright's campaigns with subject-line &lt;10 chars convert 40% higher." Approve for use?</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">❓</div>
+        <div class="body">
+          <div class="slug">clarification_pending</div>
+          <div class="title">Agent asked a question, awaiting answer</div>
+          <div class="example"><strong>Run 8a31:</strong> "Before drafting this email, should I mention the Q2 promo that ended?"</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">🔖</div>
+        <div class="body">
+          <div class="slug">fingerprint_classification_needed</div>
+          <div class="title">Novel integration fingerprint (Section 7 flywheel)</div>
+          <div class="example"><strong>Unknown provider_id `prov_w8a2zz`</strong> seen 847× across 23 sub-accounts — what is it?</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 11 — Cold-start / insufficient-data states -->
+  <div class="section-block" id="s11">
+    <h2>11. Cold-start / insufficient-data states</h2>
+    <p class="lead">When a sub-account doesn't have enough signal yet, the dashboard and intelligence surfaces render fallback states rather than bad/empty data. Implicit in the intelligence skills' early-return logic.</p>
+
+    <div class="card-list">
+      <div class="card">
+        <div class="marker m-outcome-flat">⏱️</div>
+        <div class="body">
+          <div class="slug">just_connected</div>
+          <div class="title">Just connected (&lt;24h since OAuth)</div>
+          <div class="example">Render: "Connecting… initial sync in progress (usually 15–30 minutes for 180 clients)."</div>
+          <div class="desc">Dashboard shows placeholder cards; no scoring attempted.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">📉</div>
+        <div class="body">
+          <div class="slug">insufficient_data_14_days</div>
+          <div class="title">Building baseline (&lt;14 data points)</div>
+          <div class="example">Render: "Baseline building — scoring available after 14 days of activity."</div>
+          <div class="desc">Health score shows as grey pill; anomaly detection disabled.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">⏸️</div>
+        <div class="body">
+          <div class="slug">paused_sync</div>
+          <div class="title">Sync paused by operator or system</div>
+          <div class="example">Render: "Sync paused 12 days ago. Scores frozen at last snapshot; data not current."</div>
+          <div class="desc">Scores shown but dimmed + timestamp callout.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-fail">⚠️</div>
+        <div class="body">
+          <div class="slug">sync_error_state</div>
+          <div class="title">Integration broken (auth expired, API error, revoked)</div>
+          <div class="example">Render: "OAuth token expired. Reconnect GHL to resume scoring. Data last refreshed 4 days ago."</div>
+          <div class="desc">Prominent error card with reconnect CTA.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">🪹</div>
+        <div class="body">
+          <div class="slug">empty_subaccount</div>
+          <div class="title">Connected but no activity yet</div>
+          <div class="example">Render: "No contacts, deals, or conversations yet. Scores will appear once the team starts using the account."</div>
+          <div class="desc">Often true for freshly-provisioned sub-accounts.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">📊</div>
+        <div class="body">
+          <div class="slug">low_activity_signal</div>
+          <div class="title">Too sparse for anomaly detection</div>
+          <div class="example">Render: "Low activity. Anomaly detection disabled until volume reaches threshold."</div>
+          <div class="desc">Health score may still appear but anomaly + churn-risk pipelines are skipped.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">🆕</div>
+        <div class="body">
+          <div class="slug">new_team_member</div>
+          <div class="title">New staff — no historical pattern to compare</div>
+          <div class="example">Render: "New team member added — building activity baseline for Sarah."</div>
+          <div class="desc">Relevant for per-user attribution signals; avoids false alarms while new staff learn.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">🍂</div>
+        <div class="body">
+          <div class="slug">seasonal_baseline_unknown</div>
+          <div class="title">First occurrence of a seasonal window</div>
+          <div class="example">Render: "First Q-end for this client — establishing seasonal baseline."</div>
+          <div class="desc">Prevents false-positive "sharp activity spike" alerts during expected seasonal swings.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 12 — Tier-migration events -->
+  <div class="section-block" id="s12">
+    <h2>12. Tier-migration events (what triggers a band change on the dashboard)</h2>
+    <p class="lead">What causes a client's subscription/tier row to change. Each one emits a <code>subaccount_tier_history</code> row and may trigger a <code>tier_downgrade_retention_alert</code> intervention. Source: <code>org_subscriptions</code> + GHL billing webhooks + agency-internal records.</p>
+
+    <div class="card-list cols-2">
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">upgrade_by_user_request</div>
+          <div class="title">Client paid for an upgrade</div>
+          <div class="example">Pioneer Realty moved $347 → $647 on 12 Apr. Upgrade request initiated by Ben directly.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">upgrade_by_subaccount_count</div>
+          <div class="title">Auto-upgrade by usage threshold</div>
+          <div class="example">Contact count crossed 10k → tier auto-moved to Growth ($647).</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">↑</div>
+        <div class="body">
+          <div class="slug">upgrade_trial_converted</div>
+          <div class="title">Free trial converted to paid</div>
+          <div class="example">Maple Veterinary 14-day trial converted to $147/mo on day 12.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">downgrade_by_user_request</div>
+          <div class="title">Client requested a downgrade</div>
+          <div class="example">Smith Dental moved $647 → $347 on 18 Jan (89 days before today). Strongest leading indicator of churn.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-down">↓</div>
+        <div class="body">
+          <div class="slug">downgrade_by_subaccount_count</div>
+          <div class="title">Auto-downgrade by usage drop</div>
+          <div class="example">Contact count fell below Growth threshold for 3 consecutive months → auto-moved to Starter.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-fail">✗</div>
+        <div class="body">
+          <div class="slug">downgrade_by_cancellation</div>
+          <div class="title">Client cancelled → demoted to trial/free</div>
+          <div class="example">Apex Realty cancelled 14 Apr. <code>status='cancelled'</code>, <code>current_period_end</code> locked.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">⏸️</div>
+        <div class="body">
+          <div class="slug">subscription_paused</div>
+          <div class="title">Client paused (seasonal, hiatus)</div>
+          <div class="example">Vista Roofing paused Jan–Mar (off-season). <code>status='paused'</code>, resume date 01 Apr.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">▶️</div>
+        <div class="body">
+          <div class="slug">subscription_resumed</div>
+          <div class="title">Paused account reactivated</div>
+          <div class="example">Vista Roofing resumed on 01 Apr. Scoring re-enabled; baseline re-established over 14d.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">🎁</div>
+        <div class="body">
+          <div class="slug">trial_extension_granted</div>
+          <div class="title">Trial extension (admin override)</div>
+          <div class="example">Granite Bay Therapy trial extended +14 days by support. Logged with operator attribution.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome-flat">🏢</div>
+        <div class="body">
+          <div class="slug">enterprise_custom_tier</div>
+          <div class="title">Enterprise custom negotiated tier</div>
+          <div class="example">Edmonton Tax on custom $1,200/mo multi-location plan. Outside the standard 3-tier model.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 14px; padding: 12px 14px; background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 12px; color: #065f46;">
+      <strong>Module entitlement side-effect:</strong> when a tier changes, <code>org_subscriptions</code> updates; the allowlist resolver reflects the new module set immediately. Agents in the new <code>allowed_agent_slugs</code> resume; agents outside go dormant. Scheduled tasks for disallowed agents stop firing; run history preserved for audit.
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
