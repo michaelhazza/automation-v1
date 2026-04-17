@@ -1,4 +1,4 @@
--- migrations/0160_p1_scheduled_polling.sql
+-- migrations/0161_p1_scheduled_polling.sql
 --
 -- P1: Scheduled polling infrastructure for integration connectors.
 -- Adds sync-tracking columns to integration_connections and creates
