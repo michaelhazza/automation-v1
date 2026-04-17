@@ -1062,9 +1062,11 @@ Six phases, each a discrete shippable slice. Every phase leaves the system in a 
 - Intervention queue widget on dashboard (top-5 pending; overflow → `/clientpulse/interventions`).
 - Revenue-at-risk + churn projection headlines.
 - Monday-morning email per §7.2: deep-linked per-client rows, band-change delta banner, pending-interventions count, agency-timezone delivery, one email per org.
-- **Intelligence Briefing playbook integration (§13.3):** add `render_portfolio_health_section` step reading `reportService.getLatestReport()`.
-- **Weekly Digest playbook integration (§13.3):** add matching step with week-over-week emphasis.
-- **Portfolio Rollup enrichment (§13.3):** include latest `portfolio_health` report counts in the org-wide digest artefact.
+- **Sub-account Intelligence Briefing integration (§13.5):** add `render_portfolio_health_section_briefing` step (forward-looking, per-client) to `intelligence-briefing.playbook.ts`. Use `skipWhen` to no-op when ClientPulse module is not enabled.
+- **Sub-account Weekly Digest integration (§13.5):** add `render_portfolio_health_section_digest` step (backward-looking, per-client) to `weekly-digest.playbook.ts`. Same `skipWhen` guard.
+- **Build org-level playbooks (NEW — §13.3):** create `server/playbooks/intelligence-briefing-org.playbook.ts` and `server/playbooks/weekly-digest-org.playbook.ts`. Both run on the org-subaccount. Both ship with the ClientPulse render step (`skipWhen` guarded). The org-level briefing mockup and digest mockup are the design targets.
+- **Seed all four playbooks** into `system_playbook_templates` (currently only `.ts` files exist; no DB seed). New seed migration.
+- **Portfolio Rollup deprecation path (§13.3):** `portfolioRollupJob.ts` continues to run during the transition. Once org-level playbooks are seeded and stable, deprecate the job; the org-level playbooks supersede it.
 - `ClientPulseConfigPage` for factor weights, signal thresholds, band cutoffs, intervention templates, `staffActivity` config, `integrationFingerprints` seed library + learned fingerprints, Monday-email timezone + suppression rules.
 
 **Ship gate:** Kel can open one screen, see all 180 clients ranked, drill into any one, approve or reject a proposed intervention, and edit the templates driving future proposals — all without touching code. Monday email arrives with deep links. Intelligence Briefing and Weekly Digest include a Portfolio Health section.
@@ -1263,53 +1265,160 @@ The ClientPulse module is about **65% scaffolded** out of the box for a GHL agen
 
 ### 13.1 What exists
 
-- **Intelligence Briefing** — playbook at `server/playbooks/intelligence-briefing.playbook.ts`, scheduled Monday 07:00 (configurable), per-subaccount. Produces a delivered artefact (email + optional Slack + optional portal).
-- **Weekly Digest** — playbook at `server/playbooks/weekly-digest.playbook.ts`, scheduled Friday 17:00 (configurable), per-subaccount.
-- **Portfolio Rollup** — pg-boss job `server/jobs/portfolioRollupJob.ts`, Monday 08:00 + Friday 18:00, aggregates org-wide playbook-run status + memory-review queue counts into the org-subaccount inbox. Runs *after* the per-subaccount playbooks so it sees their outputs.
+- **Intelligence Briefing** — playbook at `server/playbooks/intelligence-briefing.playbook.ts`, scheduled Monday 07:00 (configurable). 5-step DAG: setup_schedule → research → draft → publish_portal → send_email. Schema in `intelligence-briefing.schema.ts`. Default schedule in `server/config/defaultSchedules.ts`.
+- **Weekly Digest** — playbook at `server/playbooks/weekly-digest.playbook.ts`, scheduled Friday 17:00 (configurable). 4-step DAG: setup_schedule → gather → draft → deliver.
+- **Portfolio Rollup** — pg-boss job `server/jobs/portfolioRollupJob.ts`, Monday 08:00 + Friday 18:00 (intentional one-hour offset *after* the sub-account playbooks fire). Aggregates org-wide playbook-run status + memory-review queue counts into the org-subaccount inbox. **NOT** a playbook — a job that calls `portfolioRollupService.runPortfolioRollup(orgId, kind)`.
 - **`reports` table** — canonical store for generated reports, already supports `reportType='portfolio_health'` (`server/services/reportService.ts:79`).
 
-### 13.2 Is surfacing ClientPulse data in both the dashboard AND the briefings a bad design decision?
+### 13.2 Four-quadrant playbook coverage (briefing × digest × org × sub-account)
 
-No — it is the correct DRY pattern **as long as the data flows through the canonical `reports` row, not through three separate query paths.**
+| Quadrant | Status | Owner / file | Gap |
+|---|---|---|---|
+| Sub-account Intelligence Briefing | **Built** as `.playbook.ts` | `server/playbooks/intelligence-briefing.playbook.ts` | Not yet INSERT-seeded; `system_playbook_templates` table empty for this slug |
+| Sub-account Weekly Digest | **Built** as `.playbook.ts` | `server/playbooks/weekly-digest.playbook.ts` | Same — no seed row |
+| Org-level Intelligence Briefing | **Missing** | — | Needs new file `intelligence-briefing-org.playbook.ts` running on the org-subaccount per §13.3. **The Monday-morning Intelligence Briefing mockup at `tasks/clientpulse-mockup-intelligence-briefing.html` IS this missing playbook's output** — the mockup describes the design target. |
+| Org-level Weekly Digest | **Partial as a job, not a playbook** | `server/jobs/portfolioRollupJob.ts` + `portfolioRollupService.runPortfolioRollup()` | Should be promoted to a real playbook (`weekly-digest-org.playbook.ts`) running on the org-subaccount. **The Friday-afternoon Weekly Digest mockup at `tasks/clientpulse-mockup-weekly-digest.html` IS this playbook's output.** Until the playbook ships, `portfolioRollupJob.ts` covers the core rollup but needs extending to render the look-back content shown in the mockup. |
 
-Bad version: dashboard queries `client_pulse_health_snapshots` directly; Intelligence Briefing re-queries `client_pulse_health_snapshots`; Weekly Digest re-queries `client_pulse_health_snapshots`. Three consumers, three query implementations, three places to fix when the schema changes.
+### 13.3 Architectural recommendation: Pattern A (four separate playbook definitions, no engine changes)
 
-Good version (proposed): after each ClientPulse scan, `reportService.completeReport(orgId, {reportType: 'portfolio_health', counts, htmlContent, structuredSummaryJson})` writes a single canonical row. Dashboard reads it. Intelligence Briefing reads it. Weekly Digest reads it. Portfolio Rollup reads it. One source of truth; four renderings.
+`playbook_runs.subaccount_id` is a `NOT NULL` foreign key. The engine cannot run a playbook at org scope without a separate definition. Two options:
 
-### 13.3 Concrete wiring
+| Pattern | Description | Recommendation |
+|---|---|---|
+| **A — Four definitions** | `intelligence-briefing` + `weekly-digest` + `intelligence-briefing-org` + `weekly-digest-org` | **Preferred.** Matches existing codebase shape, no engine changes, each playbook references its scope's data clearly. |
+| **B — Two definitions, dual-scope invocation** | Same playbook invoked at sub-account or org level, engine resolves entity context | Requires engine changes (relax `subaccount_id NOT NULL`), permissions model changes, templating context complexity. Not justified by gain. |
+
+**How org-level playbooks satisfy the `subaccount_id NOT NULL` constraint without engine changes:** the canonical answer is the **org-subaccount** pattern (`subaccounts.isOrgSubaccount = true`), shipped in `migrations/0106_org_subaccount.sql` and already used by `portfolioRollupService.ts`. Every org has exactly one org-subaccount row that represents the org's own workspace — it's where cross-client agents and the Orchestrator already live.
+
+Org-level playbooks are sub-account-scoped playbooks **that happen to run on the org-subaccount**, with logic that aggregates across all *sibling* sub-accounts (where `isOrgSubaccount = false`) belonging to the same `organisationId`. From the engine's perspective they look identical to any other playbook run; from the rendering perspective they produce org-wide output because their data-fetch steps query across the portfolio rather than scoping to one client.
+
+Concretely:
+
+```
+intelligence-briefing.playbook.ts      → runs on regular sub-accounts
+                                         (one per client, focused on that client's work)
+
+intelligence-briefing-org.playbook.ts  → runs on the org-subaccount
+                                         (one per org, aggregates across siblings)
+
+weekly-digest.playbook.ts              → regular sub-accounts (per-client retrospective)
+weekly-digest-org.playbook.ts          → org-subaccount (portfolio-wide retrospective)
+```
+
+This keeps the playbook engine completely unchanged. `playbook_runs.subaccount_id` always points to a real sub-account row — sometimes the org-subaccount, sometimes a client sub-account. Permissions, RLS, idempotency, scheduling, delivery — all unchanged.
+
+`portfolioRollupJob.ts` remains in place during the transition. Long-term, it can be deprecated in favour of the two new org-level playbooks once they're seeded and shipping (no functional regression — the rollup output becomes a playbook-step output instead of a job-emitted inbox item).
+
+### 13.4 Module-agnostic graceful skipping
+
+The playbook engine already supports `{ skipped: true }` for empty optional inputs and `skipWhen` conditions on `action_call` steps (per `tasks/playbooks-spec.md` §5.2). The proposed ClientPulse step in §13.5 must use this pattern so orgs without ClientPulse enabled still get a useful briefing/digest:
+
+```ts
+// pseudocode for the new step in either playbook
+{
+  slug: 'render_portfolio_health_section',
+  type: 'action_call',
+  skipWhen: '!modules.client_pulse.enabled || !reports.latest("portfolio_health")',
+  action: 'render_portfolio_health_section',
+  inputs: { latestReport: 'reports.latest("portfolio_health")' }
+}
+```
+
+If the org lacks the module, or the module is enabled but no scan has produced a report yet, the section is omitted and the rest of the briefing renders unchanged. The other sections (research findings, memory-block synthesis, weekly work summary, KPI movement, pending HITL items) keep producing useful output regardless of which modules are enabled.
+
+This is the abstraction guarantee: **the briefing and digest are useful for every org; ClientPulse is one optional contributor among several.**
+
+### 13.5 Briefing vs Digest — different roles, different ClientPulse content
+
+The two playbooks are intentionally split in time and frame:
+
+| | **Intelligence Briefing** (Mon 07:00) | **Weekly Digest** (Fri 17:00) |
+|---|---|---|
+| **Frame** | **Forward-looking.** "Here's the week ahead — what to focus on, decide, or watch." | **Backward-looking.** "Here's the week behind — what happened, what worked, what we learned." |
+| **Audience job-to-be-done** | Drive Monday-morning action. Kel scans → "I have to do these 3 things today." | Drive Friday-afternoon reflection + proposer-template iteration. |
+
+The **ClientPulse section in each playbook must respect this split.** Same canonical `reports.portfolio_health` row; different rendering emphasis.
+
+**Briefing — Portfolio Health section (forward content only):**
+
+| Sub-section | Source |
+|---|---|
+| **Predictive risk forecast** — clients projected to enter Watch / At Risk / Critical this week if trajectory continues | Trend extrapolation on `client_pulse_health_snapshots` timeseries |
+| **Tier-downgrade window warnings** — clients in the typical N-day window before a follow-on downgrade based on historical patterns | `subaccount_tier_history` + cohort pattern matching |
+| **Pending interventions awaiting your approval** | `reviewItems` filtered by `actions.actionType='client_pulse_intervention'`, `status='pending'` |
+| **Intervention cooldowns ending this week** — proposer will surface fresh interventions; act first if you want a different play | `interventionService.checkCooldown` lookahead |
+| **Onboarding milestones at risk this week** | `subaccount_onboarding_milestones` + `client_pulse_onboarding_milestone_defs` deadlines |
+| **Novel integration fingerprints to classify** | `integration_unclassified_signals` over the promotion threshold |
+
+**Digest — Portfolio Health section (backward content only):**
+
+| Sub-section | Source |
+|---|---|
+| **Net portfolio movement** — band counts WoW, MRR-at-risk delta | `client_pulse_health_snapshots` + `client_pulse_churn_assessments` history |
+| **Intervention outcomes** — what was proposed, approved, executed, measured; correlations with band movement | `actions` + `interventionOutcomes` (per §5.3) |
+| **Pattern learnings** — which intervention templates correlated with band improvement, which didn't ("check-in 2/2 worked, funnel-nurture 0/1 — iterate template") | Aggregation over `interventionOutcomes` joined to `client_pulse_intervention_templates` |
+| **Top movers** — health-score gainers + losers this week with attribution | `client_pulse_health_snapshots` deltas |
+| **Forecast accuracy check** — how many of last Monday's predictions came true | Retrospective on Briefing forecasts (stored as a `reports` row of subtype `portfolio_health_forecast`) |
+| **Monday watchlist handoff** — bridge into next week's briefing | Composed from current top-N at-risk |
+
+**What does NOT belong in each:**
+
+- Briefing **MUST NOT** carry retrospective "what happened last week" content — that's the digest's job. Wins, outcome attribution, WoW deltas all belong in the digest.
+- Digest **MAY** carry a small forward bridge ("Monday watchlist") but its centre of gravity is reflection, not action.
+
+### 13.6 Concrete wiring (per playbook, module-conditional)
 
 **In the scan pipeline (Phase 2–3):**
 
-- At the end of `computeSubaccountHealthJob` → `evaluateChurnRiskJob` for all active sub-accounts per org, append a final step that calls `reportService.completeReport()` with the org-wide snapshot summary (totals by band, top-N declining, top-N recovering, week-over-week delta). This replaces the current placeholder in `clientpulseReports.ts` which returns `{clients: []}`.
+After each ClientPulse scan, write two `reports` rows:
 
-**In `intelligence-briefing.playbook.ts` (add one step):**
+- `reportType='portfolio_health'` — current snapshot (read by both playbooks)
+- `reportType='portfolio_health_forecast'` — forward extrapolation (predicted band entries this week, tier-downgrade windows, milestone risks). Briefing reads this. Digest reads it next Friday for the forecast-accuracy check.
+
+**In `intelligence-briefing.playbook.ts` (sub-account-level)** — add one step:
 
 ```
-step slug="render_portfolio_health_section"
-  type="prompt"
-  inputs: reportService.getLatestReport(orgId, 'portfolio_health')
-  renders: section headed "Portfolio Health — [N] healthy / [M] attention / [K] at risk"
-  includes: top 3 declining sub-accounts + top 3 recovering + pending intervention count
-  link: /clientpulse
+slug: 'render_portfolio_health_section_briefing'
+type: 'action_call'
+skipWhen: '!modules.client_pulse.enabled'
+action: 'render_portfolio_health_briefing_section'
+inputs: { forecast: reports.latest("portfolio_health_forecast"),
+          subaccountFocus: run.subaccount.id }
+emphasis: forward (forecast + pending decisions for THIS sub-account)
 ```
 
-**In `weekly-digest.playbook.ts` (add one step):**
+**In `weekly-digest.playbook.ts` (sub-account-level)** — add one step:
 
-Same pattern, different emphasis: week-over-week deltas, churn projection, top intervention outcomes (accounts where an intervention correlated with a band improvement).
+```
+slug: 'render_portfolio_health_section_digest'
+type: 'action_call'
+skipWhen: '!modules.client_pulse.enabled'
+action: 'render_portfolio_health_digest_section'
+inputs: { current: reports.latest("portfolio_health"),
+          weekAgo: reports.latestBefore("portfolio_health", "now() - 7d"),
+          forecast: reports.latestBefore("portfolio_health_forecast", "now() - 7d"),
+          subaccountFocus: run.subaccount.id }
+emphasis: backward (outcomes + pattern learnings for THIS sub-account)
+```
 
-**In `portfolioRollupService.runPortfolioRollup()` (`server/services/portfolioRollupService.ts:57–217`, line 93–129 is the aggregation loop):**
+**In the new `intelligence-briefing-org.playbook.ts` + `weekly-digest-org.playbook.ts`** (Pattern A new files):
 
-Extend the per-sub rollup to include `reportService.getLatestReport(subaccount.id, 'portfolio_health')` counts in the org-wide summary. The existing delivery-service wiring (line 189–203) propagates the enriched artefact through email / portal / Slack unchanged.
+Same two steps, different scope (`run.org.id` instead of `run.subaccount.id`). The action's render template adapts: org-level briefings show portfolio-wide forecasts and pending interventions across all sub-accounts; org-level digests show portfolio-wide WoW and pattern learnings.
 
-### 13.4 What *not* to do
+**In `portfolioRollupService.runPortfolioRollup()` (existing org-level job, until promoted to a real playbook):**
 
-- Do **not** create a third playbook for "ClientPulse briefing". The two existing playbooks already cover the same cadence Kel wants. Adding a third creates a triple-delivery email-fatigue problem.
-- Do **not** push ClientPulse-specific data directly into `playbook_step_runs` context at run time — keep it in `reports`. The playbooks should be consumers, not owners, of this data.
-- Do **not** conditionally skip the playbook step if the report is empty — render a neutral "Portfolio is healthy; no attention items this week" line instead. Regular rhythm is more valuable than noise suppression here.
+Extend the per-sub rollup loop to include `reportService.getLatestReport(subaccount.id, 'portfolio_health')` counts in the org-wide summary. Continues to deliver via existing `deliveryService` wiring. Eventually replaced by the org-level playbooks above.
 
-### 13.5 Dedicated ClientPulse page is still the primary surface
+### 13.7 What *not* to do
 
-The dashboard stays the primary Monday-morning surface (one screen, drill-down, intervention queue). The briefings are async companions — they arrive in Kel's inbox, hit him with the headline, and deep-link into the dashboard for action. The two surfaces reinforce each other: the email catches Kel's attention when he isn't already at the dashboard; the dashboard provides the interactive workflow once he's engaged.
+- Do **not** create a third or fourth playbook for "ClientPulse briefing" specifically. ClientPulse is a section, not a playbook.
+- Do **not** duplicate ClientPulse query logic across the dashboard, briefings, and rollup — all four read the same canonical `reports` row(s).
+- Do **not** make the briefing carry retrospective content — that violates the look-forward role and creates content-overlap fatigue with Friday's digest.
+- Do **not** unconditionally render the ClientPulse section if the module isn't enabled or hasn't produced a report yet — use `skipWhen`.
+
+### 13.8 Dedicated ClientPulse page is still the primary surface
+
+The dashboard stays the primary Monday-morning surface (one screen, drill-down, intervention queue, real-time WebSocket updates). The briefings are async companions — they arrive in Kel's inbox, hit him with the headline, and deep-link into the dashboard for action. The two surfaces reinforce each other rather than compete.
 
 ---
 
