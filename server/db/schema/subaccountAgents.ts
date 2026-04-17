@@ -94,6 +94,7 @@ export const subaccountAgents = pgTable(
     // against uncomputed maps.
     capabilityMap: jsonb('capability_map').$type<{
       computedAt: string;
+      referenceLastUpdated?: string;
       integrations: string[];
       read_capabilities: string[];
       write_capabilities: string[];

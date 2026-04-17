@@ -30,11 +30,36 @@ import {
 
 export interface CapabilityMap {
   computedAt: string;
+  /**
+   * The Integration Reference's `schema_meta.last_updated` value at the
+   * moment this map was computed. check_capability_gap compares this
+   * against the current reference's last_updated to detect stale maps
+   * deterministically — avoiding timestamp parsing of computedAt on every
+   * gap check. May be missing on pre-0158 maps; absence is treated as
+   * 'potentially stale' and falls back to the computedAt comparison.
+   */
+  referenceLastUpdated?: string;
   integrations: string[];
   read_capabilities: string[];
   write_capabilities: string[];
   skills: string[];
   primitives: string[];
+}
+
+/**
+ * Strict match between a skill slug and an integration slug for the
+ * fuzzy-fallback path (when skills_enabled is empty). Uses word-boundary
+ * matching to avoid false positives like "slackoff" matching "slack", or
+ * "notifysync" matching "notion". The skill slug must start with, end
+ * with, or contain the integration slug surrounded by underscores.
+ *
+ * Example matches for integration 'slack': 'send_slack', 'slack_notify',
+ * 'post_to_slack_channel'. Example non-matches: 'slackoff', 'unslacked'.
+ */
+function skillMatchesIntegrationFuzzy(skillSlug: string, integrationSlug: string): boolean {
+  const normalised = integrationSlug.replace(/-/g, '_');
+  const pattern = new RegExp(`(^|_)${normalised.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(_|$)`);
+  return pattern.test(skillSlug);
 }
 
 /**
@@ -61,14 +86,13 @@ export function computeCapabilityMapPure(
   }
 
   for (const integration of snapshot.integrations) {
-    // If the agent has any skill that this integration enables, the
-    // integration's capabilities flow in. Also match when skills_enabled is
-    // empty but the agent has a skill whose slug contains the integration
-    // slug (e.g. "send_to_slack" matches integration slug "slack"). This
-    // handles integrations whose skills_enabled hasn't been populated yet.
+    // When skills_enabled is populated use exact slug membership. When it is
+    // empty fall back to strict word-boundary fuzzy match so an integration
+    // with incomplete reference data can still contribute capabilities for
+    // Path B handoff decisions (never Path A — uncomputed maps block Path A).
     const hasMatchingSkill = integration.skills_enabled.length > 0
       ? integration.skills_enabled.some((slug) => skillSlugs.includes(slug))
-      : skillSlugs.some((s) => s.includes(integration.slug.replace(/-/g, '_')) || s.includes(integration.slug));
+      : skillSlugs.some((s) => skillMatchesIntegrationFuzzy(s, integration.slug));
     if (!hasMatchingSkill) continue;
 
     integrations.add(integration.slug);
@@ -79,6 +103,7 @@ export function computeCapabilityMapPure(
 
   return {
     computedAt: new Date().toISOString(),
+    referenceLastUpdated: snapshot.schema_meta.last_updated || undefined,
     integrations: Array.from(integrations).sort(),
     read_capabilities: Array.from(reads).sort(),
     write_capabilities: Array.from(writes).sort(),

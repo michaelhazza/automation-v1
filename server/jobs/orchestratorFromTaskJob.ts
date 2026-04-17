@@ -166,6 +166,11 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   }
 
   // 4. Dispatch the Orchestrator run with the task as context.
+  // Versioned idempotency key: includes task.updatedAt so retries after a
+  // user edits the task description produce a fresh run rather than silently
+  // dedup-ing against the stale one. Pure job replays (same taskId + same
+  // updatedAt) still dedup.
+  const idempotencyKey = `orchestrator-from-task:${taskId}:${task.updatedAt.getTime()}`;
   try {
     await agentExecutionService.executeRun({
       agentId: orchestratorLink.agentId,
@@ -181,8 +186,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         taskTitle: task.title,
         taskDescription: task.description,
       },
-      // Idempotency key so replaying the job does not double-spawn a run.
-      idempotencyKey: `orchestrator-from-task:${taskId}`,
+      idempotencyKey,
     });
 
     logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: orchestratorLink.subaccountAgentId });

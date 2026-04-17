@@ -137,6 +137,16 @@ export interface SkillExecutionContext {
    * actions.idempotency_key unique constraint.
    */
   toolCallId?: string;
+  /**
+   * Per-run counter for capability-discovery skill calls
+   * (list_platform_capabilities, list_connections, check_capability_gap).
+   * Enforced against systemSettings.orchestrator_capability_query_budget
+   * (default 8). When exhausted, further calls return
+   * { error: 'capability_query_budget_exhausted' } so the Orchestrator
+   * stops looping rather than burning tokens. See
+   * docs/orchestrator-capability-routing-spec.md §6.4.3.
+   */
+  capabilityQueryCallCount?: number;
 }
 
 interface SkillExecutionParams {

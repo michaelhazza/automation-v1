@@ -12,6 +12,65 @@ import {
   type SchemaMeta,
 } from '../../services/integrationReferenceService.js';
 import { listAgentCapabilityMaps } from '../../services/capabilityMapService.js';
+import { systemSettingsService, SETTING_KEYS } from '../../services/systemSettingsService.js';
+import { logger } from '../../lib/logger.js';
+
+// ---------------------------------------------------------------------------
+// Per-run budget enforcement for capability-discovery skills
+// (spec §6.4.3). Default budget is read from systemSettings; defaults to 8.
+// When the counter is exhausted, calls return a budget_exhausted error
+// structure so the Orchestrator prompt can stop looping. Callers propagate
+// the counter via SkillExecutionContext.capabilityQueryCallCount.
+// ---------------------------------------------------------------------------
+
+let cachedBudget: number | null = null;
+let cachedBudgetAt = 0;
+const BUDGET_CACHE_TTL_MS = 60_000;
+
+async function getCapabilityQueryBudget(): Promise<number> {
+  if (cachedBudget !== null && Date.now() - cachedBudgetAt < BUDGET_CACHE_TTL_MS) {
+    return cachedBudget;
+  }
+  const raw = await systemSettingsService.get(SETTING_KEYS.ORCHESTRATOR_CAPABILITY_QUERY_BUDGET);
+  const parsed = parseInt(raw, 10);
+  cachedBudget = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  cachedBudgetAt = Date.now();
+  return cachedBudget;
+}
+
+interface BudgetCheck {
+  exhausted: boolean;
+  used: number;
+  budget: number;
+}
+
+async function incrementBudget(context: SkillExecutionContext, skillName: string): Promise<BudgetCheck> {
+  const budget = await getCapabilityQueryBudget();
+  const prior = context.capabilityQueryCallCount ?? 0;
+  const used = prior + 1;
+  context.capabilityQueryCallCount = used;
+  if (used > budget) {
+    logger.warn('capability_query.budget_exhausted', {
+      skillName,
+      runId: context.runId,
+      agentId: context.agentId,
+      used,
+      budget,
+    });
+    return { exhausted: true, used, budget };
+  }
+  return { exhausted: false, used, budget };
+}
+
+function budgetExhaustedResponse(skillName: string, budget: number, used: number) {
+  return {
+    success: false as const,
+    error: 'capability_query_budget_exhausted',
+    detail: `Skill '${skillName}' exceeded the per-run budget (${used}/${budget}). Halt the decomposition loop and classify with what you have.`,
+    budget,
+    used,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Capability discovery skill handlers
@@ -56,10 +115,20 @@ export interface ListPlatformCapabilitiesError {
  */
 export async function executeListPlatformCapabilities(
   input: Record<string, unknown>,
-  _context: SkillExecutionContext,
-): Promise<ListPlatformCapabilitiesOutput | ListPlatformCapabilitiesError> {
+  context: SkillExecutionContext,
+): Promise<ListPlatformCapabilitiesOutput | ListPlatformCapabilitiesError | ReturnType<typeof budgetExhaustedResponse>> {
+  const budgetCheck = await incrementBudget(context, 'list_platform_capabilities');
+  if (budgetCheck.exhausted) return budgetExhaustedResponse('list_platform_capabilities', budgetCheck.budget, budgetCheck.used);
+
   const typed = input as ListPlatformCapabilitiesInput;
   const snapshot = await loadIntegrationReference();
+  logger.info('capability_query.list_platform_capabilities', {
+    runId: context.runId,
+    reference_state: snapshot.reference_state,
+    integration_count: snapshot.integrations.length,
+    budget_used: budgetCheck.used,
+    budget: budgetCheck.budget,
+  });
 
   if (snapshot.reference_state === 'unavailable') {
     return {
@@ -120,7 +189,10 @@ export interface ListConnectionsInput {
 export async function executeListConnections(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-): Promise<{ success: true; connections: ConnectionSummary[]; scope_resolved: { orgId: string; subaccountId: string | null } } | { success: false; error: string }> {
+): Promise<{ success: true; connections: ConnectionSummary[]; scope_resolved: { orgId: string; subaccountId: string | null } } | { success: false; error: string } | ReturnType<typeof budgetExhaustedResponse>> {
+  const budgetCheck = await incrementBudget(context, 'list_connections');
+  if (budgetCheck.exhausted) return budgetExhaustedResponse('list_connections', budgetCheck.budget, budgetCheck.used);
+
   const typed = input as ListConnectionsInput;
 
   const orgId = typed.orgId ?? context.organisationId;
@@ -183,6 +255,16 @@ export async function executeListConnections(
         };
       });
 
+    logger.info('capability_query.list_connections', {
+      runId: context.runId,
+      scope: typed.scope,
+      orgId,
+      subaccountId,
+      active_count: connections.filter((c) => c.status === 'active').length,
+      total_count: connections.length,
+      budget_used: budgetCheck.used,
+      budget: budgetCheck.budget,
+    });
     return {
       success: true,
       connections,
@@ -244,7 +326,10 @@ export interface CheckCapabilityGapOutput {
 export async function executeCheckCapabilityGap(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-): Promise<CheckCapabilityGapOutput | { success: false; error: string }> {
+): Promise<CheckCapabilityGapOutput | { success: false; error: string } | ReturnType<typeof budgetExhaustedResponse>> {
+  const budgetCheck = await incrementBudget(context, 'check_capability_gap');
+  if (budgetCheck.exhausted) return budgetExhaustedResponse('check_capability_gap', budgetCheck.budget, budgetCheck.used);
+
   const typed = input as CheckCapabilityGapInput;
   if (!Array.isArray(typed.required_capabilities) || typed.required_capabilities.length === 0) {
     return { success: false, error: 'required_capabilities is required and must be non-empty' };
@@ -442,20 +527,27 @@ export async function executeCheckCapabilityGap(
     }
   }
 
-  // Stale map guard: if the capability map was computed BEFORE the current
-  // Integration Reference was last updated, the map may not reflect current
-  // reality (e.g. a reference change removed a capability the map still
-  // claims). Disqualify such maps from Path A — they fall through to
-  // Path B, which forces the Config Assistant to re-verify. Background
-  // reconciliation will refresh the map within a minute.
-  const referenceLastUpdatedAt = snapshot.schema_meta.last_updated
-    ? Date.parse(snapshot.schema_meta.last_updated)
+  // Stale map guard: if the capability map was computed against an older
+  // Integration Reference version, disqualify it from Path A. Prefers the
+  // explicit `referenceLastUpdated` field written by computeCapabilityMapPure
+  // (added in migration 0158) over timestamp parsing of computedAt; falls
+  // back to computedAt for legacy maps. Maps that fail the check fall
+  // through to Path B, which forces a fresh Config Assistant verification.
+  const currentReferenceLastUpdated = snapshot.schema_meta.last_updated || '';
+  const currentReferenceLastUpdatedAt = currentReferenceLastUpdated
+    ? Date.parse(currentReferenceLastUpdated)
     : NaN;
   function isMapStaleVsReference(map: NonNullable<(typeof agentMaps)[number]['capabilityMap']>): boolean {
-    if (Number.isNaN(referenceLastUpdatedAt)) return false; // can't decide; trust the map
+    // Preferred path: explicit reference-version comparison. Exact string
+    // match — no timestamp parsing, no race window.
+    if (map.referenceLastUpdated !== undefined) {
+      return map.referenceLastUpdated !== currentReferenceLastUpdated;
+    }
+    // Legacy fallback: compare computedAt to the reference's last_updated.
+    if (Number.isNaN(currentReferenceLastUpdatedAt)) return false; // can't decide; trust the map
     const computedAt = Date.parse(map.computedAt);
     if (Number.isNaN(computedAt)) return true; // malformed; treat as stale
-    return computedAt < referenceLastUpdatedAt;
+    return computedAt < currentReferenceLastUpdatedAt;
   }
 
   // Atomic "configured" determination: a single agent with full coverage
@@ -546,6 +638,29 @@ export async function executeCheckCapabilityGap(
   const missingForUnsupported = perCapability
     .filter((c) => c.availability === 'unsupported')
     .map((c) => `${c.kind}:${c.slug}`);
+
+  // Structured observability emission (spec §9.5.1). One log per decision
+  // with: verdict, reference_state, candidate coverage distribution, missing
+  // capability slugs. Aggregated downstream as the Orchestrator decision
+  // distribution dashboard.
+  logger.info('capability_query.check_capability_gap', {
+    runId: context.runId,
+    orgId,
+    subaccountId,
+    verdict,
+    reference_state: snapshot.reference_state,
+    required_count: normalised.length,
+    required_capabilities: normalised.map((n) => `${n.kind}:${n.canonical_slug}`),
+    missing_for_configurable: missingForConfigurable,
+    missing_for_unsupported: missingForUnsupported,
+    candidate_agent_count: candidateAgents.length,
+    full_coverage_agents: candidateAgents.filter((c) => c.coverage === 'full').map((c) => c.agent_id),
+    partial_coverage_agents: candidateAgents.filter((c) => c.coverage === 'partial').length,
+    combined_coverage_possible: candidateAgents.some((c) => c.combined_coverage_possible),
+    configured_by_agent_id: configuredBy?.agent_id ?? null,
+    budget_used: budgetCheck.used,
+    budget: budgetCheck.budget,
+  });
 
   return {
     success: true,
