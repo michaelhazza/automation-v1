@@ -398,7 +398,7 @@ export const mcpClientManager = {
       this.writeInvocation({
         ctx, serverSlug, toolName, gateLevel: null,
         status: 'error', failureReason: 'pre_execution_failure',
-        durationMs: 0, isRetry: retryCount > 0, callIndex: null,
+        durationMs: 0, isRetry: false, callIndex: null,
       });
       return { error: `MCP server "${serverSlug}" not connected` };
     }
@@ -430,18 +430,18 @@ export const mcpClientManager = {
       );
       durationMs = Date.now() - callStart;
 
-      // responseSizeBytes: UTF-8 byte length captured before truncation so original size is always recorded
       const serialised = JSON.stringify(result);
-      responseSizeBytes = Buffer.byteLength(serialised, 'utf8');
-      wasTruncated = serialised.length > MAX_MCP_RESPONSE_SIZE;
+      const byteLength = Buffer.byteLength(serialised, 'utf8');
+      responseSizeBytes = byteLength;
+      wasTruncated = byteLength > MAX_MCP_RESPONSE_SIZE;
       status = 'success';
 
       if (wasTruncated) {
-        logger.warn('mcp.output_truncated', { serverSlug, toolName, size: serialised.length, durationMs });
+        logger.warn('mcp.output_truncated', { serverSlug, toolName, sizeBytes: byteLength, durationMs });
         return serialised.slice(0, MAX_MCP_RESPONSE_SIZE) + '\n[... response truncated at 100KB]';
       }
 
-      logger.info('mcp.call.success', { serverSlug, toolName, durationMs, responseSize: serialised.length });
+      logger.info('mcp.call.success', { serverSlug, toolName, durationMs, responseSizeBytes: byteLength });
       return result;
     } catch (err) {
       durationMs = Date.now() - callStart;
