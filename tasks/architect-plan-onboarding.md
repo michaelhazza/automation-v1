@@ -4,7 +4,7 @@
 > **Classification:** Major (new subsystem: conversational intake, task creation, orchestrator integration, new page UX)
 > **Scope lock:** First-client-added trigger only. Output = structured business context + actionable tasks routed via the orchestrator. No Playbook compiler. No simulation engine. Three checkpoints (business context / integrations / automation wishes). Summary screen at end (Option B). Soft-cap LLM budget. AUD minor units via `organisations.default_currency_code` (shared with Pulse).
 > **Depends on:** Pulse currency migration (Pulse Chunk 1) — `organisations.default_currency_code`. If Pulse has not yet shipped, this plan's schema chunk must add that column itself.
-> **Related specs:** `tasks/architect-plan-pulse.md`, `tasks/dev-spec-pulse.md`, `tasks/deferred-ai-first-features.md` (Section 1 — Onboarding).
+> **Related specs:** `tasks/architect-plan-pulse.md`, `tasks/dev-spec-pulse.md`, `docs/orchestrator-capability-routing-spec.md`, `tasks/deferred-ai-first-features.md` (Section 1 — Onboarding).
 
 ---
 
@@ -174,7 +174,7 @@ Onboarding reads `organisations.default_currency_code` (added by Pulse Chunk 1).
 
 ### 1.5 Migration summary
 
-One forward-only migration (next free sequence number after Pulse). Creates all three new tables with indexes + CHECK constraints. If `organisations.default_currency_code` is absent, adds it with `DEFAULT 'AUD'`. No data backfill required.
+One forward-only migration (next free sequence number: **0160**; 0156–0159 are taken by the orchestrator capability-aware routing build). Creates all three new tables with indexes + CHECK constraints. If `organisations.default_currency_code` is absent, adds it with `DEFAULT 'AUD'`. No data backfill required.
 
 ---
 
@@ -271,8 +271,8 @@ If `updated_at` is more than 30 minutes old, `resumed_count++` and the first ass
 Every LLM call routes through `server/services/llmRouter.ts` → `routeCall()`. Onboarding does **not** name a provider or model. It declares a `taskType`, an `executionPhase`, and a `routingMode = 'ceiling'`; `llmResolver` picks the model.
 
 LLMCallContext fields used:
-- `sourceType`: `'onboarding'` (new; added to `SOURCE_TYPES`).
-- `taskType`: `'intake_conversation'` for chat turns; `'intake_checkpoint_lock'` for the structured-extraction turn; `'intake_summary'` for summary generation and "where we left off."
+- `sourceType`: `'onboarding'` (new; must be added to `SOURCE_TYPES` in `server/db/schema/llmRequests.ts` — currently `['agent_run', 'process_execution', 'system', 'iee']`).
+- `taskType`: `'intake_conversation'` for chat turns; `'intake_checkpoint_lock'` for the structured-extraction turn; `'intake_summary'` for summary generation and "where we left off." (All three are new values; must be added to `TASK_TYPES` in `server/db/schema/llmRequests.ts`.)
 - `executionPhase`: `'planning'` for turn generation; `'post'` for summary generation.
 - `organisationId`, `subaccountId`, `userId` — populated from request context.
 
@@ -515,9 +515,21 @@ const task = await taskService.createTask({
 
 The `handoffContext` gives the orchestrator everything it needs to make routing decisions without reading the full conversation.
 
-### 6.2 Orchestrator routing expectations
+### 6.2 Orchestrator routing — how it works now
 
-The orchestrator (or any agent processing the task) reads `handoffContext.source === 'onboarding'` and:
+The orchestrator capability-aware routing system shipped in PR #143 (migrations 0156–0159). When `taskService.createTask()` is called, two things happen:
+
+1. **`task_created` / `org_task_created` triggers fire** — existing agent trigger mechanism.
+2. **`enqueueOrchestratorRoutingIfEligible()`** enqueues an async `orchestratorFromTaskJob` — this is the primary routing path.
+
+The orchestrator-from-task job has an **eligibility predicate**:
+- `status === 'inbox'` ✓ (onboarding sets this)
+- `assignedAgentId === null` ✓ (onboarding leaves tasks unassigned)
+- `!isSubTask` ✓ (onboarding tasks are top-level)
+- `createdByAgentId === null` ✓ (onboarding is user-initiated, not agent-created)
+- **`description.length >= 10`** — onboarding's `buildTaskDescription()` must produce descriptions ≥ 10 characters or the orchestrator won't route the task.
+
+Once eligible, the orchestrator classifies the task using its `check_capability_gap` skill against capability maps, then routes via one of four deterministic paths (A/B/C/D). For onboarding-sourced tasks, the `handoffContext` metadata gives the orchestrator what it needs:
 
 - **`feasibility: 'ready'` + `outOfBoxSlug` set** → route to the configuration agent, which knows how to activate and configure the named capability.
 - **`feasibility: 'needs_setup'`** → route to the configuration agent with instructions to guide the user through prerequisite setup (e.g. connecting an integration).
@@ -648,6 +660,8 @@ The client subscribes to `subaccount:<id>` on page mount (already wired via `use
 
 `server/services/onboarding/integrationDiscoveryService.ts` (new) — read-only discovery of integration metadata. Fetched once per checkpoint-2 entry, cached on the checkpoint row until the user locks checkpoint 2.
 
+**Note:** The recently-shipped `list_connections` skill and `integrationReferenceService.ts` (PR #143) provide a machine-readable integration catalogue and connection listing. The discovery service should reuse these where possible instead of building from scratch.
+
 ### 11.1 MVP integration set
 
 | Provider | What we read | How |
@@ -720,14 +734,15 @@ Wait — `abandon` from `reviewing_summary` IS terminal. So if the user explicit
 
 ## 14. Follow-up questions for the dev spec
 
-1. **Migration ordering with Pulse.** Can we assume Pulse Chunk 1 lands first, or must Onboarding's migration ship `organisations.default_currency_code` defensively? Default: defensive add.
+1. **Migration ordering with Pulse.** Can we assume Pulse Chunk 1 lands first, or must Onboarding's migration ship `organisations.default_currency_code` defensively? Default: defensive add. Migration number is **0160** (0156–0159 taken by orchestrator).
 2. **Rolling-summary generation.** When conversation exceeds N turns, do we generate a summary and prune? Default: yes, N=20, summary via a cheap model taskType `intake_summary`.
 3. **Out-of-box catalogue v1.** Enumerate the exact items shipping in v1 with their `matchHints` and `requiredIntegrations`. This is a product decision, not an architecture one.
 4. **Summary screen partial-action persistence.** Track which items are actioned across tab closes? Default: yes (add `actioned` field to summary items).
 5. **Post-completion routing when Pulse isn't live.** Default: subaccount detail page.
-6. **Named-user task assignment.** When creating tasks, should onboarding assign them to a specific user or leave them unassigned for the orchestrator? Default: unassigned.
+6. **Named-user task assignment.** When creating tasks, should onboarding assign them to a specific user or leave them unassigned for the orchestrator? Default: unassigned (orchestrator-from-task job requires `assignedAgentId === null`).
 7. **Test harness for the state machine.** Pure-file convention (`onboardingStateMachinePure.test.ts`). Dev spec confirms coverage matrix.
 8. **WebSocket event shape.** The five events in §10 — confirm field naming. Default: five-event granular model as specified.
+9. **SOURCE_TYPES + TASK_TYPES extensions.** `'onboarding'` sourceType and three new taskTypes must be added to `server/db/schema/llmRequests.ts`. Dev spec confirms whether this needs a migration or is text-only (no enum type in DB).
 9. **Docs update posture.** `architecture.md` gets a new "Ingestive Onboarding" section. `docs/capabilities.md` gets an agency-capabilities entry (vendor-neutral per editorial rules).
 10. **Orchestrator minimum handling.** What does the orchestrator's `task_created` handler need to do for onboarding-sourced tasks in v1? Dev spec must specify at least: read `handoffContext.source`, route by `feasibility`.
 
@@ -742,7 +757,7 @@ Chunks ordered for minimum in-progress dependencies. Each chunk is independently
 **Scope.** Migration creating three onboarding tables + currency column guard. Drizzle schema files. Config module for onboarding defaults.
 
 **Files to create / modify.**
-- `migrations/013X_ingestive_onboarding.sql`
+- `migrations/0160_ingestive_onboarding.sql`
 - `server/db/schema/onboarding/onboardingConversations.ts`
 - `server/db/schema/onboarding/onboardingMessages.ts`
 - `server/db/schema/onboarding/onboardingCheckpoints.ts`
