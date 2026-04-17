@@ -1380,6 +1380,87 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 
 ---
 
+## Skill Analyzer
+
+System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
+
+Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
+
+1. **Parse** — `skillParserService` extracts candidate skills from uploaded zips / pasted JSON / GitHub repos.
+2. **Hash** — SHA-256 of normalized content; used for embedding cache and idempotent retries.
+3. **Embed** — OpenAI text-embedding-3-large per candidate and per library skill; results cached on `skill_embeddings`.
+4. **Compare** — cosine similarity produces a single best-match per candidate; banded into `likely_duplicate` (>0.92) / `ambiguous` (0.60–0.92) / `distinct` (<0.60).
+5. **Classify + merge** — Claude Sonnet 4.6 produces classification (DUPLICATE / IMPROVEMENT / PARTIAL_OVERLAP / DISTINCT) and, for overlap classifications, a `proposedMerge` object. See §Rule-based fallback below when the classifier is unavailable.
+6. **Validate** — pure post-processing in `skillAnalyzerServicePure.validateMergeOutput` emits structured warnings (scope expansion, invocation-block loss, HITL-gate loss, table-row drops, required-field demotion, capability overlap, name mismatch, output-format loss).
+7. **Agent propose** (DISTINCT only) — cosine rank of the candidate against existing system agents; top-K persisted to `agentProposals` with optional Haiku enrichment.
+8. **Cluster recommend** — if ≥3 DISTINCT candidates lack a good agent home, Sonnet proposes a new agent and retro-injects a synthetic proposal into each affected result's `agentProposals`.
+
+### v2 bug-fix cycle (migration 0155)
+
+The v2 cycle closed seven correctness holes in the Review + Execute flow. Key additions:
+
+- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; `client/src/components/skill-analyzer/mergeTypes.ts` mirrors it for optimistic UI preview. The server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
+- **Warning tier system** (config-driven). Tiers are `informational` | `standard` | `decision_required` | `critical`, mapped per warning code via `skill_analyzer_config.warning_tier_map`. Tier dictates the Approve-button gate: structured resolution (per-field accept/restore for demoted required fields; use-library / use-incoming for name mismatch; scope-down / flag-other / accept-overlap for graph collisions); single-click acknowledgment; or critical-phrase typed confirmation.
+- **Rule-based fallback merger.** When the LLM classifier is unavailable or returns an invalid proposal, `buildRuleBasedMerge` produces a deterministic merge (library-dominant name for DB slug stability; definition-bearing skill wins schema; H2-section union for instructions). Always emits `CLASSIFIER_FALLBACK` warning + low-confidence banner requiring reviewer acknowledgment. No more `proposedMerge=null` dead rows.
+- **Name consistency cascade.** `detectNameMismatch` compares top-level `name`, `definition.name`, and bare-identifier references in description/instructions. When a reviewer resolves via `use_library_name` / `use_incoming_name`, the chosen name cascades atomically into `proposedMergedContent.name`, `definition.name`, and `execution_resolved_name`; Execute reads `execution_resolved_name` as the canonical source to survive drift.
+- **Three-phase staged Execute.** `executeApproved` in `server/services/skillAnalyzerService.ts` runs (1) soft-create proposed agents with DB `status='draft'` (idempotent by slug), (2) per-result skill transactions attaching to draft agents, (3) promote agents to `active` whose skills succeeded. Drafts with zero successful attachments persist as `pendingDraftAgents[]` in the response for manual review.
+- **Execution lock.** Atomic `UPDATE ... WHERE execution_lock=false` at Execute entry prevents double-runs; released in `finally`. Stale-lock recovery via `POST /jobs/:jobId/execute/unlock` (systemAdmin only) gated by `execution_lock_stale_seconds`. Auto-unlock is config-flagged and default-off to avoid zombie-process double-execution.
+- **Config snapshot isolation.** `jobs.config_snapshot` captures the full `skill_analyzer_config` row at job start; validator, collision detector, and Execute all read the snapshot. Mid-job config changes never apply to in-flight jobs.
+- **Approval freeze + drift detection.** `approved_at` locks a result against merge/resolution edits (409 RESULT_LOCKED); reviewer must unapprove (`action=null`) to edit. `approval_decision_snapshot` + `approval_hash` are captured at approve time; Execute compares the live evaluator result against `approval_hash` and emits a non-blocking `skill_analyzer.approval_drift_detected` log when they differ.
+- **Resolution invalidation on merge edit.** Any write to `proposedMergedContent` (`PATCH /merge`, `POST /merge/reset`) atomically wipes `warning_resolutions`, `execution_resolved_name`, `approved_at`, `approval_decision_snapshot`, and `approval_hash`. Response carries `resolutionsCleared: true` so the UI can surface a "Review decisions reset" toast.
+- **Concurrency on resolve-warning.** `PATCH /resolve-warning` strictly requires `If-Unmodified-Since`; server derives the canonical row timestamp as `mergeUpdatedAt ?? createdAt` and rejects mismatches > ±2s (`409 STALE_RESOLVE`). Verified by pure tests in `skillAnalyzerServicePureFallbackAndTables.test.ts`.
+- **Proposed-new-agent coupling.** Cluster recommendations write to `skill_analyzer_jobs.proposed_new_agents` (array, supports N-per-job) AND retro-inject synthetic entries into each affected DISTINCT result's `agentProposals`. UI banner renders per-agent Confirm/Reject; confirmed proposals become the top-ranked chip in per-skill assignment panels.
+- **Table drop remediation.** `remediateTables` runs before `validateMergeOutput` and auto-appends missing rows with `[SOURCE: library|incoming]` markers. Guards: column-count mismatch, cross-source first-column-key conflict, pre-marked rows, and `max_table_growth_ratio` aggregate cap.
+- **Skill-graph collision detection.** `detectSkillGraphCollision` splits merged instructions into `##` heading fragments, pre-filters library skills by bigram overlap (top-K + 200-pair budget), and emits `SKILL_GRAPH_COLLISION` warnings when fragment similarity exceeds `collision_detection_threshold`.
+
+### Schema (migration 0155)
+
+| Table / column | Purpose |
+|----------------|---------|
+| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`. Bumps `config_version` on every update. |
+| `skill_analyzer_results.warning_resolutions` | JSONB array of reviewer decisions, deduped by `(warningCode, details.field)`. Wiped on merge edit. |
+| `skill_analyzer_results.classifier_fallback_applied` | True when rule-based merger produced the proposal. |
+| `skill_analyzer_results.execution_resolved_name` | Canonical name chosen via NAME_MISMATCH resolution; authoritative at Execute. |
+| `skill_analyzer_results.approved_at` | Lock timestamp; presence blocks merge/resolution edits. |
+| `skill_analyzer_results.approval_decision_snapshot` + `approval_hash` | Debug trace + drift-detection at Execute. |
+| `skill_analyzer_results.was_approved_before` | UI surfaces "modified after previous approval" badge. |
+| `skill_analyzer_jobs.proposed_new_agents` | JSONB array supporting N proposed-agent entries per job, with `status` lifecycle. |
+| `skill_analyzer_jobs.config_snapshot` + `config_version_used` | Frozen config at job start; immutable post-INSERT. |
+| `skill_analyzer_jobs.execution_lock` + `execution_started_at` + `execution_finished_at` | Atomic concurrency guard for Execute. |
+
+### Config validation rules
+
+`skillAnalyzerConfigService.updateConfig` enforces:
+- Ratio/probability fields (`classifier_fallback_confidence_score`, scope-expansion thresholds, `collision_detection_threshold`) in `[0, 1]`.
+- `max_table_growth_ratio` in `[1, 10]`.
+- `collision_max_candidates` ∈ positive integer; `execution_lock_stale_seconds` same.
+- `critical_warning_confirmation_phrase` ≥ 3 characters.
+- Cross-field invariant: `scope_expansion_standard_threshold < scope_expansion_critical_threshold` with `MIN_THRESHOLD_DELTA = 0.05` gap to prevent degenerate collapses.
+- Every successful update emits `skill_analyzer_config_updated` structured log with `{ changedFields, before, after, configVersion }`.
+
+### Files
+
+| File | Role |
+|------|------|
+| `migrations/0155_skill_analyzer_v2_fixes.sql` | Schema additions + singleton seed |
+| `server/db/schema/skillAnalyzerConfig.ts` | Drizzle schema for the config singleton |
+| `server/db/schema/skillAnalyzerJobs.ts` | Jobs table (+ v2 columns) |
+| `server/db/schema/skillAnalyzerResults.ts` | Results table (+ v2 columns) |
+| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, warning codes, tier map, validator |
+| `server/services/skillAnalyzerService.ts` | Stateful — `createJob`, `getJob`, `setResultAction`, `patchMergeFields`, `resetMergeToOriginal`, `resolveWarning`, `updateProposedAgent`, `executeApproved` (3-phase staged pipeline) |
+| `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
+| `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
+| `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
+| `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Three-column merge view + `WarningResolutionBlock` with per-warning resolution controls |
+| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Review screen, `AgentChipBlock`, `ProposedAgentBanner` with Confirm/Reject |
+| `client/src/components/skill-analyzer/mergeTypes.ts` | Browser-safe mirror of the approval evaluator + warning types |
+
+### Tests
+
+Pure tests live in `server/services/__tests__/skillAnalyzerServicePure*.test.ts` — runnable via `npx tsx <path>`. v2 cycle coverage is in `skillAnalyzerServicePureFallbackAndTables.test.ts` (fallback merger, table remediation with row-conflict / growth-cap guards, name-mismatch detection, collision detection, approval evaluator, concurrency guard). All 115 tests pass.
+
+---
+
 ## Playbooks (Multi-Step Automation)
 
 Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
