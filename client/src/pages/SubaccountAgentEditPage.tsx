@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import TestPanel from '../components/runs/TestPanel';
 import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
@@ -182,7 +183,8 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
   ];
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="flex items-start gap-0 -mx-6 -my-7">
+    <div className="flex-1 min-w-0 max-w-3xl mx-auto px-4 py-8">
       {/* Breadcrumb */}
       <div className="text-[12px] text-slate-400 mb-5 flex items-center gap-1.5">
         <Link to="/admin/subaccounts" className="hover:text-slate-700 no-underline">Subaccounts</Link>
@@ -474,6 +476,20 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       {activeTab === 'beliefs' && subaccountId && linkId && (
         <BeliefsTab subaccountId={subaccountId} linkId={linkId} />
       )}
+    </div>{/* end main content */}
+
+    {/* ── Test panel (right-hand) ─────────────────────────────────────── */}
+    {subaccountId && linkId && (
+      <TestPanel
+        panelKey={`test-panel:agent:${linkId}`}
+        label="Test"
+        testRunEndpoint={`/api/subaccounts/${subaccountId}/agents/${linkId}/test-run`}
+        fixturesEndpoint={`/api/subaccounts/${subaccountId}/agents/${linkId}/test-fixtures`}
+        saveFixtureEndpoint={`/api/subaccounts/${subaccountId}/agents/${linkId}/test-fixtures`}
+        hasUnsavedChanges={saving !== null}
+        traceViewerBasePath={`/admin/subaccounts/${subaccountId}/runs`}
+      />
+    )}
     </div>
   );
 }

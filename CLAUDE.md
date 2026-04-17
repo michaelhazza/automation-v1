@@ -296,8 +296,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** none
-**Active items:** none
+**In-flight spec:** none. `docs/orchestrator-capability-routing-spec.md` shipped P1–P5 on branch `claude/orchestrator-spec-doc-sEY3w` (migrations 0156–0159; Orchestrator system agent; four capability discovery skills; feature-request pipeline; task-trigger wiring). `docs/routines-response-dev-spec.md` Features 1–3 remain pending from the prior sprint.
+**Active items:** none in-flight for the Orchestrator spec. Follow-ups captured in its §10 Deferred items (task-update triggers, dedicated feature-request admin page, automatic dedupe clustering, cross-org routing analytics).
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -321,6 +321,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
+| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
+| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
 
 ---
 
@@ -374,6 +377,22 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Verification over Generation** -- Proving something works matters more than producing it fast.
 - **Iteration over Perfection** -- Ship, learn, improve. Do not stall waiting for perfect.
 - **Structure over Volume** -- A well-organised project with less content beats a dumped context window.
+
+---
+
+## Non-goals: what Automation OS is NOT
+
+These are durable product stances. When an LLM provider or horizontal agent platform ships a new primitive (routines, agent SDKs, skills, memory, hosted managed agents, team chat), the reflex should be to **absorb the category into `docs/capabilities.md` positioning, ship any UX polish that closes a demo gap, and never drift the pitch toward parity with the provider's primitive.** The moat is the operations layer, not any one feature.
+
+- **Not a better agent SDK.** Consume LLM-provider primitives under the hood rather than competing with them.
+- **Not a hosted routines / scheduled-prompt product.** We build the operations layer on top of supply from every provider — multi-tenant isolation, approval workflows, client portals, per-client P&L, model-agnostic routing — surfaces an LLM provider's hosted-agent or routine product structurally cannot ship, because their buyer is an individual or an internal team, not an agency serving many clients.
+- **Not a general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for org-level extensibility — not as a competitor to general-purpose coding assistants.
+- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
+- **Not a public skill or playbook marketplace.** Anthropic-scale distribution isn't the agency play.
+- **Not a bidirectional bridge to no-code workflow tools.** We import from them (supervised-migration wedge); we do not export back.
+
+If a PR, marketing asset, or sales deck drifts toward a non-goal, push back. The right response to a provider shipping a new primitive is never "we have that too" — it is "we're the operations system you use on top of that."
 
 ---
 

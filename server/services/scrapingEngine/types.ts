@@ -20,6 +20,7 @@ export interface ScrapeOptions {
       organisationId: string;
       agentId: string;
       subaccountId: string | null;
+      isTestRun: boolean;
       taskId?: string;
       mcpCallCount?: number;
     };

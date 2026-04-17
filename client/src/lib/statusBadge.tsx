@@ -18,6 +18,14 @@ export const STATUS_BADGE_STYLES: Record<string, string> = {
   loop_detected:   'bg-amber-100 text-amber-800 border-amber-200',
   budget_exceeded: 'bg-amber-100 text-amber-800 border-amber-200',
   awaiting_clarification: 'bg-violet-50 text-violet-700 border-violet-200',
+  // Orchestrator capability-aware routing (spec §8.3)
+  routed:                      'bg-sky-50 text-sky-700 border-sky-200',
+  awaiting_configuration:      'bg-violet-50 text-violet-700 border-violet-200',
+  blocked_on_feature_request:  'bg-amber-50 text-amber-700 border-amber-200',
+  routing_failed:              'bg-red-50 text-red-700 border-red-200',
+  routing_timeout:             'bg-amber-50 text-amber-700 border-amber-200',
+  configuration_partial:       'bg-amber-50 text-amber-700 border-amber-200',
+  configuration_failed:        'bg-red-50 text-red-700 border-red-200',
 };
 
 export function StatusBadge({ status }: { status: string }) {

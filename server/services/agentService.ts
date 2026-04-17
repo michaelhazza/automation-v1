@@ -13,6 +13,7 @@ import { emailService } from './emailService.js';
 import { env } from '../lib/env.js';
 import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import { v4 as uuidv4 } from 'uuid';
+import { softDeleteByTarget } from './agentTestFixturesService.js';
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -982,6 +983,9 @@ export const agentService = {
 
     const now = new Date();
     await db.update(agents).set({ deletedAt: now, updatedAt: now }).where(and(eq(agents.id, id), eq(agents.organisationId, organisationId)));
+    // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this agent
+    // (best-effort — not in the same DB transaction as the agent soft-delete above).
+    await softDeleteByTarget(organisationId, 'agent', id);
     return { message: 'Agent deleted successfully' };
   },
 

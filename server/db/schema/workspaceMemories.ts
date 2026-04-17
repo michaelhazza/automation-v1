@@ -111,6 +111,13 @@ export const workspaceMemoryEntries = pgTable(
     lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
     taskSlug:       text('task_slug'),   // null = global memory visible to all tasks
 
+    // Phase 2 Memory & Briefings §4.4 — citation counters (S12/S4 feedback loop)
+    // Migration 0146. `injectedCount` is incremented once per run the entry is
+    // surfaced to the agent; `citedCount` is incremented when the citation
+    // detector flags it as cited in that run's output.
+    injectedCount:  integer('injected_count').notNull().default(0),
+    citedCount:     integer('cited_count').notNull().default(0),
+
     // Phase 2C: Hierarchical metadata — auto-classified at write time
     domain: text('domain'),   // e.g. 'crm', 'reporting', 'marketing', 'dev'
     topic:  text('topic'),    // e.g. 'budget', 'campaign', 'pipeline', 'metrics'
@@ -126,6 +133,50 @@ export const workspaceMemoryEntries = pgTable(
     // plain uuid because the ORM's builder does not support forward-
     // references to the same table cleanly.
     promotedFromEntryId: uuid('promoted_from_entry_id'),
+
+    // PR Review Hardening — migration 0150 ————————————————————————————————
+
+    // Item 1: lifecycle timestamps. Each async job sets its timestamp on every
+    // row it touches so downstream jobs can verify ordering.
+    // decayComputedAt: set by nightly decay job. Utility-adjust job checks IS NOT
+    //   NULL before running — ensures decay always precedes utility adjustment.
+    // qualityComputedAt: set by both decay and utility jobs when qualityScore changes.
+    // embeddingComputedAt: set when the entry's embedding vector is written.
+    embeddingComputedAt: timestamp('embedding_computed_at', { withTimezone: true }),
+    qualityComputedAt:   timestamp('quality_computed_at',   { withTimezone: true }),
+    decayComputedAt:     timestamp('decay_computed_at',     { withTimezone: true }),
+
+    // Item 2: citation provenance at write boundary.
+    // provenanceSourceType: who created this entry. NULL => isUnverified=true.
+    // provenanceSourceId:   UUID of the specific run/upload/playbook.
+    // provenanceConfidence: optional [0,1] confidence score.
+    // isUnverified: true when no provenance supplied. High-trust paths
+    //   (synthesis, utility-adjust) filter these out.
+    provenanceSourceType: text('provenance_source_type')
+      .$type<'agent_run' | 'manual' | 'playbook' | 'drop_zone' | 'synthesis'>(),
+    provenanceSourceId:   uuid('provenance_source_id'),
+    provenanceConfidence: real('provenance_confidence'),
+    isUnverified:         boolean('is_unverified').notNull().default(false),
+
+    // Item 7: DB-level qualityScore mutation guard.
+    // Every UPDATE that changes qualityScore must also set this field to an
+    // allowed value; the trigger in migration 0150 raises otherwise.
+    qualityScoreUpdater: text('quality_score_updater')
+      .$type<'initial_score' | 'system_decay_job' | 'system_utility_job'>(),
+
+    // External review §2.1 — migration 0151 ————————————————————————————————
+    //
+    // contentHash: STORED GENERATED column — `md5(content)` — auto-maintained
+    //   by Postgres on every content mutation. Drizzle does not support
+    //   GENERATED ALWAYS columns natively, so this is declared as a regular
+    //   text field; the actual storage is managed by migration 0151. Treat
+    //   this column as read-only at the application layer.
+    // embeddingContentHash: hash of the content used to compute the current
+    //   embedding. Set on every embedding write. When `contentHash !=
+    //   embeddingContentHash`, the embedding is stale and should be
+    //   recomputed.
+    contentHash:          text('content_hash'),
+    embeddingContentHash: text('embedding_content_hash'),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB

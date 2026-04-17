@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { costAggregates, workspaceLimits, orgBudgets } from '../db/schema/index.js';
+import { costAggregates, workspaceLimits, orgBudgets, agentRuns } from '../db/schema/index.js';
 import { sql, and, eq } from 'drizzle-orm';
 import type { LlmRequest } from '../db/schema/index.js';
 
@@ -29,14 +29,31 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
     periodKey:  string;
   }> = [];
 
-  // Organisation
-  dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'monthly', periodKey: request.billingMonth });
-  dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'daily',   periodKey: request.billingDay });
+  // Feature 2 §4.7 — test runs must not inflate P&L aggregates.
+  // Check is_test_run on the associated agent_run (one lookup; test runs are rare).
+  let isTestRun = false;
+  if (request.runId) {
+    const [runRow] = await db
+      .select({ isTestRun: agentRuns.isTestRun })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, request.runId))
+      .limit(1);
+    isTestRun = runRow?.isTestRun ?? false;
+  }
 
-  // Subaccount
-  if (request.subaccountId) {
-    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'monthly', periodKey: request.billingMonth });
-    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'daily',   periodKey: request.billingDay });
+  if (!isTestRun) {
+    // Organisation
+    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'monthly', periodKey: request.billingMonth });
+    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'daily',   periodKey: request.billingDay });
+
+    // Subaccount
+    if (request.subaccountId) {
+      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'monthly', periodKey: request.billingMonth });
+      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'daily',   periodKey: request.billingDay });
+    }
+  } else {
+    // Test run: skip org/subaccount aggregates but still write the per-run dimension
+    // so the individual run trace viewer can show token/cost data.
   }
 
   // Run (lifetime aggregate)

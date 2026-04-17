@@ -81,7 +81,7 @@ export const agentRuns = pgTable(
 
     // Status tracking
     // Sprint 5 P4.1: added 'awaiting_clarification' for ask_clarifying_question
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification'>(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -101,6 +101,11 @@ export const agentRuns = pgTable(
     // Error tracking
     errorMessage: text('error_message'),
     errorDetail: jsonb('error_detail'),
+
+    // Phase 2 Memory & Briefings — citation tracking (S12) + uncertainty flag (S8)
+    // Migration 0137
+    citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
+    hadUncertainty: boolean('had_uncertainty').notNull().default(false),
 
     // Impact counters
     tasksCreated: integer('tasks_created').notNull().default(0),
@@ -149,6 +154,12 @@ export const agentRuns = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
+
+    // Feature 2 (Inline Run Now test UX) classifier — when true, the run was
+    // fired from an authoring-surface test panel. Excluded from Agency P&L
+    // aggregates and from the Scheduled Runs Calendar's cost estimator by
+    // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
+    isTestRun: boolean('is_test_run').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

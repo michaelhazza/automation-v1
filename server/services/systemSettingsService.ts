@@ -7,10 +7,27 @@ import { systemSettings } from '../db/schema/index.js';
 // without risking memory exhaustion on the server.
 export const SETTING_DEFAULTS: Record<string, string> = {
   max_upload_size_mb: '200',
+  // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md)
+  orchestrator_capability_query_budget: '8',
+  orchestrator_per_org_concurrency: '10',
+  orchestrator_per_org_burst_window_per_10min: '100',
+  max_configuration_attempts_per_task: '1',
+  // Feature-request delivery channels (optional — skipped when blank)
+  feature_request_slack_channel: '',
+  feature_request_email_address: '',
+  synthetos_internal_subaccount_id: '',
 };
 
 export const SETTING_KEYS = {
   MAX_UPLOAD_SIZE_MB: 'max_upload_size_mb',
+  // Orchestrator routing
+  ORCHESTRATOR_CAPABILITY_QUERY_BUDGET: 'orchestrator_capability_query_budget',
+  ORCHESTRATOR_PER_ORG_CONCURRENCY: 'orchestrator_per_org_concurrency',
+  ORCHESTRATOR_PER_ORG_BURST_WINDOW: 'orchestrator_per_org_burst_window_per_10min',
+  MAX_CONFIGURATION_ATTEMPTS_PER_TASK: 'max_configuration_attempts_per_task',
+  FEATURE_REQUEST_SLACK_CHANNEL: 'feature_request_slack_channel',
+  FEATURE_REQUEST_EMAIL_ADDRESS: 'feature_request_email_address',
+  SYNTHETOS_INTERNAL_SUBACCOUNT_ID: 'synthetos_internal_subaccount_id',
 } as const;
 
 export class SystemSettingsService {

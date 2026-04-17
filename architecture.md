@@ -19,11 +19,14 @@ server/
 ├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
 
+shared/
+└── runStatus.ts     Canonical agent run status enum, terminal/in-flight/awaiting sets, type guards
+
 client/
 ├── src/pages/       ~76 page components (lazy-loaded)
 ├── src/components/  Reusable UI components (~21 files)
 ├── src/hooks/       useSocket.ts (WebSocket integration)
-└── src/lib/         api.ts, auth.ts, socket.ts
+└── src/lib/         api.ts, auth.ts, socket.ts, formatMoney.ts, runStatus.ts, runPlanView.ts
 ```
 
 ---
@@ -193,6 +196,104 @@ Every override column is validated by `server/schemas/subaccountAgents.ts` (Zod)
 
 ---
 
+## Orchestrator Capability-Aware Routing
+
+System-managed agent that classifies inbound tasks into one of four deterministic routes. Full spec at [`docs/orchestrator-capability-routing-spec.md`](./docs/orchestrator-capability-routing-spec.md). Implemented in migrations 0156 (schema), 0157 (agent seed), 0158 (hardening), 0159 (revert forever-unique index).
+
+### Four routing paths
+
+Every task picked up by the Orchestrator is classified atomically:
+
+| Path | Trigger | Action |
+|------|---------|--------|
+| **A** — already configured | A linked agent's `capabilityMap` covers every required capability AND every integration has an active connection AND every required scope is granted (all three, single agent) | `reassign_task` to the existing agent |
+| **B** — configurable, narrow | Platform supports all required capabilities but no agent has them; request pattern is client-specific | `reassign_task` to the Configuration Assistant with structured `handoffContext` |
+| **C** — configurable, broad | Same as B, but request pattern matches a `broadly_useful_patterns` entry in the Integration Reference | Path B handoff AND `request_feature` with `category: 'system_promotion_candidate'` |
+| **D** — unsupported | At least one required capability absent from the Integration Reference, with `reference_state: healthy` | `request_feature` with `category: 'new_capability'`; task status → `blocked_on_feature_request` |
+
+### Decomposition pipeline (before classification)
+
+The LLM never decides a route directly. Every run runs a three-stage pipeline:
+
+1. **Draft** — LLM extracts `[{kind, slug, rationale}]` from task text. `list_platform_capabilities` is called first so the canonical taxonomy is in view during drafting.
+2. **Normalise + validate** — `check_capability_gap` resolves aliases against the capability taxonomy, validates each canonical slug against the live reference, and returns per-capability availability.
+3. **One-shot retry** — if any slug is `unknown` or `not_found`, the LLM re-runs once with the taxonomy explicitly in view. After the single retry, unknowns are treated as genuinely absent (Path D).
+
+Classification is then a pure function of the `check_capability_gap` verdict.
+
+### Integration Reference (machine-readable capability catalogue)
+
+`docs/integration-reference.md` — one fenced `yaml integration` block per integration plus a `capability_taxonomy` block. Parsed at runtime by `server/services/integrationReferenceService.ts` (60s TTL in-process cache). Schema validated against the parser's `REQUIRED_INTEGRATION_FIELDS` list; drift between the doc and the code-level `OAUTH_PROVIDERS` + `MCP_PRESETS` is caught by `scripts/verify-integration-reference.mjs` at CI time (exit 1 blocking, exit 2 warning).
+
+Every integration carries a runtime-computed `confidence`: `high` (fully_supported + verified in last 30 days), `stale` (otherwise), `unknown` (malformed `last_verified`). The rollup `reference_state` (`healthy` / `degraded` / `unavailable`) is surfaced on every `list_platform_capabilities` response.
+
+When `reference_state === 'unavailable'`, routing falls back to legacy keyword patterns and files an `infrastructure_alert` feature request — it never blocks every task as Path D on a broken reference.
+
+### Capability map (per agent, derived)
+
+`subaccountAgents.capabilityMap` is a derived JSON column (added in migration 0156) mirroring the shape `{ computedAt, referenceLastUpdated, integrations[], read_capabilities[], write_capabilities[], skills[], primitives[] }`. Computed by `server/services/capabilityMapService.ts`:
+
+- **Synchronously** on skill-link changes (`addSkill` / `removeSkill` / `setSkills` / `setAllowedSkillSlugs`).
+- **Asynchronously** on reference-version change via `recomputeOrgCapabilityMaps(orgId)`.
+
+`NULL` = not yet computed; `check_capability_gap` treats a null map as zero-capability so Path A cannot fire against uncomputed state. The stored `referenceLastUpdated` is string-exact-compared against the current reference's `schema_meta.last_updated`; mismatch disqualifies the map from Path A and forces Path B (re-verification by the Configuration Assistant).
+
+### Capability discovery skills
+
+Four new system skills, all `idempotencyStrategy: 'read_only'` except `request_feature` (`keyed_write`). Registered in `server/config/actionRegistry.ts` and dispatched in `server/services/skillExecutor.ts`. Handlers at `server/tools/capabilities/`.
+
+| Skill | Purpose |
+|-------|---------|
+| `list_platform_capabilities` | Return the parsed Integration Reference — catalogue, taxonomy, reference_state |
+| `list_connections` | Active integration connections for an org or subaccount (subaccount scope inherits org-level connections; subaccount-specific rows override). Never returns secrets. |
+| `check_capability_gap` | Atomic Path A determination: capability subset + active connection + granted scopes across a single candidate agent. Returns verdict + per-capability detail + candidate agents with `combined_coverage_possible` flag |
+| `request_feature` | Writes a `feature_requests` row with per-org 30-day dedupe (advisory lock + app-level lookup), fires Slack/email/Synthetos-task notifications |
+
+All four decrement `SkillExecutionContext.capabilityQueryCallCount`. When the counter exceeds `systemSettings.orchestrator_capability_query_budget` (default 8), the skill returns `{ error: 'capability_query_budget_exhausted' }` so the Orchestrator halts the decomposition loop rather than burning tokens. Identical in-run calls are cached on `sha256(skill_name + stableStringify(input))` at zero budget cost.
+
+### Orchestrator link resolution (org sentinel model)
+
+The Orchestrator is linked ONCE per org, attached to the org's sentinel subaccount (seeded in migration 0157). When a task fires the `org_task_created` trigger, `server/jobs/orchestratorFromTaskJob.ts` uses a two-step link lookup:
+
+1. If the task has a `subaccountId`, prefer an active Orchestrator link on that exact subaccount (supports future per-subaccount Orchestrators).
+2. Fall back to any active Orchestrator link for the org, ordered by `(createdAt, id)` for deterministic selection.
+
+The task's `subaccountId` is passed through `triggerContext.taskSubaccountId` so downstream capability queries can scope correctly even when the Orchestrator itself runs from its org-level link.
+
+### Feature request pipeline
+
+`feature_requests` table (migration 0156): per-org signal with 30-day dedupe keyed on canonical capability slugs. The dedupe hash is computed over post-normalisation canonical slugs so aliases collapse (`inbox_read` and `email_read` produce the same hash). Race-safe via `pg_advisory_xact_lock(orgId + dedupeHash)` inside the insert transaction.
+
+Categories: `new_capability` (Path D), `system_promotion_candidate` (Path C), `infrastructure_alert` (reference-parse failures). Notifications fire in parallel via `featureRequestNotificationService`:
+
+- **Slack** — incoming webhook via `SYNTHETOS_INTERNAL_SLACK_WEBHOOK` env var
+- **Email** — `emailService.sendGenericEmail` to the address in `systemSettings.feature_request_email_address`
+- **Synthetos-internal task** — cross-org admin-bypass insert (`withAdminConnection` + `admin_role`) into the subaccount configured via `systemSettings.synthetos_internal_subaccount_id`. The task's `createdByAgentId` is set so the `org_task_created` trigger handler drops the event (no auto-routing of feature-request tasks).
+
+### Routing outcomes + observability
+
+`routing_outcomes` table (migration 0156) pairs decision records to downstream outcomes for the feedback loop (§9.5.2 of the spec). Every capability discovery skill emits structured logs at `info` level — `check_capability_gap` in particular emits the full decision telemetry (`verdict`, `required_capabilities`, `missing_for_configurable`, `missing_for_unsupported`, `candidate_agent_count`, `configured_by_agent_id`, `combined_coverage_possible`, `budget_used`). These feed the Orchestrator decision distribution queries.
+
+### Trigger wiring
+
+`taskService.createTask` fires `enqueueOrchestratorRoutingIfEligible(task)` (non-blocking) after the existing `triggerService.checkAndFire`. Eligibility predicate (`isEligibleForOrchestratorRouting`): `status === 'inbox'` AND `assignedAgentId === null` AND `!isSubTask` AND `createdByAgentId === null` AND description ≥ 10 chars. The pg-boss worker for `orchestrator-from-task` is registered in `server/services/queueService.ts`; the sender is injected via `setOrchestratorJobSender` at startup.
+
+Eligibility is re-checked inside `processOrchestratorFromTask` before dispatch so a task that was reassigned or moved out of inbox between enqueue and execution drops silently.
+
+### Versioned idempotency
+
+The Orchestrator dispatch idempotency key is `orchestrator-from-task:${taskId}:${task.updatedAt.getTime()}` — user edits to the task description produce a fresh run rather than dedup-ing against a stale one. Pure pg-boss replays (same task + same updatedAt) still dedup.
+
+### Task status values
+
+Migration 0156 does not constrain the `tasks.status` text column, so new statuses land additively via client-side rendering in `client/src/lib/statusBadge.tsx`:
+
+- `routed`, `awaiting_configuration`, `blocked_on_feature_request` (outcomes)
+- `routing_failed`, `routing_timeout` (failure states — distinct reasons for ops)
+- `configuration_partial`, `configuration_failed` (post-handoff verification outcomes)
+
+---
+
 ## Task System
 
 ### Core schema
@@ -343,6 +444,36 @@ Agent runs accept an `idempotencyKey` (migration 0040). Prevents duplicate execu
 Format: `{runType}:{agentId}:{subaccountId}:{userId}:{taskId}:{timeWindow}`
 
 System agents generate keys automatically. External callers should provide a deterministic key.
+
+### Test-run idempotency — `server/lib/testRunIdempotency.ts`
+
+Inline Run Now test runs use a server-derived idempotency key built from canonical JSON serialization of the input payload. Client-supplied UUID is downgraded to a hint that participates in the hash but cannot control it.
+
+**Canonical JSON:** `canonicalStringify()` sorts object keys recursively, drops `undefined` values in objects, replaces `undefined` in arrays and non-finite numbers with `null`. This ensures logically-equivalent payloads (same data, different key order) produce the same hash.
+
+**Dual-bucket acceptance:** Keys are time-bucketed (10s windows). `deriveTestRunIdempotencyCandidates()` returns `[currentBucketKey, previousBucketKey]` — the execution service checks both via `inArray()` on SELECT but inserts only the current-bucket key. This eliminates false misses when a retry straddles a bucket boundary.
+
+**Execution service integration:** `agentExecutionService.executeRun()` accepts `idempotencyCandidateKeys?: string[]`. When present, the SELECT deduplication check uses `inArray(agentRuns.idempotencyKey, candidates)` instead of a single `eq()`. All four test-run route files (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) use `deriveTestRunIdempotencyCandidates`.
+
+Tests: `server/lib/__tests__/testRunIdempotencyPure.test.ts` — 20 tests covering canonical serialization, key derivation, and dual-bucket boundary behaviour.
+
+### Test-run rate limiting — `server/lib/testRunRateLimit.ts`
+
+In-memory per-user rate limiter for test-run endpoints. Phase 1 design — process-local `Map<userId, timestamps[]>` with explicit limitations documented:
+
+- **Hard cap:** `MAX_TRACKED_USERS` (10,000) prevents unbounded memory growth; oldest entries evicted LRU-style when exceeded.
+- **Eviction metric:** `evictionCount` tracks total evictions; logs at threshold intervals (every 100) for operational visibility. `getTestRunRateLimitMetrics()` exposes current counts for health endpoints.
+- **Scaling note:** Effective rate multiplies by instance count under horizontal scaling. Replace with Redis/DB backing before multi-instance deployment.
+
+Tests: `server/services/__tests__/testRunRateLimitPure.test.ts` — 7 tests covering limits, boundary, window expiry, and per-user independence.
+
+### Test fixtures — `server/services/agentTestFixturesService.ts`
+
+Saved prompt/input payloads for the inline Run Now test panel. Scoped per org/subaccount with a polymorphic target (`scope: 'agent' | 'skill'`, `targetId`). No FK to `agents`/`skills` — the service handles integrity at two layers:
+
+- **Read-time filter:** `listFixtures()` verifies the polymorphic target still exists and is not soft-deleted before returning results. Orphaned fixtures are hidden on read and logged as `agentTestFixtures.orphan_target` for background cleanup.
+- **Cleanup helper:** `cleanupOrphanedFixtures(orgId)` soft-deletes fixtures whose target is missing or soft-deleted. Intended for periodic background jobs.
+- **Cascade on target delete:** `softDeleteByTarget()` called from agent/skill delete flows to proactively clean up fixtures.
 
 ---
 
@@ -732,6 +863,29 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
 - Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
+### Provenance, Lifecycle, and Quality-Score Boundary (migration 0150)
+
+The Memory & Briefings PR review hardening pass added five durable invariants to `workspace_memory_entries`:
+
+1. **Lifecycle timestamps** — `embeddingComputedAt`, `qualityComputedAt`, `decayComputedAt`. Each async job sets its timestamp on every row it touches so downstream jobs can verify ordering. The utility-adjust job checks `decayComputedAt IS NOT NULL` before running, which guarantees decay always precedes utility adjustment.
+2. **Citation provenance at the write boundary** — `provenanceSourceType` (`agent_run | manual | playbook | drop_zone | synthesis`), `provenanceSourceId`, optional `provenanceConfidence`, and `isUnverified` (true when no provenance is supplied). High-trust paths (synthesis, utility-adjust) filter `isUnverified` rows out.
+3. **Quality-score mutation guard** — `qualityScoreUpdater` column (`initial_score | system_decay_job | system_utility_job`). Every UPDATE that changes `qualityScore` must set this field to an allowed value; a Postgres trigger declared in migration 0150 raises otherwise.
+4. **Architectural test enforces the §4.4 invariant** — `server/services/__tests__/qualityScoreMutationBoundaryTest.ts` walks the TypeScript sources and fails CI if any file outside the allowlist contains a write to `qualityScore`. The trigger and the test together close the boundary at both DB and code levels.
+5. **Allowed writers** are exclusively `memoryEntryQualityService.ts` (`applyDecay`, `adjustFromUtility`) plus `workspaceMemoryService.ts` for the initial insert path. Any new writer requires reviewer sign-off and an allowlist entry in the boundary test.
+
+### Content-Hash-Based Embedding Invalidation (migration 0151)
+
+Workspace memory entries can be mutated in-place by the dedup UPDATE path. Without a drift signal, the embedding silently goes stale relative to the new content and vector search starts returning matches against text that no longer exists in the row. Migration 0151 closes this:
+
+- **`content_hash`** — `TEXT GENERATED ALWAYS AS (md5(content)) STORED`. Auto-maintained by Postgres on every content mutation. Read-only at the application layer.
+- **`embedding_content_hash`** — set on every embedding write to the hash of the content used to compute that embedding. When `content_hash IS DISTINCT FROM embedding_content_hash`, the embedding is stale.
+- **Partial stale-index** — `workspace_memory_entries_stale_embedding_idx ON (subaccount_id) WHERE embedding IS NOT NULL AND embedding_content_hash IS DISTINCT FROM content_hash`. A backfill job can scan in O(stale) instead of O(rows).
+- **`reembedEntry({ id, content, resetContext })`** in `workspaceMemoryService.ts` — the canonical re-embed helper. Dedups concurrent re-embeds for the same entry id via a process-local `inFlightReembeds: Set<string>`. Sets `embedding`, `embeddingComputedAt`, and `embeddingContentHash` atomically; clears `embeddingContext` when `resetContext` is true.
+- **Phase 1 / Phase 2 embedding flow** — Phase 1 writes a content-only embedding immediately on insert; Phase 2 asynchronously re-embeds with the LLM-generated `embeddingContext` prefix. The Phase 2 enrichment UPDATE includes a CAS predicate (`AND content_hash = ${snapshotContentHash} AND embedding_context IS NULL`) so a concurrent Phase 1 write that mutated the content does not get overwritten with stale enrichment text.
+- **Ops helpers** — `getStaleEmbeddingsBatch({ subaccountId?, limit? })` returns up to 1000 stale rows; `recomputeStaleEmbeddings({ subaccountId?, limit? })` walks the batch and calls `reembedEntry` per row, returning `{ scanned, recomputed, skipped }`. Both filter `deleted_at IS NULL`.
+
+Treat `reembedEntry` as the only sanctioned write path for the embedding column outside of the initial insert. New callers must not write `embedding` directly without also writing `embedding_content_hash` to the matching content hash.
+
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
 `workspaceMemoryService._hybridRetrieve()` is the canonical path for injecting memory into agent prompts. It replaces the former single-CTE vector search with a multi-stage Reciprocal Rank Fusion pipeline:
@@ -947,15 +1101,43 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 - `llmPricing` table — model + provider pricing reference
 - `llmRequests` table — every LLM call logged with tokens, cost, model
 
+### MCP Tool Invocations (migration 0154)
+
+Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one row per attempt including retries. Key design points:
+
+- **`mcpClientManager.writeInvocation()`** — fire-and-forget, never throws, never blocks the agent loop. Called from four sites: pre-execution exits (budget-blocked, invalid slug, connect failure), catch (retry path — writes the first attempt before recursing), and finally (covers success + non-retryable errors).
+- **`wroteInCatch` flag** — prevents double-write: when catch writes the first attempt's row and recurses, the outer finally skips its write. The retry gets its own row via its own finally.
+- **`callIndex`** — canonical ordering key within a run; null for pre-execution exits (avoids UNIQUE constraint); incremented before the try block so a retry gets `callIndex = N+1` with no collision.
+- **`isRetry`** — `true` only in the finally block when `retryCount > 0`; pre-execution exits and the catch-path write for the first attempt always use `false`.
+- **`failureReason`** — `'pre_execution_failure'` for routing failures (invalid slug, no connected instance); transport failure values (`timeout`, `process_crash`, `invalid_response`, `auth_error`, `rate_limited`, `unknown`) for error/timeout rows. DB CHECK enforces `null` for `success`/`budget_blocked`, non-null for `error`/`timeout`.
+- **`isTestRun`** — denormalised from `agentRun.isTestRun`; test-run rows skip `mcp_org`/`mcp_subaccount`/`mcp_server` aggregate writes to keep P&L clean.
+- **`budget_blocked`** — policy exit (not infra failure); `failure_reason IS NULL`, `duration_ms = 0`, excluded from `errorCount` in all aggregate and summary queries.
+- **`responseSizeBytes` / `wasTruncated`** — `Buffer.byteLength(serialised, 'utf8')` is the basis for both; char count diverges for multibyte characters.
+- **`mcpAggregateService.upsertMcpAggregates()`** — called fire-and-forget after each successful ledger insert. Reuses `cost_aggregates` with four MCP-specific entityTypes: `mcp_org` (monthly+daily), `mcp_subaccount` (monthly+daily), `mcp_run` (lifetime), `mcp_server` (monthly, org-scoped). Only `requestCount` and `errorCount` carry signal; LLM cost columns are zero.
+- **Deduplication** — `onConflictDoNothing()` on `(run_id, call_index)` unique index prevents double-writes; aggregate upsert is skipped when no row was inserted, preserving the "recomputable from ledger" guarantee.
+- **`mcpCallSummary`** in `agentActivityService.getRunDetail()` — grouped by `server_slug`, `errorCount` uses `filter (where status in ('error', 'timeout'))` — `budget_blocked` excluded.
+
 ---
 
 ## Event-Driven Architecture
 
 - **pg-boss** — job queue for all async work (handoffs, heartbeats, scheduled tasks, slack inbound, priority feed cleanup)
-- **WebSocket (Socket.IO)** — real-time updates to client. Rooms: subaccount tasks, agent runs
-- **`useSocket` hook** — client subscribes to subaccount-scoped room for live updates
+- **WebSocket (Socket.IO)** — real-time updates to client. Rooms: subaccount tasks, agent runs, playbook runs
+- **`useSocket` / `useSocketRoom`** — client subscribes to scoped rooms for live updates (see room patterns below)
 - **Audit events** — all significant actions logged to `auditEvents` with actor, action, resource
 - **Correlation IDs** — `correlation.ts` middleware generates per-request IDs for log tracing
+
+### WebSocket room patterns
+
+| Room | Format | Events | Consumer |
+|------|--------|--------|----------|
+| Subaccount | `subaccount:{id}` | Task/board updates | Board pages, activity feed |
+| Agent run | `agent-run:{runId}` | `agent:run:started`, `agent:run:progress`, `agent:run:completed`, `agent:run:failed` | `RunTraceViewerPage`, `TestPanel` |
+| Playbook run | `playbook-run:{runId}` | Step dispatch, step completion, approval state, form-input requests, run-level transitions | `PlaybookRunDetailPage` |
+
+**Client hook:** `useSocketRoom(namespace, id, eventHandlers, onJoin)` from `client/src/hooks/useSocket.ts`. Joins the room on mount, leaves on unmount, invokes handlers per event. Typical pattern: each handler calls a REST refresh to maintain payload consistency (socket as notification, REST as source of truth).
+
+**Backstop polling:** Components that use WebSocket rooms also run a `setInterval` backstop — 15s when connected, 5s when disconnected — to cover reconnect windows. The backstop is a safety net, not the primary update path.
 
 ---
 
@@ -1014,11 +1196,15 @@ Examples: `agentExecutionServicePure.ts`, `regressionCaptureServicePure.ts`, `cr
 
 ### Runtime tests
 
-21 test files in `server/services/__tests__/` (~4350 lines). Key coverage:
+23+ test files in `server/services/__tests__/` and `server/lib/__tests__/`. Key coverage:
 - `agentExecution.smoke.test.ts` — end-to-end agent execution
 - `rls.context-propagation.test.ts` — iterates `rlsProtectedTables.ts` to assert Layer B holds
 - `agentExecutionServicePure.checkpoint.test.ts` — crash-resume parity
 - `policyEngineService.scopeValidation.test.ts` — scope violation detection
+- `testRunIdempotencyPure.test.ts` — canonical JSON, key derivation, dual-bucket boundary (20 tests)
+- `testRunRateLimitPure.test.ts` — rate limit windows, eviction, per-user independence (7 tests)
+- `runStatusDriftPure.test.ts` — shared↔client enum drift detection (5 tests)
+- `scheduleCalendarServicePure.test.ts` — heartbeat/cron/RRULE projection, sort, cost estimation (23 tests)
 - Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, `priorityFeedServicePure.test.ts`, etc.
 
 Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for deterministic testing. `server/services/__tests__/fixtures/loadFixtures.ts` — fixture loader.
@@ -1029,8 +1215,9 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items
-- **Real-time updates** — `useSocket` hook subscribes to WebSocket rooms for live board/run updates
+- **Real-time updates** — `useSocketRoom` for per-entity rooms (agent runs, playbook runs); `useSocket` for subaccount-scoped board updates. WebSocket is the primary update path; backstop polling covers reconnect windows (see Event-Driven Architecture above).
 - **API wrapper** — all HTTP calls go through `src/lib/api.ts`
+- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering). New client-wide helpers go in `src/lib/`.
 
 ---
 
@@ -1130,6 +1317,18 @@ Drives whether a skill's output body is surfaced to downstream consumers (`skill
 ### URL canonicalisation — `server/lib/canonicaliseUrl.ts`
 
 Single canonicalisation path for URLs across the system (deduplication, comparison, idempotency keys). Use it when storing or hashing URLs.
+
+### Agent run status enum — `shared/runStatus.ts`
+
+Single source of truth for the 11 agent run statuses (`queued`, `running`, `completed`, `failed`, `timeout`, `cancelled`, `budget_exceeded`, `loop_detected`, `pending_approval`, `pending_input`, `handoff`). Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `ReadonlySet`s, plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+
+**Client duplicate:** `client/src/lib/runStatus.ts` is a structural copy — the client tsconfig does not reach `shared/`. Drift between the two is caught by `server/services/__tests__/runStatusDriftPure.test.ts` (5 assertions: dict match, terminal/in-flight/awaiting array match, `isTerminalRunStatus` agreement for every value).
+
+**Usage:** Import from `shared/runStatus.ts` on the server; from `client/src/lib/runStatus.ts` on the client. Both `runPlanView.ts` and `TestPanel.tsx` use `isTerminalRunStatus` instead of local helpers.
+
+### Currency formatting — `client/src/lib/formatMoney.ts`
+
+Shared client-side money formatter. Values are in whole dollars (fractional), not cents. Default: 2dp. Opt-in `micro: true` renders sub-cent values at 4dp so costs below $0.01 are not shown as "$0.00". Handles null/undefined (returns "—"), zero, negatives. Used by `ScheduleCalendar` (per-occurrence micro, totals at standard 2dp) and available to any surface displaying dollar amounts.
 
 ### Other shared primitives
 
@@ -1276,6 +1475,87 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 | `server/services/configHistoryService.ts` | `record()`, `restore()`, `list()`, change-summary generator, redaction |
 | `server/services/configBackupService.ts` | Bulk snapshot + restore used by Skill Analyzer and Configuration Assistant |
 | `client/src/pages/ConfigSessionHistoryPage.tsx` | Admin history browser grouped by session |
+
+---
+
+## Skill Analyzer
+
+System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
+
+Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
+
+1. **Parse** — `skillParserService` extracts candidate skills from uploaded zips / pasted JSON / GitHub repos.
+2. **Hash** — SHA-256 of normalized content; used for embedding cache and idempotent retries.
+3. **Embed** — OpenAI text-embedding-3-large per candidate and per library skill; results cached on `skill_embeddings`.
+4. **Compare** — cosine similarity produces a single best-match per candidate; banded into `likely_duplicate` (>0.92) / `ambiguous` (0.60–0.92) / `distinct` (<0.60).
+5. **Classify + merge** — Claude Sonnet 4.6 produces classification (DUPLICATE / IMPROVEMENT / PARTIAL_OVERLAP / DISTINCT) and, for overlap classifications, a `proposedMerge` object. See §Rule-based fallback below when the classifier is unavailable.
+6. **Validate** — pure post-processing in `skillAnalyzerServicePure.validateMergeOutput` emits structured warnings (scope expansion, invocation-block loss, HITL-gate loss, table-row drops, required-field demotion, capability overlap, name mismatch, output-format loss).
+7. **Agent propose** (DISTINCT only) — cosine rank of the candidate against existing system agents; top-K persisted to `agentProposals` with optional Haiku enrichment.
+8. **Cluster recommend** — if ≥3 DISTINCT candidates lack a good agent home, Sonnet proposes a new agent and retro-injects a synthetic proposal into each affected result's `agentProposals`.
+
+### v2 bug-fix cycle (migration 0155)
+
+The v2 cycle closed seven correctness holes in the Review + Execute flow. Key additions:
+
+- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; `client/src/components/skill-analyzer/mergeTypes.ts` mirrors it for optimistic UI preview. The server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
+- **Warning tier system** (config-driven). Tiers are `informational` | `standard` | `decision_required` | `critical`, mapped per warning code via `skill_analyzer_config.warning_tier_map`. Tier dictates the Approve-button gate: structured resolution (per-field accept/restore for demoted required fields; use-library / use-incoming for name mismatch; scope-down / flag-other / accept-overlap for graph collisions); single-click acknowledgment; or critical-phrase typed confirmation.
+- **Rule-based fallback merger.** When the LLM classifier is unavailable or returns an invalid proposal, `buildRuleBasedMerge` produces a deterministic merge (library-dominant name for DB slug stability; definition-bearing skill wins schema; H2-section union for instructions). Always emits `CLASSIFIER_FALLBACK` warning + low-confidence banner requiring reviewer acknowledgment. No more `proposedMerge=null` dead rows.
+- **Name consistency cascade.** `detectNameMismatch` compares top-level `name`, `definition.name`, and bare-identifier references in description/instructions. When a reviewer resolves via `use_library_name` / `use_incoming_name`, the chosen name cascades atomically into `proposedMergedContent.name`, `definition.name`, and `execution_resolved_name`; Execute reads `execution_resolved_name` as the canonical source to survive drift.
+- **Three-phase staged Execute.** `executeApproved` in `server/services/skillAnalyzerService.ts` runs (1) soft-create proposed agents with DB `status='draft'` (idempotent by slug), (2) per-result skill transactions attaching to draft agents, (3) promote agents to `active` whose skills succeeded. Drafts with zero successful attachments persist as `pendingDraftAgents[]` in the response for manual review.
+- **Execution lock.** Atomic `UPDATE ... WHERE execution_lock=false` at Execute entry prevents double-runs; released in `finally`. Stale-lock recovery via `POST /jobs/:jobId/execute/unlock` (systemAdmin only) gated by `execution_lock_stale_seconds`. Auto-unlock is config-flagged and default-off to avoid zombie-process double-execution.
+- **Config snapshot isolation.** `jobs.config_snapshot` captures the full `skill_analyzer_config` row at job start; validator, collision detector, and Execute all read the snapshot. Mid-job config changes never apply to in-flight jobs.
+- **Approval freeze + drift detection.** `approved_at` locks a result against merge/resolution edits (409 RESULT_LOCKED); reviewer must unapprove (`action=null`) to edit. `approval_decision_snapshot` + `approval_hash` are captured at approve time; Execute compares the live evaluator result against `approval_hash` and emits a non-blocking `skill_analyzer.approval_drift_detected` log when they differ.
+- **Resolution invalidation on merge edit.** Any write to `proposedMergedContent` (`PATCH /merge`, `POST /merge/reset`) atomically wipes `warning_resolutions`, `execution_resolved_name`, `approved_at`, `approval_decision_snapshot`, and `approval_hash`. Response carries `resolutionsCleared: true` so the UI can surface a "Review decisions reset" toast.
+- **Concurrency on resolve-warning.** `PATCH /resolve-warning` strictly requires `If-Unmodified-Since`; server derives the canonical row timestamp as `mergeUpdatedAt ?? createdAt` and rejects mismatches > ±2s (`409 STALE_RESOLVE`). Verified by pure tests in `skillAnalyzerServicePureFallbackAndTables.test.ts`.
+- **Proposed-new-agent coupling.** Cluster recommendations write to `skill_analyzer_jobs.proposed_new_agents` (array, supports N-per-job) AND retro-inject synthetic entries into each affected DISTINCT result's `agentProposals`. UI banner renders per-agent Confirm/Reject; confirmed proposals become the top-ranked chip in per-skill assignment panels.
+- **Table drop remediation.** `remediateTables` runs before `validateMergeOutput` and auto-appends missing rows with `[SOURCE: library|incoming]` markers. Guards: column-count mismatch, cross-source first-column-key conflict, pre-marked rows, and `max_table_growth_ratio` aggregate cap.
+- **Skill-graph collision detection.** `detectSkillGraphCollision` splits merged instructions into `##` heading fragments, pre-filters library skills by bigram overlap (top-K + 200-pair budget), and emits `SKILL_GRAPH_COLLISION` warnings when fragment similarity exceeds `collision_detection_threshold`.
+
+### Schema (migration 0155)
+
+| Table / column | Purpose |
+|----------------|---------|
+| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`. Bumps `config_version` on every update. |
+| `skill_analyzer_results.warning_resolutions` | JSONB array of reviewer decisions, deduped by `(warningCode, details.field)`. Wiped on merge edit. |
+| `skill_analyzer_results.classifier_fallback_applied` | True when rule-based merger produced the proposal. |
+| `skill_analyzer_results.execution_resolved_name` | Canonical name chosen via NAME_MISMATCH resolution; authoritative at Execute. |
+| `skill_analyzer_results.approved_at` | Lock timestamp; presence blocks merge/resolution edits. |
+| `skill_analyzer_results.approval_decision_snapshot` + `approval_hash` | Debug trace + drift-detection at Execute. |
+| `skill_analyzer_results.was_approved_before` | UI surfaces "modified after previous approval" badge. |
+| `skill_analyzer_jobs.proposed_new_agents` | JSONB array supporting N proposed-agent entries per job, with `status` lifecycle. |
+| `skill_analyzer_jobs.config_snapshot` + `config_version_used` | Frozen config at job start; immutable post-INSERT. |
+| `skill_analyzer_jobs.execution_lock` + `execution_started_at` + `execution_finished_at` | Atomic concurrency guard for Execute. |
+
+### Config validation rules
+
+`skillAnalyzerConfigService.updateConfig` enforces:
+- Ratio/probability fields (`classifier_fallback_confidence_score`, scope-expansion thresholds, `collision_detection_threshold`) in `[0, 1]`.
+- `max_table_growth_ratio` in `[1, 10]`.
+- `collision_max_candidates` ∈ positive integer; `execution_lock_stale_seconds` same.
+- `critical_warning_confirmation_phrase` ≥ 3 characters.
+- Cross-field invariant: `scope_expansion_standard_threshold < scope_expansion_critical_threshold` with `MIN_THRESHOLD_DELTA = 0.05` gap to prevent degenerate collapses.
+- Every successful update emits `skill_analyzer_config_updated` structured log with `{ changedFields, before, after, configVersion }`.
+
+### Files
+
+| File | Role |
+|------|------|
+| `migrations/0155_skill_analyzer_v2_fixes.sql` | Schema additions + singleton seed |
+| `server/db/schema/skillAnalyzerConfig.ts` | Drizzle schema for the config singleton |
+| `server/db/schema/skillAnalyzerJobs.ts` | Jobs table (+ v2 columns) |
+| `server/db/schema/skillAnalyzerResults.ts` | Results table (+ v2 columns) |
+| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, warning codes, tier map, validator |
+| `server/services/skillAnalyzerService.ts` | Stateful — `createJob`, `getJob`, `setResultAction`, `patchMergeFields`, `resetMergeToOriginal`, `resolveWarning`, `updateProposedAgent`, `executeApproved` (3-phase staged pipeline) |
+| `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
+| `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
+| `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
+| `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Three-column merge view + `WarningResolutionBlock` with per-warning resolution controls |
+| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Review screen, `AgentChipBlock`, `ProposedAgentBanner` with Confirm/Reject |
+| `client/src/components/skill-analyzer/mergeTypes.ts` | Browser-safe mirror of the approval evaluator + warning types |
+
+### Tests
+
+Pure tests live in `server/services/__tests__/skillAnalyzerServicePure*.test.ts` — runnable via `npx tsx <path>`. v2 cycle coverage is in `skillAnalyzerServicePureFallbackAndTables.test.ts` (fallback merger, table remediation with row-conflict / growth-cap guards, name-mismatch detection, collision detection, approval evaluator, concurrency guard). All 115 tests pass.
 
 ---
 

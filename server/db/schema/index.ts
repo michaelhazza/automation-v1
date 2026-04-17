@@ -80,9 +80,10 @@ export * from './mcpServerConfigs';
 export * from './mcpServerAgentLinks';
 export * from './goals';
 export * from './agentPromptRevisions';
-// Skill Analyzer (migration 0092, extended in 0098)
+// Skill Analyzer (migration 0092, extended in 0098; v2 fixes in 0155)
 export * from './skillAnalyzerJobs';
 export * from './skillAnalyzerResults';
+export * from './skillAnalyzerConfig';
 export * from './skillEmbeddings';
 export * from './agentEmbeddings';
 export * from './inboxReadStates';
@@ -156,3 +157,33 @@ export * from './portalBriefs.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
 export * from './subaccountOnboardingState.js';
+
+// Memory & Briefings spec Phase 1 — HITL review queue (migration 0139)
+export * from './memoryReviewQueue.js';
+
+// Memory & Briefings spec Phase 2 — citation score table (migration 0140)
+export * from './memoryCitationScores.js';
+
+// Memory & Briefings spec Phase 2 — trust calibration (migration 0147)
+export * from './trustCalibrationState.js';
+
+// Memory & Briefings spec Phase 4 — drop-zone upload audit (migration 0141)
+export * from './dropZoneUploadAudit.js';
+export * from './dropZoneProcessingLog.js';
+
+// Memory & Briefings spec Phase 4 — onboarding bundle configs (migration 0142)
+export * from './onboardingBundleConfigs.js';
+
+// Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
+export * from './memoryBlockVersions.js';
+
+// Feature 2 — test-input fixtures for inline Run-Now test panel (migration 0153)
+export * from './agentTestFixtures.js';
+
+// MCP Tool Invocations — cost attribution & observability ledger (migration 0154)
+export * from './mcpToolInvocations.js';
+
+// Orchestrator capability-aware routing (migration 0156) — see
+// docs/orchestrator-capability-routing-spec.md.
+export * from './featureRequests.js';
+export * from './routingOutcomes.js';

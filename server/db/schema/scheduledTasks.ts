@@ -63,6 +63,15 @@ export const scheduledTasks = pgTable(
     endsAt: timestamp('ends_at', { withTimezone: true }),
     endsAfterRuns: integer('ends_after_runs'),
 
+    // Memory & Briefings spec Phase 1 (migration 0143, §10.4 S22)
+    // Per-task delivery channel override. Null = use the playbook default.
+    // Shape is a subset of DeliveryConfig from deliveryService (Phase 1).
+    deliveryChannels: jsonb('delivery_channels').$type<{
+      email?: boolean;
+      portal?: boolean;
+      slack?: boolean;
+    } | null>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,5 +1,5 @@
 /**
- * Daily Intelligence Brief — Phase G system template (spec §11).
+ * Intelligence Briefing — Phase G system template (spec §11).
  *
  * Exercises every primitive shipped in this spec:
  *   - action_call (§4)          — setup_schedule, publish_portal, send_email
@@ -34,8 +34,8 @@ const schedulePickerValueSchema = z.object({
 });
 
 export default definePlaybook({
-  slug: 'daily-intelligence-brief',
-  name: 'Daily Intelligence Brief',
+  slug: 'intelligence-briefing',
+  name: 'Intelligence Briefing',
   description:
     'Researches competitive, regulatory, campaign, and industry signals on a configurable schedule, ' +
     'drafts a concise brief, publishes it to the sub-account portal, and optionally emails it to a list of recipients.',
@@ -44,7 +44,7 @@ export default definePlaybook({
   autoStartOnOnboarding: true,
 
   portalPresentation: {
-    cardTitle: 'Daily Intelligence Brief',
+    cardTitle: 'Intelligence Briefing',
     headlineStepId: 'draft',
     headlineOutputPath: 'bullets',
     // Deep-link to a future brief archive page; run modal is the fallback.
@@ -93,18 +93,18 @@ export default definePlaybook({
       dependsOn: [],
       sideEffectType: 'idempotent',
       idempotencyScope: 'entity',
-      entityKey: 'task:{{ run.subaccount.id }}:daily-intelligence-brief',
+      entityKey: 'task:{{ run.subaccount.id }}:intelligence-briefing',
       actionSlug: 'config_create_scheduled_task',
       actionInputs: {
-        title: 'Daily Intelligence Brief',
+        title: 'Intelligence Briefing',
         description:
-          'Recurring brief for this sub-account. Created by the Daily Intelligence Brief playbook.',
+          'Recurring brief for this sub-account. Created by the Intelligence Briefing playbook.',
         subaccountId: '{{ run.subaccount.id }}',
         rrule: '{{ run.input.schedule.rrule }}',
         timezone: '{{ run.input.schedule.timezone }}',
         scheduleTime: '{{ run.input.schedule.scheduleTime }}',
-        taskSlug: 'daily-intelligence-brief-{{ run.subaccount.id }}',
-        createdByPlaybookSlug: 'daily-intelligence-brief',
+        taskSlug: 'intelligence-briefing-{{ run.subaccount.id }}',
+        createdByPlaybookSlug: 'intelligence-briefing',
         // runNow: true kicks off the first occurrence immediately so the brief
         // exists in the portal before the next scheduled run fires.
         runNow: 'true',
@@ -185,7 +185,7 @@ export default definePlaybook({
       humanReviewRequired: true,
       actionSlug: 'config_publish_playbook_output_to_portal',
       actionInputs: {
-        playbookSlug: 'daily-intelligence-brief',
+        playbookSlug: 'intelligence-briefing',
         title: '{{ steps.draft.output.title }}',
         bullets: '{{ steps.draft.output.bullets }}',
         detailMarkdown: '{{ steps.draft.output.detailMarkdown }}',

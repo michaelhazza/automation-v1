@@ -112,6 +112,8 @@ export interface SkillExecutionContext {
   _mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig>;
   /** MCP call counter for budget enforcement. */
   mcpCallCount?: number;
+  /** Whether this run is a test run — propagated from agentRun.isTestRun. */
+  isTestRun?: boolean;
   /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
@@ -135,6 +137,16 @@ export interface SkillExecutionContext {
    * actions.idempotency_key unique constraint.
    */
   toolCallId?: string;
+  /**
+   * Per-run counter for capability-discovery skill calls
+   * (list_platform_capabilities, list_connections, check_capability_gap).
+   * Enforced against systemSettings.orchestrator_capability_query_budget
+   * (default 8). When exhausted, further calls return
+   * { error: 'capability_query_budget_exhausted' } so the Orchestrator
+   * stops looping rather than burning tokens. See
+   * docs/orchestrator-capability-routing-spec.md §6.4.3.
+   */
+  capabilityQueryCallCount?: number;
 }
 
 interface SkillExecutionParams {
@@ -511,6 +523,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   playbook_propose_save: async (input, context) => {
     return executePlaybookProposeSave(input, context);
+  },
+  import_n8n_workflow: async (input) => {
+    return executeImportN8nWorkflow(input);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
@@ -1347,6 +1362,71 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     });
   },
 
+  // ── Phase 2 S8: Real-time clarification routing ──────────────────
+  request_clarification: async (input, context) => {
+    const { executeRequestClarification } = await import('../tools/internal/requestClarification.js');
+    return executeRequestClarification(input, {
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      agentId: context.agentId,
+      stepId: (context as { stepId?: string | null }).stepId ?? null,
+    });
+  },
+
+  // ── Phase 3 S19: Weekly Digest Gather ────────────────────────────
+  weekly_digest_gather: async (input) => {
+    const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
+    return executeWeeklyDigestGather(input);
+  },
+
+  // Action-call alias used by the playbook runner (see weekly-digest.playbook.ts)
+  config_weekly_digest_gather: async (input) => {
+    const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
+    return executeWeeklyDigestGather(input);
+  },
+
+  // ── Phase 3 S22: Deliver playbook output via deliveryService ─────
+  config_deliver_playbook_output: async (input, context) => {
+    const { deliveryService } = await import('./deliveryService.js');
+    const {
+      subaccountId,
+      organisationId,
+      artefactTitle,
+      artefactContent,
+      deliveryChannels,
+    } = input as Record<string, unknown>;
+
+    if (!subaccountId || !organisationId || !artefactTitle || !artefactContent) {
+      return { success: false, error: 'subaccountId, organisationId, artefactTitle, artefactContent required' };
+    }
+
+    const config =
+      (deliveryChannels as { email?: boolean; portal?: boolean; slack?: boolean } | undefined) ??
+      { email: true, portal: true, slack: false };
+
+    const result = await deliveryService.deliver(
+      {
+        title: String(artefactTitle),
+        content: String(artefactContent),
+        createdByAgentId: context.agentId,
+      },
+      {
+        email: Boolean(config.email ?? true),
+        portal: Boolean(config.portal ?? true),
+        slack: Boolean(config.slack ?? false),
+      },
+      String(subaccountId),
+      String(organisationId),
+    );
+
+    return {
+      success: true,
+      taskId: result.taskId,
+      channels: result.channels,
+    };
+  },
+
   // ── Sprint 5 P4.2: Memory block write path ─────────────────────
   update_memory_block: async (input, context) => {
     const { updateBlock } = await import('./memoryBlockService.js');
@@ -1423,6 +1503,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   config_restore_version: async (input, context) => {
     const { executeConfigRestoreVersion } = await import('../tools/config/configSkillHandlers.js');
     return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
+  },
+
+  // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
+  list_platform_capabilities: async (input, context) => {
+    const { executeListPlatformCapabilities } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListPlatformCapabilities(input, context);
+  },
+  list_connections: async (input, context) => {
+    const { executeListConnections } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListConnections(input, context);
+  },
+  check_capability_gap: async (input, context) => {
+    const { executeCheckCapabilityGap } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeCheckCapabilityGap(input, context);
+  },
+  request_feature: async (input, context) => {
+    const { executeRequestFeature } = await import('../tools/capabilities/requestFeatureHandler.js');
+    return executeRequestFeature(input, context);
   },
 
   // Read-only config tools (no action audit needed)
@@ -1513,6 +1611,7 @@ export const skillExecutor = {
           organisationId: context.organisationId,
           agentId: context.agentId,
           subaccountId: context.subaccountId,
+          isTestRun: context.isTestRun ?? false,
           taskId: context.taskId,
           mcpCallCount: context.mcpCallCount,
         },
@@ -3433,6 +3532,7 @@ async function executeScrapeUrl(
         organisationId: context.organisationId,
         agentId: context.agentId,
         subaccountId: context.subaccountId,
+        isTestRun: context.isTestRun ?? false,
         taskId: context.taskId,
         mcpCallCount: context.mcpCallCount,
       },
@@ -4698,6 +4798,20 @@ async function executePlaybookProposeSave(
         'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
     };
   }
+  // Feature 3 §5.6 — high-severity gate for n8n imports.
+  // If the caller passes unresolved_high_severity_count > 0, the import
+  // session still has unacknowledged high-severity mapping items (disconnected
+  // nodes, unconvertible code/function nodes). Block until the admin resolves
+  // or explicitly dismisses each item.
+  if (
+    typeof input.unresolved_high_severity_count === 'number' &&
+    input.unresolved_high_severity_count > 0
+  ) {
+    return {
+      success: false,
+      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call playbook_propose_save again with unresolved_high_severity_count: 0.`,
+    };
+  }
   // Strict user-scope enforcement (review finding #3 from the previous
   // round). The agent run's initiating principal MUST be present on the
   // SkillExecutionContext; if it's missing (e.g. a scheduled / system
@@ -4744,5 +4858,47 @@ async function executePlaybookProposeSave(
       'Candidate rendered and recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
     sessionId,
     definitionHash: rendered.definitionHash,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Feature 3 — n8n Workflow Import (admin-callable Studio skill)
+// ---------------------------------------------------------------------------
+
+async function executeImportN8nWorkflow(
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { importN8nWorkflow, renderMappingReport } = await import('./n8nImportServicePure.js');
+
+  const workflowJsonRaw = input.workflow_json;
+  if (!workflowJsonRaw || typeof workflowJsonRaw !== 'string') {
+    return { success: false, error: 'workflow_json is required and must be a string' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(workflowJsonRaw);
+  } catch {
+    return { success: false, error: 'workflow_json is not valid JSON. Paste the full exported n8n workflow JSON.' };
+  }
+
+  const result = importN8nWorkflow(parsed);
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+
+  const reportMarkdown = renderMappingReport(result.report);
+  const highSeverityCount = result.report.filter(
+    (r) => r.warning?.severity === 'high',
+  ).length;
+
+  return {
+    success: true,
+    workflowName: result.workflowName,
+    steps: result.steps,
+    report: reportMarkdown,
+    credentialChecklist: result.credentialChecklist,
+    highSeverityCount,
+    summary: `Imported "${result.workflowName}": ${result.steps.length} steps, ${highSeverityCount} high-severity items requiring resolution before save.`,
   };
 }

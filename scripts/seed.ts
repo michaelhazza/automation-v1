@@ -527,7 +527,7 @@ async function phase4_playbookTemplates(): Promise<void> {
  */
 async function seedOnboardingModuleSlugs(): Promise<void> {
   const REPORTING_MODULE_SLUG = 'client_pulse';
-  const PLAYBOOK_SLUG = 'daily-intelligence-brief';
+  const PLAYBOOK_SLUG = 'intelligence-briefing';
 
   const [mod] = await db
     .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })

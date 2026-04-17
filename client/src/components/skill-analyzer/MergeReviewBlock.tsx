@@ -6,7 +6,12 @@ import {
   computeMergeConfidence,
   warningLabel,
   warningBadgeClass,
+  evaluateApprovalState,
+  parseDemotedFields,
   type MergeWarning,
+  type MergeWarningCode,
+  type WarningResolution,
+  type WarningResolutionKind,
 } from './mergeTypes';
 
 // ---------------------------------------------------------------------------
@@ -276,11 +281,14 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
         const body = result.mergeUpdatedAt
           ? { ...patch, mergeUpdatedAt: result.mergeUpdatedAt }
           : patch;
-        const { data } = await api.patch<AnalysisResult>(
+        const { data } = await api.patch<AnalysisResult & { resolutionsCleared?: boolean }>(
           `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/merge`,
           body,
         );
         setPatchError(null);
+        if (data.resolutionsCleared) {
+          setPatchError('Your previous review decisions were cleared because the merge changed. Re-review required before approval.');
+        }
         onResultUpdated(data);
       } catch (err) {
         const e = err as { response?: { status?: number; data?: { error?: unknown } }; message?: string };
@@ -352,9 +360,12 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
     setIsResetting(true);
     setPatchError(null);
     try {
-      const { data } = await api.post<AnalysisResult>(
+      const { data } = await api.post<AnalysisResult & { resolutionsCleared?: boolean }>(
         `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/merge/reset`,
       );
+      if (data.resolutionsCleared) {
+        setPatchError('Your previous review decisions were cleared because the merge was reset. Re-review required before approval.');
+      }
       onResultUpdated(data);
     } catch (err) {
       const e = err as { response?: { data?: { error?: unknown } }; message?: string };
@@ -418,20 +429,13 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
 
       {patchError && <p className="mb-2 text-xs text-red-600">{patchError}</p>}
 
-      {/* Warning banner — Bugs 1, 2, 8, 10 (and post-checks 3, 4, 7) */}
+      {/* Warning banner + resolution UI — v2 Fixes 1/2/6/7 */}
       {result.mergeWarnings && result.mergeWarnings.length > 0 && (
-        <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs">
-          <p className="font-semibold text-amber-800 mb-1.5">AI merge warnings</p>
-          {result.mergeWarnings.map((w: MergeWarning, i: number) => (
-            <div key={i} className="mb-1">
-              <span className={`mr-1.5 px-1 py-0.5 rounded text-[10px] font-medium ${warningBadgeClass(w.code)}`}>
-                {warningLabel(w.code)}
-              </span>
-              <span className="text-amber-900">{w.message}</span>
-              {w.detail && <div className="ml-1 text-slate-500 text-[10px]">{w.detail}</div>}
-            </div>
-          ))}
-        </div>
+        <WarningResolutionBlock
+          jobId={jobId}
+          result={result}
+          onResultUpdated={onResultUpdated}
+        />
       )}
 
       {/* Merge rationale collapsible — Bug 6 */}
@@ -497,3 +501,397 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// WarningResolutionBlock — v2 Fixes 1, 2, 6, 7
+// ---------------------------------------------------------------------------
+// Renders each merge warning with an appropriate resolution control. Calls
+// the PATCH /resolve-warning endpoint with an If-Unmodified-Since header;
+// the server is authoritative and will reject writes if the row has moved.
+// ---------------------------------------------------------------------------
+
+type ParsedNameMismatch = {
+  topLevel?: string;
+  schemaName?: string | null;
+  distinctNames?: string[];
+  candidates?: string[];
+};
+
+function parseNameMismatchDetail(detail: string | undefined): ParsedNameMismatch {
+  if (!detail) return {};
+  try {
+    return JSON.parse(detail) as ParsedNameMismatch;
+  } catch {
+    return {};
+  }
+}
+
+function WarningResolutionBlock({
+  jobId,
+  result,
+  onResultUpdated,
+}: {
+  jobId: string;
+  result: AnalysisResult;
+  onResultUpdated: (next: AnalysisResult) => void;
+}) {
+  const warnings = (result.mergeWarnings ?? []) as MergeWarning[];
+  const resolutions = (result.warningResolutions ?? []) as WarningResolution[];
+  const approvalState = evaluateApprovalState(warnings, resolutions);
+  const isLocked = !!result.approvedAt;
+  // Concurrency token. Prefer mergeUpdatedAt (set after any merge edit);
+  // fall back to the row's createdAt for never-edited rows. The server
+  // requires an exact match (within ~2s skew) against the same derivation,
+  // so inventing a "now" timestamp would fail by design.
+  const mergeUpdatedAt =
+    result.mergeUpdatedAt ?? result.createdAt ?? new Date().toISOString();
+  const isFallback = !!result.classifierFallbackApplied
+    || warnings.some(w => w.code === 'CLASSIFIER_FALLBACK');
+
+  // Fetch the confirmation phrase once per merge block — shared across all
+  // CriticalPhraseInput instances to avoid N parallel config requests.
+  const [criticalPhrase, setCriticalPhrase] = useState<string>('I accept this critical warning');
+  useEffect(() => {
+    let cancelled = false;
+    const hasCritical = warnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL');
+    if (!hasCritical) return;
+    api
+      .get<{ criticalWarningConfirmationPhrase: string }>('/api/system/skill-analyser/config')
+      .then(({ data }) => {
+        if (!cancelled && typeof data?.criticalWarningConfirmationPhrase === 'string') {
+          setCriticalPhrase(data.criticalWarningConfirmationPhrase);
+        }
+      })
+      .catch(() => { /* keep default */ });
+    return () => { cancelled = true; };
+  }, [warnings]);
+
+  async function resolveWarning(
+    warningCode: MergeWarningCode,
+    resolution: WarningResolutionKind,
+    details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string },
+  ) {
+    try {
+      await api.patch(
+        `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/resolve-warning`,
+        { warningCode, resolution, details },
+        { headers: { 'If-Unmodified-Since': mergeUpdatedAt } },
+      );
+      // Refetch the row to pick up the new resolution list.
+      const { data } = await api.get<{ results: AnalysisResult[] }>(
+        `/api/system/skill-analyser/jobs/${jobId}`,
+      );
+      const next = data.results.find(r => r.id === result.id);
+      if (next) onResultUpdated(next);
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const body = e?.response?.data?.error;
+      const msg = (typeof body === 'string' ? body : (body as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to record resolution.';
+      alert(msg);
+    }
+  }
+
+  function isResolved(code: MergeWarningCode, field?: string): WarningResolutionKind | null {
+    for (const r of resolutions) {
+      if (r.warningCode !== code) continue;
+      if (field && r.details?.field !== field) continue;
+      return r.resolution;
+    }
+    return null;
+  }
+
+  return (
+    <div
+      className={`mb-3 p-3 rounded border text-xs ${
+        approvalState.blocked ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+      }`}
+    >
+      {isFallback && (
+        <div className="mb-2 p-2 bg-red-100 border border-red-200 rounded text-red-900 font-medium">
+          LOW CONFIDENCE — Classifier unavailable. Rule-based merge applied. Review all sections carefully.
+        </div>
+      )}
+      {isLocked && (
+        <div className="mb-2 p-2 bg-slate-100 border border-slate-300 rounded text-slate-700 text-[11px]">
+          Result is approved — unapprove to edit merge or change resolutions.
+        </div>
+      )}
+      {result.wasApprovedBefore && !isLocked && (
+        <div className="mb-2 p-2 bg-indigo-50 border border-indigo-200 rounded text-indigo-800 text-[11px]">
+          ⚠️ Modified after a previous approval — re-review required before approving again.
+        </div>
+      )}
+      <p className="font-semibold text-slate-800 mb-2">
+        Merge warnings {approvalState.blocked && <span className="text-red-700">· Action required before approval</span>}
+      </p>
+      {warnings.map((w, i) => (
+        <WarningItem
+          key={`${w.code}-${i}`}
+          warning={w}
+          isLocked={isLocked}
+          isResolved={isResolved}
+          onResolve={resolveWarning}
+          criticalPhrase={criticalPhrase}
+        />
+      ))}
+    </div>
+  );
+}
+
+function WarningItem({
+  warning,
+  isLocked,
+  isResolved,
+  onResolve,
+  criticalPhrase,
+}: {
+  warning: MergeWarning;
+  isLocked: boolean;
+  isResolved: (code: MergeWarningCode, field?: string) => WarningResolutionKind | null;
+  onResolve: (
+    code: MergeWarningCode,
+    resolution: WarningResolutionKind,
+    details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string },
+  ) => Promise<void>;
+  criticalPhrase: string;
+}) {
+  const disabled = isLocked;
+  const label = warningLabel(warning.code);
+  const badge = warningBadgeClass(warning.code);
+
+  const header = (
+    <div className="flex items-start gap-2 mb-1">
+      <span className={`mt-[1px] px-1.5 py-0.5 rounded text-[10px] font-medium ${badge}`}>
+        {label}
+      </span>
+      <span className="text-slate-800 flex-1">{warning.message}</span>
+    </div>
+  );
+
+  if (warning.code === 'REQUIRED_FIELD_DEMOTED') {
+    const fields = parseDemotedFields(warning.detail);
+    return (
+      <div className="mb-2">
+        {header}
+        <ul className="ml-4 space-y-1">
+          {fields.map((field) => {
+            const current = isResolved('REQUIRED_FIELD_DEMOTED', field);
+            return (
+              <li key={field} className="flex items-center gap-2 text-[11px]">
+                <code className="text-slate-600">{field}</code>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onResolve('REQUIRED_FIELD_DEMOTED', 'accept_removal', { field })}
+                  className={`px-2 py-0.5 rounded border ${current === 'accept_removal' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  Accept removal
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onResolve('REQUIRED_FIELD_DEMOTED', 'restore_required', { field })}
+                  className={`px-2 py-0.5 rounded border ${current === 'restore_required' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-300 hover:border-indigo-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  Restore required
+                </button>
+                {current && <span className="text-emerald-700">✓</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  }
+
+  if (warning.code === 'NAME_MISMATCH') {
+    const parsed = parseNameMismatchDetail(warning.detail);
+    const current = isResolved('NAME_MISMATCH');
+    return (
+      <div className="mb-2">
+        {header}
+        <div className="ml-4 mt-1 text-[11px] text-slate-600">
+          <p>Library name: <code className="text-slate-800">{parsed.schemaName ?? '(none)'}</code></p>
+          <p>Incoming name: <code className="text-slate-800">{parsed.topLevel || '(none)'}</code></p>
+          <div className="flex gap-2 mt-1">
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onResolve('NAME_MISMATCH', 'use_library_name')}
+              className={`px-2 py-0.5 rounded border ${current === 'use_library_name' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-300 hover:border-indigo-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              Use library name throughout
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onResolve('NAME_MISMATCH', 'use_incoming_name')}
+              className={`px-2 py-0.5 rounded border ${current === 'use_incoming_name' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-300 hover:border-indigo-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              Use incoming name throughout
+            </button>
+            {current && <span className="text-emerald-700 self-center">✓</span>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (warning.code === 'SKILL_GRAPH_COLLISION') {
+    const current = isResolved('SKILL_GRAPH_COLLISION');
+    return (
+      <div className="mb-2">
+        {header}
+        <div className="ml-4 mt-1 flex gap-2 text-[11px]">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onResolve('SKILL_GRAPH_COLLISION', 'scope_down')}
+            className={`px-2 py-0.5 rounded border ${current === 'scope_down' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-300 hover:border-indigo-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            Scope down this merge
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onResolve('SKILL_GRAPH_COLLISION', 'flag_other')}
+            className={`px-2 py-0.5 rounded border ${current === 'flag_other' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-amber-700 border-amber-300 hover:border-amber-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            Flag other skill
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              const note = window.prompt('Disambiguation note (required):');
+              if (note && note.trim().length > 0) {
+                onResolve('SKILL_GRAPH_COLLISION', 'accept_overlap', { disambiguationNote: note.trim() });
+              }
+            }}
+            className={`px-2 py-0.5 rounded border ${current === 'accept_overlap' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            Accept overlap
+          </button>
+          {current && <span className="text-emerald-700 self-center">✓</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (warning.code === 'CLASSIFIER_FALLBACK') {
+    const current = isResolved('CLASSIFIER_FALLBACK');
+    return (
+      <div className="mb-2">
+        {header}
+        <div className="ml-4 mt-1 text-[11px]">
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              disabled={disabled}
+              checked={current === 'acknowledge_low_confidence'}
+              onChange={(e) => {
+                if (e.target.checked) onResolve('CLASSIFIER_FALLBACK', 'acknowledge_low_confidence');
+              }}
+            />
+            <span>I have reviewed the rule-based merge and accept the low-confidence state.</span>
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  if (warning.code === 'SCOPE_EXPANSION_CRITICAL') {
+    // Critical-tier: require typing the configurable confirmation phrase.
+    const current = isResolved('SCOPE_EXPANSION_CRITICAL');
+    return (
+      <div className="mb-2">
+        {header}
+        <div className="ml-4 mt-1 text-[11px]">
+          <p className="text-slate-600 mb-1">
+            To approve with critical scope expansion, either edit the merge below the threshold OR type the confirmation phrase exactly.
+          </p>
+          <CriticalPhraseInput
+            current={current}
+            disabled={disabled}
+            expectedPhrase={criticalPhrase}
+            onConfirm={() => onResolve('SCOPE_EXPANSION_CRITICAL', 'confirm_critical_phrase')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (warning.code === 'INVOCATION_LOST'
+    || warning.code === 'HITL_LOST'
+    || warning.code === 'SCOPE_EXPANSION'
+    || warning.code === 'CAPABILITY_OVERLAP') {
+    const current = isResolved(warning.code);
+    return (
+      <div className="mb-2">
+        {header}
+        <div className="ml-4 mt-1">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onResolve(warning.code, 'acknowledge_warning')}
+            className={`px-2 py-0.5 rounded border text-[11px] ${current === 'acknowledge_warning' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            Acknowledge
+          </button>
+          {current && <span className="ml-2 text-emerald-700 text-[11px]">✓</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // Informational tier: no resolution control; just show the detail.
+  return (
+    <div className="mb-2">
+      {header}
+      {warning.detail && <div className="ml-4 text-slate-500 text-[10px]">{warning.detail}</div>}
+    </div>
+  );
+}
+
+function CriticalPhraseInput({
+  current,
+  disabled,
+  expectedPhrase,
+  onConfirm,
+}: {
+  current: WarningResolutionKind | null;
+  disabled: boolean;
+  expectedPhrase: string;
+  onConfirm: () => void;
+}) {
+  const [phrase, setPhrase] = useState('');
+
+  if (current === 'confirm_critical_phrase') {
+    return <span className="text-emerald-700">Confirmation recorded ✓</span>;
+  }
+
+  const matches = phrase.trim() === expectedPhrase.trim();
+
+  return (
+    <div className="flex gap-2">
+      <input
+        type="text"
+        value={phrase}
+        disabled={disabled}
+        onChange={(e) => setPhrase(e.target.value)}
+        placeholder={`Type: ${expectedPhrase}`}
+        className="flex-1 border border-slate-300 rounded px-2 py-0.5 text-[11px]"
+      />
+      <button
+        type="button"
+        disabled={disabled || !matches}
+        onClick={onConfirm}
+        className="px-2 py-0.5 rounded bg-red-600 text-white text-[11px] disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Confirm critical
+      </button>
+    </div>
+  );
+}
+
+

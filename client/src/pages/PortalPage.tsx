@@ -6,6 +6,7 @@ import { Link, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import HelpHint from '../components/ui/HelpHint';
+import UpcomingWorkCard from '../components/portal/UpcomingWorkCard';
 import { toast } from 'sonner';
 
 interface PortalProcess {
@@ -55,6 +56,10 @@ export default function PortalPage({ user: _user }: { user: User }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [portalRuns, setPortalRuns] = useState<PortalRun[]>([]);
   const [dailyBriefCard, setDailyBriefCard] = useState<DailyBriefCard | null>(null);
+  // Feature 1 (docs/routines-response-dev-spec.md §3.5) — portal-card access
+  // is gated on `subaccount.schedule.view_calendar`. `client_user` carries it
+  // by default so the card shows up without needing the broader workspace.view.
+  const [canViewCalendar, setCanViewCalendar] = useState(false);
   const [runningNow, setRunningNow] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -69,15 +74,21 @@ export default function PortalPage({ user: _user }: { user: User }) {
       // §G10.4 — gated on completed-run + active-schedule server-side, so
       // the client just reads `active` without running its own joins.
       api
-        .get<DailyBriefCard>(`/api/portal/${subaccountId}/daily-brief-card`)
+        .get<DailyBriefCard>(`/api/portal/${subaccountId}/intelligence-briefing-card`)
         .catch(() => ({ data: null as DailyBriefCard | null })),
+      api
+        .get<{ permissions: string[] }>(`/api/subaccounts/${subaccountId}/my-permissions`)
+        .catch(() => ({ data: { permissions: [] as string[] } })),
     ])
-      .then(([processRes, runsRes, briefRes]) => {
+      .then(([processRes, runsRes, briefRes, permsRes]) => {
         setSubaccount(processRes.data.subaccount);
         setProcesses(processRes.data.processes ?? []);
         setCategories(processRes.data.categories ?? []);
         setPortalRuns(runsRes.data.runs ?? []);
         setDailyBriefCard(briefRes.data ?? null);
+        setCanViewCalendar(
+          (permsRes.data?.permissions ?? []).includes('subaccount.schedule.view_calendar')
+        );
       })
       .catch((err) => {
         const e = err as { response?: { data?: { error?: string } } };
@@ -128,9 +139,9 @@ export default function PortalPage({ user: _user }: { user: User }) {
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-wider opacity-80">
-                Daily Intelligence Brief
+                Intelligence Briefing
               </div>
-              <div className="text-[20px] font-bold mt-0.5">Today's brief is ready</div>
+              <div className="text-[20px] font-bold mt-0.5">This week's briefing is ready</div>
               <div className="text-[13px] opacity-90 mt-1">
                 {dailyBriefCard.latestRun.completedAt
                   ? `Delivered ${new Date(dailyBriefCard.latestRun.completedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
@@ -158,12 +169,21 @@ export default function PortalPage({ user: _user }: { user: User }) {
         </div>
       )}
 
+      {/* Feature 1 — Upcoming Work card (docs/routines-response-dev-spec.md §3.5)
+          Gated server-side by `subaccount.schedule.view_calendar`; we also skip
+          rendering when the permission is absent to avoid a dangling frame. */}
+      {canViewCalendar && subaccountId && (
+        <div className="mb-8">
+          <UpcomingWorkCard subaccountId={subaccountId} hasPermission={canViewCalendar} />
+        </div>
+      )}
+
       {/* §9.4 Portal playbook run cards — one per isPortalVisible run.
           When the Daily Brief hero card is active we omit its run from
           this list to avoid showing it twice. */}
       {(() => {
         const otherRuns = dailyBriefCard?.active
-          ? portalRuns.filter((r) => r.playbookSlug !== 'daily-intelligence-brief')
+          ? portalRuns.filter((r) => r.playbookSlug !== 'intelligence-briefing')
           : portalRuns;
         if (otherRuns.length === 0) return null;
         return (

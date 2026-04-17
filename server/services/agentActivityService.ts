@@ -1,6 +1,6 @@
 import { eq, and, desc, gte, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, tasks, taskActivities } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations } from '../db/schema/index.js';
 
 const MAX_CHAIN_NODES = 50;
 
@@ -19,12 +19,16 @@ export const agentActivityService = {
     status?: string;
     limit?: number;
     offset?: number;
+    /** When false (default), test runs are excluded. Pass true to include them. */
+    includeTestRuns?: boolean;
   }) {
     const conditions: ReturnType<typeof eq>[] = [];
     if (params.organisationId) conditions.push(eq(agentRuns.organisationId, params.organisationId));
     if (params.subaccountId) conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
     if (params.agentId) conditions.push(eq(agentRuns.agentId, params.agentId));
     if (params.status) conditions.push(eq(agentRuns.status, params.status as 'completed' | 'failed'));
+    // Default: exclude test runs (spec §4.7). Pass includeTestRuns=true to show them.
+    if (!params.includeTestRuns) conditions.push(eq(agentRuns.isTestRun, false));
 
     const limit = Math.min(params.limit ?? 50, 100);
     const offset = params.offset ?? 0;
@@ -92,11 +96,38 @@ export const agentActivityService = {
 
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
 
+    // MCP call summary — grouped by server, covering index on (run_id, server_slug)
+    const mcpRows = await db
+      .select({
+        serverSlug: mcpToolInvocations.serverSlug,
+        callCount: sql<number>`count(*)::int`,
+        errorCount: sql<number>`count(*) filter (where ${mcpToolInvocations.status} in ('error', 'timeout'))::int`,
+        avgDurationMs: sql<number>`round(avg(${mcpToolInvocations.durationMs}))::int`,
+      })
+      .from(mcpToolInvocations)
+      .where(eq(mcpToolInvocations.runId, runId))
+      .groupBy(mcpToolInvocations.serverSlug);
+
+    const mcpCallSummary =
+      mcpRows.length === 0
+        ? null
+        : {
+            totalCalls: mcpRows.reduce((s, r) => s + r.callCount, 0),
+            errorCount: mcpRows.reduce((s, r) => s + r.errorCount, 0),
+            byServer: mcpRows.map((r) => ({
+              serverSlug: r.serverSlug,
+              callCount: r.callCount,
+              errorCount: r.errorCount,
+              avgDurationMs: r.avgDurationMs,
+            })),
+          };
+
     return {
       ...row.run,
       agentName: row.agentName,
       agentSlug: row.agentSlug,
       subaccountName: row.subaccountName,
+      mcpCallSummary,
     };
   },
 

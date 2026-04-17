@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { eq, and, desc, isNull, count } from 'drizzle-orm';
+import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -165,6 +165,14 @@ export interface AgentRunRequest {
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
   idempotencyKey?: string;
+  /**
+   * Additional keys to check for an existing run before inserting. When the
+   * caller wants boundary-tolerant dedup (e.g. dual-bucket for test runs) it
+   * passes `[currentBucketKey, previousBucketKey]` here. The SELECT treats
+   * the set as an OR; the INSERT always uses `idempotencyKey` as the write
+   * value. If absent, behaviour falls back to checking only `idempotencyKey`.
+   */
+  idempotencyCandidateKeys?: string[];
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
   /**
@@ -203,6 +211,12 @@ export interface AgentRunRequest {
    * skill set is used.
    */
   allowedToolSlugs?: string[];
+  /**
+   * Feature 2 — inline Run-Now test panel. When true the run is flagged as a
+   * test run: excluded from agency P&L and LLM usage aggregates by default,
+   * and shown with a "Test" badge in run history. Default false.
+   */
+  isTestRun?: boolean;
 }
 
 export interface AgentRunResult {
@@ -286,11 +300,19 @@ export const agentExecutionService = {
     const isOrgSubaccountRun = subaccountRow?.isOrgSubaccount ?? false;
 
     // ── 0d. Idempotency check — return existing run if key already used ───
-    if (request.idempotencyKey) {
+    // Candidate set: explicit list (e.g. dual-bucket for test runs) falls
+    // through to a single-key lookup if absent.
+    const idempotencyLookupKeys =
+      request.idempotencyCandidateKeys && request.idempotencyCandidateKeys.length > 0
+        ? Array.from(new Set(request.idempotencyCandidateKeys))
+        : request.idempotencyKey
+          ? [request.idempotencyKey]
+          : [];
+    if (idempotencyLookupKeys.length > 0) {
       const [existing] = await db
         .select()
         .from(agentRuns)
-        .where(eq(agentRuns.idempotencyKey, request.idempotencyKey))
+        .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))
         .limit(1);
 
       if (existing) {
@@ -329,6 +351,7 @@ export const agentExecutionService = {
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         playbookStepRunId: request.playbookStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
@@ -584,6 +607,7 @@ export const agentExecutionService = {
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
+          isTestRun: run.isTestRun ?? false,
         });
         mcpClients = mcp.clients;
         mcpLazyRegistry = mcp.lazyRegistry;
@@ -639,12 +663,20 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${agent.additionalPrompt}`);
       }
 
-      // Layer 2a: Shared memory blocks (P4.2 — Letta pattern)
-      // Queried once at run start and cached for the run duration.
-      const memoryBlocksForPrompt = await memoryBlockService.getBlocksForAgent(
-        request.agentId,
-        request.organisationId,
-      );
+      // Layer 2a: Shared memory blocks — composes explicit attachments +
+      // relevance-ranked active blocks (spec §5.2, S6). The block-status
+      // invariant (`status='active'` only) is enforced inside the service.
+      //
+      // Relevance retrieval requires a task context. When no task is in flight
+      // (e.g., smart-board runs), the workspace-context string derived above
+      // acts as the query text. Explicit attachments always pass through and
+      // ensure zero regression for agents configured with pinned blocks.
+      const memoryBlocksForPrompt = await memoryBlockService.getBlocksForInjection({
+        agentId: request.agentId,
+        subaccountId: request.subaccountId ?? null,
+        organisationId: request.organisationId,
+        taskContext: workspaceContext,
+      });
       const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
@@ -741,12 +773,16 @@ export const agentExecutionService = {
 
       const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
       let memory: string | null = null;
-      memory = await workspaceMemoryService.getMemoryForPrompt(
+      // Phase 2 S12: track injected memory entries for the citation detector
+      // hook at run completion.
+      const memoryWithTracking = await workspaceMemoryService.getMemoryForPromptWithTracking(
         request.organisationId,
         request.subaccountId!,
         taskContextForMemory,
         agentDomain,
       );
+      memory = memoryWithTracking.promptText;
+      const injectedMemoryEntries = memoryWithTracking.injectedEntries;
       if (memory) {
         dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
       }
@@ -1127,6 +1163,35 @@ export const agentExecutionService = {
           runId: run.id,
           error: err instanceof Error ? err.message : String(err),
         });
+      }
+
+      // Phase 2 (S12) — score injected memory entries against run output.
+      // Idempotent: second call is a PK no-op. Best-effort: failure logs
+      // and does not affect the run's persisted state.
+      if (finalStatus === 'completed' && injectedMemoryEntries.length > 0) {
+        try {
+          const { scoreRun } = await import('./memoryCitationDetector.js');
+          const generatedText = typeof loopResult.summary === 'string'
+            ? loopResult.summary
+            : '';
+          const toolCallArgs = Array.isArray(loopResult.toolCallsLog)
+            ? loopResult.toolCallsLog
+                .map((tc: unknown) => (tc as { input?: unknown })?.input)
+                .filter((v) => v !== undefined && v !== null)
+            : [];
+          await scoreRun({
+            runId: run.id,
+            organisationId: request.organisationId,
+            injectedEntries: injectedMemoryEntries,
+            generatedText,
+            toolCallArgs,
+          });
+        } catch (err) {
+          logger.warn('agent_runs.citation_score_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // H-5: upsert toolCallsLog into the snapshot table
@@ -1652,6 +1717,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     startTime,
     timeoutMs,
     taskId: request.taskId,
+    isTestRun: request.isTestRun ?? false,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,

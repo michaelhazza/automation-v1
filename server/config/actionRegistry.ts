@@ -124,6 +124,132 @@ export interface ActionDefinition {
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
+  // ── Capability discovery (Orchestrator capability-aware routing spec §4) ──
+  list_platform_capabilities: {
+    actionType: 'list_platform_capabilities',
+    description:
+      'Return the platform integration catalogue as structured data — which integrations exist, ' +
+      'what capabilities each enables, current status and confidence. Sourced from ' +
+      'docs/integration-reference.md. Read-only; supports filter by provider_type, status, or slug.',
+    actionCategory: 'worker',
+    topics: ['capability_discovery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['filter', 'include_schema_meta'],
+    parameterSchema: z.object({
+      filter: z
+        .object({
+          provider_type: z.string().optional().describe('Narrow by provider type (oauth, mcp, webhook, native, hybrid)'),
+          status: z.string().optional().describe('Narrow by status (fully_supported, partial, stub, planned)'),
+          slug: z.string().optional().describe('Fetch a single integration by slug'),
+        })
+        .optional()
+        .describe('Optional filter to narrow the returned integration list'),
+      include_schema_meta: z.boolean().optional().describe('When true, include the reference doc schema version and last_updated'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+  list_connections: {
+    actionType: 'list_connections',
+    description:
+      'Return the live integration connections active for the caller\'s org or a specific subaccount. ' +
+      'Returns provider slug, scopes granted, status, and connection age — never secrets.',
+    actionCategory: 'worker',
+    topics: ['capability_discovery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['scope', 'orgId', 'subaccountId', 'include_inactive'],
+    parameterSchema: z.object({
+      scope: z.enum(['org', 'subaccount']).describe('Resolution scope for the query'),
+      orgId: z.string().describe('Organisation ID (must match caller org)'),
+      subaccountId: z.string().optional().describe('Subaccount ID — required when scope=subaccount'),
+      include_inactive: z.boolean().optional().describe('Include revoked/expired/error connections'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+  check_capability_gap: {
+    actionType: 'check_capability_gap',
+    description:
+      'Given a list of required capabilities, return whether they are configured (an agent has them, ' +
+      'with active connections and required scopes), configurable (platform supports but not yet set up), ' +
+      'or unsupported (platform does not provide). The Orchestrator uses this to classify tasks into ' +
+      'routing paths A, B, C, D per the capability-aware routing spec.',
+    actionCategory: 'worker',
+    topics: ['capability_discovery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['orgId', 'subaccountId', 'required_capabilities'],
+    parameterSchema: z.object({
+      orgId: z.string().describe('Organisation ID (must match caller org)'),
+      subaccountId: z.string().optional().describe('Subaccount ID (optional — inferred from context if not provided)'),
+      required_capabilities: z
+        .array(
+          z.object({
+            kind: z.enum(['integration', 'read_capability', 'write_capability', 'skill', 'primitive'])
+              .describe('Capability kind'),
+            slug: z.string().describe('Capability slug — may be a canonical form or a taxonomy alias'),
+          }),
+        )
+        .min(1)
+        .describe('The list of capabilities a task needs to proceed'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+  request_feature: {
+    actionType: 'request_feature',
+    description:
+      'File a feature request against the platform. Writes a durable feature_requests row with per-org ' +
+      'dedupe (30-day window, canonical slug hash) and fires best-effort Slack/email/Synthetos-task ' +
+      'notifications. Used by the Orchestrator on Path C (system-promotion candidate) and Path D ' +
+      '(unsupported capability) per the capability-aware routing spec.',
+    actionCategory: 'worker',
+    topics: ['capability_discovery', 'feature_request'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: [
+      'category', 'summary', 'user_intent', 'required_capabilities', 'missing_capabilities',
+      'orchestrator_reasoning', 'source_task_id', 'orgId', 'subaccountId', 'requested_by_user_id',
+    ],
+    parameterSchema: z.object({
+      category: z.enum(['new_capability', 'system_promotion_candidate', 'infrastructure_alert']),
+      summary: z.string().min(1).max(200).describe('Short title for the request'),
+      user_intent: z.string().min(1).describe('Verbatim user task text or intent'),
+      required_capabilities: z
+        .array(
+          z.object({
+            kind: z.enum(['integration', 'read_capability', 'write_capability', 'skill', 'primitive']),
+            slug: z.string(),
+          }),
+        )
+        .describe('The Orchestrator\'s decomposed capability list (post-normalisation)'),
+      missing_capabilities: z
+        .array(
+          z.object({
+            kind: z.enum(['integration', 'read_capability', 'write_capability', 'skill', 'primitive']),
+            slug: z.string(),
+          }),
+        )
+        .describe('Subset of required_capabilities that the platform does not have'),
+      orchestrator_reasoning: z.string().optional().describe('Paragraph explaining the classification'),
+      source_task_id: z.string().optional().describe('Originating task, when filed from the task board'),
+      orgId: z.string().describe('Organisation ID (must match caller)'),
+      subaccountId: z.string().optional(),
+      requested_by_user_id: z.string().describe('User the request is attributed to'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: ['validation_error'] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
   send_email: {
     actionType: 'send_email',
     description: 'Send an email via a connected email provider. Requires human approval before sending.',
@@ -1016,6 +1142,34 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       question: z.string().min(10).max(2000).describe('The clarifying question to ask the user'),
       blocked_by: z.enum(['topic_filter', 'scope_check', 'no_relevant_tool', 'low_confidence']).optional()
         .describe('Why clarification is needed'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    isMethodology: false,
+    topics: [],
+  },
+
+  // ── Phase 2 S8: Real-time clarification routing (§5.4) ────────────────────
+  // Distinct from ask_clarifying_question — this routes to a named role via
+  // WebSocket and supports timeout fallback for blocking urgency.
+  request_clarification: {
+    actionType: 'request_clarification',
+    description: 'Route a real-time question to a named human (subaccount manager / agency owner / client contact) via WebSocket. Blocking urgency pauses the current step until the reply or timeout; non_blocking continues with best-guess.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['question', 'urgency'],
+    parameterSchema: z.object({
+      question: z.string().min(10).max(2000).describe('The clarifying question for the recipient'),
+      contextSnippet: z.string().max(1000).optional()
+        .describe('Short context block explaining the ambiguity'),
+      urgency: z.enum(['blocking', 'non_blocking'])
+        .describe('blocking pauses the current step; non_blocking continues with best-guess'),
+      suggestedAnswers: z.array(z.string().min(1).max(500)).max(5).optional()
+        .describe('One-tap answer choices surfaced as buttons'),
     }),
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
@@ -2168,6 +2322,55 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   // ── Phase G — portal + email skills (spec §11.6) — action_call only ────────
   // NOT callable from human-initiated Configuration Assistant sessions; only
   // reachable via action_call steps in playbook templates.
+
+  // ── Memory & Briefings Phase 3 — Weekly Digest gather ────────────────────
+  config_weekly_digest_gather: {
+    actionType: 'config_weekly_digest_gather',
+    description: 'Aggregates past 7 days of activity, memory events, KPI deltas, pending items, and next-week scheduled tasks for the Weekly Digest playbook.',
+    actionCategory: 'api',
+    topics: ['playbook', 'analytics'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['subaccountId'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      windowDays: z.number().int().positive().max(90).default(7),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
+  config_deliver_playbook_output: {
+    actionType: 'config_deliver_playbook_output',
+    description: 'Deliver a playbook artefact via deliveryService: always writes to inbox + dispatches portal/slack per deliveryChannels config.',
+    actionCategory: 'api',
+    topics: ['playbook', 'delivery'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['subaccountId', 'artefactTitle', 'artefactContent'],
+    parameterSchema: z.object({
+      subaccountId: z.string().describe('Target subaccount'),
+      organisationId: z.string().describe('Tenant scope'),
+      artefactTitle: z.string().describe('Title of the inbox item / artefact'),
+      artefactContent: z.string().describe('Body content (markdown)'),
+      deliveryChannels: z.object({
+        email: z.boolean().default(true),
+        portal: z.boolean().default(true),
+        slack: z.boolean().default(false),
+      }).optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'auth_error'],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
 
   config_publish_playbook_output_to_portal: {
     actionType: 'config_publish_playbook_output_to_portal',

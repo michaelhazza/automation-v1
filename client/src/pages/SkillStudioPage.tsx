@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import TestPanel from '../components/runs/TestPanel';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -352,6 +353,19 @@ export default function SkillStudioPage({ user }: { user: User }) {
           </div>
         )}
       </div>
+
+      {/* ── Test panel (right-hand, org skills only) ───────────────────── */}
+      {scope === 'org' && context && (
+        <TestPanel
+          panelKey={`test-panel:skill:${context.id}`}
+          label="Test"
+          testRunEndpoint={`/api/org/skills/${context.id}/test-run`}
+          fixturesEndpoint={`/api/org/skills/${context.id}/test-fixtures`}
+          saveFixtureEndpoint={`/api/org/skills/${context.id}/test-fixtures`}
+          hasUnsavedChanges={saving || definitionJson !== JSON.stringify(context.definition, null, 2) || instructions !== (context.instructions ?? '')}
+          traceViewerBasePath="/admin/runs"
+        />
+      )}
     </div>
   );
 }

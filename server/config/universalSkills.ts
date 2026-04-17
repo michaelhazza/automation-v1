@@ -16,6 +16,7 @@
  */
 export const UNIVERSAL_SKILL_NAMES: readonly string[] = [
   'ask_clarifying_question',
+  'request_clarification',
   'read_workspace',
   'web_search',
   'read_codebase',

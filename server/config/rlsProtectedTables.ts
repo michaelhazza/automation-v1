@@ -178,6 +178,54 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0108_scraping_engine.sql',
     rationale: 'Per-org scraping cache — cached page content with tenant isolation.',
   },
+  // 0139 — Memory & Briefings Phase 1: HITL review queue
+  {
+    tableName: 'memory_review_queue',
+    schemaFile: 'memoryReviewQueue.ts',
+    policyMigration: '0139_memory_review_queue.sql',
+    rationale: 'Per-org HITL review queue — belief conflicts and block proposals contain workspace intelligence that must not leak across tenants.',
+  },
+  // 0147 — Memory & Briefings Phase 2: trust calibration
+  {
+    tableName: 'trust_calibration_state',
+    schemaFile: 'trustCalibrationState.ts',
+    policyMigration: '0147_trust_calibration_state.sql',
+    rationale: 'Per-agent trust counter — auto-thresholds and validation history must stay tenant-isolated to prevent gaming across orgs.',
+  },
+  // 0141 — Memory & Briefings Phase 4: drop-zone upload audit
+  {
+    tableName: 'drop_zone_upload_audit',
+    schemaFile: 'dropZoneUploadAudit.ts',
+    policyMigration: '0141_drop_zone_upload_audit.sql',
+    rationale: 'Append-only upload history with file hashes + destination payloads — must stay tenant-isolated for compliance and trust-state recomputation.',
+  },
+  // 0142 — Memory & Briefings Phase 4: onboarding bundle configs
+  {
+    tableName: 'onboarding_bundle_configs',
+    schemaFile: 'onboardingBundleConfigs.ts',
+    policyMigration: '0142_onboarding_bundle_configs.sql',
+    rationale: 'Per-org onboarding bundle manifest — must stay tenant-isolated to prevent cross-org bundle leak.',
+  },
+  // 0153 — Feature 2: test-input fixtures for inline Run-Now test panel
+  {
+    tableName: 'agent_test_fixtures',
+    schemaFile: 'agentTestFixtures.ts',
+    policyMigration: '0153_agent_test_fixtures.sql',
+    rationale: 'Test-input fixtures contain prompt text and JSON payloads authored by org/subaccount users — must stay tenant-isolated.',
+  },
+  // 0156 — Orchestrator capability-aware routing: feature requests + routing outcomes
+  {
+    tableName: 'feature_requests',
+    schemaFile: 'featureRequests.ts',
+    policyMigration: '0156_orchestrator_capability_routing.sql',
+    rationale: 'Capability-request signals with user_intent text and org attribution — must stay tenant-isolated so one org cannot see another org\'s pending feature requests.',
+  },
+  {
+    tableName: 'routing_outcomes',
+    schemaFile: 'routingOutcomes.ts',
+    policyMigration: '0156_orchestrator_capability_routing.sql',
+    rationale: 'Per-run routing decision outcomes — leak would reveal how competitors\' agents are configured and what tasks they run.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */
