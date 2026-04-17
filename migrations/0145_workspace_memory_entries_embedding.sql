@@ -15,3 +15,7 @@ ALTER TABLE workspace_memory_entries
 CREATE INDEX IF NOT EXISTS idx_memory_entries_embedding
   ON workspace_memory_entries USING hnsw (embedding vector_cosine_ops)
   WHERE embedding IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_memory_entries_recent
+  ON workspace_memory_entries (subaccount_id, created_at DESC)
+  WHERE embedding IS NOT NULL;
