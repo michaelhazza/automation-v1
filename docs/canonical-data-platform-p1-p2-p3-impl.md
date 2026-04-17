@@ -153,6 +153,9 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
 4. On success: update `last_successful_sync_at`, clear `last_sync_error`. Write `integration_ingestion_stats` row.
 5. On failure: update `last_sync_error`, `last_sync_error_at`. Write stats row with error. Do not throw — the job completes and `TripWire` monitors error rates.
 6. Concurrency: 1 per connection. **Dedupe key:** `connector-polling-sync-${connectionId}` — pg-boss `singletonKey` prevents duplicate enqueue for the same connection even if the tick job runs twice in rapid succession. Global max concurrent syncs from `connectorPollingConfig.ts`.
+7. **Race guard:** Before calling `syncConnector`, the handler checks `WHERE last_sync_started_at IS NULL OR now() - last_sync_started_at > safety_window` (default: 2× the connection's poll interval). If the guard fails, the job exits early with a debug log — another sync is already in flight or recently completed. This protects against the retry-after-crash edge case where pg-boss re-delivers a job that was mid-execution.
+
+**Idempotency contract:** `syncConnector(connectionId, principal)` MUST be idempotent — repeated execution for the same time window produces the same final canonical state. No duplicate rows (enforced by `UNIQUE(organisation_id, provider, external_id)` on canonical tables). No side-effect amplification (stats rows are append-only, not aggregated in place). Adapters use upsert (`ON CONFLICT ... DO UPDATE`) for canonical writes.
 
 **Cron-parser reuse:** The `selectConnectionsDue` pure helper uses the same cron-parser library version as `scheduleCalendarServicePure.ts` (`SOURCE_PRIORITY`, `computeNextHeartbeatAt`). If the connector-polling cadence model diverges from agent-run scheduling, the divergence is documented in this spec with justification.
 
@@ -288,6 +291,8 @@ export interface CanonicalTableEntry {
   columns: Array<{ name: string; type: string; purpose: string }>;
   foreignKeys: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
   freshnessPeriod: string;
+  /** Relationship cardinality relative to canonical_accounts (the root entity) */
+  cardinality: '1:1' | '1:N' | 'N:N';
   skillReferences: string[];
   /** Example queries an agent can use to understand typical access patterns */
   exampleQueries: string[];
@@ -480,6 +485,8 @@ CREATE INDEX IF NOT EXISTS <table>_source_connection_idx
 ```
 
 Backfill: `source_connection_id` set from existing `connector_config_id` linkage where available. All rows default to `visibility_scope = 'shared_subaccount'`.
+
+Note: `subaccount_id` and `organisation_id` already exist on all canonical tables (added by their original creation migrations). Migration 0165 does not re-add them. The RLS policies in migration 0167 reference these existing columns — no schema gap.
 
 ### New files
 
@@ -699,6 +706,11 @@ CREATE POLICY integration_connections_principal_read ON integration_connections
           WHEN current_setting('app.current_team_ids', true) = '' THEN '{}'::uuid[]
           ELSE string_to_array(current_setting('app.current_team_ids', true), ',')::uuid[]
         END))
+      OR
+      -- delegated principals: see connections owned by the delegating user
+      (current_setting('app.current_principal_type', true) = 'delegated'
+        AND ownership_scope = 'user'
+        AND owner_user_id::text = current_setting('app.current_principal_id', true))
     )
   );
 ```
@@ -759,7 +771,11 @@ CREATE POLICY canonical_contacts_writer_bypass ON canonical_contacts
   );
 ```
 
-The `canonical_writer` bypass is org-scoped — adapters can write to canonical tables within their org but cannot perform cross-org writes even with this role. Adapter services call `SET LOCAL ROLE canonical_writer` within their transaction before writing. The transaction wrapper reverts the role on commit/rollback. `app.organisation_id` must still be set (via `withOrgTx` / `withPrincipalContext`) before switching to `canonical_writer`. This is narrower than `admin_role` — `canonical_writer` can write canonical tables within a single org but cannot bypass RLS on `tasks`, `agent_runs`, or any other app-surface table.
+The `canonical_writer` bypass is org-scoped — adapters can write to canonical tables within their org but cannot perform cross-org writes even with this role. Adapter services call `SET LOCAL ROLE canonical_writer` within their transaction before writing. The transaction wrapper reverts the role on commit/rollback.
+
+**Invariant (enforced by static gate):** All adapter write paths MUST call `withOrgTx` or `withPrincipalContext` before `SET LOCAL ROLE canonical_writer`. The org session variable must be set first — without it, the policy's `current_setting('app.organisation_id', true)` returns empty string, causing all writes to fail (correct fail-closed behaviour, but confusing to debug). The gate `verify-rls-contract-compliance.sh` checks that any file containing `canonical_writer` also imports `withOrgTx` or `withPrincipalContext`.
+
+This is narrower than `admin_role` — `canonical_writer` can write canonical tables within a single org but cannot bypass RLS on `tasks`, `agent_runs`, or any other app-surface table.
 
 ### RLS exclusion registry
 
@@ -818,6 +834,7 @@ The 64+ minimum comes from covering each dimension at least once in combination 
 - **Service principal with subaccount NULL** — must see `shared_subaccount` rows (org-level service)
 - **User principal with empty `team_ids`** — must deny `shared_team` rows (empty array never overlaps)
 - **Multi-scoped row (via `canonical_row_subaccount_scopes`)** — visible through one scope but not another
+- **Cross-table visibility mismatch** — visible contact but invisible parent account (different `visibility_scope` on each). Verifies agents see consistent results and don't encounter broken joins. The harness seeds parent-child pairs with mismatched scopes and asserts the join result matches what both individual predicates would allow.
 
 This runs as a static gate (`scripts/verify-visibility-parity.sh`), not a runtime test. It uses the existing test database connection and runs in a transaction that rolls back — no persistent state.
 
@@ -862,9 +879,9 @@ New services use the existing structured logger. Key log events:
 
 | Event | Level | Where |
 |-------|-------|-------|
-| Sync job started/completed | info | `canonicalSyncSchedulerJob.ts` |
+| Sync job started/completed | info | `connectorPollingTick.ts`, `connectorPollingSync.ts` |
 | Connector stale detected | warn | `staleConnectorDetector.ts` |
-| `readPath` tag mismatch (action registry vs actual) | warn | `verify-read-path-tags.sh` output |
+| `readPath` tag mismatch (action registry vs actual) | warn | `verify-skill-read-paths.sh` output |
 | Principal context set | debug | `withPrincipalContext.ts` |
 | RLS policy check failure (denied row) | silent | Postgres — no app-level log; rows simply excluded |
 | Data dictionary cache miss/rebuild | debug | `canonicalDictionarySkill.ts` |
@@ -900,14 +917,15 @@ All gates run in `scripts/run-all-gates.sh`. New gates are appended; existing ga
 
 | Gate | Sub-phase | New / Extended | What it checks |
 |------|-----------|---------------|----------------|
-| `verify-read-path-tags.sh` | P2A | New | Every action-registry entry has a `readPath` tag; tag value matches actual implementation |
+| `verify-skill-read-paths.sh` | P2A | New | Every action-registry entry has a `readPath` tag; `liveFetch` actions have `liveFetchRationale` |
+| `verify-canonical-read-interface.sh` | P2A | New | No Drizzle queries against `canonical_*` tables outside `canonicalDataService.ts` and adapter write paths |
 | `verify-canonical-dictionary.sh` | P2B | New | TS registry covers every canonical table; column lists match Drizzle schema; no orphan entries |
 | `verify-principal-context-propagation.sh` | P3A | New | No bare `organisationId` args to `canonicalDataService`; all callers pass `PrincipalContext` |
 | `verify-canonical-required-columns.sh` | P3A | New | Every canonical table has `owner_user_id`, `visibility_scope`, `shared_team_ids`, `source_connection_id` |
 | `verify-connection-shape.sh` | P3A | New | Connection fixtures have `ownership_scope`, `classification`, `visibility_scope` set |
 | `verify-rls-coverage.sh` | P3B | Extended | Adds canonical + principal tables to manifest; checks `RLS_EXCLUSIONS` registry — unaccounted tables fail |
 | `verify-rls-contract-compliance.sh` | P3B | Extended | `canonicalDataService` callers must use `withPrincipalContext`; no bare `withOrgTx` for canonical operations |
-| `verify-visibility-parity.sh` | P3B | New | Pure predicate vs. SQL policy parity on 48+ fixture rows |
+| `verify-visibility-parity.sh` | P3B | New | Pure predicate vs. SQL policy parity on 64+ fixture rows |
 
 ### Existing gates (unchanged, still run)
 
@@ -928,7 +946,7 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 | 3 | `canonical_writer` vs. `admin_role` for adapter writes | New `canonical_writer` role | Narrower than `admin_role`; adapters should not have break-glass access to app tables |
 | 4 | Parity harness: runtime test vs. static gate | Static gate using test DB in rollback transaction | Matches project testing posture; no runtime test infra needed |
 | 5 | `readPath` tag storage | Field on action-registry entries (in-memory config, not DB column) | No migration needed; tag is developer-facing, not user-facing |
-| 6 | Data dictionary format | YAML with structured field descriptors | Machine-readable for agents; human-readable for developers; parseable by static gate |
+| 6 | Data dictionary format | TypeScript registry (`CANONICAL_DICTIONARY_REGISTRY`) | Single source of truth; gate validates against Drizzle schema; no YAML drift risk |
 | 7 | Sync scheduler: pg-boss vs. custom | pg-boss via `createWorker()` | Existing primitive; no new job infrastructure |
 | 8 | Stale-connector detection: separate detector vs. inline check | `workspaceHealth/detectors/` detector | Matches existing detector pattern; surfaced in workspace health dashboard |
 
@@ -954,8 +972,9 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 - [ ] Migration 0161 applied (if metadata column needed; otherwise config-only)
 - [ ] Every action-registry entry has `readPath: 'canonical' | 'liveFetch' | 'none'`
 - [ ] `canonicalDataService` extended with connection-aware read methods
-- [ ] `verify-read-path-tags.sh` gate passes
-- [ ] Gate added to `scripts/run-all-gates.sh`
+- [ ] `verify-skill-read-paths.sh` gate passes
+- [ ] `verify-canonical-read-interface.sh` gate passes — no direct canonical table queries outside `canonicalDataService`
+- [ ] Both gates added to `scripts/run-all-gates.sh`
 - [ ] `readPathResolutionPure.test.ts` passes
 - [ ] `npm run typecheck` clean
 - [ ] `npm run lint` clean
@@ -1023,7 +1042,8 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 | `server/services/__tests__/staleConnectorDetectorPure.test.ts` | P1 |
 | `server/services/readPathResolutionPure.ts` | P2A |
 | `server/services/__tests__/readPathResolutionPure.test.ts` | P2A |
-| `scripts/verify-read-path-tags.sh` | P2A |
+| `scripts/verify-skill-read-paths.sh` | P2A |
+| `scripts/verify-canonical-read-interface.sh` | P2A |
 | `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts` | P2B |
 | `server/services/canonicalDictionary/canonicalDictionaryRendererPure.ts` | P2B |
 | `server/services/canonicalDictionary/canonicalDictionaryValidatorPure.ts` | P2B |
@@ -1053,7 +1073,7 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 | File | Sub-phase | Change |
 |------|-----------|--------|
 | `server/db/schema/integrationConnections.ts` | P1 | Add sync scheduling columns (`last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`) |
-| `server/jobs/index.ts` | P1 | Register `canonicalSyncSchedulerJob` |
+| `server/jobs/index.ts` | P1 | Register `connectorPollingTick` and `connectorPollingSync` jobs |
 | `server/services/workspaceHealth/detectors/index.ts` | P1 | Export stale-connector detector |
 | `server/config/actionRegistry.ts` | P2A, P2B | Add `readPath` tag; register dictionary skill |
 | `server/services/canonicalDataService.ts` | P2A, P3A | Connection-aware reads (P2A); signature migration to `PrincipalContext` (P3A) |
