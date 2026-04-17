@@ -2,47 +2,69 @@
 set -euo pipefail
 
 # Gate: Every canonical_* schema file must contain the P3A visibility columns:
-#   ownerUserId, visibilityScope, sharedTeamIds, sourceConnectionId
+#   owner_user_id, visibility_scope, shared_team_ids, source_connection_id
 #
 # These columns are required for the principal-based visibility predicate.
-# Schema files that predate P3A will fail this gate until migrated.
 #
-# Exit 2 (warning) rather than 1 (blocking) so pre-migration schemas are
-# surfaced without blocking the pipeline.
+# Tables that MUST have them (error if missing):
+#   canonical_accounts, canonical_contacts, canonical_opportunities, canonical_conversations
+#
+# Other canonical tables get a warning (exit 2), not a hard fail.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$ROOT_DIR"
+GUARD_ID="canonical-required-columns"
+GUARD_NAME="Canonical Required Columns (P3A)"
+
+source "$SCRIPT_DIR/lib/guard-utils.sh"
+
+VIOLATIONS=0
+FILES_SCANNED=0
+
+emit_header "$GUARD_NAME"
 
 REQUIRED_COLUMNS=("owner_user_id" "visibility_scope" "shared_team_ids" "source_connection_id")
-SCHEMA_DIR="server/db/schema"
-MISSING=()
+SCHEMA_DIR="$ROOT_DIR/server/db/schema"
+
+# Tables that MUST have the columns (hard fail if missing)
+REQUIRED_TABLES=(
+  "canonicalAccounts"
+  "canonicalEntities"  # contains canonical_contacts, canonical_opportunities, canonical_conversations
+)
+
+is_required_table() {
+  local basename="$1"
+  for t in "${REQUIRED_TABLES[@]}"; do
+    if [[ "$basename" == "${t}.ts" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 for schema_file in "$SCHEMA_DIR"/canonical*.ts; do
   [ -f "$schema_file" ] || continue
   basename="$(basename "$schema_file")"
-
-  # Skip canonicalMetrics — it has its own column shape
-  # (metrics are computed aggregates, not source-of-record entities)
-  if [[ "$basename" == "canonicalMetrics.ts" ]]; then
-    continue
-  fi
+  FILES_SCANNED=$((FILES_SCANNED + 1))
 
   for col in "${REQUIRED_COLUMNS[@]}"; do
     if ! grep -q "$col" "$schema_file"; then
-      MISSING+=("$basename is missing column '$col'")
+      lineno=1
+      severity="warning"
+      if is_required_table "$basename"; then
+        severity="error"
+      fi
+
+      emit_violation "$GUARD_ID" "$severity" "$schema_file" "$lineno" \
+        "$basename is missing column '$col'" \
+        "Add '$col' column via migration for P3A visibility predicate"
+      VIOLATIONS=$((VIOLATIONS + 1))
     fi
   done
 done
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo "WARNING: Canonical schema files missing required P3A columns:"
-  for m in "${MISSING[@]}"; do
-    echo "  - $m"
-  done
-  echo ""
-  echo "Add these columns via migration before P3B RLS policies can be applied."
-  exit 2
-fi
+emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-echo "PASS: verify-canonical-required-columns"
+# Use exit code 2 (warning) since some tables may not be migrated yet
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 2)
+exit "$exit_code"

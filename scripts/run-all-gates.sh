@@ -100,6 +100,10 @@ run_gate "$SCRIPT_DIR/verify-integration-reference.mjs"
 run_gate "$SCRIPT_DIR/verify-connector-scheduler.sh"
 run_gate "$SCRIPT_DIR/verify-canonical-idempotency.sh"
 
+# ── P2A: Canonical Data Platform — Read-Path Consolidation ──
+run_gate "$SCRIPT_DIR/verify-skill-read-paths.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-read-interface.sh"
+
 # ── P3A: Canonical Data Platform — Principal Types & Visibility ──
 run_gate "$SCRIPT_DIR/verify-principal-context-propagation.sh"
 run_gate "$SCRIPT_DIR/verify-canonical-required-columns.sh"
