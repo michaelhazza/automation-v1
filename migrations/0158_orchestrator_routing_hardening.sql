@@ -32,7 +32,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS feature_requests_dedupe_unique_idx
 -- routing run, written into the agent_run_messages transcript with
 -- messageType='routing_decision'. It has no FK constraint because the
 -- decision record lives in a free-form jsonb column, not a dedicated table.
--- The CHECK below validates the uuid shape so a malformed id fails fast.
+--
+-- Note on scope: the column is already typed `uuid`, so malformed UUID
+-- strings are rejected by the column type before this CHECK fires. The
+-- constraint below is therefore CONTRACT DOCUMENTATION — it makes the
+-- id-format invariant explicit in the schema itself so future schema
+-- readers don't need to cross-reference the Orchestrator code to learn
+-- that `decision_record_id` is a UUID generated elsewhere. If the
+-- integrity story ever needs strengthening (e.g. once decision records
+-- move into a dedicated table), convert this to an FK.
 
 ALTER TABLE routing_outcomes
   ADD CONSTRAINT routing_outcomes_decision_record_id_uuid_format

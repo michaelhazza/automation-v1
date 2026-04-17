@@ -138,26 +138,58 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
-  // Scope the lookup to the task's subaccount so multi-subaccount orgs
-  // resolve the correct board, memory, and tool scope.
-  const linkConditions = [
+  // Resolve the Orchestrator's subaccount_agents link for this org.
+  //
+  // Per the seeded architecture (migration 0157 + spec §6.6), the
+  // Orchestrator is linked ONCE per org, attached to that org's sentinel
+  // subaccount — not per-client-subaccount. The task's own subaccountId
+  // is passed into the run as triggerContext so downstream capability
+  // queries still scope correctly, but the Orchestrator itself runs
+  // from its org-level link regardless of which subaccount the task
+  // belongs to.
+  //
+  // Resolution strategy (supports both the common case and a future
+  // per-subaccount Orchestrator model):
+  //   1. If the task has a subaccountId, prefer an Orchestrator link on
+  //      that exact subaccount (lets an org opt into per-subaccount
+  //      Orchestrators in the future without code changes).
+  //   2. Fall back to ANY active Orchestrator link for this org — this
+  //      is the sentinel-subaccount case and the normal path today.
+  const baseConditions = [
     eq(subaccountAgents.organisationId, organisationId),
     eq(agents.systemAgentId, systemAgent.id),
     eq(subaccountAgents.isActive, true),
   ];
+
+  let orchestratorLink: { subaccountAgentId: string; subaccountId: string; agentId: string } | undefined;
+
   if (task.subaccountId) {
-    linkConditions.push(eq(subaccountAgents.subaccountId, task.subaccountId));
+    const [exact] = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        subaccountId: subaccountAgents.subaccountId,
+        agentId: subaccountAgents.agentId,
+      })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+      .where(and(...baseConditions, eq(subaccountAgents.subaccountId, task.subaccountId)))
+      .limit(1);
+    orchestratorLink = exact;
   }
-  const [orchestratorLink] = await db
-    .select({
-      subaccountAgentId: subaccountAgents.id,
-      subaccountId: subaccountAgents.subaccountId,
-      agentId: subaccountAgents.agentId,
-    })
-    .from(subaccountAgents)
-    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
-    .where(and(...linkConditions))
-    .limit(1);
+
+  if (!orchestratorLink) {
+    const [any] = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        subaccountId: subaccountAgents.subaccountId,
+        agentId: subaccountAgents.agentId,
+      })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+      .where(and(...baseConditions))
+      .limit(1);
+    orchestratorLink = any;
+  }
 
   if (!orchestratorLink) {
     logger.warn('orchestratorFromTask.no_orchestrator_link', { organisationId });
@@ -175,6 +207,10 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     await agentExecutionService.executeRun({
       agentId: orchestratorLink.agentId,
       subaccountAgentId: orchestratorLink.subaccountAgentId,
+      // The Orchestrator runs from its own link (typically the org sentinel
+      // subaccount). The task's subaccount is passed in triggerContext so
+      // the Orchestrator can scope downstream capability queries to the
+      // target subaccount without needing a per-subaccount link.
       subaccountId: orchestratorLink.subaccountId,
       organisationId,
       runType: 'triggered',
@@ -185,6 +221,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         triggerId: payload.triggerId,
         taskTitle: task.title,
         taskDescription: task.description,
+        taskSubaccountId: task.subaccountId,
       },
       idempotencyKey,
     });

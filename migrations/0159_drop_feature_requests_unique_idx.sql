@@ -1,0 +1,21 @@
+-- Migration 0159 — drop feature_requests_dedupe_unique_idx
+--
+-- 0158 added a partial unique index on
+--   (organisation_id, category, dedupe_hash) WHERE deleted_at IS NULL
+-- as a DB-level backstop against racing inserts.
+--
+-- That index, however, enforces uniqueness *forever* for non-deleted rows —
+-- which contradicts the documented product contract in
+-- docs/orchestrator-capability-routing-spec.md §5.4: dedupe is a *30-day
+-- window*, after which a fresh request is allowed to create a new row
+-- carrying the same canonical slug set. Under 0158, day-31 inserts for the
+-- same hash would crash on the unique constraint instead of creating a new
+-- row as the spec promised.
+--
+-- Correctness under concurrency is preserved by the advisory-lock + in-txn
+-- dedupe query already implemented in requestFeatureHandler. Pure races
+-- inside the same 30-day window are serialised by
+-- pg_advisory_xact_lock(hash(orgId + dedupeHash)); legitimate re-requests
+-- after 30 days are allowed to create a fresh row.
+
+DROP INDEX IF EXISTS feature_requests_dedupe_unique_idx;
