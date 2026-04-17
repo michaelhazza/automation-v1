@@ -1,87 +1,89 @@
 # GHL Agency Interview Brief — 180-client agency owner
 
-One-page stress test for our core thesis before we go further down the GHL path.
+A one-pager to stress-test our core idea before we build more.
 
-**Related docs (for deeper context after the call):**
-- `tasks/ghl-agency-value-proposition.md` — five pillars, pricing, market sizing
-- `tasks/ghl-agency-development-brief.md` — full discovery framework and template defaults
-- `tasks/ghl-agency-feasibility-assessment.md` — competitive map and unit economics
-- `docs/clientpulse-ghl-dev-brief.md` — soft-launch product definition
-- `docs/capabilities.md` — positioning (Core Value Proposition / Competitive Differentiation)
-
----
-
-## The one thing to stress-test
-
-**Thesis:** A GHL agency at 180 clients has hit a ceiling that GHL itself cannot fix — no cross-sub-account visibility, no safe way to run AI across all clients, no per-client P&L. We are the **operations system that sits on top of GHL**, not a better GHL.
-
-If this agency owner does not feel that ceiling, our GHL wedge is weaker than we think. If they do, we have a design partner.
+**Related docs:**
+- `tasks/ghl-agency-value-proposition.md`
+- `tasks/ghl-agency-development-brief.md`
+- `tasks/ghl-agency-feasibility-assessment.md`
+- `docs/clientpulse-ghl-dev-brief.md`
+- `docs/capabilities.md`
 
 ---
 
-## Value proposition (plain English, one breath)
+## What I'm really testing
 
-> You connect GHL once. We auto-discover all 180 sub-accounts. Within an hour you have one dashboard showing every client's health score — pipeline, conversations, revenue — with anomalies flagged before the client notices. AI agents run across every client with approval gates so nothing embarrassing goes out. You see cost and margin per client, so you can sell AI monitoring as a service instead of absorbing the bill.
+At 180 clients, GHL runs out of room. There's no way to see all clients at once. There's no safe way to run AI everywhere. There's no clean view of what each client costs or earns.
+
+We're not a better GHL. We sit on top of it.
+
+If this owner feels that pain, we have a design partner. If they don't, we need to rethink.
+
+---
+
+## The pitch (one breath)
+
+> Connect GHL once. We pull in all 180 clients. Within an hour you've got one dashboard with a health score for every client, anomalies flagged before the client notices, AI that needs your approval before it sends anything risky, and a clear view of cost and margin per client — so you can sell AI as a service instead of eating the bill.
 >
-> **One dashboard. All clients. AI that is actually safe to run.**
+> **One dashboard. Every client. AI you can trust.**
 
-Four structural things GHL cannot match, no matter what they ship:
-1. Cross-sub-account portfolio view with health scoring and anomaly detection
-2. Human-in-the-loop approval gates on every AI-driven client action
-3. Per-client cost attribution and margin markup (so AI becomes a revenue line)
-4. One-click template deployment — configure once, provisioned across all clients
+Four things GHL can't do, no matter what they ship:
+1. See all clients at once, with health scores and alerts
+2. Approval gates on anything AI sends to a client
+3. Cost and margin per client (so AI becomes a revenue line)
+4. Set it up once, runs across every client
 
 ---
 
-## Five questions to ask (in this order)
+## Five questions (in this order)
 
-**1. Monday-morning reality check — validates cross-client visibility gap**
-> "Walk me through your Monday morning. Out of 180 clients, how do you figure out which ones need attention this week? What do you log into, what do you read, who on your team tells you what's wrong?"
+**1. How do you spot trouble on a Monday morning?**
+> "It's Monday. You've got 180 clients. How do you work out which ones need attention this week? What do you open, who do you ask?"
 
-Listen for: manual log-ins, spreadsheets, "I ask the account managers," "I find out when the client complains." If they say "I have a dashboard that tells me," probe hard — is it real-time, is it cross-client, does it flag anomalies?
+Listening for: manual logins, spreadsheets, "my team tells me," "I hear it when the client complains." If they say they have a dashboard, ask if it covers every client and flags problems on its own.
 
-**2. The last AI incident — validates AI governance gap**
-> "Are you running AI agents for your clients today — chatbots, voice AI, SMS follow-up, booking bots? Tell me about the last time one of those said something wrong, off-brand, or embarrassing. How did you find out? What did it take to stop it happening again?"
+**2. What's the last time AI embarrassed you?**
+> "Are you running any AI for your clients — chatbots, SMS, voice, booking? When did it last say something wrong or off-brand? How did you find out?"
 
-Listen for: a specific story. If they cannot describe an incident, either they are not running AI at scale or they are not catching the failures — both are disqualifiers for a design partner. If they have a story and visibly wince, green flag.
+Listening for: a real story. No story means they're not running AI at scale, or they're not catching the failures. Both are disqualifiers. A wince is a green flag.
 
-**3. The "what did the AI do for me" moment — validates per-client P&L**
-> "When a client asks you 'what did your AI actually do for me last month?', what do you send them? Do you know your cost per client on AI, and are you marking it up — or is it a line item you are absorbing?"
+**3. Do you know what AI costs you per client?**
+> "When a client asks what your AI did for them last month, what do you send? Do you know what it cost you for that client — and are you charging for it, or eating it?"
 
-Listen for: "we don't really track that per client," "we just bundle it in," "I have no idea what it costs me." That is the margin wedge. If they are already tracking it cleanly, they are either a unicorn or lying.
+Listening for: "we don't track that," "it's bundled in," "no idea." That's the margin wedge.
 
-**4. The willingness-to-pay test — validates commercial case**
-> "If I gave you one dashboard showing every client's health score, with anomalies flagged before they noticed, plus approval gates on every AI-driven message, plus per-client margin — what is that worth to you per month? And what would you need to believe to pay for it?"
+**4. What would this be worth to you?**
+> "If you had one dashboard with a health score for every client, anomalies flagged early, approval gates on AI, and margin per client — what would you pay a month? What would you need to see to believe it?"
 
-Listen for: real numbers, not politeness. "A few hundred" means it is a vitamin. "A thousand or two" means it is a painkiller. "I'd pay whatever if it actually worked" means build them a demo this week.
+Listening for: a real number. "A few hundred" = nice to have. "A thousand or two" = real pain. "Whatever it costs if it works" = build them a demo this week.
 
-**5. The wand question — lets them surface the real pain**
-> "If you could wave a wand and automate one thing across all 180 clients at once — without configuring it 180 times — what would it be? And what has stopped you from doing it so far?"
+**5. What would you automate across all 180 clients if you could?**
+> "If you could wave a wand and do one thing across every client at once — without setting it up 180 times — what would it be? What's stopped you so far?"
 
-Listen for: the thing they say is often not what we expected. That is the gold. It tells us whether our five pillars actually map to their felt pain, or whether we have built a solution for a different agency.
+Listening for: whatever they say. If it matches our five pillars, we're on track. If it doesn't, we've built for a different agency.
 
 ---
 
 ## What a good call looks like
 
-**Green flags** — pursue as design partner:
-- Specific AI-gone-wrong story they can tell
-- Admits they cannot see across all 180 clients without effort
-- Does not know per-client AI cost, nods when margin is mentioned
-- Quotes a four-figure monthly number without flinching
-- Willing to connect GHL OAuth to a private-app build
+**Green flags:**
+- Real AI-gone-wrong story
+- Admits they can't see across all clients easily
+- Doesn't know cost per client, nods at the margin idea
+- Four-figure monthly number without flinching
+- Happy to connect GHL and give 30 minutes a week
 
-**Red flags** — thank them and move on:
-- "GHL AI works fine for us"
-- Already built internal dashboards they love
-- Cannot describe a single incident
-- Treats the conversation as a sales pitch to dodge
-- Won't give 30 minutes a week for feedback
+**Red flags:**
+- "GHL AI works fine"
+- Already has internal dashboards they love
+- No incident story
+- Treats the call as a sales pitch to dodge
+- Won't commit time for feedback
 
 ---
 
-## What I am listening for overall
+## The sentence I want to hear
 
-One sentence that tells me the thesis is right: *"Yeah, we have no way to see across all our clients at once, and every time we turn AI up it breaks something and we have to turn it back down."*
+> "We can't see across all our clients, and every time we turn AI up it breaks something and we turn it back down."
 
-If I hear that, we have a wedge. If I do not hear anything close to it from a 180-client agency, the GHL path needs a rethink before we build more.
+If I hear that, we have a wedge. If I don't hear anything close from a 180-client owner, the GHL path needs a rethink.
