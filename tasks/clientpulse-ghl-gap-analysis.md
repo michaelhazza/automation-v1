@@ -1017,6 +1017,19 @@ Six phases, each a discrete shippable slice. Every phase leaves the system in a 
 
 **Ship gate:** new/existing GHL Agency orgs load the extended template on onboarding; `orgConfigService.getStaffActivityDefinition(orgId)` returns the seeded JSONB without the caller providing defaults.
 
+### Phase 0.5 — Playbook engine refactor for explicit org scope (per §13.3)
+
+Runs in parallel with Phase 0, or immediately after it — independent of Phase 1 ingestion. Unblocks Phase 5 org-level playbooks.
+
+- Schema migration: add `scope` enum column to `playbook_runs` and `system_playbook_templates` (default `'subaccount'`); make `playbook_runs.subaccount_id` nullable; add CHECK constraint enforcing `(scope='subaccount' AND subaccount_id IS NOT NULL) OR (scope='org' AND organisation_id IS NOT NULL AND subaccount_id IS NULL)`.
+- Engine: `playbookEngine.startRun(definition, context)` accepts either scope; templating context resolves `run.entity` polymorphically; scheduler enqueues runs at the correct scope per `defaultSchedules.ts`.
+- Permissions: add `playbook_runs.start@org` alongside existing `@subaccount`. RLS on `playbook_runs` updated to handle nullable subaccount_id.
+- Step library small-scope updates: `publish_portal`, `send_email`, `aggregate_*` resolve targets from scope.
+- Query helpers centralised: `listRuns({ scope, organisationId, subaccountId })`, `listClientRuns(orgId)` — callers never write the scope filter by hand.
+- Backfill: no data change needed — every existing run defaults correctly to `scope='subaccount'`.
+
+**Ship gate:** all existing sub-account playbooks continue to work unchanged; engine accepts `scope='org'` registrations; no org-level playbook yet exists but the substrate is ready. Estimated ~3.5 engineer-days.
+
 ### Phase 1 — Signal ingestion (the six adapter functions)
 
 - Add `fetchLoginActivity`, `fetchFunnels`, `fetchCalendars`, `fetchUsers`, `fetchInstalledIntegrations`, `fetchLocationDetails` in `ghlAdapter.ts`.
@@ -1065,7 +1078,7 @@ Six phases, each a discrete shippable slice. Every phase leaves the system in a 
 - Monday-morning email per §7.2: deep-linked per-client rows, band-change delta banner, pending-interventions count, agency-timezone delivery, one email per org.
 - **Sub-account Intelligence Briefing integration (§13.5):** add `render_portfolio_health_section_briefing` step (forward-looking, per-client) to `intelligence-briefing.playbook.ts`. Use `skipWhen` to no-op when ClientPulse module is not enabled.
 - **Sub-account Weekly Digest integration (§13.5):** add `render_portfolio_health_section_digest` step (backward-looking, per-client) to `weekly-digest.playbook.ts`. Same `skipWhen` guard.
-- **Build org-level playbooks (NEW — §13.3):** create `server/playbooks/intelligence-briefing-org.playbook.ts` and `server/playbooks/weekly-digest-org.playbook.ts`. Both run on the org-subaccount. Both ship with the ClientPulse render step (`skipWhen` guarded). The org-level briefing mockup and digest mockup are the design targets.
+- **Build org-level playbooks (NEW — §13.3):** create `server/playbooks/intelligence-briefing-org.playbook.ts` and `server/playbooks/weekly-digest-org.playbook.ts`. Both declare `scope: 'org'` (requires Phase 0.5 engine refactor). Both ship with the ClientPulse render step (`skipWhen` guarded). The org-level briefing mockup and digest mockup are the design targets.
 - **Seed all four playbooks** into `system_playbook_templates` (currently only `.ts` files exist; no DB seed). New seed migration.
 - **Portfolio Rollup deprecation path (§13.3):** `portfolioRollupJob.ts` continues to run during the transition. Once org-level playbooks are seeded and stable, deprecate the job; the org-level playbooks supersede it.
 - `ClientPulseConfigPage` for factor weights, signal thresholds, band cutoffs, intervention templates, `staffActivity` config, `integrationFingerprints` seed library + learned fingerprints, Monday-email timezone + suppression rules.
@@ -1280,35 +1293,71 @@ The ClientPulse module is about **65% scaffolded** out of the box for a GHL agen
 | Org-level Intelligence Briefing | **Missing** | — | Needs new file `intelligence-briefing-org.playbook.ts` running on the org-subaccount per §13.3. **The Monday-morning Intelligence Briefing mockup at `tasks/clientpulse-mockup-intelligence-briefing.html` IS this missing playbook's output** — the mockup describes the design target. |
 | Org-level Weekly Digest | **Partial as a job, not a playbook** | `server/jobs/portfolioRollupJob.ts` + `portfolioRollupService.runPortfolioRollup()` | Should be promoted to a real playbook (`weekly-digest-org.playbook.ts`) running on the org-subaccount. **The Friday-afternoon Weekly Digest mockup at `tasks/clientpulse-mockup-weekly-digest.html` IS this playbook's output.** Until the playbook ships, `portfolioRollupJob.ts` covers the core rollup but needs extending to render the look-back content shown in the mockup. |
 
-### 13.3 Architectural recommendation: Pattern A (four separate playbook definitions, no engine changes)
+### 13.3 Architectural recommendation: Pattern C (engine refactor for explicit org scope)
 
-`playbook_runs.subaccount_id` is a `NOT NULL` foreign key. The engine cannot run a playbook at org scope without a separate definition. Two options:
+**Chosen pattern** (reversed from earlier drafts after honest evaluation). The earlier recommendation to use the org-subaccount as the playbook run target (Pattern A) worked without engine changes but had real concerns: conceptual debt, discoverability risk, first instance of the pattern, edge cases around portal semantics. For a product that will accumulate many playbooks and be touched by many engineers over time, those concerns compound. Pattern C is a one-time refactor that produces a clean long-term model.
 
-| Pattern | Description | Recommendation |
-|---|---|---|
-| **A — Four definitions** | `intelligence-briefing` + `weekly-digest` + `intelligence-briefing-org` + `weekly-digest-org` | **Preferred.** Matches existing codebase shape, no engine changes, each playbook references its scope's data clearly. |
-| **B — Two definitions, dual-scope invocation** | Same playbook invoked at sub-account or org level, engine resolves entity context | Requires engine changes (relax `subaccount_id NOT NULL`), permissions model changes, templating context complexity. Not justified by gain. |
+**What Pattern C changes:**
 
-**How org-level playbooks satisfy the `subaccount_id NOT NULL` constraint without engine changes:** the canonical answer is the **org-subaccount** pattern (`subaccounts.isOrgSubaccount = true`), shipped in `migrations/0106_org_subaccount.sql` and already used by `portfolioRollupService.ts`. Every org has exactly one org-subaccount row that represents the org's own workspace — it's where cross-client agents and the Orchestrator already live.
+Schema:
 
-Org-level playbooks are sub-account-scoped playbooks **that happen to run on the org-subaccount**, with logic that aggregates across all *sibling* sub-accounts (where `isOrgSubaccount = false`) belonging to the same `organisationId`. From the engine's perspective they look identical to any other playbook run; from the rendering perspective they produce org-wide output because their data-fetch steps query across the portfolio rather than scoping to one client.
+```sql
+-- playbook_runs.subaccount_id becomes nullable
+ALTER TABLE playbook_runs ALTER COLUMN subaccount_id DROP NOT NULL;
 
-Concretely:
+-- new scope discriminator on runs + templates
+ALTER TABLE playbook_runs         ADD COLUMN scope playbook_scope_enum NOT NULL DEFAULT 'subaccount';
+ALTER TABLE system_playbook_templates ADD COLUMN scope playbook_scope_enum NOT NULL DEFAULT 'subaccount';
 
-```
-intelligence-briefing.playbook.ts      → runs on regular sub-accounts
-                                         (one per client, focused on that client's work)
-
-intelligence-briefing-org.playbook.ts  → runs on the org-subaccount
-                                         (one per org, aggregates across siblings)
-
-weekly-digest.playbook.ts              → regular sub-accounts (per-client retrospective)
-weekly-digest-org.playbook.ts          → org-subaccount (portfolio-wide retrospective)
+-- CHECK constraint enforces valid combinations
+ALTER TABLE playbook_runs ADD CONSTRAINT scope_entity_consistent CHECK (
+  (scope = 'subaccount' AND subaccount_id IS NOT NULL) OR
+  (scope = 'org'        AND organisation_id IS NOT NULL AND subaccount_id IS NULL)
+);
 ```
 
-This keeps the playbook engine completely unchanged. `playbook_runs.subaccount_id` always points to a real sub-account row — sometimes the org-subaccount, sometimes a client sub-account. Permissions, RLS, idempotency, scheduling, delivery — all unchanged.
+Engine:
 
-`portfolioRollupJob.ts` remains in place during the transition. Long-term, it can be deprecated in favour of the two new org-level playbooks once they're seeded and shipping (no functional regression — the rollup output becomes a playbook-step output instead of a job-emitted inbox item).
+- `playbookEngine.startRun(definition, context)` accepts either scope. Context must carry an `entity` that is a subaccount (for `scope='subaccount'`) or an org (for `scope='org'`).
+- Templating context resolves `run.entity.name` / `run.entity.id` polymorphically; `run.scope` is available for the rare step that needs to branch.
+- `defaultSchedules.ts` declares scope per playbook; scheduler enqueues each run at the correct scope.
+
+Permissions + RLS:
+
+- New permission key `playbook_runs.start@org` alongside the existing `playbook_runs.start@subaccount`. Org-scoped runs default to agency-owner permissions.
+- RLS on `playbook_runs` already filters by `organisation_id` (denormalised); add a `subaccount_id IS NULL OR subaccount_has_access(user, subaccount_id)` branch.
+
+Step library updates (small):
+
+- `publish_portal` resolves target portal from scope (client portal for sub-account runs; org-subaccount portal for org runs).
+- `send_email` recipient resolution handles both scopes (agency owner + operators for org runs; client-scoped recipient list for sub-account runs).
+- `aggregate_*` steps for org-scoped runs take `organisationId` directly from `run.entity.id`.
+
+Query helpers centralised:
+
+- `listRuns({ scope, organisationId, subaccountId })` — scoped filtering in one place; callers never write the scope filter by hand.
+- `listClientRuns(orgId)` — explicitly `scope='subaccount'` only.
+
+Migration (one-way, backfill-safe):
+
+1. Add columns with safe defaults (`scope='subaccount'`, all existing runs are sub-account-scoped).
+2. Backfill: no data change needed — every existing run is correctly `scope='subaccount'` by default.
+3. Drop old NOT NULL on `subaccount_id`.
+4. Add CHECK constraint.
+5. Wire engine + step library to the new scope field.
+6. New migration seeds `scope='org'` on the two new org-level playbook templates (`intelligence-briefing-org`, `weekly-digest-org`).
+
+**Estimated effort:** ~3.5 engineer-days end-to-end (schema 0.5d, engine 1.5d, templating + steps 1d, permissions + RLS 0.5d, tests + migration plan baked in).
+
+**Why this is worth it over Pattern A:**
+
+- `playbook_runs.subaccount_id` always means "a client sub-account" after the refactor. No exceptions, no silent filtering rules for the org-subaccount case.
+- Queries like "list all playbook runs for this org's clients" are natural: `WHERE scope='subaccount'`. No mental footnote required.
+- Metrics dashboards don't accidentally include org-level runs in per-client aggregates.
+- Future playbooks at org or sub-account scope use the same explicit scope declaration — no pattern-matching by convention.
+- When the next tier emerges (e.g. "agency-network-scope" for a holding company managing multiple agencies), we extend the enum rather than invent another hack.
+
+**Pattern A remains a valid v1 fallback** if the engine refactor has to be deferred, but we're not choosing it.
 
 ### 13.4 Module-agnostic graceful skipping
 
@@ -1445,13 +1494,20 @@ There are four mockup HTML files in `tasks/`:
 | Monday Briefing email | **NEW org-level playbook** `intelligence-briefing-org.playbook.ts`. Runs on the org-subaccount (one playbook run per org per Monday). | New playbook file |
 | Friday Digest email | **NEW org-level playbook** `weekly-digest-org.playbook.ts`. Same shape, Friday cadence. | New playbook file |
 
-### 14.3 Why org-level playbooks "just work" without engine changes
+### 14.3 Why org-level playbooks need an explicit scope (Pattern C)
 
-Every organisation has one special sub-account row with `isOrgSubaccount = true` (shipped in `migrations/0106_org_subaccount.sql`) — this is the agency's own internal workspace, where the Orchestrator and other cross-client agents already live.
+Earlier drafts of this doc proposed running org-level playbooks on the **org-subaccount** (`isOrgSubaccount = true`) to avoid engine changes. That approach works but carries conceptual debt: `playbook_runs.subaccount_id` would sometimes point to a real client and sometimes to an internal workspace, which silently breaks queries, metrics, and the mental model.
 
-An "org-level briefing" is just a regular sub-account-scoped playbook that happens to **run on the org-subaccount**. Its step logic queries across the agency's *other* sub-accounts (the actual client accounts) and produces an org-wide rendering. From the playbook engine's perspective it's identical to any other run — same `playbook_runs` table, same scheduling, same delivery primitives, same RLS, same idempotency.
+**We chose Pattern C instead** — a one-time engine refactor that adds an explicit `scope` enum (`'subaccount'` | `'org'`) to playbook definitions and runs, makes `playbook_runs.subaccount_id` nullable when `scope='org'`, and populates `organisation_id` instead. See §13.3 for the full refactor spec.
 
-No engine changes. No nullable foreign keys. No new permissions model. No special "org playbook" code path.
+After the refactor:
+
+- `playbook_runs.subaccount_id` always means a client sub-account, no exceptions.
+- Org-level briefings declare `scope: 'org'` in their definition; the engine invokes them with `run.entity = organisation`.
+- Permissions, RLS, templating context all branch cleanly on `scope`.
+- The engine is a one-time 3.5-day refactor; every future org-scoped playbook reuses it for free.
+
+No more "this is a sub-account that isn't really a sub-account" footnote anywhere in the code.
 
 ### 14.4 Where the work happens (sub-account level, per your preference)
 
@@ -1492,18 +1548,19 @@ The same guarantee applies CRM-wide. The playbook engine and step library are CR
 
 ### 14.8 Total net-new code to ship the four mockups
 
-Assuming Phases 0–4 from §10 are in place (canonical tables, signal ingestion, scoring, churn assessment, intervention pipeline):
+Assuming Phases 0–4 from §10 are in place (canonical tables, signal ingestion, scoring, churn assessment, intervention pipeline), plus the Phase 0.5 engine refactor per §13.3:
 
 | Item | Type |
 |---|---|
-| `intelligence-briefing-org.playbook.ts` | New playbook file |
-| `weekly-digest-org.playbook.ts` | New playbook file |
+| Playbook engine refactor for explicit org scope | Edit engine + schema migration (Phase 0.5) |
+| `intelligence-briefing-org.playbook.ts` (declares `scope: 'org'`) | New playbook file |
+| `weekly-digest-org.playbook.ts` (declares `scope: 'org'`) | New playbook file |
 | `ClientPulseSubaccountDrilldownPage.tsx` (or similar) | New React page |
 | Wire `clientpulseReports.ts` queries (replace the `[]` stub) | Edit existing |
 | Refactor `portfolioRollupService.ts` to pure aggregator | Edit existing |
-| Seed migration for all four playbook templates | New migration |
+| Seed migration for all four playbook templates (two `scope='subaccount'`, two `scope='org'`) | New migration |
 
-Five new code files / edits + one migration = the complete delivery surface for everything the four mockups show.
+Engine refactor is a one-time cost of ~3.5 engineer-days; every future scoped playbook benefits.
 
 ### 14.9 The architectural win
 
