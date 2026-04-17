@@ -82,7 +82,8 @@ ALTER TABLE integration_connections
   ADD COLUMN IF NOT EXISTS last_sync_started_at timestamptz,
   ADD COLUMN IF NOT EXISTS last_sync_error text,
   ADD COLUMN IF NOT EXISTS last_sync_error_at timestamptz,
-  ADD COLUMN IF NOT EXISTS sync_phase text NOT NULL DEFAULT 'backfill';
+  ADD COLUMN IF NOT EXISTS sync_phase text NOT NULL DEFAULT 'backfill',
+  ADD COLUMN IF NOT EXISTS sync_lock_token uuid;
 
 CREATE INDEX IF NOT EXISTS integration_connections_last_successful_sync_at_idx
   ON integration_connections (last_successful_sync_at)
@@ -114,6 +115,8 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
 
 `integration_ingestion_stats` is org-scoped and should be added to `RLS_PROTECTED_TABLES` in the same migration (it contains per-connection sync metrics — cross-tenant leak reveals integration activity patterns).
 
+**Stats deduplication:** Stats rows are append-only and are NOT deduplicated. Retries and lease-expiry re-runs may produce multiple rows for the same logical sync window. Consumers (dashboards, health detectors) MUST aggregate by `(connection_id, date_trunc('hour', sync_started_at))` or similar time bucket rather than assuming a 1:1 mapping between sync windows and stats rows.
+
 ### New files
 
 | File | Purpose |
@@ -132,7 +135,7 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
 
 | File | Change |
 |------|--------|
-| `server/db/schema/integrationConnections.ts` | Add five new columns to Drizzle schema |
+| `server/db/schema/integrationConnections.ts` | Add six new columns to Drizzle schema (incl. `sync_lock_token`) |
 | `server/db/schema/index.ts` | Export new `integrationIngestionStats` table |
 | `server/services/connectorPollingService.ts` | Add `ServicePrincipal` argument to `syncConnector()` (stub until P3A — just extract `organisationId`). Record `last_sync_started_at` before sync, `last_successful_sync_at` / `last_sync_error` after. Wrap sync call with `withBackoff`. |
 | `server/config/jobConfig.ts` | Register `'connector-polling-tick'` (cron, 1min, singleton) and `'connector-polling-sync'` (on-demand, per-connection concurrency) |
@@ -153,9 +156,23 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
 4. On success: update `last_successful_sync_at`, clear `last_sync_error`. Write `integration_ingestion_stats` row.
 5. On failure: update `last_sync_error`, `last_sync_error_at`. Write stats row with error. Do not throw — the job completes and `TripWire` monitors error rates.
 6. Concurrency: 1 per connection. **Dedupe key:** `connector-polling-sync-${connectionId}` — pg-boss `singletonKey` prevents duplicate enqueue for the same connection even if the tick job runs twice in rapid succession. Global max concurrent syncs from `connectorPollingConfig.ts`.
-7. **Race guard:** Before calling `syncConnector`, the handler checks `WHERE last_sync_started_at IS NULL OR now() - last_sync_started_at > safety_window` (default: 2× the connection's poll interval). If the guard fails, the job exits early with a debug log — another sync is already in flight or recently completed. This protects against the retry-after-crash edge case where pg-boss re-delivers a job that was mid-execution.
+7. **Sync lease (lock-token pattern):** Before calling `syncConnector`, the handler acquires a lightweight lease via an atomic `UPDATE ... RETURNING`:
 
-**Idempotency contract:** `syncConnector(connectionId, principal)` MUST be idempotent — repeated execution for the same time window produces the same final canonical state. No duplicate rows (enforced by `UNIQUE(organisation_id, provider, external_id)` on canonical tables). No side-effect amplification (stats rows are append-only, not aggregated in place). Adapters use upsert (`ON CONFLICT ... DO UPDATE`) for canonical writes.
+```sql
+UPDATE integration_connections
+SET sync_lock_token = gen_random_uuid(),
+    last_sync_started_at = now()
+WHERE id = $connectionId
+  AND (
+    sync_lock_token IS NULL
+    OR now() - last_sync_started_at > safety_window
+  )
+RETURNING sync_lock_token;
+```
+
+If the `UPDATE` returns zero rows, another sync holds the lease — job exits early with a debug log. On successful sync completion, the handler clears the token: `SET sync_lock_token = NULL, last_successful_sync_at = now()`. On failure, the token is left in place — it expires naturally after `safety_window` (default: 2× the connection's poll interval), allowing the next retry to acquire. This prevents overlapping writes when a crashed job partially resumes while its retry is already running — only the lease holder proceeds, and external API calls do not double-fire.
+
+**Idempotency contract:** `syncConnector(connectionId, principal)` MUST be idempotent — repeated execution for the same time window produces the same final canonical state. No duplicate rows (enforced by `UNIQUE(organisation_id, provider, external_id)` on canonical tables). No side-effect amplification (stats rows are append-only, not aggregated in place — see stats deduplication note below). Adapters use upsert (`ON CONFLICT ... DO UPDATE`) for canonical writes. The static gate `verify-canonical-idempotency.sh` enforces that every `canonical_*` table has a `UNIQUE(organisation_id, provider, external_id)` constraint — tables without it fail the gate.
 
 **Cron-parser reuse:** The `selectConnectionsDue` pure helper uses the same cron-parser library version as `scheduleCalendarServicePure.ts` (`SOURCE_PRIORITY`, `computeNextHeartbeatAt`). If the connector-polling cadence model diverges from agent-run scheduling, the divergence is documented in this spec with justification.
 
@@ -291,7 +308,10 @@ export interface CanonicalTableEntry {
   columns: Array<{ name: string; type: string; purpose: string }>;
   foreignKeys: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
   freshnessPeriod: string;
-  /** Relationship cardinality relative to canonical_accounts (the root entity) */
+  /** Relationship cardinality relative to canonical_accounts (the root entity).
+   *  1:1 = one account has one row (e.g. canonical_accounts itself)
+   *  1:N = one account has many rows (e.g. contacts, opportunities)
+   *  N:N = many-to-many via junction (e.g. emails span multiple accounts) */
   cardinality: '1:1' | '1:N' | 'N:N';
   skillReferences: string[];
   /** Example queries an agent can use to understand typical access patterns */
@@ -834,7 +854,7 @@ The 64+ minimum comes from covering each dimension at least once in combination 
 - **Service principal with subaccount NULL** — must see `shared_subaccount` rows (org-level service)
 - **User principal with empty `team_ids`** — must deny `shared_team` rows (empty array never overlaps)
 - **Multi-scoped row (via `canonical_row_subaccount_scopes`)** — visible through one scope but not another
-- **Cross-table visibility mismatch** — visible contact but invisible parent account (different `visibility_scope` on each). Verifies agents see consistent results and don't encounter broken joins. The harness seeds parent-child pairs with mismatched scopes and asserts the join result matches what both individual predicates would allow.
+- **Cross-table visibility mismatch** — visible contact but invisible parent account (different `visibility_scope` on each). Verifies agents see consistent results and don't encounter broken joins. The harness seeds parent-child pairs with mismatched scopes and asserts the join result matches what both individual predicates would allow. **Dangling FK assertion:** when a child row is visible but its parent is not, a LEFT JOIN must return NULL for the parent columns — the harness explicitly asserts this and documents it as expected behaviour. Agents must not attempt inner joins across canonical tables with different visibility scopes; the `antiPatterns` field in the data dictionary warns against this per-table.
 
 This runs as a static gate (`scripts/verify-visibility-parity.sh`), not a runtime test. It uses the existing test database connection and runs in a transaction that rolls back — no persistent state.
 
@@ -917,6 +937,8 @@ All gates run in `scripts/run-all-gates.sh`. New gates are appended; existing ga
 
 | Gate | Sub-phase | New / Extended | What it checks |
 |------|-----------|---------------|----------------|
+| `verify-connector-scheduler.sh` | P1 | New | No direct calls to `syncConnector` outside job handlers and manual-sync route |
+| `verify-canonical-idempotency.sh` | P1 | New | Every `canonical_*` table has `UNIQUE(organisation_id, provider, external_id)` constraint |
 | `verify-skill-read-paths.sh` | P2A | New | Every action-registry entry has a `readPath` tag; `liveFetch` actions have `liveFetchRationale` |
 | `verify-canonical-read-interface.sh` | P2A | New | No Drizzle queries against `canonical_*` tables outside `canonicalDataService.ts` and adapter write paths |
 | `verify-canonical-dictionary.sh` | P2B | New | TS registry covers every canonical table; column lists match Drizzle schema; no orphan entries |
@@ -956,10 +978,12 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 ### P1 — Scheduled polling + stale-connector detector
 
-- [ ] Migration 0160 applied — `integration_connections` has `last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`; `integration_ingestion_stats` table created
+- [ ] Migration 0160 applied — `integration_connections` has `last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`, `sync_lock_token`; `integration_ingestion_stats` table created
 - [ ] `connectorPollingTick` cron job registered via `createWorker()` and fires on schedule
 - [ ] Per-connection `connectorPollingSync` jobs enqueued and executed; `last_successful_sync_at` updated on completion
 - [ ] `staleConnectorDetector.ts` registered in `workspaceHealth/detectors/index.ts`
+- [ ] Sync lease (lock-token) acquired/released correctly; overlapping syncs prevented
+- [ ] `verify-canonical-idempotency.sh` passes — all canonical tables have upsert-safe UNIQUE constraint
 - [ ] Detector fires finding when `last_successful_sync_at` older than threshold
 - [ ] `connectorPollingSchedulerPure.test.ts` passes — tick selection, phase filter, paused-skip, null-lastSync
 - [ ] `staleConnectorDetectorPure.test.ts` passes — threshold, grace period, edge cases
@@ -1037,6 +1061,7 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 | `server/services/__tests__/connectorPollingSchedulerPure.test.ts` | P1 |
 | `server/config/connectorPollingConfig.ts` | P1 |
 | `scripts/verify-connector-scheduler.sh` | P1 |
+| `scripts/verify-canonical-idempotency.sh` | P1 |
 | `server/services/workspaceHealth/detectors/staleConnectorDetector.ts` | P1 |
 | `server/services/workspaceHealth/detectors/staleConnectorDetectorPure.ts` | P1 |
 | `server/services/__tests__/staleConnectorDetectorPure.test.ts` | P1 |
@@ -1072,7 +1097,7 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 | File | Sub-phase | Change |
 |------|-----------|--------|
-| `server/db/schema/integrationConnections.ts` | P1 | Add sync scheduling columns (`last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`) |
+| `server/db/schema/integrationConnections.ts` | P1 | Add sync scheduling columns (`last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`, `sync_lock_token`) |
 | `server/jobs/index.ts` | P1 | Register `connectorPollingTick` and `connectorPollingSync` jobs |
 | `server/services/workspaceHealth/detectors/index.ts` | P1 | Export stale-connector detector |
 | `server/config/actionRegistry.ts` | P2A, P2B | Add `readPath` tag; register dictionary skill |
