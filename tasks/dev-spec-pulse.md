@@ -2,35 +2,125 @@
 
 > **Status:** Draft — ready for spec-reviewer loop (local dev)
 > **Classification:** Major (new subsystem; replaces three admin-scope pages)
-> **Architect plan:** `tasks/architect-plan-pulse.md` — read first
 > **Prototype:** `prototypes/pulse/index.html` — UX source of truth
 > **Branch:** `claude/evaluate-ai-strategy-gHP7t`
+> **Note:** This document is self-contained. It incorporates design decisions from the architect plan (`tasks/architect-plan-pulse.md`) as a preamble — no need to read the architect plan separately.
 
 ---
 
 ## Table of contents
 
-1. [Decision summary](#decision-summary)
-2. [Scope overview](#scope-overview)
-3. [Architecture constraints](#architecture-constraints)
-4. [Execution order](#execution-order)
-5. [Dependencies](#dependencies)
-6. [Chunk 1 — Schema + config scaffolding](#chunk-1--schema--config-scaffolding)
-7. [Chunk 2 — Lane classifier](#chunk-2--lane-classifier)
-8. [Chunk 3 — Skill wiring](#chunk-3--skill-wiring)
-9. [Chunk 4 — pulseService + routes](#chunk-4--pulseservice--routes)
-10. [Chunk 5 — Major-ack enforcement](#chunk-5--major-ack-enforcement)
-11. [Chunk 6 — PulsePage + Attention tab](#chunk-6--pulsepage--attention-tab)
-12. [Chunk 7 — Major-lane confirmation modal](#chunk-7--major-lane-confirmation-modal)
-13. [Chunk 8 — History tab](#chunk-8--history-tab)
-14. [Chunk 9 — Threshold editor UI](#chunk-9--threshold-editor-ui)
-15. [Chunk 9b — Per-subaccount retention override](#chunk-9b--per-subaccount-retention-override)
-16. [Chunk 10 — Legacy page deletions](#chunk-10--legacy-page-deletions)
-17. [Chunk 11 — Docs and capabilities registry](#chunk-11--docs-and-capabilities-registry)
-18. [File impact summary](#file-impact-summary)
-19. [Risk assessment](#risk-assessment)
-20. [Rollout and verification](#rollout-and-verification)
-21. [Out of scope](#out-of-scope)
+0. [Design decisions (from architect plan)](#0-design-decisions)
+1. [Architecture overview](#1-architecture-overview)
+2. [Decision summary](#decision-summary)
+3. [Scope overview](#scope-overview)
+4. [Architecture constraints](#architecture-constraints)
+5. [Execution order](#execution-order)
+6. [Dependencies](#dependencies)
+7. [Chunk 1 — Schema + config scaffolding](#chunk-1--schema--config-scaffolding)
+8. [Chunk 2 — Lane classifier](#chunk-2--lane-classifier)
+9. [Chunk 3 — Skill wiring](#chunk-3--skill-wiring)
+10. [Chunk 4 — pulseService + routes](#chunk-4--pulseservice--routes)
+11. [Chunk 5 — Major-ack enforcement](#chunk-5--major-ack-enforcement)
+12. [Chunk 6 — PulsePage + Attention tab](#chunk-6--pulsepage--attention-tab)
+13. [Chunk 7 — Major-lane confirmation modal](#chunk-7--major-lane-confirmation-modal)
+14. [Chunk 8 — History tab](#chunk-8--history-tab)
+15. [Chunk 9 — Threshold editor UI](#chunk-9--threshold-editor-ui)
+16. [Chunk 9b — Per-subaccount retention override](#chunk-9b--per-subaccount-retention-override)
+17. [Chunk 10 — Legacy page deletions](#chunk-10--legacy-page-deletions)
+18. [Chunk 11 — Docs and capabilities registry](#chunk-11--docs-and-capabilities-registry)
+19. [File impact summary](#file-impact-summary)
+20. [Risk assessment](#risk-assessment)
+21. [Rollout and verification](#rollout-and-verification)
+22. [Out of scope](#out-of-scope)
+
+---
+
+## 0. Design decisions
+
+Locked decisions from the architecture phase. These supersede any contradictions elsewhere in this document.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| A1 | **Currency: AUD in v1. Multi-currency-ready backend.** `organisations.default_currency_code text NOT NULL DEFAULT 'AUD'` (ISO 4217). All monetary amounts stored as integer **minor units** (cents for AUD). `pulse_major_threshold` jsonb becomes `{perActionMinor, perRunMinor}` with currency inherited from the org. `actions.estimated_cost_minor` integer NULL. `review_audits.ack_amount_minor` + `review_audits.ack_currency_code` snapshot both at approve time for audit integrity. Display: `Intl.NumberFormat(locale, { style: 'currency', currency: code })`. Phase 2 adds per-subaccount override and FX table. | AUD is the target market; moving to multi-currency later is cheap if minor-units + currency-code are baked in from day one. |
+| A2 | **Irreversible rule for Major lane:** `external && (destructive \|\| !idempotent)`. | Catches `send_email` and other send-and-forget actions that are external, not marked destructive, but not reversible. |
+| A3 | **Portal review queue survives.** `ReviewQueuePage.tsx` stays wired to `/portal/:subaccountId/review-queue` only. Removed from all `/admin/*` routes. | End-client portal users need to see/approve escalated items in-portal. Pulse replaces admin-scope review UI only. |
+| A4 | **Currency locale: `en-AU`. System-scope History: system admins only.** | Org owners don't need cross-org visibility; narrower scope keeps permissions simple. |
+| A5 | **History retention: unchanged from platform defaults.** Pulse doesn't own retention policy. Agent-run detail follows `subaccounts.run_retention_days` → `organisations.run_retention_days` → `DEFAULT_RUN_RETENTION_DAYS` (90). Review-item and task activity persist indefinitely. | Retention is a platform concern, not a Pulse concern. Pulse renders what's in the DB. |
+| A6 | **Per-subaccount retention override** added to Pulse scope. Schema: `subaccounts.run_retention_days integer NULL`. Resolution cascade in `agentRunCleanupJob.ts`. UI: Settings tab on `AdminSubaccountDetailPage.tsx`. | Agencies serve clients with different compliance obligations. Per-org is too blunt. ~1 day incremental scope. |
+| A7 | **Detail navigation: drawer** (right-edge slide-in panel). List stays visible on the left. Playbook and Workflow editors continue full-page. | List stays visible for rapid triage. Standard pattern in Linear/Slack/Notion. |
+| A8 | **`retain_indefinitely` playbook flag stays out of Pulse v1.** | Retention-escape-hatch for regulated workloads; separate from supervision. |
+
+### Resolved open questions
+
+| # | Question | Resolution |
+|---|----------|------------|
+| Q1 | `EXECUTIONS_MANAGE` permission | Does not exist. **Add** to `server/lib/permissions.ts`, seed default roles. Chunk 1. |
+| Q2 | `listAccessibleSubaccounts` helper | Does not exist. **Introduce** in `server/services/permissionService.ts`. Chunk 4. |
+| Q3 | Retry endpoint for failed agent runs | Does not exist. **Out of scope** for v1; Pulse shows "View run" only. |
+| Q4 | `failureAcknowledgedAt` column on `agent_runs` | Does not exist. **Add** in Chunk 1 migration. |
+| Q5 | Which skills need `estimated_cost_minor` | None have it today. Chunk 3 wires top-usage outward-facing skills. Older skills stay NULL (treated as 0 for threshold). |
+| Q6 | Portal review queue | Kept. See A3. |
+| Q7 | Governance section on org settings page | Exists at `OrgSettingsPage.tsx:311`. Threshold editor slots in there. |
+| Q8 | Currency | AUD v1, multi-currency-ready. See A1. |
+| Q9 | Multi-subaccount action detection | No existing field. **Add** `actions.subaccount_scope text NOT NULL DEFAULT 'single'`. Chunk 1. |
+| Q10 | Downstream readers of `inbox_read_states` | Only `server/services/inboxService.ts`. **Safe to drop** in Chunk 10. |
+
+---
+
+## 1. Architecture overview
+
+```mermaid
+flowchart LR
+  subgraph Client
+    PulsePage[PulsePage.tsx]
+    PulsePage -->|GET /api/pulse/attention| RESTAtt[(REST)]
+    PulsePage -->|GET /api/pulse/history| RESTHist[(REST)]
+    PulsePage -->|GET /api/pulse/overview| RESTOv[(REST)]
+    PulsePage -->|subscribe subaccount:id / org:id| WS[[WebSocket]]
+    PulsePage -->|POST approve/reject/bulk| RESTAct[(REST)]
+  end
+
+  subgraph Server[Express routes]
+    R1[routes/pulse.ts]
+    R1 --> S1[services/pulseService]
+    S1 --> RS[reviewService]
+    S1 --> TS[taskService]
+    S1 --> AR[agentRunService]
+    S1 --> AS[activityService]
+    S1 --> LC[pulseLaneClassifier]
+    LC --> Reg[config/actionRegistry]
+    LC --> OrgCfg[(organisations.pulseMajorThreshold)]
+  end
+
+  subgraph Persistence[Postgres]
+    Reviews[(review_items)]
+    Tasks[(tasks)]
+    Runs[(agent_runs)]
+    Findings[(workspace_health_findings)]
+    AuditR[(review_audits)]
+    Orgs[(organisations)]
+  end
+
+  RS --> Reviews
+  TS --> Tasks
+  AR --> Runs
+  AS --> Reviews
+  AS --> Tasks
+  AS --> Runs
+  AS --> Findings
+  S1 --> Orgs
+
+  subgraph Writes
+    RS -->|approve/reject| Reviews
+    RS --> AuditR
+    Reviews -.emit review:item_updated.-> WS
+    Tasks -.emit task:status_changed.-> WS
+    Runs -.emit agent:run:failed.-> WS
+  end
+```
+
+Pulse is read-mostly on the server (one new service, one new route). Writes flow through existing `reviewService` approve/reject/bulk handlers. WebSocket fan-out uses rooms already emitted by those services — no new broadcast channel.
 
 ---
 
