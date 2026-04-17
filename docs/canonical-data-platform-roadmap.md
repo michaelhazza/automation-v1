@@ -731,7 +731,7 @@ Agents that need schema awareness (reporting agents, analytics agents, the NL→
 - NL→SQL query planning (P6).
 - Dynamic cost estimation or query-plan hints in the dictionary. The dictionary is semantic; cost concerns belong to the query planner.
 - Self-serve human-facing schema documentation (e.g. a web page listing all canonical tables). Useful but separate; the dictionary is for agent consumption.
-- **Non-canonical RLS-protected tables.** The dictionary covers `canonical_*` tables only. The following existing RLS-protected tables are agent-state or app-surface, NOT canonical data, and are explicitly excluded: `agent_test_fixtures`, `agent_beliefs`, `agent_briefings`, `subaccount_state_summaries`, `memory_review_queue`, `trust_calibration_state`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `memory_blocks`, `regression_cases`, `tool_call_security_events`. They live in `RLS_PROTECTED_TABLES` for tenant isolation but are not exposed via `canonicalDataService` and have no `readPath` tag.
+- **Non-canonical RLS-protected tables.** The dictionary covers `canonical_*` tables only. The following existing RLS-protected tables are agent-state or app-surface, NOT canonical data, and are explicitly excluded: `agent_test_fixtures`, `agent_beliefs`, `agent_briefings`, `subaccount_state_summaries`, `memory_review_queue`, `trust_calibration_state`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `memory_blocks`, `regression_cases`, `tool_call_security_events`, `feature_requests`, `routing_outcomes`. They live in `RLS_PROTECTED_TABLES` for tenant isolation but are not exposed via `canonicalDataService` and have no `readPath` tag.
 
 #### Entry criteria
 
