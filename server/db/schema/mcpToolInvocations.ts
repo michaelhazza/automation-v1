@@ -30,7 +30,7 @@ export const mcpToolInvocations = pgTable(
     // Low-level call-execution status — distinct from run-level or action-level status enums
     status: text('status').notNull().$type<'success' | 'error' | 'timeout' | 'budget_blocked'>(),
 
-    // DB CHECK enforces: null iff status='success', non-null otherwise (mcp_tool_invocations_failure_reason_chk)
+    // DB CHECK enforces: null for status='success' or 'budget_blocked'; non-null for 'error'/'timeout' (mcp_tool_invocations_failure_reason_chk)
     failureReason: text('failure_reason')
       .$type<'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown'>(),
 

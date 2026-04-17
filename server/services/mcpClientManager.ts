@@ -523,7 +523,7 @@ export const mcpClientManager = {
     error?: string;
   }> {
     const config = await mcpServerConfigService.getById(configId, organisationId);
-    const ctx: McpRunContext = { runId: 'test', organisationId, agentId: 'test', subaccountId: null, isTestRun: false };
+    const ctx: McpRunContext = { runId: 'test', organisationId, agentId: 'test', subaccountId: null, isTestRun: true };
 
     try {
       const instance = await this._connectSingleServer(config, ctx);

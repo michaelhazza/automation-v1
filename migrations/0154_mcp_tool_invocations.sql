@@ -46,12 +46,15 @@ CREATE INDEX IF NOT EXISTS mcp_tool_invocations_server_slug_idx
 
 -- Enforce status/failure_reason coupling at the DB level:
 --   success rows must have failure_reason = NULL
---   non-success rows must have failure_reason set
+--   transport-failure rows (error, timeout) must have failure_reason set
+--   budget_blocked is a pre-execution exit — no transport failure occurred, so NULL is valid
 ALTER TABLE mcp_tool_invocations ADD CONSTRAINT mcp_tool_invocations_failure_reason_chk
   CHECK (
     (status = 'success' AND failure_reason IS NULL)
     OR
-    (status != 'success' AND failure_reason IS NOT NULL)
+    (status = 'budget_blocked')
+    OR
+    (status NOT IN ('success', 'budget_blocked') AND failure_reason IS NOT NULL)
   );
 
 -- Partial index for error/timeout analytics queries (WHERE status != 'success')
