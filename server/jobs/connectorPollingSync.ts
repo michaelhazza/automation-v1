@@ -37,6 +37,7 @@ export async function runConnectorPollingSync(
   }
 
   const leaseRow = leaseResult.rows[0] as { sync_lock_token: string; sync_phase: string };
+  const acquiredToken = leaseRow.sync_lock_token;
   const currentSyncPhase = leaseRow.sync_phase;
   const syncStartedAt = new Date();
   let errorMessage: string | null = null;
@@ -58,11 +59,10 @@ export async function runConnectorPollingSync(
       },
     );
 
-    // Success — clear lease and update timestamps
+    // Success — update timestamps
     await db
       .update(integrationConnections)
       .set({
-        syncLockToken: null,
         lastSuccessfulSyncAt: new Date(),
         lastSyncError: null,
         lastSyncErrorAt: null,
@@ -95,38 +95,56 @@ export async function runConnectorPollingSync(
   } catch (err) {
     errorMessage = err instanceof Error ? err.message : String(err);
 
-    await db
-      .update(integrationConnections)
-      .set({
-        syncLockToken: null,
-        lastSyncError: errorMessage,
-        lastSyncErrorAt: new Date(),
-      })
-      .where(and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.organisationId, organisationId),
-      ));
+    try {
+      await db
+        .update(integrationConnections)
+        .set({
+          lastSyncError: errorMessage,
+          lastSyncErrorAt: new Date(),
+        })
+        .where(and(
+          eq(integrationConnections.id, connectionId),
+          eq(integrationConnections.organisationId, organisationId),
+        ));
 
-    // Record failed stats — ON CONFLICT handles pg-boss retry dedup
-    await db.insert(integrationIngestionStats).values({
-      connectionId,
-      organisationId,
-      syncStartedAt,
-      syncFinishedAt: new Date(),
-      apiCallsApprox: 0,
-      rowsIngested: 0,
-      syncDurationMs: Date.now() - syncStartedAt.getTime(),
-      syncPhase: currentSyncPhase,
-      errorMessage,
-    }).onConflictDoUpdate({
-      target: [integrationIngestionStats.connectionId, integrationIngestionStats.syncStartedAt],
-      set: {
+      // Record failed stats — ON CONFLICT handles pg-boss retry dedup
+      await db.insert(integrationIngestionStats).values({
+        connectionId,
+        organisationId,
+        syncStartedAt,
         syncFinishedAt: new Date(),
-        errorMessage,
+        apiCallsApprox: 0,
+        rowsIngested: 0,
         syncDurationMs: Date.now() - syncStartedAt.getTime(),
-      },
-    });
+        syncPhase: currentSyncPhase,
+        errorMessage,
+      }).onConflictDoUpdate({
+        target: [integrationIngestionStats.connectionId, integrationIngestionStats.syncStartedAt],
+        set: {
+          syncFinishedAt: new Date(),
+          errorMessage,
+          syncDurationMs: Date.now() - syncStartedAt.getTime(),
+        },
+      });
+    } catch {
+      // Best-effort error recording — if DB is unreachable, finally still clears the lock
+    }
 
     // Don't throw — job completes; TripWire monitors error rates
+  } finally {
+    // Always release OUR lease — scoped to acquiredToken to avoid
+    // clearing a newer lease if the safety window expired mid-sync
+    try {
+      await db
+        .update(integrationConnections)
+        .set({ syncLockToken: null })
+        .where(and(
+          eq(integrationConnections.id, connectionId),
+          eq(integrationConnections.organisationId, organisationId),
+          eq(integrationConnections.syncLockToken, acquiredToken),
+        ));
+    } catch {
+      // Best-effort — safety window handles recovery if DB is unreachable
+    }
   }
 }
