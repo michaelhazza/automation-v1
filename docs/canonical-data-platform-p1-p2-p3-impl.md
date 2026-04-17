@@ -3,7 +3,34 @@
 **Parent spec:** `docs/canonical-data-platform-roadmap.md`
 **Branch:** `claude/middleware-database-integration-k6LfO`
 **Date:** 2026-04-17
-**Migrations:** 0160–0167
+**Migrations as built:** 0161–0169 (renumbered from the 0160–0167 numbering referenced below; see "Actual migration mapping" immediately below).
+
+### Actual migration mapping
+
+Main landed a `0160_pulse_scaffolding.sql` while this branch was in flight, so the P1–P3B migrations were renumbered +1. Inline references to `0160`..`0167` throughout this spec should be read as the `+1`-shifted file names in the table below.
+
+| Spec number | Actual file |
+|-------------|-------------|
+| 0160 | `migrations/0161_p1_scheduled_polling.sql` |
+| 0161 | `migrations/0162_p2a_readpath_metadata.sql` |
+| 0162 | `migrations/0163_p3a_principal_tables.sql` |
+| 0163 | `migrations/0164_p3a_connection_ownership.sql` |
+| 0164 | `migrations/0165_p3a_agent_runs_principal.sql` |
+| 0165 | `migrations/0166_p3a_canonical_columns.sql` |
+| 0166 + 0167 (split) | `migrations/0167_p3b_principal_rls.sql` + `migrations/0168_p3b_canonical_rls.sql` |
+| (post-review) | `migrations/0169_p3b_rls_legacy_compat.sql` — backward-compat policy branches + NULL-safe dedup index (with pre-existing-duplicate collapse step so `CREATE UNIQUE INDEX` does not abort on production databases that already contain duplicate NULL-period rows). Added after the first PR review round exposed that pre-P3B callers (`canonicalDataService`, `connectorPollingService`, `intelligenceSkillExecutor`, `ghlWebhook`) do not set `app.current_principal_type`, which would deny every canonical read once 0167/0168 are enforced. Remove this migration in P3C once all callers pass a principal context. |
+
+### P3C deployment gate (blocks shipping 0167/0168/0169)
+
+The legacy-compat policies in 0169 still require `app.organisation_id` to be set. Every current call site that touches canonical tables or `integration_connections` uses the raw `db` handle without opening a `withOrgTx` block, so 0168's `ENABLE + FORCE ROW LEVEL SECURITY` will break them in production until the P3C caller refactor lands. An earlier draft of 0169 added "no-context bootstrap" policies that fired when both GUCs were unset; they were removed because the unauthenticated webhook routes (`ghlWebhook.ts`, `githubWebhook.ts`) would then read every tenant's rows. The narrow, principled fix is to route raw-db callers through `withOrgTx` / `withAdminConnection` rather than relaxing the policies. This branch must NOT be deployed to any environment running with RLS enforced until these five deliverables land:
+
+| ID | Deliverable |
+|----|-------------|
+| P3C-01 | `canonicalDataService` routes every call through `getOrgScopedDb(...)` |
+| P3C-02 | `connectorPollingService` opens a `withOrgTx(orgId, ...)` per connection |
+| P3C-03 | `intelligenceSkillExecutor` opens `withOrgTx` / `withPrincipalContext` |
+| P3C-04 | `ghlWebhook.ts` bootstrap SELECT moves to `withAdminConnection` + explicit `SET LOCAL ROLE admin_role`; subsequent writes wrapped in `withOrgTx(orgId, ...)` once the org is known |
+| P3C-05 | `githubWebhook.ts` follows the same pattern as P3C-04 |
 
 ---
 

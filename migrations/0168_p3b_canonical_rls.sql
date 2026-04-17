@@ -328,11 +328,22 @@ DROP POLICY IF EXISTS integration_connections_org_isolation ON integration_conne
 ALTER TABLE integration_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_connections FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY integration_connections_org_write ON integration_connections
-  FOR ALL USING (
+-- Split into per-command policies so `integration_connections_principal_read`
+-- (FOR SELECT) is the only SELECT policy. A FOR ALL USING here would OR with
+-- the principal_read policy and leak personal (user-owned) connections to any
+-- org member regardless of ownership/visibility.
+CREATE POLICY integration_connections_insert ON integration_connections
+  FOR INSERT WITH CHECK (
     organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
+  );
+CREATE POLICY integration_connections_update ON integration_connections
+  FOR UPDATE USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  ) WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+CREATE POLICY integration_connections_delete ON integration_connections
+  FOR DELETE USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 

@@ -1,4 +1,4 @@
--- migrations/0165_p3a_canonical_columns.sql
+-- migrations/0166_p3a_canonical_columns.sql
 -- P3A: Add owner_user_id, visibility_scope, shared_team_ids, source_connection_id
 -- to all existing canonical tables.
 

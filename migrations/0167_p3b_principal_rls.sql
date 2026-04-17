@@ -11,8 +11,24 @@ CREATE POLICY service_principals_org_read ON service_principals
   FOR SELECT USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
   );
-CREATE POLICY service_principals_org_write ON service_principals
-  FOR ALL USING (
+-- Split into per-command policies so the USING clause does not leak into SELECT.
+-- (FOR ALL permissive policies are OR'd with other permissive policies for reads,
+--  which would otherwise bypass any tighter SELECT-only restriction.)
+CREATE POLICY service_principals_insert ON service_principals
+  FOR INSERT WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+    AND current_setting('app.current_principal_type', true) = 'user'
+  );
+CREATE POLICY service_principals_update ON service_principals
+  FOR UPDATE USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+    AND current_setting('app.current_principal_type', true) = 'user'
+  ) WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+    AND current_setting('app.current_principal_type', true) = 'user'
+  );
+CREATE POLICY service_principals_delete ON service_principals
+  FOR DELETE USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
     AND current_setting('app.current_principal_type', true) = 'user'
   );
@@ -64,11 +80,22 @@ CREATE POLICY delegation_grants_principal_read ON delegation_grants
       OR grantee_id = current_setting('app.current_principal_id', true)
     )
   );
-CREATE POLICY delegation_grants_org_write ON delegation_grants
-  FOR ALL USING (
+-- Split into per-command policies so `delegation_grants_principal_read` (FOR SELECT)
+-- is the only policy that governs reads. A FOR ALL USING here would OR with the
+-- principal_read policy and leak ALL org grants to any org member, regardless of
+-- grantor/grantee match.
+CREATE POLICY delegation_grants_insert ON delegation_grants
+  FOR INSERT WITH CHECK (
     organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
+  );
+CREATE POLICY delegation_grants_update ON delegation_grants
+  FOR UPDATE USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  ) WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+CREATE POLICY delegation_grants_delete ON delegation_grants
+  FOR DELETE USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 

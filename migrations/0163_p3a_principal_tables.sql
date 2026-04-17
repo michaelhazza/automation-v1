@@ -1,4 +1,4 @@
--- migrations/0162_p3a_principal_tables.sql
+-- migrations/0163_p3a_principal_tables.sql
 -- P3A: Principal model tables — service principals, teams, delegation grants,
 -- and the canonical row subaccount scoping junction table.
 

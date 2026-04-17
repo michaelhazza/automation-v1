@@ -1,4 +1,4 @@
--- migrations/0163_p3a_connection_ownership.sql
+-- migrations/0164_p3a_connection_ownership.sql
 -- P3A: Add ownership, classification, and visibility columns to integration_connections.
 
 ALTER TABLE integration_connections

@@ -1,4 +1,4 @@
--- migrations/0164_p3a_agent_runs_principal.sql
+-- migrations/0165_p3a_agent_runs_principal.sql
 -- P3A: Add principal-model fields to agent_runs.
 
 ALTER TABLE agent_runs

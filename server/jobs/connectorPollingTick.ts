@@ -32,7 +32,6 @@ export async function runConnectorPollingTick(
     syncPhase: c.syncPhase as 'backfill' | 'transition' | 'live',
     lastSuccessfulSyncAt: c.lastSuccessfulSyncAt,
     pollIntervalMinutes: DEFAULT_POLL_INTERVAL_MINUTES,
-    deletedAt: null,
   }));
 
   const dueIds = selectConnectionsDue(mapped, new Date());

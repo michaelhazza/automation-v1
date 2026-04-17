@@ -12,13 +12,15 @@ ALTER TABLE integration_connections
   ADD COLUMN IF NOT EXISTS sync_phase text NOT NULL DEFAULT 'backfill',
   ADD COLUMN IF NOT EXISTS sync_lock_token uuid;
 
+-- integration_connections has no deleted_at column; use connection_status = 'active'
+-- as the soft-delete discriminator (schema: active | revoked | error).
 CREATE INDEX IF NOT EXISTS integration_connections_last_successful_sync_at_idx
   ON integration_connections (last_successful_sync_at)
-  WHERE deleted_at IS NULL;
+  WHERE connection_status = 'active';
 
 CREATE INDEX IF NOT EXISTS integration_connections_sync_phase_idx
   ON integration_connections (sync_phase)
-  WHERE deleted_at IS NULL AND sync_phase IN ('backfill','transition','live');
+  WHERE connection_status = 'active' AND sync_phase IN ('backfill','transition','live');
 
 CREATE TABLE IF NOT EXISTS integration_ingestion_stats (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

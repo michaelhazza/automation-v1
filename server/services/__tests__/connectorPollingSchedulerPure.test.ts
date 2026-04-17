@@ -42,7 +42,6 @@ function makeConnection(overrides: Partial<PollingConnection> = {}): PollingConn
     syncPhase: 'live',
     lastSuccessfulSyncAt: null,
     pollIntervalMinutes: 15,
-    deletedAt: null,
     ...overrides,
   };
 }
@@ -60,13 +59,6 @@ test('returns empty for no connections', () => {
 test('returns connection with null lastSuccessfulSyncAt', () => {
   const connections = [makeConnection({ id: 'c-1', lastSuccessfulSyncAt: null })];
   assertEqual(selectConnectionsDue(connections, FIXED_NOW), ['c-1'], 'null sync returns id');
-});
-
-test('filters out deleted connections', () => {
-  const connections = [
-    makeConnection({ id: 'c-del', deletedAt: new Date('2026-04-16T00:00:00Z'), lastSuccessfulSyncAt: null }),
-  ];
-  assertEqual(selectConnectionsDue(connections, FIXED_NOW), [], 'deleted filtered out');
 });
 
 test('filters out connections with wrong syncPhase', () => {

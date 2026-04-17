@@ -3,7 +3,6 @@ export interface PollingConnection {
   syncPhase: 'backfill' | 'transition' | 'live';
   lastSuccessfulSyncAt: Date | null;
   pollIntervalMinutes: number;
-  deletedAt: Date | null;
 }
 
 export function selectConnectionsDue(
@@ -12,7 +11,6 @@ export function selectConnectionsDue(
 ): string[] {
   return connections
     .filter((c) => {
-      if (c.deletedAt) return false;
       if (!['backfill', 'transition', 'live'].includes(c.syncPhase)) return false;
       if (!c.lastSuccessfulSyncAt) return true;
       const elapsed = now.getTime() - c.lastSuccessfulSyncAt.getTime();
