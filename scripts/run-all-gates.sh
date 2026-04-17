@@ -93,6 +93,9 @@ run_gate "$SCRIPT_DIR/verify-help-hint-length.mjs"
 run_gate "$SCRIPT_DIR/verify-action-call-allowlist.sh"
 run_gate "$SCRIPT_DIR/verify-playbook-portal-presentation.mjs"
 
+# ── Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md) gates ──
+run_gate "$SCRIPT_DIR/verify-integration-reference.mjs"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

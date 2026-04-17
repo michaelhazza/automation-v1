@@ -1495,6 +1495,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
   },
 
+  // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
+  list_platform_capabilities: async (input, context) => {
+    const { executeListPlatformCapabilities } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListPlatformCapabilities(input, context);
+  },
+  list_connections: async (input, context) => {
+    const { executeListConnections } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListConnections(input, context);
+  },
+  check_capability_gap: async (input, context) => {
+    const { executeCheckCapabilityGap } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeCheckCapabilityGap(input, context);
+  },
+  request_feature: async (input, context) => {
+    const { executeRequestFeature } = await import('../tools/capabilities/requestFeatureHandler.js');
+    return executeRequestFeature(input, context);
+  },
+
   // Read-only config tools (no action audit needed)
   config_list_agents: async (input, context) => {
     const { executeConfigListAgents } = await import('../tools/config/configSkillHandlers.js');

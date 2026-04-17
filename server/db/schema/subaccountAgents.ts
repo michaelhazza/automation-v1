@@ -86,6 +86,21 @@ export const subaccountAgents = pgTable(
         agentRunId: string;
       }>>(),
 
+    // ── Capability map (Orchestrator routing spec §4.3) ──────────────────
+    // Derived snapshot of what this linked agent can do, computed from its
+    // skill set crossed with the Integration Reference. Consumed by
+    // check_capability_gap for Path A matching. NULL = not yet computed;
+    // the gap check treats null as zero-capability so Path A cannot fire
+    // against uncomputed maps.
+    capabilityMap: jsonb('capability_map').$type<{
+      computedAt: string;
+      integrations: string[];
+      read_capabilities: string[];
+      write_capabilities: string[];
+      skills: string[];
+      primitives: string[];
+    } | null>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

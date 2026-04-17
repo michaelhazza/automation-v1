@@ -85,6 +85,12 @@ const envSchema = z.object({
   OAUTH_HUBSPOT_CLIENT_SECRET: z.string().optional(),
   OAUTH_SLACK_CLIENT_ID: z.string().optional(),
   OAUTH_SLACK_CLIENT_SECRET: z.string().optional(),
+
+  // Synthetos internal ops — Slack incoming webhook for feature request
+  // notifications (docs/orchestrator-capability-routing-spec.md §5.3.1, §5.6).
+  // When unset, the Slack channel is skipped silently and the feature request
+  // still lands in the feature_requests table and the Synthetos-internal task.
+  SYNTHETOS_INTERNAL_SLACK_WEBHOOK: z.string().optional(),
   OAUTH_GHL_CLIENT_ID: z.string().optional(),
   OAUTH_GHL_CLIENT_SECRET: z.string().optional(),
   // GitHub App — fine-grained, per-repo access (replaces OAUTH_GITHUB_* OAuth App)

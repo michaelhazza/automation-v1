@@ -213,6 +213,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0153_agent_test_fixtures.sql',
     rationale: 'Test-input fixtures contain prompt text and JSON payloads authored by org/subaccount users — must stay tenant-isolated.',
   },
+  // 0156 — Orchestrator capability-aware routing: feature requests + routing outcomes
+  {
+    tableName: 'feature_requests',
+    schemaFile: 'featureRequests.ts',
+    policyMigration: '0156_orchestrator_capability_routing.sql',
+    rationale: 'Capability-request signals with user_intent text and org attribution — must stay tenant-isolated so one org cannot see another org\'s pending feature requests.',
+  },
+  {
+    tableName: 'routing_outcomes',
+    schemaFile: 'routingOutcomes.ts',
+    policyMigration: '0156_orchestrator_capability_routing.sql',
+    rationale: 'Per-run routing decision outcomes — leak would reveal how competitors\' agents are configured and what tasks they run.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */
