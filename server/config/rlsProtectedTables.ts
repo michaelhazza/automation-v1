@@ -230,7 +230,7 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'integration_ingestion_stats',
     schemaFile: 'integrationIngestionStats.ts',
-    policyMigration: '0160_p1_scheduled_polling.sql',
+    policyMigration: '0167_p3b_canonical_rls.sql',
     rationale: 'Per-connection sync metrics — cross-tenant leak reveals integration activity patterns and connector health.',
   },
   // 0166 — P3B: principal tables RLS

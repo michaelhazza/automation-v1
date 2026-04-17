@@ -22,5 +22,5 @@ export const servicePrincipals = pgTable(
   })
 );
 
-export type ServicePrincipal = typeof servicePrincipals.$inferSelect;
-export type NewServicePrincipal = typeof servicePrincipals.$inferInsert;
+export type ServicePrincipalRow = typeof servicePrincipals.$inferSelect;
+export type NewServicePrincipalRow = typeof servicePrincipals.$inferInsert;

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { syncConnector } from '../services/connectorPollingService.js';
@@ -16,25 +16,28 @@ export async function runConnectorPollingSync(
 ): Promise<void> {
   const db = getOrgScopedDb('connectorPollingSync');
   const { connectionId, organisationId } = payload;
-  const safetyWindowInterval = `${DEFAULT_POLL_INTERVAL_MINUTES * SYNC_LEASE_SAFETY_MULTIPLIER} minutes`;
+  const safetyWindowMinutes = DEFAULT_POLL_INTERVAL_MINUTES * SYNC_LEASE_SAFETY_MULTIPLIER;
 
-  // Acquire lease
+  // Acquire lease with org-scoped WHERE for defense-in-depth
   const leaseResult = await db.execute(sql`
     UPDATE integration_connections
     SET sync_lock_token = gen_random_uuid(),
         last_sync_started_at = now()
     WHERE id = ${connectionId}
+      AND organisation_id = ${organisationId}::uuid
       AND (
         sync_lock_token IS NULL
-        OR now() - last_sync_started_at > interval '${sql.raw(safetyWindowInterval)}'
+        OR now() - last_sync_started_at > ${safetyWindowMinutes} * interval '1 minute'
       )
-    RETURNING sync_lock_token
+    RETURNING sync_lock_token, sync_phase
   `);
 
   if (!leaseResult.rows || leaseResult.rows.length === 0) {
     return; // Another sync holds the lease
   }
 
+  const leaseRow = leaseResult.rows[0] as { sync_lock_token: string; sync_phase: string };
+  const currentSyncPhase = leaseRow.sync_phase ?? 'live';
   const syncStartedAt = new Date();
   let errorMessage: string | null = null;
 
@@ -59,7 +62,10 @@ export async function runConnectorPollingSync(
         lastSyncError: null,
         lastSyncErrorAt: null,
       })
-      .where(eq(integrationConnections.id, connectionId));
+      .where(and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
 
     // Record stats
     await db.insert(integrationIngestionStats).values({
@@ -70,7 +76,7 @@ export async function runConnectorPollingSync(
       apiCallsApprox: result.apiCallsApprox,
       rowsIngested: result.rowsIngested,
       syncDurationMs: result.durationMs,
-      syncPhase: 'live',
+      syncPhase: currentSyncPhase,
     });
   } catch (err) {
     errorMessage = err instanceof Error ? err.message : String(err);
@@ -81,7 +87,10 @@ export async function runConnectorPollingSync(
         lastSyncError: errorMessage,
         lastSyncErrorAt: new Date(),
       })
-      .where(eq(integrationConnections.id, connectionId));
+      .where(and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
 
     // Record failed stats
     await db.insert(integrationIngestionStats).values({
@@ -92,7 +101,7 @@ export async function runConnectorPollingSync(
       apiCallsApprox: 0,
       rowsIngested: 0,
       syncDurationMs: Date.now() - syncStartedAt.getTime(),
-      syncPhase: 'live',
+      syncPhase: currentSyncPhase,
       errorMessage,
     });
 

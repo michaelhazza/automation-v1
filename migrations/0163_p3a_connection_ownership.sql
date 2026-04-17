@@ -23,9 +23,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS integration_connections_owner_user_id_idx
   ON integration_connections (owner_user_id) WHERE owner_user_id IS NOT NULL;
 
--- Backfill: all existing connections are subaccount-owned shared mailboxes
-UPDATE integration_connections
-  SET ownership_scope = 'subaccount',
-      classification = 'shared_mailbox',
-      visibility_scope = 'shared_subaccount'
-  WHERE ownership_scope = 'subaccount';
+-- Backfill: column defaults handle all existing rows.
+-- ownership_scope defaults to 'subaccount', classification to 'shared_mailbox',
+-- visibility_scope to 'shared_subaccount', owner_user_id to NULL,
+-- shared_team_ids to '{}'. No UPDATE needed.

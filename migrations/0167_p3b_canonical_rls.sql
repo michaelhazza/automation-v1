@@ -298,12 +298,43 @@ CREATE POLICY canonical_metric_history_org_read ON canonical_metric_history
   );
 
 -- ===========================================================================
+-- integration_ingestion_stats: org-scoped read + write
+-- ===========================================================================
+ALTER TABLE integration_ingestion_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE integration_ingestion_stats FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY integration_ingestion_stats_org_read ON integration_ingestion_stats
+  FOR SELECT USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+CREATE POLICY integration_ingestion_stats_org_write ON integration_ingestion_stats
+  FOR ALL USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- ===========================================================================
 -- integration_connections: replace org-only isolation with principal-aware policy
+-- Design decision: service principals cannot read user-owned personal
+-- connections (ownership_scope = 'user'). Personal connections are not polled
+-- by the connector-polling jobs. The polling tick job uses admin-bypass (raw db)
+-- so it is unaffected by this policy.
 -- ===========================================================================
 DROP POLICY IF EXISTS integration_connections_org_isolation ON integration_connections;
 
 ALTER TABLE integration_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_connections FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY integration_connections_org_write ON integration_connections
+  FOR ALL USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
 CREATE POLICY integration_connections_principal_read ON integration_connections
   FOR SELECT USING (

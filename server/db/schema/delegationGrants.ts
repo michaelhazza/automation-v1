@@ -33,5 +33,5 @@ export const delegationGrants = pgTable(
   })
 );
 
-export type DelegationGrant = typeof delegationGrants.$inferSelect;
-export type NewDelegationGrant = typeof delegationGrants.$inferInsert;
+export type DelegationGrantRow = typeof delegationGrants.$inferSelect;
+export type NewDelegationGrantRow = typeof delegationGrants.$inferInsert;

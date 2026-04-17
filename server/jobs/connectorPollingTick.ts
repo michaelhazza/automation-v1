@@ -1,5 +1,5 @@
 import type PgBoss from 'pg-boss';
-import { and, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { selectConnectionsDue } from '../services/connectorPollingSchedulerPure.js';
 import { DEFAULT_POLL_INTERVAL_MINUTES } from '../config/connectorPollingConfig.js';
@@ -22,6 +22,7 @@ export async function runConnectorPollingTick(
     .from(integrationConnections)
     .where(
       and(
+        eq(integrationConnections.connectionStatus, 'active'),
         inArray(integrationConnections.syncPhase, ['backfill', 'transition', 'live']),
       ),
     );

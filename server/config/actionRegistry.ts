@@ -1798,6 +1798,32 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
   },
 
+  // ── Canonical Data Dictionary ──────────────────────────────────────────────
+
+  canonical_dictionary: {
+    actionType: 'canonical_dictionary',
+    description: 'Query the canonical data dictionary for table metadata, columns, relationships, and example queries.',
+    actionCategory: 'worker',
+    topics: ['data'],
+    isExternal: false,
+    readPath: 'canonical',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['tableFilter', 'includeExamples'],
+    parameterSchema: z.object({
+      tableFilter: z.array(z.string()).optional().describe('Optional list of canonical table names to filter the result'),
+      includeExamples: z.boolean().optional().describe('Whether to include example queries in the output'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
   // ── Knowledge Management Agent — auto-gated stub + review-gated ──────────
 
   read_docs: {
