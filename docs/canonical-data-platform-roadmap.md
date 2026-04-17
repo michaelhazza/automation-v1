@@ -1145,8 +1145,9 @@ Push subscriptions expire after 7 days per Google policy. A scheduled job re-reg
 
 Each has fixture tests with representative Gmail API payloads (sanitised, anonymised).
 
-- `gmailLabelResolverPure.ts` — label name → ID resolution logic, cache management, and label-creation decision. Fixture tests cover: existing label lookup, cache hit, cache miss, label creation for unknown names, case-insensitive matching.
-- `modifyEmailLabelsValidatorPure.ts` — validates scope tier permits modification, rate-limit check, batch-size check, delegation grant check. Fixture tests cover each rejection path.
+- `gmailLabelResolverPure.ts` — label name → ID resolution logic, cache management (TTL + error-triggered invalidation), and label-creation decision. Fixture tests cover: existing label lookup, cache hit, cache miss, TTL expiry, 404-triggered refresh, label creation for unknown names, case-insensitive matching.
+- `modifyEmailLabelsValidatorPure.ts` — validates scope tier permits modification, rate-limit check, batch-size check, delegation grant check, delta computation (desired-state vs current-state). Fixture tests cover each rejection path plus empty-delta skip.
+- `modifyEmailLabelsBatchPure.ts` — batch result aggregation, partial-failure semantics, retry-subset computation. Fixture tests cover: all-succeed, all-fail, partial-fail, all-skipped (empty delta), retry-of-failed-subset idempotency.
 
 #### Static gates
 
@@ -1247,26 +1248,48 @@ export const modifyEmailLabelsAction: ActionDefinition = {
 };
 ```
 
+**Idempotency contract:**
+
+Label mutations are defined as a **desired-state operation**, not an imperative add/remove:
+
+```
+final_labels = (current_labels - removeLabels[]) ∪ addLabels[]
+```
+
+The skill reads the email's current label set from canonical before calling the Gmail API, computes the delta, and only applies the diff. If the delta is empty (labels already match desired state), the skill returns success without calling Gmail. This makes retries safe and deterministic — the same invocation always converges to the same final state regardless of how many times it runs. The idempotency key for deduplication is `(provider_message_id, sorted(addLabels), sorted(removeLabels))`.
+
 **Invocation flow:**
 
 1. Agent requests `modify_email_labels` with a `canonical_email_id`, `addLabels: string[]`, and `removeLabels: string[]`.
 2. `actionService.proposeAction` runs; `requiresApproval: 'per-run'` routes the first invocation per run to HITL review. Subsequent label modifications within the same run inherit the approval.
 3. Skill loads the canonical email row under the current principal context. If not visible (RLS), returns "email not found."
 4. Skill checks the connection's scope tier (stored in `ingestion_config_json`). If the connection does not have `gmail.modify` scope, the skill returns a clear error: "This connection does not authorise label modifications. The user must upgrade their connection scope."
-5. Skill resolves `source_connection_id`, loads the connection, decrypts the OAuth token, calls `gmail.users.messages.modify` with `{ addLabelIds, removeLabelIds }`.
-6. On success, the canonical email row's `labels` array is updated in place to reflect the new label set. This is the one write-back path that touches canonical — it keeps the metadata in sync with the provider rather than waiting for the next ingestion poll.
-7. `tool_call_security_events` logs the modification with `action: 'modify_labels'`, the principal, the canonical email ID, and the labels added/removed.
+5. Skill computes the delta between the row's current `labels` array and the desired state. If the delta is empty, returns `{ status: 'no_change' }` without calling Gmail.
+6. Skill resolves `source_connection_id`, loads the connection, decrypts the OAuth token, calls `gmail.users.messages.modify` with only the delta `{ addLabelIds, removeLabelIds }`.
+7. On success, the canonical email row's `labels` array is updated in place to reflect the new label set. This is the one write-back path that touches canonical — it keeps the metadata in sync with the provider rather than waiting for the next ingestion poll.
+8. `tool_call_security_events` logs the modification with `action: 'modify_labels'`, the principal, the canonical email ID, the labels added/removed, and `before_labels` / `after_labels` arrays for audit diffing.
 
 **Label resolution:**
 
-Gmail labels are identified by ID internally but named by the user. The skill accepts human-readable label names and resolves them to Gmail label IDs via `gmail.users.labels.list`. If a requested label does not exist, the skill creates it via `gmail.users.labels.create` (only if the connection has `gmail.modify` scope). Label ID ↔ name mappings are cached per connection with a 1-hour TTL to avoid repeated list calls.
+Gmail labels are identified by ID internally but named by the user. The skill accepts human-readable label names and resolves them to Gmail label IDs via `gmail.users.labels.list`. If a requested label does not exist, the skill creates it via `gmail.users.labels.create` (only if the connection has `gmail.modify` scope). Label ID ↔ name mappings are cached per connection with a **15-minute TTL** to balance API call reduction against staleness risk.
+
+**Cache invalidation strategy:** Labels can be renamed, deleted, or created externally (by the user in Gmail, or by other clients). The cache handles this via two mechanisms:
+- **TTL expiry** — the 15-minute TTL ensures the cache self-heals without operator intervention.
+- **Error-triggered refresh** — if the Gmail API returns a `404` or `invalidLabel` error for a cached label ID, the cache is immediately invalidated for that connection and the label list is re-fetched before retrying the operation. This handles mid-TTL renames or deletions without waiting for expiry.
+
+Label name matching is case-insensitive (Gmail labels are case-insensitive). The resolver normalises names before cache lookup.
 
 **Guardrails:**
 
 - Rate limit per principal: configurable cap on label modifications per run (default 50). Prevents mass-relabelling of an entire inbox in a single run.
 - `runCostBreaker` applies — each modification counts against the run's cost budget (API call cost, not LLM cost).
 - Delegated principals: the grant must include `modify_email_labels` in `allowed_actions`.
-- Batch support: the skill accepts an array of `canonical_email_id`s for bulk labelling in a single invocation (up to the per-run cap). Each email is modified individually via the Gmail API (no batch endpoint for label modification). Failures on individual emails do not abort the batch — the skill returns per-email success/failure results.
+- Batch support: the skill accepts an array of `canonical_email_id`s for bulk labelling in a single invocation (up to the per-run cap). Each email is modified individually via the Gmail API (no batch endpoint for label modification). Partial failure semantics:
+  - The batch does NOT abort on individual failures. Each email is attempted independently.
+  - Result structure: `{ total: number, succeeded: number, failed: Array<{ canonicalEmailId, errorCode, errorMessage }>, skipped: number }`. `skipped` counts emails where the delta was empty (already in desired state).
+  - Run status follows the existing `completed_with_errors` pattern if any emails fail.
+  - On retry (pg-boss / manual), only the `failed` subset is retried — the idempotency contract ensures already-succeeded emails are no-ops on re-invocation.
+  - Canonical rows are synced per-email immediately on success, not batched — a partial failure leaves successfully-modified rows in sync and failed rows unchanged.
 
 ### Connection-revocation deletion contract
 
