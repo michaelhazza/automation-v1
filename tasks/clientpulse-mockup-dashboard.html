@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClientPulse — Productivity Hub (SaaS)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8;
+    color: #1a1d23;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .sidebar {
+    background: #1a1d23; color: #c9ccd1; padding: 24px 0;
+  }
+  .sidebar .logo { padding: 0 24px 24px; font-weight: 700; font-size: 16px; color: #fff; letter-spacing: -0.3px; }
+  .sidebar .org { padding: 8px 24px 24px; font-size: 12px; color: #6b7280; }
+  .sidebar .org strong { display: block; color: #d1d5db; font-size: 13px; font-weight: 600; }
+  .sidebar nav { display: flex; flex-direction: column; }
+  .sidebar nav a {
+    display: flex; align-items: center; gap: 10px; padding: 10px 24px;
+    color: #c9ccd1; text-decoration: none; font-size: 13px; border-left: 3px solid transparent;
+  }
+  .sidebar nav a.active { background: rgba(99,102,241,0.12); color: #fff; border-left-color: #6366f1; }
+  .sidebar nav a:hover:not(.active) { background: rgba(255,255,255,0.04); }
+  .sidebar .org-switch {
+    margin: 24px; padding: 12px; background: #2a2f3a; border-radius: 6px; font-size: 12px;
+  }
+  .sidebar .org-switch label { color: #6b7280; display: block; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sidebar .org-switch select {
+    width: 100%; background: #1a1d23; color: #fff; border: 1px solid #3a3f4a;
+    padding: 6px 8px; border-radius: 4px; font-size: 12px;
+  }
+
+  .main { padding: 24px 32px 48px; overflow-y: auto; }
+
+  /* Header */
+  .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  .header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; }
+  .header .timestamp { font-size: 12px; color: #6b7280; }
+
+  /* KPI strip */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: #fff; border-radius: 8px; padding: 14px 16px; border: 1px solid #e5e7eb; }
+  .kpi .label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .kpi .value { font-size: 20px; font-weight: 600; }
+  .kpi .delta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .kpi .delta.up { color: #15803d; }
+  .kpi .delta.down { color: #b91c1c; }
+  .kpi.healthy .value { color: #15803d; }
+  .kpi.watch .value { color: #b45309; }
+  .kpi.atrisk .value { color: #c2410c; }
+  .kpi.critical .value { color: #b91c1c; }
+  .kpi.mrr .value { color: #1a1d23; }
+
+  /* Layout: grid + intervention queue */
+  .content { display: grid; grid-template-columns: 1fr 340px; gap: 20px; }
+  .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
+
+  /* Portfolio grid */
+  .grid-panel .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+  }
+  .grid-panel .panel-head h2 { font-size: 14px; font-weight: 600; }
+  .grid-panel .panel-head .actions { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #6b7280; }
+  .grid-panel .panel-head .clear-btn { background: #eef2ff; color: #4338ca; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: none; font-size: 12px; font-weight: 500; }
+
+  /* Header row of grid */
+  .gridheader {
+    display: grid;
+    grid-template-columns: 14px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.6fr;
+    gap: 10px; padding: 10px 18px; background: #fafbfc; border-bottom: 1px solid #e5e7eb;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;
+    align-items: center;
+  }
+  .gridheader .col { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+  .gridheader .col .sort-arrow { color: #4338ca; font-size: 10px; }
+  .gridheader .col .filter-dot { width: 6px; height: 6px; border-radius: 50%; background: #6366f1; display: inline-block; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 14px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.6fr;
+    gap: 10px; padding: 12px 18px 12px 0; border-bottom: 1px solid #f0f1f3;
+    align-items: center; cursor: pointer;
+  }
+  .row:hover { background: #fafbff; }
+  .row .band-bar { width: 4px; height: 36px; border-radius: 0 2px 2px 0; }
+  .row .band-bar.critical { background: #dc2626; }
+  .row .band-bar.atrisk   { background: #ea580c; }
+  .row .band-bar.watch    { background: #d97706; }
+  .row .band-bar.healthy  { background: #16a34a; }
+  .row .band-bar.cold     { background: #9ca3af; }
+
+  .name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .name-cell .name { font-weight: 600; color: #1a1d23; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name-cell .meta { font-size: 11px; color: #6b7280; }
+
+  .tier-cell { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .tier-cell .tier { font-weight: 500; color: #374151; }
+  .tier-cell .arrow { color: #dc2626; font-weight: 600; font-size: 13px; }
+  .tier-cell .arrow-tooltip { font-size: 10px; color: #dc2626; }
+
+  /* Sticky-three pills */
+  .pills { display: flex; gap: 6px; align-items: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pill.green   { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+  .pill.green .dot { background: #16a34a; }
+  .pill.amber   { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+  .pill.amber .dot { background: #d97706; }
+  .pill.red     { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+  .pill.red .dot { background: #dc2626; }
+  .pill.cold    { background: #f3f4f6; color: #6b7280; border-color: #e5e7eb; }
+  .pill.cold .dot { background: #9ca3af; }
+
+  .funnel-cell, .calendar-cell { font-size: 12px; color: #374151; text-align: left; }
+  .funnel-cell .count { font-weight: 600; }
+  .funnel-cell.warn .count, .calendar-cell.warn .count { color: #b91c1c; }
+
+  /* Integration chips */
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 7px; border-radius: 10px; font-size: 11px; font-weight: 500;
+    background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb;
+  }
+  .chip .icon { font-size: 9px; }
+  .chip .usage { color: #6b7280; font-weight: 400; font-size: 10px; }
+  .chip.ai { background: #ede9fe; color: #6d28d9; border-color: #ddd6fe; }
+  .chip.dead { opacity: 0.55; }
+  .chip.more { background: transparent; color: #6366f1; border-color: transparent; padding: 3px 4px; }
+
+  /* Health score column */
+  .health-cell { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+  .health-cell.critical { color: #b91c1c; }
+  .health-cell.atrisk   { color: #c2410c; }
+  .health-cell.watch    { color: #b45309; }
+  .health-cell.healthy  { color: #15803d; }
+  .health-cell.cold     { color: #9ca3af; font-weight: 500; }
+  .health-cell .trend { font-size: 11px; }
+  .health-cell .trend.up { color: #15803d; }
+  .health-cell .trend.down { color: #b91c1c; }
+  .health-cell .trend.flat { color: #6b7280; }
+
+  /* Intervention queue panel */
+  .queue-panel .panel-head {
+    padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .queue-panel h2 { font-size: 14px; font-weight: 600; }
+  .queue-panel .badge {
+    background: #fee2e2; color: #b91c1c; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+  }
+  .queue-item { padding: 14px 18px; border-bottom: 1px solid #f0f1f3; }
+  .queue-item:last-child { border-bottom: none; }
+  .queue-item .qi-head {
+    display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;
+  }
+  .queue-item .qi-name { font-weight: 600; font-size: 13px; }
+  .queue-item .qi-band-mini {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .qi-band-mini.critical { background: #fef2f2; color: #b91c1c; }
+  .qi-band-mini.atrisk   { background: #fff7ed; color: #c2410c; }
+  .qi-band-mini.watch    { background: #fffbeb; color: #b45309; }
+
+  .queue-item .qi-trigger { font-size: 12px; color: #4b5563; margin-bottom: 8px; line-height: 1.45; }
+  .queue-item .qi-trigger strong { color: #1a1d23; }
+  .queue-item .qi-pills { display: flex; gap: 4px; margin-bottom: 10px; }
+  .queue-item .qi-pills .pill { font-size: 10px; padding: 2px 7px; }
+  .queue-item .qi-action {
+    background: #eef2ff; padding: 8px 10px; border-radius: 5px; font-size: 12px; color: #3730a3;
+    margin-bottom: 10px; border-left: 3px solid #6366f1;
+  }
+  .queue-item .qi-buttons { display: flex; gap: 8px; }
+  .qi-buttons button {
+    flex: 1; padding: 7px 10px; font-size: 12px; font-weight: 600; border-radius: 5px; cursor: pointer; border: 1px solid;
+  }
+  .qi-buttons .approve { background: #16a34a; color: #fff; border-color: #15803d; }
+  .qi-buttons .approve:hover { background: #15803d; }
+  .qi-buttons .reject  { background: #fff; color: #4b5563; border-color: #d1d5db; }
+  .qi-buttons .reject:hover { background: #f3f4f6; }
+  .qi-buttons .edit    { background: #fff; color: #4b5563; border-color: #d1d5db; flex: 0 0 auto; padding: 7px 12px; }
+
+  .queue-overflow { padding: 12px 18px; text-align: center; font-size: 12px; color: #6366f1; font-weight: 500; cursor: pointer; }
+  .queue-overflow:hover { background: #fafbff; }
+
+  /* Footnote */
+  .footnote { margin-top: 24px; padding: 14px 16px; background: #fff; border: 1px dashed #c7d2fe; border-radius: 8px; font-size: 12px; color: #4338ca; }
+  .footnote strong { color: #1e1b4b; }
+
+  /* Mock annotations */
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP — ClientPulse dashboard for Kel / Productivity Hub. Realistic data; not connected to live GHL.</div>
+<div class="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">Synthetos</div>
+    <div class="org">
+      <strong>Productivity Hub</strong>
+      Agency · GHL connector active
+    </div>
+    <nav>
+      <a href="#" class="active">📊 ClientPulse</a>
+      <a href="#">📨 Inbox</a>
+      <a href="#">📋 Reports</a>
+      <a href="#">🏢 Companies</a>
+      <a href="#">🔌 Integrations</a>
+      <a href="#">👥 Team</a>
+      <a href="#">⚙️ Settings</a>
+    </nav>
+    <div class="org-switch">
+      <label>Workspace</label>
+      <select>
+        <option>Productivity Hub — SaaS (87 clients)</option>
+        <option>Productivity Hub — DFY (89 clients)</option>
+      </select>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="header">
+      <div>
+        <h1>ClientPulse — SaaS Portfolio</h1>
+        <div class="timestamp">Monday 17 April 2026 · Last scan 6 minutes ago · Next scan 14:00</div>
+      </div>
+      <div>
+        <button class="clear-btn" style="background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:6px 12px;font-size:12px;cursor:pointer;border-radius:5px;">Configure</button>
+      </div>
+    </header>
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi healthy">
+        <div class="label">Healthy</div>
+        <div class="value">63</div>
+        <div class="delta up">+2 from last week</div>
+      </div>
+      <div class="kpi watch">
+        <div class="label">Watch</div>
+        <div class="value">14</div>
+        <div class="delta down">+1 from last week</div>
+      </div>
+      <div class="kpi atrisk">
+        <div class="label">At Risk</div>
+        <div class="value">7</div>
+        <div class="delta down">+2 from last week</div>
+      </div>
+      <div class="kpi critical">
+        <div class="label">Critical</div>
+        <div class="value">3</div>
+        <div class="delta down">+1 from last week</div>
+      </div>
+      <div class="kpi mrr">
+        <div class="label">MRR at Risk</div>
+        <div class="value">$8,470</div>
+        <div class="delta">Projected loss this month: 3 clients ($1,890)</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Portfolio grid -->
+      <div class="panel grid-panel">
+        <div class="panel-head">
+          <h2>Portfolio · 87 clients</h2>
+          <div class="actions">
+            <span>Sorted by churn risk · Filtered: At Risk + Critical</span>
+            <button class="clear-btn">Clear all</button>
+          </div>
+        </div>
+
+        <div class="gridheader">
+          <div></div>
+          <div class="col">Client <span class="sort-arrow">↑</span></div>
+          <div class="col">Tier <span class="filter-dot"></span></div>
+          <div class="col">Sticky three (activity / funnels / calendar)</div>
+          <div class="col">Funnels</div>
+          <div class="col">Calendar</div>
+          <div class="col">Integrations</div>
+          <div class="col">Health <span class="sort-arrow">↓</span></div>
+        </div>
+
+        <!-- CRITICAL clients -->
+        <div class="row">
+          <div class="band-bar critical"></div>
+          <div class="name-cell">
+            <span class="name">Smith Dental</span>
+            <span class="meta">Subaccount · loc_3a91…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$147</span>
+            <span class="arrow" title="Downgraded $647 → $347 → $147 over last 90 days">↓</span>
+          </div>
+          <div class="pills">
+            <span class="pill red"><span class="dot"></span>26d</span>
+            <span class="pill red"><span class="dot"></span>0</span>
+            <span class="pill red"><span class="dot"></span>1/4</span>
+          </div>
+          <div class="funnel-cell warn"><span class="count">0</span></div>
+          <div class="calendar-cell warn"><span class="count">1/4</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 2 msgs/30d</span></span>
+            <span class="chip dead">📊 Uphex <span class="usage">· 0 ads</span></span>
+          </div>
+          <div class="health-cell critical">12 <span class="trend down">↓ 18</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar critical"></div>
+          <div class="name-cell">
+            <span class="name">Apex Realty Group</span>
+            <span class="meta">Subaccount · loc_b27d…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+            <span class="arrow" title="Downgraded $647 → $347">↓</span>
+          </div>
+          <div class="pills">
+            <span class="pill red"><span class="dot"></span>42d</span>
+            <span class="pill amber"><span class="dot"></span>1</span>
+            <span class="pill green"><span class="dot"></span>3/3</span>
+          </div>
+          <div class="funnel-cell warn"><span class="count">1</span></div>
+          <div class="calendar-cell"><span class="count">3/3</span></div>
+          <div class="chips">
+            <span class="chip">📞 Twilio <span class="usage">· 12 calls/30d</span></span>
+          </div>
+          <div class="health-cell critical">15 <span class="trend down">↓ 9</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar critical"></div>
+          <div class="name-cell">
+            <span class="name">Northwood Pediatrics</span>
+            <span class="meta">Subaccount · loc_9f4c…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$147</span>
+          </div>
+          <div class="pills">
+            <span class="pill red"><span class="dot"></span>31d</span>
+            <span class="pill red"><span class="dot"></span>0</span>
+            <span class="pill red"><span class="dot"></span>0/2</span>
+          </div>
+          <div class="funnel-cell warn"><span class="count">0</span></div>
+          <div class="calendar-cell warn"><span class="count">0/2</span></div>
+          <div class="chips">
+            <span class="chip" style="opacity:0.55">— No integrations</span>
+          </div>
+          <div class="health-cell critical">8 <span class="trend down">↓ 4</span></div>
+        </div>
+
+        <!-- AT RISK -->
+        <div class="row">
+          <div class="band-bar atrisk"></div>
+          <div class="name-cell">
+            <span class="name">Bright Marketing Co</span>
+            <span class="meta">Subaccount · loc_6a8e…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+            <span class="arrow" title="Downgraded $647 → $347">↓</span>
+          </div>
+          <div class="pills">
+            <span class="pill amber"><span class="dot"></span>11d</span>
+            <span class="pill amber"><span class="dot"></span>2</span>
+            <span class="pill green"><span class="dot"></span>4/4</span>
+          </div>
+          <div class="funnel-cell"><span class="count">2</span></div>
+          <div class="calendar-cell"><span class="count">4/4</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 168 msgs/30d</span></span>
+            <span class="chip">📊 Uphex <span class="usage">· 6 ads</span></span>
+          </div>
+          <div class="health-cell atrisk">28 <span class="trend down">↓ 6</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar atrisk"></div>
+          <div class="name-cell">
+            <span class="name">Riverside Wellness</span>
+            <span class="meta">Subaccount · loc_c2b1…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$147</span>
+          </div>
+          <div class="pills">
+            <span class="pill amber"><span class="dot"></span>8d</span>
+            <span class="pill red"><span class="dot"></span>0</span>
+            <span class="pill amber"><span class="dot"></span>2/3</span>
+          </div>
+          <div class="funnel-cell warn"><span class="count">0</span></div>
+          <div class="calendar-cell"><span class="count">2/3</span></div>
+          <div class="chips">
+            <span class="chip">⚡ Make <span class="usage">· 14 ops/30d</span></span>
+          </div>
+          <div class="health-cell atrisk">31 <span class="trend down">↓ 3</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar atrisk"></div>
+          <div class="name-cell">
+            <span class="name">Grand Auto Detailing</span>
+            <span class="meta">Subaccount · loc_e8f3…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+          </div>
+          <div class="pills">
+            <span class="pill amber"><span class="dot"></span>13d</span>
+            <span class="pill green"><span class="dot"></span>3</span>
+            <span class="pill amber"><span class="dot"></span>2/4</span>
+          </div>
+          <div class="funnel-cell"><span class="count">3</span></div>
+          <div class="calendar-cell warn"><span class="count">2/4</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 89 msgs/30d</span></span>
+            <span class="chip">💳 Stripe</span>
+            <span class="chip more">+1</span>
+          </div>
+          <div class="health-cell atrisk">35 <span class="trend flat">→</span></div>
+        </div>
+
+        <!-- WATCH -->
+        <div class="row">
+          <div class="band-bar watch"></div>
+          <div class="name-cell">
+            <span class="name">Coastal Plumbing &amp; Gas</span>
+            <span class="meta">Subaccount · loc_4d5a…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+          </div>
+          <div class="pills">
+            <span class="pill green"><span class="dot"></span>3d</span>
+            <span class="pill amber"><span class="dot"></span>2</span>
+            <span class="pill amber"><span class="dot"></span>3/5</span>
+          </div>
+          <div class="funnel-cell"><span class="count">2</span></div>
+          <div class="calendar-cell"><span class="count">3/5</span></div>
+          <div class="chips">
+            <span class="chip">📊 Uphex <span class="usage">· 3 ads</span></span>
+            <span class="chip">⚡ Make <span class="usage">· 41 ops/30d</span></span>
+          </div>
+          <div class="health-cell watch">52 <span class="trend down">↓ 2</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar watch"></div>
+          <div class="name-cell">
+            <span class="name">Vista Roofing</span>
+            <span class="meta">Subaccount · loc_7c19…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$647</span>
+          </div>
+          <div class="pills">
+            <span class="pill green"><span class="dot"></span>2d</span>
+            <span class="pill green"><span class="dot"></span>4</span>
+            <span class="pill amber"><span class="dot"></span>3/6</span>
+          </div>
+          <div class="funnel-cell"><span class="count">4</span></div>
+          <div class="calendar-cell warn"><span class="count">3/6</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 412 msgs/30d</span></span>
+            <span class="chip">📞 Twilio <span class="usage">· 67 calls/30d</span></span>
+            <span class="chip">📊 Uphex <span class="usage">· 9 ads</span></span>
+          </div>
+          <div class="health-cell watch">61 <span class="trend up">↑ 4</span></div>
+        </div>
+
+        <!-- HEALTHY (truncated sample, just to show contrast) -->
+        <div class="row">
+          <div class="band-bar healthy"></div>
+          <div class="name-cell">
+            <span class="name">Cairns Solar Solutions</span>
+            <span class="meta">Subaccount · loc_2e4f… · Bounty merchant</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$647</span>
+          </div>
+          <div class="pills">
+            <span class="pill green"><span class="dot"></span>1d</span>
+            <span class="pill green"><span class="dot"></span>7</span>
+            <span class="pill green"><span class="dot"></span>5/5</span>
+          </div>
+          <div class="funnel-cell"><span class="count">7</span></div>
+          <div class="calendar-cell"><span class="count">5/5</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 1.2k msgs/30d</span></span>
+            <span class="chip">💳 Stripe</span>
+            <span class="chip">📊 Uphex <span class="usage">· 14 ads</span></span>
+            <span class="chip more">+2</span>
+          </div>
+          <div class="health-cell healthy">87 <span class="trend up">↑ 3</span></div>
+        </div>
+
+        <div class="row">
+          <div class="band-bar healthy"></div>
+          <div class="name-cell">
+            <span class="name">Highland Fitness Group</span>
+            <span class="meta">Subaccount · loc_a91c…</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$647</span>
+          </div>
+          <div class="pills">
+            <span class="pill green"><span class="dot"></span>0d</span>
+            <span class="pill green"><span class="dot"></span>5</span>
+            <span class="pill green"><span class="dot"></span>4/4</span>
+          </div>
+          <div class="funnel-cell"><span class="count">5</span></div>
+          <div class="calendar-cell"><span class="count">4/4</span></div>
+          <div class="chips">
+            <span class="chip ai">🤖 CloseBot <span class="usage">· 743 msgs/30d</span></span>
+            <span class="chip">💳 Stripe</span>
+            <span class="chip">📞 Twilio <span class="usage">· 92 calls/30d</span></span>
+          </div>
+          <div class="health-cell healthy">82 <span class="trend up">↑ 2</span></div>
+        </div>
+
+        <!-- COLD START -->
+        <div class="row">
+          <div class="band-bar cold"></div>
+          <div class="name-cell">
+            <span class="name">Maple St Veterinary</span>
+            <span class="meta">Subaccount · loc_d49a… · Onboarded 6 days ago</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+          </div>
+          <div class="pills">
+            <span class="pill cold"><span class="dot"></span>—</span>
+            <span class="pill cold"><span class="dot"></span>—</span>
+            <span class="pill cold"><span class="dot"></span>—</span>
+          </div>
+          <div class="funnel-cell" style="color:#9ca3af"><span>—</span></div>
+          <div class="calendar-cell" style="color:#9ca3af"><span>—</span></div>
+          <div class="chips">
+            <span class="chip" style="background:#f3f4f6;color:#9ca3af">⏳ Building baseline (8/14 days)</span>
+          </div>
+          <div class="health-cell cold">— <span class="trend flat">cold start</span></div>
+        </div>
+
+        <div style="padding: 14px 18px; text-align: center; color: #6b7280; font-size: 12px;">
+          Showing 11 of 24 attention-needed clients · <a href="#" style="color:#6366f1;text-decoration:none;font-weight:500;">View all 87 clients →</a>
+        </div>
+      </div>
+
+      <!-- Intervention queue -->
+      <div class="panel queue-panel">
+        <div class="panel-head">
+          <h2>Pending Review</h2>
+          <span class="badge">3 of 5</span>
+        </div>
+
+        <div class="queue-item">
+          <div class="qi-head">
+            <span class="qi-name">Smith Dental</span>
+            <span class="qi-band-mini critical">Critical</span>
+          </div>
+          <div class="qi-trigger">
+            <strong>No staff activity for 26 days</strong>, no funnels built, calendar mostly idle. Tier downgraded $647 → $147 over 90 days.
+          </div>
+          <div class="qi-pills">
+            <span class="pill red"><span class="dot"></span>26d</span>
+            <span class="pill red"><span class="dot"></span>0</span>
+            <span class="pill red"><span class="dot"></span>1/4</span>
+          </div>
+          <div class="qi-action">
+            📧 <strong>Send check-in email</strong> · "Hey, noticed you haven't been in for a bit — everything okay?" · From: Kel @ Productivity Hub
+          </div>
+          <div class="qi-buttons">
+            <button class="approve">Approve &amp; Send</button>
+            <button class="reject">Reject</button>
+            <button class="edit">✎</button>
+          </div>
+        </div>
+
+        <div class="queue-item">
+          <div class="qi-head">
+            <span class="qi-name">Northwood Pediatrics</span>
+            <span class="qi-band-mini critical">Critical</span>
+          </div>
+          <div class="qi-trigger">
+            <strong>No funnels built since onboarding</strong> 4 months ago. Contacts &amp; email only — high flight risk.
+          </div>
+          <div class="qi-pills">
+            <span class="pill red"><span class="dot"></span>31d</span>
+            <span class="pill red"><span class="dot"></span>0</span>
+            <span class="pill red"><span class="dot"></span>0/2</span>
+          </div>
+          <div class="qi-action">
+            📧 <strong>Send 4-video funnel-building nurture sequence</strong> · Day 0, 3, 7, 14 · Topic: "Your first funnel in 20 minutes"
+          </div>
+          <div class="qi-buttons">
+            <button class="approve">Approve &amp; Schedule</button>
+            <button class="reject">Reject</button>
+            <button class="edit">✎</button>
+          </div>
+        </div>
+
+        <div class="queue-item">
+          <div class="qi-head">
+            <span class="qi-name">Bright Marketing Co</span>
+            <span class="qi-band-mini atrisk">At Risk</span>
+          </div>
+          <div class="qi-trigger">
+            <strong>Tier downgrade $647 → $347 + activity dropped 60% week-over-week.</strong> Strongest leading indicator of churn.
+          </div>
+          <div class="qi-pills">
+            <span class="pill amber"><span class="dot"></span>11d</span>
+            <span class="pill amber"><span class="dot"></span>2</span>
+            <span class="pill green"><span class="dot"></span>4/4</span>
+          </div>
+          <div class="qi-action">
+            📋 <strong>Create retention task for you</strong> · "Call James at Bright Marketing this week — tier downgrade detected"
+          </div>
+          <div class="qi-buttons">
+            <button class="approve">Add to my tasks</button>
+            <button class="reject">Dismiss</button>
+            <button class="edit">✎</button>
+          </div>
+        </div>
+
+        <div class="queue-overflow">View 2 more pending →</div>
+      </div>
+
+    </div>
+
+    <div class="footnote">
+      <strong>Where this data comes from:</strong> health snapshots + churn assessments (computed every 4 hours) + integration detections (from fingerprint scanner per §2.0c) + staff activity pulse (from <code>canonical_subaccount_mutations</code> per §2.0b). All thresholds, weights, and intervention templates are editable in <a href="#" style="color:#4338ca;">Configure</a>. The same data feeds Monday's Intelligence Briefing email and Friday's Weekly Digest (per §13).
+    </div>
+
+  </main>
+</div>
+</body>
+</html>
