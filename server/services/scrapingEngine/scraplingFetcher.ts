@@ -32,6 +32,7 @@ export interface ScraplingCallContext {
     organisationId: string;
     agentId: string;
     subaccountId: string | null;
+    isTestRun: boolean;
     taskId?: string;
     mcpCallCount?: number;
   };

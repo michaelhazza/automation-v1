@@ -607,6 +607,7 @@ export const agentExecutionService = {
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
+          isTestRun: run.isTestRun ?? false,
         });
         mcpClients = mcp.clients;
         mcpLazyRegistry = mcp.lazyRegistry;
@@ -1716,6 +1717,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     startTime,
     timeoutMs,
     taskId: request.taskId,
+    isTestRun: request.isTestRun ?? false,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
