@@ -1124,32 +1124,57 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 - **HITL queue confusion.** `memoryReviewQueue` is for belief conflicts / block proposals / clarification pending. `reviewItems` is the projection of pending `actions`. ClientPulse interventions go through `reviewItems`, not `memoryReviewQueue`. The current dev spec is ambiguous on this; clarify in Module B.
 - **Spec status on shipped phases.** The dev spec has no phase marked "shipped". Migrations (0068, 0087, 0096), the `clientpulseReports.ts` routes, and `ClientPulseDashboardPage.tsx` are partial implementations of the spec's ambitions — but none of them is end-to-end useful. Update the spec's phase tracker with honest status.
 
-### 11.3 Open questions for Kel (follow-up call)
+### 11.3 Decisions recorded from Kel's follow-up (2026-04-17)
 
-1. **Confirm the "Staff Activity Pulse" framing replaces login-activity tracking.** GHL does not expose login data via API and we are not building UI scraping. Instead we derive a composite "has staff work happened here recently" score from contact / opportunity / conversation mutations attributed to real users (see §2.0b). This is a **stronger** signal than logins — someone logging in and doing nothing looks healthy on a login metric but is dead on a staff-activity metric. Does this map to Kel's actual mental model? Is there any case where he cares about logins specifically, independent of whether anything got done?
+These are baked-in design commitments from Kel's response to the first round of open questions. Reflected throughout §§1–10 and §12 where relevant.
 
-2. **Name the integrations we should ship fingerprints for on day one.** The "Integration Fingerprint Scanner" (§2.0c) auto-detects third-party tools from artifacts we can already read (conversation provider IDs, workflow action types, outbound-webhook domains, tag/field prefixes). To ship it with useful defaults, we need Kel to list the third-party apps he sees most often across his 180 sub-accounts — CloseBot and Uphex already named, plus whatever else is common. **Ten-minute ask.** After that, the system learns from data: novel integrations surface as one-click "what is this?" prompts in Kel's inbox, classified once and applied retroactively across his whole portfolio.
+| # | Decision | Consequence |
+|---|---|---|
+| **D1** | **Replacement scope = full Starboys service (~$2,400/mo equivalent), not just the $1,200 monitoring half.** ClientPulse must replace both the monitoring arm *and* the done-for-you execution arm. | Phase 4 intervention pipeline must include agency-branded outbound email/SMS actions with Kel's one-click approval (not just operator-facing tasks). Full intervention template library in §6 is in scope, not optional. |
+| **D2** | **Calendar quality signal = enabled for all GHL Agency configurations (SaaS and DFY).** | No per-org conditional in the default `staffActivity`/health-factor config; the GHL Agency Intelligence template enables calendar-quality across the board. |
+| **D3** | **Intervention proposer = enabled by default for every GHL Agency configuration, including DFY.** The VAs managing DFY clients will use the proposer queue as a work surface. | DFY orgs are not a special case in the default template. Proposer output per sub-account per day governed by `maxProposalsPerDayPerSubaccount` (configurable). |
+| **D4** | **Trial onboarding milestone library (Phase 6 default):** `first_calendar_created` / `first_funnel_built` / `first_contact_imported` / `first_campaign_sent` / `first_automation_published` — accepted as the default set, start here. | Phase 6 seed migration populates these five as the default `client_pulse_onboarding_milestone_defs` rows; orgs can add/remove per org. |
+| **D5** | **Billing: cost per Synthetos org.** An agency owner running multiple GHL agency backends (Kel: SaaS + DFY) will have two separate Synthetos orgs and receive two separate invoices. No "sibling orgs" billing-level linking. | §3 stance reinforced. No composite-invoice or cross-org discount logic. Onboarding UX copy remains: "Each GHL agency backend becomes its own ClientPulse workspace." |
+| **D6 (new)** | **ClientPulse will be sold in two subscription tiers, anchored to Starboys pricing:** a **Monitor tier** (read-only portfolio monitoring + briefings/digests, anchored ~$1,200/mo) and an **Operate tier** (everything in Monitor + intervention proposer + HITL execution + outcome measurement, anchored ~$2,400/mo). See §12.4 for the tier feature split. | The existing `modules` + `subscriptions` schema (migration 0104) already supports per-module subscription rows; we extend with tier-level entitlements rather than adding a new entitlement system. |
 
-3. **Subscription tier endpoint access.** `GET /saas/location/{locationId}/subscription` requires SaaS mode + Agency Pro tier on the GHL side. Kel's SaaS arm has SaaS mode; confirm whether DFY arm does too. If not, tier tracking for DFY clients has to come from Kel's internal billing (not GHL) — which is fine because DFY tier movement isn't predictive of churn.
+### 11.4 Open questions for Kel (second round)
 
-4. **Calendar quality denominator.** For a DFY client where the VA runs everything and the end-client barely logs in, the "calendars ÷ team members" ratio is probably noise. Does Kel want calendar-quality as a health input on DFY at all, or only on SaaS? This drives whether the two Synthetos orgs (per §3) get different `hierarchyTemplates.operationalConfig` values.
+Three questions carried over from the first round, plus two new questions derived from D1 and D6.
 
-5. **Intervention scope on DFY clients.** DFY clients have near-zero churn and are VA-managed. Proposer-driven intervention queue items on DFY are likely to be noise or redundant. Default recommendation: DFY org computes health scores but the intervention proposer is disabled. Confirm with Kel.
+**🛑 Still blocking Phase 1 implementation:**
 
-6. **Onboarding milestone library for trial monitoring.** For Phase 6 (reintroducing trials), which specific milestones should count? Working assumption: `first_calendar_created / first_funnel_built / first_contact_imported / first_campaign_sent / first_automation_published`. Confirm with Kel, and whether each milestone should map to a specific nudge email from his existing 25-email sequence.
+1. **Does the "Staff Activity Pulse" framing map to your mental model?** GHL doesn't expose login data via its public API and we're not building UI scraping. Instead we'd derive a "has real work happened in this sub-account recently" score from staff-attributed mutations (contact edits, opportunity stage changes, outbound messages sent by team users, notes, task completions, workflow/funnel/calendar edits). See §2.0b for the full derivation. Is this aligned with how you triage "is this account alive?", or is there a case where raw logins matter independent of whether anything got done?
 
-7. **Starboys replacement threshold.** Kel was explicit on the call that Phase 3-style detection alone would not fully replace Starboys — he also values the DFY-execution arm ($1,200 of the $2,400). Our Phase 4 proposer → HITL approve → execute pipeline is the closest analogue, but requires action types for "email the client on the agency's behalf". Confirm: is the intended replacement scope `$1,200 monitoring half` or `$2,400 full service`, and is Kel willing to have the platform send emails from the agency brand to end clients with his one-click approval?
+2. **Name the third-party integrations we should ship fingerprints for on day one.** You already named CloseBot and Uphex. We want 5–10 more common integrations so the scanner auto-detects them across your portfolio from day one. After that the system learns from data (novel integrations surface as one-click "what is this?" prompts, classified once, applied retroactively). Ten-minute ask.
 
-8. **GHL dev-tier API access.** Kel offered to facilitate a conversation with GHL about enabling dev-tier access. Two asks for that conversation: (a) confirm which scopes are available on the $97 / $297 / Agency Pro tiers (esp. `calendars.readonly`, `funnels.readonly`, SaaS subscription scope); (b) confirm whether a public audit-log / login-activity endpoint is on GHL's roadmap and on what timeline — this materially affects whether we build the derived proxy in Phase 1 or defer it.
+3. **GHL dev-tier API access — two sub-asks for your GHL contact:**
+   (a) Which OAuth scopes are available on the $97 / $297 / Agency Pro tiers? We specifically need `calendars.readonly`, `funnels.readonly`, `users.readonly`, plus the SaaS subscription scope (`GET /saas/location/{id}/subscription`).
+   (b) Is a public audit-log / login-activity endpoint on GHL's roadmap, and on what timeline? This determines whether our Staff Activity Pulse is permanent architecture or a bridge.
 
-9. **Two-orgs onboarding UX (per §3).** Kel's Productivity Hub will connect two Synthetos orgs (SaaS + DFY), each its own OAuth flow. Does Kel want them billed as one customer with a single invoice, or as two separate subscriptions? This affects how we present the onboarding and whether we add any "sibling orgs" linking at the account level.
+**🟡 New questions derived from your decisions:**
 
-10. **Philippines government tender (out of band).** Flagged for separate workstream — not in ClientPulse v1 scope. Worth tracking independently: if Productivity Hub wins, the platform becomes the operations layer for a government-scale managed AI delivery. Put on the roadmap watchlist.
+4. **Tier feature split (derived from D6).** Proposed default tier definitions below — confirm or tweak:
+   - **Monitor tier (~$1,200 anchor):** portfolio dashboard, per-client drill-down, health score computation, Staff Activity Pulse, Integration Fingerprint Scanner, churn risk assessment, Intelligence Briefing + Weekly Digest (both org and per-client), anomaly alerts. **Read-only — no intervention proposer.**
+   - **Operate tier (~$2,400 anchor):** everything in Monitor plus the intervention proposer, HITL approval queue, action execution (agency-branded email / SMS / tasks), intervention outcome measurement loop, and the full editable intervention template library.
+   Does that split match your framing? Any specific feature you'd move from one tier to the other?
 
-### 11.4 Success criteria (how we know we shipped ClientPulse for Kel)
+5. **Intervention template library (derived from D1).** For full Starboys replacement, Phase 4 ships a default library of six intervention templates that can send on behalf of the agency brand with your one-click approval:
+   - `dormant_staff_activity_checkin` — staff activity ≥14 days silent → email check-in to client
+   - `no_funnel_nurture` — 0 funnels built → 4-video funnel-setup nurture sequence
+   - `calendar_setup_guide` — calendar quality below threshold → setup guide + optional VA-help offer
+   - `tier_downgrade_retention_alert` — tier decreased in last 90 days → operator task (retention call)
+   - `third_party_ai_upsell` — CloseBot or similar detected → comparison info for native GHL AI + upsell
+   - `trial_milestone_nudge` — trial user stalled on a milestone → specific nudge per incomplete step
+   Are these the right six to ship by default? Any you'd add or cut? Any specific copy constraints we should respect (tone, signoff, format)?
 
-1. Kel has one screen showing all ~180 sub-accounts across both GHL backends, ranked by churn risk, updated daily.
-2. At least 80% of the `$2,400/mo` Starboys value is replaced by the monitoring + HITL proposer pipeline, validated by Kel actually cancelling Starboys or renegotiating down.
+**⏳ Tracking only — no answer needed:**
+
+6. **Philippines government tender.** Separate workstream. If Productivity Hub wins, the platform becomes the operations layer at government scale. No action required here; just flagging that we're tracking it.
+
+### 11.5 Success criteria (how we know we shipped ClientPulse for Kel)
+
+1. Kel has one screen showing all ~180 sub-accounts across both GHL backends (via two Synthetos orgs), ranked by churn risk, updated daily.
+2. At least 80% of the `$2,400/mo` Starboys value is replaced by the Monitor + Operate-tier pipeline, validated by Kel actually cancelling Starboys or renegotiating down.
 3. Churn rate drops by ≥25% within 90 days of ClientPulse going live, vs the 6-month trailing average.
 4. Kel reintroduces trials (Phase 6 success).
 5. All configuration (weights, thresholds, templates) is editable via UI with zero engineering intervention.
@@ -1272,6 +1297,26 @@ Each follows the existing pattern: system default → template override → org 
 The ClientPulse module is about **65% scaffolded** out of the box for a GHL agency today. The agent is seeded, the hierarchy template is seeded with the foundational health / churn / intervention config, the module entitlement system gates the right agent, and the dashboard page exists in the router. What is missing is surgical: one config-extension migration, one tables migration, five new accessors, the skill executors, and the adapter endpoint additions.
 
 **When an org enables the `client_pulse` module and gets the "GHL Agency Intelligence" template applied**, they get the foundational config automatically. After Gaps A–E land, they also get Staff Activity Pulse + Integration Fingerprint Scanner + the full dashboard / intervention pipeline out of the box with zero hand-config.
+
+### 12.4 Subscription tiering (per decision D6)
+
+ClientPulse is sold in two tiers, each anchored to one of Kel's existing Starboys price points. The tier gates which features are active per org. Confirmation of the exact feature split is an open question for Kel (§11.4 Q4).
+
+| Feature | Monitor tier (~$1,200/mo anchor) | Operate tier (~$2,400/mo anchor) |
+|---|---|---|
+| Portfolio dashboard (grid + drill-down) | ✓ | ✓ |
+| Health score + Staff Activity Pulse + Integration Fingerprint Scanner | ✓ | ✓ |
+| Churn risk bands + anomaly alerts | ✓ | ✓ |
+| Intelligence Briefing + Weekly Digest (org + per-client playbooks) | ✓ | ✓ |
+| Intervention proposer (continuous) | ✗ | ✓ |
+| HITL approval queue + review items | ✗ | ✓ |
+| Action execution (agency-branded email / SMS / tasks) | ✗ | ✓ |
+| Intervention outcome measurement loop | ✗ | ✓ |
+| Editable intervention template library | ✗ | ✓ |
+
+**Schema impact:** the existing `modules` + `subscriptions` + `orgSubscriptions` schema (migration 0104) already models per-org per-module entitlements. We extend it with a `tier` column on `orgSubscriptions` (enum: `'monitor'` | `'operate'`) rather than introducing a parallel tiering system. Skill executors and the intervention proposer check the tier via a new accessor `getClientPulseTier(orgId)` in `orgConfigService` before activating tier-gated behaviour.
+
+**No proposer for Monitor-tier orgs:** if an org subscribes at Monitor tier, the `proposeClientPulseInterventionsJob` no-ops (no review items written). Upgrading to Operate immediately enables the proposer on the next scan cycle; no migration or re-ingestion required.
 
 ---
 
