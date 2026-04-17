@@ -104,15 +104,26 @@ function extractFencedBlocks(markdown) {
 // OAuth / MCP source-of-truth extraction
 // ---------------------------------------------------------------------------
 
+// Structural assumptions about server/config/oauthProviders.ts that this
+// regex-based extraction depends on (document them so a later reformat is
+// not a mystery when the gate starts failing):
+//
+//   1. The registry is declared as `export const OAUTH_PROVIDERS: Record<..., ...> = { ... };`
+//      on a single logical declaration, closed by `\n};`.
+//   2. Top-level provider keys are indented with exactly 2 spaces.
+//      Nested keys (`extra`, `scopes`, etc.) use 4+ spaces.
+//   3. Provider keys match /[a-z0-9_-]+/ (lowercase slugs).
+//
+// A safer long-term approach is dynamic import, but that requires tsx/ESM
+// transpilation in the gate runtime. The gate runs as plain Node.mjs in CI
+// where tsx isn't available by default. When this fragility bites, rewrite
+// the gate to spawn tsx and dynamically import OAUTH_PROVIDERS directly.
 async function extractOAuthProviderKeys() {
   const src = await readFile(OAUTH_PROVIDERS_PATH, 'utf-8');
   const registryMatch = src.match(/OAUTH_PROVIDERS:\s*Record<[^>]+>\s*=\s*\{([\s\S]*?)\n\};/);
   if (!registryMatch) return [];
   const body = registryMatch[1];
   const keys = [];
-  // Top-level keys of OAUTH_PROVIDERS are indented with exactly 2 spaces;
-  // nested keys like `extra:` and `scopes:` use 4+ spaces. Anchoring to 2
-  // spaces excludes nested keys.
   for (const line of body.split('\n')) {
     const m = line.match(/^ {2}([a-z0-9_-]+):\s*\{/);
     if (m) keys.push(m[1]);

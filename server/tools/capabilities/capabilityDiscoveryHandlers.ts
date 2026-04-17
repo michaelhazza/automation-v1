@@ -142,12 +142,11 @@ export async function executeListConnections(
   }
 
   // Query integration_connections for the resolved scope.
-  const conditions = subaccountId
-    ? and(eq(integrationConnections.organisationId, orgId), eq(integrationConnections.subaccountId, subaccountId))
-    : and(eq(integrationConnections.organisationId, orgId));
-
   try {
-    const rows = await db.select().from(integrationConnections).where(conditions!);
+    const conditions = subaccountId
+      ? and(eq(integrationConnections.organisationId, orgId), eq(integrationConnections.subaccountId, subaccountId))
+      : eq(integrationConnections.organisationId, orgId);
+    const rows = await db.select().from(integrationConnections).where(conditions);
 
     const connections: ConnectionSummary[] = rows
       .filter((r) => typed.include_inactive || r.connectionStatus === 'active')
@@ -396,7 +395,6 @@ export async function executeCheckCapabilityGap(
     return true;
   }
 
-  const totalRequired = normalised.length;
   const candidateAgents: CandidateAgent[] = [];
 
   for (const agent of agentMaps) {
@@ -424,11 +422,33 @@ export async function executeCheckCapabilityGap(
     }
   }
 
+  // Stale map guard: if the capability map was computed BEFORE the current
+  // Integration Reference was last updated, the map may not reflect current
+  // reality (e.g. a reference change removed a capability the map still
+  // claims). Disqualify such maps from Path A — they fall through to
+  // Path B, which forces the Config Assistant to re-verify. Background
+  // reconciliation will refresh the map within a minute.
+  const referenceLastUpdatedAt = snapshot.schema_meta.last_updated
+    ? Date.parse(snapshot.schema_meta.last_updated)
+    : NaN;
+  function isMapStaleVsReference(map: NonNullable<(typeof agentMaps)[number]['capabilityMap']>): boolean {
+    if (Number.isNaN(referenceLastUpdatedAt)) return false; // can't decide; trust the map
+    const computedAt = Date.parse(map.computedAt);
+    if (Number.isNaN(computedAt)) return true; // malformed; treat as stale
+    return computedAt < referenceLastUpdatedAt;
+  }
+
   // Atomic "configured" determination: a single agent with full coverage
-  // AND active connections AND scope match for all integrations/capabilities.
+  // AND active connections AND scope match for all integrations/capabilities
+  // AND its capability map is not stale vs. the current Integration Reference.
   let configuredBy: CandidateAgent | null = null;
   for (const candidate of candidateAgents) {
     if (candidate.coverage !== 'full') continue;
+
+    // Look up the source map for this candidate and reject if it's stale.
+    const agentRow = agentMaps.find((a) => a.agentId === candidate.agent_id);
+    if (!agentRow?.capabilityMap) continue;
+    if (isMapStaleVsReference(agentRow.capabilityMap)) continue;
     // Derive integration list from the candidate's matched list (those with 'integration:' prefix)
     const integrationSlugs = candidate.matched
       .filter((k) => k.startsWith('integration:'))

@@ -190,6 +190,27 @@ export const taskService = {
       });
     });
 
+    // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md §7).
+    // Enqueue the Orchestrator-from-task job when the task meets the eligibility
+    // predicate. Non-blocking; the handler performs its own guards and silently
+    // no-ops when the Orchestrator agent is not linked in this org.
+    import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
+      enqueueOrchestratorRoutingIfEligible({
+        id: item.id,
+        organisationId,
+        status: item.status,
+        assignedAgentId: item.assignedAgentId ?? null,
+        isSubTask: item.isSubTask,
+        createdByAgentId: item.createdByAgentId ?? null,
+        description: item.description ?? null,
+      }),
+    ).catch((err: unknown) => {
+      logger.error('task.orchestrator_enqueue_failed', {
+        taskId: item.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
     return item;
   },
 

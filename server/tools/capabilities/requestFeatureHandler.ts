@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
 import {
@@ -102,7 +102,7 @@ export async function executeRequestFeature(
       eq(featureRequests.dedupeHash, dedupeHash),
       eq(featureRequests.category, typed.category),
       gte(featureRequests.createdAt, since),
-      sql`${featureRequests.deletedAt} IS NULL`,
+      isNull(featureRequests.deletedAt),
     ))
     .orderBy(desc(featureRequests.createdAt))
     .limit(1);

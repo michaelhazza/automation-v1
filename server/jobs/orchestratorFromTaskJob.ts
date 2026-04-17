@@ -8,15 +8,16 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 // orchestratorFromTaskJob
 //
-// Handler for the `org_task_created` trigger event targeting the Orchestrator
+// Handler for the org-level task-created event targeting the Orchestrator
 // agent. Consumes a pg-boss job payload containing the task id + org id,
-// performs handler-side guards that `eventFilter` cannot express, resolves
-// the Orchestrator's subaccount-agent link for the org, and dispatches an
-// agent run with the task as context.
+// performs handler-side guards that a simple eventFilter cannot express,
+// resolves the Orchestrator's subaccount-agent link for the org, and
+// dispatches an agent run with the task as context.
 //
 // See docs/orchestrator-capability-routing-spec.md §7.
 // ---------------------------------------------------------------------------
 
+export const ORCHESTRATOR_FROM_TASK_QUEUE = 'orchestrator-from-task';
 const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';
 const MIN_DESCRIPTION_CHARS = 10;
 
@@ -24,6 +25,69 @@ export interface OrchestratorFromTaskPayload {
   taskId: string;
   organisationId: string;
   triggerId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Enqueue: called by taskService.createTask after the row is written. Job
+// handler runs the real work asynchronously. Non-blocking from the caller's
+// perspective. See spec §7.3 for the eligibility predicate.
+// ---------------------------------------------------------------------------
+
+type JobSender = (name: string, data: object) => Promise<string | null>;
+
+let orchestratorJobSender: JobSender | null = null;
+
+export function setOrchestratorJobSender(sender: JobSender): void {
+  orchestratorJobSender = sender;
+}
+
+export interface TaskLike {
+  id: string;
+  organisationId: string;
+  status: string;
+  assignedAgentId: string | null;
+  isSubTask: boolean;
+  createdByAgentId: string | null;
+  description: string | null;
+}
+
+/**
+ * Eligibility predicate — mirrors the eventFilter from spec §7.3 plus the
+ * handler-side guards for non-equality-checkable fields (createdByAgentId,
+ * description length).
+ */
+export function isEligibleForOrchestratorRouting(task: TaskLike): boolean {
+  if (task.status !== 'inbox') return false;
+  if (task.assignedAgentId !== null) return false;
+  if (task.isSubTask) return false;
+  if (task.createdByAgentId !== null) return false;
+  if (!task.description || task.description.trim().length < MIN_DESCRIPTION_CHARS) return false;
+  return true;
+}
+
+/**
+ * Enqueue the Orchestrator routing job for a newly-created task, if the
+ * task meets the eligibility criteria. Non-throwing — caller fires and
+ * forgets. Safe to call on every task creation.
+ */
+export async function enqueueOrchestratorRoutingIfEligible(task: TaskLike): Promise<void> {
+  if (!isEligibleForOrchestratorRouting(task)) return;
+  if (!orchestratorJobSender) {
+    logger.warn('orchestratorFromTask.no_sender', { taskId: task.id });
+    return;
+  }
+  try {
+    await orchestratorJobSender(ORCHESTRATOR_FROM_TASK_QUEUE, {
+      taskId: task.id,
+      organisationId: task.organisationId,
+    } satisfies OrchestratorFromTaskPayload);
+  } catch (err) {
+    logger.error('orchestratorFromTask.enqueue_failed', {
+      taskId: task.id,
+      organisationId: task.organisationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function processOrchestratorFromTask(payload: OrchestratorFromTaskPayload): Promise<void> {

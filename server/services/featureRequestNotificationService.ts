@@ -69,7 +69,7 @@ export function buildNotificationBody(req: FeatureRequest, ctx: NotificationCont
 }
 
 async function sendSlack(req: FeatureRequest, ctx: NotificationContext): Promise<ChannelResult> {
-  const webhookUrl = (env as unknown as Record<string, string | undefined>).SYNTHETOS_INTERNAL_SLACK_WEBHOOK;
+  const webhookUrl = env.SYNTHETOS_INTERNAL_SLACK_WEBHOOK;
   const channelSetting = await systemSettingsService.get(SETTING_KEYS.FEATURE_REQUEST_SLACK_CHANNEL);
   if (!webhookUrl && !channelSetting) {
     return { status: 'skipped', detail: 'Neither SYNTHETOS_INTERNAL_SLACK_WEBHOOK env nor feature_request_slack_channel setting configured' };

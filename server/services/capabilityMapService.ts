@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import {
@@ -154,6 +154,9 @@ export async function listAgentCapabilityMaps(
   const conditions = [
     eq(subaccountAgents.organisationId, organisationId),
     eq(subaccountAgents.isActive, true),
+    // Exclude soft-deleted agents — a soft-deleted agent can still have an
+    // active subaccount_agents row, and we must not route tasks to it.
+    isNull(agents.deletedAt),
   ];
   if (subaccountId !== null) {
     conditions.push(eq(subaccountAgents.subaccountId, subaccountId));
