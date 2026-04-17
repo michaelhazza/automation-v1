@@ -152,7 +152,7 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
 3. Call `connectorPollingService.syncConnector(connectionId, principal)` wrapped in `withBackoff` (existing primitive).
 4. On success: update `last_successful_sync_at`, clear `last_sync_error`. Write `integration_ingestion_stats` row.
 5. On failure: update `last_sync_error`, `last_sync_error_at`. Write stats row with error. Do not throw — the job completes and `TripWire` monitors error rates.
-6. Concurrency: 1 per connection (keyed by `connectionId`), global max from config.
+6. Concurrency: 1 per connection. **Dedupe key:** `connector-polling-sync-${connectionId}` — pg-boss `singletonKey` prevents duplicate enqueue for the same connection even if the tick job runs twice in rapid succession. Global max concurrent syncs from `connectorPollingConfig.ts`.
 
 **Cron-parser reuse:** The `selectConnectionsDue` pure helper uses the same cron-parser library version as `scheduleCalendarServicePure.ts` (`SOURCE_PRIORITY`, `computeNextHeartbeatAt`). If the connector-polling cadence model diverges from agent-run scheduling, the divergence is documented in this spec with justification.
 
@@ -289,6 +289,12 @@ export interface CanonicalTableEntry {
   foreignKeys: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
   freshnessPeriod: string;
   skillReferences: string[];
+  /** Example queries an agent can use to understand typical access patterns */
+  exampleQueries: string[];
+  /** Common join paths to other canonical tables (e.g. 'canonical_contacts via contact_id') */
+  commonJoins: string[];
+  /** Patterns agents should avoid (e.g. 'do not JOIN to canonical_emails — use liveFetch for body') */
+  antiPatterns: string[];
 }
 
 export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
@@ -358,12 +364,16 @@ CREATE TABLE teams (
 CREATE TABLE team_members (
   team_id uuid NOT NULL REFERENCES teams(id),
   user_id uuid NOT NULL REFERENCES users(id),
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
   added_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (team_id, user_id)
 );
 
+CREATE INDEX team_members_org_idx ON team_members (organisation_id);
+
 CREATE TABLE delegation_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
   grantor_user_id uuid NOT NULL REFERENCES users(id),
   grantee_kind text NOT NULL CHECK (grantee_kind IN ('user','service')),
   grantee_id text NOT NULL,
@@ -376,6 +386,7 @@ CREATE TABLE delegation_grants (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX delegation_grants_org_idx ON delegation_grants (organisation_id);
 CREATE UNIQUE INDEX delegation_grants_active_idx
   ON delegation_grants (grantor_user_id, grantee_kind, grantee_id, subaccount_id)
   WHERE revoked_at IS NULL;
@@ -384,6 +395,7 @@ CREATE TABLE canonical_row_subaccount_scopes (
   canonical_table text NOT NULL,
   canonical_row_id uuid NOT NULL,
   subaccount_id uuid NOT NULL,
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
   attribution text NOT NULL CHECK (attribution IN ('primary','mentioned','shared')),
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (canonical_table, canonical_row_id, subaccount_id)
@@ -391,6 +403,8 @@ CREATE TABLE canonical_row_subaccount_scopes (
 
 CREATE INDEX canonical_row_subaccount_scopes_sub_idx
   ON canonical_row_subaccount_scopes (subaccount_id, canonical_table);
+CREATE INDEX canonical_row_subaccount_scopes_org_idx
+  ON canonical_row_subaccount_scopes (organisation_id);
 ```
 
 ### Migration 0163 — connection ownership
@@ -507,9 +521,29 @@ Backfill: `source_connection_id` set from existing `connector_config_id` linkage
 
 ### `canonicalDataService` signature migration
 
-This is the widest-reaching change. Every caller of `canonicalDataService` updates in the same commit. The static gate `verify-principal-context-propagation.sh` catches any caller still passing bare `organisationId`.
+This is the widest-reaching change. To manage blast radius, a temporary shim bridges the old and new signatures:
+
+```typescript
+// server/services/principal/fromOrgId.ts — TEMPORARY migration shim
+export function fromOrgId(orgId: string, subaccountId?: string): PrincipalContext {
+  return buildServicePrincipal({
+    organisationId: orgId,
+    subaccountId: subaccountId ?? null,
+    serviceId: 'service:legacy-shim',
+    teamIds: [],
+  });
+}
+```
+
+**Migration sequence:**
+1. Land `fromOrgId` shim + new `PrincipalContext` types.
+2. Migrate `canonicalDataService` to accept `PrincipalContext`. Wrap all existing callers with `fromOrgId(orgId)` — this is a mechanical find-and-replace that preserves existing behaviour.
+3. Static gate `verify-principal-context-propagation.sh` catches any caller still passing bare `organisationId`.
+4. In subsequent PRs within P3A, progressively replace `fromOrgId` calls with real principal construction at each call site (route → `UserPrincipal`, job → `ServicePrincipal`, webhook → `ServicePrincipal`/`DelegatedPrincipal`).
+5. Final cleanup PR: delete `fromOrgId.ts`. The static gate verifies zero remaining imports.
 
 Before: `canonicalDataService.getAccountsByOrg(organisationId, filters)`
+Interim: `canonicalDataService.getAccountsByOrg(fromOrgId(organisationId), filters)`
 After: `canonicalDataService.getAccountsByOrg(principal, filters)`
 
 The service internally calls `principal.organisationId` and applies visibility filtering via `visibilityPredicatePure`.
@@ -534,7 +568,16 @@ P3B introduces three new `SET LOCAL` variables alongside the existing `app.organ
 
 **Naming asymmetry decision (resolved):** Keep `app.organisation_id` as-is. The `current_` prefix applies only to the new principal variables. Rationale: renaming `app.organisation_id` → `app.current_organisation_id` would rewrite 25+ existing RLS policies, `orgScoping.ts`, and `withOrgTx` — cosmetic gain, wide blast radius, zero security value. Accept the asymmetry.
 
-**`app.current_team_ids` encoding:** Postgres `current_setting()` returns text. Team IDs are stored as a comma-separated string (`'uuid1,uuid2,...'`). Policies cast via `string_to_array(current_setting('app.current_team_ids', true), ',')::uuid[]` and use the `&&` (overlap) operator against the row's `shared_team_ids` column. Empty string yields empty array after cast, which never overlaps — correct default-deny.
+**`app.current_team_ids` encoding:** Postgres `current_setting()` returns text. Team IDs are stored as a comma-separated string (`'uuid1,uuid2,...'`). Policies use a `CASE` expression to handle the empty-string edge case — `string_to_array('', ',')` returns `{''}` (array with one empty string), not `{}`, so a bare cast to `uuid[]` would fail. The safe pattern used in every policy:
+
+```sql
+CASE
+  WHEN current_setting('app.current_team_ids', true) = '' THEN '{}'::uuid[]
+  ELSE string_to_array(current_setting('app.current_team_ids', true), ',')::uuid[]
+END
+```
+
+This yields an empty array for service/delegated principals (correct default-deny — empty array never overlaps with `shared_team_ids`).
 
 ### Migration 0166 — RLS policies for principal tables
 
@@ -567,14 +610,14 @@ CREATE POLICY team_members_org_read ON team_members
     organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- delegation_grants: only the granting user or the grantee can see their own grants
+-- delegation_grants: only the grantor or the grantee can see their own grants
 ALTER TABLE delegation_grants ENABLE ROW LEVEL SECURITY;
 CREATE POLICY delegation_grants_principal_read ON delegation_grants
   FOR SELECT USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
     AND (
-      granted_by_user_id::text = current_setting('app.current_principal_id', true)
-      OR grantee_service_id::text = current_setting('app.current_principal_id', true)
+      grantor_user_id::text = current_setting('app.current_principal_id', true)
+      OR grantee_id = current_setting('app.current_principal_id', true)
     )
   );
 
@@ -610,8 +653,10 @@ CREATE POLICY canonical_contacts_principal_read ON canonical_contacts
         (visibility_scope = 'private'
           AND owner_user_id::text = current_setting('app.current_principal_id', true))
         OR (visibility_scope = 'shared_team'
-          AND shared_team_ids && string_to_array(
-            current_setting('app.current_team_ids', true), ',')::uuid[])
+          AND shared_team_ids && (CASE
+            WHEN current_setting('app.current_team_ids', true) = '' THEN '{}'::uuid[]
+            ELSE string_to_array(current_setting('app.current_team_ids', true), ',')::uuid[]
+          END))
         OR (visibility_scope = 'shared_subaccount'
           AND (subaccount_id IS NULL
                OR subaccount_id = current_setting('app.current_subaccount_id', true)::uuid))
@@ -650,8 +695,10 @@ CREATE POLICY integration_connections_principal_read ON integration_connections
       -- user-owned shared-team connections
       (ownership_scope = 'user'
         AND visibility_scope = 'shared_team'
-        AND shared_team_ids && string_to_array(
-          current_setting('app.current_team_ids', true), ',')::uuid[])
+        AND shared_team_ids && (CASE
+          WHEN current_setting('app.current_team_ids', true) = '' THEN '{}'::uuid[]
+          ELSE string_to_array(current_setting('app.current_team_ids', true), ',')::uuid[]
+        END))
     )
   );
 ```
@@ -704,11 +751,15 @@ ALTER TABLE canonical_contacts FORCE ROW LEVEL SECURITY;
 CREATE POLICY canonical_contacts_writer_bypass ON canonical_contacts
   FOR ALL
   TO canonical_writer
-  USING (true)
-  WITH CHECK (true);
+  USING (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 ```
 
-Adapter services call `SET LOCAL ROLE canonical_writer` within their transaction before writing. The transaction wrapper reverts the role on commit/rollback. This is narrower than `admin_role` — `canonical_writer` can write canonical tables but cannot bypass RLS on `tasks`, `agent_runs`, or any other app-surface table.
+The `canonical_writer` bypass is org-scoped — adapters can write to canonical tables within their org but cannot perform cross-org writes even with this role. Adapter services call `SET LOCAL ROLE canonical_writer` within their transaction before writing. The transaction wrapper reverts the role on commit/rollback. `app.organisation_id` must still be set (via `withOrgTx` / `withPrincipalContext`) before switching to `canonical_writer`. This is narrower than `admin_role` — `canonical_writer` can write canonical tables within a single org but cannot bypass RLS on `tasks`, `agent_runs`, or any other app-surface table.
 
 ### RLS exclusion registry
 
@@ -742,11 +793,31 @@ The static gate `verify-rls-coverage.sh` (already exists) is extended: every tab
 
 **Approach:**
 
-1. Define a fixture set: 48+ rows spanning 3 principal types × 4 visibility scopes × 2 ownership states × 2 org-match states.
+1. Define a fixture set: 64+ rows spanning the matrix below.
 2. For each row, run the pure `isVisibleTo(row, principal)` predicate and record the boolean result.
 3. Seed a throwaway Postgres schema (using the test database) with the same rows and policies.
 4. For each principal in the fixture set, `SET LOCAL` the session variables and `SELECT` from the table. Record which rows are returned.
 5. Assert: the set of visible rows from step 2 matches step 4 exactly.
+
+**Fixture matrix (must-cover combinations):**
+
+| Dimension | Values |
+|-----------|--------|
+| Principal type | `user`, `service`, `delegated` |
+| Visibility scope | `private`, `shared_team`, `shared_subaccount`, `shared_org` |
+| Ownership | owner-match, owner-mismatch |
+| Org match | same-org, different-org |
+| Subaccount | NULL (org-level), matching subaccount, non-matching subaccount |
+| Team overlap | teams overlap, teams disjoint, principal has no teams (empty array) |
+| Delegated | grant valid, grant expired, grant revoked, grant scope mismatch |
+
+The 64+ minimum comes from covering each dimension at least once in combination with the others. Edge cases that must appear explicitly:
+
+- **Delegated principal with expired grant** — must deny even if `owner_user_id` matches
+- **Team overlap with single shared team** — must allow
+- **Service principal with subaccount NULL** — must see `shared_subaccount` rows (org-level service)
+- **User principal with empty `team_ids`** — must deny `shared_team` rows (empty array never overlaps)
+- **Multi-scoped row (via `canonical_row_subaccount_scopes`)** — visible through one scope but not another
 
 This runs as a static gate (`scripts/verify-visibility-parity.sh`), not a runtime test. It uses the existing test database connection and runs in a transaction that rolls back — no persistent state.
 
@@ -830,7 +901,7 @@ All gates run in `scripts/run-all-gates.sh`. New gates are appended; existing ga
 | Gate | Sub-phase | New / Extended | What it checks |
 |------|-----------|---------------|----------------|
 | `verify-read-path-tags.sh` | P2A | New | Every action-registry entry has a `readPath` tag; tag value matches actual implementation |
-| `verify-canonical-dictionary.sh` | P2B | New | Dictionary YAML parses; every canonical table has an entry; field list matches Drizzle schema |
+| `verify-canonical-dictionary.sh` | P2B | New | TS registry covers every canonical table; column lists match Drizzle schema; no orphan entries |
 | `verify-principal-context-propagation.sh` | P3A | New | No bare `organisationId` args to `canonicalDataService`; all callers pass `PrincipalContext` |
 | `verify-canonical-required-columns.sh` | P3A | New | Every canonical table has `owner_user_id`, `visibility_scope`, `shared_team_ids`, `source_connection_id` |
 | `verify-connection-shape.sh` | P3A | New | Connection fixtures have `ownership_scope`, `classification`, `visibility_scope` set |
@@ -867,12 +938,12 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 ### P1 — Scheduled polling + stale-connector detector
 
-- [ ] Migration 0160 applied — `connector_configs` has `sync_interval_minutes`, `last_sync_at`, `next_sync_at`, `sync_status`
-- [ ] `canonicalSyncSchedulerJob` registered via `createWorker()` and fires on schedule
-- [ ] Adapters called per connector config; `last_sync_at` / `next_sync_at` updated on completion
+- [ ] Migration 0160 applied — `integration_connections` has `last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`; `integration_ingestion_stats` table created
+- [ ] `connectorPollingTick` cron job registered via `createWorker()` and fires on schedule
+- [ ] Per-connection `connectorPollingSync` jobs enqueued and executed; `last_successful_sync_at` updated on completion
 - [ ] `staleConnectorDetector.ts` registered in `workspaceHealth/detectors/index.ts`
-- [ ] Detector fires finding when `last_sync_at` older than threshold
-- [ ] `syncSchedulerPure.test.ts` passes — tick selection, jitter, error handling
+- [ ] Detector fires finding when `last_successful_sync_at` older than threshold
+- [ ] `connectorPollingSchedulerPure.test.ts` passes — tick selection, phase filter, paused-skip, null-lastSync
 - [ ] `staleConnectorDetectorPure.test.ts` passes — threshold, grace period, edge cases
 - [ ] `npm run typecheck` clean
 - [ ] `npm run lint` clean
@@ -892,12 +963,12 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 ### P2B — Data dictionary skill
 
-- [ ] `canonical-data-dictionary.yaml` exists with entries for every canonical table
+- [ ] `canonicalDictionaryRegistry.ts` exports `CANONICAL_DICTIONARY_REGISTRY` with entries for every canonical table
 - [ ] `canonicalDictionarySkill.ts` registered in action registry
 - [ ] Skill returns structured field metadata when invoked by agent
-- [ ] `verify-canonical-dictionary.sh` gate passes — YAML parses, tables covered, fields match schema
+- [ ] `verify-canonical-dictionary.sh` gate passes — registry entries cover all canonical tables, column lists match Drizzle schema
 - [ ] Gate added to `scripts/run-all-gates.sh`
-- [ ] `dictionaryParserPure.test.ts` passes
+- [ ] `canonicalDictionaryValidatorPure.test.ts` passes
 - [ ] `npm run typecheck` clean
 - [ ] `npm run lint` clean
 - [ ] `pr-reviewer` + `dual-reviewer` passed
@@ -941,19 +1012,23 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 | File | Sub-phase |
 |------|-----------|
-| `server/jobs/canonicalSyncSchedulerJob.ts` | P1 |
-| `server/services/canonicalSyncSchedulerPure.ts` | P1 |
-| `server/services/__tests__/canonicalSyncSchedulerPure.test.ts` | P1 |
+| `server/jobs/connectorPollingTick.ts` | P1 |
+| `server/jobs/connectorPollingSync.ts` | P1 |
+| `server/services/connectorPollingSchedulerPure.ts` | P1 |
+| `server/services/__tests__/connectorPollingSchedulerPure.test.ts` | P1 |
+| `server/config/connectorPollingConfig.ts` | P1 |
+| `scripts/verify-connector-scheduler.sh` | P1 |
 | `server/services/workspaceHealth/detectors/staleConnectorDetector.ts` | P1 |
 | `server/services/workspaceHealth/detectors/staleConnectorDetectorPure.ts` | P1 |
 | `server/services/__tests__/staleConnectorDetectorPure.test.ts` | P1 |
 | `server/services/readPathResolutionPure.ts` | P2A |
 | `server/services/__tests__/readPathResolutionPure.test.ts` | P2A |
 | `scripts/verify-read-path-tags.sh` | P2A |
-| `server/config/canonical-data-dictionary.yaml` | P2B |
-| `server/services/canonicalDictionarySkill.ts` | P2B |
-| `server/services/dictionaryParserPure.ts` | P2B |
-| `server/services/__tests__/dictionaryParserPure.test.ts` | P2B |
+| `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts` | P2B |
+| `server/services/canonicalDictionary/canonicalDictionaryRendererPure.ts` | P2B |
+| `server/services/canonicalDictionary/canonicalDictionaryValidatorPure.ts` | P2B |
+| `server/services/__tests__/canonicalDictionaryRendererPure.test.ts` | P2B |
+| `server/services/__tests__/canonicalDictionaryValidatorPure.test.ts` | P2B |
 | `scripts/verify-canonical-dictionary.sh` | P2B |
 | `server/services/principal/types.ts` | P3A |
 | `server/services/principal/principalContext.ts` | P3A |
@@ -977,7 +1052,7 @@ These decisions were open in the parent roadmap spec. This implementation spec r
 
 | File | Sub-phase | Change |
 |------|-----------|--------|
-| `server/db/schema/connectorConfigs.ts` | P1 | Add sync scheduling columns |
+| `server/db/schema/integrationConnections.ts` | P1 | Add sync scheduling columns (`last_successful_sync_at`, `last_sync_started_at`, `last_sync_error`, `last_sync_error_at`, `sync_phase`) |
 | `server/jobs/index.ts` | P1 | Register `canonicalSyncSchedulerJob` |
 | `server/services/workspaceHealth/detectors/index.ts` | P1 | Export stale-connector detector |
 | `server/config/actionRegistry.ts` | P2A, P2B | Add `readPath` tag; register dictionary skill |
