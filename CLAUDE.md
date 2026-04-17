@@ -296,8 +296,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `docs/canonical-data-platform-roadmap.md` — program-level spec sequencing P1 (scheduled polling) → P2 (canonical consolidation + dictionary) → P3 (principal model + RLS) → P4 (Gmail thin canonical) → P5 (Google Calendar full canonical) → P6 (NL→SQL query surface). Draft complete; has not yet been through `spec-reviewer`.
-**Active items:** none (awaiting user direction on whether to run `spec-reviewer` next, or to begin a P1 implementation spec)
+**In-flight spec:** `docs/canonical-data-platform-roadmap.md` — program-level spec. `spec-reviewer` complete (5 iterations, all HITL findings resolved). Spec is mechanically tight and ready for implementation. Changes are uncommitted.
+**Active items:** none — awaiting user direction on next step (commit the spec + begin P1 implementation spec)
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
