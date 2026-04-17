@@ -484,7 +484,11 @@ export function classify(
   const idempotent  = def?.mcp?.annotations?.idempotentHint === true;
   const openWorld   = def?.mcp?.annotations?.openWorldHint === true;
 
-  // Rule 1 — Major lane (highest-severity classification wins).
+  // Rule 1 — Major lane.
+  // Evaluation order is explicit and deterministic: the FIRST match wins
+  // and becomes the majorReason recorded in the audit. Order chosen so
+  // the most actionable reason surfaces first (irreversibility is binary
+  // and always relevant; cost depends on threshold config).
   const costExceedsPerAction =
     (draft.estimatedCostMinor ?? 0) > thresholds.perActionMinor;
   const costExceedsPerRun =
@@ -494,10 +498,11 @@ export function classify(
   // A2 — widened irreversible rule: catches send_email-style actions.
   const isIrreversible = isExternal && (destructive || !idempotent);
 
+  // Priority order: irreversible > cross-subaccount > cost-per-action > cost-per-run.
+  if (isIrreversible)       return { lane: 'major', majorReason: 'irreversible' };
+  if (affectsMultipleSubaccounts) return { lane: 'major', majorReason: 'cross_subaccount' };
   if (costExceedsPerAction) return { lane: 'major', majorReason: 'cost_per_action' };
   if (costExceedsPerRun)    return { lane: 'major', majorReason: 'cost_per_run' };
-  if (affectsMultipleSubaccounts) return { lane: 'major', majorReason: 'cross_subaccount' };
-  if (isIrreversible)       return { lane: 'major', majorReason: 'irreversible' };
 
   // Rule 2 — Client-facing: anything external that wasn't already Major.
   if (isExternal || openWorld) return { lane: 'client' };
@@ -563,6 +568,8 @@ export function buildAckText(
 | Task (non-review) | task | — | — | — | — | `internal` |
 | Failed run | failed_run | — | — | — | — | `internal` |
 | Health finding | health_finding | — | — | — | — | `internal` |
+| Priority order: irreversible + expensive | review | `send_email` (external, !idempotent) | 6000 | 6000 | single | `major` (irreversible — wins over cost_per_action because irreversible is evaluated first) |
+| Priority order: cross-sub + expensive | review | `broadcast_social` (external, idempotent) | 6000 | 6000 | multiple | `major` (cross_subaccount — wins over cost_per_action) |
 
 `buildAckText` tests:
 
@@ -691,8 +698,19 @@ export interface PulseItem {
 export interface PulseAttentionResponse {
   lanes: { client: PulseItem[]; major: PulseItem[]; internal: PulseItem[] };
   counts: { client: number; major: number; internal: number; total: number };
+  warnings: PulseWarning[];
+  isPartial: boolean;
   generatedAt: string;
 }
+
+export interface PulseWarning {
+  source: 'reviews' | 'tasks' | 'runs' | 'health';
+  type: 'timeout' | 'error';
+}
+
+// isPartial = true when ANY source failed or timed out (i.e. warnings.length > 0).
+// counts reflect only the items actually returned, not theoretical totals.
+// Client shows a "Some data may be missing" banner when isPartial is true.
 
 export async function getAttention(scope: PulseScope): Promise<PulseAttentionResponse>;
 export async function getHistory(scope: PulseScope, query: HistoryQuery): Promise<HistoryResponse>;
@@ -724,7 +742,7 @@ pulseService
 
 **Fan-out detail:**
 
-- `Promise.allSettled` (not `all`) so a single-source failure doesn't nuke the whole fetch. Failed fetchers produce an empty array for that source and a `warnings[]` entry.
+- `Promise.allSettled` (not `all`) so a single-source failure doesn't nuke the whole fetch. Failed fetchers produce an empty array for that source and a typed `PulseWarning` entry in `warnings[]`. If any warning exists, `isPartial = true`. Counts reflect only the items actually returned.
 - Per-fetcher 2-second hard timeout via `Promise.race` against a sentinel.
 - Hard cap of 50 items per source → 200 max items per Attention response.
 - Aggregated `counts.total` may exceed the sum of the three lane arrays — it reflects the underlying source counts, capped at 1000 for the nav badge.
@@ -856,8 +874,9 @@ Service errors follow the project convention. Pulse-specific codes:
 | Subaccount not found / wrong org | (from `resolveSubaccount`) | 404 |
 | Threshold config malformed | `PULSE_CONFIG_INVALID` | 500 |
 | Fetcher timeout (all sources) | `PULSE_TIMEOUT` | 504 |
-| Fetcher timeout (some sources) | — | 200 with `warnings: []` |
+| Fetcher timeout (some sources) | — | 200 with `isPartial: true` and typed `warnings[]` |
 | Item not found in `getItem` | `PULSE_ITEM_NOT_FOUND` | 404 |
+| Approve/reject on already-resolved item | `ALREADY_RESOLVED` | 409 |
 
 ### Tests
 
@@ -866,7 +885,7 @@ Service errors follow the project convention. Pulse-specific codes:
 1. **Org scope Attention** — user with 2 accessible subaccounts, 3 pending reviews in one, 0 in the other → 3 items returned, correctly scoped.
 2. **Subaccount scope Attention** — same fixtures, scoped to one subaccount → only that subaccount's items.
 3. **Lane bucketing** — seeded `send_email` action → Major (irreversible); seeded `update_record` with cost 100 → Client; seeded `create_task` → not returned (tasks path), seeded task → Internal.
-4. **Fetcher timeout** — stub `reviewService.listPending` to delay 3s → response arrives at 2s with `warnings: ['reviews_timeout']` and empty `client/major` lanes.
+4. **Fetcher timeout** — stub `reviewService.listPending` to delay 3s → response arrives at 2s with `isPartial: true`, `warnings: [{ source: 'reviews', type: 'timeout' }]`, and empty `client/major` lanes. Counts reflect only items from the successful sources.
 5. **Org scope with no accessible subaccounts** — returns empty lanes (not 403).
 6. **Subaccount from wrong org** — returns 404 via `resolveSubaccount`.
 7. **History delegation** — mocks `activityService.listActivityItems`, asserts it's called with the resolved scope + query.
@@ -888,7 +907,7 @@ Route-level tests (in `server/routes/__tests__/pulseRoutes.test.ts`) cover auth 
 
 ### Purpose
 
-Extend `server/routes/reviewItems.ts` approve and bulk-approve handlers with lane re-classification. Reject without-ack approvals for Major items (412). Persist the ack snapshot (text + amount + currency) to `review_audits`. Bulk-approve fails closed if any item in the batch is Major.
+Extend `server/routes/reviewItems.ts` approve and bulk-approve handlers with lane re-classification. Single approve: reject without-ack approvals for Major items (412); reject already-resolved items (409). Persist the ack snapshot (text + amount + currency) to `review_audits`. Bulk-approve: approve non-Major items, return Major items as `blocked` (partial success, not failure). Batch-load actions to avoid N+1.
 
 ### Files edited
 
@@ -908,6 +927,12 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   asyncHandler(async (req, res) => {
     const item = await reviewService.getReviewItem(req.params.id, req.orgId!);
+
+    // Concurrency guard: reject if already resolved (double-submit, race).
+    if (item.status !== 'pending' && item.status !== 'edited_pending') {
+      throw { statusCode: 409, message: 'Item already resolved', errorCode: 'ALREADY_RESOLVED' };
+    }
+
     const action = await actionService.getAction(item.actionId, req.orgId!);
 
     // Pulse lane re-classification at approve time.
@@ -988,31 +1013,66 @@ router.post(
 
     const thresholds = await pulseConfigService.getMajorThresholds(req.orgId!);
 
-    // Classify every item up-front. Fail the batch if any is Major.
+    // Load all items and their actions in batch (avoids N+1).
     const items = await reviewService.getReviewItemsBulk(ids, req.orgId!);
+    const actionIds = items.map(i => i.actionId);
+    const actions = await actionService.getActionsBulk(actionIds, req.orgId!);
+    const actionMap = new Map(actions.map(a => [a.id, a]));
+
+    // Classify every item. Split into approvable vs blocked (Major).
+    const approvable: string[] = [];
+    const blocked: Array<{ id: string; majorReason: string }> = [];
+    const alreadyResolved: string[] = [];
+
     for (const item of items) {
-      const action = await actionService.getAction(item.actionId, req.orgId!);
+      if (item.status !== 'pending' && item.status !== 'edited_pending') {
+        alreadyResolved.push(item.id);
+        continue;
+      }
+      const action = actionMap.get(item.actionId);
+      if (!action) continue;
       const draft = await pulseService.buildDraftFromAction(action);
-      const { lane } = pulseLaneClassifier.classify(draft, thresholds);
+      const { lane, majorReason } = pulseLaneClassifier.classify(draft, thresholds);
       if (lane === 'major') {
-        throw {
-          statusCode: 412,
-          message: 'Major-lane items cannot be bulk-approved',
-          errorCode: 'MAJOR_IN_BULK',
-          meta: { offendingId: item.id },
-        };
+        blocked.push({ id: item.id, majorReason: majorReason! });
+      } else {
+        approvable.push(item.id);
       }
     }
 
-    await reviewService.bulkApprove(ids, req.user!.id);
-    res.json({ ok: true, count: ids.length });
+    if (approvable.length > 0) {
+      await reviewService.bulkApprove(approvable, req.user!.id);
+    }
+
+    res.json({
+      ok: true,
+      approved: approvable,
+      blocked,
+      alreadyResolved,
+    });
   }),
 );
 ```
 
 ### `pulseService.buildDraftFromAction(action)` — helper
 
-Reused by both the approve route and the aggregator. Takes a loaded `actions` row and returns `PulseItemDraft`. Handles loading `runTotalCostMinor` by summing pending actions in the same `agentRunId` (single aggregated query). Pure function of its inputs except for the run-total query.
+Reused by both the approve route and the aggregator. Takes a loaded `actions` row and returns `PulseItemDraft`. Handles loading `runTotalCostMinor` via a single aggregated query. Pure function of its inputs except for the run-total query.
+
+**`runTotalCostMinor` definition (explicit):**
+
+```sql
+SELECT COALESCE(SUM(estimated_cost_minor), 0) AS run_total_cost_minor
+FROM actions
+WHERE agent_run_id = $1
+  AND status IN ('pending', 'pending_approval', 'approved', 'executing', 'completed')
+  AND organisation_id = $2
+```
+
+Scope rules:
+- **Includes** pending, approved, and completed actions — represents the full cost exposure of the run.
+- **Excludes** rejected, failed, blocked, skipped actions — those costs were avoided.
+- NULL `estimated_cost_minor` values are treated as 0 (via `COALESCE` on each row, not on the SUM — a row with NULL cost contributes 0, not missing).
+- If the action has no `agent_run_id`, `runTotalCostMinor` is NULL and the `cost_per_run` Major reason is never triggered.
 
 ### Tests
 
@@ -1022,16 +1082,19 @@ Reused by both the approve route and the aggregator. Takes a loaded `actions` ro
 2. Approve a Major item without ack → 412 `MAJOR_ACK_REQUIRED`; audit row not created; review item still pending.
 3. Approve a Major item with `majorAcknowledgment: true` → 200; audit row has `major_acknowledged=true`, `ack_text` matches classifier output, `ack_amount_minor` and `ack_currency_code` populated.
 4. Approve a Major item via `cost_per_run` reason → audit captures `ack_amount_minor = runTotalMinor`, not the per-action cost.
-5. Bulk-approve with all non-Major → 200; all approved.
-6. Bulk-approve with one Major → 412 `MAJOR_IN_BULK`; none approved (transaction rolled back or pre-check rejected before any write).
+5. Bulk-approve with all non-Major → 200; `approved` contains all ids, `blocked` is empty.
+6. Bulk-approve with one Major in a batch of 5 → 200; `approved` contains 4 ids, `blocked` contains 1 with `majorReason`. The 4 non-Major items are approved; the Major item is untouched.
+6b. Bulk-approve where one item is already resolved → 200; that item appears in `alreadyResolved`, not in `approved` or `blocked`.
 7. Threshold changes mid-request: fetch-time Major, approve-time not → approved without ack (re-check is authoritative).
 8. Org currency changed between surface render and approve → approve uses the current org currency; ack snapshot captures the new value (intended — snapshot is point-in-time).
+9. Approve an already-approved item → 409 `ALREADY_RESOLVED`; no duplicate audit row.
+10. Two concurrent approvals of the same item → one succeeds, one gets 409.
 
 ### Done criteria
 
 - Approve path never skips the re-classification check.
 - Audit snapshot always captures text + amount + currency for Major approvals.
-- Bulk-approve pre-check catches all Major items before any write happens.
+- Bulk-approve splits Major items into `blocked` array and approves the rest. No 412 — partial success is the happy path.
 - `pr-reviewer` sign-off on the approve path.
 
 ---
@@ -1438,6 +1501,8 @@ export function PulseDrawer() {
 - **Accessibility:** `aria-modal="false"` so assistive tech can continue to read the list behind it (modeless).
 
 Each drawer body is `React.lazy` so its bundle loads only when needed.
+
+**Not-found / resolved handling:** Each drawer body must handle the case where the item no longer exists or has been resolved since the URL was bookmarked. The `getItem` API returns 404 (`PULSE_ITEM_NOT_FOUND`) for missing items. Each drawer body should catch this and render an inline message: *"This item has already been resolved or no longer exists"* with a "Close" button — not a full-page error. This prevents stale deep-links from crashing the drawer.
 
 ### Navigate vs drawer mapping
 
@@ -2075,7 +2140,7 @@ Add more as the build surfaces real lessons.
 | R7 | Legacy-path redirects miss an external link source | Medium | Low (user follows link, lands on 404) | Grep all notification/email templates in Chunk 10; add server-side 301s for common paths; 404s after that are acceptable collateral for a pre-launch product. |
 | R8 | Drawer focus trap interferes with existing modals | Low | Medium (focus bugs) | Drawer is modeless (`aria-modal="false"`); focus trap only while drawer is open; integration test with existing modals stacked. |
 | R9 | AUD minor-unit math off-by-one (e.g. using 2 decimal for JPY later) | Low now; Medium Phase 2 | Medium (wrong amounts in audit) | All currency math uses integer minor units; display layer uses `Intl.NumberFormat` which handles decimal places per ISO 4217. No manual division except `minor / 100` for display — verify a locale-aware helper replaces it before a non-decimal-2 currency is enabled. |
-| R10 | Bulk-approve N+1 classifier call | Low | Low (slow bulk ops) | Batch the action load (`actionService.getActionsBulk`) before the classifier loop. Measure and optimise if >50 items is a common case. |
+| R10 | Bulk-approve N+1 classifier call | Low | Low (slow bulk ops) | **Addressed in spec:** bulk-approve now uses `getActionsBulk` to batch-load all actions before the classifier loop. |
 
 ---
 
