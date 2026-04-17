@@ -14,6 +14,8 @@ import { logger } from '../lib/logger.js';
 //   mcp_server      — per-server monthly call count, keyed as "orgId:serverSlug"
 //
 // LLM cost/token columns are set to 0; only requestCount and errorCount carry signal.
+// requestCount = total invocation attempts, including retries and budget_blocked policy exits.
+// errorCount   = transport failures only (status IN ('error', 'timeout')); budget_blocked excluded.
 // Aggregates every invocation row including retries — no deduplication.
 // ---------------------------------------------------------------------------
 

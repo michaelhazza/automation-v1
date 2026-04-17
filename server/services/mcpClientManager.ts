@@ -284,7 +284,11 @@ export const mcpClientManager = {
       toolName: params.toolName || '__unknown__',
       gateLevel: params.gateLevel ?? undefined,
       status: params.status,
-      failureReason: params.failureReason ?? undefined,
+      // Runtime guard: error/timeout rows must carry a failureReason — fall back to 'unknown'
+      // so the DB constraint (failure_reason IS NOT NULL for error/timeout) is never hit silently.
+      failureReason: (params.status === 'error' || params.status === 'timeout') && !params.failureReason
+        ? 'unknown'
+        : (params.failureReason ?? undefined),
       durationMs: params.durationMs,
       responseSizeBytes: params.responseSizeBytes,
       wasTruncated: params.wasTruncated ?? false,
@@ -344,7 +348,7 @@ export const mcpClientManager = {
         gateLevel: null,
         status: 'budget_blocked',
         durationMs: 0,
-        isRetry: retryCount > 0,
+        isRetry: false,
         callIndex: null,
       });
       return { error: `MCP tool call limit reached (${MAX_MCP_CALLS_PER_RUN}/${MAX_MCP_CALLS_PER_RUN}). Use internal skills or request a budget increase.` };
@@ -361,7 +365,7 @@ export const mcpClientManager = {
         status: 'error',
         failureReason: 'pre_execution_failure',
         durationMs: 0,
-        isRetry: retryCount > 0,
+        isRetry: false,
         callIndex: null,
       });
       return { error: `Invalid MCP tool slug: ${toolSlug}` };
@@ -383,7 +387,7 @@ export const mcpClientManager = {
         this.writeInvocation({
           ctx, serverSlug, toolName, gateLevel: null,
           status: 'error', failureReason: 'process_crash',
-          durationMs: 0, isRetry: retryCount > 0, callIndex: null,
+          durationMs: 0, isRetry: false, callIndex: null,
         });
         return { error: `Failed to connect to ${serverSlug} MCP server` };
       }
