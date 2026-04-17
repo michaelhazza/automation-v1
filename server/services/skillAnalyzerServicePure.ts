@@ -1624,7 +1624,9 @@ export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput)
   else {
     const candidateScore = richnessScore(candidate.instructions);
     const libraryScore = richnessScore(library.instructions);
-    dominantKey = candidateScore >= libraryScore ? 'candidate' : 'library';
+    // §11.4: tie-break goes to library for DB slug stability. Only when the
+    // candidate is strictly richer does it become dominant.
+    dominantKey = candidateScore > libraryScore ? 'candidate' : 'library';
   }
   const dominant = dominantKey === 'candidate' ? candidate : library;
   const secondary = dominantKey === 'candidate' ? library : candidate;

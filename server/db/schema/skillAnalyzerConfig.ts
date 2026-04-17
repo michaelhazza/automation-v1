@@ -59,7 +59,25 @@ export const skillAnalyzerConfig = pgTable('skill_analyzer_config', {
     .notNull()
     .default('I accept this critical warning'),
 
-  warningTierMap: jsonb('warning_tier_map').$type<WarningTierMap>().notNull().default({}),
+  // Default aligned with migration 0154's DB-level default. When a row is
+  // inserted via Drizzle ORM (e.g., the lazy seed in skillAnalyzerConfigService),
+  // the column default fires only when this field is omitted — which matches
+  // the behaviour expected by effectiveTierMap(). The explicit map is written
+  // here so the Drizzle schema and the SQL migration stay aligned.
+  warningTierMap: jsonb('warning_tier_map').$type<WarningTierMap>().notNull().default({
+    REQUIRED_FIELD_DEMOTED:   'decision_required',
+    NAME_MISMATCH:            'decision_required',
+    SKILL_GRAPH_COLLISION:    'decision_required',
+    INVOCATION_LOST:          'decision_required',
+    HITL_LOST:                'decision_required',
+    CLASSIFIER_FALLBACK:      'decision_required',
+    SCOPE_EXPANSION_CRITICAL: 'critical',
+    SCOPE_EXPANSION:          'standard',
+    CAPABILITY_OVERLAP:       'standard',
+    TABLE_ROWS_DROPPED:       'informational',
+    OUTPUT_FORMAT_LOST:       'informational',
+    WARNINGS_TRUNCATED:       'informational',
+  }),
 
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   updatedBy: uuid('updated_by'),

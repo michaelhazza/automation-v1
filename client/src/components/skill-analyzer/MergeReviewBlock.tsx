@@ -281,11 +281,14 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
         const body = result.mergeUpdatedAt
           ? { ...patch, mergeUpdatedAt: result.mergeUpdatedAt }
           : patch;
-        const { data } = await api.patch<AnalysisResult>(
+        const { data } = await api.patch<AnalysisResult & { resolutionsCleared?: boolean }>(
           `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/merge`,
           body,
         );
         setPatchError(null);
+        if (data.resolutionsCleared) {
+          setPatchError('Your previous review decisions were cleared because the merge changed. Re-review required before approval.');
+        }
         onResultUpdated(data);
       } catch (err) {
         const e = err as { response?: { status?: number; data?: { error?: unknown } }; message?: string };
@@ -357,9 +360,12 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
     setIsResetting(true);
     setPatchError(null);
     try {
-      const { data } = await api.post<AnalysisResult>(
+      const { data } = await api.post<AnalysisResult & { resolutionsCleared?: boolean }>(
         `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/merge/reset`,
       );
+      if (data.resolutionsCleared) {
+        setPatchError('Your previous review decisions were cleared because the merge was reset. Re-review required before approval.');
+      }
       onResultUpdated(data);
     } catch (err) {
       const e = err as { response?: { data?: { error?: unknown } }; message?: string };
@@ -537,6 +543,24 @@ function WarningResolutionBlock({
   const isFallback = !!result.classifierFallbackApplied
     || warnings.some(w => w.code === 'CLASSIFIER_FALLBACK');
 
+  // Fetch the confirmation phrase once per merge block — shared across all
+  // CriticalPhraseInput instances to avoid N parallel config requests.
+  const [criticalPhrase, setCriticalPhrase] = useState<string>('I accept this critical warning');
+  useEffect(() => {
+    let cancelled = false;
+    const hasCritical = warnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL');
+    if (!hasCritical) return;
+    api
+      .get<{ criticalWarningConfirmationPhrase: string }>('/api/system/skill-analyser/config')
+      .then(({ data }) => {
+        if (!cancelled && typeof data?.criticalWarningConfirmationPhrase === 'string') {
+          setCriticalPhrase(data.criticalWarningConfirmationPhrase);
+        }
+      })
+      .catch(() => { /* keep default */ });
+    return () => { cancelled = true; };
+  }, [warnings]);
+
   async function resolveWarning(
     warningCode: MergeWarningCode,
     resolution: WarningResolutionKind,
@@ -602,6 +626,7 @@ function WarningResolutionBlock({
           isLocked={isLocked}
           isResolved={isResolved}
           onResolve={resolveWarning}
+          criticalPhrase={criticalPhrase}
         />
       ))}
     </div>
@@ -613,6 +638,7 @@ function WarningItem({
   isLocked,
   isResolved,
   onResolve,
+  criticalPhrase,
 }: {
   warning: MergeWarning;
   isLocked: boolean;
@@ -622,6 +648,7 @@ function WarningItem({
     resolution: WarningResolutionKind,
     details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string },
   ) => Promise<void>;
+  criticalPhrase: string;
 }) {
   const disabled = isLocked;
   const label = warningLabel(warning.code);
@@ -781,6 +808,7 @@ function WarningItem({
           <CriticalPhraseInput
             current={current}
             disabled={disabled}
+            expectedPhrase={criticalPhrase}
             onConfirm={() => onResolve('SCOPE_EXPANSION_CRITICAL', 'confirm_critical_phrase')}
           />
         </div>
@@ -823,34 +851,21 @@ function WarningItem({
 function CriticalPhraseInput({
   current,
   disabled,
+  expectedPhrase,
   onConfirm,
 }: {
   current: WarningResolutionKind | null;
   disabled: boolean;
+  expectedPhrase: string;
   onConfirm: () => void;
 }) {
   const [phrase, setPhrase] = useState('');
-  const [expected, setExpected] = useState<string>('I accept this critical warning');
-
-  // Read config on mount to get the current confirmation phrase.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .get<{ criticalWarningConfirmationPhrase: string }>('/api/system/skill-analyser/config')
-      .then(({ data }) => {
-        if (!cancelled && typeof data?.criticalWarningConfirmationPhrase === 'string') {
-          setExpected(data.criticalWarningConfirmationPhrase);
-        }
-      })
-      .catch(() => { /* keep default */ });
-    return () => { cancelled = true; };
-  }, []);
 
   if (current === 'confirm_critical_phrase') {
     return <span className="text-emerald-700">Confirmation recorded ✓</span>;
   }
 
-  const matches = phrase.trim() === expected.trim();
+  const matches = phrase.trim() === expectedPhrase.trim();
 
   return (
     <div className="flex gap-2">
@@ -859,7 +874,7 @@ function CriticalPhraseInput({
         value={phrase}
         disabled={disabled}
         onChange={(e) => setPhrase(e.target.value)}
-        placeholder={`Type: ${expected}`}
+        placeholder={`Type: ${expectedPhrase}`}
         className="flex-1 border border-slate-300 rounded px-2 py-0.5 text-[11px]"
       />
       <button

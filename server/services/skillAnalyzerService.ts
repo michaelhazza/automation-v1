@@ -3,6 +3,7 @@ import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
+import { systemAgents } from '../db/schema/systemAgents.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
@@ -133,6 +134,9 @@ export interface AvailableSystemAgent {
 /** Result row enriched with the live `matchedSkillContent` lookup. */
 export type EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {
   matchedSkillContent?: MatchedSkillContent;
+  /** v2 §11.12.5: true when the mutation cleared existing warning_resolutions
+   *  so the UI can surface a "Review decisions reset" toast. */
+  resolutionsCleared?: boolean;
 };
 
 /** Job + enriched results + Phase 1 GET response extensions. */
@@ -500,12 +504,29 @@ export async function resolveWarning(params: ResolveWarningParams): Promise<void
     }
 
     const rowStamp = row.mergeUpdatedAt ? new Date(row.mergeUpdatedAt) : null;
-    if (rowStamp && rowStamp > clientStamp) {
-      throw {
-        statusCode: 409,
-        message: 'Result was modified since you opened it — reload and retry.',
-        errorCode: 'STALE_RESOLVE',
-      };
+    // Equality check, not staleness only: when mergeUpdatedAt is null the
+    // client must send a sentinel matching row.createdAt or the earlier
+    // mergeUpdatedAt. This closes the §11.11.5 gap where never-edited rows
+    // bypass the concurrency check entirely.
+    if (rowStamp) {
+      if (rowStamp > clientStamp) {
+        throw {
+          statusCode: 409,
+          message: 'Result was modified since you opened it — reload and retry.',
+          errorCode: 'STALE_RESOLVE',
+        };
+      }
+    } else {
+      // Row has never been merge-edited; require the client timestamp to be
+      // no older than the row's creation (within a small skew window).
+      const createdAt = row.createdAt ? new Date(row.createdAt) : null;
+      if (createdAt && clientStamp.getTime() < createdAt.getTime() - 60_000) {
+        throw {
+          statusCode: 409,
+          message: 'If-Unmodified-Since predates this result. Reload and retry.',
+          errorCode: 'STALE_RESOLVE',
+        };
+      }
     }
 
     const existing = Array.isArray(row.warningResolutions)
@@ -872,6 +893,7 @@ export async function patchMergeFields(
 
   // v2 §11.11.1: any merge edit wipes warning_resolutions + approval state so
   // stale decisions can't satisfy a new merge's warnings.
+  const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
   await db
     .update(skillAnalyzerResults)
     .set({
@@ -927,6 +949,7 @@ export async function patchMergeFields(
       }
     }
   }
+  if (hadResolutions) enriched.resolutionsCleared = true;
   return enriched;
 }
 
@@ -998,6 +1021,8 @@ export async function resetMergeToOriginal(params: {
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
+  const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
+
   // Return enriched row (matchedSkillContent included)
   const updatedRows = await db
     .select()
@@ -1037,6 +1062,7 @@ export async function resetMergeToOriginal(params: {
       }
     }
   }
+  if (hadResolutions) enriched.resolutionsCleared = true;
   return enriched;
 }
 
@@ -1068,11 +1094,80 @@ export async function executeApproved(params: {
 }> {
   const { jobId, organisationId } = params;
 
+  // v2 §11.11.3: atomic execution-lock acquisition. Concurrent Execute calls
+  // land here and see 409 until the current run finishes.
+  const lockRows = await db
+    .update(skillAnalyzerJobs)
+    .set({ executionLock: true, executionStartedAt: new Date(), executionFinishedAt: null })
+    .where(and(
+      eq(skillAnalyzerJobs.id, jobId),
+      eq(skillAnalyzerJobs.organisationId, organisationId),
+      eq(skillAnalyzerJobs.executionLock, false),
+    ))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (!lockRows[0]) {
+    // Either the job doesn't exist, org mismatch, or another Execute is running.
+    const jobRows = await db
+      .select({ id: skillAnalyzerJobs.id, executionLock: skillAnalyzerJobs.executionLock })
+      .from(skillAnalyzerJobs)
+      .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+      .limit(1);
+    if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+    throw {
+      statusCode: 409,
+      message: 'Execution already in progress. Wait for the current run to finish.',
+      errorCode: 'EXECUTION_LOCKED',
+    };
+  }
+
+  try {
+    return await runExecute(params);
+  } finally {
+    // Release the lock unconditionally — success, partial failure, or thrown error.
+    await db
+      .update(skillAnalyzerJobs)
+      .set({ executionLock: false, executionFinishedAt: new Date() })
+      .where(eq(skillAnalyzerJobs.id, jobId));
+  }
+}
+
+async function runExecute(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}) {
+  const { jobId, organisationId } = params;
+
   const { job, results } = await getJob(jobId, organisationId);
 
   const approved = results.filter(
     (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
   );
+
+  // v2 §11.1 / §11.11.3: re-run evaluateApprovalState at Execute entry.
+  // Belt-and-suspenders defense against approvals drifting between approve
+  // and execute. Rejects with 409 + reasons[] on any unresolved blocker.
+  const configSnapshot = job.configSnapshot as { warningTierMap?: Record<string, WarningTier> } | null;
+  const tierMap = skillAnalyzerConfigService.effectiveTierMap(
+    configSnapshot as unknown as { warningTierMap: Record<string, WarningTier> } | null,
+  );
+  for (const r of approved) {
+    if (r.classification !== 'PARTIAL_OVERLAP' && r.classification !== 'IMPROVEMENT') continue;
+    const warnings = (r.mergeWarnings ?? []) as MergeWarning[];
+    const resolutions = (r.warningResolutions ?? []) as WarningResolution[];
+    const state = evaluateApprovalState(warnings, resolutions, tierMap);
+    if (state.blocked) {
+      throw {
+        statusCode: 409,
+        message: `Cannot execute: result ${r.id} has unresolved blocking warnings.`,
+        errorCode: 'MERGE_CRITICAL_WARNINGS',
+        resultId: r.id,
+        reasons: state.reasons,
+      };
+    }
+  }
+
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
 
   // Create a pre-mutation backup if there are approved results to execute.
@@ -1137,13 +1232,17 @@ export async function executeApproved(params: {
       if (!slug || !name || idx === null) continue;
 
       // Idempotency: reuse existing agent if slug already exists (e.g., a
-      // prior Execute attempt partially succeeded).
+      // prior Execute attempt partially succeeded). Direct slug query
+      // instead of listing every agent.
       let agentId: string;
       try {
-        const existing = await systemAgentService.listAgents();
-        const found = existing.find(a => a.slug === slug);
-        if (found) {
-          agentId = found.id;
+        const existingRows = await db
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(and(eq(systemAgents.slug, slug), isNull(systemAgents.deletedAt)))
+          .limit(1);
+        if (existingRows[0]) {
+          agentId = existingRows[0].id;
         } else {
           const created = await systemAgentService.createAgent({
             name,

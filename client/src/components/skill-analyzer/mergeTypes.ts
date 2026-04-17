@@ -182,18 +182,6 @@ export function evaluateApprovalState(
   return { blocked: reasons.length > 0, reasons, requiredResolutions: required };
 }
 
-/** Legacy blocking set retained for callers that haven't migrated to
- *  evaluateApprovalState. New code should use evaluateApprovalState.
- *  @deprecated */
-export const BLOCKING_WARNING_CODES = new Set<MergeWarningCode>([
-  'REQUIRED_FIELD_DEMOTED',
-  'INVOCATION_LOST',
-  'HITL_LOST',
-  'NAME_MISMATCH',
-  'SKILL_GRAPH_COLLISION',
-  'CLASSIFIER_FALLBACK',
-]);
-
 /**
  * Compute a confidence score (0–1) from a warnings array.
  * Deductions are taken per unique warning code. Floor 0.2; critical cap 0.5.

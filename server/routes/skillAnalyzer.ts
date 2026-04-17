@@ -162,10 +162,12 @@ router.get(
 router.patch(
   '/api/system/skill-analyser/jobs/:jobId/results/:resultId',
   asyncHandler(async (req, res) => {
-    const { action } = req.body as { action: string };
+    // v2 §11.11.2: action=null is the unapprove path — required so a
+    // reviewer can edit a locked (approved) result.
+    const { action } = req.body as { action: string | null };
 
-    if (!['approved', 'rejected', 'skipped'].includes(action)) {
-      return res.status(400).json({ error: 'Invalid action. Must be approved, rejected, or skipped.' });
+    if (action !== null && !['approved', 'rejected', 'skipped'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Must be approved, rejected, skipped, or null (unapprove).' });
     }
 
     await skillAnalyzerService.setResultAction({
@@ -173,7 +175,7 @@ router.patch(
       jobId: req.params.jobId,
       organisationId: req.orgId!,
       userId: req.user!.id,
-      action: action as 'approved' | 'rejected' | 'skipped',
+      action: action as 'approved' | 'rejected' | 'skipped' | null,
     });
 
     return res.json({ ok: true });
