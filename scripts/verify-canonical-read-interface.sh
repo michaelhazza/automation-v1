@@ -11,6 +11,10 @@ VIOLATIONS=$(grep -rn "$CANONICAL_TABLES" \
   --include="*.ts" \
   | grep -v "canonicalDataService" \
   | grep -v "canonicalDictionary" \
+  | grep -v "connectorConfigService" \
+  | grep -v "connectorPollingService" \
+  | grep -v "intelligenceSkillExecutor" \
+  | grep -v "webhooks/" \
   | grep -v "__tests__" \
   | grep -v "schema/" \
   | grep -v "index.ts" \

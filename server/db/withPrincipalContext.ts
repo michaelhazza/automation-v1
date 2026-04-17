@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { PrincipalContext } from '../services/principal/types.js';
 import { getOrgTxContext } from '../instrumentation.js';
-import type { OrgScopedTx } from '../db/index.js';
+import type { OrgScopedTx } from './index.js';
 
 /**
  * Layer principal session variables on top of the existing org-scoped
