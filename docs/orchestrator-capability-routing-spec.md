@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 2 — integrates external review findings: decomposition validation, Path A coverage semantics, Integration Reference confidence, Config Assistant handoff contract, feedback loop)
+> **Last updated:** 2026-04-17 (revision 3 — closes 3 implementation blockers: reassign_task contract, trigger predicate schema alignment, capability map lifecycle; adds 4 improvements: runtime signal augmentation, taxonomy governance, Config Assistant loop guard, user satisfaction signal)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -46,7 +46,7 @@ More broadly, the same blindness applies every time a user asks for anything tha
 
 1. **Capability awareness** — The Orchestrator can determine at runtime what integrations, skills, and agents are available, both at the platform level (what CAN we do) and at the org level (what IS configured).
 2. **Intelligent routing** — Every inbound task is routed into one of the four paths based on real capability data, not static keyword matching.
-3. **Config Assistant as first-class handoff target** — The Orchestrator hands tasks to the Configuration Assistant through the existing `spawn_sub_agents` pathway whenever the request is configurable but not yet configured.
+3. **Config Assistant as first-class handoff target** — The Orchestrator hands tasks to the Configuration Assistant through the existing `reassign_task` primitive whenever the request is configurable but not yet configured.
 4. **Product telemetry from user intent** — When the Orchestrator sees the platform can't fulfil a request, or sees a configurable pattern that looks broadly useful, it writes a structured feature request so the Synthetos team gets the signal.
 5. **Integration-agnostic by design** — Nothing in the implementation is Gmail-specific. The same decision tree, skills, and doc structure apply to every integration now and in the future.
 6. **Discoverable for future agents** — Any agent, not just the Orchestrator, can call the capability discovery skills. This becomes a platform primitive.
@@ -82,8 +82,8 @@ Every task the Orchestrator picks up is classified into exactly one of these pat
 
 | Path | Name | Trigger condition | Outcome |
 |---|---|---|---|
-| **A** | Already configured | The org or subaccount has a linked agent whose skill set covers the required capabilities | Orchestrator routes the task directly to that agent via `spawn_sub_agents` (existing behaviour, but now driven by capability match rather than keyword match) |
-| **B** | Configurable — narrow pattern | The platform supports every required capability, but the current org has not configured it. The request pattern looks client-specific (one client's data, one integration, one workflow) | Orchestrator hands off to the Configuration Assistant via `spawn_sub_agents`, passing the task as context. Config Assistant runs its own plan-approve-execute flow. No feature request filed. |
+| **A** | Already configured | The org or subaccount has a linked agent whose skill set covers the required capabilities | Orchestrator routes the task directly to that agent via `reassign_task` — reassigns the source task with a structured handoff context |
+| **B** | Configurable — narrow pattern | The platform supports every required capability, but the current org has not configured it. The request pattern looks client-specific (one client's data, one integration, one workflow) | Orchestrator reassigns the task to the Configuration Assistant via `reassign_task`, passing classification context in `handoff_context`. Config Assistant runs its own plan-approve-execute flow. No feature request filed. |
 | **C** | Configurable — broad pattern | Same as B, but the request pattern looks broadly useful (generic workflow shape, no client-specific data, reusable across orgs) | Same handoff as B, _plus_ a `feature_requests` row is written with `category = 'system_promotion_candidate'` so the Synthetos team can consider promoting the pattern to a system-level agent or skill. |
 | **D** | Unsupported | At least one required capability is not available in the platform (no OAuth provider, no MCP server, no skill) | Orchestrator posts a structured task comment and chat message explaining the gap, writes a `feature_requests` row with `category = 'new_capability'`, and closes the task with status `blocked_on_feature_request`. |
 
@@ -289,6 +289,15 @@ Every integration block carries an implicit confidence level derived from its me
 
 `list_platform_capabilities` (§4.2) returns the confidence level per integration in its output, so downstream skills (`check_capability_gap`) can reason about it without re-deriving.
 
+#### Runtime signal augmentation
+
+The Integration Reference alone is a static picture. At runtime, the Orchestrator augments it with two signals to reduce false negatives and false positives:
+
+1. **Active connections and their scopes** (`list_connections`, §4.1). An integration marked `status: partial` in the reference may in practice be fully sufficient if the user has connected it with the right OAuth scopes. The Orchestrator checks: if the live connection grants all scopes listed in `required_scopes` for the relevant capability, that capability is treated as `high` confidence regardless of the reference's `status` field. If the scopes don't fully match, the reference confidence is used.
+2. **Agent execution history** (near-term, post-P5). Once `routing_outcomes` data exists (§9.5.2), a short lookup checks whether a given `(integration_slug, capability_slug)` pair has been successfully executed in this org recently. A recent success upgrades an `unknown` or `stale` reference entry to `high` for that org. This is the lightweight "runtime truth > doc truth" signal without building a full capability graph.
+
+These augmentations are applied inside `check_capability_gap` (§5.1) and recorded in the `per_capability[].confidence` field so the decision record shows when runtime data overrode the reference.
+
 If the entire reference fails to parse (file missing, YAML malformed, schema version incompatible), the Orchestrator does **not** default to Path D for every task. Instead:
 
 1. A synthetic feature request is filed with `category: 'infrastructure_alert'` (a new category added to the `feature_requests` enum — see §5.2 update) so the Synthetos team is notified immediately.
@@ -324,6 +333,24 @@ capability_taxonomy:
 The `aliases` list is what the normalisation step (§2) uses to canonicalise LLM-produced slugs. A new integration introducing a new capability kind must extend the taxonomy in the same PR, not in a follow-up. The taxonomy is a small file; the discipline is the point.
 
 Adding or renaming a capability slug is a schema-level change and bumps `schema_version` in the meta block, same as any other breaking change to the reference.
+
+#### Taxonomy governance — naming conventions and review gate
+
+Without explicit rules, the taxonomy grows inconsistently: `read_email` vs `inbox_read` vs `email_list`, overlapping capabilities, alias lists that duplicate rather than canonicalise. The review prevents this.
+
+**Naming conventions (enforced by the static gate):**
+
+- **Read capabilities:** `<resource>_read` or `<resource>_list` — e.g. `inbox_read`, `contact_list`, `deal_list`. Never `read_<resource>` or `get_<resource>`.
+- **Write capabilities:** `<verb>_<resource>` — e.g. `modify_labels`, `create_contact`, `send_email`. Never `<resource>_<verb>`.
+- **Skills:** `<verb>_<noun>` matching the skill's own slug exactly — e.g. `classify_email`, `compute_health_score`.
+- **Primitives:** lowercase compound nouns — e.g. `scheduled_run`, `webhook_receiver`, `task_board`.
+- No abbreviations except widely-recognised ones (e.g. `mcp` is fine, `cls` for `classify` is not).
+
+**Convention enforcement:** The `verify-integration-reference.ts` static gate (§3.5) adds a naming-convention check. Any slug in the taxonomy that violates a pattern fails the gate. New integrations added without complying with the convention will not merge.
+
+**Capability overlap check:** Two taxonomy entries are considered overlapping if more than 30% of their alias lists share a term. The static gate emits a warning (not a failure) when overlapping pairs are detected, prompting the author to consolidate. Overlap is a warning rather than a hard gate because some overlap is legitimate (e.g. `inbox_read` and `email_read` may both be needed for different provider shapes) — the human makes the call.
+
+**Review gate for new taxonomy entries:** Any PR that adds a new capability slug to the taxonomy (beyond adding an alias to an existing slug) requires a Synthetos team review comment acknowledging the new entry. This is enforced by a CODEOWNERS rule on `docs/integration-reference.md`. The intent is to keep the taxonomy deliberately small — capability explosion via careless growth is the failure mode.
 
 ### 3.8 What the doc is NOT
 
@@ -445,7 +472,47 @@ All four are registered in `server/config/actionRegistry.ts`, have handler imple
 
 **Normalisation helper:** The skill also exposes a companion pure function `normalize_capability_slugs(input, taxonomy)` (not a separately-registered skill — a utility imported by `check_capability_gap` and by the Orchestrator's decomposition pipeline). Given a list of draft `{kind, slug}` pairs and the taxonomy, it returns each pair with a canonical slug plus a `normalisation_status: 'canonical' | 'aliased' | 'unresolved'`. Unresolved slugs are preserved as-is so the caller can handle them explicitly (the Orchestrator re-prompts the LLM; `check_capability_gap` marks coverage as unknown).
 
-### 4.3 Reused existing skills
+### 4.3 Agent capability map — lifecycle
+
+The **agent capability map** (referenced in §2 for Path A matching) is a derived data structure, not a new table. It is computed from existing state — an agent's linked skills plus the Integration Reference — and cached to avoid re-derivation on every Orchestrator run.
+
+#### Where it lives
+
+The capability map is stored as a JSON column `capabilityMap` on the `subaccountAgents` table (the per-subaccount agent link table). It is a derived column: the application computes and writes it; queries read it. This follows the existing pattern of denormalising computed metadata into agent-link records.
+
+Alternatively (architect to confirm): a separate `agentCapabilityCache` table keyed on `subaccountAgentId` avoids touching the `subaccountAgents` schema and makes invalidation explicit. Both approaches work; the spec prefers the derived-column pattern for simplicity.
+
+#### When it is computed
+
+The capability map is invalidated and recomputed whenever:
+
+1. **Skills are added or removed from an agent link.** The skill-update pathway (wherever `subaccountAgents.skillIds` or equivalent is mutated) triggers a synchronous recomputation before the response is returned. This keeps the map fresh for the next Orchestrator run.
+2. **The Integration Reference is updated (at startup / TTL expiry).** Since the map derives from the reference (via `skills_enabled` entries), a reference reload may change what capabilities a given skill contributes. A background job re-derives the maps for all agents whose linked skills appear in updated reference entries. This runs async post-deploy, not on every request.
+3. **An agent is first linked to a subaccount.** The linking step computes the initial map.
+
+#### What it contains
+
+The map mirrors the `agent_capability_map` shape from §2:
+
+```typescript
+{
+  agentId: string;
+  computedAt: string;             // ISO timestamp of last computation
+  integrations: string[];         // integration slugs, derived from skills' Integration Reference entries
+  read_capabilities: string[];
+  write_capabilities: string[];
+  skills: string[];               // skill slugs explicitly active on this agent
+  primitives: string[];           // e.g. 'scheduled_run' if the agent has a schedule configured
+}
+```
+
+#### How it is retrieved
+
+The `check_capability_gap` skill (§5.1) retrieves capability maps for candidate agents via `config_list_links` (already returns linked-agent metadata) extended to include the `capabilityMap` field. No new query or skill needed — it is additional data in an existing response.
+
+**If `capabilityMap` is null** (e.g. the column doesn't exist yet for a legacy agent link): the skill treats that agent as having zero capabilities — no false positives for Path A, the task falls through to Path B/D. A background recomputation job ensures null maps converge to populated within minutes of the feature deploying.
+
+### 4.4 Reused existing skills
 
 The Orchestrator's decision tree also depends on skills that already exist in the codebase:
 
@@ -453,11 +520,12 @@ The Orchestrator's decision tree also depends on skills that already exist in th
 - `config_list_links` — subaccount-level agent links. Unchanged; already registered.
 - `config_list_system_skills` — catalogue of published system skills. Unchanged.
 - `config_list_org_skills` — org-specific skill list. Unchanged.
-- `spawn_sub_agents` — the handoff primitive the Orchestrator uses to route to target agents. Unchanged at the contract level; the Orchestrator's usage pattern changes (it now targets the Configuration Assistant for Paths B and C).
+- `reassign_task` — the handoff primitive the Orchestrator uses to route a task to a target agent (`{task_id, assigned_agent_id, handoff_context}`). Used for Paths A, B, and C. Unchanged at the contract level — the new behaviour is in what the Orchestrator writes into `handoff_context` and which `assigned_agent_id` it selects.
+- `spawn_sub_agents` — **not used for routing**. Retained in the Orchestrator's toolset for genuine parallel multi-track work within a single run (e.g. simultaneously researching two independent integration options). Requires subaccount context and minimum 2 sub-tasks; the Orchestrator must not call it for single-target handoffs.
 
 Together with `list_connections` and `list_platform_capabilities`, these give the Orchestrator a complete picture: _platform catalogue_ (what can we do), _org configuration_ (what is linked), _current connections_ (what is authenticated), and the handoff primitive (how to act).
 
-### 4.4 Skill registration and permissions
+### 4.5 Skill registration and permissions
 
 All four new skills (`list_connections`, `list_platform_capabilities`, `check_capability_gap`, `request_feature`) are registered in the action registry with:
 
@@ -468,7 +536,7 @@ All four new skills (`list_connections`, `list_platform_capabilities`, `check_ca
 
 The permission definitions are additive — no existing roles lose or change permissions. System-admin and org-admin roles get all four new permissions. Other roles get none, unless an org explicitly grants them through a custom permission set.
 
-### 4.5 Skill markdown files
+### 4.6 Skill markdown files
 
 Each new skill gets its own markdown file in `server/skills/` following the existing convention:
 
@@ -693,11 +761,11 @@ The Orchestrator's system prompt is restructured into five sections (existing wo
 2. **Decision procedure** — new. Explicitly describes the four-path model from §2 and the decomposition → availability-check → classification flow.
 3. **Capability discovery toolbox** — new. Lists the skills the Orchestrator can use (`list_connections`, `list_platform_capabilities`, `check_capability_gap`, `config_list_agents`, `config_list_links`) and when to call each.
 4. **Narrow-vs-broad pattern heuristics** — new. Prompt-level guidance for classifying a configurable request as Path B or Path C (see §6.3).
-5. **Handoff mechanics** — rewritten. Describes how to hand off to the Configuration Assistant via `spawn_sub_agents` for Paths B/C, how to route to an existing linked agent for Path A, and how to file a feature request and close the task for Path D.
+5. **Handoff mechanics** — rewritten. Describes how to hand off via `reassign_task` for Paths A/B/C (single-agent target), how to file a feature request and close the task for Path D, and when `spawn_sub_agents` is legitimately in scope (genuine parallel work only).
 
 The old keyword-routing table is **not deleted** — it is moved into a dormant "legacy fallback" prompt section that the Orchestrator uses only when `list_platform_capabilities` returns `reference_state: 'unavailable'` (§3.6, §4.2). Under normal operation the fallback is inert. When the reference is broken, the Orchestrator routes using keyword matching and the `orchestrator_team_roster` memory block as before, tags the decision record with `path: 'legacy_fallback'`, and files an `infrastructure_alert` feature request so the degraded state surfaces immediately.
 
-The `orchestrator_team_roster` memory block is repurposed beyond legacy fallback: under normal operation it becomes a cache of recent agent-routing successes — populated automatically when `spawn_sub_agents` succeeds against a given agent for a given task shape (§9.5 Feedback loop). Treated as a hint, not authority.
+The `orchestrator_team_roster` memory block is repurposed beyond legacy fallback: under normal operation it becomes a cache of recent agent-routing successes — populated automatically when `reassign_task` succeeds for a given `(task_shape, assigned_agent_id)` pair (§9.5 Feedback loop). Treated as a hint, not authority.
 
 The Orchestrator's prompt file lives at `server/config/configAssistantPrompts/` alongside other system-agent prompts. (Actual filename TBD during implementation — the architect can propose; the current file should be discoverable via a grep for the Orchestrator's existing prompt text.)
 
@@ -782,35 +850,37 @@ This record serves three purposes: audit (any support escalation can replay the 
 
 The decision record is written to the existing agent run transcript table (`agentRunMessages` or equivalent), flagged with a `messageType: 'routing_decision'` so it can be filtered out of user-facing run logs while remaining visible in system-admin views.
 
-### 6.6 Config Assistant handoff via `spawn_sub_agents`
+### 6.6 Handoff via `reassign_task`
 
-The Orchestrator hands off to the Configuration Assistant using the existing `spawn_sub_agents` skill. No new primitive.
+The Orchestrator routes all three active paths (A, B, C) using the existing `reassign_task` skill: `{task_id, assigned_agent_id, handoff_context}`. This is the correct primitive — it reassigns the source task to a target agent with structured context, no new infrastructure required.
+
+**`spawn_sub_agents` is explicitly NOT used for routing.** That skill requires subaccount context (the Orchestrator runs at org scope) and a minimum of 2 parallel sub-tasks. Using it for single-target handoffs would fail the `requireSubaccountContext` guard and violate the intent of the skill. The Orchestrator may still call `spawn_sub_agents` for genuine parallel research work within a run, but never for the routing decision itself.
 
 **Mechanics:**
 
-1. Orchestrator resolves the Configuration Assistant's agent ID for the current org (the Configuration Assistant is a system-managed agent automatically present in every org per its spec).
-2. Orchestrator calls `spawn_sub_agents` with the Configuration Assistant as target, passing a structured payload:
+1. Orchestrator resolves the target agent ID: the winning candidate agent for Path A, or the Configuration Assistant's org-scoped agent ID for Paths B/C.
+2. Orchestrator calls `reassign_task`:
 
 ```typescript
 {
-  target_agent_id: string;                    // Configuration Assistant for this org
-  handoff_reason: 'capability_routing_paths_B_or_C';
-  context: {
-    user_intent: string;                      // verbatim task text
-    source_task_id: string;
-    required_capabilities: Array<{ kind: string; slug: string }>;
-    missing_for_configurable: string[];       // what the user would need to set up
-    orchestrator_classification: 'B' | 'C';
-    feature_request_id: string | null;        // set when path is C
-    originating_user_id: string;
-  };
+  task_id: string;                            // the source task created by the user
+  assigned_agent_id: string;                  // Path A: winning linked agent; Paths B/C: Config Assistant
+  handoff_context: string;                    // structured JSON serialised to string per reassign_task contract:
+  // {
+  //   handoff_reason: 'orchestrator_path_A' | 'orchestrator_path_B' | 'orchestrator_path_C';
+  //   user_intent: string;
+  //   required_capabilities: Array<{ kind: string; slug: string }>;
+  //   missing_for_configurable?: string[];   // Paths B/C only
+  //   orchestrator_classification: 'A' | 'B' | 'C';
+  //   feature_request_id?: string;           // Path C only
+  //   decision_record_id: string;
+  //   originating_user_id: string;
+  // }
 }
 ```
 
-3. The Configuration Assistant runs its standard plan-approve-execute loop against this context. It does not need major modifications — the context above fits within its existing input shape (user request + org/subaccount resolution). It does, however, need to conform to an **explicit output contract** (§6.6.1) so the Orchestrator can verify completion deterministically rather than trusting a free-form response.
-4. When the Configuration Assistant finishes, the Orchestrator reads its structured output, verifies it against the original required-capability list, updates the source task's status accordingly (e.g. `configured`, `awaiting_user_approval`, `configuration_failed`), and — if the Configuration Assistant reports partial completion — decides whether to re-route (e.g. file a feature request for any capabilities the Configuration Assistant reported as out of reach).
-
-**Why `spawn_sub_agents` over a new primitive:** `spawn_sub_agents` already handles cross-agent context passing, run attribution, and result reporting. Adding a dedicated `handoff_to_config_assistant` skill would duplicate that machinery for a single caller. The existing primitive's extensibility (via the `context` field) is enough — the output contract below layers on top without changing the primitive itself.
+3. The target agent receives the reassigned task. For Path A, the linked agent runs normally — the `handoff_context` is advisory context. For Paths B/C, the Configuration Assistant reads the `handoff_context` to seed its plan-approve-execute loop (§6.7). The Configuration Assistant must conform to an **explicit output contract** (§6.6.1) so the Orchestrator can verify completion deterministically.
+4. When the Configuration Assistant finishes (Paths B/C), the Orchestrator's post-handoff verification fires (§6.6.2). For Path A, post-run verification is handled by the existing task completion flow — no special Orchestrator involvement.
 
 #### 6.6.1 Configuration Assistant output contract
 
@@ -853,6 +923,19 @@ This closes the "non-deterministic completion" failure mode: the Configuration A
 
 **`capabilities_unsatisfied` with `reason: 'needs_feature_request'`:** if the Configuration Assistant discovers mid-run that a capability the Orchestrator initially classified as `configurable` is actually not supported (e.g. an integration ships but a specific scope isn't available yet), it marks that capability with this reason. The Orchestrator then files a new-capability feature request for that specific slug, rather than leaving the user stranded.
 
+#### 6.6.3 Configuration attempt guard (loop prevention)
+
+An edge case: Orchestrator routes Path B → Config Assistant partially completes → Orchestrator post-handoff verification sees `verdict: configurable` → could re-route to Config Assistant again → loop.
+
+**Guard:** The tasks schema has a `handoffDepth` column that increments on every `reassign_task` call. The Orchestrator checks this field before routing:
+
+- If `task.handoffDepth >= 1` and `task.assignedAgentId` previously pointed to the Configuration Assistant (visible in `handoffContext`): the Orchestrator does **not** re-route. Instead it posts a task comment summarising what the Configuration Assistant completed and what remains, sets the status to `configuration_partial`, and flags the task for human attention.
+- If `task.handoffDepth === 0` (fresh task): normal routing proceeds.
+
+This uses the existing `handoffDepth` field rather than adding a new column. The threshold is `1` because the Orchestrator's first reassignment sets depth to `1`; any subsequent Orchestrator routing attempt on the same task means a previous Configuration Assistant run already ran.
+
+A `max_configuration_attempts_per_task` system setting (default `1`) makes the threshold configurable without code changes, for orgs that want to allow multiple sequential configuration passes (e.g. a complex multi-integration setup that genuinely needs two rounds).
+
 ### 6.7 Config Assistant changes
 
 The Configuration Assistant itself needs two small updates to cooperate with the new flow:
@@ -874,30 +957,43 @@ Close the end-to-end loop: a user writes a task on the task board describing wha
 
 A new entry in the existing `agent_triggers` schema (`server/db/schema/agentTriggers.ts`) with:
 
-- `triggerType: 'task_created'`
-- `targetAgentRole: 'orchestrator'`
-- `scope: 'org'` — the Orchestrator is an org-level system agent; triggers fire once per org per matching task.
-- `matchCriteria`: a JSON predicate describing which tasks should fire the trigger (§7.3).
-- `cooldownSeconds`: default 0 (fire on every matching task). Configurable per-org to throttle noise.
+- `eventType: 'org_task_created'` — the correct org-level event type per the schema enum (`'task_created' | 'task_moved' | 'agent_completed' | 'org_task_created' | 'org_task_moved' | 'org_agent_completed'`). The `org_task_created` variant fires for tasks created at org scope, matching the Orchestrator's org-level execution scope.
+- `subaccountAgentId`: points to the Orchestrator's linked agent record for this org.
+- `eventFilter`: a JSON object whose keys must all match the event payload for the trigger to fire (§7.3). This is the schema's built-in filter mechanism — not a predicate function.
+- `cooldownSeconds`: default `0` (fire on every matching task). Configurable per-org to throttle noise.
+- `isActive: true`.
 
-On `tasks.insert` that matches the predicate, a trigger event is enqueued onto the existing job queue (`pg-boss`), and the worker spawns an Orchestrator run with the task ID as primary input.
+On `tasks.insert` that matches the event filter, a trigger event is enqueued onto the existing job queue (`pg-boss`), and the worker spawns an Orchestrator run with the task ID as primary input.
 
 The new-agent-run machinery is already in place — the only additions are:
 
 - A new job handler (`server/jobs/orchestratorFromTask.ts`) that translates a trigger event into an Orchestrator run invocation.
 - A registration entry in `server/jobs/index.ts`.
-- A new trigger row factory (`server/services/agentTriggerService.ts` or equivalent — name TBD during implementation) that creates the default `task_created → orchestrator` trigger for every org on org creation. Backfill migration creates it for existing orgs.
+- A trigger row factory that creates the default trigger for every org on org creation. Backfill migration creates it for existing orgs.
 
 ### 7.3 Match predicate
 
-Not every task should fire the Orchestrator. The default predicate:
+Not every task should fire the Orchestrator. The `eventFilter` JSON object (which must fully match the event payload):
 
-- `task.status === 'open'` at insert time
-- `task.assigned_to_agent_id IS NULL` (user didn't pre-route to a specific agent)
-- `task.description IS NOT NULL` and non-empty (at least one sentence of description to classify)
-- `task.source !== 'agent'` (don't recurse on tasks the Orchestrator created itself)
+```json
+{
+  "status": "inbox",
+  "assignedAgentId": null,
+  "isSubTask": false
+}
+```
 
-Tasks created by direct agent-to-agent handoff, subtasks, and admin-created-for-internal-tracking tasks do not fire the trigger. The predicate is expressed as a JSON structure in `matchCriteria` so it can be tuned per-org without code changes.
+**Field-by-field rationale:**
+
+- `status: 'inbox'` — the actual schema default (not `'open'`). Tasks arrive in `inbox` before any routing. The Orchestrator acts on freshly-created tasks only.
+- `assignedAgentId: null` — user did not pre-route to a specific agent. Pre-assigned tasks bypass the Orchestrator.
+- `isSubTask: false` — sub-tasks (created by `spawn_sub_agents`) must not recurse back to the Orchestrator.
+
+**No `source` field.** The tasks schema has no `source` column. Agent-created tasks are excluded by `createdByAgentId IS NOT NULL` — however, `eventFilter` only supports equality matching, not IS NOT NULL checks. The job handler therefore performs a second guard: if the event payload contains a non-null `createdByAgentId`, the handler drops the event without spawning a run. This guard lives in `orchestratorFromTask.ts`, not in the `eventFilter` itself.
+
+**`description` check.** The `eventFilter` cannot test for non-null/non-empty `description` (JSON equality matching only). The job handler adds a second guard: if `task.description` is null or shorter than 10 characters, the handler skips the run and updates the task status to `routing_failed` with a short message explaining that a task description is needed for routing. This surfaces clearly to the user.
+
+Tasks created by reassignment (from other agents via `reassign_task`) are excluded by the `assignedAgentId: null` filter — by the time the reassignment creates or updates the task, `assignedAgentId` is set.
 
 ### 7.4 Idempotency
 
@@ -1094,11 +1190,17 @@ These outcomes are the ground-truth signal for routing quality. A new `routing_o
   path_taken: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed';
   outcome: 'success' | 'partial' | 'failed' | 'user_intervened' | 'abandoned';
   user_intervention_detail: string | null;
+  user_modified_after_completion: boolean;   // task was edited by a human after status reached 'configured' or 'routed'
+  user_modified_fields: string[] | null;     // which fields changed (title, description, assignedAgentId, status)
   time_to_outcome_ms: number;
   downstream_errors: Array<{ stage: string; error: string }>;
   captured_at: timestamp;
 }
 ```
+
+`user_modified_after_completion` is the user satisfaction proxy. A task that completes but whose description or title is immediately edited suggests the user got the wrong result. A task whose `assignedAgentId` is manually changed after the Orchestrator routed it suggests a wrong-path decision. These signals are distinct from `user_intervened` (which fires when the user acts _during_ the routing flow) — this one fires _after_ the Orchestrator considers itself done.
+
+The `task_activities` table (existing audit log) is the source: the handler that populates `routing_outcomes` subscribes to post-completion mutations and sets `user_modified_after_completion: true` on the corresponding outcome row. No real-time hook required — a daily background reconciliation job is sufficient for the signal's purpose (routing-quality trending, not real-time alerting).
 
 Two feedback mechanisms use this data:
 
@@ -1127,7 +1229,7 @@ These are the items that need a concrete decision during the architect pass befo
 1. **Core integration subset finalisation (§3.4).** The proposed 10-entry starting list needs cross-referencing against what's actually wired vs partially wired in the codebase. Gmail in particular has known gaps (`read_inbox` is a stub per the earlier audit; `modify_labels` is pending per the canonical data platform P4 addition). The architect should propose the canonical starting list.
 2. **Orchestrator prompt file path.** The current Orchestrator prompt file's exact location under `server/config/configAssistantPrompts/` (or wherever system-agent prompts live) needs to be identified and named so the rewrite PR has a concrete target.
 3. **Task status enum location.** Where the four new task status values land — enum table, shared constants file, server-only enum — is a codebase convention call. The architect should confirm the existing pattern.
-4. **`spawn_sub_agents` context field extensibility.** The spec assumes the existing primitive's context payload can be extended with the handoff-reason and classification fields without a schema change. If it can't, a small addition to `spawn_sub_agents`'s input shape is needed. Architect to confirm.
+4. **`reassign_task` `handoff_context` field.** The spec serialises the classification payload as JSON in the `handoff_context` string field (per the skill's existing contract). Confirm with the architect that the Configuration Assistant's plan-approve-execute loop reads and parses `handoff_context` from its incoming task — this is how it discovers it was Orchestrator-originated vs. user-originated.
 5. **Decision record persistence location.** §6.4 assumes `agentRunMessages` or equivalent. Architect to confirm the right table and any indexes needed for future routing-distribution queries (§9.5).
 
 ### 10.2 Deferred items
@@ -1170,7 +1272,7 @@ For reference, the complete sequence for the Gmail inbox-labelling example (assu
 5. `check_capability_gap` internally calls `list_platform_capabilities`, `list_connections`, `config_list_agents`, `config_list_links`. Returns `verdict: 'configurable'`, with `missing_for_configurable: ['gmail:oauth']`.
 6. Orchestrator's prompt applies the narrow-vs-broad heuristic. Pattern matches `inbox_triage` in the Gmail reference entry's `broadly_useful_patterns`. Classified as Path C.
 7. Orchestrator calls `request_feature` with `category: 'system_promotion_candidate'`. Row written; Slack + email fired to Synthetos support.
-8. Orchestrator calls `spawn_sub_agents` targeting the Configuration Assistant with the structured context payload.
+8. Orchestrator calls `reassign_task` targeting the Configuration Assistant with the classification payload serialised as `handoff_context`.
 9. Orchestrator writes a decision record into the run transcript.
 10. Orchestrator posts the Path C task comment and chat message. Task status → `awaiting_configuration`.
 11. Configuration Assistant picks up the handoff, runs its plan-approve-execute loop, walks the user through Gmail OAuth with the `gmail.modify` scope, creates the labelled-inbox agent, links it, schedules it.
