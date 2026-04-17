@@ -82,6 +82,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Playbook templates | `playbookTemplates.ts` |
 | Playbook studio | `playbookStudio.ts` |
 | Activity | `activity.ts` |
+| Pulse | `pulse.ts` |
 | Skill studio | `skillStudio.ts` |
 | Client Pulse reports | `clientpulseReports.ts` |
 | GoHighLevel (GHL) OAuth | `ghl.ts` |
@@ -433,7 +434,28 @@ The view/resolve permission split is intentional — read-only stakeholders can 
 
 **Frontend:** `client/src/pages/AdminHealthFindingsPage.tsx` lists findings grouped by severity. The "Mark resolved" button is hidden for users without `org.health_audit.resolve` (honoring `__system_admin__` / `__org_admin__` sentinels from `/api/my-permissions`). `client/src/components/HealthAuditWidget.tsx` renders a compact summary on the dashboard.
 
-> **Resolved:** `AdminHealthFindingsPage` now has a sidebar nav entry under the Organisation section (gated by `org.health_audit.view`). Health findings also surface in the Activity page (`/admin/activity`) as `health_finding` activity type.
+> **Resolved:** `AdminHealthFindingsPage` now has a sidebar nav entry under the Organisation section (gated by `org.health_audit.view`). Health findings also surface in the Pulse History tab as `health_finding` activity type.
+
+### Pulse — Supervision Home
+
+Replaces the legacy dashboard, inbox, and activity pages with a single operational command centre. Migration `0160`.
+
+**Lane classifier:** `server/services/pulseLaneClassifier.ts` (pure). Deterministic waterfall: `irreversible > cross_subaccount > cost_per_action > cost_per_run → major | client | internal`. Fully unit-tested (`pulseLaneClassifierPure.test.ts`, 26 tests).
+
+**Config:** `server/config/pulseThresholds.ts` (defaults), `server/services/pulseConfigService.ts` (reads org overrides from `organisations.pulseMajorThreshold` jsonb column).
+
+**Service:** `server/services/pulseService.ts` — `getAttention()` fans out to review items, failed runs, health findings, and tasks via `Promise.allSettled` with 2s timeout. Returns `{ lanes, counts, warnings[], isPartial }`.
+
+**Routes:** `server/routes/pulse.ts`
+- `GET /api/pulse/attention` — org-scoped attention feed (`org.review.view`)
+- `GET /api/subaccounts/:id/pulse/attention` — subaccount-scoped (`subaccount.review.view`)
+- `GET /api/pulse/counts` — nav badge counts (`org.review.view`)
+- `GET /api/subaccounts/:id/pulse/counts` — subaccount nav badge (`subaccount.review.view`)
+- `GET /api/pulse/item/:kind/:id` — single-item lookup for WebSocket follow-up
+
+**Approval flow:** `server/routes/reviewItems.ts` — approve handler checks 409 `ALREADY_RESOLVED` guard, checks 412 `MAJOR_ACK_REQUIRED` for major-lane items, bulk-approve returns `{ approved, blocked, alreadyResolved }`.
+
+**Frontend:** `client/src/pages/PulsePage.tsx` with Attention/History tabs. Components at `client/src/components/pulse/` — `Lane.tsx`, `Card.tsx`, `ActionBar.tsx`, `MajorApprovalModal.tsx`, `HistoryTab.tsx`. Hook: `client/src/hooks/usePulseAttention.ts` (REST fetch + WebSocket merge + optimistic removal).
 
 ---
 

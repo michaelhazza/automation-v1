@@ -20,6 +20,8 @@ interface OrgData {
   createdAt: string;
   brandColor: string | null;
   requireAgentApproval: boolean;
+  pulseMajorThreshold: { perActionMinor: number; perRunMinor: number } | null;
+  defaultCurrencyCode: string;
 }
 
 type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'integrations' | 'general' | 'permissions';
@@ -115,6 +117,13 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
   const [savingGovernance, setSavingGovernance] = useState(false);
   const [governanceMsg, setGovernanceMsg] = useState('');
 
+  // Pulse threshold state (display values in major units, e.g. dollars)
+  const [perActionMajor, setPerActionMajor] = useState('');
+  const [perRunMajor, setPerRunMajor] = useState('');
+  const [currencyCode, setCurrencyCode] = useState('AUD');
+  const [savingPulse, setSavingPulse] = useState(false);
+  const [pulseMsg, setPulseMsg] = useState('');
+
   useEffect(() => {
     setLoading(true);
     api.get(`/api/organisations/${orgId}`)
@@ -126,6 +135,10 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
         setEditStatus(data.status);
         setBrandColor(data.brandColor ?? '');
         setRequireAgentApproval(data.requireAgentApproval ?? false);
+        const t = data.pulseMajorThreshold;
+        setPerActionMajor(t ? String(t.perActionMinor / 100) : '50');
+        setPerRunMajor(t ? String(t.perRunMinor / 100) : '500');
+        setCurrencyCode(data.defaultCurrencyCode ?? 'AUD');
       })
       .catch((err) => console.error('[OrgSettings] Failed to load organisation:', err))
       .finally(() => setLoading(false));
@@ -211,6 +224,45 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
   };
 
   const governanceHasChanges = requireAgentApproval !== (org.requireAgentApproval ?? false);
+
+  const handleSavePulse = async () => {
+    const perAction = parseFloat(perActionMajor);
+    const perRun = parseFloat(perRunMajor);
+    if (isNaN(perAction) || perAction < 0 || isNaN(perRun) || perRun < 0) {
+      setPulseMsg('Thresholds must be non-negative numbers.');
+      return;
+    }
+    setSavingPulse(true);
+    setPulseMsg('');
+    try {
+      const { data } = await api.patch(`/api/organisations/${orgId}`, {
+        pulseMajorThreshold: {
+          perActionMinor: Math.round(perAction * 100),
+          perRunMinor: Math.round(perRun * 100),
+        },
+        defaultCurrencyCode: currencyCode,
+      });
+      setOrg(data);
+      const t = data.pulseMajorThreshold;
+      setPerActionMajor(t ? String(t.perActionMinor / 100) : '50');
+      setPerRunMajor(t ? String(t.perRunMinor / 100) : '500');
+      setCurrencyCode(data.defaultCurrencyCode ?? 'AUD');
+      setPulseMsg('Pulse thresholds saved.');
+      setTimeout(() => setPulseMsg(''), 3000);
+    } catch {
+      setPulseMsg('Failed to save.');
+    } finally {
+      setSavingPulse(false);
+    }
+  };
+
+  const pulseHasChanges = (() => {
+    const t = org.pulseMajorThreshold;
+    const origAction = t ? String(t.perActionMinor / 100) : '50';
+    const origRun = t ? String(t.perRunMinor / 100) : '500';
+    const origCurrency = org.defaultCurrencyCode ?? 'AUD';
+    return perActionMajor !== origAction || perRunMajor !== origRun || currencyCode !== origCurrency;
+  })();
 
   return (
     <div className="flex flex-col gap-6 max-w-[600px]">
@@ -339,6 +391,66 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
             {governanceMsg && (
               <span className={`text-[13px] font-medium ${governanceMsg.includes('Failed') ? 'text-red-500' : 'text-emerald-600'}`}>
                 {governanceMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Pulse Thresholds */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <h2 className="text-[16px] font-bold text-slate-800 m-0 mb-1">Pulse Thresholds</h2>
+        <p className="text-[13px] text-slate-500 m-0 mb-4">
+          Actions that exceed these cost thresholds are routed to the Major lane in Pulse and require explicit acknowledgment before approval.
+        </p>
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">Per-action threshold ({currencyCode})</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={perActionMajor}
+                onChange={(e) => setPerActionMajor(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">Per-run threshold ({currencyCode})</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={perRunMajor}
+                onChange={(e) => setPerRunMajor(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">Currency</label>
+            <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className={`${inputCls} max-w-[180px]`}>
+              <option value="AUD">AUD</option>
+              <option value="USD">USD</option>
+              <option value="GBP">GBP</option>
+              <option value="EUR">EUR</option>
+              <option value="NZD">NZD</option>
+              <option value="CAD">CAD</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={handleSavePulse}
+              disabled={!pulseHasChanges || savingPulse}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[14px] font-semibold rounded-lg transition-colors"
+            >
+              {savingPulse ? 'Saving...' : 'Save Thresholds'}
+            </button>
+            {pulseMsg && (
+              <span className={`text-[13px] font-medium ${pulseMsg.includes('Failed') ? 'text-red-500' : 'text-emerald-600'}`}>
+                {pulseMsg}
               </span>
             )}
           </div>
