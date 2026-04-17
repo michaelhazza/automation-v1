@@ -422,9 +422,9 @@ export const mcpClientManager = {
       );
       durationMs = Date.now() - callStart;
 
-      // responseSizeBytes captured before truncation check so original size is always recorded
+      // responseSizeBytes: UTF-8 byte length captured before truncation so original size is always recorded
       const serialised = JSON.stringify(result);
-      responseSizeBytes = serialised.length;
+      responseSizeBytes = Buffer.byteLength(serialised, 'utf8');
       wasTruncated = serialised.length > MAX_MCP_RESPONSE_SIZE;
       status = 'success';
 

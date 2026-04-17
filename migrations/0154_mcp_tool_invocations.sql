@@ -43,3 +43,18 @@ CREATE INDEX IF NOT EXISTS mcp_tool_invocations_run_server_idx
 
 CREATE INDEX IF NOT EXISTS mcp_tool_invocations_server_slug_idx
   ON mcp_tool_invocations (organisation_id, server_slug, billing_month);
+
+-- Enforce status/failure_reason coupling at the DB level:
+--   success rows must have failure_reason = NULL
+--   non-success rows must have failure_reason set
+ALTER TABLE mcp_tool_invocations ADD CONSTRAINT mcp_tool_invocations_failure_reason_chk
+  CHECK (
+    (status = 'success' AND failure_reason IS NULL)
+    OR
+    (status != 'success' AND failure_reason IS NOT NULL)
+  );
+
+-- Partial index for error/timeout analytics queries (WHERE status != 'success')
+CREATE INDEX IF NOT EXISTS mcp_tool_invocations_error_idx
+  ON mcp_tool_invocations (organisation_id, status, billing_month)
+  WHERE status != 'success';
