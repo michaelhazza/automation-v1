@@ -182,3 +182,8 @@ export * from './agentTestFixtures.js';
 
 // MCP Tool Invocations — cost attribution & observability ledger (migration 0154)
 export * from './mcpToolInvocations.js';
+
+// Orchestrator capability-aware routing (migration 0156) — see
+// docs/orchestrator-capability-routing-spec.md.
+export * from './featureRequests.js';
+export * from './routingOutcomes.js';

@@ -296,8 +296,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `docs/routines-response-dev-spec.md`
-**Active items:** Features 4 (capabilities.md positioning refresh) and 5 (this CLAUDE.md non-goals section) ship in the same commit as the spec itself; Features 1–3 (scheduled-runs calendar, inline Run Now test UX, n8n workflow import) are pending implementation in the order specified
+**In-flight spec:** none. `docs/orchestrator-capability-routing-spec.md` shipped P1–P5 on branch `claude/orchestrator-spec-doc-sEY3w` (migrations 0156–0159; Orchestrator system agent; four capability discovery skills; feature-request pipeline; task-trigger wiring). `docs/routines-response-dev-spec.md` Features 1–3 remain pending from the prior sprint.
+**Active items:** none in-flight for the Orchestrator spec. Follow-ups captured in its §10 Deferred items (task-update triggers, dedicated feature-request admin page, automatic dedupe clustering, cross-org routing analytics).
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -321,6 +321,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
+| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
+| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
 
 ---
 
