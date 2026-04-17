@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 3 — closes 3 implementation blockers: reassign_task contract, trigger predicate schema alignment, capability map lifecycle; adds 4 improvements: runtime signal augmentation, taxonomy governance, Config Assistant loop guard, user satisfaction signal)
+> **Last updated:** 2026-04-17 (revision 4 — spec consistency pass: stale spawn_sub_agents wording removed from success criteria, worked example, and §6.7; trigger name unified to org_task_created; capability map storage fork resolved to single contract; post-handoff verification trigger defined as org_agent_completed event; infrastructure_alert added to request_feature input type; schema field names aligned to camelCase throughout)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -66,7 +66,7 @@ The spec is a success if, once implemented, the Gmail inbox-labelling example (a
 
 - User creates a task in the task board describing the desired outcome.
 - Orchestrator picks up the task via its new trigger, reads the Integration Reference doc, queries current org configuration, classifies the request into one of the four paths.
-- For the configurable path: Orchestrator spawns the Configuration Assistant as a sub-agent with the task context; Config Assistant runs its own plan-approve-execute loop; the configured agent takes over.
+- For the configurable path: Orchestrator calls `reassign_task` to hand the source task to the Configuration Assistant with the classification payload in `handoff_context`; Config Assistant runs its own plan-approve-execute loop; the configured agent takes over.
 - For the unsupported path: Orchestrator posts a task comment and chat message explaining the gap, then writes a `feature_requests` row with full attribution.
 - For the system-promotion path: the configurable path fires and, simultaneously, a `feature_requests` row with `category = 'system_promotion_candidate'` is written.
 
@@ -162,7 +162,7 @@ Given task text _"I want my Gmail inbox labelled into LEADS, CLIENTS, JUNK, INVO
 2. **Platform check:** `list_platform_capabilities` returns that Gmail OAuth is wired, `inbox_read` is available via the Gmail adapter (per canonical data platform P4), `modify_labels` is available via the `modify_email_labels` skill (per the P4 addition agreed in the canonical spec), `classify_email` is an existing system skill, `scheduled_run` is a first-class primitive. All required capabilities are available at the platform level. Path is B, C, or D.
 3. **Org check:** `list_connections` returns no active Gmail OAuth connection for this org. `config_list_agents` shows no linked agent covers this shape. Not configured. Path is B or C.
 4. **Pattern judgement:** Orchestrator prompt applies the narrow-vs-broad heuristic (§6.3). The request matches a common shape ("inbox triage") with no client-specific data in the task text. Classified as C.
-5. **Route:** Orchestrator spawns the Configuration Assistant with the task as context _and_ writes a `feature_requests` row with `category = 'system_promotion_candidate'`, `summary = 'Inbox triage agent (Gmail)'`, `source_task_id = <task.id>`.
+5. **Route:** Orchestrator calls `reassign_task` to hand the source task to the Configuration Assistant (with the Path C classification payload in `handoff_context`) _and_ writes a `feature_requests` row with `category = 'system_promotion_candidate'`, `summary = 'Inbox triage agent (Gmail)'`, `source_task_id = <task.id>`.
 6. **Downstream:** Configuration Assistant runs its own plan-approve-execute flow, walks the user through Gmail OAuth, creates/links an agent with the right skills and schedule. Separately, the Synthetos team sees the system-promotion signal and decides whether to promote "inbox triage" to a system-level agent template.
 
 Contrast with a hypothetical _"please send a weekly summary of my Acme Corp Monday board via fax"_:
@@ -478,9 +478,9 @@ The **agent capability map** (referenced in §2 for Path A matching) is a derive
 
 #### Where it lives
 
-The capability map is stored as a JSON column `capabilityMap` on the `subaccountAgents` table (the per-subaccount agent link table). It is a derived column: the application computes and writes it; queries read it. This follows the existing pattern of denormalising computed metadata into agent-link records.
+The capability map is stored as a JSON column `capabilityMap` on the `subaccountAgents` table (the per-subaccount agent link table). This is a derived column: the application computes and writes it; queries read it. This follows the existing pattern of denormalising computed metadata into agent-link records and avoids a new table and join.
 
-Alternatively (architect to confirm): a separate `agentCapabilityCache` table keyed on `subaccountAgentId` avoids touching the `subaccountAgents` schema and makes invalidation explicit. Both approaches work; the spec prefers the derived-column pattern for simplicity.
+The architect must confirm one detail: whether `subaccountAgents` already has an open migration slot or whether this column lands in its own numbered migration. Everything else about the lifecycle is resolved by this spec.
 
 #### When it is computed
 
@@ -666,7 +666,7 @@ export const featureRequests = pgTable('feature_requests', {
 
 ```typescript
 {
-  category: 'new_capability' | 'system_promotion_candidate';
+  category: 'new_capability' | 'system_promotion_candidate' | 'infrastructure_alert';
   summary: string;                          // short title
   user_intent: string;                      // verbatim task text
   required_capabilities: Array<{ kind: string; slug: string }>;
@@ -940,10 +940,10 @@ A `max_configuration_attempts_per_task` system setting (default `1`) makes the t
 
 The Configuration Assistant itself needs two small updates to cooperate with the new flow:
 
-1. **Recognise orchestrator-originated context.** When invoked via `spawn_sub_agents` with `handoff_reason: 'capability_routing_paths_B_or_C'`, the Configuration Assistant should treat the `user_intent` as the starting point of its plan-approve-execute loop and back-reference the `source_task_id` in its own outputs.
-2. **Report back to the source task.** On completion (success or abandonment), the Configuration Assistant posts a summary comment on the source task so the user has a single place to follow the outcome. Implementation: one new skill call (`post_task_comment`) or extension of the existing completion hook — the architect to pick.
+1. **Recognise orchestrator-originated tasks.** When the Configuration Assistant receives a task via `reassign_task`, it reads the `handoffContext` field on the task. If `handoffContext` contains a parseable JSON object with `handoff_reason` starting with `'orchestrator_path_'`, the Configuration Assistant treats the `user_intent` field as the starting point of its plan-approve-execute loop, and uses `source_task_id` (if present) to back-reference the originating task in its own outputs. Tasks without this marker are treated as normal direct assignments — the Config Assistant's behaviour is unchanged.
+2. **Return the structured output contract.** On completion (success, partial, failed, or user_abandoned), the Configuration Assistant writes the §6.6.1 output object as its final run output so the Orchestrator's post-handoff verification can consume it. The Orchestrator's verification is triggered by the `agent_completed` event on the reassigned task — specifically `eventType: 'org_agent_completed'` in the existing trigger system, with the agent ID matched to the Orchestrator's own trigger registration. This closes the loop without polling.
 
-Neither change alters the Configuration Assistant's own contract (its spec is preserved) — they are additive behaviours triggered only when the handoff context shape is present.
+Neither change alters the Configuration Assistant's own contract (its spec is preserved) — they are additive behaviours triggered only when the `handoffContext` shape is present.
 
 ---
 
@@ -1113,7 +1113,7 @@ The work decomposes into five phases. Each phase is independently shippable — 
 - Deliverable: given a task, the Orchestrator produces a correctly-classified routing decision and executes the chosen path.
 
 **P5: Task board trigger + user-facing UX**
-- Add the `task_created → orchestrator` trigger (§7.2) with the default match predicate.
+- Add the `org_task_created → orchestrator` trigger (§7.2) with the default `eventFilter` and handler-side guards.
 - Backfill the trigger for existing orgs.
 - Add the four new task status values and their rendering (§8.3).
 - Implement the task-comment template and chat notification (§8.4, §8.5).
@@ -1157,7 +1157,7 @@ Per spec-context.md, rollout is `commit_and_revert` — no staged rollout, no fe
 - The four new task statuses are additive — existing tasks keep their existing statuses. No data migration on the tasks table.
 - The `feature_requests` table migration follows the existing Drizzle convention — next free sequence number, standard up-migration, no down-migration.
 
-No behaviour-mode feature flag is needed. The Orchestrator's new behaviour is default-on as soon as its prompt is updated; the reason the new code doesn't cause regressions is that pre-existing agent routing via direct assignment (`task.assigned_to_agent_id IS NOT NULL`) bypasses the trigger (per §7.3).
+No behaviour-mode feature flag is needed. The Orchestrator's new behaviour is default-on as soon as its prompt is updated; the reason the new code doesn't cause regressions is that pre-existing agent routing via direct assignment (`task.assignedAgentId IS NOT NULL`) bypasses the trigger (per §7.3).
 
 ### 9.5 Observability and the routing feedback loop
 
@@ -1265,7 +1265,7 @@ These items were considered and explicitly pushed out of scope. Re-evaluate afte
 
 For reference, the complete sequence for the Gmail inbox-labelling example (assuming P1–P5 have all shipped):
 
-1. User writes a task: _"Label my Gmail inbox into LEADS, CLIENTS, JUNK, INVOICES every 5 minutes."_ Task is inserted with `status: open`, `assigned_to_agent_id: null`.
+1. User writes a task: _"Label my Gmail inbox into LEADS, CLIENTS, JUNK, INVOICES every 5 minutes."_ Task is inserted with `status: 'inbox'`, `assignedAgentId: null`, `isSubTask: false`, `createdByAgentId: null`.
 2. `task_created` trigger fires. `orchestratorFromTask` worker picks it up from pg-boss.
 3. Orchestrator run starts. Its first LLM turn decomposes the task into required capabilities: `[{integration: gmail}, {read: inbox_read}, {write: modify_labels}, {skill: classify_email}, {primitive: scheduled_run}]`.
 4. Orchestrator calls `check_capability_gap` with the required-capability list and the originating org/subaccount.
