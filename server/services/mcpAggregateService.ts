@@ -18,7 +18,8 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 
 export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<void> {
-  const isError = row.status !== 'success';
+  // budget_blocked is a policy exit, not an infra failure — only error/timeout count as errors
+  const isError = row.status === 'error' || row.status === 'timeout';
 
   type Dimension = { entityType: string; entityId: string; periodType: string; periodKey: string };
   const dimensions: Dimension[] = [];

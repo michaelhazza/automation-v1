@@ -144,7 +144,7 @@ function computeMcpCallSummary(rows: InvRow[]) {
   for (const r of rows) {
     const entry = byServer.get(r.serverSlug) ?? { callCount: 0, errorCount: 0, totalDuration: 0 };
     entry.callCount++;
-    if (r.status !== 'success') entry.errorCount++;
+    if (r.status === 'error' || r.status === 'timeout') entry.errorCount++;
     entry.totalDuration += r.durationMs;
     byServer.set(r.serverSlug, entry);
   }
@@ -158,7 +158,7 @@ function computeMcpCallSummary(rows: InvRow[]) {
 
   return {
     totalCalls: rows.length,
-    errorCount: rows.filter((r) => r.status !== 'success').length,
+    errorCount: rows.filter((r) => r.status === 'error' || r.status === 'timeout').length,
     byServer: byServerArr,
   };
 }
@@ -299,6 +299,16 @@ test('summary with one server sums correctly', () => {
   assertEqual(summary!.totalCalls, 3, 'totalCalls');
   assertEqual(summary!.errorCount, 1, 'errorCount');
   assertEqual(summary!.byServer[0].avgDurationMs, 150, 'avgDurationMs = round((100+200+150)/3)');
+});
+
+test('budget_blocked does not count as errorCount — policy exit, not infra failure', () => {
+  const summary = computeMcpCallSummary([
+    { serverSlug: 'github', status: 'success', durationMs: 100 },
+    { serverSlug: 'github', status: 'budget_blocked', durationMs: 0 },
+  ]);
+  assert(summary !== null, 'summary not null');
+  assertEqual(summary!.totalCalls, 2, 'totalCalls includes budget_blocked');
+  assertEqual(summary!.errorCount, 0, 'budget_blocked must not inflate errorCount');
 });
 
 test('summary with multiple servers groups correctly', () => {

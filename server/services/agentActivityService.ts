@@ -101,7 +101,7 @@ export const agentActivityService = {
       .select({
         serverSlug: mcpToolInvocations.serverSlug,
         callCount: sql<number>`count(*)::int`,
-        errorCount: sql<number>`count(*) filter (where ${mcpToolInvocations.status} != 'success')::int`,
+        errorCount: sql<number>`count(*) filter (where ${mcpToolInvocations.status} in ('error', 'timeout'))::int`,
         avgDurationMs: sql<number>`round(avg(${mcpToolInvocations.durationMs}))::int`,
       })
       .from(mcpToolInvocations)

@@ -53,7 +53,7 @@ ALTER TABLE mcp_tool_invocations ADD CONSTRAINT mcp_tool_invocations_failure_rea
   CHECK (
     (status = 'success' AND failure_reason IS NULL)
     OR
-    (status = 'budget_blocked')
+    (status = 'budget_blocked' AND failure_reason IS NULL)
     OR
     (status NOT IN ('success', 'budget_blocked') AND failure_reason IS NOT NULL)
   );
