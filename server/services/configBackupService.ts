@@ -50,12 +50,18 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
 
     // Snapshot all live systemAgents with the mutable fields the analyser can touch.
     // Existence is implicit: ids appearing as entities are the pre-backup live set.
+    // `slug` is captured alongside `name` because systemAgentService.updateAgent
+    // recomputes slug from name on rename (unique index system_agents_slug_idx);
+    // restoring `name` without the matching `slug` would break the name↔slug
+    // invariant and misroute slug-based lookups for any agent renamed between
+    // backup and restore.
     const agents = await tx
       .select({
         id: systemAgents.id,
         defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs,
         status: systemAgents.status,
         name: systemAgents.name,
+        slug: systemAgents.slug,
         description: systemAgents.description,
         masterPrompt: systemAgents.masterPrompt,
         agentRole: systemAgents.agentRole,
@@ -73,6 +79,7 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
           defaultSystemSkillSlugs: agent.defaultSystemSkillSlugs,
           status: agent.status,
           name: agent.name,
+          slug: agent.slug,
           description: agent.description,
           masterPrompt: agent.masterPrompt,
           agentRole: agent.agentRole,
@@ -99,13 +106,19 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
  * 2. For system_skills that exist now but NOT in the backup: they were created
  *    after the backup — deactivate them (isActive=false) rather than hard-deleting,
  *    to preserve referential integrity with skill_analyzer_results.resultingSkillId
- * 3. For system_agent (new shape): restore the full mutable field-set in place.
- *    For legacy system_agent_skills: restore defaultSystemSkillSlugs only.
- * 4. For new-shape backups only: soft-delete any live systemAgents whose id is
- *    not present in the backup (agents created after the backup). Skipped for
+ * 3. For new-shape backups only: soft-delete any live systemAgents whose id is
+ *    not present in the backup (agents created after the backup), AND rename
+ *    their slug to a tombstone value so the in-place restore in step 4 can
+ *    re-assign the original slug without hitting the GLOBAL unique index
+ *    `system_agents_slug_idx` (which is not predicated on deletedAt IS NULL —
+ *    soft-deleted rows still count against uniqueness). Skipped for
  *    legacy-shape backups because the old capture did not snapshot agent
- *    existence — we cannot distinguish post-backup creations from pre-backup
- *    agents that were simply not tracked.
+ *    existence.
+ * 4. For system_agent (new shape): restore the full mutable field-set in place,
+ *    including slug. This must run AFTER step 3 so any collision from a
+ *    post-backup agent that reused a snapshotted slug is already resolved.
+ *    For legacy system_agent_skills: restore defaultSystemSkillSlugs only
+ *    (legacy shape doesn't snapshot slug, so no collision risk).
  */
 async function restoreSkillAnalyzerEntities(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -224,28 +237,100 @@ async function restoreSkillAnalyzerEntities(
     }
   }
 
-  // 3a. Restore full mutable field-set for new-shape agent snapshots
+  // 3. Soft-delete post-backup agents FIRST (new-shape backups only). This
+  // must happen before step 4's in-place restore because `system_agents_slug_idx`
+  // is a GLOBAL unique index — soft-deleted rows still count. If a post-backup
+  // agent reused a snapshotted agent's original slug (e.g. backup agent A had
+  // slug `foo`, was later renamed, new agent B took slug `foo`), restoring
+  // A.slug='foo' in step 4 would unique-violate on B. Renaming B's slug to a
+  // tombstone value here frees the slug for step 4 and preserves the
+  // point-in-time restore semantic (B is gone from the live set anyway).
+  if (hasLegacyAgentShape) {
+    logger.warn('[configBackup] Legacy backup shape — skipping post-backup agent soft-delete', {
+      backupId,
+    });
+  } else {
+    const liveAgents = await tx
+      .select({ id: systemAgents.id, slug: systemAgents.slug })
+      .from(systemAgents)
+      .where(isNull(systemAgents.deletedAt));
+    const now = new Date();
+    for (const agent of liveAgents) {
+      if (!backupAgentIds.has(agent.id)) {
+        // Prefix with __deleted-<id>-<epoch>__ to both free the slug for any
+        // concurrent restore target AND make the tombstone self-documenting.
+        const tombstoneSlug = `__deleted-${agent.id}-${now.getTime()}__${agent.slug}`;
+        const updated = await tx
+          .update(systemAgents)
+          .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug })
+          .where(and(eq(systemAgents.id, agent.id), isNull(systemAgents.deletedAt)))
+          .returning({ id: systemAgents.id });
+        if (updated.length > 0) agentsSoftDeleted++;
+      }
+    }
+  }
+
+  // 4a. Restore full mutable field-set for new-shape agent snapshots.
+  //
+  // `slug` is restored alongside `name` because systemAgentService.updateAgent
+  // recomputes it on rename; writing `name` without the matching `slug` would
+  // leave the row with a stale slug pointing at a new name. Older snapshots
+  // without `slug` fall back to the current row's slug.
+  //
+  // Slug writes are done in TWO PHASES inside this same transaction to avoid
+  // unique-index collisions during a rename-swap: if backed-up agents A and B
+  // swapped their slugs after the snapshot (A now has B's old slug, B now has
+  // A's old slug), a one-pass restore that writes `A.slug = <A's original>`
+  // while B still holds that slug fails the `system_agents_slug_idx` unique
+  // constraint. The same collision can fire from any N-way rename cycle, not
+  // just a direct swap.
+  //
+  // Phase 1 (slug-parking): for every agent-entity whose snapshot carries a
+  //   slug, park that row's slug at a unique intermediate value that cannot
+  //   collide with any live row. This frees ALL the target slugs at once.
+  // Phase 2 (field-set restore): run the normal snapshot restore — now every
+  //   target slug is unoccupied, so writing the snapshot slug always succeeds.
+  //
+  // Phase 3's intermediate slug values are never visible outside the
+  // transaction.
+  const restoreTs = Date.now();
   for (const entity of agentEntities) {
     const { snapshot } = entity;
+    if (typeof snapshot.slug === 'string') {
+      const parkingSlug = `__restoring-${entity.entityId}-${restoreTs}__`;
+      await tx
+        .update(systemAgents)
+        .set({ slug: parkingSlug })
+        .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)));
+    }
+  }
+
+  for (const entity of agentEntities) {
+    const { snapshot } = entity;
+    const setFields: Record<string, unknown> = {
+      defaultSystemSkillSlugs: snapshot.defaultSystemSkillSlugs as string[],
+      status: snapshot.status as 'draft' | 'active' | 'inactive',
+      name: snapshot.name as string,
+      description: snapshot.description as string | null,
+      masterPrompt: snapshot.masterPrompt as string,
+      agentRole: snapshot.agentRole as string | null,
+      agentTitle: snapshot.agentTitle as string | null,
+      parentSystemAgentId: snapshot.parentSystemAgentId as string | null,
+      updatedAt: new Date(),
+    };
+    if (typeof snapshot.slug === 'string') {
+      setFields.slug = snapshot.slug;
+    }
     const updated = await tx
       .update(systemAgents)
-      .set({
-        defaultSystemSkillSlugs: snapshot.defaultSystemSkillSlugs as string[],
-        status: snapshot.status as 'draft' | 'active' | 'inactive',
-        name: snapshot.name as string,
-        description: snapshot.description as string | null,
-        masterPrompt: snapshot.masterPrompt as string,
-        agentRole: snapshot.agentRole as string | null,
-        agentTitle: snapshot.agentTitle as string | null,
-        parentSystemAgentId: snapshot.parentSystemAgentId as string | null,
-        updatedAt: new Date(),
-      })
+      .set(setFields)
       .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)))
       .returning({ id: systemAgents.id });
     if (updated.length > 0) agentsReverted++;
   }
 
-  // 3b. Legacy shape: restore skill slug arrays only
+  // 4b. Legacy shape: restore skill slug arrays only (legacy capture didn't
+  // snapshot slug, so there's nothing for step 3 to collide with here).
   for (const entity of legacyAgentEntities) {
     const { snapshot } = entity;
     const updated = await tx
@@ -257,31 +342,6 @@ async function restoreSkillAnalyzerEntities(
       .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)))
       .returning({ id: systemAgents.id });
     if (updated.length > 0) agentsReverted++;
-  }
-
-  // 4. Soft-delete post-backup agents (new-shape backups only — legacy shape
-  // did not snapshot agent existence, so we cannot safely infer which agents
-  // were created after the backup).
-  if (hasLegacyAgentShape) {
-    logger.warn('[configBackup] Legacy backup shape — skipping post-backup agent soft-delete', {
-      backupId,
-    });
-  } else {
-    const liveAgents = await tx
-      .select({ id: systemAgents.id })
-      .from(systemAgents)
-      .where(isNull(systemAgents.deletedAt));
-    const now = new Date();
-    for (const agent of liveAgents) {
-      if (!backupAgentIds.has(agent.id)) {
-        const updated = await tx
-          .update(systemAgents)
-          .set({ deletedAt: now, updatedAt: now })
-          .where(and(eq(systemAgents.id, agent.id), isNull(systemAgents.deletedAt)))
-          .returning({ id: systemAgents.id });
-        if (updated.length > 0) agentsSoftDeleted++;
-      }
-    }
   }
 
   return { skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted };
