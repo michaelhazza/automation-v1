@@ -12,7 +12,7 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 // Config Backup Service — create and restore point-in-time configuration
 // snapshots. Scoped by organisation. Currently supports 'skill_analyzer'
-// scope (system_skills + systemAgents.defaultSystemSkillSlugs); extensible
+// scope (system_skills + live systemAgents mutable fields); extensible
 // to other scopes.
 // ---------------------------------------------------------------------------
 
@@ -21,8 +21,9 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Capture all system_skills rows and systemAgent defaultSystemSkillSlugs.
- * This is enough to fully revert a skill analyser apply operation.
+ * Capture all system_skills rows and a full mutable-field snapshot of every
+ * live systemAgent. This is enough to fully revert a skill analyser apply —
+ * including agents the analyser created and draft→active promotions.
  * Runs inside a transaction so the two reads share a consistent snapshot.
  */
 async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
@@ -47,21 +48,36 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
       });
     }
 
-    // Snapshot all systemAgents' skill slug arrays (only the fields the analyser mutates)
+    // Snapshot all live systemAgents with the mutable fields the analyser can touch.
+    // Existence is implicit: ids appearing as entities are the pre-backup live set.
     const agents = await tx
       .select({
         id: systemAgents.id,
         defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs,
+        status: systemAgents.status,
+        name: systemAgents.name,
+        description: systemAgents.description,
+        masterPrompt: systemAgents.masterPrompt,
+        agentRole: systemAgents.agentRole,
+        agentTitle: systemAgents.agentTitle,
+        parentSystemAgentId: systemAgents.parentSystemAgentId,
       })
       .from(systemAgents)
       .where(isNull(systemAgents.deletedAt));
 
     for (const agent of agents) {
       entities.push({
-        entityType: 'system_agent_skills',
+        entityType: 'system_agent',
         entityId: agent.id,
         snapshot: {
           defaultSystemSkillSlugs: agent.defaultSystemSkillSlugs,
+          status: agent.status,
+          name: agent.name,
+          description: agent.description,
+          masterPrompt: agent.masterPrompt,
+          agentRole: agent.agentRole,
+          agentTitle: agent.agentTitle,
+          parentSystemAgentId: agent.parentSystemAgentId,
         },
       });
     }
@@ -75,7 +91,7 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * Restore system_skills and systemAgent skill slugs from a backup.
+ * Restore system_skills and systemAgents from a backup.
  * Runs inside the caller's transaction for atomicity.
  *
  * Strategy:
@@ -83,7 +99,13 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
  * 2. For system_skills that exist now but NOT in the backup: they were created
  *    after the backup — deactivate them (isActive=false) rather than hard-deleting,
  *    to preserve referential integrity with skill_analyzer_results.resultingSkillId
- * 3. For system_agent_skills: restore defaultSystemSkillSlugs to snapshotted value
+ * 3. For system_agent (new shape): restore the full mutable field-set in place.
+ *    For legacy system_agent_skills: restore defaultSystemSkillSlugs only.
+ * 4. For new-shape backups only: soft-delete any live systemAgents whose id is
+ *    not present in the backup (agents created after the backup). Skipped for
+ *    legacy-shape backups because the old capture did not snapshot agent
+ *    existence — we cannot distinguish post-backup creations from pre-backup
+ *    agents that were simply not tracked.
  */
 async function restoreSkillAnalyzerEntities(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -93,14 +115,22 @@ async function restoreSkillAnalyzerEntities(
   skillsReverted: number;
   skillsDeactivated: number;
   agentsReverted: number;
+  agentsSoftDeleted: number;
 }> {
   let skillsReverted = 0;
   let skillsDeactivated = 0;
   let agentsReverted = 0;
+  let agentsSoftDeleted = 0;
 
   const skillEntities = entities.filter((e) => e.entityType === 'system_skill');
-  const agentEntities = entities.filter((e) => e.entityType === 'system_agent_skills');
+  const agentEntities = entities.filter((e) => e.entityType === 'system_agent');
+  const legacyAgentEntities = entities.filter((e) => e.entityType === 'system_agent_skills');
+  const hasLegacyAgentShape = legacyAgentEntities.length > 0;
   const backupSkillIds = new Set(skillEntities.map((e) => e.entityId));
+  const backupAgentIds = new Set<string>([
+    ...agentEntities.map((e) => e.entityId),
+    ...legacyAgentEntities.map((e) => e.entityId),
+  ]);
 
   // 1. Restore each snapshotted skill
   for (const entity of skillEntities) {
@@ -158,7 +188,8 @@ async function restoreSkillAnalyzerEntities(
   // 2. Deactivate skills created after the backup
   const currentSkills = await tx
     .select({ id: systemSkills.id, name: systemSkills.name, description: systemSkills.description, definition: systemSkills.definition, instructions: systemSkills.instructions })
-    .from(systemSkills);
+    .from(systemSkills)
+    .where(eq(systemSkills.isActive, true));
   for (const skill of currentSkills) {
     if (!backupSkillIds.has(skill.id)) {
       await tx
@@ -193,8 +224,29 @@ async function restoreSkillAnalyzerEntities(
     }
   }
 
-  // 3. Restore agent skill slug arrays (only count if the row was actually updated)
+  // 3a. Restore full mutable field-set for new-shape agent snapshots
   for (const entity of agentEntities) {
+    const { snapshot } = entity;
+    const updated = await tx
+      .update(systemAgents)
+      .set({
+        defaultSystemSkillSlugs: snapshot.defaultSystemSkillSlugs as string[],
+        status: snapshot.status as 'draft' | 'active' | 'inactive',
+        name: snapshot.name as string,
+        description: snapshot.description as string | null,
+        masterPrompt: snapshot.masterPrompt as string,
+        agentRole: snapshot.agentRole as string | null,
+        agentTitle: snapshot.agentTitle as string | null,
+        parentSystemAgentId: snapshot.parentSystemAgentId as string | null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)))
+      .returning({ id: systemAgents.id });
+    if (updated.length > 0) agentsReverted++;
+  }
+
+  // 3b. Legacy shape: restore skill slug arrays only
+  for (const entity of legacyAgentEntities) {
     const { snapshot } = entity;
     const updated = await tx
       .update(systemAgents)
@@ -207,7 +259,32 @@ async function restoreSkillAnalyzerEntities(
     if (updated.length > 0) agentsReverted++;
   }
 
-  return { skillsReverted, skillsDeactivated, agentsReverted };
+  // 4. Soft-delete post-backup agents (new-shape backups only — legacy shape
+  // did not snapshot agent existence, so we cannot safely infer which agents
+  // were created after the backup).
+  if (hasLegacyAgentShape) {
+    logger.warn('[configBackup] Legacy backup shape — skipping post-backup agent soft-delete', {
+      backupId,
+    });
+  } else {
+    const liveAgents = await tx
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(isNull(systemAgents.deletedAt));
+    const now = new Date();
+    for (const agent of liveAgents) {
+      if (!backupAgentIds.has(agent.id)) {
+        const updated = await tx
+          .update(systemAgents)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(and(eq(systemAgents.id, agent.id), isNull(systemAgents.deletedAt)))
+          .returning({ id: systemAgents.id });
+        if (updated.length > 0) agentsSoftDeleted++;
+      }
+    }
+  }
+
+  return { skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted };
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +367,7 @@ export const configBackupService = {
     skillsReverted: number;
     skillsDeactivated: number;
     agentsReverted: number;
+    agentsSoftDeleted: number;
   }> {
     return db.transaction(async (tx) => {
       // Atomically claim the backup: set status='restored' only if currently active
@@ -325,7 +403,7 @@ export const configBackupService = {
       }
 
       const entities = claimed.entities as ConfigBackupEntity[];
-      let result: { skillsReverted: number; skillsDeactivated: number; agentsReverted: number };
+      let result: { skillsReverted: number; skillsDeactivated: number; agentsReverted: number; agentsSoftDeleted: number };
 
       switch (claimed.scope) {
         case 'skill_analyzer':
@@ -337,6 +415,99 @@ export const configBackupService = {
 
       return result;
     });
+  },
+
+  /**
+   * Preview a restore: return the same counts shape `restoreBackup` would
+   * produce, without performing any mutation. Used by the UI confirmation
+   * dialog to show accurate counts before the reviewer commits.
+   *
+   * Count logic must stay in sync with `restoreSkillAnalyzerEntities` — the
+   * shapes are intentionally parallel (skills reverted = backup-id intersect
+   * current; skills deactivated = current minus backup; agents reverted =
+   * backup-id intersect live; agents soft-deleted = live minus backup, or 0
+   * for legacy-shape backups).
+   */
+  async describeRestore(params: {
+    backupId: string;
+    organisationId: string;
+  }): Promise<{
+    skillsReverted: number;
+    skillsDeactivated: number;
+    agentsReverted: number;
+    agentsSoftDeleted: number;
+  }> {
+    const [row] = await db
+      .select({
+        status: configBackups.status,
+        scope: configBackups.scope,
+        entities: configBackups.entities,
+      })
+      .from(configBackups)
+      .where(
+        and(
+          eq(configBackups.id, params.backupId),
+          eq(configBackups.organisationId, params.organisationId),
+        )
+      );
+
+    if (!row) throw { statusCode: 404, message: 'Backup not found' };
+    if (row.status !== 'active') {
+      throw { statusCode: 409, message: 'Backup has already been restored' };
+    }
+
+    switch (row.scope) {
+      case 'skill_analyzer':
+        break;
+      default:
+        throw { statusCode: 400, message: `Unsupported backup scope: ${row.scope}` };
+    }
+
+    const entities = row.entities;
+    const skillEntities = entities.filter((e) => e.entityType === 'system_skill');
+    const agentEntities = entities.filter((e) => e.entityType === 'system_agent');
+    const legacyAgentEntities = entities.filter((e) => e.entityType === 'system_agent_skills');
+    const hasLegacyAgentShape = legacyAgentEntities.length > 0;
+    const backupSkillIds = skillEntities.map((e) => e.entityId);
+    const backupAgentIds = [
+      ...agentEntities.map((e) => e.entityId),
+      ...legacyAgentEntities.map((e) => e.entityId),
+    ];
+
+    const existingBackupSkills = backupSkillIds.length === 0
+      ? []
+      : await db
+          .select({ id: systemSkills.id })
+          .from(systemSkills)
+          .where(inArray(systemSkills.id, backupSkillIds));
+    const skillsReverted = existingBackupSkills.length;
+
+    const currentSkills = await db
+      .select({ id: systemSkills.id })
+      .from(systemSkills)
+      .where(eq(systemSkills.isActive, true));
+    const backupSkillIdSet = new Set(backupSkillIds);
+    const skillsDeactivated = currentSkills.filter((s) => !backupSkillIdSet.has(s.id)).length;
+
+    const agentsReverted = backupAgentIds.length === 0
+      ? 0
+      : (await db
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(and(inArray(systemAgents.id, backupAgentIds), isNull(systemAgents.deletedAt)))
+        ).length;
+
+    let agentsSoftDeleted = 0;
+    if (!hasLegacyAgentShape) {
+      const liveAgents = await db
+        .select({ id: systemAgents.id })
+        .from(systemAgents)
+        .where(isNull(systemAgents.deletedAt));
+      const backupAgentIdSet = new Set(backupAgentIds);
+      agentsSoftDeleted = liveAgents.filter((a) => !backupAgentIdSet.has(a.id)).length;
+    }
+
+    return { skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted };
   },
 
   /**

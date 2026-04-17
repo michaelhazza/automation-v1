@@ -1543,6 +1543,10 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 
 `configHistoryService.restore(entityType, entityId, targetVersion)` replays the target snapshot back onto the entity's canonical service, then writes a **new** history entry with `changeSource: 'restore'`. The old versions stay in the table — restore is forward-only, never destructive.
 
+`configBackupService.restoreBackup({ backupId, organisationId, restoredBy })` is the bulk counterpart used by Skill Analyzer (and Configuration Assistant plan replay). It iterates every entity in the backup row, replays it via the canonical service for that entity type, flips the `config_backups.status` from `active` to `restored`, and returns a per-scope counter object. For the `skill_analyzer` scope the returned counters are `{ skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted }`. See the Skill Analyzer section for the specific entity-type shapes and back-compat handling.
+
+`configBackupService.describeRestore({ backupId, organisationId })` is a read-only dry-run that returns the same counter object a real restore would produce, without mutating anything. Used by the Skill Analyzer UI to preview impact before confirming.
+
 ### UI surfaces
 
 - **Config Session History** page (`/admin/config-history`) — browse every mutation grouped by Configuration Assistant session, with filter by entity type and user
@@ -1593,6 +1597,26 @@ The v2 cycle closed seven correctness holes in the Review + Execute flow. Key ad
 - **Proposed-new-agent coupling.** Cluster recommendations write to `skill_analyzer_jobs.proposed_new_agents` (array, supports N-per-job) AND retro-inject synthetic entries into each affected DISTINCT result's `agentProposals`. UI banner renders per-agent Confirm/Reject; confirmed proposals become the top-ranked chip in per-skill assignment panels.
 - **Table drop remediation.** `remediateTables` runs before `validateMergeOutput` and auto-appends missing rows with `[SOURCE: library|incoming]` markers. Guards: column-count mismatch, cross-source first-column-key conflict, pre-marked rows, and `max_table_growth_ratio` aggregate cap.
 - **Skill-graph collision detection.** `detectSkillGraphCollision` splits merged instructions into `##` heading fragments, pre-filters library skills by bigram overlap (top-K + 200-pair budget), and emits `SKILL_GRAPH_COLLISION` warnings when fragment similarity exceeds `collision_detection_threshold`.
+
+### Revert previous execution
+
+Every successful Execute writes a pre-mutation `config_backups` row (`scope: 'skill_analyzer'`) containing the full pre-Execute state of every affected skill and system agent. The Skill Analyzer Results step (and the Execute step when reopening a finished job) surfaces a **Revert previous execution** button whenever an `active` backup exists for the job. Clicking it dry-runs the restore, shows the four counts in a confirmation dialog, then runs the real restore on confirm.
+
+Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntities`:
+
+| Entity type | Payload |
+|-------------|---------|
+| `system_skill` | Full skill snapshot for every skill that existed before Execute |
+| `system_agent` | Full mutable-field snapshot per affected system agent: `defaultSystemSkillSlugs`, `status`, `name`, `description`, `masterPrompt`, `agentRole`, `agentTitle`, `parentSystemAgentId` |
+
+`restoreSkillAnalyzerEntities` interprets the snapshot as follows:
+
+- **Skills** — rows present in the backup are replayed onto `system_skills` (counted as `skillsReverted`); rows absent from the backup but present live are deactivated via `isActive = false` rather than hard-deleted (counted as `skillsDeactivated`).
+- **Agents** — each `system_agent` entity is replayed in full onto `system_agents` (counted as `agentsReverted`). Agents present live but absent from the backup (i.e. created by the Execute that is now being reverted) are soft-deleted via `deletedAt = now()` — **not** via `status` (counted as `agentsSoftDeleted`). Soft-delete preserves the row for audit and is reversible; hard-delete would orphan history and config-backup references.
+
+**Legacy back-compat.** Backups written before this extension used a `system_agent_skills` entity type carrying only `defaultSystemSkillSlugs`. The restore path still accepts those entities and replays the slug array, but the post-backup soft-delete step is skipped for legacy-shape backups (there is no way to know which live agents existed at backup time from a slug-only payload). `agentsSoftDeleted` will be `0` for any legacy-shape restore.
+
+**Dry-run route.** `POST /api/system/skill-analyser/jobs/:jobId/restore?dryRun=true` calls `configBackupService.describeRestore` instead of `restoreBackup` and returns the same `{ skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted }` counters without mutating anything. Strict string comparison — only the literal `'true'` triggers dry-run mode; any other value (including `'1'`, `'yes'`, missing) runs the real restore.
 
 ### Schema (migration 0155)
 

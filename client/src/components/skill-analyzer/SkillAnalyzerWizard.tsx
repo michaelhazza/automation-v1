@@ -4,6 +4,7 @@ import SkillAnalyzerImportStep from './SkillAnalyzerImportStep';
 import SkillAnalyzerProcessingStep from './SkillAnalyzerProcessingStep';
 import SkillAnalyzerResultsStep from './SkillAnalyzerResultsStep';
 import SkillAnalyzerExecuteStep from './SkillAnalyzerExecuteStep';
+import type { RestoreOutcome } from './RestoreBackupControl';
 import type { MergeWarning } from './mergeTypes';
 
 /** Pre-computed live snapshot of a system_skills row for the matched library
@@ -208,6 +209,15 @@ export interface AnalysisResult {
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';
 
+export interface BackupMetadata {
+  id: string;
+  scope: string;
+  label: string | null;
+  status: 'active' | 'restored' | string;
+  createdAt: string;
+  restoredAt: string | null;
+}
+
 interface Props {
   initialJobId?: string;
   onClose: () => void;
@@ -232,6 +242,15 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
     errors: Array<{ resultId: string; error: string }>;
     backupId: string | null;
   } | null>(null);
+  const [backup, setBackup] = useState<BackupMetadata | null>(null);
+  /** Sticky outcome of the most recent restore attempt. Lives here — not in
+   *  RestoreBackupControl — so the success / "already restored" banner
+   *  survives the parent's `backup.status` transition from 'active' to
+   *  'restored', which unmounts the control itself. Scoped to the job so
+   *  navigating away / starting new clears it implicitly. */
+  const [lastRestoreOutcome, setLastRestoreOutcome] = useState<
+    { jobId: string; outcome: RestoreOutcome } | null
+  >(null);
 
   // Load existing job if jobId provided
   useEffect(() => {
@@ -248,9 +267,34 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
       setResults(r);
       const resolved = resolveStep(j);
       setStep(resolved);
+      await fetchBackup(jobId);
     } catch {
       // job not found or error — stay at import
     }
+  }
+
+  async function fetchBackup(jobId: string) {
+    try {
+      const res = await api.get<{ backup: BackupMetadata | null }>(
+        `/api/system/skill-analyser/jobs/${jobId}/backup`,
+      );
+      setBackup(res.data.backup);
+    } catch {
+      setBackup(null);
+    }
+  }
+
+  function handleRestoreOutcome(outcome: RestoreOutcome) {
+    if (!job) return;
+    setLastRestoreOutcome({ jobId: job.id, outcome });
+    // Refetch so the control itself unmounts once the backup flips to
+    // 'restored'. The banner persists because it reads from
+    // lastRestoreOutcome, not from the control's local state.
+    fetchBackup(job.id);
+  }
+
+  function dismissRestoreOutcome() {
+    setLastRestoreOutcome(null);
   }
 
   function handleJobCreated(jobId: string, newJob: AnalysisJob) {
@@ -271,6 +315,7 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
 
   function handleExecuted(result: typeof executeResult) {
     setExecuteResult(result);
+    if (job) fetchBackup(job.id);
   }
 
   const STEPS: WizardStep[] = ['import', 'processing', 'results', 'execute'];
@@ -344,7 +389,7 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
           jobId={job.id}
           initialJob={job}
           onComplete={handleJobComplete}
-          onStartNew={() => { setJob(null); setStep('import'); }}
+          onStartNew={() => { setJob(null); setBackup(null); setLastRestoreOutcome(null); setStep('import'); }}
         />
       )}
       {step === 'results' && job && (
@@ -353,6 +398,10 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
           results={results}
           onResultsUpdated={setResults}
           onContinue={handleResultsReady}
+          backup={backup}
+          onRestoreOutcome={handleRestoreOutcome}
+          restoreOutcome={lastRestoreOutcome?.jobId === job.id ? lastRestoreOutcome.outcome : null}
+          onDismissRestoreOutcome={dismissRestoreOutcome}
         />
       )}
       {step === 'execute' && job && (
@@ -361,7 +410,11 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
           results={results}
           onExecuted={handleExecuted}
           executeResult={executeResult}
-          onStartNew={() => { setJob(null); setResults([]); setExecuteResult(null); setStep('import'); }}
+          onStartNew={() => { setJob(null); setResults([]); setExecuteResult(null); setBackup(null); setLastRestoreOutcome(null); setStep('import'); }}
+          backup={backup}
+          onRestoreOutcome={handleRestoreOutcome}
+          restoreOutcome={lastRestoreOutcome?.jobId === job.id ? lastRestoreOutcome.outcome : null}
+          onDismissRestoreOutcome={dismissRestoreOutcome}
         />
       )}
     </div>
