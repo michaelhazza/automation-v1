@@ -1041,7 +1041,7 @@ Platform-level tables that legitimately need cross-tenant access (system config,
 
 ### Goal
 
-An agency user can connect their personal Gmail. Metadata flows to `canonical_emails` under their principal scope. Agents reason over cadence, thread navigation, and entity links without any body content persisted. When an agent genuinely needs a body, it calls `fetch_email_body` which hits Gmail API under the invoking principal's credentials, returns the body, and does not write.
+An agency user can connect their personal Gmail. Metadata flows to `canonical_emails` under their principal scope. Agents reason over cadence, thread navigation, and entity links without any body content persisted. When an agent genuinely needs a body, it calls `fetch_email_body` which hits Gmail API under the invoking principal's credentials, returns the body, and does not write. When an agent needs to organise emails (e.g. automated inbox labelling), it calls `modify_email_labels` which applies/removes labels via the Gmail API under the principal's credentials and syncs the canonical row.
 
 ### Current state
 
@@ -1059,16 +1059,24 @@ Google Cloud project per environment (dev / staging / prod) with OAuth 2.0 crede
 
 The connection-creation UI lets the user choose between `metadata-only` and `metadata + readable body on demand`. Choice is recorded on the connection row. Changing later requires re-consent.
 
-Send scopes (`gmail.send`, `gmail.modify`) are **not** requested by this program. A future "send email" skill gets a separate connection (or scope-upgrade flow) — design explicitly out of scope for P4.
+An additional scope tier, `metadata + labels`, is available for users who want agents to manage their labels:
+
+- `https://www.googleapis.com/auth/gmail.modify` — read and modify messages (labels, read/unread, archive). Required for the `modify_email_labels` skill. Not requested unless the user explicitly opts in to label management.
+
+`gmail.send` is **not** requested by this program. A future "send email" skill gets a separate connection (or scope-upgrade flow) — design explicitly out of scope for P4.
 
 **Connection-creation flow.**
 
 1. User clicks "Connect Gmail" in the connection-management UI.
 2. UI prompts: "Ownership: personal (recommended for your own inbox) or shared mailbox (for sales@, support@, etc.)?" Default: personal.
-3. UI prompts for scope: "Metadata only" vs "Metadata + read-on-demand body access." Default: metadata only.
+3. UI prompts for scope tier:
+   - **Metadata only** — read-only, cheapest scope. Default.
+   - **Metadata + read-on-demand body access** — agents can fetch email bodies live.
+   - **Metadata + label management** — agents can read metadata and apply/remove labels. Requires `gmail.modify`.
+   - **Full access (body + labels)** — combines body reads and label management.
 4. UI previews the effective visibility (for personal: "Private — only you and agents you authorise will see this data").
-5. Google OAuth consent screen.
-6. Tokens encrypted and stored via `connectionTokenService`. Connection row written with `ownership_scope = 'user'`, `owner_user_id = connecting user`, `classification = 'personal'`, `visibility_scope = 'private'`.
+5. Google OAuth consent screen (scopes vary by tier selected in step 3).
+6. Tokens encrypted and stored via `connectionTokenService`. Connection row written with `ownership_scope = 'user'`, `owner_user_id = connecting user`, `classification = 'personal'`, `visibility_scope = 'private'`. The selected scope tier is recorded in `ingestion_config_json` so skills can check at invocation time whether the connection authorises the requested operation.
 
 For shared mailboxes, the flow branches: `ownership_scope = 'subaccount' | 'organisation'`, `classification = 'shared_mailbox'`, `visibility_scope = 'shared-subaccount' | 'shared-org'`.
 
@@ -1137,10 +1145,14 @@ Push subscriptions expire after 7 days per Google policy. A scheduled job re-reg
 
 Each has fixture tests with representative Gmail API payloads (sanitised, anonymised).
 
+- `gmailLabelResolverPure.ts` — label name → ID resolution logic, cache management, and label-creation decision. Fixture tests cover: existing label lookup, cache hit, cache miss, label creation for unknown names, case-insensitive matching.
+- `modifyEmailLabelsValidatorPure.ts` — validates scope tier permits modification, rate-limit check, batch-size check, delegation grant check. Fixture tests cover each rejection path.
+
 #### Static gates
 
 - `scripts/verify-email-thin-canonical.sh` — fails if any column in `canonical_emails` is named `body`, `body_text`, `body_html`, or matches attachment-bytes patterns. Enforces D7 at schema level.
-- `scripts/verify-live-fetch-skill.sh` — ensures `fetch_email_body` (defined below) is declared `readPath: 'liveFetch'` with the documented rationale.
+- `scripts/verify-live-fetch-skill.sh` — ensures `fetch_email_body` and `modify_email_labels` are declared `readPath: 'liveFetch'` with documented rationale.
+- `scripts/verify-modify-labels-scope-check.sh` — ensures the `modify_email_labels` skill checks `gmail.modify` scope before calling the Gmail API. Grep-based enforcement against the skill handler source.
 
 ### `canonical_emails` schema
 
@@ -1222,6 +1234,40 @@ export const fetchEmailBodyAction: ActionDefinition = {
 - `runCostBreaker` (existing primitive) applies — body fetches count against the run's cost budget.
 - Delegated principals: the grant must include `fetch_email_body` in `allowed_actions`. Otherwise refuse.
 
+### `modify_email_labels` write-back skill
+
+```typescript
+// server/skills/modifyEmailLabels/modifyEmailLabels.ts
+export const modifyEmailLabelsAction: ActionDefinition = {
+  name: 'modify_email_labels',
+  readPath: 'liveFetch',
+  liveFetchRationale: 'Write-back skill — modifies labels on the provider (Gmail API) under the invoking principal\'s credentials. Updates the canonical row\'s labels array after successful modification to keep canonical in sync.',
+  requiresApproval: 'per-run',
+  // ... other existing ActionDefinition fields ...
+};
+```
+
+**Invocation flow:**
+
+1. Agent requests `modify_email_labels` with a `canonical_email_id`, `addLabels: string[]`, and `removeLabels: string[]`.
+2. `actionService.proposeAction` runs; `requiresApproval: 'per-run'` routes the first invocation per run to HITL review. Subsequent label modifications within the same run inherit the approval.
+3. Skill loads the canonical email row under the current principal context. If not visible (RLS), returns "email not found."
+4. Skill checks the connection's scope tier (stored in `ingestion_config_json`). If the connection does not have `gmail.modify` scope, the skill returns a clear error: "This connection does not authorise label modifications. The user must upgrade their connection scope."
+5. Skill resolves `source_connection_id`, loads the connection, decrypts the OAuth token, calls `gmail.users.messages.modify` with `{ addLabelIds, removeLabelIds }`.
+6. On success, the canonical email row's `labels` array is updated in place to reflect the new label set. This is the one write-back path that touches canonical — it keeps the metadata in sync with the provider rather than waiting for the next ingestion poll.
+7. `tool_call_security_events` logs the modification with `action: 'modify_labels'`, the principal, the canonical email ID, and the labels added/removed.
+
+**Label resolution:**
+
+Gmail labels are identified by ID internally but named by the user. The skill accepts human-readable label names and resolves them to Gmail label IDs via `gmail.users.labels.list`. If a requested label does not exist, the skill creates it via `gmail.users.labels.create` (only if the connection has `gmail.modify` scope). Label ID ↔ name mappings are cached per connection with a 1-hour TTL to avoid repeated list calls.
+
+**Guardrails:**
+
+- Rate limit per principal: configurable cap on label modifications per run (default 50). Prevents mass-relabelling of an entire inbox in a single run.
+- `runCostBreaker` applies — each modification counts against the run's cost budget (API call cost, not LLM cost).
+- Delegated principals: the grant must include `modify_email_labels` in `allowed_actions`.
+- Batch support: the skill accepts an array of `canonical_email_id`s for bulk labelling in a single invocation (up to the per-run cap). Each email is modified individually via the Gmail API (no batch endpoint for label modification). Failures on individual emails do not abort the batch — the skill returns per-email success/failure results.
+
 ### Connection-revocation deletion contract
 
 When a personal Gmail connection is disconnected (by the user) or removed (by an org admin removing the user):
@@ -1232,10 +1278,11 @@ When a personal Gmail connection is disconnected (by the user) or removed (by an
 
 ### Out of scope for P4
 
-- Send-email skill. Separate connection and scope flow.
+- Send-email skill. Requires `gmail.send` scope, which this program does not request. Separate connection or scope-upgrade flow.
 - Outlook adapter. The adapter abstraction is kept general enough to slot Outlook in later; this is an implementation-spec-level concern, not a program concern.
 - Full-text search over email metadata at scale. Current index set is sufficient for expected query volumes.
 - Vector embedding of email content. Per D6, deferred.
+- Archive/delete/mark-as-read write-back skills. Only label modification is in scope for P4. Other write-back operations are straightforward extensions of the same pattern but require separate HITL and guardrail decisions.
 
 ### Entry criteria
 
@@ -1244,10 +1291,11 @@ When a personal Gmail connection is disconnected (by the user) or removed (by an
 
 ### Exit criteria
 
-- Gmail OAuth flow works for personal and shared-mailbox connections.
+- Gmail OAuth flow works for personal and shared-mailbox connections, with scope tiers (metadata-only / body / labels / full) correctly driving which scopes are requested.
 - Ingestion pipeline running in dev/staging: backfill → transition → live with working push notifications.
 - `canonical_emails` populated under correct principal/ownership/visibility fields; verified by an integration-level fixture test against a seeded org.
 - `fetch_email_body` skill working, subject to HITL approval, correctly refusing to fetch across principal boundaries.
+- `modify_email_labels` skill working, subject to HITL approval, correctly refusing when connection lacks `gmail.modify` scope. Label creation, resolution, and canonical sync verified by fixture tests.
 - `canonical-email-purge` job running.
 - Dictionary entry for `canonical_emails`.
 - `pr-reviewer` + `dual-reviewer` passed.
@@ -1538,6 +1586,10 @@ Adapters run as the `canonical_writer` role. `canonical_writer` has RLS bypass o
 
 Role assignments are per-connection: the application pool uses `app_reader` by default, and adapter code that needs to write calls `withCanonicalWriterRole(work)` which opens a dedicated connection, sets the role, runs the work, closes. This keeps the high-privilege role narrowly scoped.
 
+### Write-back skills are live-action, not adapter writes
+
+Write-back skills (e.g. `modify_email_labels`) operate differently from adapter ingestion. They call the provider API directly under the invoking principal's credentials and then sync the canonical row to reflect the change. They do NOT use the `canonical_writer` role — canonical-row updates from write-back skills run through `app_reader` with normal RLS enforcement, which ensures the principal can only modify rows they can see. This pattern is the template for all future write-back skills across any integration (e.g. a future `modify_calendar_event` or `update_hubspot_contact`). The invariants: HITL-gated, principal-scoped, scope-tier-checked, rate-limited, audit-logged, canonical-synced.
+
 ### Audit log fields
 
 Every entry in `tool_call_security_events` carries (from this program onwards):
@@ -1609,7 +1661,8 @@ Consolidated list. Each gate is introduced by the phase noted. All gates are add
 | `verify-visibility-parity.sh` | P3B | Pure-predicate and SQL-policy parity on fixture set |
 | `verify-with-principal-context.sh` | P3B | Direct DB access outside `withPrincipalContext` is forbidden |
 | `verify-email-thin-canonical.sh` | P4 | `canonical_emails` has no body-content columns |
-| `verify-live-fetch-skill.sh` | P4 | `fetch_email_body` declared `liveFetch` with rationale |
+| `verify-live-fetch-skill.sh` | P4 | `fetch_email_body` and `modify_email_labels` declared `liveFetch` with rationale |
+| `verify-modify-labels-scope-check.sh` | P4 | `modify_email_labels` checks `gmail.modify` scope before calling Gmail API |
 | `verify-calendar-classification-versions.sh` | P5 | Canonical event rows carry `classification_version` |
 | `verify-query-allowlist.sh` | P6 | Canonical tables have explicit allow-list entry or exclusion rationale |
 | `verify-query-surface-write-refusal.sh` | P6 | Validator rejects every write operation; fixture coverage required |
@@ -1740,7 +1793,7 @@ Consolidated table of gate criteria. Each row names the phase, its entry depende
 | P2B | P2A | Dictionary covers every canonical table; `canonical_dictionary` skill available; `verify-canonical-dictionary.sh` in CI; at least one agent consuming dictionary context; reviewers passed |
 | P3A | P2A, P2B | Additive migrations landed with indexes + backfill; `canonicalDataService` takes principal context; principal populated at all entry points; `verify-principal-context-propagation.sh` + `verify-canonical-required-columns.sh` + `verify-connection-shape.sh` in CI; dictionary updated; reviewers passed |
 | P3B | P3A | RLS policies on every in-scope table; `withPrincipalContext` helper used everywhere; parity harness passes; `verify-rls-coverage.sh` + `verify-visibility-parity.sh` + `verify-with-principal-context.sh` in CI; exclusion registry documents platform tables; reviewers passed |
-| P4 | P3A, P3B, P2A, P2B | Gmail OAuth (personal + shared-mailbox); ingestion lifecycle (backfill → transition → live) running; `canonical_emails` populated with correct principal/ownership/visibility; `fetch_email_body` working with HITL; `canonical-email-purge` job running; dictionary entry; `verify-email-thin-canonical.sh` + `verify-live-fetch-skill.sh` in CI; reviewers passed |
+| P4 | P3A, P3B, P2A, P2B | Gmail OAuth (personal + shared-mailbox) with scope tiers; ingestion lifecycle (backfill → transition → live) running; `canonical_emails` populated with correct principal/ownership/visibility; `fetch_email_body` working with HITL; `modify_email_labels` working with HITL + scope-tier enforcement; `canonical-email-purge` job running; dictionary entry; `verify-email-thin-canonical.sh` + `verify-live-fetch-skill.sh` + `verify-modify-labels-scope-check.sh` in CI; reviewers passed |
 | P5 | P4 | Calendar OAuth (scope-add to Gmail connections + standalone); ingestion lifecycle running; `canonical_calendar_events` populated with correct scoping; event-visibility filter working; dictionary entry; `verify-calendar-classification-versions.sh` in CI; reviewers passed |
 | P6 | P3, P2B, P4, P5 | `query_canonical` skill end-to-end for representative question set; HITL gates firing for wide-scope and over-budget queries; validator rejects every write; per-principal caps enforced; `verify-query-allowlist.sh` + `verify-query-surface-write-refusal.sh` in CI; reviewers passed |
 
