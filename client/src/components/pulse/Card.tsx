@@ -7,9 +7,10 @@ interface CardProps {
   laneId: PulseLane;
   onApprove: (item: PulseItem) => void;
   onReject: (item: PulseItem) => void;
+  pending?: boolean;
 }
 
-export function Card({ item, laneId, onApprove, onReject }: CardProps) {
+export function Card({ item, laneId, onApprove, onReject, pending }: CardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -44,7 +45,7 @@ export function Card({ item, laneId, onApprove, onReject }: CardProps) {
           <pre className="whitespace-pre-wrap">{JSON.stringify(item.evidence, null, 2)}</pre>
         </div>
       )}
-      <ActionBar item={item} laneId={laneId} onApprove={onApprove} onReject={onReject} />
+      <ActionBar item={item} laneId={laneId} onApprove={onApprove} onReject={onReject} pending={pending} />
     </div>
   );
 }

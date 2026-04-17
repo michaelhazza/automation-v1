@@ -100,15 +100,18 @@ router.post(
     let ackAmountMinor: number | null = null;
 
     if (lane === 'major') {
-      if (majorAcknowledgment !== true) {
-        const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
-        throw {
-          statusCode: 412,
-          message: 'Major-lane approval requires acknowledgment',
-          errorCode: 'MAJOR_ACK_REQUIRED',
-        };
-      }
       const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
+      if (majorAcknowledgment !== true) {
+        res.status(412).json({
+          error: { code: 'MAJOR_ACK_REQUIRED', message: 'Major-lane approval requires acknowledgment' },
+          lane,
+          majorReason,
+          ackText: ack.text,
+          ackAmountMinor: ack.amountMinor,
+          ackCurrencyCode: thresholds.currencyCode,
+        });
+        return;
+      }
       ackText = ack.text;
       ackAmountMinor = ack.amountMinor;
     }
@@ -150,7 +153,7 @@ router.post(
 
     const subaccountId = action.subaccountId;
     if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
-    res.json(result);
+    res.json({ ...result, lane });
   })
 );
 

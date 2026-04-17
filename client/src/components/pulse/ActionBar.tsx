@@ -5,9 +5,10 @@ interface ActionBarProps {
   laneId: PulseLane;
   onApprove: (item: PulseItem) => void;
   onReject: (item: PulseItem) => void;
+  pending?: boolean;
 }
 
-export function ActionBar({ item, laneId, onApprove, onReject }: ActionBarProps) {
+export function ActionBar({ item, laneId, onApprove, onReject, pending }: ActionBarProps) {
   if (item.kind === 'task') {
     return (
       <div className="mt-3 flex items-center gap-2">
@@ -45,13 +46,15 @@ export function ActionBar({ item, laneId, onApprove, onReject }: ActionBarProps)
     <div className="mt-3 flex items-center gap-2">
       <button
         onClick={() => onApprove(item)}
-        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+        disabled={pending}
+        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Approve
+        {pending ? 'Processing…' : 'Approve'}
       </button>
       <button
         onClick={() => onReject(item)}
-        className="rounded bg-red-50 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+        disabled={pending}
+        className="rounded bg-red-50 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Reject
       </button>

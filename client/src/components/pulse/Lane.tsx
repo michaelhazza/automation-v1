@@ -19,9 +19,10 @@ interface LaneProps {
   items: PulseItem[];
   onApprove: (item: PulseItem) => void;
   onReject: (item: PulseItem) => void;
+  pendingIds?: Set<string>;
 }
 
-export function Lane({ laneId, items, onApprove, onReject }: LaneProps) {
+export function Lane({ laneId, items, onApprove, onReject, pendingIds }: LaneProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -50,6 +51,7 @@ export function Lane({ laneId, items, onApprove, onReject }: LaneProps) {
               laneId={laneId}
               onApprove={onApprove}
               onReject={onReject}
+              pending={pendingIds?.has(item.id)}
             />
           ))}
         </div>

@@ -18,6 +18,7 @@ export default function PulsePage({ user }: Props) {
   const [majorModalItem, setMajorModalItem] = useState<PulseItem | null>(null);
   const [rejectingItem, setRejectingItem] = useState<PulseItem | null>(null);
   const [rejectComment, setRejectComment] = useState('');
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   const { attention, isLoading, error, refetch, removeItem } = usePulseAttention({
     scope,
@@ -29,11 +30,21 @@ export default function PulsePage({ user }: Props) {
       setMajorModalItem(item);
       return;
     }
-    removeItem(item.id);
+    setPendingIds(prev => new Set(prev).add(item.id));
     try {
       await api.post(`/api/review-items/${item.id}/approve`);
-    } catch {
-      refetch();
+      removeItem(item.id);
+    } catch (err: unknown) {
+      const resp = (err as { response?: { status?: number; data?: { error?: { code?: string } } } })?.response;
+      if (resp?.status === 412 && resp.data?.error?.code === 'MAJOR_ACK_REQUIRED') {
+        setMajorModalItem(item);
+      } else if (resp?.status === 409) {
+        removeItem(item.id);
+      } else {
+        refetch();
+      }
+    } finally {
+      setPendingIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
     }
   }, [removeItem, refetch]);
 
@@ -44,14 +55,18 @@ export default function PulsePage({ user }: Props) {
 
   const submitReject = useCallback(async () => {
     if (!rejectingItem || !rejectComment.trim()) return;
-    removeItem(rejectingItem.id);
+    const itemId = rejectingItem.id;
     setRejectingItem(null);
+    setPendingIds(prev => new Set(prev).add(itemId));
     try {
-      await api.post(`/api/review-items/${rejectingItem.id}/reject`, {
+      await api.post(`/api/review-items/${itemId}/reject`, {
         comment: rejectComment,
       });
+      removeItem(itemId);
     } catch {
       refetch();
+    } finally {
+      setPendingIds(prev => { const next = new Set(prev); next.delete(itemId); return next; });
     }
   }, [rejectingItem, rejectComment, removeItem, refetch]);
 
@@ -122,9 +137,9 @@ export default function PulsePage({ user }: Props) {
               )}
               {attention.counts.total > 0 && (
                 <>
-                  <Lane laneId="client" items={attention.lanes.client} onApprove={handleApprove} onReject={handleReject} />
-                  <Lane laneId="major" items={attention.lanes.major} onApprove={handleApprove} onReject={handleReject} />
-                  <Lane laneId="internal" items={attention.lanes.internal} onApprove={handleApprove} onReject={handleReject} />
+                  <Lane laneId="client" items={attention.lanes.client} onApprove={handleApprove} onReject={handleReject} pendingIds={pendingIds} />
+                  <Lane laneId="major" items={attention.lanes.major} onApprove={handleApprove} onReject={handleReject} pendingIds={pendingIds} />
+                  <Lane laneId="internal" items={attention.lanes.internal} onApprove={handleApprove} onReject={handleReject} pendingIds={pendingIds} />
                 </>
               )}
             </div>
