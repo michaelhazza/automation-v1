@@ -265,10 +265,11 @@ export const mcpClientManager = {
     mcpServerConfigId?: string;
     gateLevel: 'auto' | 'review' | 'block' | null;
     status: 'success' | 'error' | 'timeout' | 'budget_blocked';
-    failureReason?: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown';
+    failureReason?: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown' | 'pre_execution_failure';
     durationMs: number;
     responseSizeBytes?: number;
     wasTruncated?: boolean;
+    isRetry: boolean;
     callIndex: number | null;
   }): void {
     const now = new Date();
@@ -279,8 +280,8 @@ export const mcpClientManager = {
       runId: params.ctx.runId !== 'test' ? params.ctx.runId : undefined,
       agentId: params.ctx.agentId !== 'test' ? params.ctx.agentId : undefined,
       mcpServerConfigId: params.mcpServerConfigId,
-      serverSlug: params.serverSlug || 'unknown',
-      toolName: params.toolName || 'unknown',
+      serverSlug: params.serverSlug || '__unknown__',
+      toolName: params.toolName || '__unknown__',
       gateLevel: params.gateLevel ?? undefined,
       status: params.status,
       failureReason: params.failureReason ?? undefined,
@@ -288,6 +289,7 @@ export const mcpClientManager = {
       responseSizeBytes: params.responseSizeBytes,
       wasTruncated: params.wasTruncated ?? false,
       isTestRun: params.ctx.isTestRun,
+      isRetry: params.isRetry,
       callIndex: params.callIndex ?? undefined,
       billingMonth: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`,
       billingDay: now.toISOString().slice(0, 10),
@@ -337,11 +339,12 @@ export const mcpClientManager = {
       const slugParts = toolSlug.split('.');
       this.writeInvocation({
         ctx,
-        serverSlug: slugParts[1] ?? 'unknown',
-        toolName: slugParts.slice(2).join('.') || 'unknown',
+        serverSlug: slugParts[1] ?? '__unknown__',
+        toolName: slugParts.slice(2).join('.') || '__unknown__',
         gateLevel: null,
         status: 'budget_blocked',
         durationMs: 0,
+        isRetry: retryCount > 0,
         callIndex: null,
       });
       return { error: `MCP tool call limit reached (${MAX_MCP_CALLS_PER_RUN}/${MAX_MCP_CALLS_PER_RUN}). Use internal skills or request a budget increase.` };
@@ -352,12 +355,13 @@ export const mcpClientManager = {
     if (parts.length < 3 || parts[0] !== 'mcp') {
       this.writeInvocation({
         ctx,
-        serverSlug: 'unknown',
-        toolName: 'unknown',
+        serverSlug: '__unknown__',
+        toolName: '__unknown__',
         gateLevel: null,
         status: 'error',
-        failureReason: 'invalid_response',
+        failureReason: 'pre_execution_failure',
         durationMs: 0,
+        isRetry: retryCount > 0,
         callIndex: null,
       });
       return { error: `Invalid MCP tool slug: ${toolSlug}` };
@@ -379,7 +383,7 @@ export const mcpClientManager = {
         this.writeInvocation({
           ctx, serverSlug, toolName, gateLevel: null,
           status: 'error', failureReason: 'process_crash',
-          durationMs: 0, callIndex: null,
+          durationMs: 0, isRetry: retryCount > 0, callIndex: null,
         });
         return { error: `Failed to connect to ${serverSlug} MCP server` };
       }
@@ -389,8 +393,8 @@ export const mcpClientManager = {
     if (!instance) {
       this.writeInvocation({
         ctx, serverSlug, toolName, gateLevel: null,
-        status: 'error', failureReason: 'unknown',
-        durationMs: 0, callIndex: null,
+        status: 'error', failureReason: 'pre_execution_failure',
+        durationMs: 0, isRetry: retryCount > 0, callIndex: null,
       });
       return { error: `MCP server "${serverSlug}" not connected` };
     }
@@ -453,7 +457,7 @@ export const mcpClientManager = {
           ctx, serverSlug, toolName,
           mcpServerConfigId: instance.serverConfig.id,
           gateLevel: resolveGateLevel(instance.serverConfig, toolName, toolAnnotations),
-          status, failureReason, durationMs, callIndex,
+          status, failureReason, durationMs, isRetry: false, callIndex,
         });
 
         // On process crash: reconnect before retrying
@@ -478,7 +482,7 @@ export const mcpClientManager = {
           mcpServerConfigId: instance.serverConfig.id,
           gateLevel: resolveGateLevel(instance.serverConfig, toolName, toolAnnotations),
           status, failureReason, durationMs,
-          responseSizeBytes, wasTruncated, callIndex,
+          responseSizeBytes, wasTruncated, isRetry: retryCount > 0, callIndex,
         });
       }
     }

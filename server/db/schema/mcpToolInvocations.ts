@@ -31,8 +31,9 @@ export const mcpToolInvocations = pgTable(
     status: text('status').notNull().$type<'success' | 'error' | 'timeout' | 'budget_blocked'>(),
 
     // DB CHECK enforces: null for status='success' or 'budget_blocked'; non-null for 'error'/'timeout' (mcp_tool_invocations_failure_reason_chk)
+    // 'pre_execution_failure' used for routing failures (invalid slug, no connected instance)
     failureReason: text('failure_reason')
-      .$type<'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown'>(),
+      .$type<'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown' | 'pre_execution_failure'>(),
 
     // 0 for pre-execution exits (budget-blocked, connect failure, etc.)
     durationMs: integer('duration_ms').notNull().default(0),
@@ -43,6 +44,9 @@ export const mcpToolInvocations = pgTable(
 
     // Denormalised from agentRuns.isTestRun at insert time
     isTestRun: boolean('is_test_run').notNull().default(false),
+
+    // true for the second attempt of a retried tool call — allows separating retry cost in analytics
+    isRetry: boolean('is_retry').notNull().default(false),
 
     // Canonical ordering key within a run; null for pre-execution exits (budget-blocked etc.)
     callIndex: integer('call_index'),

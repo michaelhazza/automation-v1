@@ -13,11 +13,12 @@ CREATE TABLE IF NOT EXISTS mcp_tool_invocations (
   tool_name             text        NOT NULL,
   gate_level            text        CHECK (gate_level IN ('auto', 'review', 'block')),
   status                text        NOT NULL CHECK (status IN ('success', 'error', 'timeout', 'budget_blocked')),
-  failure_reason        text        CHECK (failure_reason IN ('timeout', 'process_crash', 'invalid_response', 'auth_error', 'rate_limited', 'unknown')),
+  failure_reason        text        CHECK (failure_reason IN ('timeout', 'process_crash', 'invalid_response', 'auth_error', 'rate_limited', 'unknown', 'pre_execution_failure')),
   duration_ms           integer     NOT NULL DEFAULT 0,
   response_size_bytes   integer,
   was_truncated         boolean     NOT NULL DEFAULT false,
   is_test_run           boolean     NOT NULL DEFAULT false,
+  is_retry              boolean     NOT NULL DEFAULT false,
   call_index            integer,
   billing_month         text        NOT NULL,
   billing_day           text        NOT NULL,
@@ -57,7 +58,7 @@ ALTER TABLE mcp_tool_invocations ADD CONSTRAINT mcp_tool_invocations_failure_rea
     (status NOT IN ('success', 'budget_blocked') AND failure_reason IS NOT NULL)
   );
 
--- Partial index for error/timeout analytics queries (WHERE status != 'success')
+-- Partial index for infra-failure analytics (error + timeout only — budget_blocked is policy, not infra)
 CREATE INDEX IF NOT EXISTS mcp_tool_invocations_error_idx
   ON mcp_tool_invocations (organisation_id, status, billing_month)
-  WHERE status != 'success';
+  WHERE status IN ('error', 'timeout');
