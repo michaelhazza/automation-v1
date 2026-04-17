@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
@@ -67,6 +67,9 @@ export const subaccounts = pgTable(
       .notNull()
       .default({ approvedCount: 0, trustedAt: null, resetAt: null })
       .$type<{ approvedCount: number; trustedAt: string | null; resetAt: string | null }>(),
+
+    // ── Pulse — per-subaccount retention override (migration 0160) ──
+    runRetentionDays: integer('run_retention_days'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

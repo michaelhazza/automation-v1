@@ -8,6 +8,9 @@ import { queueService } from '../services/queueService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { getMajorThresholds } from '../services/pulseConfigService.js';
+import { buildDraftFromAction, getRunTotalCostMinor, getRunTotalCostMinorBatch } from '../services/pulseService.js';
+import { classify, buildAckText } from '../services/pulseLaneClassifier.js';
 
 const router = Router();
 
@@ -76,17 +79,45 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   asyncHandler(async (req, res) => {
-    const { edits, comment } = req.body;
-    const action = await actionService.getAction(
-      req.params.id.length === 36
-        ? (await reviewService.getReviewItem(req.params.id, req.orgId!)).actionId
-        : req.params.id,
-      req.orgId!,
-    );
+    const { edits, comment, majorAcknowledgment } = req.body;
+
+    const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);
+
+    if (reviewItem.reviewStatus !== 'pending' && reviewItem.reviewStatus !== 'edited_pending') {
+      throw { statusCode: 409, message: 'Item already resolved', errorCode: 'ALREADY_RESOLVED' };
+    }
+
+    const action = await actionService.getAction(reviewItem.actionId, req.orgId!);
+
+    const thresholds = await getMajorThresholds(req.orgId!);
+    const runTotal = action.agentRunId
+      ? await getRunTotalCostMinor(action.agentRunId, req.orgId!)
+      : null;
+    const draft = buildDraftFromAction(action, runTotal);
+    const { lane, majorReason } = classify(draft, thresholds);
+
+    let ackText: string | null = null;
+    let ackAmountMinor: number | null = null;
+
+    if (lane === 'major') {
+      const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
+      if (majorAcknowledgment !== true) {
+        res.status(412).json({
+          error: { code: 'MAJOR_ACK_REQUIRED', message: 'Major-lane approval requires acknowledgment' },
+          lane,
+          majorReason,
+          ackText: ack.text,
+          ackAmountMinor: ack.amountMinor,
+          ackCurrencyCode: thresholds.currencyCode,
+        });
+        return;
+      }
+      ackText = ack.text;
+      ackAmountMinor = ack.amountMinor;
+    }
 
     const result = await reviewService.approveItem(req.params.id, req.orgId!, req.user!.id, edits);
 
-    // Write audit record (async — does not affect response timing)
     reviewAuditService.record({
       actionId: action.id,
       organisationId: req.orgId!,
@@ -99,6 +130,11 @@ router.post(
       rawFeedback: comment,
       editedArgs: edits,
       proposedAt: action.createdAt,
+      majorAcknowledged: lane === 'major',
+      majorReason: majorReason ?? undefined,
+      ackText: ackText ?? undefined,
+      ackAmountMinor: ackAmountMinor ?? undefined,
+      ackCurrencyCode: lane === 'major' ? thresholds.currencyCode : undefined,
     }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
 
     // If this action was created by a workflow step, enqueue a resume job
@@ -117,7 +153,7 @@ router.post(
 
     const subaccountId = action.subaccountId;
     if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
-    res.json(result);
+    res.json({ ...result, lane });
   })
 );
 
@@ -175,8 +211,71 @@ router.post(
       res.status(400).json({ error: 'ids (array) is required' });
       return;
     }
-    const result = await reviewService.bulkApprove(ids, req.orgId!, req.user!.id);
-    res.json(result);
+
+    const thresholds = await getMajorThresholds(req.orgId!);
+    const items = await Promise.all(
+      ids.map(id => reviewService.getReviewItem(id, req.orgId!).catch(() => null)),
+    );
+
+    const actionIds = items
+      .filter(Boolean)
+      .map(item => item!.actionId)
+      .filter(Boolean) as string[];
+    const actionsLoaded = actionIds.length > 0
+      ? await actionService.getActionsBulk(actionIds, req.orgId!)
+      : [];
+    const actionMap = new Map(actionsLoaded.map(a => [a.id, a]));
+
+    const runIds = actionsLoaded.map(a => a.agentRunId).filter(Boolean) as string[];
+    const runTotalsMap = runIds.length > 0
+      ? await getRunTotalCostMinorBatch(runIds, req.orgId!)
+      : new Map<string, number>();
+
+    const approvable: string[] = [];
+    const blocked: Array<{ id: string; majorReason: string }> = [];
+    const alreadyResolved: string[] = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      const item = items[i];
+      if (!item) continue;
+
+      if (item.reviewStatus !== 'pending' && item.reviewStatus !== 'edited_pending') {
+        alreadyResolved.push(ids[i]);
+        continue;
+      }
+
+      const action = actionMap.get(item.actionId);
+      if (!action) continue;
+
+      const runTotal = action.agentRunId
+        ? runTotalsMap.get(action.agentRunId) ?? null
+        : null;
+      const draft = buildDraftFromAction(action, runTotal);
+      const { lane, majorReason } = classify(draft, thresholds);
+
+      if (lane === 'major') {
+        blocked.push({ id: ids[i], majorReason: majorReason! });
+      } else {
+        approvable.push(ids[i]);
+      }
+    }
+
+    if (approvable.length > 0) {
+      await reviewService.bulkApprove(approvable, req.orgId!, req.user!.id);
+    }
+
+    console.info('[Pulse] bulk_approve_result', {
+      approvedCount: approvable.length,
+      blockedCount: blocked.length,
+      alreadyResolvedCount: alreadyResolved.length,
+    });
+
+    res.json({
+      ok: true,
+      approved: approvable,
+      blocked,
+      alreadyResolved,
+    });
   })
 );
 

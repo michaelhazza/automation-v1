@@ -18,6 +18,7 @@ export const ORG_PERMISSIONS = {
   PROCESSES_TEST: 'org.processes.test',
   // Executions
   EXECUTIONS_VIEW: 'org.executions.view',
+  EXECUTIONS_MANAGE: 'org.executions.manage',
   // Users
   USERS_VIEW: 'org.users.view',
   USERS_INVITE: 'org.users.invite',
@@ -89,6 +90,7 @@ export const SUBACCOUNT_PERMISSIONS = {
   // Executions
   EXECUTIONS_VIEW: 'subaccount.executions.view',
   EXECUTIONS_VIEW_ALL: 'subaccount.executions.view_all',
+  EXECUTIONS_MANAGE: 'subaccount.executions.manage',
   // Members
   USERS_VIEW: 'subaccount.users.view',
   USERS_INVITE: 'subaccount.users.invite',
@@ -149,6 +151,7 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.CONNECTIONS_MANAGE, description: 'Create/edit/revoke org-level connections', groupName: 'org.connections' },
   // org.executions
   { key: ORG_PERMISSIONS.EXECUTIONS_VIEW, description: 'View all org executions',    groupName: 'org.executions' },
+  { key: ORG_PERMISSIONS.EXECUTIONS_MANAGE, description: 'Manage executions (approve, acknowledge failures)', groupName: 'org.executions' },
   // org.users
   { key: ORG_PERMISSIONS.USERS_VIEW,   description: 'View org users',               groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_INVITE, description: 'Invite users to org',          groupName: 'org.users' },
@@ -205,6 +208,7 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.executions
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,     description: 'View own execution history',         groupName: 'subaccount.executions' },
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL, description: 'View all subaccount executions',     groupName: 'subaccount.executions' },
+  { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_MANAGE,   description: 'Manage executions (acknowledge failures)', groupName: 'subaccount.executions' },
   // subaccount.users
   { key: SUBACCOUNT_PERMISSIONS.USERS_VIEW,   description: 'View subaccount members',        groupName: 'subaccount.users' },
   { key: SUBACCOUNT_PERMISSIONS.USERS_INVITE, description: 'Invite users to subaccount',     groupName: 'subaccount.users' },
@@ -267,6 +271,7 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.PROCESSES_ACTIVATE,
       ORG_PERMISSIONS.PROCESSES_TEST,
       ORG_PERMISSIONS.EXECUTIONS_VIEW,
+      ORG_PERMISSIONS.EXECUTIONS_MANAGE,
       ORG_PERMISSIONS.USERS_VIEW,
       ORG_PERMISSIONS.USERS_INVITE,
       ORG_PERMISSIONS.USERS_EDIT,

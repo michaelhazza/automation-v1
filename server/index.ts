@@ -136,6 +136,7 @@ import memoryInspectorRouter from './routes/memoryInspector.js';
 import portfolioRollupRouter from './routes/portfolioRollup.js';
 // Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
 import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
+import pulseRouter from './routes/pulse.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -308,6 +309,7 @@ app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
+app.use(pulseRouter);
 app.use(skillStudioRouter);
 // ClientPulse module routes
 app.use(modulesRouter);
