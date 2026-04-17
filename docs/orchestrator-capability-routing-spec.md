@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 6 — final micro-fixes: combined_coverage_possible carried into decision record; routing_timeout_reason field for observability; cache key uses deterministic stableStringify not JSON.stringify)
+> **Last updated:** 2026-04-17 (revision 7 — Synthetos-internal task creation: request_feature now creates a task in the Synthetos subaccount for HITL triage before any analysis fires; dedicated feature-request admin page deferred in favour of task board)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -706,6 +706,57 @@ Both channels are best-effort. The durable record is the `feature_requests` row.
 
 **Permissions:** `feature_request_submit`. System and org agents can file; subaccount agents cannot (to prevent feature-request spam from client_user-facing flows). The Orchestrator, which runs at org scope, always has permission.
 
+**Output (extended):**
+
+```typescript
+{
+  feature_request_id: string;
+  notification_result: {
+    slack: { status: 'sent' | 'skipped' | 'failed'; detail?: string };
+    email: { status: 'sent' | 'skipped' | 'failed'; detail?: string };
+    synthetos_task: { status: 'created' | 'skipped' | 'failed'; task_id?: string; detail?: string };
+  };
+}
+```
+
+### 5.3.1 Synthetos-internal task creation (dogfooding)
+
+After writing the `feature_requests` row and firing outbound notifications, `request_feature` creates a task in the Synthetos-internal subaccount configured via `systemSettings.synthetos_internal_subaccount_id`. If the setting is not configured, this step is skipped silently — it is opt-in infrastructure, not required for the skill to function.
+
+**Why a task, not a separate admin page:** The task board already has everything needed for triage — status, comments, assignment, filtering, priority. Building a dedicated feature-request admin page at this stage would be speculative UI without knowing what the real triage workflow looks like. The task board handles it for free. A dedicated page can be built later if volume forces it (bulk operations, cross-org trending, duplicate merging).
+
+**Task content:**
+
+```typescript
+{
+  title: `[Feature Request] ${feature_request.summary}`,
+  description: [
+    `Category: ${feature_request.category}`,
+    ``,
+    `User intent (verbatim):`,
+    feature_request.user_intent,
+    ``,
+    `Required capabilities: ${required_capabilities.map(c => c.slug).join(', ')}`,
+    `Missing: ${missing_capabilities.map(c => c.slug).join(', ')}`,
+    ``,
+    `Org: ${org.name} | Subaccount: ${subaccount?.name ?? 'n/a'} | User: ${user.email}`,
+    `Feature request ID: ${feature_request_id}`,
+    `Source task ID: ${source_task_id ?? 'n/a'}`,
+  ].join('\n'),
+  status: 'inbox',
+  priority: category === 'system_promotion_candidate' ? 'normal' : 'low',
+  assignedAgentId: null,      // intentionally unassigned — human reviews first
+  subaccountId: systemSettings.synthetos_internal_subaccount_id,
+  createdByAgentId: <orchestrator_agent_id>,  // set so the org_task_created trigger guard drops it (§7.3)
+}
+```
+
+**HITL before analysis:** The task lands in the Synthetos team's task board in the `inbox` column, unassigned. A team member reviews it and — if they want a codebase-level proposal — manually assigns it to a development agent (e.g. the IEE). There is no automatic routing. The `createdByAgentId` being non-null means the `org_task_created` trigger's handler guard (§7.3) drops the event, so the Orchestrator does not auto-route it even if the Synthetos subaccount has the trigger active.
+
+**Dogfooding value:** This exercises the complete `request_feature → task_created → task board` pipeline with real data from day one, without building separate tooling. When the Synthetos team later enables the Orchestrator on their own subaccount, these feature-request tasks become candidates for automated analysis — but that is a prompt-level configuration change, not a code change. The infrastructure is already correct.
+
+**Deduplication:** The Synthetos-internal task is only created on the _first_ write of a dedupe group (§5.4). Subsequent identical requests that increment `dedupe_group_count` do not create a second task. The existing task's description could optionally be updated to note the increased count, but this is a stretch goal — the primary goal is avoiding noise.
+
 ### 5.4 Lightweight dedupe (per-org, single category, 30-day window)
 
 The spec does **not** build full clustering or cross-org dedupe, but a small hash-based suppression prevents the obvious spam case (a noisy trigger or a prompt bug filing the same request hundreds of times).
@@ -723,7 +774,7 @@ The window is deliberately short — repeated signal over months is genuine sign
 
 - **No full clustering or cross-org dedupe.** Feature requests are single-org facts beyond the simple per-org hash above. Cross-org analytics comes later if volume justifies.
 - **No automatic promotion.** A `system_promotion_candidate` row does not trigger any automated system-agent creation. The Synthetos team reads the signal and makes the call by hand.
-- **No user-facing feature-request browser.** Users see their own feature-request filings via the task comment (§8). An admin dashboard can be added later if needed.
+- **No dedicated feature-request admin page.** The Synthetos team triages via their internal subaccount task board (§5.3.1). A purpose-built system-admin page (bulk triage, cross-org trending, duplicate merging) is deferred until volume makes the task board insufficient. End-users see their own filings via the task comment on the originating task (§8).
 - **No SLA enforcement.** Rows remain `open` until a Synthetos team member triages them. No deadlines, no escalation. This is a signal channel, not a ticket queue.
 
 ### 5.6 Notification content
@@ -1111,9 +1162,10 @@ The work decomposes into five phases. Each phase is independently shippable — 
 
 **P3: `feature_requests` table + `request_feature` skill + notification service**
 - New migration adding the table (§5.2).
-- Implement and register `request_feature` (§5.3).
-- Implement `featureRequestNotificationService` with Slack and email channels (§5.5).
-- Deliverable: any agent can file a feature request that is durably stored and visibly notified.
+- Implement and register `request_feature` (§5.3) including the Synthetos-internal task creation step (§5.3.1).
+- Implement `featureRequestNotificationService` with Slack, email, and Synthetos-task channels (§5.6).
+- Add `systemSettings.synthetos_internal_subaccount_id` setting (skip silently if not configured).
+- Deliverable: any agent can file a feature request that is durably stored, visibly notified, and appears as a reviewable task in the Synthetos team's task board for HITL triage before any analysis is triggered.
 
 **P4: Orchestrator prompt rewrite + Config Assistant handoff**
 - Rewrite the Orchestrator's system prompt per §6.2 and §6.3.
