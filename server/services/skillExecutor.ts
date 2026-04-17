@@ -112,6 +112,8 @@ export interface SkillExecutionContext {
   _mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig>;
   /** MCP call counter for budget enforcement. */
   mcpCallCount?: number;
+  /** Whether this run is a test run — propagated from agentRun.isTestRun. */
+  isTestRun?: boolean;
   /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
@@ -1581,6 +1583,7 @@ export const skillExecutor = {
           organisationId: context.organisationId,
           agentId: context.agentId,
           subaccountId: context.subaccountId,
+          isTestRun: context.isTestRun ?? false,
           taskId: context.taskId,
           mcpCallCount: context.mcpCallCount,
         },
@@ -3501,6 +3504,7 @@ async function executeScrapeUrl(
         organisationId: context.organisationId,
         agentId: context.agentId,
         subaccountId: context.subaccountId,
+        isTestRun: context.isTestRun ?? false,
         taskId: context.taskId,
         mcpCallCount: context.mcpCallCount,
       },

@@ -84,3 +84,20 @@ When updating `docs/capabilities.md`, ALWAYS write in end-user / sales / marketi
 ### 2026-04-13 Pattern — GEO audit score storage uses JSONB for dimension breakdown
 
 `geo_audits` table stores `dimension_scores` as JSONB array of `{dimension, score, weight, findings, recommendations}` and `platform_readiness` as JSONB array. This allows flexible per-dimension storage without needing separate tables for each score type. The `weights_snapshot` column captures the weights used at audit time so historical scores remain reproducible even if default weights change later.
+
+### 2026-04-17 Gotcha — Rebase with merge conflicts can leave duplicate code visible in PR diff
+
+When a rebase involves merge conflicts in a heavily-edited file, the resolved file can look clean locally while the CUMULATIVE diff against main (what GitHub shows in the PR) reveals old+new versions of a block coexisting — because the fix added the new line without removing the old one during conflict resolution. `git show origin/<branch>:file` shows current HEAD (may look clean), while `git diff main...HEAD -- <file>` shows the cumulative diff that reviewers actually see. Always run `git diff main...HEAD -- <changed-file>` after any rebase that involved conflicts to verify what GitHub will show.
+
+### 2026-04-17 Correction — Verify reviewer feedback against the PR diff perspective, not just the local file
+
+During the MCP tool invocations PR, a reviewer flagged a `const durationMs` shadowing bug multiple rounds. Each time, reading the local file and `git show origin/...` showed clean code, so the feedback was dismissed. The actual issue was that intermediate rebase states had introduced the bug into the PR's cumulative diff, even though current HEAD was clean. Rule: if a reviewer repeatedly flags the same issue and the local file looks correct, run `git diff main...HEAD -- <file>` before dismissing. If the cumulative diff is also clean, the reviewer is misreading diff format markers — confirm and explain.
+
+### 2026-04-17 Gotcha — GitHub unified diff format is commonly misread as "both lines present"
+
+A reviewer seeing the GitHub PR diff may interpret:
+```diff
+-      const durationMs = Date.now() - callStart;
++      durationMs = Date.now() - callStart;
+```
+as both lines existing in the final file, when in fact `-` means REMOVED and `+` means ADDED — only the `+` line exists after the change. When a reviewer flags a bug that is visibly "fixed" in the diff (old bad line on `-`, new good line on `+`), the code is correct and the reviewer is misreading the diff format. Confirm by reading the actual file or `git show origin/<branch>:file`.

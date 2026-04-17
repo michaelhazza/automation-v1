@@ -790,6 +790,8 @@ Complete list of all 110 skills.
 | **Gate overrides** | Per-tool gate level (auto/review/block) |
 | **Connection modes** | Eager (connect at startup) or lazy (connect on first use) |
 | **Scrapling preset** | Anti-bot web scraping sidecar (`uvx scrapling mcp`) — Cloudflare bypass, stealth browsing; used as Tier 3 of the scraping engine |
+| **Call observability** | Every MCP tool call attempt (including retries) is logged to an append-only ledger with status, duration, response size, and gate level — per-server and per-run summaries available on run detail |
+| **MCP cost attribution** | MCP call counts roll up into the same cost-aggregate pipeline as LLM spend — org, subaccount, run, and per-server monthly breakdowns; test-run calls excluded from P&L |
 
 ---
 
@@ -797,6 +799,7 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |
 | 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
 | 2026-04-16 | Hosted-routine / scheduled-prompt product-category positioning refresh: add Portfolio-wide scheduled-work visibility and Supervised migration from no-code workflow tools to Structural Differentiators; add "I'll use a hosted routines product from an LLM provider" objection row; sharpen existing scheduled-prompt objection row with portfolio-calendar and client-portal proof points; expand Replaces / Consolidates with hosted-routine and no-code migration rows; add portfolio calendar + inline Run Now test bullets to AI Agent System; add no-code migration wedge bullet to Playbook Engine; add discovery-call demo and "why not hosted routines" conversation bullets to GTM guidance. Ships in the same commit as `docs/routines-response-dev-spec.md`. | — |
 | 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_playbook_output_to_portal` and `config_send_playbook_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
