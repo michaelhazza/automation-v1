@@ -659,7 +659,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <span className="flex-1">New Issue</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to="/admin/pulse" icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
+                <NavItem to={activeClientId ? `/admin/subaccounts/${activeClientId}/pulse` : '/admin/pulse'} icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
               )}
             </>
           )}

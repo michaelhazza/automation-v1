@@ -220,8 +220,8 @@ router.patch(
       update.includeInOrgInbox = includeInOrgInbox;
     }
     if (runRetentionDays !== undefined) {
-      if (runRetentionDays !== null && (typeof runRetentionDays !== 'number' || runRetentionDays < 1)) {
-        throw { statusCode: 400, message: 'runRetentionDays must be a positive integer or null' };
+      if (runRetentionDays !== null && (typeof runRetentionDays !== 'number' || !Number.isInteger(runRetentionDays) || runRetentionDays < 7 || runRetentionDays > 3650)) {
+        throw { statusCode: 400, message: 'runRetentionDays must be an integer between 7 and 3650, or null' };
       }
       update.runRetentionDays = runRetentionDays;
     }

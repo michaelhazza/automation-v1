@@ -478,7 +478,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                 <p className="text-[12px] text-slate-400 mb-1.5">Override the default retention period for agent run data. Leave blank to use the organisation default.</p>
                 <input
                   type="number"
-                  min="1"
+                  min="7"
                   max="3650"
                   placeholder="Org default"
                   value={settingsForm.runRetentionDays}

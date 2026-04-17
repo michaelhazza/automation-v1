@@ -62,7 +62,10 @@ export function usePulseAttention({ scope, subaccountId }: UsePulseAttentionArgs
       const res = await api.get(url);
       setData(res.data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load Pulse data';
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      const message = status === 403
+        ? 'You do not have org-level review permission. Select a client from the sidebar to view their Pulse feed.'
+        : err instanceof Error ? err.message : 'Failed to load Pulse data';
       setError(message);
     } finally {
       setIsLoading(false);
@@ -115,6 +118,7 @@ export function usePulseAttention({ scope, subaccountId }: UsePulseAttentionArgs
   const roomId = scope === 'org' ? 'current' : subaccountId || '';
 
   useSocketRoom(roomType, roomId, {
+    'review:item_created': mergeFromEvent,
     'review:item_updated': mergeFromEvent,
     'task:status_changed': mergeFromEvent,
     'agent:run:failed': mergeFromEvent,

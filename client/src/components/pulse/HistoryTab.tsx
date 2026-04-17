@@ -184,6 +184,7 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
   const [filterStatus, setFilterStatus] = useState<Set<NormalisedStatus>>(new Set());
   const [filterSeverity, setFilterSeverity] = useState<Set<string>>(new Set());
 
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('newest');
   const [from, setFrom] = useState('');
@@ -224,9 +225,12 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
       if (from) params.from = from;
       if (to) params.to = to;
       const { data } = await api.get(getEndpoint(), { params });
+      setPermissionDenied(false);
       setItems(data.items);
       setTotal(data.total);
-    } catch {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 403) setPermissionDenied(true);
       setItems([]);
       setTotal(0);
     } finally {
@@ -274,6 +278,14 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
         return sortDir === 'asc' ? cmp : -cmp;
       })
     : filtered;
+
+  if (permissionDenied) {
+    return (
+      <div className="rounded bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-700">
+        You do not have permission to view activity history. Contact your administrator to request the executions view permission.
+      </div>
+    );
+  }
 
   return (
     <div>
