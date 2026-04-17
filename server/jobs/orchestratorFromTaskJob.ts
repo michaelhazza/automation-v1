@@ -104,18 +104,24 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
-  // 2. Handler-side guards (spec §7.3 — beyond what eventFilter can express).
-  if (task.createdByAgentId) {
-    // Agent-created tasks must not recurse back to the Orchestrator.
-    logger.info('orchestratorFromTask.skipped_agent_created', { taskId, createdByAgentId: task.createdByAgentId });
-    return;
-  }
-  if (!task.description || task.description.trim().length < MIN_DESCRIPTION_CHARS) {
-    logger.info('orchestratorFromTask.skipped_short_description', { taskId });
-    await taskService.updateTask(taskId, organisationId, {
-      status: 'routing_failed',
-    }).catch((err: unknown) => {
-      logger.error('orchestratorFromTask.update_status_failed', { taskId, error: String(err) });
+  // 2. Full eligibility revalidation — the task may have been assigned, moved
+  //    out of inbox, or turned into a subtask between enqueue and execution.
+  const taskLike: TaskLike = {
+    id: task.id,
+    organisationId: task.organisationId,
+    status: task.status,
+    assignedAgentId: task.assignedAgentId,
+    isSubTask: task.isSubTask,
+    createdByAgentId: task.createdByAgentId,
+    description: task.description,
+  };
+  if (!isEligibleForOrchestratorRouting(taskLike)) {
+    logger.info('orchestratorFromTask.skipped_ineligible', {
+      taskId,
+      status: task.status,
+      assignedAgentId: task.assignedAgentId,
+      isSubTask: task.isSubTask,
+      createdByAgentId: task.createdByAgentId,
     });
     return;
   }
@@ -132,6 +138,16 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
+  // Scope the lookup to the task's subaccount so multi-subaccount orgs
+  // resolve the correct board, memory, and tool scope.
+  const linkConditions = [
+    eq(subaccountAgents.organisationId, organisationId),
+    eq(agents.systemAgentId, systemAgent.id),
+    eq(subaccountAgents.isActive, true),
+  ];
+  if (task.subaccountId) {
+    linkConditions.push(eq(subaccountAgents.subaccountId, task.subaccountId));
+  }
   const [orchestratorLink] = await db
     .select({
       subaccountAgentId: subaccountAgents.id,
@@ -140,11 +156,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     })
     .from(subaccountAgents)
     .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
-    .where(and(
-      eq(subaccountAgents.organisationId, organisationId),
-      eq(agents.systemAgentId, systemAgent.id),
-      eq(subaccountAgents.isActive, true),
-    ))
+    .where(and(...linkConditions))
     .limit(1);
 
   if (!orchestratorLink) {

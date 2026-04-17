@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or, isNull } from 'drizzle-orm';
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
 import { integrationConnections } from '../../db/schema/index.js';
@@ -144,9 +144,28 @@ export async function executeListConnections(
   // Query integration_connections for the resolved scope.
   try {
     const conditions = subaccountId
-      ? and(eq(integrationConnections.organisationId, orgId), eq(integrationConnections.subaccountId, subaccountId))
+      ? and(
+          eq(integrationConnections.organisationId, orgId),
+          or(eq(integrationConnections.subaccountId, subaccountId), isNull(integrationConnections.subaccountId)),
+        )
       : eq(integrationConnections.organisationId, orgId);
-    const rows = await db.select().from(integrationConnections).where(conditions);
+    const rawRows = await db.select().from(integrationConnections).where(conditions);
+
+    // When scope=subaccount, dedup so subaccount-specific connections take
+    // precedence over inherited org-level rows for the same provider slug.
+    const rows = subaccountId
+      ? (() => {
+          const bySlug = new Map<string, typeof rawRows[number]>();
+          for (const r of rawRows) {
+            const existing = bySlug.get(r.providerType);
+            // Prefer subaccount-scoped row over org-level (null subaccountId)
+            if (!existing || (r.subaccountId && !existing.subaccountId)) {
+              bySlug.set(r.providerType, r);
+            }
+          }
+          return Array.from(bySlug.values());
+        })()
+      : rawRows;
 
     const connections: ConnectionSummary[] = rows
       .filter((r) => typed.include_inactive || r.connectionStatus === 'active')
@@ -377,8 +396,10 @@ export async function executeCheckCapabilityGap(
 
   function hasScopesForCapability(kind: CapabilityKind, slug: string): boolean {
     // Scope matching is integration-level: find integrations whose
-    // read/write_capabilities list contains this slug, then verify the
-    // active connection has every required_scope from the reference entry.
+    // read/write_capabilities list contains this slug, then verify at least
+    // ONE active connection satisfies every required_scope from the reference
+    // entry. Shared slugs (exposed by multiple providers) only need one
+    // satisfying integration, not all of them.
     const integrations = snapshot.integrations.filter((i) => {
       if (kind === 'read_capability') return i.read_capabilities.includes(slug);
       if (kind === 'write_capability') return i.write_capabilities.includes(slug);
@@ -387,12 +408,11 @@ export async function executeCheckCapabilityGap(
     if (integrations.length === 0) return true; // skills/primitives bypass scope check
     for (const integration of integrations) {
       const connection = connections.find((c) => c.slug === integration.slug && c.status === 'active');
-      if (!connection) return false;
-      for (const requiredScope of integration.required_scopes) {
-        if (!connection.scopes_granted.includes(requiredScope)) return false;
-      }
+      if (!connection) continue; // try next integration
+      const scopesSatisfied = integration.required_scopes.every((s) => connection.scopes_granted.includes(s));
+      if (scopesSatisfied) return true; // at least one integration satisfies
     }
-    return true;
+    return false;
   }
 
   const candidateAgents: CandidateAgent[] = [];
@@ -453,17 +473,35 @@ export async function executeCheckCapabilityGap(
     const integrationSlugs = candidate.matched
       .filter((k) => k.startsWith('integration:'))
       .map((k) => k.slice('integration:'.length));
-    // Also include integrations reachable via read/write capabilities in the required set
+    // Also include integrations reachable via read/write capabilities in the required set.
+    // For shared slugs (same capability exposed by multiple integrations), only require
+    // at least one active connection — but restrict to integrations the candidate agent
+    // actually has in its capability map (prevents accepting a connection the agent
+    // cannot use).
+    const agentMapIntegrations = new Set(agentRow.capabilityMap.integrations ?? []);
+    let integrationCheckPassed = true;
     for (const cap of normalised) {
       if (cap.kind === 'read_capability' || cap.kind === 'write_capability') {
-        for (const integration of snapshot.integrations) {
-          const lists = cap.kind === 'read_capability' ? integration.read_capabilities : integration.write_capabilities;
-          if (lists.includes(cap.canonical_slug) && !integrationSlugs.includes(integration.slug)) {
-            integrationSlugs.push(integration.slug);
+        const providers = snapshot.integrations.filter((i) => {
+          const list = cap.kind === 'read_capability' ? i.read_capabilities : i.write_capabilities;
+          return list.includes(cap.canonical_slug) && agentMapIntegrations.has(i.slug);
+        });
+        if (providers.length > 0) {
+          const anySatisfied = providers.some((p) =>
+            connections.some((c) => c.slug === p.slug && c.status === 'active'),
+          );
+          if (!anySatisfied) { integrationCheckPassed = false; break; }
+          // Add the first active provider to the slug list for downstream logging
+          for (const p of providers) {
+            if (connections.some((c) => c.slug === p.slug && c.status === 'active') && !integrationSlugs.includes(p.slug)) {
+              integrationSlugs.push(p.slug);
+              break;
+            }
           }
         }
       }
     }
+    if (!integrationCheckPassed) continue;
     if (!hasActiveConnectionsForIntegrations(integrationSlugs)) continue;
 
     let scopesOk = true;

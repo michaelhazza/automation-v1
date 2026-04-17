@@ -62,8 +62,13 @@ export function computeCapabilityMapPure(
 
   for (const integration of snapshot.integrations) {
     // If the agent has any skill that this integration enables, the
-    // integration's capabilities flow in.
-    const hasMatchingSkill = integration.skills_enabled.some((slug) => skillSlugs.includes(slug));
+    // integration's capabilities flow in. Also match when skills_enabled is
+    // empty but the agent has a skill whose slug contains the integration
+    // slug (e.g. "send_to_slack" matches integration slug "slack"). This
+    // handles integrations whose skills_enabled hasn't been populated yet.
+    const hasMatchingSkill = integration.skills_enabled.length > 0
+      ? integration.skills_enabled.some((slug) => skillSlugs.includes(slug))
+      : skillSlugs.some((s) => s.includes(integration.slug.replace(/-/g, '_')) || s.includes(integration.slug));
     if (!hasMatchingSkill) continue;
 
     integrations.add(integration.slug);

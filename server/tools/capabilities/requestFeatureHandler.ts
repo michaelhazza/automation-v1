@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { and, desc, eq, gte, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
 import {
@@ -92,35 +92,75 @@ export async function executeRequestFeature(
   // list. Two users asking for the same missing capability should collapse.
   const dedupeHash = computeDedupeHash(typed.category, normMissing.length > 0 ? normMissing : normRequired);
 
-  // 2. Dedupe lookup — per-org, same category, last 30 days, not soft-deleted.
+  // 2. Dedupe lookup + insert — wrapped in a transaction to prevent concurrent
+  //    orchestrator runs from inserting duplicate rows for the same request.
   const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
-  const [existing] = await db
-    .select()
-    .from(featureRequests)
-    .where(and(
-      eq(featureRequests.organisationId, orgId),
-      eq(featureRequests.dedupeHash, dedupeHash),
-      eq(featureRequests.category, typed.category),
-      gte(featureRequests.createdAt, since),
-      isNull(featureRequests.deletedAt),
-    ))
-    .orderBy(desc(featureRequests.createdAt))
-    .limit(1);
 
-  if (existing) {
-    // Increment the dedupe group count and bump updatedAt. No new row, no
-    // outbound notifications fire.
-    await db
-      .update(featureRequests)
-      .set({
-        dedupeGroupCount: existing.dedupeGroupCount + 1,
-        updatedAt: new Date(),
+  const dedupeResult = await db.transaction(async (tx) => {
+    // Acquire a transaction-scoped advisory lock keyed on the dedupe hash to
+    // serialise concurrent orchestrator runs filing the same request. The lock
+    // is released automatically when the transaction commits/rolls back.
+    const lockId = parseInt(createHash('md5').update(orgId + dedupeHash).digest('hex').slice(0, 15), 16);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockId})`);
+
+    const [existing] = await tx
+      .select()
+      .from(featureRequests)
+      .where(and(
+        eq(featureRequests.organisationId, orgId),
+        eq(featureRequests.dedupeHash, dedupeHash),
+        eq(featureRequests.category, typed.category),
+        gte(featureRequests.createdAt, since),
+        isNull(featureRequests.deletedAt),
+      ))
+      .orderBy(desc(featureRequests.createdAt))
+      .limit(1);
+
+    if (existing) {
+      // Increment the dedupe group count and bump updatedAt. No new row, no
+      // outbound notifications fire.
+      await tx
+        .update(featureRequests)
+        .set({
+          dedupeGroupCount: existing.dedupeGroupCount + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(featureRequests.id, existing.id));
+
+      return { deduped: true as const, feature_request_id: existing.id };
+    }
+
+    // 3. Insert the new feature_requests row.
+    const [inserted] = await tx
+      .insert(featureRequests)
+      .values({
+        organisationId: orgId,
+        subaccountId: typed.subaccountId ?? null,
+        requestedByUserId: typed.requested_by_user_id,
+        requestedByAgentId: context.agentId ?? null,
+        sourceTaskId: typed.source_task_id ?? null,
+        category: typed.category,
+        status: 'open',
+        dedupeHash,
+        dedupeGroupCount: 1,
+        summary: typed.summary.slice(0, 200),
+        userIntent: typed.user_intent,
+        requiredCapabilities: normRequired,
+        missingCapabilities: normMissing,
+        orchestratorReasoning: typed.orchestrator_reasoning ?? null,
       })
-      .where(eq(featureRequests.id, existing.id));
+      .returning();
 
+    if (!inserted) {
+      return { deduped: false as const, inserted: null };
+    }
+    return { deduped: false as const, inserted };
+  });
+
+  if (dedupeResult.deduped) {
     return {
       success: true,
-      feature_request_id: existing.id,
+      feature_request_id: dedupeResult.feature_request_id,
       deduped: true,
       notification_result: {
         slack: { status: 'skipped', detail: 'dedupe hit — no re-notification' },
@@ -130,27 +170,7 @@ export async function executeRequestFeature(
     };
   }
 
-  // 3. Insert the new feature_requests row.
-  const [inserted] = await db
-    .insert(featureRequests)
-    .values({
-      organisationId: orgId,
-      subaccountId: typed.subaccountId ?? null,
-      requestedByUserId: typed.requested_by_user_id,
-      requestedByAgentId: context.agentId ?? null,
-      sourceTaskId: typed.source_task_id ?? null,
-      category: typed.category,
-      status: 'open',
-      dedupeHash,
-      dedupeGroupCount: 1,
-      summary: typed.summary.slice(0, 200),
-      userIntent: typed.user_intent,
-      requiredCapabilities: normRequired,
-      missingCapabilities: normMissing,
-      orchestratorReasoning: typed.orchestrator_reasoning ?? null,
-    })
-    .returning();
-
+  const inserted = dedupeResult.inserted;
   if (!inserted) {
     return { success: false, error: 'Failed to insert feature request row' };
   }
