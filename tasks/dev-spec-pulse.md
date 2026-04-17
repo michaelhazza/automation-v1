@@ -491,6 +491,7 @@ export function classify(
   // Fail safe: unknown action types go to Major. An unrecognised action
   // could be dangerous — better to require ack than silently classify as Internal.
   if (draft.actionType && !def) {
+    logger.warn('pulse_unknown_action_type', { actionType: draft.actionType });
     return { lane: 'major', majorReason: 'irreversible' };
   }
 
@@ -749,7 +750,7 @@ pulseService
 │   │   └─ workspaceHealthService.listOpenFindings(scope)        // 50 max
 │   ├─ mergeToDrafts(...)
 │   ├─ getRunTotalCostMinorBatch(runIds, orgId)                  // 1 query
-│   ├─ buildDraftFromAction(action, runTotalsMap.get(runId)) each
+│   ├─ buildDraftFromAction(action, runId ? runTotalsMap.get(runId) ?? null : null) each
 │   ├─ laneClassifier.classify(draft, thresholds) for each
 │   ├─ buildAckText for major lane items
 │   └─ group by lane, sort newest first
@@ -764,7 +765,7 @@ pulseService
 - `Promise.allSettled` (not `all`) so a single-source failure doesn't nuke the whole fetch. Failed fetchers produce an empty array for that source and a typed `PulseWarning` entry in `warnings[]`. If any warning exists, `isPartial = true`. Counts reflect only the items actually returned.
 - Per-fetcher 2-second hard timeout via `Promise.race` against a sentinel.
 - Hard cap of 50 items per source → 200 max items per Attention response.
-- `counts` reflect only the items actually returned and classified. `counts.total` = `counts.client + counts.major + counts.internal`. When `isPartial` is true (a source timed out / errored), counts are lower than reality — the client shows a "Some data may be missing" banner. The `/api/pulse/counts` endpoint (used for the nav badge) makes the same 4 queries independently, capped at 1000 total.
+- `counts` reflect only the items actually returned and classified. **Invariant: `counts.total` MUST equal `counts.client + counts.major + counts.internal` at all times.** When `isPartial` is true (a source timed out / errored), counts are lower than reality — the client shows a "Some data may be missing" banner. The `/api/pulse/counts` endpoint (used for the nav badge) makes the same 4 queries independently, capped at 1000 total.
 
 ### Cross-subaccount fan-out (org scope)
 
@@ -1065,6 +1066,12 @@ router.post(
     if (approvable.length > 0) {
       await reviewService.bulkApprove(approvable, req.user!.id);
     }
+
+    logger.info('bulk_approve_result', {
+      approvedCount: approvable.length,
+      blockedCount: blocked.length,
+      alreadyResolvedCount: alreadyResolved.length,
+    });
 
     res.json({
       ok: true,
