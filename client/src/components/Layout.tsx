@@ -696,9 +696,6 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/admin/subaccounts/${activeClientId}/triggers`} icon={<Icons.scheduled />} label="Triggers" />
               )}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/activity`} icon={<Icons.activity />} label="Activity" />
-              )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/actions`} icon={<Icons.activity />} label="Action Log" />
               )}
             </>
@@ -837,7 +834,7 @@ export default function Layout({ user, children }: LayoutProps) {
         <div className="h-[42px] pr-4 pl-6 flex items-center bg-white border-b border-slate-200 shrink-0 text-[13px] gap-1.5">
           <div className="flex-1 flex items-center gap-1.5">
             {breadcrumbs.length === 0
-              ? <span className="text-slate-900 font-semibold">Dashboard</span>
+              ? <span className="text-slate-900 font-semibold">Pulse</span>
               : breadcrumbs.map((crumb, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-slate-300">›</span>}
