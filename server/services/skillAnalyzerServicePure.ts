@@ -1240,10 +1240,14 @@ export function remediateTables(input: RemediateTablesInput): RemediateTablesOut
 
   let nextText = lines.join('\n');
 
-  // Guard 2: aggregate growth ratio.
+  // Guard 2: aggregate growth ratio. Only enforced for non-trivial inputs;
+  // small tables would otherwise trip the cap on a single auto-recovered row.
   const preWords = countWords(mergedInstructions);
   const postWords = countWords(nextText);
-  const growthRatioExceeded = preWords > 0 && postWords / preWords > maxGrowthRatio;
+  const GROWTH_CAP_MIN_WORDS = 100;
+  const growthRatioExceeded =
+    preWords >= GROWTH_CAP_MIN_WORDS &&
+    postWords / preWords > maxGrowthRatio;
   if (growthRatioExceeded) {
     // Abort: return original.
     nextText = mergedInstructions;

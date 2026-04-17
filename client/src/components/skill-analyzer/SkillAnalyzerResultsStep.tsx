@@ -148,6 +148,7 @@ function AgentChipBlock({
   }
 
   async function toggleSelected(proposal: AgentProposal) {
+    if (!proposal.systemAgentId) return;    // retro-injected proposed-new-agent; no backing agent yet
     await patchProposal({
       systemAgentId: proposal.systemAgentId,
       selected: !proposal.selected,
@@ -155,6 +156,7 @@ function AgentChipBlock({
   }
 
   async function removeProposal(proposal: AgentProposal) {
+    if (!proposal.systemAgentId) return;
     await patchProposal({ systemAgentId: proposal.systemAgentId, remove: true });
   }
 

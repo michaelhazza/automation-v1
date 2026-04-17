@@ -291,7 +291,9 @@ export async function setResultAction(params: {
       const warnings = (resultRow.mergeWarnings ?? []) as MergeWarning[];
       const resolutions = (resultRow.warningResolutions ?? []) as WarningResolution[];
       const snapshot = jobRows[0].configSnapshot as { warningTierMap?: Record<string, WarningTier> } | null;
-      const tierMap = skillAnalyzerConfigService.effectiveTierMap(snapshot);
+      const tierMap = skillAnalyzerConfigService.effectiveTierMap(
+        snapshot as unknown as { warningTierMap: Record<string, WarningTier> } | null,
+      );
       const state = evaluateApprovalState(warnings, resolutions, tierMap);
       if (state.blocked) {
         throw {
@@ -1062,6 +1064,7 @@ export async function executeApproved(params: {
   failed: number;
   errors: Array<{ resultId: string; error: string }>;
   backupId: string | null;
+  pendingDraftAgents?: Array<{ agentId: string; slug: string; name: string }>;
 }> {
   const { jobId, organisationId } = params;
 

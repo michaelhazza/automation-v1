@@ -883,8 +883,12 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           // Extract rationale before stripping it from the stored merge.
           let mergeWarnings: MergeWarning[] = [];
           let mergeRationale: string | null = null;
-          let storedMerge = finalResult.proposedMerge
-            ? { ...finalResult.proposedMerge, mergeRationale: undefined }
+          type StoredMerge = { name: string; description: string; definition: object; instructions: string | null; mergeRationale?: undefined };
+          let storedMerge: StoredMerge | null = finalResult.proposedMerge
+            ? {
+                ...(finalResult.proposedMerge as unknown as StoredMerge),
+                mergeRationale: undefined,
+              }
             : null;
 
           if (
