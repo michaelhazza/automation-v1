@@ -3,12 +3,30 @@ import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
+import { systemAgents } from '../db/schema/systemAgents.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
+import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
+import { createHash } from 'crypto';
+
+/** Deterministic JSON stringify (sorted keys) for hashing. */
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet();
+  const stringify = (v: unknown): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (seen.has(v as object)) return '"[circular]"';
+    seen.add(v as object);
+    if (Array.isArray(v)) return '[' + v.map(stringify).join(',') + ']';
+    const keys = Object.keys(v as object).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + stringify((v as Record<string, unknown>)[k])).join(',') + '}';
+  };
+  return stringify(value);
+}
 
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
@@ -116,6 +134,9 @@ export interface AvailableSystemAgent {
 /** Result row enriched with the live `matchedSkillContent` lookup. */
 export type EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {
   matchedSkillContent?: MatchedSkillContent;
+  /** v2 §11.12.5: true when the mutation cleared existing warning_resolutions
+   *  so the UI can surface a "Review decisions reset" toast. */
+  resolutionsCleared?: boolean;
 };
 
 /** Job + enriched results + Phase 1 GET response extensions. */
@@ -236,13 +257,14 @@ export async function setResultAction(params: {
   jobId: string;
   organisationId: string;
   userId: string;
-  action: 'approved' | 'rejected' | 'skipped';
+  // action=null unapproves a previously-approved result (clears approved_at).
+  action: 'approved' | 'rejected' | 'skipped' | null;
 }): Promise<void> {
   const { resultId, jobId, organisationId, userId, action } = params;
 
   // Verify job belongs to org
   const jobRows = await db
-    .select({ id: skillAnalyzerJobs.id })
+    .select({ id: skillAnalyzerJobs.id, configSnapshot: skillAnalyzerJobs.configSnapshot })
     .from(skillAnalyzerJobs)
     .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
     .limit(1);
@@ -251,42 +273,81 @@ export async function setResultAction(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  // Server-side blocking enforcement — prevents approving a merge with
-  // critical unresolved warnings via a direct API call.
+  // Server-side blocking enforcement via canonical evaluateApprovalState.
+  // PARTIAL_OVERLAP / IMPROVEMENT results with unresolved decision_required
+  // or critical warnings cannot transition to approved.
   if (action === 'approved') {
     const resultRows = await db
-      .select({
-        classification: skillAnalyzerResults.classification,
-        mergeWarnings: skillAnalyzerResults.mergeWarnings,
-      })
+      .select()
       .from(skillAnalyzerResults)
       .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
       .limit(1);
 
     const resultRow = resultRows[0];
+    if (!resultRow) {
+      throw { statusCode: 404, message: 'Result not found' };
+    }
+
     if (
-      resultRow &&
-      (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
+      resultRow.classification === 'PARTIAL_OVERLAP' ||
+      resultRow.classification === 'IMPROVEMENT'
     ) {
-      // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
-      // scope creep and name collisions can be resolved by the reviewer editing the
-      // merged content. They are not safety gates like missing HITL gates or dropped
-      // required fields.
-      // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
-      const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
-      const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
-      if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
-        throw { statusCode: 422, message: 'Cannot approve: merge has critical warnings that must be resolved first.', errorCode: 'MERGE_CRITICAL_WARNINGS' };
+      const warnings = (resultRow.mergeWarnings ?? []) as MergeWarning[];
+      const resolutions = (resultRow.warningResolutions ?? []) as WarningResolution[];
+      const snapshot = jobRows[0].configSnapshot as { warningTierMap?: Record<string, WarningTier> } | null;
+      const tierMap = skillAnalyzerConfigService.effectiveTierMap(
+        snapshot as unknown as { warningTierMap: Record<string, WarningTier> } | null,
+      );
+      const state = evaluateApprovalState(warnings, resolutions, tierMap);
+      if (state.blocked) {
+        throw {
+          statusCode: 422,
+          message: 'Cannot approve: merge has unresolved blocking warnings.',
+          errorCode: 'MERGE_CRITICAL_WARNINGS',
+          reasons: state.reasons,
+        };
       }
+
+      // Approval snapshot + drift-detection hash (§11.11.12, §11.12.1).
+      const approvalSnapshot = {
+        warnings,
+        resolutions,
+        state,
+        configVersion: (snapshot as { configVersion?: number } | null)?.configVersion ?? null,
+        evaluatedAt: new Date().toISOString(),
+      };
+      const approvalHash = createHash('sha256')
+        .update(stableStringify(approvalSnapshot))
+        .digest('hex');
+
+      await db
+        .update(skillAnalyzerResults)
+        .set({
+          actionTaken: 'approved',
+          actionTakenAt: new Date(),
+          actionTakenBy: userId,
+          approvedAt: new Date(),
+          approvalDecisionSnapshot: approvalSnapshot,
+          approvalHash,
+          wasApprovedBefore: true,
+        })
+        .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)));
+      return;
     }
   }
 
+  // reject / skip / unapprove (null) path. For 'approved' on non-PARTIAL_OVERLAP
+  // classifications (DISTINCT, DUPLICATE) we simply update actionTaken without
+  // the approval gate — those don't have merge warnings to resolve.
   await db
     .update(skillAnalyzerResults)
     .set({
       actionTaken: action,
-      actionTakenAt: new Date(),
-      actionTakenBy: userId,
+      actionTakenAt: action === null ? null : new Date(),
+      actionTakenBy: action === null ? null : userId,
+      // Unapprove clears approved_at so edits are permitted again.
+      // was_approved_before stays true (§11.12.2 UX signal).
+      approvedAt: action === 'approved' ? new Date() : null,
     })
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)));
 }
@@ -313,41 +374,16 @@ export async function bulkSetResultAction(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  // Server-side blocking enforcement for bulk approval — mirrors setResultAction.
-  // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
-  // scope creep and name collisions can be resolved by the reviewer editing the
-  // merged content. They are not safety gates like missing HITL gates or dropped
-  // required fields.
-  if (action === 'approved' && resultIds.length > 0) {
-    // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
-    const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
-    const blockedRows = await db
-      .select({
-        id: skillAnalyzerResults.id,
-        classification: skillAnalyzerResults.classification,
-        mergeWarnings: skillAnalyzerResults.mergeWarnings,
-      })
-      .from(skillAnalyzerResults)
-      .where(and(
-        inArray(skillAnalyzerResults.id, resultIds),
-        eq(skillAnalyzerResults.jobId, jobId),
-      ));
-
-    const hasBlocked = blockedRows.some(row =>
-      (row.classification === 'PARTIAL_OVERLAP' || row.classification === 'IMPROVEMENT') &&
-      (row.mergeWarnings as MergeWarning[] | null)
-        ?.some(w => BLOCKING_CODES.has(w.code))
-    );
-
-    if (hasBlocked) {
-      throw {
-        statusCode: 422,
-        message: 'Cannot approve: one or more selected merges have critical warnings that must be resolved first.',
-        errorCode: 'MERGE_CRITICAL_WARNINGS',
-      };
+  // Delegate to the per-row setResultAction so approval snapshot + drift hash
+  // + was_approved_before get written consistently for every row.
+  if (action === 'approved') {
+    for (const resultId of resultIds) {
+      await setResultAction({ resultId, jobId, organisationId, userId, action });
     }
+    return;
   }
 
+  // reject / skip: bulk update without approval snapshot logic.
   await db
     .update(skillAnalyzerResults)
     .set({
@@ -361,6 +397,188 @@ export async function bulkSetResultAction(params: {
         eq(skillAnalyzerResults.jobId, jobId)
       )
     );
+}
+
+// ---------------------------------------------------------------------------
+// Proposed new agents — v2 Fix 5 (confirm/reject)
+// ---------------------------------------------------------------------------
+
+export async function updateProposedAgent(params: {
+  jobId: string;
+  organisationId: string;
+  proposedAgentIndex: number;
+  action: 'confirm' | 'reject';
+}): Promise<void> {
+  const { jobId, organisationId, proposedAgentIndex, action } = params;
+
+  const jobRows = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  const job = jobRows[0];
+  if (!job) throw { statusCode: 404, message: 'Job not found' };
+
+  const current = Array.isArray(job.proposedNewAgents) ? (job.proposedNewAgents as Array<Record<string, unknown>>) : [];
+  if (current.length === 0 || !current[proposedAgentIndex]) {
+    throw { statusCode: 404, message: `Proposed agent index ${proposedAgentIndex} not found` };
+  }
+
+  const next = current.map((entry, i) => {
+    if (i !== proposedAgentIndex) return entry;
+    if (action === 'confirm') {
+      return { ...entry, status: 'confirmed', confirmedAt: new Date().toISOString() };
+    }
+    return { ...entry, status: 'rejected', rejectedAt: new Date().toISOString() };
+  });
+
+  await db
+    .update(skillAnalyzerJobs)
+    .set({ proposedNewAgents: next })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+}
+
+// ---------------------------------------------------------------------------
+// Warning resolution — v2 §11.2
+// ---------------------------------------------------------------------------
+
+export interface ResolveWarningParams {
+  resultId: string;
+  jobId: string;
+  organisationId: string;
+  userId: string;
+  /** Required header; missing → 400, mismatch → 409. See §11.11.5. */
+  ifUnmodifiedSince: string;
+  warningCode: MergeWarningCode;
+  resolution: WarningResolutionKind;
+  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
+}
+
+/** Append (or upsert-by-composite-key) a reviewer decision on a warning.
+ *  Dedup key: (warningCode, details.field ?? null). Newer entry replaces
+ *  the prior one for the same key.
+ *
+ *  Enforces: result is not locked (approvedAt null); If-Unmodified-Since
+ *  matches the row's mergeUpdatedAt exactly (or is newer — we reject if the
+ *  row was modified after the client's snapshot). */
+export async function resolveWarning(params: ResolveWarningParams): Promise<void> {
+  const { resultId, jobId, organisationId, userId, ifUnmodifiedSince, warningCode, resolution, details } = params;
+
+  if (!ifUnmodifiedSince || typeof ifUnmodifiedSince !== 'string') {
+    throw { statusCode: 400, message: 'If-Unmodified-Since is required for resolve-warning.' };
+  }
+  const clientStamp = new Date(ifUnmodifiedSince);
+  if (Number.isNaN(clientStamp.getTime())) {
+    throw { statusCode: 400, message: 'If-Unmodified-Since must be a valid ISO timestamp.' };
+  }
+
+  await db.transaction(async (tx) => {
+    // Row-lock read to avoid concurrent resolve-warning overwrites.
+    const rows = await tx
+      .select()
+      .from(skillAnalyzerResults)
+      .where(and(
+        eq(skillAnalyzerResults.id, resultId),
+        eq(skillAnalyzerResults.jobId, jobId),
+      ))
+      .for('update')
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) throw { statusCode: 404, message: 'Result not found' };
+
+    // Org ownership check via job.
+    const jobRows = await tx
+      .select({ id: skillAnalyzerJobs.id })
+      .from(skillAnalyzerJobs)
+      .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+      .limit(1);
+    if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+
+    if (row.approvedAt) {
+      throw {
+        statusCode: 409,
+        message: 'Result is locked — unapprove before resolving warnings.',
+        errorCode: 'RESULT_LOCKED',
+      };
+    }
+
+    const concurrencyResult = checkConcurrencyStamp(
+      row.mergeUpdatedAt,
+      row.createdAt,
+      clientStamp,
+    );
+    if (concurrencyResult === 'missing') {
+      throw {
+        statusCode: 500,
+        message: 'Result has no createdAt timestamp — cannot verify concurrency.',
+      };
+    }
+    if (concurrencyResult === 'stale') {
+      throw {
+        statusCode: 409,
+        message: 'Result was modified since you opened it, or the If-Unmodified-Since token does not match. Reload and retry.',
+        errorCode: 'STALE_RESOLVE',
+      };
+    }
+
+    const existing = Array.isArray(row.warningResolutions)
+      ? (row.warningResolutions as WarningResolution[])
+      : [];
+
+    // Dedup by composite (warningCode, details.field ?? null). Newer wins.
+    const fieldKey = details?.field ?? null;
+    const filtered = existing.filter(r => {
+      const rField = r.details?.field ?? null;
+      return !(r.warningCode === warningCode && rField === fieldKey);
+    });
+
+    const entry: WarningResolution = {
+      warningCode,
+      resolution,
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: userId,
+    };
+    if (details && (details.field || details.disambiguationNote || details.collidingSkillId)) {
+      entry.details = details;
+    }
+    filtered.push(entry);
+
+    // Fix 7 cascade: NAME_MISMATCH resolutions cascade the chosen name into
+    // proposedMergedContent and set execution_resolved_name atomically so
+    // the merge preview matches what Execute will write.
+    const updates: Record<string, unknown> = {
+      warningResolutions: filtered,
+      mergeUpdatedAt: new Date(),
+    };
+    if (warningCode === 'NAME_MISMATCH' && row.proposedMergedContent) {
+      const merged = row.proposedMergedContent as { name: string; definition: object | null; description: string; instructions: string | null };
+      const defName = (merged.definition as Record<string, unknown> | null | undefined)?.name;
+      let chosen: string | null = null;
+      if (resolution === 'use_library_name') {
+        // Dominant source is the library by construction; use schema name if
+        // present, else top-level name.
+        chosen = typeof defName === 'string' && defName.trim().length > 0
+          ? defName
+          : (merged.name ?? '').trim() || null;
+      } else if (resolution === 'use_incoming_name') {
+        chosen = (merged.name ?? '').trim() || (typeof defName === 'string' ? defName : null);
+      }
+      if (chosen) {
+        const newDefinition = {
+          ...(merged.definition as Record<string, unknown> | null ?? {}),
+          name: chosen,
+        };
+        updates.proposedMergedContent = { ...merged, name: chosen, definition: newDefinition };
+        updates.executionResolvedName = chosen;
+      }
+    }
+
+    await tx
+      .update(skillAnalyzerResults)
+      .set(updates)
+      .where(eq(skillAnalyzerResults.id, resultId));
+  });
 }
 
 /** Body for the PATCH /jobs/:jobId/results/:resultId/agents endpoint.
@@ -629,6 +847,16 @@ export async function patchMergeFields(
     }
   }
 
+  // v2 §11.11.2: a result locked by approval may not be edited. The reviewer
+  // must first unapprove (PATCH action=null).
+  if (row.approvedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Result is locked — unapprove before editing the merge.',
+      errorCode: 'RESULT_LOCKED',
+    };
+  }
+
   // Per spec §7.3: merge edits only valid for PARTIAL_OVERLAP / IMPROVEMENT.
   if (row.classification !== 'PARTIAL_OVERLAP' && row.classification !== 'IMPROVEMENT') {
     throw {
@@ -656,12 +884,22 @@ export async function patchMergeFields(
     instructions: patch.instructions !== undefined ? patch.instructions : current.instructions,
   };
 
+  // v2 §11.11.1: any merge edit wipes warning_resolutions + approval state so
+  // stale decisions can't satisfy a new merge's warnings.
+  const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
   await db
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: next,
       userEditedMerge: true,
       mergeUpdatedAt: new Date(),
+      warningResolutions: [],
+      executionResolvedName: null,
+      approvedAt: null,
+      approvalDecisionSnapshot: null,
+      approvalHash: null,
+      actionTaken: row.actionTaken === 'approved' ? null : row.actionTaken,
+      actionTakenAt: row.actionTaken === 'approved' ? null : row.actionTakenAt,
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
@@ -704,6 +942,7 @@ export async function patchMergeFields(
       }
     }
   }
+  if (hadResolutions) enriched.resolutionsCleared = true;
   return enriched;
 }
 
@@ -744,18 +983,38 @@ export async function resetMergeToOriginal(params: {
     };
   }
 
+  // v2 §11.11.2: locked result can't be reset without first unapproving.
+  if (row.approvedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Result is locked — unapprove before resetting the merge.',
+      errorCode: 'RESULT_LOCKED',
+    };
+  }
+
   if (!row.originalProposedMerge) {
     throw { statusCode: 409, message: 'no original merge proposal to reset from' };
   }
 
+  // v2 §11.11.1: reset wipes resolutions + approval state identically to
+  // PATCH /merge to keep invariants consistent.
   await db
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: row.originalProposedMerge,
       userEditedMerge: false,
       mergeUpdatedAt: new Date(),
+      warningResolutions: [],
+      executionResolvedName: null,
+      approvedAt: null,
+      approvalDecisionSnapshot: null,
+      approvalHash: null,
+      actionTaken: row.actionTaken === 'approved' ? null : row.actionTaken,
+      actionTakenAt: row.actionTaken === 'approved' ? null : row.actionTakenAt,
     })
     .where(eq(skillAnalyzerResults.id, resultId));
+
+  const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
 
   // Return enriched row (matchedSkillContent included)
   const updatedRows = await db
@@ -796,6 +1055,7 @@ export async function resetMergeToOriginal(params: {
       }
     }
   }
+  if (hadResolutions) enriched.resolutionsCleared = true;
   return enriched;
 }
 
@@ -823,7 +1083,53 @@ export async function executeApproved(params: {
   failed: number;
   errors: Array<{ resultId: string; error: string }>;
   backupId: string | null;
+  pendingDraftAgents?: Array<{ agentId: string; slug: string; name: string }>;
 }> {
+  const { jobId, organisationId } = params;
+
+  // v2 §11.11.3: atomic execution-lock acquisition. Concurrent Execute calls
+  // land here and see 409 until the current run finishes.
+  const lockRows = await db
+    .update(skillAnalyzerJobs)
+    .set({ executionLock: true, executionStartedAt: new Date(), executionFinishedAt: null })
+    .where(and(
+      eq(skillAnalyzerJobs.id, jobId),
+      eq(skillAnalyzerJobs.organisationId, organisationId),
+      eq(skillAnalyzerJobs.executionLock, false),
+    ))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (!lockRows[0]) {
+    // Either the job doesn't exist, org mismatch, or another Execute is running.
+    const jobRows = await db
+      .select({ id: skillAnalyzerJobs.id, executionLock: skillAnalyzerJobs.executionLock })
+      .from(skillAnalyzerJobs)
+      .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+      .limit(1);
+    if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+    throw {
+      statusCode: 409,
+      message: 'Execution already in progress. Wait for the current run to finish.',
+      errorCode: 'EXECUTION_LOCKED',
+    };
+  }
+
+  try {
+    return await runExecute(params);
+  } finally {
+    // Release the lock unconditionally — success, partial failure, or thrown error.
+    await db
+      .update(skillAnalyzerJobs)
+      .set({ executionLock: false, executionFinishedAt: new Date() })
+      .where(eq(skillAnalyzerJobs.id, jobId));
+  }
+}
+
+async function runExecute(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}) {
   const { jobId, organisationId } = params;
 
   const { job, results } = await getJob(jobId, organisationId);
@@ -831,6 +1137,30 @@ export async function executeApproved(params: {
   const approved = results.filter(
     (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
   );
+
+  // v2 §11.1 / §11.11.3: re-run evaluateApprovalState at Execute entry.
+  // Belt-and-suspenders defense against approvals drifting between approve
+  // and execute. Rejects with 409 + reasons[] on any unresolved blocker.
+  const configSnapshot = job.configSnapshot as { warningTierMap?: Record<string, WarningTier> } | null;
+  const tierMap = skillAnalyzerConfigService.effectiveTierMap(
+    configSnapshot as unknown as { warningTierMap: Record<string, WarningTier> } | null,
+  );
+  for (const r of approved) {
+    if (r.classification !== 'PARTIAL_OVERLAP' && r.classification !== 'IMPROVEMENT') continue;
+    const warnings = (r.mergeWarnings ?? []) as MergeWarning[];
+    const resolutions = (r.warningResolutions ?? []) as WarningResolution[];
+    const state = evaluateApprovalState(warnings, resolutions, tierMap);
+    if (state.blocked) {
+      throw {
+        statusCode: 409,
+        message: `Cannot execute: result ${r.id} has unresolved blocking warnings.`,
+        errorCode: 'MERGE_CRITICAL_WARNINGS',
+        resultId: r.id,
+        reasons: state.reasons,
+      };
+    }
+  }
+
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
 
   // Create a pre-mutation backup if there are approved results to execute.
@@ -869,6 +1199,69 @@ export async function executeApproved(params: {
       .set({ executionResult: 'failed', executionError: errMsg })
       .where(eq(skillAnalyzerResults.id, resultId));
   };
+
+  // v2 Fix 5 Phase 1: soft-create any confirmed proposed new agents.
+  // Runs OUTSIDE per-result transactions so agents exist before any skill
+  // attachment. Idempotent via slug lookup — re-runs reuse existing drafts.
+  // Map: proposedAgentIndex → agentId for retro-injected proposals.
+  const proposedAgentIdByIndex = new Map<number, string>();
+  // Track which proposed agents got at least one skill attached; these get
+  // promoted to 'active' at the end.
+  const proposedAgentsSeeded = new Set<number>();
+  try {
+    const jobRows = await db
+      .select({ proposedNewAgents: skillAnalyzerJobs.proposedNewAgents })
+      .from(skillAnalyzerJobs)
+      .where(eq(skillAnalyzerJobs.id, params.jobId))
+      .limit(1);
+    const proposedNewAgents = Array.isArray(jobRows[0]?.proposedNewAgents)
+      ? (jobRows[0]!.proposedNewAgents as Array<Record<string, unknown>>)
+      : [];
+    for (const entry of proposedNewAgents) {
+      if (entry?.status !== 'confirmed') continue;
+      const slug = typeof entry.slug === 'string' ? entry.slug : null;
+      const name = typeof entry.name === 'string' ? entry.name : null;
+      const idx = typeof entry.proposedAgentIndex === 'number' ? entry.proposedAgentIndex : null;
+      if (!slug || !name || idx === null) continue;
+
+      // Idempotency: reuse existing agent if slug already exists (e.g., a
+      // prior Execute attempt partially succeeded). Direct slug query
+      // instead of listing every agent.
+      let agentId: string;
+      try {
+        const existingRows = await db
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(and(eq(systemAgents.slug, slug), isNull(systemAgents.deletedAt)))
+          .limit(1);
+        if (existingRows[0]) {
+          agentId = existingRows[0].id;
+        } else {
+          const created = await systemAgentService.createAgent({
+            name,
+            description: typeof entry.description === 'string' ? entry.description : '',
+            masterPrompt: typeof entry.reasoning === 'string' ? entry.reasoning : name,
+          });
+          // New agents default to status='draft' via the schema default;
+          // promoted to 'active' in Phase 3 after attachment succeeds.
+          agentId = created.id;
+        }
+      } catch (err) {
+        logger.warn('[skillAnalyzer] proposed agent soft-create failed; skipping', {
+          jobId: params.jobId,
+          proposedAgentIndex: idx,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
+      proposedAgentIdByIndex.set(idx, agentId);
+    }
+  } catch (err) {
+    logger.warn('[skillAnalyzer] proposed agents phase skipped', {
+      jobId: params.jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   for (const result of approved) {
     const candidate = parsedCandidates[result.candidateIndex] as {
@@ -934,6 +1327,15 @@ export async function executeApproved(params: {
         await failResult(result.id, 'merge proposal unavailable — re-run analysis');
         continue;
       }
+      // v2 Fix 7: execution_resolved_name overrides any drift in merge.name
+      // that may have occurred between NAME_MISMATCH resolution and Execute.
+      // Cascade to definition.name so the schema and file name stay in sync.
+      const canonicalName = result.executionResolvedName && result.executionResolvedName.trim().length > 0
+        ? result.executionResolvedName.trim()
+        : merge.name;
+      const canonicalDefinition = canonicalName !== merge.name
+        ? { ...(merge.definition as Record<string, unknown>), name: canonicalName }
+        : merge.definition;
       // Apply the merge inside a transaction. In Phase 1 this is a single-
       // statement transaction; the wrapping is in place for Phase 2's
       // multi-statement extensions.
@@ -942,9 +1344,9 @@ export async function executeApproved(params: {
           const updated_skill = await systemSkillService.updateSystemSkill(
             result.matchedSkillId!,
             {
-              name: merge.name,
+              name: canonicalName,
               description: merge.description,
-              definition: merge.definition as never,
+              definition: canonicalDefinition as never,
               instructions: merge.instructions,
             },
             { tx, skipVersionWrite: true, externalVersionWrite: true },
@@ -1061,24 +1463,45 @@ export async function executeApproved(params: {
           // edge case "system agent is deleted between analysis and
           // execute").
           const proposals = (result.agentProposals as Array<{
-            systemAgentId: string;
+            systemAgentId: string | null;
             slugSnapshot: string;
             nameSnapshot: string;
             score: number;
             selected: boolean;
+            isProposedNewAgent?: boolean;
+            proposedAgentIndex?: number;
           }> | null) ?? [];
 
           for (const proposal of proposals) {
             if (!proposal.selected) continue;
 
+            // v2 Fix 5: resolve proposed-new-agent entries to the freshly
+            // soft-created agent ID. If the reviewer didn't confirm the
+            // proposal, skip (Phase 1 didn't create an agent for it).
+            let resolvedAgentId = proposal.systemAgentId;
+            if (proposal.isProposedNewAgent) {
+              const idx = proposal.proposedAgentIndex ?? 0;
+              const newAgentId = proposedAgentIdByIndex.get(idx);
+              if (!newAgentId) {
+                logger.warn('[skillAnalyzer] proposed-new-agent not created; skipping attach', {
+                  resultId: result.id,
+                  proposedAgentIndex: idx,
+                });
+                continue;
+              }
+              resolvedAgentId = newAgentId;
+              proposedAgentsSeeded.add(idx);
+            }
+            if (!resolvedAgentId) continue;
+
             let agent;
             try {
-              agent = await systemAgentService.getAgent(proposal.systemAgentId, { tx });
+              agent = await systemAgentService.getAgent(resolvedAgentId, { tx });
             } catch {
               // 404 — agent was deleted between analysis and execute.
               logger.warn('[skillAnalyzer] agent attach skipped — missing', {
                 resultId: result.id,
-                systemAgentId: proposal.systemAgentId,
+                systemAgentId: resolvedAgentId,
                 outcome: 'skipped-missing',
               });
               continue;
@@ -1091,20 +1514,20 @@ export async function executeApproved(params: {
               // Already attached — idempotent no-op.
               logger.info('[skillAnalyzer] agent attach already-present', {
                 resultId: result.id,
-                systemAgentId: proposal.systemAgentId,
+                systemAgentId: resolvedAgentId,
                 outcome: 'already-present',
               });
               continue;
             }
             const nextSlugs = [...currentSlugs, created.slug];
             await systemAgentService.updateAgent(
-              proposal.systemAgentId,
+              resolvedAgentId,
               { defaultSystemSkillSlugs: nextSlugs },
               { tx },
             );
             logger.info('[skillAnalyzer] agent attach succeeded', {
               resultId: result.id,
-              systemAgentId: proposal.systemAgentId,
+              systemAgentId: resolvedAgentId,
               outcome: 'attached',
             });
           }
@@ -1138,7 +1561,35 @@ export async function executeApproved(params: {
     }
   }
 
-  return { created, updated, failed, errors, backupId };
+  // v2 Fix 5 Phase 3: promote proposed agents whose skills succeeded from
+  // 'draft' to 'active'. Drafts whose skills all failed stay as drafts and
+  // appear in pendingDraftAgents[] for admin review.
+  const pendingDraftAgents: Array<{ agentId: string; slug: string; name: string }> = [];
+  for (const [idx, agentId] of proposedAgentIdByIndex) {
+    try {
+      const agent = await systemAgentService.getAgent(agentId);
+      if (proposedAgentsSeeded.has(idx) && agent.status === 'draft') {
+        await systemAgentService.updateAgent(agentId, { status: 'active' });
+        logger.info('[skillAnalyzer] proposed agent promoted to active', {
+          jobId: params.jobId,
+          agentId,
+          proposedAgentIndex: idx,
+        });
+      } else if (agent.status === 'draft') {
+        // No skills attached — leave as draft for admin review.
+        pendingDraftAgents.push({ agentId, slug: agent.slug, name: agent.name });
+      }
+    } catch (err) {
+      logger.warn('[skillAnalyzer] proposed agent promotion check failed', {
+        jobId: params.jobId,
+        agentId,
+        proposedAgentIndex: idx,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { created, updated, failed, errors, backupId, pendingDraftAgents };
 }
 
 /** Update job progress (used by the job handler). */
@@ -1289,17 +1740,77 @@ export async function updateJobAgentRecommendation(
     throw new Error('updateJobAgentRecommendation: skillSlugs must be an array if present');
   }
 
+  // v2 Fix 5: also write the proposedNewAgents array. Single-agent case today;
+  // shape supports N entries per job.
+  const proposedNewAgents = recommendation.shouldCreateAgent
+    ? [{
+        proposedAgentIndex: 0,
+        slug: recommendation.agentSlug ?? slugifyName(recommendation.agentName ?? 'proposed-agent'),
+        name: recommendation.agentName ?? 'Proposed Agent',
+        description: recommendation.agentDescription ?? recommendation.reasoning,
+        reasoning: recommendation.reasoning,
+        skillSlugs: Array.isArray(recommendation.skillSlugs) ? recommendation.skillSlugs : [],
+        status: 'proposed' as const,
+      }]
+    : [];
+
   // Idempotency: only write if the column is still null (first run wins on retry).
   const updated = await db
     .update(skillAnalyzerJobs)
-    .set({ agentRecommendation: recommendation })
+    .set({
+      agentRecommendation: recommendation,
+      proposedNewAgents,
+    })
     .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)))
     .returning({ id: skillAnalyzerJobs.id });
 
   if (updated.length === 0) {
     // Row was skipped — recommendation already written on a previous run.
     logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
+    return;
   }
+
+  // Retro-inject synthetic proposed-new-agent entries into affected
+  // DISTINCT results' agentProposals so per-skill assignment panels can
+  // show the proposed agent. Only runs when a new agent was suggested.
+  if (recommendation.shouldCreateAgent && Array.isArray(recommendation.skillSlugs) && recommendation.skillSlugs.length > 0) {
+    const slugSet = recommendation.skillSlugs.map(s => s.toLowerCase());
+    const affectedRows = await db
+      .select({ id: skillAnalyzerResults.id, candidateSlug: skillAnalyzerResults.candidateSlug, agentProposals: skillAnalyzerResults.agentProposals })
+      .from(skillAnalyzerResults)
+      .where(and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classification, 'DISTINCT'),
+      ));
+    const proposed = proposedNewAgents[0];
+    for (const row of affectedRows) {
+      if (!slugSet.includes(row.candidateSlug.toLowerCase())) continue;
+      const existing = Array.isArray(row.agentProposals) ? row.agentProposals as Array<Record<string, unknown>> : [];
+      // Skip if we've already injected this proposal on a previous run.
+      if (existing.some(p => p?.isProposedNewAgent === true && p?.proposedAgentIndex === proposed.proposedAgentIndex)) {
+        continue;
+      }
+      const synthetic = {
+        systemAgentId: null,
+        slugSnapshot: proposed.slug,
+        nameSnapshot: proposed.name,
+        score: 1.0,
+        selected: true,
+        isProposedNewAgent: true,
+        proposedAgentIndex: proposed.proposedAgentIndex,
+      };
+      // Place the proposed agent at the top so the UI ranks it first.
+      const nextProposals = [synthetic, ...existing];
+      await db
+        .update(skillAnalyzerResults)
+        .set({ agentProposals: nextProposals })
+        .where(eq(skillAnalyzerResults.id, row.id));
+    }
+  }
+}
+
+function slugifyName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -1530,8 +2041,10 @@ export const skillAnalyzerService = {
   setResultAction,
   bulkSetResultAction,
   updateAgentProposal,
+  updateProposedAgent,
   patchMergeFields,
   resetMergeToOriginal,
+  resolveWarning,
   executeApproved,
   updateJobProgress,
   retryClassification,

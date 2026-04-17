@@ -296,8 +296,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `docs/canonical-data-platform-roadmap.md` — program-level spec. `spec-reviewer` complete (5 iterations, all HITL findings resolved). Spec is mechanically tight and ready for implementation. Changes are uncommitted.
-**Active items:** none — awaiting user direction on next step (commit the spec + begin P1 implementation spec)
+**In-flight spec:** `docs/canonical-data-platform-roadmap.md` — program-level spec. `spec-reviewer` complete (5 iterations, all HITL findings resolved). Spec is mechanically tight and ready for implementation. Drafting P1+P2+P3 combined implementation spec on this branch.
+**Active items:** P1+P2+P3 implementation spec in progress
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -321,6 +321,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
+| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
+| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
 
 ---
 

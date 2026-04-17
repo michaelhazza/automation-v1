@@ -137,6 +137,16 @@ export interface SkillExecutionContext {
    * actions.idempotency_key unique constraint.
    */
   toolCallId?: string;
+  /**
+   * Per-run counter for capability-discovery skill calls
+   * (list_platform_capabilities, list_connections, check_capability_gap).
+   * Enforced against systemSettings.orchestrator_capability_query_budget
+   * (default 8). When exhausted, further calls return
+   * { error: 'capability_query_budget_exhausted' } so the Orchestrator
+   * stops looping rather than burning tokens. See
+   * docs/orchestrator-capability-routing-spec.md §6.4.3.
+   */
+  capabilityQueryCallCount?: number;
 }
 
 interface SkillExecutionParams {
@@ -1493,6 +1503,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   config_restore_version: async (input, context) => {
     const { executeConfigRestoreVersion } = await import('../tools/config/configSkillHandlers.js');
     return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
+  },
+
+  // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
+  list_platform_capabilities: async (input, context) => {
+    const { executeListPlatformCapabilities } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListPlatformCapabilities(input, context);
+  },
+  list_connections: async (input, context) => {
+    const { executeListConnections } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeListConnections(input, context);
+  },
+  check_capability_gap: async (input, context) => {
+    const { executeCheckCapabilityGap } = await import('../tools/capabilities/capabilityDiscoveryHandlers.js');
+    return executeCheckCapabilityGap(input, context);
+  },
+  request_feature: async (input, context) => {
+    const { executeRequestFeature } = await import('../tools/capabilities/requestFeatureHandler.js');
+    return executeRequestFeature(input, context);
   },
 
   // Read-only config tools (no action audit needed)

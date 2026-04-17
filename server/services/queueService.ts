@@ -914,6 +914,24 @@ export const queueService = {
           throw err;
         }
       });
+
+      // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md §7)
+      // — processes task-created events that pass the eligibility predicate.
+      {
+        const { ORCHESTRATOR_FROM_TASK_QUEUE, setOrchestratorJobSender } = await import('../jobs/orchestratorFromTaskJob.js');
+        setOrchestratorJobSender((name, data) => boss.send(name, data));
+        await (boss as any).work(ORCHESTRATOR_FROM_TASK_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 4 }, async (job: any) => {
+          try {
+            const { processOrchestratorFromTask } = await import('../jobs/orchestratorFromTaskJob.js');
+            await withTimeout(processOrchestratorFromTask(job.data).then(() => undefined), 180_000);
+          } catch (err) {
+            if (isTimeoutError(err)) {
+              logger.error('job_timeout', { queue: ORCHESTRATOR_FROM_TASK_QUEUE, jobId: job.id });
+            }
+            throw err;
+          }
+        });
+      }
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

@@ -39,6 +39,9 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Multi-Tenant Platform](#multi-tenant-platform)
   - [Authentication & Access Control](#authentication--access-control)
   - [AI Agent System](#ai-agent-system)
+  - [Capability-Aware Orchestrator](#capability-aware-orchestrator)
+  - [Platform Feature Request Pipeline](#platform-feature-request-pipeline)
+  - [Configuration Assistant](#configuration-assistant)
   - [Skill System](#skill-system)
   - [Playbook Engine](#playbook-engine)
   - [Human-in-the-Loop](#human-in-the-loop)
@@ -193,6 +196,31 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
 - **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with real-time streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill. Rapid clicks and retries are automatically deduplicated; per-user rate limits prevent runaway test costs.
 
+### Capability-Aware Orchestrator
+
+Automatic task routing that understands what the platform can do, what the agency has configured, and where the request belongs — without hand-maintained rules.
+
+- **Task board is the intake** — an agency operator or client writes a task describing what they want; the Orchestrator picks it up automatically the moment it lands in the inbox
+- **Deterministic four-path decision** — every inbound task is classified into one of four routes: (A) already configured — run existing agent, (B) configurable and client-specific — hand off to the Configuration Assistant, (C) configurable and broadly useful — hand off AND flag the pattern as a platform-wide improvement candidate, (D) unsupported — file a structured feature request
+- **Decomposition pipeline, not free-form reasoning** — requests are broken into a canonical capability list (integrations, read/write capabilities, skills, primitives), normalised against a published taxonomy, and validated against the live integration catalogue before any routing decision is made
+- **Explicit capability matching** — routing to an existing agent requires the agent's capability map to cover every required capability AND the underlying integrations to have active connections AND granted scopes that cover the request — three conditions, checked atomically, never fuzzy
+- **Graceful degradation** — when the integration catalogue is temporarily unavailable, the platform falls back to a safe routing posture and files an internal alert rather than blocking every inbound task
+- **Auditable decisions** — every routing decision emits a structured record (path taken, required capabilities, missing slugs, candidate agents, reasoning, reference state) for operator review and product-quality tuning
+- **Per-run budget + timeout** — capability discovery is bounded; runaway loops or unresolvable requests surface as distinct `routing_timeout` states rather than burning tokens
+- **Post-handoff verification** — when the Orchestrator hands off to the Configuration Assistant, it independently re-verifies the configuration afterward and escalates on mismatch, so "claimed complete" and "actually complete" can't drift
+- **Loop prevention** — a handoff-depth guard prevents Orchestrator → Configuration Assistant → Orchestrator cycles on partial configurations
+
+### Platform Feature Request Pipeline
+
+Every user request for something the platform doesn't support today becomes structured product signal, automatically.
+
+- **Captured in the flow** — when a task asks for a capability the platform doesn't yet support, the Orchestrator files a structured feature request with full attribution (user, org, subaccount, originating task, verbatim intent, required capabilities, Orchestrator reasoning)
+- **System-promotion detection** — when a configurable request matches a broadly-useful pattern (not client-specific), the platform flags it as a candidate for promotion to a system-level agent or skill — turning agency-level customisation into roadmap signal for everyone
+- **Durable + deduplicated** — requests land in a queryable internal table with 30-day rolling dedupe on canonical capability slugs, so repeated demand is counted, not spammed
+- **Multi-channel delivery** — each new request fires a notification into the platform team's support channel, support mailbox, and an internal subaccount task for human-in-the-loop triage before any analysis fires
+- **Dogfood-ready** — the same task board the platform offers to end-users carries the request queue, so the platform team triages feature signal in the same UI they ship to customers
+- **Auditable lifecycle** — open → triaged → accepted/rejected/shipped/duplicate states with resolution notes, so every piece of user intent has a traceable outcome
+
 ### Configuration Assistant
 
 AI-powered conversational configuration for agents, skills, schedules, and data sources. Helps org admins set up and manage their platform through natural language.
@@ -213,6 +241,7 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 - **Per-client skill customisation** — Workspaces can create custom skills that replace platform defaults, so each client gets exactly the behaviour they need
 - **Per-agent allowlists** — Each agent link specifies exactly which skills are available — no accidental access to capabilities a client shouldn't use
 - **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback across all scopes
+- **Skill Analyzer** — Bulk import skill libraries from uploaded files, pasted JSON, or a GitHub repo; the platform compares every incoming skill against the existing catalogue, produces a recommended merge for near-duplicates, flags scope creep, name collisions, capability overlap, missing review gates, and required-field regressions, and routes each candidate to a reviewer with structured accept / restore / rename / acknowledge decisions. Approval is locked once granted — edits require explicit unapprove — and every run captures a snapshot of the approval state for audit. When the comparison engine is offline, a deterministic rule-based merger still produces a proposal flagged as low-confidence so the library never stalls. Execution is transactional across skills and suggested new agents, with a pre-mutation backup for one-click rollback.
 - **Full version history** — Every skill change is tracked with immutable versions; restore any previous version with one click
 - **Built-in safeguards** — Total skill instructions are capped to prevent runaway costs; backup/restore built in for safe experimentation
 - **Review gating** — 42+ skills require human approval before execution; 6 deterministic skills run instantly without AI involvement
@@ -733,6 +762,8 @@ Complete list of all 110 skills.
 
 ## Integrations Reference
 
+> **Machine-readable source of truth:** the same catalogue below is also published as structured YAML at `docs/integration-reference.md` and consumed at runtime by the Capability-Aware Orchestrator. Every integration listed here has a corresponding YAML block declaring its provider type, read/write capabilities, enabled skills, required OAuth scopes, setup contract, status, and `last_verified` date. A static gate (`scripts/verify-integration-reference.mjs`) keeps the YAML in sync with the code-level OAuth providers and MCP presets and blocks drift at CI time.
+
 ### External Services
 
 | Service | Auth Type | Capabilities | Scoping |
@@ -799,6 +830,7 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-17 | Capability-aware Orchestrator + Platform Feature Request Pipeline: add two new customer-facing Product Capabilities sections covering deterministic four-path task routing (A configured / B narrow-configurable / C broad-configurable / D unsupported), atomic capability matching (capability map + active connection + granted scopes), graceful reference-degradation, auditable decision records, per-run budget, post-handoff verification, and the structured feature-request pipeline with system-promotion detection, 30-day dedupe, multi-channel delivery, and dogfooded task-board triage. Add machine-readable-source callout on Integrations Reference pointing to `docs/integration-reference.md` as the structured YAML backing the runtime capability catalogue. | — |
 | 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |
 | 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
 | 2026-04-16 | Hosted-routine / scheduled-prompt product-category positioning refresh: add Portfolio-wide scheduled-work visibility and Supervised migration from no-code workflow tools to Structural Differentiators; add "I'll use a hosted routines product from an LLM provider" objection row; sharpen existing scheduled-prompt objection row with portfolio-calendar and client-portal proof points; expand Replaces / Consolidates with hosted-routine and no-code migration rows; add portfolio calendar + inline Run Now test bullets to AI Agent System; add no-code migration wedge bullet to Playbook Engine; add discovery-call demo and "why not hosted routines" conversation bullets to GTM guidance. Ships in the same commit as `docs/routines-response-dev-spec.md`. | — |

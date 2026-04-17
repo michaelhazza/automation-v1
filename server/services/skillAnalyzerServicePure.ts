@@ -306,7 +306,11 @@ export type MergeWarningCode =
   | 'INVOCATION_LOST'
   | 'HITL_LOST'
   | 'OUTPUT_FORMAT_LOST'
-  | 'WARNINGS_TRUNCATED';
+  | 'WARNINGS_TRUNCATED'
+  // v2 fix-cycle additions
+  | 'CLASSIFIER_FALLBACK'
+  | 'NAME_MISMATCH'
+  | 'SKILL_GRAPH_COLLISION';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -315,6 +319,241 @@ export interface MergeWarning {
   severity: MergeWarningSeverity;
   message: string;
   detail?: string;
+}
+
+/** Warning tier — read from skill_analyzer_config.warning_tier_map.
+ *  Controls how the Approve button gates on each warning. See plan §4. */
+export type WarningTier =
+  | 'informational'         // display only
+  | 'standard'              // single-click acknowledgment
+  | 'decision_required'     // structured resolution needed
+  | 'critical';             // edit merge OR type confirmation phrase
+
+/** Default tier map used when config snapshot is absent (e.g., legacy jobs).
+ *  Mirrors the DB default in migration 0155. */
+export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
+  REQUIRED_FIELD_DEMOTED:   'decision_required',
+  NAME_MISMATCH:            'decision_required',
+  SKILL_GRAPH_COLLISION:    'decision_required',
+  INVOCATION_LOST:          'decision_required',
+  HITL_LOST:                'decision_required',
+  CLASSIFIER_FALLBACK:      'decision_required',
+  SCOPE_EXPANSION_CRITICAL: 'critical',
+  SCOPE_EXPANSION:          'standard',
+  CAPABILITY_OVERLAP:       'standard',
+  TABLE_ROWS_DROPPED:       'informational',
+  OUTPUT_FORMAT_LOST:       'informational',
+  WARNINGS_TRUNCATED:       'informational',
+};
+
+/** Severity priority used when sorting warnings before MAX-count truncation.
+ *  Higher number = higher priority; survives when warnings are capped. */
+const WARNING_SEVERITY_PRIORITY: Record<MergeWarningSeverity, number> = {
+  critical: 2,
+  warning: 1,
+};
+
+/** Tier priority used as secondary sort. Higher = kept during truncation. */
+const WARNING_TIER_PRIORITY: Record<WarningTier, number> = {
+  critical: 4,
+  decision_required: 3,
+  standard: 2,
+  informational: 1,
+};
+
+/** Sort warnings in-place by severity and tier priority so the highest-value
+ *  ones survive MAX_MERGE_WARNINGS truncation. Exported for tests. */
+export function sortWarningsBySeverity(
+  warnings: MergeWarning[],
+  tierMap: Record<string, WarningTier> = DEFAULT_WARNING_TIER_MAP,
+): MergeWarning[] {
+  return warnings.slice().sort((a, b) => {
+    const sev = WARNING_SEVERITY_PRIORITY[b.severity] - WARNING_SEVERITY_PRIORITY[a.severity];
+    if (sev !== 0) return sev;
+    const aTier = tierMap[a.code] ?? DEFAULT_WARNING_TIER_MAP[a.code as MergeWarningCode] ?? 'informational';
+    const bTier = tierMap[b.code] ?? DEFAULT_WARNING_TIER_MAP[b.code as MergeWarningCode] ?? 'informational';
+    return WARNING_TIER_PRIORITY[bTier] - WARNING_TIER_PRIORITY[aTier];
+  });
+}
+
+/** Reviewer resolution recorded against a warning. Append-only JSONB array
+ *  on skill_analyzer_results.warning_resolutions, deduped by composite key
+ *  (warningCode, details.field ?? null). Wiped on merge edit. */
+export type WarningResolutionKind =
+  | 'accept_removal'
+  | 'restore_required'
+  | 'use_library_name'
+  | 'use_incoming_name'
+  | 'scope_down'
+  | 'flag_other'
+  | 'accept_overlap'
+  | 'acknowledge_low_confidence'
+  | 'acknowledge_warning'
+  | 'confirm_critical_phrase';
+
+export interface WarningResolution {
+  warningCode: MergeWarningCode;
+  resolution: WarningResolutionKind;
+  resolvedAt: string;    // ISO timestamp
+  resolvedBy: string;    // userId
+  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
+}
+
+export interface ApprovalBlockingReason {
+  warningCode: MergeWarningCode;
+  tier: WarningTier;
+  message: string;
+  field?: string;
+}
+
+export interface RequiredResolution {
+  warningCode: MergeWarningCode;
+  allowedResolutions: WarningResolutionKind[];
+  field?: string;
+}
+
+export interface ApprovalState {
+  blocked: boolean;
+  reasons: ApprovalBlockingReason[];
+  requiredResolutions: RequiredResolution[];
+}
+
+/** Concurrency guard used by resolveWarning. Pure so we can test it without
+ *  spinning up a DB. Returns one of:
+ *    - 'ok' when the client's token matches the row's canonical stamp within
+ *      SKEW_MS tolerance.
+ *    - 'stale' when the row's stamp has drifted outside tolerance (i.e.,
+ *      another session wrote first, or the client fabricated a token).
+ *    - 'missing' when neither mergeUpdatedAt nor createdAt exists — indicates
+ *      a corrupt row and should 500 rather than 409. */
+export type ConcurrencyCheckResult = 'ok' | 'stale' | 'missing';
+
+export function checkConcurrencyStamp(
+  rowMergeUpdatedAt: Date | string | null | undefined,
+  rowCreatedAt: Date | string | null | undefined,
+  clientStamp: Date | string,
+  skewMs = 2_000,
+): ConcurrencyCheckResult {
+  const rowStampRaw = rowMergeUpdatedAt ?? rowCreatedAt;
+  if (!rowStampRaw) return 'missing';
+  const rowStamp = rowStampRaw instanceof Date ? rowStampRaw : new Date(rowStampRaw);
+  const client = clientStamp instanceof Date ? clientStamp : new Date(clientStamp);
+  if (Number.isNaN(rowStamp.getTime()) || Number.isNaN(client.getTime())) return 'stale';
+  return Math.abs(rowStamp.getTime() - client.getTime()) > skewMs ? 'stale' : 'ok';
+}
+
+/** Allowed resolution kinds per warning code. */
+const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = {
+  REQUIRED_FIELD_DEMOTED:   ['accept_removal', 'restore_required'],
+  NAME_MISMATCH:            ['use_library_name', 'use_incoming_name'],
+  SKILL_GRAPH_COLLISION:    ['scope_down', 'flag_other', 'accept_overlap'],
+  INVOCATION_LOST:          ['acknowledge_warning'],
+  HITL_LOST:                ['acknowledge_warning'],
+  CLASSIFIER_FALLBACK:      ['acknowledge_low_confidence'],
+  SCOPE_EXPANSION_CRITICAL: ['confirm_critical_phrase'],
+  SCOPE_EXPANSION:          ['acknowledge_warning'],
+  CAPABILITY_OVERLAP:       ['acknowledge_warning'],
+  TABLE_ROWS_DROPPED:       [],
+  OUTPUT_FORMAT_LOST:       [],
+  WARNINGS_TRUNCATED:       [],
+};
+
+/** Parse demoted field list out of a REQUIRED_FIELD_DEMOTED warning's detail.
+ *  Accepts both the legacy comma-delimited string and the structured JSON form. */
+export function parseDemotedFields(detail: string | undefined): string[] {
+  if (!detail) return [];
+  const trimmed = detail.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed?.demotedFields)) return parsed.demotedFields.filter((f: unknown) => typeof f === 'string');
+    } catch {
+      // fall through to legacy split
+    }
+  }
+  return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+/** Return true if a resolution satisfies a given warning/field pair. */
+function isResolvedBy(
+  code: MergeWarningCode,
+  field: string | undefined,
+  resolutions: WarningResolution[],
+): boolean {
+  const allowed = RESOLUTIONS_FOR_CODE[code] ?? [];
+  return resolutions.some(r =>
+    r.warningCode === code
+    && (allowed.length === 0 || allowed.includes(r.resolution))
+    && (field === undefined || r.details?.field === field));
+}
+
+/**
+ * Canonical approval-gate evaluator. Server is authoritative; client imports
+ * this for optimistic preview only. Covers all v2 fix-cycle tiers.
+ *
+ * - `informational`: never blocks.
+ * - `standard`:      blocks unless an `acknowledge_warning` resolution exists.
+ * - `decision_required`:
+ *     - REQUIRED_FIELD_DEMOTED: per-field `accept_removal` or `restore_required`.
+ *     - Otherwise: any allowed resolution for the code.
+ * - `critical`: blocks unless `confirm_critical_phrase` resolution exists
+ *     (or scope-expansion is already within threshold — the validator just
+ *     won't re-emit the warning in that case).
+ */
+export function evaluateApprovalState(
+  warnings: MergeWarning[] | null | undefined,
+  resolutions: WarningResolution[] | null | undefined,
+  tierMap: Record<string, WarningTier> = DEFAULT_WARNING_TIER_MAP,
+): ApprovalState {
+  const reasons: ApprovalBlockingReason[] = [];
+  const required: RequiredResolution[] = [];
+  const safeWarnings = warnings ?? [];
+  const safeResolutions = resolutions ?? [];
+
+  for (const w of safeWarnings) {
+    const tier = (tierMap[w.code] ?? DEFAULT_WARNING_TIER_MAP[w.code]) ?? 'informational';
+    if (tier === 'informational') continue;
+
+    // Per-field decision gate for REQUIRED_FIELD_DEMOTED.
+    if (w.code === 'REQUIRED_FIELD_DEMOTED') {
+      const fields = parseDemotedFields(w.detail);
+      for (const field of fields) {
+        if (!isResolvedBy('REQUIRED_FIELD_DEMOTED', field, safeResolutions)) {
+          reasons.push({
+            warningCode: w.code,
+            tier,
+            message: `Field "${field}" — choose Accept removal or Restore required.`,
+            field,
+          });
+          required.push({
+            warningCode: w.code,
+            allowedResolutions: RESOLUTIONS_FOR_CODE.REQUIRED_FIELD_DEMOTED,
+            field,
+          });
+        }
+      }
+      continue;
+    }
+
+    // Generic gate: code must be resolved at least once.
+    if (!isResolvedBy(w.code, undefined, safeResolutions)) {
+      reasons.push({
+        warningCode: w.code,
+        tier,
+        message: w.message,
+      });
+      required.push({
+        warningCode: w.code,
+        allowedResolutions: RESOLUTIONS_FOR_CODE[w.code] ?? ['acknowledge_warning'],
+      });
+    }
+  }
+
+  return {
+    blocked: reasons.length > 0,
+    reasons,
+    requiredResolutions: required,
+  };
 }
 
 /** Result returned by parseClassificationResponseWithMerge. The classification
@@ -732,6 +971,80 @@ interface ExtractedTable {
   rowCount: number;    // data rows only (header + separator excluded)
 }
 
+/** Name-mismatch detection (Fix 7).
+ *
+ * Compares the four locations where a skill name appears:
+ *   - top-level merged.name (file-level)
+ *   - merged.definition.name (tool schema)
+ *   - any name reference inside merged.description
+ *   - any name reference inside merged.instructions
+ *
+ * Returns null if all four are consistent (or fewer than two distinct names
+ * appear). Otherwise, returns a structured mismatch object the UI resolution
+ * picker consumes.
+ */
+export interface NameMismatch {
+  topLevel: string;
+  schemaName: string | null;
+  distinctNames: string[];
+  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions'>;
+}
+
+export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
+  const topLevel = (merged.name ?? '').trim();
+  const schemaNameRaw = (merged.definition as Record<string, unknown> | null | undefined)?.name;
+  const schemaName = typeof schemaNameRaw === 'string' && schemaNameRaw.trim().length > 0
+    ? schemaNameRaw.trim()
+    : null;
+  if (!topLevel && !schemaName) return null;
+
+  const normalise = (s: string) => s.toLowerCase().replace(/[-_]+/g, '_').trim();
+  const candidates = new Set<string>();
+  if (topLevel) candidates.add(normalise(topLevel));
+  if (schemaName) candidates.add(normalise(schemaName));
+
+  // Look for either name used as a bare identifier in description / instructions.
+  // Only flag when a DIFFERENT name appears there, not the same one.
+  const allBareNames = collectBareNames(merged.description)
+    .concat(collectBareNames(merged.instructions))
+    .map(normalise);
+  for (const n of allBareNames) {
+    candidates.add(n);
+  }
+
+  if (candidates.size < 2) return null;
+
+  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions'> = [];
+  if (topLevel) sources.push('top_level');
+  if (schemaName) sources.push('schema');
+  if (merged.description && collectBareNames(merged.description).length > 0) sources.push('description');
+  if (merged.instructions && collectBareNames(merged.instructions).length > 0) sources.push('instructions');
+
+  return {
+    topLevel,
+    schemaName,
+    distinctNames: [...candidates],
+    candidates: sources,
+  };
+}
+
+/** Collect bare-identifier name-like tokens (lowercase letters / digits /
+ *  underscores / hyphens, ≥3 chars) that look like skill slugs or tool names.
+ *  Used as a heuristic for detecting stale references inside prose. */
+function collectBareNames(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const out: string[] = [];
+  const re = /`([a-z][a-z0-9_-]{2,})`|\b([a-z][a-z0-9_]{3,})\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const token = (m[1] ?? m[2] ?? '').trim();
+    if (token.length >= 3 && /[_-]/.test(token)) {
+      out.push(token);
+    }
+  }
+  return out;
+}
+
 /** Extract markdown tables from text, keyed by their normalized header row.
  *  headerKey is used for matching across source and merged text. */
 export function extractTables(text: string | null): ExtractedTable[] {
@@ -771,10 +1084,342 @@ export function extractTables(text: string | null): ExtractedTable[] {
 
 const MAX_MERGE_WARNINGS = 10;
 
+/** Full-row table representation used by remediateTables. */
+interface ExtractedTableRows {
+  headerLine: string;           // the raw header line (with pipes)
+  headerKey: string;            // normalized pipe-joined header
+  separatorLine: string;        // the |---|---| row
+  columnCount: number;
+  rows: string[];               // raw row lines
+  startLineIndex: number;       // line index of the header in source text
+  endLineIndex: number;         // line index of last row (exclusive)
+}
+
+/** Extract tables with full row content, keyed by normalized header. */
+export function extractTablesWithRows(text: string | null): ExtractedTableRows[] {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const tables: ExtractedTableRows[] = [];
+  let current: ExtractedTableRows | null = null;
+  let linePos = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('|')) {
+      if (!current) {
+        const headerCells = trimmed.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        current = {
+          headerLine: line,
+          headerKey: headerCells.map(c => c.toLowerCase()).join('|'),
+          separatorLine: '',
+          columnCount: headerCells.length,
+          rows: [],
+          startLineIndex: i,
+          endLineIndex: i + 1,
+        };
+        linePos = 0;
+      } else {
+        linePos++;
+        if (linePos === 1 && /^\|[\s\-:|]+\|/.test(trimmed)) {
+          current.separatorLine = line;
+          current.endLineIndex = i + 1;
+          continue;
+        }
+        current.rows.push(line);
+        current.endLineIndex = i + 1;
+      }
+    } else if (current) {
+      tables.push(current);
+      current = null;
+    }
+  }
+  if (current) tables.push(current);
+  return tables;
+}
+
+/** First-column key for row deduplication. Strips leading/trailing pipes
+ *  and lowercases the first cell. Empty cells return ''. */
+function firstColumnKey(rowLine: string): string {
+  const trimmed = rowLine.trim().replace(/^\|/, '');
+  const firstPipe = trimmed.indexOf('|');
+  const cell = firstPipe >= 0 ? trimmed.slice(0, firstPipe) : trimmed;
+  return cell.trim().toLowerCase();
+}
+
+/** Whether a row already carries a [SOURCE: ...] marker (skip to prevent
+ *  recursive inflation on retries). */
+function hasSourceMarker(rowLine: string): boolean {
+  return /\[SOURCE:\s*(library|incoming)\]/i.test(rowLine);
+}
+
+/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row. */
+function withSourceMarker(rowLine: string, source: 'library' | 'incoming'): string {
+  const trimmed = rowLine.trimEnd();
+  if (hasSourceMarker(trimmed)) return trimmed;
+  // Find position before the trailing pipe (if any) to inject marker cleanly.
+  if (trimmed.endsWith('|')) {
+    return trimmed.slice(0, -1).trimEnd() + ` [SOURCE: ${source}] |`;
+  }
+  return `${trimmed} [SOURCE: ${source}]`;
+}
+
+export interface RemediateTablesInput {
+  mergedInstructions: string;
+  baseInstructions: string | null;          // library skill instructions
+  incomingInstructions: string | null;      // candidate skill instructions
+  /** Abort auto-recovery if remediated word count exceeds this multiple of
+   *  the pre-remediation word count (§11.11.9). */
+  maxGrowthRatio?: number;
+}
+
+export interface RemediateTablesOutput {
+  instructions: string;
+  autoRecoveredRows: number;
+  skippedDueToColumnMismatch: number;
+  skippedDueToKeyConflict: number;
+  growthRatioExceeded: boolean;
+}
+
+/**
+ * Post-process merged instructions to append missing table rows from the
+ * source skills, marking each recovered row with [SOURCE: library|incoming].
+ * Refuses to merge when column schemas differ or when first-column keys
+ * conflict across sources (§11.11.6). Honors max_table_growth_ratio.
+ */
+export function remediateTables(input: RemediateTablesInput): RemediateTablesOutput {
+  const { mergedInstructions, baseInstructions, incomingInstructions } = input;
+  const maxGrowthRatio = input.maxGrowthRatio ?? 1.5;
+
+  const baseTables = extractTablesWithRows(baseInstructions);
+  const incomingTables = extractTablesWithRows(incomingInstructions);
+  const mergedTables = extractTablesWithRows(mergedInstructions);
+
+  // Source table lookup: header -> { source, rows }
+  const sourceByHeader = new Map<string, Array<{ source: 'library' | 'incoming'; table: ExtractedTableRows }>>();
+  for (const t of baseTables) {
+    const list = sourceByHeader.get(t.headerKey) ?? [];
+    list.push({ source: 'library', table: t });
+    sourceByHeader.set(t.headerKey, list);
+  }
+  for (const t of incomingTables) {
+    const list = sourceByHeader.get(t.headerKey) ?? [];
+    list.push({ source: 'incoming', table: t });
+    sourceByHeader.set(t.headerKey, list);
+  }
+
+  let autoRecovered = 0;
+  let skippedColumn = 0;
+  let skippedKeyConflict = 0;
+
+  // Process tables in reverse line order so line-index splices stay valid.
+  const lines = mergedInstructions.split('\n');
+  const sortedMergedTables = [...mergedTables].sort((a, b) => b.startLineIndex - a.startLineIndex);
+
+  for (const mergedTable of sortedMergedTables) {
+    const sources = sourceByHeader.get(mergedTable.headerKey) ?? [];
+    if (sources.length === 0) continue;
+
+    // Guard 1: column mismatch (any source with different column count).
+    if (sources.some(s => s.table.columnCount !== mergedTable.columnCount)) {
+      skippedColumn++;
+      continue;
+    }
+
+    const existingKeys = new Set(
+      mergedTable.rows
+        .filter(r => !hasSourceMarker(r))
+        .map(firstColumnKey),
+    );
+
+    // Collect candidate rows to append, skipping those whose first-column
+    // key is already present (or conflicts across sources).
+    const seenSourceKey = new Map<string, 'library' | 'incoming'>();
+    const toAppend: Array<{ row: string; source: 'library' | 'incoming' }> = [];
+    for (const { source, table } of sources) {
+      for (const row of table.rows) {
+        if (hasSourceMarker(row)) continue;
+        const key = firstColumnKey(row);
+        if (!key) continue;
+        if (existingKeys.has(key)) continue;
+        const prior = seenSourceKey.get(key);
+        if (prior && prior !== source) {
+          // Cross-source conflict: skip this row entirely.
+          skippedKeyConflict++;
+          continue;
+        }
+        seenSourceKey.set(key, source);
+        toAppend.push({ row, source });
+      }
+    }
+
+    if (toAppend.length === 0) continue;
+
+    // Append the new rows to the merged table in-place.
+    const markedRows = toAppend.map(({ row, source }) => withSourceMarker(row, source));
+    // Splice after the last merged-table row (mergedTable.endLineIndex).
+    lines.splice(mergedTable.endLineIndex, 0, ...markedRows);
+    autoRecovered += markedRows.length;
+  }
+
+  let nextText = lines.join('\n');
+
+  // Guard 2: aggregate growth ratio. Only enforced for non-trivial inputs;
+  // small tables would otherwise trip the cap on a single auto-recovered row.
+  const preWords = countWords(mergedInstructions);
+  const postWords = countWords(nextText);
+  const GROWTH_CAP_MIN_WORDS = 100;
+  const growthRatioExceeded =
+    preWords >= GROWTH_CAP_MIN_WORDS &&
+    postWords / preWords > maxGrowthRatio;
+  if (growthRatioExceeded) {
+    // Abort: return original.
+    nextText = mergedInstructions;
+    autoRecovered = 0;
+  }
+
+  return {
+    instructions: nextText,
+    autoRecoveredRows: autoRecovered,
+    skippedDueToColumnMismatch: skippedColumn,
+    skippedDueToKeyConflict: skippedKeyConflict,
+    growthRatioExceeded,
+  };
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+// ---------------------------------------------------------------------------
+// Skill graph collision detection — v2 Fix 3
+// ---------------------------------------------------------------------------
+
+export interface SkillGraphCollisionCheckInput {
+  merged: ProposedMerge;
+  libraryCatalog: ReadonlyArray<{ id: string | null; slug: string; name: string; instructions: string | null }>;
+  sessionApprovedSlugs?: ReadonlySet<string>;      // other approved results in same session
+  excludedId: string | null;                        // the matched-against skill (not a collision)
+  /** Minimum fragment-overlap ratio to surface the warning. Default 0.40. */
+  threshold?: number;
+  /** Max number of top-K candidate skills to fragment-compare against. */
+  maxCandidates?: number;
+  /** Hard cap on fragment-pair comparisons per candidate (budget). */
+  maxPairComparisons?: number;
+}
+
+export interface SkillGraphCollision {
+  collidingSkillId: string | null;
+  collidingSlug: string;
+  collidingName: string;
+  overlapRatio: number;
+  overlappingFragments: string[];   // first line of each overlapping fragment
+}
+
+/**
+ * Compare merged skill against the library catalog + session-approved set
+ * to detect capability-fragment overlap. Pragmatic bigram-based implementation
+ * that respects the §11.5 performance caps (top-K + budget).
+ */
+export function detectSkillGraphCollision(input: SkillGraphCollisionCheckInput): SkillGraphCollision[] {
+  const threshold = input.threshold ?? 0.40;
+  const maxCandidates = input.maxCandidates ?? 20;
+  const maxPairs = input.maxPairComparisons ?? 200;
+  const sessionApproved = input.sessionApprovedSlugs ?? new Set<string>();
+
+  const mergedFragments = splitCapabilityFragments(input.merged.instructions);
+  if (mergedFragments.length === 0) return [];
+
+  // Pre-filter: skip the matched-against skill, skip anything with no bigram
+  // overlap at all (cheap keyword check), rank by overall description + name
+  // bigram overlap.
+  const mergedDescBigrams = extractDescriptionBigrams(input.merged.description);
+  type Scored = { skill: (typeof input.libraryCatalog)[number]; preScore: number };
+  const preScored: Scored[] = [];
+  for (const skill of input.libraryCatalog) {
+    if (skill.id !== null && skill.id === input.excludedId) continue;
+    // Allow session-approved slugs to flow through as additional collision
+    // targets even if their id is null (synthesised from the job's approved set).
+    const isSession = sessionApproved.has(skill.slug);
+    if (!isSession && skill.id === null) continue;
+
+    const otherBigrams = extractDescriptionBigrams(
+      `${skill.name} ${skill.instructions?.slice(0, 2000) ?? ''}`,
+    );
+    let preScore = 0;
+    for (const bg of mergedDescBigrams) if (otherBigrams.has(bg) && !isGenericBigram(bg)) preScore++;
+    if (preScore === 0) continue;
+    preScored.push({ skill, preScore });
+  }
+
+  preScored.sort((a, b) => b.preScore - a.preScore);
+  const top = preScored.slice(0, maxCandidates);
+
+  const collisions: SkillGraphCollision[] = [];
+  let pairBudget = maxPairs;
+  for (const { skill } of top) {
+    const otherFragments = splitCapabilityFragments(skill.instructions ?? '');
+    if (otherFragments.length === 0) continue;
+
+    // Count overlapping fragment pairs by bigram ratio.
+    const overlapping: string[] = [];
+    let pairs = 0;
+    outer: for (const mf of mergedFragments) {
+      if (pairBudget <= 0) break;
+      const mfBigrams = extractDescriptionBigrams(mf.body);
+      for (const of of otherFragments) {
+        if (pairBudget-- <= 0) break outer;
+        pairs++;
+        const ofBigrams = extractDescriptionBigrams(of.body);
+        const denom = Math.min(mfBigrams.size, ofBigrams.size);
+        if (denom < 3) continue;
+        let shared = 0;
+        for (const bg of mfBigrams) if (ofBigrams.has(bg) && !isGenericBigram(bg)) shared++;
+        const ratio = shared / denom;
+        if (ratio >= threshold) {
+          overlapping.push(mf.heading || '(unnamed fragment)');
+          break;
+        }
+      }
+    }
+
+    if (overlapping.length === 0) continue;
+    const overlapRatio = overlapping.length / Math.max(1, mergedFragments.length);
+    if (overlapRatio < threshold / 2) continue;  // require at least half-threshold
+
+    collisions.push({
+      collidingSkillId: skill.id,
+      collidingSlug: skill.slug,
+      collidingName: skill.name,
+      overlapRatio,
+      overlappingFragments: overlapping,
+    });
+  }
+
+  return collisions;
+}
+
+function splitCapabilityFragments(text: string | null): Array<{ heading: string; body: string }> {
+  if (!text) return [];
+  return splitH2Sections(text);
+}
+
+
+
+/** Thresholds injected into validateMergeOutput from the config snapshot. */
+export interface ValidationThresholds {
+  scopeExpansionStandardPct?: number;   // decimal fraction, e.g. 0.40
+  scopeExpansionCriticalPct?: number;   // decimal fraction, e.g. 0.75
+  tierMap?: Record<string, WarningTier>;
+}
+
 /**
  * Post-processing validator for LLM-generated merge output.
  * Pure — no DB, no clock. Returns an array of structured warnings.
  * An empty array means no issues were detected.
+ *
+ * Thresholds are read from the optional `thresholds` parameter (captured from
+ * the job's config_snapshot). Defaults preserve pre-v2 behaviour when absent.
  */
 export function validateMergeOutput(
   base: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
@@ -784,8 +1429,12 @@ export function validateMergeOutput(
   allLibrarySlugs: ReadonlySet<string>,
   allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
   excludedId: string | null,
+  thresholds: ValidationThresholds = {},
 ): MergeWarning[] {
   const warnings: MergeWarning[] = [];
+  const scopeStd = Math.round((thresholds.scopeExpansionStandardPct ?? 0.30) * 100);
+  const scopeCrit = Math.round((thresholds.scopeExpansionCriticalPct ?? 0.60) * 100);
+  const tierMap = thresholds.tierMap ?? DEFAULT_WARNING_TIER_MAP;
 
   // --- Bug 1: Required field demotion ---
   const baseRequired: string[] = (base.definition as Record<string, unknown> | null)?.input_schema
@@ -805,7 +1454,10 @@ export function validateMergeOutput(
       code: 'REQUIRED_FIELD_DEMOTED',
       severity: 'critical',
       message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
-      detail: demoted.join(', '),
+      // Structured detail so the client can render per-field Accept/Restore UI.
+      // parseDemotedFields() still accepts the legacy comma-delimited form for
+      // backwards compatibility.
+      detail: JSON.stringify({ demotedFields: demoted }),
     });
   }
 
@@ -840,21 +1492,21 @@ export function validateMergeOutput(
     }
   }
 
-  // --- Bug 8: Scope expansion ---
+  // --- Bug 8: Scope expansion (thresholds from config snapshot) ---
   const baseWords = wordCount(base.instructions);
   const nonBaseWords = wordCount(nonBase.instructions);
   const richerSourceWords = Math.max(baseWords, nonBaseWords);
   const mergedWords = wordCount(merged.instructions);
   if (richerSourceWords > 0) {
     const pct = Math.round((mergedWords / richerSourceWords - 1) * 100);
-    if (pct > 60) {
+    if (pct > scopeCrit) {
       warnings.push({
         code: 'SCOPE_EXPANSION_CRITICAL',
         severity: 'critical',
         message: `Merged instructions are ${pct}% longer than the richer source skill — likely out-of-scope content was imported.`,
         detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
       });
-    } else if (pct > 30) {
+    } else if (pct > scopeStd) {
       warnings.push({
         code: 'SCOPE_EXPANSION',
         severity: 'warning',
@@ -926,9 +1578,29 @@ export function validateMergeOutput(
     });
   }
 
-  // Safety cap: prevent unbounded warning list from malformed input
+  // --- Fix 7: Name mismatch across file name / schema name / references ---
+  const mismatch = detectNameMismatch(merged);
+  if (mismatch) {
+    warnings.push({
+      code: 'NAME_MISMATCH',
+      severity: 'critical',
+      message: `Skill name is inconsistent across ${mismatch.candidates.length} locations. Reviewer must choose one.`,
+      detail: JSON.stringify({
+        topLevel: mismatch.topLevel,
+        schemaName: mismatch.schemaName,
+        distinctNames: mismatch.distinctNames,
+        candidates: mismatch.candidates,
+      }),
+    });
+  }
+
+  // Safety cap: prevent unbounded warning list from malformed input.
+  // Sort by severity + tier priority so critical codes survive truncation,
+  // then cap.
   if (warnings.length > MAX_MERGE_WARNINGS) {
-    warnings.splice(MAX_MERGE_WARNINGS - 1);
+    const sorted = sortWarningsBySeverity(warnings, tierMap);
+    warnings.length = 0;
+    for (let i = 0; i < MAX_MERGE_WARNINGS - 1 && i < sorted.length; i++) warnings.push(sorted[i]);
     warnings.push({
       code: 'WARNINGS_TRUNCATED',
       severity: 'warning',
@@ -937,6 +1609,163 @@ export function validateMergeOutput(
   }
 
   return warnings;
+}
+
+// ---------------------------------------------------------------------------
+// Rule-based fallback merger — v2 Fix 1
+// ---------------------------------------------------------------------------
+
+export interface RuleBasedMergeInput {
+  candidate: { name: string; description: string; definition: object | null; instructions: string | null };
+  library:   { name: string; description: string; definition: object | null; instructions: string | null };
+}
+
+export interface RuleBasedMergeOutput {
+  merge: ProposedMerge;
+  mergeRationale: string;
+}
+
+/**
+ * Deterministic merge produced when the LLM classifier is unavailable or
+ * returns an invalid response. Preserves invocation blocks, HITL gates, and
+ * tool-definition schemas without any model call.
+ *
+ * Dominant source is chosen as: (1) definition-bearing skill > definition-less,
+ * else (2) higher richnessScore of instructions, else (3) library (stable tie-break).
+ *
+ * Name behaviour (§11.4): always defaults to the library name for DB slug
+ * stability; a NAME_MISMATCH warning is emitted separately by
+ * validateMergeOutput when candidate and library names differ, and the
+ * reviewer resolves that via the normal Fix 7 UI.
+ */
+export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput): RuleBasedMergeOutput {
+  const candidateHasDef = !!candidate.definition && typeof candidate.definition === 'object';
+  const libraryHasDef = !!library.definition && typeof library.definition === 'object';
+
+  let dominantKey: 'candidate' | 'library';
+  if (libraryHasDef && !candidateHasDef) dominantKey = 'library';
+  else if (candidateHasDef && !libraryHasDef) dominantKey = 'candidate';
+  else {
+    const candidateScore = richnessScore(candidate.instructions);
+    const libraryScore = richnessScore(library.instructions);
+    // §11.4: tie-break goes to library for DB slug stability. Only when the
+    // candidate is strictly richer does it become dominant.
+    dominantKey = candidateScore > libraryScore ? 'candidate' : 'library';
+  }
+  const dominant = dominantKey === 'candidate' ? candidate : library;
+  const secondary = dominantKey === 'candidate' ? library : candidate;
+
+  // Name: library default (keeps DB slug predictable). NAME_MISMATCH handles UX.
+  const name = library.name || candidate.name;
+
+  // Description: prefer the shorter of the two if both present; else whichever exists.
+  let description = '';
+  if (candidate.description && library.description) {
+    description = candidate.description.length <= library.description.length
+      ? candidate.description
+      : library.description;
+  } else {
+    description = candidate.description || library.description || '';
+  }
+
+  // Definition: dominant's schema wins; if dominant has none but secondary
+  // does, adopt secondary's. When dominant has a definition, overwrite its
+  // name field to match the chosen merge name for consistency.
+  let definition: object;
+  if (dominantKey === 'candidate' && candidateHasDef) definition = candidate.definition as object;
+  else if (dominantKey === 'library' && libraryHasDef) definition = library.definition as object;
+  else if (candidateHasDef) definition = candidate.definition as object;
+  else if (libraryHasDef) definition = library.definition as object;
+  else {
+    // Neither source has a schema — synthesise a minimal valid shape so
+    // downstream validators don't explode.
+    definition = {
+      name,
+      description,
+      input_schema: { type: 'object', properties: {}, required: [] as string[] },
+    };
+  }
+
+  const instructions = mergeInstructionsRuleBased(dominant.instructions, secondary.instructions);
+
+  const sectionCount = (instructions.match(/^##\s+/gm)?.length ?? 0);
+  const mergeRationale =
+    `Rule-based merge applied — classifier unavailable or output invalid. `
+    + `Dominant source: ${dominantKey === 'library' ? 'library' : 'incoming'}. `
+    + `Merged instructions have ${sectionCount} top-level section(s). `
+    + `Review carefully; confidence is low by default.`;
+
+  return {
+    merge: {
+      name,
+      description,
+      definition,
+      instructions,
+    },
+    mergeRationale,
+  };
+}
+
+/** Merge two instruction bodies by (a) taking the dominant text as base and
+ *  (b) appending any `## heading` sections from the secondary that the
+ *  dominant doesn't already contain (case-insensitive heading match). Keeps
+ *  the dominant's invocation block at the top untouched. */
+function mergeInstructionsRuleBased(
+  dominant: string | null,
+  secondary: string | null,
+): string {
+  const base = (dominant ?? '').trimEnd();
+  if (!secondary || secondary.trim().length === 0) return base;
+
+  // Collect existing H2 headings (normalized) in the dominant.
+  const existingHeadings = new Set<string>();
+  const h2Re = /^##\s+(.+?)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = h2Re.exec(base)) !== null) existingHeadings.add(normaliseHeading(m[1]));
+
+  // Split secondary into H2 sections and append any not already present.
+  const sections = splitH2Sections(secondary);
+  const appendParts: string[] = [];
+  for (const section of sections) {
+    const norm = normaliseHeading(section.heading);
+    if (norm && !existingHeadings.has(norm)) {
+      appendParts.push(section.body);
+    }
+  }
+  if (appendParts.length === 0) return base;
+  return `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+}
+
+function normaliseHeading(h: string): string {
+  return h.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function splitH2Sections(text: string): Array<{ heading: string; body: string }> {
+  const lines = text.split('\n');
+  const sections: Array<{ heading: string; body: string }> = [];
+  let currentHeading = '';
+  let buf: string[] = [];
+  const flush = () => {
+    if (buf.length === 0) return;
+    sections.push({
+      heading: currentHeading,
+      body: `${currentHeading ? `## ${currentHeading}\n` : ''}${buf.join('\n').trimEnd()}`,
+    });
+    buf = [];
+  };
+  for (const line of lines) {
+    const h = line.match(/^##\s+(.+?)\s*$/);
+    if (h) {
+      flush();
+      currentHeading = h[1];
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  // Drop the implicit "preface" section with empty heading — we only want to
+  // append real headings from the secondary.
+  return sections.filter(s => s.heading.length > 0);
 }
 
 // ---------------------------------------------------------------------------

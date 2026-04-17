@@ -80,9 +80,10 @@ export * from './mcpServerConfigs';
 export * from './mcpServerAgentLinks';
 export * from './goals';
 export * from './agentPromptRevisions';
-// Skill Analyzer (migration 0092, extended in 0098)
+// Skill Analyzer (migration 0092, extended in 0098; v2 fixes in 0155)
 export * from './skillAnalyzerJobs';
 export * from './skillAnalyzerResults';
+export * from './skillAnalyzerConfig';
 export * from './skillEmbeddings';
 export * from './agentEmbeddings';
 export * from './inboxReadStates';
@@ -181,3 +182,8 @@ export * from './agentTestFixtures.js';
 
 // MCP Tool Invocations — cost attribution & observability ledger (migration 0154)
 export * from './mcpToolInvocations.js';
+
+// Orchestrator capability-aware routing (migration 0156) — see
+// docs/orchestrator-capability-routing-spec.md.
+export * from './featureRequests.js';
+export * from './routingOutcomes.js';
