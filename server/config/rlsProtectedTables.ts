@@ -226,6 +226,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0156_orchestrator_capability_routing.sql',
     rationale: 'Per-run routing decision outcomes — leak would reveal how competitors\' agents are configured and what tasks they run.',
   },
+  // 0160 — P1: scheduled polling stats
+  {
+    tableName: 'integration_ingestion_stats',
+    schemaFile: 'integrationIngestionStats.ts',
+    policyMigration: '0160_p1_scheduled_polling.sql',
+    rationale: 'Per-connection sync metrics — cross-tenant leak reveals integration activity patterns and connector health.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

@@ -1,0 +1,5 @@
+-- Migration 0161: P2A readPath metadata
+-- No DDL. This migration documents the addition of the readPath field
+-- to the TypeScript ActionDefinition type in server/config/actionRegistry.ts.
+-- Every action is tagged: 'canonical' | 'liveFetch' | 'none'.
+-- Static gate verify-skill-read-paths.sh enforces non-null.

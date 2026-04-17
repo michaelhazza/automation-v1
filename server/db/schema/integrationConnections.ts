@@ -2,6 +2,7 @@ import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, unique, uniqueI
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
+import { users } from './users';
 
 // ---------------------------------------------------------------------------
 // Integration Connections — stored external service credentials per org or subaccount
@@ -43,6 +44,21 @@ export const integrationConnections = pgTable(
     clientSecretEnc: text('client_secret_enc'),             // AES-256-GCM encrypted
     oauthStatus: text('oauth_status').default('active')
       .$type<'active' | 'expired' | 'error' | 'disconnected'>(),
+
+    // P3A: ownership, classification, and visibility (migration 0163)
+    ownershipScope: text('ownership_scope').notNull().default('subaccount').$type<'user' | 'subaccount' | 'organisation'>(),
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    classification: text('classification').notNull().default('shared_mailbox').$type<'personal' | 'shared_mailbox' | 'service_account'>(),
+    visibilityScope: text('visibility_scope').notNull().default('shared_subaccount').$type<'private' | 'shared_team' | 'shared_subaccount' | 'shared_org'>(),
+    sharedTeamIds: uuid('shared_team_ids').array().notNull().default(sql`'{}'`),
+
+    // P1 scheduled polling — sync tracking columns (migration 0160)
+    lastSuccessfulSyncAt: timestamp('last_successful_sync_at', { withTimezone: true }),
+    lastSyncStartedAt: timestamp('last_sync_started_at', { withTimezone: true }),
+    lastSyncError: text('last_sync_error'),
+    lastSyncErrorAt: timestamp('last_sync_error_at', { withTimezone: true }),
+    syncPhase: text('sync_phase').notNull().default('backfill'),
+    syncLockToken: uuid('sync_lock_token'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

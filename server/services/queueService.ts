@@ -932,6 +932,36 @@ export const queueService = {
           }
         });
       }
+
+      // Canonical Data Platform P1 — connector polling tick (every-minute cron).
+      // Cross-org sweep: selects connections due for sync across all orgs and
+      // fan-outs one connector-polling-sync job per connection via boss.send().
+      // Admin-bypass: resolveOrgContext → null (no org-scoped tx).
+      await createWorker<Record<string, never>>({
+        queue: 'connector-polling-tick',
+        boss: boss as any,
+        resolveOrgContext: () => null,
+        handler: async () => {
+          const { runConnectorPollingTick } = await import('../jobs/connectorPollingTick.js');
+          await runConnectorPollingTick(boss as any);
+        },
+      });
+      await boss.schedule('connector-polling-tick', '* * * * *', {});
+
+      // Canonical Data Platform P1 — per-connection sync job (on-demand)
+      // Acquires a lease, runs the adapter, records ingestion stats.
+      await createWorker<{
+        organisationId: string;
+        connectionId: string;
+      }>({
+        queue: 'connector-polling-sync',
+        boss: boss as any,
+        handler: async (job) => {
+          const { runConnectorPollingSync } = await import('../jobs/connectorPollingSync.js');
+          await runConnectorPollingSync(job.data);
+        },
+      });
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

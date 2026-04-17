@@ -13,7 +13,7 @@ import { organisations } from './organisations';
 // ---------------------------------------------------------------------------
 
 export type WorkspaceHealthSeverity = 'info' | 'warning' | 'critical';
-export type WorkspaceHealthResourceKind = 'agent' | 'subaccount_agent' | 'process' | 'subaccount' | 'org';
+export type WorkspaceHealthResourceKind = 'agent' | 'subaccount_agent' | 'process' | 'subaccount' | 'org' | 'connection';
 
 export const workspaceHealthFindings = pgTable(
   'workspace_health_findings',

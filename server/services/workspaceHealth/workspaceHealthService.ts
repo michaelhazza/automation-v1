@@ -21,6 +21,7 @@ import {
 } from '../../db/schema/index.js';
 import { runDetectors, diffFindings, type ExistingFindingRow } from './workspaceHealthServicePure.js';
 import type { DetectorContext, WorkspaceHealthFinding } from './detectorTypes.js';
+import { ASYNC_DETECTORS } from './detectors/index.js';
 
 const DEFAULT_NO_RECENT_RUNS_DAYS = 30;
 const DEFAULT_SYSTEM_AGENT_STALE_DAYS = 60;
@@ -45,7 +46,13 @@ export async function runAudit(organisationId: string): Promise<{
   const ctx = await buildContext(organisationId);
 
   // ── Run detectors (pure) ─────────────────────────────────────────────
-  const newFindings = runDetectors(ctx);
+  const pureFindings = runDetectors(ctx);
+
+  // ── Run async (impure) detectors ────────────────────────────────────
+  const asyncResults = await Promise.all(
+    ASYNC_DETECTORS.map((detect) => detect(organisationId)),
+  );
+  const newFindings = [...pureFindings, ...asyncResults.flat()];
 
   // ── Read existing active findings for this org ───────────────────────
   const existing = await db

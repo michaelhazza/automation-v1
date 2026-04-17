@@ -1591,6 +1591,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   smart_skip_from_website: async (_input, _context) => {
     return { success: false, error: 'smart_skip_from_website is not yet implemented' };
   },
+
+  // ── Canonical Data Dictionary (Phase 2B) ────────────────────────────
+  canonical_dictionary: async (input, _context) => {
+    const { CANONICAL_DICTIONARY_REGISTRY } = await import('./canonicalDictionary/canonicalDictionaryRegistry.js');
+    const { renderDictionary } = await import('./canonicalDictionary/canonicalDictionaryRendererPure.js');
+    const tableFilter = input.tableFilter as string[] | undefined;
+    const includeExamples = (input.includeExamples as boolean) ?? false;
+    return {
+      success: true,
+      result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
+    };
+  },
 };
 
 export const skillExecutor = {
