@@ -42,17 +42,22 @@ interface AggRow {
   subaccountId?: string | null;
   runId?: string | null;
   billingMonth: string;
+  billingDay?: string;
   serverSlug: string;
   isTestRun?: boolean;
 }
 
 function buildAggregateDimensions(row: AggRow): Dimension[] {
   const dims: Dimension[] = [];
+  const billingDay = row.billingDay ?? `${row.billingMonth}-01`;
 
   if (!row.isTestRun) {
+    // Org (monthly + daily) — mirrors LLM aggregate pattern
     dims.push({ entityType: 'mcp_org', entityId: row.organisationId, periodType: 'monthly', periodKey: row.billingMonth });
+    dims.push({ entityType: 'mcp_org', entityId: row.organisationId, periodType: 'daily', periodKey: billingDay });
     if (row.subaccountId) {
       dims.push({ entityType: 'mcp_subaccount', entityId: row.subaccountId, periodType: 'monthly', periodKey: row.billingMonth });
+      dims.push({ entityType: 'mcp_subaccount', entityId: row.subaccountId, periodType: 'daily', periodKey: billingDay });
     }
   }
 
@@ -164,32 +169,37 @@ console.log('\n=== mcpToolInvocationsPure — unit tests ===\n');
 
 // Aggregate dimension tests
 
-test('non-test run with subaccount and runId produces 4 dimensions', () => {
+test('non-test run with subaccount and runId produces 6 dimensions (monthly+daily for org and sub)', () => {
   const dims = buildAggregateDimensions({
     organisationId: 'org-1',
     subaccountId: 'sub-1',
     runId: 'run-1',
     billingMonth: '2026-04',
+    billingDay: '2026-04-17',
     serverSlug: 'github',
     isTestRun: false,
   });
-  assertEqual(dims.length, 4, 'dimension count');
-  assert(dims.some((d) => d.entityType === 'mcp_org'), 'mcp_org present');
-  assert(dims.some((d) => d.entityType === 'mcp_subaccount'), 'mcp_subaccount present');
+  assertEqual(dims.length, 6, 'dimension count');
+  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'monthly'), 'mcp_org monthly present');
+  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present');
+  assert(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'monthly'), 'mcp_subaccount monthly present');
+  assert(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'daily'), 'mcp_subaccount daily present');
   assert(dims.some((d) => d.entityType === 'mcp_run'), 'mcp_run present');
   assert(dims.some((d) => d.entityType === 'mcp_server'), 'mcp_server present');
 });
 
-test('non-test run without subaccount produces 3 dimensions (no mcp_subaccount)', () => {
+test('non-test run without subaccount produces 4 dimensions (org monthly+daily, run, server)', () => {
   const dims = buildAggregateDimensions({
     organisationId: 'org-1',
     runId: 'run-1',
     billingMonth: '2026-04',
+    billingDay: '2026-04-17',
     serverSlug: 'github',
     isTestRun: false,
   });
-  assertEqual(dims.length, 3, 'dimension count');
+  assertEqual(dims.length, 4, 'dimension count');
   assert(!dims.some((d) => d.entityType === 'mcp_subaccount'), 'mcp_subaccount absent');
+  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present');
 });
 
 test('test run with runId produces only mcp_run dimension', () => {

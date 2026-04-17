@@ -1717,6 +1717,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     startTime,
     timeoutMs,
     taskId: request.taskId,
+    isTestRun: request.isTestRun ?? false,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,

@@ -298,7 +298,11 @@ export const mcpClientManager = {
       .insert(mcpToolInvocations)
       .values(row)
       .onConflictDoNothing()
-      .then(() => {
+      .returning({ id: mcpToolInvocations.id })
+      .then((inserted) => {
+        // Only update aggregates when a row was actually written — deduped rows must not
+        // inflate cost_aggregates, which would break the "recomputable from ledger" guarantee.
+        if (inserted.length === 0) return;
         void mcpAggregateService.upsertMcpAggregates(row as Parameters<typeof mcpAggregateService.upsertMcpAggregates>[0]).catch((err: unknown) => {
           logger.warn('mcp.aggregate_failed', {
             invocationId: row.id,
@@ -395,6 +399,11 @@ export const mcpClientManager = {
     if (ctx.mcpCallCount !== undefined) ctx.mcpCallCount++;
     else ctx.mcpCallCount = 1;
 
+    // Resolve tool annotations for accurate gate-level recording.
+    // Annotation-driven escalation (destructiveHint) is part of resolveGateLevel() — passing
+    // undefined here would silently record the wrong gate level for destructive tools.
+    const toolAnnotations = instance.tools.find((t) => t.name === toolName)?.annotations;
+
     // Variables declared before try so finally can access them in all paths.
     const callStart = Date.now();
     let status: 'success' | 'error' | 'timeout' | 'budget_blocked' = 'error'; // safe default
@@ -443,7 +452,7 @@ export const mcpClientManager = {
         this.writeInvocation({
           ctx, serverSlug, toolName,
           mcpServerConfigId: instance.serverConfig.id,
-          gateLevel: resolveGateLevel(instance.serverConfig, toolName),
+          gateLevel: resolveGateLevel(instance.serverConfig, toolName, toolAnnotations),
           status, failureReason, durationMs, callIndex,
         });
 
@@ -467,7 +476,7 @@ export const mcpClientManager = {
         this.writeInvocation({
           ctx, serverSlug, toolName,
           mcpServerConfigId: instance.serverConfig.id,
-          gateLevel: resolveGateLevel(instance.serverConfig, toolName),
+          gateLevel: resolveGateLevel(instance.serverConfig, toolName, toolAnnotations),
           status, failureReason, durationMs,
           responseSizeBytes, wasTruncated, callIndex,
         });
@@ -514,7 +523,7 @@ export const mcpClientManager = {
     error?: string;
   }> {
     const config = await mcpServerConfigService.getById(configId, organisationId);
-    const ctx: McpRunContext = { runId: 'test', organisationId, agentId: 'test', subaccountId: null };
+    const ctx: McpRunContext = { runId: 'test', organisationId, agentId: 'test', subaccountId: null, isTestRun: false };
 
     try {
       const instance = await this._connectSingleServer(config, ctx);

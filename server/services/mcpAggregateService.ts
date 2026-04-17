@@ -8,8 +8,8 @@ import { logger } from '../lib/logger.js';
 // MCP aggregate upsert — called fire-and-forget after each mcp_tool_invocations write
 //
 // Reuses cost_aggregates table with four MCP-specific entityTypes:
-//   mcp_org         — org-level monthly call count
-//   mcp_subaccount  — subaccount-level monthly call count (if subaccountId present)
+//   mcp_org         — org-level monthly + daily call count
+//   mcp_subaccount  — subaccount-level monthly + daily call count (if subaccountId present)
 //   mcp_run         — per-run lifetime call count (always written, including test runs)
 //   mcp_server      — per-server monthly call count, keyed as "orgId:serverSlug"
 //
@@ -24,21 +24,33 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
   const dimensions: Dimension[] = [];
 
   if (!row.isTestRun) {
-    // Org (monthly)
+    // Org (monthly + daily) — mirrors LLM aggregate pattern
     dimensions.push({
       entityType: 'mcp_org',
       entityId: row.organisationId,
       periodType: 'monthly',
       periodKey: row.billingMonth,
     });
+    dimensions.push({
+      entityType: 'mcp_org',
+      entityId: row.organisationId,
+      periodType: 'daily',
+      periodKey: row.billingDay,
+    });
 
-    // Subaccount (monthly)
+    // Subaccount (monthly + daily)
     if (row.subaccountId) {
       dimensions.push({
         entityType: 'mcp_subaccount',
         entityId: row.subaccountId,
         periodType: 'monthly',
         periodKey: row.billingMonth,
+      });
+      dimensions.push({
+        entityType: 'mcp_subaccount',
+        entityId: row.subaccountId,
+        periodType: 'daily',
+        periodKey: row.billingDay,
       });
     }
   }
