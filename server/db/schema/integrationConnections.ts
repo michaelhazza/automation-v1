@@ -57,7 +57,7 @@ export const integrationConnections = pgTable(
     lastSyncStartedAt: timestamp('last_sync_started_at', { withTimezone: true }),
     lastSyncError: text('last_sync_error'),
     lastSyncErrorAt: timestamp('last_sync_error_at', { withTimezone: true }),
-    syncPhase: text('sync_phase').notNull().default('backfill'),
+    syncPhase: text('sync_phase').notNull().default('backfill').$type<'backfill' | 'transition' | 'live'>(),
     syncLockToken: uuid('sync_lock_token'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

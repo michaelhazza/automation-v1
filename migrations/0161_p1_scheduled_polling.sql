@@ -40,3 +40,9 @@ CREATE INDEX IF NOT EXISTS integration_ingestion_stats_connection_idx
   ON integration_ingestion_stats (connection_id, sync_started_at DESC);
 CREATE INDEX IF NOT EXISTS integration_ingestion_stats_org_idx
   ON integration_ingestion_stats (organisation_id, created_at DESC);
+
+-- Dedup: pg-boss retries re-execute the entire handler, so the same
+-- (connection_id, sync_started_at) pair can be inserted multiple times.
+-- ON CONFLICT DO UPDATE lets the latest attempt overwrite the prior row.
+CREATE UNIQUE INDEX IF NOT EXISTS integration_ingestion_stats_dedup_idx
+  ON integration_ingestion_stats (connection_id, sync_started_at);

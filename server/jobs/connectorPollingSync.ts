@@ -37,7 +37,12 @@ export async function runConnectorPollingSync(
   }
 
   const leaseRow = leaseResult.rows[0] as { sync_lock_token: string; sync_phase: string };
-  const currentSyncPhase = leaseRow.sync_phase ?? 'live';
+  const validPhases = ['backfill', 'transition', 'live'] as const;
+  const rawPhase = leaseRow.sync_phase;
+  if (!validPhases.includes(rawPhase as typeof validPhases[number])) {
+    throw new Error(`connectorPollingSync: unexpected sync_phase '${rawPhase}' on connection ${connectionId}`);
+  }
+  const currentSyncPhase = rawPhase;
   const syncStartedAt = new Date();
   let errorMessage: string | null = null;
 
@@ -67,7 +72,7 @@ export async function runConnectorPollingSync(
         eq(integrationConnections.organisationId, organisationId),
       ));
 
-    // Record stats
+    // Record stats — ON CONFLICT handles pg-boss retry dedup
     await db.insert(integrationIngestionStats).values({
       connectionId,
       organisationId,
@@ -77,6 +82,15 @@ export async function runConnectorPollingSync(
       rowsIngested: result.rowsIngested,
       syncDurationMs: result.durationMs,
       syncPhase: currentSyncPhase,
+    }).onConflictDoUpdate({
+      target: [integrationIngestionStats.connectionId, integrationIngestionStats.syncStartedAt],
+      set: {
+        syncFinishedAt: new Date(),
+        apiCallsApprox: result.apiCallsApprox,
+        rowsIngested: result.rowsIngested,
+        syncDurationMs: result.durationMs,
+        errorMessage: null,
+      },
     });
   } catch (err) {
     errorMessage = err instanceof Error ? err.message : String(err);
@@ -84,6 +98,7 @@ export async function runConnectorPollingSync(
     await db
       .update(integrationConnections)
       .set({
+        syncLockToken: null,
         lastSyncError: errorMessage,
         lastSyncErrorAt: new Date(),
       })
@@ -92,7 +107,7 @@ export async function runConnectorPollingSync(
         eq(integrationConnections.organisationId, organisationId),
       ));
 
-    // Record failed stats
+    // Record failed stats — ON CONFLICT handles pg-boss retry dedup
     await db.insert(integrationIngestionStats).values({
       connectionId,
       organisationId,
@@ -103,6 +118,13 @@ export async function runConnectorPollingSync(
       syncDurationMs: Date.now() - syncStartedAt.getTime(),
       syncPhase: currentSyncPhase,
       errorMessage,
+    }).onConflictDoUpdate({
+      target: [integrationIngestionStats.connectionId, integrationIngestionStats.syncStartedAt],
+      set: {
+        syncFinishedAt: new Date(),
+        errorMessage,
+        syncDurationMs: Date.now() - syncStartedAt.getTime(),
+      },
     });
 
     // Don't throw — job completes; TripWire monitors error rates

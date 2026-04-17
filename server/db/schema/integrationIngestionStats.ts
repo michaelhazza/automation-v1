@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations.js';
 import { integrationConnections } from './integrationConnections.js';
 
@@ -33,6 +33,9 @@ export const integrationIngestionStats = pgTable(
     ),
     orgIdx: index('integration_ingestion_stats_org_idx').on(
       table.organisationId, table.createdAt
+    ),
+    dedupIdx: uniqueIndex('integration_ingestion_stats_dedup_idx').on(
+      table.connectionId, table.syncStartedAt
     ),
   })
 );
