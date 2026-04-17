@@ -35,9 +35,16 @@ export default function PulsePage({ user }: Props) {
       await api.post(`/api/review-items/${item.id}/approve`);
       removeItem(item.id);
     } catch (err: unknown) {
-      const resp = (err as { response?: { status?: number; data?: { error?: { code?: string } } } })?.response;
+      const resp = (err as { response?: { status?: number; data?: Record<string, unknown> & { error?: { code?: string } } } })?.response;
       if (resp?.status === 412 && resp.data?.error?.code === 'MAJOR_ACK_REQUIRED') {
-        setMajorModalItem(item);
+        const d = resp.data;
+        setMajorModalItem({
+          ...item,
+          lane: 'major',
+          ackText: (d.ackText as string) ?? item.ackText,
+          ackAmountMinor: (d.ackAmountMinor as number) ?? item.ackAmountMinor,
+          ackCurrencyCode: (d.ackCurrencyCode as string) ?? item.ackCurrencyCode,
+        });
       } else if (resp?.status === 409) {
         removeItem(item.id);
       } else {

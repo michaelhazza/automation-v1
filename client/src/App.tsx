@@ -10,7 +10,6 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ProcessesPage = lazy(() => import('./pages/TasksPage'));
 const ProcessExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage'));
@@ -62,7 +61,6 @@ const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
-const InboxPage = lazy(() => import('./pages/InboxPage'));
 const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
 const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
 const PlaybookRunPage = lazy(() => import('./pages/subaccount/PlaybookRunPage'));
@@ -265,7 +263,7 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/config-documents/upload" element={<ConfigDocumentUploadPage />} />
             {/* Memory & Briefings Phase 5 — block detail (S24) */}
             <Route path="/admin/memory-blocks/:blockId" element={<MemoryBlockDetailPage />} />
-            <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/inbox" element={<Navigate to="../pulse" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
@@ -288,8 +286,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<PulsePage user={user!} />} />
             {/* Activity — org scope (redirects to Pulse history) */}
             <Route path="/admin/activity" element={<Navigate to="/admin/pulse" replace />} />
-            {/* Activity — subaccount scope (still rendered for deep links) */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
+            {/* Activity — subaccount scope (redirects to subaccount Pulse) */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<Navigate to="../pulse" replace />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Configuration Assistant */}
