@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-17)
-> **Last updated:** 2026-04-17 (revision 4 — spec consistency pass: stale spawn_sub_agents wording removed from success criteria, worked example, and §6.7; trigger name unified to org_task_created; capability map storage fork resolved to single contract; post-handoff verification trigger defined as org_agent_completed event; infrastructure_alert added to request_feature input type; schema field names aligned to camelCase throughout)
+> **Last updated:** 2026-04-17 (revision 5 — final sharp-edge pass: decision_record stable ID defined; check_capability_gap configured rule made atomic (3-condition AND); combined_coverage_possible signal added to candidate_agents; capability query cache keyed on input signature; dedupe hash made explicit about post-normalisation canonical slugs; routing_timeout added as distinct failure state; post-handoff verification trigger tightened to match task_id AND assigned_agent_id)
 > **Branch:** `claude/orchestrator-spec-doc-sEY3w`
 
 ---
@@ -597,13 +597,17 @@ These files describe the skill's purpose, inputs, outputs, and example invocatio
 
 **Logic:** For each required capability, the skill checks (in order):
 
-1. **Configured** — is there a linked agent whose **capability map** (§2) contains this capability _and_ an active connection (`list_connections`) for the relevant integration? Coverage is subset matching: the full `required_capabilities` list must be a subset of the agent's map for that agent to count as configured. Partial coverage is _not_ configured.
+1. **Configured** — the following three conditions must all hold for at least one candidate linked agent (not scattered across multiple agents):
+   - `required_capabilities ⊆ agent.capabilityMap` — every required capability slug appears in the agent's derived capability map.
+   - For each integration slug in `required_capabilities`, there is an active connection in `list_connections` with `status: 'active'`.
+   - For each such active connection, `required_scopes ⊆ connection.scopes_granted` — the connection has been granted every scope the Integration Reference lists under `required_scopes` for that capability.
+   All three conditions are evaluated atomically per candidate agent. Satisfying two out of three does not count as configured. This prevents false Path A on agents that have the skills but lack the live connection, or have the connection but lack a critical scope (e.g. `gmail.modify` is absent but `gmail.readonly` is granted).
 2. **Configurable** — does the Integration Reference (`list_platform_capabilities`) declare that this capability is available at the platform level with `status: fully_supported` or `status: partial` (confidence `high` or `stale` per §3.6)?
 3. **Unsupported** — neither of the above, _and_ the reference's `reference_state` is `healthy` (so the negative answer is trustworthy). If `reference_state` is `degraded` or `unavailable`, the per-capability availability is returned as `unknown` rather than `unsupported`, so the Orchestrator does not confidently file a feature request based on a bad reference read.
 
-The skill rolls up the per-capability answers into a single `verdict`: `configured` if every capability is configured against a single candidate agent (not scattered across multiple agents); `configurable` if at least one is not configured but all are configurable; `unsupported` if any capability is unsupported with a healthy reference; `unknown` if any capability resolves to unknown and none are unsupported.
+The skill rolls up the per-capability answers into a single `verdict`: `configured` if every capability passes all three conditions against a single candidate agent; `configurable` if at least one is not configured but all are configurable; `unsupported` if any capability is unsupported with a healthy reference; `unknown` if any capability resolves to unknown and none are unsupported.
 
-The skill also returns `candidate_agents: Array<{agent_id, coverage: 'full' | 'partial', missing: string[]}>` so the Orchestrator can see which agents were considered, why each was accepted or rejected, and whether partial coverage (Path B) is worth proposing against a specific agent rather than a fresh Configuration Assistant run.
+The skill returns `candidate_agents: Array<{agent_id, coverage: 'full' | 'partial', missing: string[], combined_coverage_possible: boolean}>`. The `combined_coverage_possible` flag is `true` when no single agent has full coverage but the union of two or more candidate agents' capability maps would cover all required capabilities. This is informational only — the Orchestrator does not act on it in the current spec (Path B fires in all partial-coverage cases) — but it becomes valuable signal for future multi-agent orchestration and for the Configuration Assistant to know whether "top up an existing agent" or "create a new one" is the right setup path.
 
 **Implementation:** Pure aggregation skill. Internally calls `list_connections`, `list_platform_capabilities`, `config_list_agents`, `config_list_links`. Runs in a single round-trip from the agent's perspective. No new data required — it's a composition of existing queries. Cache TTL for its inputs is short (60s from `list_platform_capabilities`; live for the others).
 
@@ -631,7 +635,7 @@ export const featureRequests = pgTable('feature_requests', {
   status: text('status').notNull().default('open'),                            // 'open' | 'triaged' | 'accepted' | 'rejected' | 'shipped' | 'duplicate'
 
   // Lightweight dedupe (see §5.4)
-  dedupe_hash: text('dedupe_hash').notNull(),                                  // sha256(category + '|' + canonical_capability_slugs.sorted.join(','))
+  dedupe_hash: text('dedupe_hash').notNull(),                                  // sha256(category + '|' + post_normalisation_canonical_slugs.sorted.join(',')) — slugs must be canonical (after the decomposition pipeline's normalise step) so 'inbox_read' and 'email_read' alias to the same hash
   dedupe_group_count: integer('dedupe_group_count').notNull().default(1),      // incremented instead of inserting a row when the same hash appears in the same org within a 30-day window
 
   // Content
@@ -706,7 +710,7 @@ Both channels are best-effort. The durable record is the `feature_requests` row.
 
 The spec does **not** build full clustering or cross-org dedupe, but a small hash-based suppression prevents the obvious spam case (a noisy trigger or a prompt bug filing the same request hundreds of times).
 
-The dedupe key is `sha256(category + '|' + canonical_capability_slugs.sorted.join(','))`. On insert:
+The dedupe key is `sha256(category + '|' + canonical_capability_slugs.sorted.join(','))` where slugs are the **post-normalisation canonical forms** — aliases resolved to their canonical slug by the taxonomy before hashing. This means `inbox_read` and `email_read` (aliases of the same canonical) produce the same hash, collapsing semantic duplicates that would otherwise create separate rows. On insert:
 
 1. `request_feature` computes the hash from the already-normalised capability slugs (same pipeline as §2).
 2. It looks up `(organisationId, dedupe_hash)` on rows where `category` matches and `createdAt` is within the last 30 days.
@@ -817,9 +821,11 @@ Re-decomposition is bounded at **one retry per task** so a pathological prompt c
 
 Every Orchestrator run has a fixed budget of capability-discovery skill calls (`list_connections`, `list_platform_capabilities`, `check_capability_gap`, `normalize_capability_slugs`). Default: **8 calls per run**. The budget exists because an LLM with read-only skills tends to re-query the same data multiple times across a single reasoning loop, inflating latency and token cost without improving the decision.
 
-The budget is enforced at the skill-registry level: each call decrements a per-run counter; when the counter hits zero, further calls return `{ error: 'capability_query_budget_exhausted', last_results: <cached>... }` using in-run cached results so the Orchestrator can still complete. The budget value is configurable via `systemSettings.orchestrator_capability_query_budget` so the Synthetos team can tune it per-environment.
+The budget is enforced at the skill-registry level: each **unique** call decrements a per-run counter; when the counter hits zero, further calls return `{ error: 'capability_query_budget_exhausted', last_results: <cached>... }` using in-run cached results so the Orchestrator can still complete. The budget value is configurable via `systemSettings.orchestrator_capability_query_budget` so the Synthetos team can tune it per-environment.
 
-Four calls are typically enough for a straightforward run (one each of `list_platform_capabilities`, `list_connections`, `check_capability_gap`, plus one `normalize_capability_slugs`). The 8-call default leaves headroom for the one-shot re-decomposition path and a handful of retries, with room to grow before the budget bites.
+**In-run call deduplication:** Calls are keyed by `sha256(skill_name + '|' + JSON.stringify(sorted_input))`. An identical call (same skill, same serialised input) within the same run returns the cached result from the first call at zero budget cost. This prevents the common LLM pattern of re-querying the same data across reasoning steps — without deduplication, a multi-step prompt could burn the entire 8-call budget on repeated identical `list_platform_capabilities` reads. The cache is per-run only (not cross-run) and is never persisted.
+
+Four calls are typically enough for a straightforward run (one each of `list_platform_capabilities`, `list_connections`, `check_capability_gap`, plus one `normalize_capability_slugs`). The 8-call default leaves headroom for the one-shot re-decomposition path, with room to grow before the budget bites.
 
 ### 6.5 Decision record
 
@@ -827,7 +833,8 @@ Every time the Orchestrator runs the decision procedure, it emits a structured d
 
 ```typescript
 {
-  path: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed';
+  id: string;                                          // uuid generated at the start of the routing run, before any skill calls; this is the stable join key threaded into handoff_context, feature_requests, and routing_outcomes
+  path: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed' | 'routing_timeout';
   decomposition: {
     draft: Array<{ kind: string; slug: string; rationale: string }>;
     normalised: Array<{ kind: string; canonical_slug: string; original_slug: string; normalisation_status: 'canonical' | 'aliased' | 'unresolved' }>;
@@ -873,7 +880,7 @@ The Orchestrator routes all three active paths (A, B, C) using the existing `rea
   //   missing_for_configurable?: string[];   // Paths B/C only
   //   orchestrator_classification: 'A' | 'B' | 'C';
   //   feature_request_id?: string;           // Path C only
-  //   decision_record_id: string;
+  //   decision_record_id: string;           // the uuid generated at the top of the routing run
   //   originating_user_id: string;
   // }
 }
@@ -941,7 +948,7 @@ A `max_configuration_attempts_per_task` system setting (default `1`) makes the t
 The Configuration Assistant itself needs two small updates to cooperate with the new flow:
 
 1. **Recognise orchestrator-originated tasks.** When the Configuration Assistant receives a task via `reassign_task`, it reads the `handoffContext` field on the task. If `handoffContext` contains a parseable JSON object with `handoff_reason` starting with `'orchestrator_path_'`, the Configuration Assistant treats the `user_intent` field as the starting point of its plan-approve-execute loop, and uses `source_task_id` (if present) to back-reference the originating task in its own outputs. Tasks without this marker are treated as normal direct assignments — the Config Assistant's behaviour is unchanged.
-2. **Return the structured output contract.** On completion (success, partial, failed, or user_abandoned), the Configuration Assistant writes the §6.6.1 output object as its final run output so the Orchestrator's post-handoff verification can consume it. The Orchestrator's verification is triggered by the `agent_completed` event on the reassigned task — specifically `eventType: 'org_agent_completed'` in the existing trigger system, with the agent ID matched to the Orchestrator's own trigger registration. This closes the loop without polling.
+2. **Return the structured output contract.** On completion (success, partial, failed, or user_abandoned), the Configuration Assistant writes the §6.6.1 output object as its final run output so the Orchestrator's post-handoff verification can consume it. The Orchestrator's verification is triggered by `eventType: 'org_agent_completed'` with an `eventFilter` that explicitly matches **both** `{ task_id: <source_task_id>, assigned_agent_id: <config_assistant_agent_id> }`. Both fields must match to prevent a false-positive trigger when a different agent completes work on an unrelated task. The Orchestrator's trigger row for this verification is created at the same time it calls `reassign_task` (one-shot: `cooldownSeconds` set high, `isActive` flipped to false after it fires once). This closes the loop without polling and without ambiguity about which completion event matters.
 
 Neither change alters the Configuration Assistant's own contract (its spec is preserved) — they are additive behaviours triggered only when the `handoffContext` shape is present.
 
@@ -1049,7 +1056,8 @@ Four new task status values are introduced:
 - `routed` — Orchestrator handed off to an existing agent; downstream agent now owns the task.
 - `awaiting_configuration` — Orchestrator handed off to Configuration Assistant; user needs to approve/respond to the Configuration Assistant's plan.
 - `blocked_on_feature_request` — Platform doesn't support the request; feature filed.
-- `routing_failed` — Orchestrator encountered an error during classification (e.g. `check_capability_gap` threw). Task stays open for human attention.
+- `routing_failed` — Orchestrator encountered a recoverable error during classification (e.g. `check_capability_gap` threw an unexpected error). Task stays open for human attention.
+- `routing_timeout` — Orchestrator's capability-query budget was exhausted, or the LLM step (decomposition or re-decomposition) failed twice consecutively. Distinct from `routing_failed` so ops can tell "ran out of budget / LLM error" apart from "classification logic threw". Task stays open; user sees a distinct comment explaining the platform couldn't classify the request and to try rephrasing or contacting support.
 
 These extend the existing task status enum. All four have client-side rendering (icon, colour, filter chip) in the task board UI. The task board already supports custom statuses, so this is additive.
 
@@ -1077,7 +1085,7 @@ If the org has disabled agent-chat notifications for the Orchestrator, only the 
 
 ### 8.6 Error visibility
 
-If the Orchestrator fails mid-decision (e.g. `list_platform_capabilities` returns `error: 'integration_reference_invalid'`), the user sees a task comment saying _"I hit an infrastructure error classifying this request. Our team has been notified."_ and the task status is set to `routing_failed`. The underlying error detail is logged but not exposed to the user — the detail is in the routing decision record and the feature request (if one was synthetically filed per §4.2).
+If the Orchestrator fails mid-decision due to a capability-query budget exhaustion or two consecutive LLM failures, the task status is set to `routing_timeout` and the user sees a task comment: _"I wasn't able to classify this request — the system ran out of capacity. Try rephrasing your task with more specific integration names, or contact support."_ Other infrastructure errors (e.g. `list_platform_capabilities` returns `error: 'integration_reference_invalid'`) set `routing_failed` and the user sees: _"I hit an infrastructure error classifying this request. Our team has been notified."_ The underlying error detail is logged but not exposed to the user — the detail is in the routing decision record and the feature request (if one was synthetically filed per §4.2).
 
 The user is never left with a silent failure. "I couldn't route this right now" is better than no response.
 
@@ -1187,7 +1195,7 @@ These outcomes are the ground-truth signal for routing quality. A new `routing_o
 {
   decision_record_id: string;
   task_id: string;
-  path_taken: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed';
+  path_taken: 'A' | 'B' | 'C' | 'D' | 'legacy_fallback' | 'routing_failed' | 'routing_timeout';
   outcome: 'success' | 'partial' | 'failed' | 'user_intervened' | 'abandoned';
   user_intervention_detail: string | null;
   user_modified_after_completion: boolean;   // task was edited by a human after status reached 'configured' or 'routed'
