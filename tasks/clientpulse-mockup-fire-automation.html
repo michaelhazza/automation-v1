@@ -25,6 +25,14 @@
   .app-head .crumbs a { color: #a5b4fc; text-decoration: none; }
   .app-head .crumbs .sep { color: #475569; }
   .app-head .spacer { flex: 1; }
+  .parent-hint {
+    background: #fafbfc; border-bottom: 1px solid #e5e7eb; padding: 8px 20px;
+    font-size: 11px; color: #6b7280; display: flex; align-items: center; gap: 8px;
+  }
+  .parent-hint code {
+    background: #fff; padding: 1px 5px; border-radius: 3px;
+    border: 1px solid #e5e7eb; font-size: 10.5px;
+  }
   .app-head .who { font-size: 11px; color: #94a3b8; }
 
   /* Page container */
@@ -187,6 +195,11 @@
   </div>
   <div class="spacer"></div>
   <div class="who">kel@kelmedia.com.au · org: Productivity Hub — SaaS</div>
+</div>
+
+<!-- Parent-page hint so reviewers know how this picker fits in the flow -->
+<div class="parent-hint">
+  ⛶ Opened from <code>clientpulse-mockup-propose-intervention.html</code> (picked 'Fire automation' in step 1) · which opens from <code>clientpulse-mockup-drilldown.html</code> · which opens from <code>clientpulse-mockup-dashboard.html</code>
 </div>
 
 <div class="page">

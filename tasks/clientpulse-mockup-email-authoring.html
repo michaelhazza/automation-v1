@@ -160,7 +160,7 @@
 <div class="annot-banner">📐 MOCKUP · Send email compose popup · Platform primitive usable system-wide (not just ClientPulse) · Synthetos-native authoring with canonical merge fields · Send goes through the connected CRM to preserve domain authentication</div>
 
 <div class="bg-context"></div>
-<div class="bg-hint">← drill-down page (faded, behind modal)</div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-propose-intervention.html</code> (modal) · behind that: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-drilldown.html</code></div>
 
 <div class="modal-backdrop">
   <div class="modal">
@@ -269,6 +269,18 @@ Kel @ Productivity Hub</textarea>
 
         <div class="dest-callout">
           <strong>How this sends:</strong> Synthetos resolves all canonical merge fields into concrete values (using our signal data — not available via the CRM's own fields), then calls Smith Dental's CRM API to dispatch. CRM uses the authenticated domain for delivery. Outcome is measured by the next band assessment (v1 signal).
+        </div>
+
+        <!-- Test-email control -->
+        <div style="margin-top: 12px; padding: 10px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div style="font-weight: 600; font-size: 12px; color: #1a1d23;">🧪 Test before submitting</div>
+            <div style="flex: 1;"></div>
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 5px 10px;">Send test to me</button>
+          </div>
+          <div style="font-size: 11px; color: #6b7280; line-height: 1.5;">
+            Dispatches this email — with all merge fields resolved against Smith Dental's real data — to <strong>kel@kelmedia.com.au</strong> via Smith Dental's connected CRM. Same path as the real send, so you're verifying genuine deliverability (domain auth, inbox placement, rendering). No intervention record created; no contact enrolled.
+          </div>
         </div>
       </div>
 
