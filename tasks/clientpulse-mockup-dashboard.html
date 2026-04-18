@@ -72,7 +72,7 @@
   /* Header row of grid */
   .gridheader {
     display: grid;
-    grid-template-columns: 14px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.55fr 1fr;
+    grid-template-columns: 100px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.55fr 1fr;
     gap: 10px; padding: 10px 18px; background: #fafbfc; border-bottom: 1px solid #e5e7eb;
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;
     align-items: center;
@@ -83,17 +83,54 @@
 
   .row {
     display: grid;
-    grid-template-columns: 14px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.55fr 1fr;
+    grid-template-columns: 100px 1.4fr 0.7fr 1.2fr 0.5fr 0.6fr 1.4fr 0.55fr 1fr;
     gap: 10px; padding: 12px 18px 12px 0; border-bottom: 1px solid #f0f1f3;
     align-items: center; cursor: pointer;
   }
   .row:hover { background: #fafbff; }
-  .row .band-bar { width: 4px; height: 36px; border-radius: 0 2px 2px 0; }
-  .row .band-bar.critical { background: #dc2626; }
-  .row .band-bar.atrisk   { background: #ea580c; }
-  .row .band-bar.watch    { background: #d97706; }
-  .row .band-bar.healthy  { background: #16a34a; }
-  .row .band-bar.cold     { background: #9ca3af; }
+  /* Band cell — now a proper labeled column with coloured dot + text label + sort */
+  .row .band-cell {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.35px;
+  }
+  .row .band-cell .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .row .band-cell.critical { color: #b91c1c; }
+  .row .band-cell.critical .dot { background: #dc2626; }
+  .row .band-cell.atrisk   { color: #c2410c; }
+  .row .band-cell.atrisk   .dot { background: #ea580c; }
+  .row .band-cell.watch    { color: #b45309; }
+  .row .band-cell.watch    .dot { background: #d97706; }
+  .row .band-cell.healthy  { color: #15803d; }
+  .row .band-cell.healthy  .dot { background: #16a34a; }
+  .row .band-cell.cold     { color: #6b7280; font-weight: 600; }
+  .row .band-cell.cold     .dot { background: #9ca3af; }
+
+  /* Interactive sort + filter chips above the grid */
+  .panel-head .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sort-pill {
+    font-size: 12px; padding: 5px 10px; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 5px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    color: #374151;
+  }
+  .sort-pill strong { color: #4338ca; font-weight: 700; }
+  .sort-pill .caret { color: #6b7280; font-size: 9px; }
+  .chip-label { font-size: 11px; color: #6b7280; margin-left: 4px; }
+  .filter-chip {
+    font-size: 11px; padding: 4px 4px 4px 9px; background: #eef2ff; color: #4338ca;
+    border: 1px solid #c7d2fe; border-radius: 11px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .filter-chip .x {
+    cursor: pointer; font-weight: 700; font-size: 13px; padding: 0 4px;
+    border-radius: 10px; color: #6366f1;
+  }
+  .filter-chip .x:hover { background: rgba(99, 102, 241, 0.15); }
+  .add-filter-btn {
+    font-size: 11px; padding: 4px 10px; background: #fff; color: #4338ca;
+    border: 1px dashed #c7d2fe; border-radius: 11px; font-weight: 600; cursor: pointer;
+  }
+  .clear-all-link { font-size: 11px; color: #6b7280; text-decoration: none; margin-left: 2px; }
+  .clear-all-link:hover { color: #b91c1c; }
 
   .name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .name-cell .name { font-weight: 600; color: #1a1d23; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -460,26 +497,32 @@
         <div class="panel-head">
           <h2>Portfolio · 87 clients</h2>
           <div class="actions">
-            <span>Sorted by churn risk · Filtered: At Risk + Critical</span>
-            <button class="clear-btn">Clear all</button>
+            <div class="sort-pill" title="Click to change sort">
+              Sort: <strong>Band</strong> ↓ <span class="caret">▾</span>
+            </div>
+            <span class="chip-label">Filters:</span>
+            <span class="filter-chip">Critical <span class="x">×</span></span>
+            <span class="filter-chip">At Risk <span class="x">×</span></span>
+            <button class="add-filter-btn">+ Add filter</button>
+            <a class="clear-all-link" href="#">Clear all</a>
           </div>
         </div>
 
         <div class="gridheader">
-          <div></div>
-          <div class="col">Client <span class="sort-arrow">↑</span></div>
+          <div class="col">Band <span class="sort-arrow">↓</span></div>
+          <div class="col">Client</div>
           <div class="col">Tier <span class="filter-dot"></span></div>
           <div class="col">Sticky three (activity / funnels / calendar)</div>
           <div class="col">Funnels</div>
           <div class="col">Calendar</div>
           <div class="col">Integrations</div>
-          <div class="col">Health <span class="sort-arrow">↓</span></div>
+          <div class="col">Health</div>
           <div class="col">Trend (90d)</div>
         </div>
 
         <!-- CRITICAL clients -->
         <div class="row">
-          <div class="band-bar critical"></div>
+          <div class="band-cell critical"><span class="dot"></span>Critical</div>
           <div class="name-cell">
             <span class="name">Smith Dental</span>
             <span class="meta">Subaccount · loc_3a91…</span>
@@ -515,7 +558,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar critical"></div>
+          <div class="band-cell critical"><span class="dot"></span>Critical</div>
           <div class="name-cell">
             <span class="name">Apex Realty Group</span>
             <span class="meta">Subaccount · loc_b27d…</span>
@@ -549,7 +592,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar critical"></div>
+          <div class="band-cell critical"><span class="dot"></span>Critical</div>
           <div class="name-cell">
             <span class="name">Northwood Pediatrics</span>
             <span class="meta">Subaccount · loc_9f4c…</span>
@@ -582,7 +625,7 @@
 
         <!-- AT RISK -->
         <div class="row">
-          <div class="band-bar atrisk"></div>
+          <div class="band-cell atrisk"><span class="dot"></span>At Risk</div>
           <div class="name-cell">
             <span class="name">Bright Marketing Co</span>
             <span class="meta">Subaccount · loc_6a8e…</span>
@@ -617,7 +660,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar atrisk"></div>
+          <div class="band-cell atrisk"><span class="dot"></span>At Risk</div>
           <div class="name-cell">
             <span class="name">Riverside Wellness</span>
             <span class="meta">Subaccount · loc_c2b1…</span>
@@ -649,7 +692,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar atrisk"></div>
+          <div class="band-cell atrisk"><span class="dot"></span>At Risk</div>
           <div class="name-cell">
             <span class="name">Grand Auto Detailing</span>
             <span class="meta">Subaccount · loc_e8f3…</span>
@@ -684,7 +727,7 @@
 
         <!-- WATCH -->
         <div class="row">
-          <div class="band-bar watch"></div>
+          <div class="band-cell watch"><span class="dot"></span>Watch</div>
           <div class="name-cell">
             <span class="name">Coastal Plumbing &amp; Gas</span>
             <span class="meta">Subaccount · loc_4d5a…</span>
@@ -717,7 +760,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar watch"></div>
+          <div class="band-cell watch"><span class="dot"></span>Watch</div>
           <div class="name-cell">
             <span class="name">Vista Roofing</span>
             <span class="meta">Subaccount · loc_7c19…</span>
@@ -752,7 +795,7 @@
 
         <!-- HEALTHY (truncated sample, just to show contrast) -->
         <div class="row">
-          <div class="band-bar healthy"></div>
+          <div class="band-cell healthy"><span class="dot"></span>Healthy</div>
           <div class="name-cell">
             <span class="name">Cairns Solar Solutions</span>
             <span class="meta">Subaccount · loc_2e4f… · Bounty merchant</span>
@@ -787,7 +830,7 @@
         </div>
 
         <div class="row">
-          <div class="band-bar healthy"></div>
+          <div class="band-cell healthy"><span class="dot"></span>Healthy</div>
           <div class="name-cell">
             <span class="name">Highland Fitness Group</span>
             <span class="meta">Subaccount · loc_a91c…</span>
@@ -822,7 +865,7 @@
 
         <!-- COLD START -->
         <div class="row">
-          <div class="band-bar cold"></div>
+          <div class="band-cell cold"><span class="dot"></span>Cold start</div>
           <div class="name-cell">
             <span class="name">Maple St Veterinary</span>
             <span class="meta">Subaccount · loc_d49a… · Onboarded 6 days ago</span>
