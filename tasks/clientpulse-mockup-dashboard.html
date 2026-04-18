@@ -104,6 +104,15 @@
   .row .band-cell.healthy  .dot { background: #16a34a; }
   .row .band-cell.cold     { color: #6b7280; font-weight: 600; }
   .row .band-cell.cold     .dot { background: #9ca3af; }
+  .row .band-cell.paused   { color: #6b7280; font-weight: 600; }
+  .row .band-cell.paused   .dot { background: #6b7280; }
+  .row .band-cell.paused   .dot::after {
+    content: '⏸'; position: relative; top: -4px; left: -2px; font-size: 8px; color: #fff;
+  }
+
+  /* Paused row — dimmed + pause-icon prefix visible */
+  .row.paused { opacity: 0.65; background: #fafbfc; }
+  .row.paused:hover { opacity: 0.85; }
 
   /* Interactive sort + filter chips above the grid */
   .panel-head .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -495,7 +504,7 @@
       <!-- Portfolio grid -->
       <div class="panel grid-panel">
         <div class="panel-head">
-          <h2>Portfolio · 87 clients</h2>
+          <h2>Portfolio · 85 active · 2 paused</h2>
           <div class="actions">
             <div class="sort-pill" title="Click to change sort">
               Sort: <strong>Band</strong> ↓ <span class="caret">▾</span>
@@ -503,6 +512,7 @@
             <span class="chip-label">Filters:</span>
             <span class="filter-chip">Critical <span class="x">×</span></span>
             <span class="filter-chip">At Risk <span class="x">×</span></span>
+            <span class="filter-chip" style="background: #f3f4f6; color: #4b5563; border-color: #d1d5db;">Excludes Paused <span class="x" style="color: #9ca3af;">×</span></span>
             <button class="add-filter-btn">+ Add filter</button>
             <a class="clear-all-link" href="#">Clear all</a>
           </div>
@@ -859,6 +869,36 @@
               <rect x="0" y="24" width="100" height="6" fill="#fecaca" opacity="0.55"/>
               <polyline points="0,6.9 11,6.6 22,6.3 33,6 44,6 55,5.7 66,5.7 78,5.4 89,5.4 100,5.4" fill="none" stroke="#111827" stroke-width="1.2" vector-effect="non-scaling-stroke"/>
               <circle cx="100" cy="5.4" r="1.8" fill="#15803d"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- PAUSED (normally hidden by the 'Excludes Paused' filter above;
+             shown here to demonstrate the treatment when the filter is removed) -->
+        <div class="row paused">
+          <div class="band-cell paused"><span class="dot"></span>Paused</div>
+          <div class="name-cell">
+            <span class="name">Pinnacle Legal Services</span>
+            <span class="meta">Subaccount · loc_7d21… · Paused by Kel on 10 Apr · client on 6-wk leave</span>
+          </div>
+          <div class="tier-cell">
+            <span class="tier">$347</span>
+          </div>
+          <div class="pills">
+            <span class="pill" style="background:#f3f4f6;color:#6b7280"><span class="dot" style="background:#9ca3af"></span>—</span>
+            <span class="pill" style="background:#f3f4f6;color:#6b7280"><span class="dot" style="background:#9ca3af"></span>—</span>
+            <span class="pill" style="background:#f3f4f6;color:#6b7280"><span class="dot" style="background:#9ca3af"></span>—</span>
+          </div>
+          <div class="funnel-cell" style="color:#9ca3af"><span>—</span></div>
+          <div class="calendar-cell" style="color:#9ca3af"><span>—</span></div>
+          <div class="chips">
+            <span class="chip" style="background:#f3f4f6;color:#6b7280">⏸ Monitoring paused · resumes 22 May (or manually)</span>
+          </div>
+          <div class="health-cell" style="color:#6b7280">62 <span class="trend flat">frozen</span></div>
+          <div class="sparkline-cell" style="color:#9ca3af;font-size:10px;font-style:italic;">
+            <svg class="sparkline" viewBox="0 0 100 30" preserveAspectRatio="none">
+              <rect x="0" y="0"  width="100" height="30" fill="#f3f4f6" opacity="0.6"/>
+              <text x="50" y="19" font-size="8" fill="#9ca3af" text-anchor="middle" font-family="Segoe UI, sans-serif" font-style="italic">monitoring paused</text>
             </svg>
           </div>
         </div>
