@@ -178,7 +178,9 @@
   }
   .trend-range button.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
 
-  .trend-chart { width: 100%; height: 180px; display: block; }
+  .trend-chart {
+    width: 100%; max-width: 760px; height: auto; display: block; margin: 0 auto;
+  }
   .trend-chart .healthy { fill: #86efac; fill-opacity: 0.9; }
   .trend-chart .watch   { fill: #fde68a; fill-opacity: 0.9; }
   .trend-chart .risk    { fill: #fdba74; fill-opacity: 0.9; }
@@ -342,64 +344,90 @@
         </div>
       </div>
 
-      <svg class="trend-chart" viewBox="0 0 640 180" preserveAspectRatio="none">
+      <svg class="trend-chart" viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
+        <!-- Plot area: x=40..660 (width 620) · y=20..200 (height 180) · scale 1 client ≈ 2.0px · max 89 clients -->
 
         <!-- Y-axis gridlines -->
-        <line class="grid" x1="30" y1="20"  x2="640" y2="20"/>
-        <line class="grid" x1="30" y1="50"  x2="640" y2="50"/>
-        <line class="grid" x1="30" y1="80"  x2="640" y2="80"/>
-        <line class="grid" x1="30" y1="110" x2="640" y2="110"/>
-        <line class="grid" x1="30" y1="140" x2="640" y2="140"/>
+        <line class="grid" x1="40" y1="20"  x2="660" y2="20"/>
+        <line class="grid" x1="40" y1="65"  x2="660" y2="65"/>
+        <line class="grid" x1="40" y1="110" x2="660" y2="110"/>
+        <line class="grid" x1="40" y1="155" x2="660" y2="155"/>
+        <line class="grid" x1="40" y1="200" x2="660" y2="200"/>
 
-        <!-- Y-axis labels -->
-        <text x="26" y="23"  text-anchor="end">88</text>
-        <text x="26" y="53"  text-anchor="end">66</text>
-        <text x="26" y="83"  text-anchor="end">44</text>
-        <text x="26" y="113" text-anchor="end">22</text>
-        <text x="26" y="143" text-anchor="end">0</text>
-        <text x="16" y="80"  text-anchor="middle" transform="rotate(-90, 16, 80)" style="font-size: 8px;">clients</text>
+        <!-- Y-axis labels (clients count) -->
+        <text x="36" y="23"  text-anchor="end">90</text>
+        <text x="36" y="68"  text-anchor="end">67</text>
+        <text x="36" y="113" text-anchor="end">45</text>
+        <text x="36" y="158" text-anchor="end">22</text>
+        <text x="36" y="203" text-anchor="end">0</text>
+        <text x="22" y="110" text-anchor="middle" transform="rotate(-90, 22, 110)" style="font-size:9px;fill:#9ca3af;">clients</text>
 
-        <!-- Stacked areas (bottom-up: Critical > At Risk > Watch > Healthy) -->
-        <!-- Chart plot area: x = 30..640 (width 610), y = 20..140 (height 120). Scale: 88 clients → 120px, so 1 client ≈ 1.36px. Bottom y=140. -->
+        <!-- STACKED AREAS (bottom-up: Critical → At Risk → Watch → Healthy) -->
+        <!--
+          Data over 12 weeks (W1 = 12w ago, W12 = today). Scale: y = 200 - cum*2
+          W1:  H=50 W=24 R=9 C=5   cum(C,R,W,All)=(5, 14, 38, 88)   y=(190, 172, 124, 24)
+          W2:  H=52 W=23 R=8 C=5                  (5, 13, 36, 88)    (190, 174, 128, 24)
+          W3:  H=53 W=23 R=8 C=4                  (4, 12, 35, 88)    (192, 176, 130, 24)
+          W4:  H=55 W=22 R=7 C=4  ← Smith Dental tier downgrade
+                                                  (4, 11, 33, 88)    (192, 178, 134, 24)
+          W5:  H=55 W=22 R=8 C=4                  (4, 12, 34, 89)    (192, 176, 132, 22)
+          W6:  H=57 W=20 R=8 C=4                  (4, 12, 32, 89)    (192, 176, 136, 22)
+          W7:  H=59 W=19 R=8 C=3                  (3, 11, 30, 89)    (194, 178, 140, 22)
+          W8:  H=60 W=18 R=8 C=3                  (3, 11, 29, 89)    (194, 178, 142, 22)
+          W9:  H=61 W=17 R=8 C=3  ← Bright Marketing tier downgrade
+                                                  (3, 11, 28, 89)    (194, 178, 144, 22)
+          W10: H=62 W=16 R=8 C=3                  (3, 11, 27, 89)    (194, 178, 146, 22)
+          W11: H=62 W=15 R=7 C=3                  (3, 10, 25, 87)    (194, 180, 150, 26)
+          W12: H=63 W=14 R=7 C=3  ← today        (3, 10, 24, 87)    (194, 180, 152, 26)
 
-        <!-- CRITICAL (bottom-most layer, red) — 3 clients consistently -->
+          X positions: x = 40 + (week-1) * 56.36 → rounded: 40, 96, 153, 209, 265, 322, 378, 435, 491, 547, 604, 660
+        -->
+
+        <!-- CRITICAL (bottom layer, red) -->
         <polygon class="crit"
-          points="30,140 30,136 85,136 140,136 195,136 250,136 305,136 360,136 415,136 470,136 525,136 580,136 640,136 640,140"/>
+          points="40,200 40,190 96,190 153,192 209,192 265,192 322,192 378,194 435,194 491,194 547,194 604,194 660,194 660,200"/>
 
-        <!-- AT RISK (orange) — starts at yCrit, ends at yCrit+atRisk -->
-        <!-- Values: 8,8,8,7,8,8,7,7,7,8,8,7 → cumulative with C=3: 11,11,11,10,11,11,10,10,10,11,11,10 -->
-        <!-- y = 140 - cum*1.36 → 125, 125, 125, 126.4, 125, 125, 126.4, 126.4, 126.4, 125, 125, 126.4 -->
+        <!-- AT RISK (orange) -->
         <polygon class="risk"
-          points="30,125 85,125 140,125 195,126.4 250,125 305,125 360,126.4 415,126.4 470,126.4 525,125 580,125 640,126.4
-                  640,136 580,136 525,136 470,136 415,136 360,136 305,136 250,136 195,136 140,136 85,136 30,136"/>
+          points="40,172 96,174 153,176 209,178 265,176 322,176 378,178 435,178 491,178 547,178 604,180 660,180 660,194 604,194 547,194 491,194 435,194 378,194 322,192 265,192 209,192 153,192 96,190 40,190"/>
 
-        <!-- WATCH (amber) — starts at yAtRisk+Crit, ends at yAtRisk+Crit+Watch -->
-        <!-- Watch values: 18,17,16,17,15,14,16,15,14,14,15,14 → cum (C+R+W): 29,28,27,27,26,25,26,25,24,25,26,24 -->
-        <!-- y = 140 - cum*1.36 → 100.6, 101.9, 103.3, 103.3, 104.6, 106, 104.6, 106, 107.4, 106, 104.6, 107.4 -->
+        <!-- WATCH (amber) -->
         <polygon class="watch"
-          points="30,100.6 85,101.9 140,103.3 195,103.3 250,104.6 305,106 360,104.6 415,106 470,107.4 525,106 580,104.6 640,107.4
-                  640,126.4 580,125 525,125 470,126.4 415,126.4 360,126.4 305,125 250,125 195,126.4 140,125 85,125 30,125"/>
+          points="40,124 96,128 153,130 209,134 265,132 322,136 378,140 435,142 491,144 547,146 604,150 660,152 660,180 604,180 547,178 491,178 435,178 378,178 322,176 265,176 209,178 153,176 96,174 40,172"/>
 
-        <!-- HEALTHY (green, top-most) — starts at yWatch+AtRisk+Crit, ends at total -->
-        <!-- Healthy values: 58,60,61,61,62,63,62,63,64,63,62,63 → cum (all): 87,88,88,88,88,88,88,88,88,88,88,87 -->
-        <!-- y = 140 - cum*1.36 → 21.68, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 21.68 -->
+        <!-- HEALTHY (green, top-most) -->
         <polygon class="healthy"
-          points="30,21.68 85,20.32 140,20.32 195,20.32 250,20.32 305,20.32 360,20.32 415,20.32 470,20.32 525,20.32 580,20.32 640,21.68
-                  640,107.4 580,104.6 525,106 470,107.4 415,106 360,104.6 305,106 250,104.6 195,103.3 140,103.3 85,101.9 30,100.6"/>
+          points="40,24 96,24 153,24 209,24 265,22 322,22 378,22 435,22 491,22 547,22 604,26 660,26 660,152 604,150 547,146 491,144 435,142 378,140 322,136 265,132 209,134 153,130 96,128 40,124"/>
 
-        <!-- "Now" line at the right edge -->
-        <line class="now-line" x1="640" y1="15" x2="640" y2="145"/>
-        <text x="637" y="14" text-anchor="end" style="font-size:9px;fill:#4338ca;font-weight:600;">NOW</text>
+        <!-- Thin separator lines on top of each band for visual clarity -->
+        <polyline points="40,190 96,190 153,192 209,192 265,192 322,192 378,194 435,194 491,194 547,194 604,194 660,194" fill="none" stroke="#b91c1c" stroke-width="0.6" opacity="0.4"/>
+        <polyline points="40,172 96,174 153,176 209,178 265,176 322,176 378,178 435,178 491,178 547,178 604,180 660,180" fill="none" stroke="#c2410c" stroke-width="0.6" opacity="0.4"/>
+        <polyline points="40,124 96,128 153,130 209,134 265,132 322,136 378,140 435,142 491,144 547,146 604,150 660,152" fill="none" stroke="#b45309" stroke-width="0.6" opacity="0.4"/>
+        <polyline points="40,24 96,24 153,24 209,24 265,22 322,22 378,22 435,22 491,22 547,22 604,26 660,26" fill="none" stroke="#15803d" stroke-width="0.6" opacity="0.4"/>
+
+        <!-- Tier-downgrade event markers -->
+        <line x1="209" y1="20" x2="209" y2="200" stroke="#b91c1c" stroke-width="0.6" stroke-dasharray="3,3" opacity="0.5"/>
+        <line x1="491" y1="20" x2="491" y2="200" stroke="#b91c1c" stroke-width="0.6" stroke-dasharray="3,3" opacity="0.5"/>
+
+        <!-- "Now" line at right edge -->
+        <line class="now-line" x1="660" y1="15" x2="660" y2="205"/>
+        <text x="658" y="14" text-anchor="end" style="font-size:10px;fill:#4338ca;font-weight:700;">NOW</text>
 
         <!-- X-axis labels (every 4 weeks) -->
-        <text x="30"  y="158" text-anchor="middle">12w ago</text>
-        <text x="250" y="158" text-anchor="middle">8w ago</text>
-        <text x="470" y="158" text-anchor="middle">4w ago</text>
-        <text x="640" y="158" text-anchor="end">today</text>
+        <text x="40"  y="218" text-anchor="middle">12w ago</text>
+        <text x="265" y="218" text-anchor="middle">8w ago</text>
+        <text x="491" y="218" text-anchor="middle">4w ago</text>
+        <text x="660" y="218" text-anchor="end">today</text>
 
-        <!-- Key dates inline (when major tier changes happened on client visible in the data) -->
-        <text x="195" y="172" text-anchor="middle" style="fill:#b91c1c;font-size:9px;">Smith Dental $647→$347 (wk 4)</text>
-        <text x="470" y="172" text-anchor="middle" style="fill:#b91c1c;font-size:9px;">Bright $647→$347 (wk 9)</text>
+        <!-- Event annotations below the axis -->
+        <text x="209" y="238" text-anchor="middle" style="fill:#b91c1c;font-size:10px;font-weight:500;">Smith Dental · $647→$347</text>
+        <text x="491" y="238" text-anchor="middle" style="fill:#b91c1c;font-size:10px;font-weight:500;">Bright Marketing · $647→$347</text>
+
+        <!-- Legend-in-chart dots for narrative: current position per band -->
+        <circle cx="660" cy="194" r="2.5" fill="#b91c1c"/>
+        <circle cx="660" cy="180" r="2.5" fill="#c2410c"/>
+        <circle cx="660" cy="152" r="2.5" fill="#b45309"/>
+        <circle cx="660" cy="26"  r="2.5" fill="#15803d"/>
       </svg>
 
       <div class="trend-legend">
