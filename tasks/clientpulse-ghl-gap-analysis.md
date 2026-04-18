@@ -50,31 +50,32 @@ Roughly 60% of the plumbing ClientPulse needs for a Kel-shaped agency already ex
 
 **There is no meaningful hardcoded "GHL agency" logic required.** Every Kel-specific behaviour maps cleanly onto existing canonical concepts: a GHL agency → `organisations` row, each of its clients → `subaccounts` row, each monitored feature → a capability slug, each signal evaluation → a skill, each intervention → an `actions` row with `gateLevel='review'`, each review → a `reviewItems` row. Nothing about the Kel use case requires a code branch that says "if GHL agency, do X". It all lands as config on canonical rows.
 
-The four real blockers (in severity order) are:
+The three real blockers (in severity order) are:
 
-1. **Multi-agency-per-org** — `connector_configs` has a unique constraint on `(organisation_id, connector_type)` that prevents Kel running two separate GHL agency backends under one Productivity Hub org. This is a schema + service change, not a redesign.
-2. **GHL data breadth** — we pull contacts / opportunities / conversations / revenue. We do not pull login activity, funnels, calendars, installed integrations (CloseBot detection), tier, or AI feature usage. Six of the eight signals Kel identified as churn-predictive are un-ingested.
-3. **Health + churn executors do not exist** — the skills are defined, the config tables are populated, the trajectory test expects them, but no pg-boss job fires them per-sub-account and no table stores health-score timeseries.
-4. **Intervention pipeline not wired** — `actions` + `reviewItems` + `interventionOutcomes` are the right substrate, but there is no `actionType: 'client_pulse_intervention'` registered, and no proposer that converts "health score declined" into a proposal row.
+1. **GHL data breadth** — we pull contacts / opportunities / conversations / revenue. We do not pull funnels, calendars, users, or tier metadata. Staff activity and installed-integration detection are derived signals (§§2.0b, 2.0c) and also require new adapter work. Six of the eight signals Kel identified as churn-predictive are un-ingested.
+2. **Health + churn executors exist but are not scheduled against ClientPulse-shaped data.** `compute_health_score` / `compute_churn_risk` skill handlers are registered in `server/services/skillExecutor.ts:1269,1279` and delegate to `intelligenceSkillExecutor`, targeting the existing generic `health_snapshots` table (`server/db/schema/canonicalEntities.ts:175`). What's missing is the ClientPulse-specific timeseries tables (`client_pulse_health_snapshots`, `client_pulse_churn_assessments`) and the pg-boss jobs that fan the scoring work out per-sub-account. See §4.2 for the full gap decomposition.
+3. **Intervention pipeline not wired** — `actions` + `reviewItems` + `interventionOutcomes` are the right substrate, but the five new action-type primitives (§15) are not registered, and no proposer reads `client_pulse_churn_assessments` to surface a review item.
+
+(Multi-agency-per-org was previously listed as a blocker but is now resolved by design — per §3, one GHL agency backend maps to one Synthetos org, so `connector_configs`'s existing unique constraint on `(organisation_id, connector_type)` is correct as-is.)
 
 ### 1.2 Kel requirements matrix
 
 | # | Kel's explicit requirement | Canonical home | Current state | Gap class |
 |---|---|---|---|---|
 | 1 | See all sub-accounts on one screen ranked by health | `subaccounts` + health snapshot table (new) + `ClientPulseDashboardPage.tsx` | Dashboard page exists; high-risk widget returns `{clients: []}` (TODO in `clientpulseReports.ts:79`) | Wiring + 1 new table |
-| 2 | Detect logins per sub-account | GHL adapter + `compute_login_activity` skill (new) | No endpoint, no webhook | Data ingestion |
+| 2 | Detect staff activity per sub-account (derived replacement for "login activity") | Adapter populates `canonical_subaccount_mutations` (new) + `compute_staff_activity_pulse` skill (new) — see §2.0b | No adapter write path, no webhook normalisation | Data ingestion |
 | 3 | Detect funnel inventory per sub-account | GHL adapter + `compute_funnel_coverage` skill (new) | None | Data ingestion |
 | 4 | Detect calendar quality (calendars ÷ users) | GHL adapter + `compute_calendar_quality` skill (new) | None | Data ingestion |
-| 5 | Detect installed integrations (e.g. CloseBot) | GHL adapter `/integrations` endpoint + `detect_external_integrations` skill (new) | None | Data ingestion |
+| 5 | Detect installed third-party integrations (e.g. CloseBot) | Adapter populates `canonical_conversation_providers` / `canonical_workflow_definitions` / `canonical_tag_definitions` / `canonical_custom_field_definitions` / `canonical_contact_sources` (new) + `scan_integration_fingerprints` skill (new) — see §2.0c | None | Data ingestion |
 | 6 | Detect subscription tier + tier-migration trend | GHL adapter `/businesses` metadata + new `subaccount_tier_history` table | Not surfaced; may exist in `canonical_accounts.externalMetadata` | Data ingestion + 1 new table |
 | 7 | Detect AI feature usage (native GHL vs CloseBot) | Composition of #5 + GHL adapter | None | Data ingestion |
-| 8 | Weighted composite health score per sub-account | `compute_health_score` skill + `orgConfigService.getHealthScoreFactors()` + new `client_pulse_health_snapshots` table | Skill defined, config configurable per-org, **no executor**, **no timeseries table** | Execution + 1 new table |
-| 9 | Churn risk classification with configurable thresholds | `compute_churn_risk` skill + `orgConfigService.getChurnRiskSignals()` | Config exists, skill asserted in trajectory test, **not implemented** | Execution |
+| 8 | Weighted composite health score per sub-account | `compute_health_score` skill + `orgConfigService.getHealthScoreFactors()` + new `client_pulse_health_snapshots` table | Skill handler registered (`server/services/skillExecutor.ts:1269`), delegates to `intelligenceSkillExecutor` and writes the existing generic `health_snapshots`. Config configurable per-org. **No per-sub-account scheduler**, **no ClientPulse-shaped timeseries table**. | Execution + 1 new table |
+| 9 | Churn risk classification with configurable thresholds | `compute_churn_risk` skill + `orgConfigService.getChurnRiskSignals()` | Skill handler registered (`server/services/skillExecutor.ts:1279`). Config exists. **No per-sub-account scheduler**, **no `client_pulse_churn_assessments` timeseries table**. | Execution + 1 new table |
 | 10 | Monday morning one-screen view with trends | `ClientPulseDashboardPage.tsx` + new drill-down + `portfolioRollupJob` already Mon 08:00 | Job fires, aggregates empty data | Wiring |
 | 11 | Propose intervention → Kel approves → execute (HITL) | `actions` + `reviewItems` + `interventionOutcomes` (all exist) + new `actionType: 'client_pulse_intervention'` + proposer | Substrate exists; **no proposer, no registered action type** | Wiring + action registry entry |
 | 12 | Intervention cooldowns | `interventionService.checkCooldown` (exists) | Works; needs to be called from the new proposer | Wiring |
 | 13 | Trial progress monitoring + stalled-trial nudges | New onboarding-milestone table + reuse of health pipeline | Absent from code and canonical spec | New module |
-| 14 | Multi-agency per org (SaaS + DFY backends) | `connector_configs` (schema change) + polling service (scope change) | **Blocked by unique constraint** | Schema change |
+| 14 | Multi-agency per org (SaaS + DFY backends) | Resolved by design: one GHL agency backend = one Synthetos org (§3). `connector_configs` unique constraint on `(organisation_id, connector_type)` stays as-is. | Kel connects Productivity Hub — SaaS and Productivity Hub — DFY as two separate orgs. | **No change required** |
 | 15 | Per-org configuration of every weight, threshold, template | `hierarchyTemplates.operationalConfig` (JSONB) + new admin UI | Backend config path works; **no UI** | UI |
 
 ### 1.3 Taxonomy principle
@@ -437,14 +438,11 @@ fetchSubscription(connection, {locationId}): SubscriptionInfo|null // GET /saas/
 
 All follow the existing pattern (rate-limited via `rateLimiter` at `ghl` key, org concurrency cap respected via `organisations.ghlConcurrencyCap`, retried via the existing retry policy, OAuth refreshed via `integrationConnectionService`). Zero new infrastructure; only new endpoints.
 
-For the two signals with no native API (login activity, third-party integrations), add derivers that read existing canonical tables rather than adapter calls:
-
-```
-deriveStaffActivity({subaccountId}): StaffActivityObservation    // reads contacts/opportunities/conversations mutations attributed to users
-readManualIntegrationTags({subaccountId}): IntegrationTag[]       // reads `subaccount_external_integrations` populated manually
-```
+For the two signals with no native API (staff activity, third-party integrations), the adapter does not expose dedicated "fetch" functions — it normalises GHL webhooks + polling deltas into the canonical tables defined in §§2.0b (`canonical_subaccount_mutations`) and 2.0c (`canonical_conversation_providers`, `canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`). The skills `compute_staff_activity_pulse` and `scan_integration_fingerprints` then derive the observable signals from those canonical rows. No manual tagging path; no `subaccount_external_integrations` table.
 
 ### 2.3 OAuth scope audit
+
+**Single source of truth:** `server/config/oauthProviders.ts` is the only place GHL scopes are declared. `server/routes/ghl.ts` currently hardcodes its own scope list (line 34) — this duplication is a bug: the `/api/ghl/oauth-url` endpoint must build its `scope=` query-string from `OAUTH_PROVIDERS.ghl.scopes` so any scope addition here takes effect in the live redirect without a second edit. Part of the Phase 1 OAuth update below is fixing that route to consume the config.
 
 The current config at `server/config/oauthProviders.ts:52–56` declares only `contacts.readonly`, `contacts.write`, `opportunities.readonly`. The new endpoints require verifying and adding:
 
@@ -456,7 +454,7 @@ The current config at `server/config/oauthProviders.ts:52–56` declares only `c
 - `businesses.readonly` — for location metadata details
 - SaaS mode subscription scope (name TBC) — for `/saas/location/{id}/subscription`
 
-Action: extend the scope list in `server/config/oauthProviders.ts` before the next `/integrations/ghl/connect` flow is run. Kel offered to facilitate a conversation with GHL to enable dev-tier API access; use that channel to confirm which scopes are available on the $97 agency tier vs $297 vs Agency Pro.
+Action: (a) refactor `server/routes/ghl.ts` to build its `scope=` query-string from `OAUTH_PROVIDERS.ghl.scopes`; (b) extend the scope list in `server/config/oauthProviders.ts` before the next `/integrations/ghl/connect` flow is run. Kel offered to facilitate a conversation with GHL to enable dev-tier API access; use that channel to confirm which scopes are available on the $97 agency tier vs $297 vs Agency Pro.
 
 ---
 
@@ -503,19 +501,21 @@ Kel's initial setup becomes two OAuth flows (one per GHL agency). This should be
 | Health-score factors config (per-org, configurable) | `server/services/orgConfigService.ts:88–115, 185` | **Works.** `getHealthScoreFactors(orgId)` merges system defaults with org overrides via `hierarchyTemplates.operationalConfig` JSONB |
 | Default factor weights (pipeline 0.30, engagement 0.25, contact growth 0.20, revenue 0.15, activity 0.10) | `DEFAULT_HEALTH_SCORE_FACTORS` in `orgConfigService.ts` | Seeded |
 | `compute_health_score` skill (markdown) | `server/skills/compute_health_score.md` | Exists; takes `account_id`; declares output as HealthSnapshot |
-| Portfolio Health Agent (system agent, org-execution scope) | `migrations/0068_portfolio_health_agent_seed.sql:1–38` | Seeded in DB; master prompt defines 7-step monitoring loop |
-| Trajectory test asserting bulk health computation | `tests/trajectories/portfolio-health-3-subaccounts.json` | Declarative; no executor path satisfies it |
+| `compute_health_score` + `compute_churn_risk` handlers | `server/services/skillExecutor.ts:1269,1279` | Registered; delegate to `intelligenceSkillExecutor`; currently write to the generic `health_snapshots` / `anomaly_events` / `canonical_metrics` surfaces rather than a ClientPulse-shaped per-sub-account timeseries |
+| Generic `health_snapshots` table | `server/db/schema/canonicalEntities.ts:175` (migration 0044) | Exists; keyed on `accountId`, not `subaccountId`; lacks `factorBreakdown` / `confidence` / `inputObservationIds` columns |
+| Portfolio Health Agent (system agent, org-execution scope) | `migrations/0068_portfolio_health_agent_seed.sql:1–38` | Seeded in DB; master prompt defines 7-step monitoring loop; heartbeat enabled (4h) |
+| Trajectory test asserting bulk health computation | `tests/trajectories/portfolio-health-3-subaccounts.json` | Declarative; asserts `compute_health_score` is invoked per-sub-account but the current handler does not execute in a per-sub-account fan-out job |
 | Report aggregation endpoint | `server/routes/clientpulseReports.ts` + `server/services/reportService.ts` | Reads the most recent `reports` row of type `portfolio_health` |
 
 ### 4.2 What is missing
 
 Five discrete gaps, all of which are "wire existing parts together" rather than "invent a new system":
 
-1. **No HealthSnapshot table.** The skill markdown says it writes a `HealthSnapshot`, but there is no table named `health_snapshots` or `client_pulse_health_snapshots` in any migration. Without it, there is nothing to feed the dashboard's trend arrows or the churn-risk evaluator.
-2. **No skill executor registration.** `compute_health_score.md` has no handler in `server/services/skillExecutor.ts` and no entry in `server/config/actionRegistry.ts`. Running the skill is a no-op.
+1. **`health_snapshots` exists but is not a ClientPulse-shaped store.** `server/db/schema/canonicalEntities.ts:175` defines a generic `health_snapshots` table (migration 0044) keyed on `accountId`, not `subaccountId`, with no `factorBreakdown` / `confidence` / `inputObservationIds` columns. Decision to make: extend this table with ClientPulse columns, or add a dedicated `client_pulse_health_snapshots` timeseries. The rest of this doc assumes the latter (see §4.3, §9.4) — see R2 in §11.2 for the explicit source-of-truth statement.
+2. **`compute_health_score` + `compute_churn_risk` handlers exist but are orphaned.** `server/services/skillExecutor.ts:1269,1279` registers handlers for both, delegating to `intelligenceSkillExecutor`. Nothing schedules them, and they target the existing `health_snapshots` (not the `client_pulse_*` tables proposed below). The gap is the scheduling + target-table alignment, not a missing handler.
 3. **No per-sub-account scheduling.** `portfolioRollupJob.ts` runs Monday 08:00 / Friday 18:00 and aggregates *existing* data; it never initiates a health scan. There is no `computeHealthScoresJob` that enqueues one compute per active sub-account per scan window.
-4. **No ingestion → scoring handoff.** Even if #2 were fixed, the scoring skill has no observations to read because §2 ingestion does not run.
-5. **No heartbeat for the Portfolio Health Agent.** Migration 0068 seeds the agent but does not set `heartbeatEnabled=true` or schedule it; the agent never runs even though it has a master prompt.
+4. **No ingestion → scoring handoff.** Even if the scheduler fires, the scoring skill has no observations to read because §2 ingestion does not run.
+5. **Portfolio Health Agent is heartbeat-enabled but has no real work path.** `migrations/0068_portfolio_health_agent_seed.sql` sets `heartbeat_enabled=true, heartbeat_interval_hours=4` (confirmed in §12.1). The remaining gap is that even when the heartbeat fires, there is no entitled-org → agent-instance instantiation path that hands the agent a concrete scan target (see gap #3 above).
 
 ### 4.3 Proposed canonical shape
 
@@ -571,9 +571,9 @@ The spec calls for "null / baseline-building until 14 data points accumulated". 
 
 ### 5.2 What is missing
 
-- **No `compute_churn_risk` skill implementation.** The trajectory test names it; the skill file does not exist under `server/skills/`.
-- **No `client_pulse_churn_assessments` table.** Churn risk has no durable surface; today it could only live inside a report's HTML body.
-- **No evaluator job.** Nothing consumes the configured signals and produces a score.
+- **`compute_churn_risk` skill handler is registered but orphaned.** `server/services/skillExecutor.ts:1279` delegates to `intelligenceSkillExecutor`. The gap is that no ClientPulse-shaped durable surface exists for the output and no job schedules the evaluation per-sub-account.
+- **No `client_pulse_churn_assessments` table.** Churn risk has no ClientPulse-shaped durable surface; today the intelligence executor writes into the generic canonical surfaces (`anomaly_events`, `canonical_metrics`) rather than a per-sub-account timeseries keyed on `subaccountId`.
+- **No evaluator job.** Nothing consumes the configured signals and produces a per-sub-account score on a schedule.
 - **Kel-specific signals not in the default set.** The four defaults focus on pipeline / engagement / health trajectory. Kel's brief adds at least three signals we do not model today:
   - `no_funnel_built` — binary
   - `contacts_and_email_only` — feature-breadth floor
@@ -663,9 +663,9 @@ This is exactly `Detect → Propose → Approve → Execute` — our HITL primit
 ```
 client_pulse_intervention_templates(
   id, organisationId, connectorConfigId (nullable),
-  slug,                       -- e.g. 'dormant_login_checkin'
-  triggerSignalSlug,          -- e.g. 'login_activity'
-  triggerCondition JSONB,     -- e.g. {"op":"gte_days_since","field":"last_login","value":14}
+  slug,                       -- e.g. 'dormant_staff_activity_checkin'
+  triggerSignalSlug,          -- e.g. 'staff_activity_pulse'
+  triggerCondition JSONB,     -- e.g. {"op":"zero_activity_days_gte","value":14}
   proposedActionType,         -- maps to actionRegistry entry
   proposedActionParamsTemplate JSONB,  -- Handlebars-style, rendered per subaccount
   cooldownHours, cooldownScope,
@@ -770,7 +770,7 @@ No UI exists to edit health-factor weights, churn-signal thresholds, interventio
 - Signal thresholds (numeric inputs with validation).
 - Churn band cutoffs (four ranges, contiguous).
 - Intervention templates (CRUD with trigger condition builder + action template editor + cooldown / measurement window inputs).
-- Scope selector (apply to All | SaaS only | DFY only — drives `connectorConfigId` filter on the row).
+- (No cross-agency scope selector — per §3, each GHL agency backend is its own Synthetos org, so config edits apply to the whole org by definition. If an org later grows multiple connector instances under one org for an orthogonal reason, a `connectorConfigId`-scoped override selector can be added then.)
 
 ### 7.6 Intervention queue — overflow + quick-context discipline
 
@@ -859,30 +859,30 @@ This section consolidates every new canonical entity proposed above into a singl
 Each slug is declarative — it names a *read capability* of the GHL integration. Adding a new signal later = adding a slug + adapter function + skill row, no code branches.
 
 ```
-ghl.read.login_activity
+ghl.read.staff_activity          # composite, derived (§2.0b)
 ghl.read.funnels
 ghl.read.calendars
 ghl.read.users
-ghl.read.installed_integrations
+ghl.read.integration_fingerprints  # composite, derived (§2.0c)
 ghl.read.subscription_tier
 ghl.read.ai_feature_usage
-ghl.read.location_metadata      # already partially covered; formalise
+ghl.read.location_metadata         # already partially covered; formalise
 ```
 
-These plug into the Orchestrator's capability routing (`docs/orchestrator-capability-routing-spec.md`) so when an agent asks "does this org have login-activity data for sub-account X?", Path A / B / C / D resolves correctly.
+These plug into the Orchestrator's capability routing (`docs/orchestrator-capability-routing-spec.md`) so when an agent asks "does this org have staff-activity data for sub-account X?", Path A / B / C / D resolves correctly.
 
 ### 9.2 New skill slugs (registered in `server/skills/` + executor in `server/services/skillExecutor.ts`)
 
 ```
-compute_login_activity         # per sub-account
+compute_staff_activity_pulse   # per sub-account (§2.0b)
 compute_funnel_coverage
 compute_calendar_quality
-detect_external_integrations
+scan_integration_fingerprints  # per sub-account (§2.0c)
 compute_subscription_tier
 compute_ai_feature_usage
 
-compute_health_score           # already has .md; needs executor
-compute_churn_risk             # new
+compute_health_score           # handler already registered; needs ClientPulse-shaped target table
+compute_churn_risk             # handler already registered; needs ClientPulse-shaped target table
 
 propose_client_pulse_interventions   # proposer
 measure_intervention_outcome          # outcome loop
@@ -933,11 +933,12 @@ client_pulse_onboarding_milestone_defs   # per-org, editable
 ### 9.5 Existing tables extended (no new table needed)
 
 ```
-connector_configs.connectorInstanceLabel    # to permit two GHL backends per org
 subaccounts.isInTrial, trialStartedAt, trialEndsAt
 subaccounts.monthly_revenue_cents           # if not already present
 organisations.settings / hierarchyTemplates.operationalConfig  # new keys: churnBands, interventionTemplates
 ```
+
+(Previously listed: `connector_configs.connectorInstanceLabel`. Removed — per §3, each GHL agency backend becomes its own Synthetos org, so the existing unique constraint on `(organisation_id, connector_type)` stays in place.)
 
 ### 9.6 Per-org configuration keys (all live in `hierarchyTemplates.operationalConfig` JSONB)
 
@@ -1003,7 +1004,7 @@ Scheduling hooks into the existing `portfolioRollupJob` pattern — same pg-boss
 
 When an operator asks "why is client X at risk?" in chat, the Orchestrator looks up capabilities via `list_platform_capabilities`. Because every signal we expose is a capability slug, the Orchestrator can answer:
 
-- *Path A*: "Agent Y has `ghl.read.login_activity` — here's the latest observation."
+- *Path A*: "Agent Y has `ghl.read.staff_activity` — here's the latest observation."
 - *Path B*: "Platform supports `ghl.read.funnels` but this org hasn't configured it — Configuration Assistant can enable it."
 - *Path C*: "Same as B but mark as system-promotion candidate because three other orgs have asked for it this week."
 - *Path D*: "Platform does not yet support GHL call-recording sentiment. Logged as feature request."
@@ -1039,14 +1040,15 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 
 **Ship gate:** all existing sub-account playbooks continue to work unchanged; engine accepts `scope='org'` registrations; no org-level playbook yet exists but the substrate is ready. Estimated ~3.5 engineer-days.
 
-### Phase 1 — Signal ingestion (the six adapter functions)
+### Phase 1 — Signal ingestion (adapter fetches + canonical mutation/fingerprint writes)
 
-- Add `fetchLoginActivity`, `fetchFunnels`, `fetchCalendars`, `fetchUsers`, `fetchInstalledIntegrations`, `fetchLocationDetails` in `ghlAdapter.ts`.
-- Migration: `client_pulse_signal_observations`, `subaccount_external_integrations`, `subaccount_tier_history`.
-- Register new capability slugs in `docs/integration-reference.md`.
-- Extend `connectorPollingService` to call new fetches per sub-account and write observations.
-- Webhook handler: add `INSTALL`/`UNINSTALL`/`LocationCreate`/`LocationUpdate`.
-- OAuth scope audit + update.
+- Add the six adapter fetch functions from §2.2 in `ghlAdapter.ts`: `fetchFunnels`, `fetchFunnelPages`, `fetchCalendars`, `fetchUsers`, `fetchLocationDetails`, `fetchSubscription`.
+- Extend webhook + polling normalisation to populate the canonical tables defined in §§2.0b–2.0c: `canonical_subaccount_mutations`, `canonical_conversation_providers`, `canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`.
+- Migration: `client_pulse_signal_observations`, `subaccount_tier_history`, plus the canonical tables above. No `subaccount_external_integrations` table — third-party detection is derived from the canonical fingerprint-bearing tables (§2.0c).
+- Register new capability slugs (`ghl.read.staff_activity`, `ghl.read.funnels`, `ghl.read.calendars`, `ghl.read.users`, `ghl.read.integration_fingerprints`, `ghl.read.subscription_tier`, `ghl.read.ai_feature_usage`, `ghl.read.location_metadata`) in `docs/integration-reference.md`.
+- Extend `connectorPollingService` to call new fetches per sub-account and write observations + canonical mutation/fingerprint rows.
+- Webhook handler: add `INSTALL`/`UNINSTALL`/`LocationCreate`/`LocationUpdate`. Existing `ContactCreate` / `ContactUpdate` / `OpportunityStageUpdate` / `OpportunityStatusUpdate` / `ConversationCreated` / `ConversationUpdated` handlers extended to write `canonical_subaccount_mutations` rows per the adapter contract in §2.0b.
+- OAuth scope audit + update (including the `server/routes/ghl.ts` SSoT fix per §2.3).
 
 **Ship gate:** for a test agency, after a poll cycle, `client_pulse_signal_observations` has rows for all eight signals across every sub-account.
 
@@ -1054,7 +1056,7 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 
 - Migration: `client_pulse_health_snapshots`.
 - Implement `computeSubaccountHealthJob` (pg-boss) that consumes observations + `orgConfigService.getHealthScoreFactors()` and writes a snapshot.
-- Register `compute_health_score` as a skill handler calling the job.
+- Re-target the existing `compute_health_score` handler (`server/services/skillExecutor.ts:1269`) so it writes to `client_pulse_health_snapshots` instead of (or in addition to) the generic `health_snapshots` — see R2 in §11.2 for the source-of-truth statement.
 - Cold-start + confidence logic.
 
 **Ship gate:** trajectory test `portfolio-health-3-subaccounts.json` passes end-to-end.
@@ -1062,7 +1064,7 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 ### Phase 3 — Churn risk evaluation
 
 - Migration: `client_pulse_churn_assessments`.
-- Implement `compute_churn_risk` skill + `evaluateChurnRiskJob`.
+- Re-target the existing `compute_churn_risk` handler (`server/services/skillExecutor.ts:1279`) so it writes to `client_pulse_churn_assessments` keyed on `subaccountId`, and implement `evaluateChurnRiskJob` to schedule it per sub-account per scan window.
 - Extend `DEFAULT_CHURN_RISK_SIGNALS` with Kel-validated additions (`no_funnel_built`, `feature_breadth_floor`, `tier_downgrade_trend`).
 - Default churn bands seeded; configurable per org.
 
@@ -1403,8 +1405,8 @@ ClientPulse is sold in two tiers, each anchored to one of Kel's existing Starboy
 |---|---|---|---|
 | Sub-account Intelligence Briefing | **Built** as `.playbook.ts` | `server/playbooks/intelligence-briefing.playbook.ts` | Not yet INSERT-seeded; `system_playbook_templates` table empty for this slug |
 | Sub-account Weekly Digest | **Built** as `.playbook.ts` | `server/playbooks/weekly-digest.playbook.ts` | Same — no seed row |
-| Org-level Intelligence Briefing | **Missing** | — | Needs new file `intelligence-briefing-org.playbook.ts` running on the org-subaccount per §13.3. **The Monday-morning Intelligence Briefing mockup at `tasks/clientpulse-mockup-intelligence-briefing.html` IS this missing playbook's output** — the mockup describes the design target. |
-| Org-level Weekly Digest | **Partial as a job, not a playbook** | `server/jobs/portfolioRollupJob.ts` + `portfolioRollupService.runPortfolioRollup()` | Should be promoted to a real playbook (`weekly-digest-org.playbook.ts`) running on the org-subaccount. **The Friday-afternoon Weekly Digest mockup at `tasks/clientpulse-mockup-weekly-digest.html` IS this playbook's output.** Until the playbook ships, `portfolioRollupJob.ts` covers the core rollup but needs extending to render the look-back content shown in the mockup. |
+| Org-level Intelligence Briefing | **Missing** | — | Needs new file `intelligence-briefing-org.playbook.ts` declaring `scope: 'org'` per §13.3 (requires the Phase 0.5 engine refactor). **The Monday-morning Intelligence Briefing mockup at `tasks/clientpulse-mockup-intelligence-briefing.html` IS this missing playbook's output** — the mockup describes the design target. |
+| Org-level Weekly Digest | **Partial as a job, not a playbook** | `server/jobs/portfolioRollupJob.ts` + `portfolioRollupService.runPortfolioRollup()` | Should be promoted to a real playbook (`weekly-digest-org.playbook.ts`) declaring `scope: 'org'` per §13.3 (requires the Phase 0.5 engine refactor). **The Friday-afternoon Weekly Digest mockup at `tasks/clientpulse-mockup-weekly-digest.html` IS this playbook's output.** Until the playbook ships, `portfolioRollupJob.ts` covers the core rollup but needs extending to render the look-back content shown in the mockup. |
 
 ### 13.3 Architectural recommendation: Pattern C (engine refactor for explicit org scope)
 
@@ -1564,9 +1566,9 @@ inputs: { current: reports.latest("portfolio_health"),
 emphasis: backward (outcomes + pattern learnings for THIS sub-account)
 ```
 
-**In the new `intelligence-briefing-org.playbook.ts` + `weekly-digest-org.playbook.ts`** (Pattern A new files):
+**In the new `intelligence-briefing-org.playbook.ts` + `weekly-digest-org.playbook.ts`** (both declare `scope: 'org'` per §13.3 Pattern C):
 
-Same two steps, different scope (`run.org.id` instead of `run.subaccount.id`). The action's render template adapts: org-level briefings show portfolio-wide forecasts and pending interventions across all sub-accounts; org-level digests show portfolio-wide WoW and pattern learnings.
+Same two steps, different scope (`run.entity.id` resolves to the organisation instead of a subaccount). The action's render template adapts: org-level briefings show portfolio-wide forecasts and pending interventions across all sub-accounts; org-level digests show portfolio-wide WoW and pattern learnings.
 
 **In `portfolioRollupService.runPortfolioRollup()` (existing org-level job, until promoted to a real playbook):**
 
@@ -1604,7 +1606,7 @@ There are four mockup HTML files in `tasks/`:
 |---|---|---|
 | Dashboard | **React page** at `/clientpulse`. Already exists in router (`ClientPulseDashboardPage.tsx`); main query returns `[]`. Wire queries against canonical tables. | Edit existing |
 | Drill-down | **React page** at new route `/clientpulse/subaccount/:id`. Doesn't exist. | New page |
-| Monday Briefing email | **NEW org-level playbook** `intelligence-briefing-org.playbook.ts`. Runs on the org-subaccount (one playbook run per org per Monday). | New playbook file |
+| Monday Briefing email | **NEW org-level playbook** `intelligence-briefing-org.playbook.ts`. Declares `scope: 'org'` (one playbook run per org per Monday; `playbook_runs.subaccount_id IS NULL`, `organisation_id` is the execution target). | New playbook file |
 | Friday Digest email | **NEW org-level playbook** `weekly-digest-org.playbook.ts`. Same shape, Friday cadence. | New playbook file |
 
 ### 14.3 Why org-level playbooks need an explicit scope (Pattern C)
@@ -1677,7 +1679,7 @@ Engine refactor is a one-time cost of ~3.5 engineer-days; every future scoped pl
 
 ### 14.9 The architectural win
 
-Adding a fifth playbook later (Monthly Board Report, Quarterly Business Review, Daily Critical Alert, etc.) is **just another `.playbook.ts` file**. No new infrastructure. The shape established by these four — per-client + org variants, shared step library, `skipWhen` module gating, org-subaccount as the canonical home for org-level work — is the template for everything that comes after.
+Adding a fifth playbook later (Monthly Board Report, Quarterly Business Review, Daily Critical Alert, etc.) is **just another `.playbook.ts` file**. No new infrastructure. The shape established by these four — per-client + org variants, shared step library, `skipWhen` module gating, explicit `scope='subaccount' | 'org'` declared on each playbook — is the template for everything that comes after.
 
 ---
 
@@ -2047,7 +2049,7 @@ Two distinct onboarding surfaces, two distinct audiences. Keep them separate bec
    - Create `organisations` row
    - Snapshot the picked template's `operationalConfig_template` into the org's `operational_config`
    - Seed the default system-managed agents (via existing three-tier agent model)
-   - Create the org-subaccount (Pattern C — see §13.3)
+   - Create the org-subaccount (retained for portal/inbox concerns only — per §13.3 Pattern C, org-scoped playbook runs use `scope='org'` and do not target the org-subaccount as their execution entity)
    - Queue welcome emails to invited admins
 
 **Exit:** sysadmin sees confirmation + link to jump to the new org's dashboard as that org.
