@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Send SMS — compose popup (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1; }
+  .bg-hint { position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none; font-size: 11px; color: #9ca3af; }
+
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 620px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .m-body { padding: 16px 20px; }
+  .form-field { margin-bottom: 10px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field select, .form-field input, .form-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea {
+    min-height: 110px; resize: vertical; font-family: inherit; line-height: 1.55;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .merge-palette-label { font-size: 10px; color: #6b7280; margin-top: 6px; }
+  .merge-palette { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .merge-chip {
+    padding: 2px 7px; background: #f5f3ff; color: #5b21b6;
+    border: 1px solid #ddd6fe; border-radius: 3px; font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer;
+  }
+  .merge-chip:hover { background: #ddd6fe; }
+
+  /* Char counter */
+  .char-count {
+    margin-top: 4px; font-size: 11px; color: #6b7280;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .char-count .bar {
+    flex: 1; height: 3px; background: #e5e7eb; border-radius: 2px; margin: 0 10px;
+    position: relative;
+  }
+  .char-count .bar-fill { position: absolute; inset: 0 auto 0 0; width: 56%; background: #16a34a; border-radius: 2px; }
+  .char-count .count-label { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+  /* Preview (phone style) */
+  .sms-preview {
+    margin-top: 14px; padding: 12px 14px; background: #fafbfc; border: 1px solid #e5e7eb;
+    border-radius: 8px;
+  }
+  .sms-preview .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+    color: #6b7280; margin-bottom: 8px;
+  }
+  .sms-bubble {
+    background: #3b82f6; color: #fff; padding: 10px 12px; border-radius: 14px 14px 14px 4px;
+    font-size: 13px; line-height: 1.5; max-width: 85%;
+  }
+  .sms-bubble .merged { background: #fde68a; color: #78350f; padding: 0 2px; border-radius: 2px; }
+  .sms-meta {
+    font-size: 10px; color: #6b7280; margin-top: 4px;
+  }
+
+  .dest-callout {
+    margin-top: 12px; padding: 10px 12px; background: #fae8ff; border: 1px solid #f5d0fe;
+    border-radius: 6px; font-size: 11px; color: #86198f; line-height: 1.5;
+  }
+  .dest-callout strong { color: #701a75; }
+
+  .test-block {
+    margin-top: 12px; padding: 10px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+  }
+  .test-block .t-head {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+  }
+  .test-block .t-head .t-title { font-weight: 600; font-size: 12px; color: #1a1d23; }
+
+  .m-foot {
+    padding: 12px 20px; background: #fafbfc; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-foot .save-toggle { font-size: 11px; color: #4338ca; display: flex; align-items: center; gap: 5px; font-weight: 600; }
+  .btn { padding: 6px 13px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+  .btn-primary { background: #4338ca; color: #fff; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Send SMS · Popup opened from <strong>clientpulse-mockup-propose-intervention.html</strong> when operator picks 'Send SMS' and clicks Configure · Canonical merge fields · Send via client's CRM (Twilio)</div>
+
+<div class="bg-context"></div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-propose-intervention.html</code> (modal) · behind that: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-drilldown.html</code></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+
+    <div class="m-head">
+      <div>
+        <h2>Send SMS · Smith Dental</h2>
+        <div class="sub">Synthetos compose · delivery via Smith Dental's CRM (Twilio through GHL) from +61 …892</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>From number</label>
+          <select>
+            <option selected>+61 2 0000 0892 · Smith Dental's registered number</option>
+            <option>+61 2 0000 0704 · Productivity Hub agency shortcode</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>To</label>
+          <select>
+            <option selected>Dr. Marcia Smith · +61 4 8823 9915 · opted in</option>
+            <option>Stephanie Rodriguez · +61 4 2290 3311 · opted in</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Message</label>
+        <textarea>Hi {{contact.firstName}}, Kel from Productivity Hub here — quick check: {{signals.lastActivityDays}} days since your team logged a new contact. Everything OK? Happy to help if not. Reply STOP to opt out.</textarea>
+        <div class="char-count">
+          <span>160-char segment boundary</span>
+          <div class="bar"><div class="bar-fill"></div></div>
+          <span class="count-label">151 / 160 · 1 segment</span>
+        </div>
+        <div class="merge-palette-label">Canonical merge fields:</div>
+        <div class="merge-palette">
+          <span class="merge-chip">{{contact.firstName}}</span>
+          <span class="merge-chip">{{client.name}}</span>
+          <span class="merge-chip">{{client.tier}}</span>
+          <span class="merge-chip">{{signals.funnelCount}}</span>
+          <span class="merge-chip">{{signals.lastActivityDays}}</span>
+          <span class="merge-chip">{{signals.healthBand}}</span>
+          <span class="merge-chip">{{agency.ownerFirstName}}</span>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>Send</label>
+          <select>
+            <option selected>Immediately on approval</option>
+            <option>Delay 24 hours</option>
+            <option>Schedule for later</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Rationale (logged with outcome)</label>
+          <input type="text" value="Ben @ Bright's pattern suggests SMS works for tier-concerned clients.">
+        </div>
+      </div>
+
+      <!-- Phone-style preview -->
+      <div class="sms-preview">
+        <div class="label">Live preview · rendered with Smith Dental's data</div>
+        <div class="sms-bubble">
+          Hi <span class="merged">Marcia</span>, Kel from Productivity Hub here — quick check: <span class="merged">26</span> days since your team logged a new contact. Everything OK? Happy to help if not. Reply STOP to opt out.
+        </div>
+        <div class="sms-meta">from +61 2 0000 0892 · to +61 4 8823 9915 · 151 chars</div>
+      </div>
+
+      <div class="dest-callout">
+        <strong>How this sends:</strong> Synthetos resolves the canonical merge fields, then calls Smith Dental's CRM API to dispatch via their existing Twilio integration. Opt-out + compliance handled by the CRM / Twilio (STOP keyword auto-registered). Outcome measured via band change on the next scan (v1 signal).
+      </div>
+
+      <div class="test-block">
+        <div class="t-head">
+          <div class="t-title">🧪 Test before submitting</div>
+          <div style="flex:1;"></div>
+          <button class="btn btn-secondary" style="font-size: 11px; padding: 5px 10px;">Send test to me</button>
+        </div>
+        <div style="font-size: 11px; color: #6b7280; line-height: 1.5;">
+          Dispatches this SMS with merge fields resolved to <strong>+61 4 0000 8800</strong> (Kel's number on file) via Smith Dental's CRM. Same delivery path as the real send. No intervention record created.
+        </div>
+      </div>
+    </div>
+
+    <div class="m-foot">
+      <label class="save-toggle">
+        <input type="checkbox"> Save as SMS template (reusable across CRMs)
+      </label>
+      <div>
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary" style="margin-left: 6px;">Submit to review queue →</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

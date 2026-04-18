@@ -1,6 +1,6 @@
 ---
 name: dual-reviewer
-description: Second-phase Codex review loop with Claude adjudication. Run this AFTER pr-reviewer has completed its pass and fixed initial issues. Invokes the Codex CLI, evaluates each recommendation against the full codebase context, accepts or rejects with documented reasoning, implements accepted changes, and loops until Codex is satisfied or 3 iterations are complete. Use for Significant and Major tasks. Caller should provide: what was implemented (brief description) and optionally a specific file list (defaults to git diff HEAD).
+description: Second-phase Codex code-review loop with Claude adjudication. Run AFTER pr-reviewer. Evaluates Codex recommendations, implements accepted fixes, loops until satisfied or 3 iterations. Use for Significant and Major tasks. Caller provides a brief description of what was implemented.
 tools: Bash, Read, Glob, Grep, Edit, Write
 model: sonnet
 ---
