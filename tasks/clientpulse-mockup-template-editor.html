@@ -64,6 +64,30 @@
     float: right; color: #9ca3af; font-size: 11px;
   }
   .nav-item.active .count { color: #6366f1; }
+  .nav-item.dirty { position: relative; }
+  .nav-item.dirty::before {
+    content: ''; position: absolute; left: 2px; top: 50%; transform: translateY(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: #f59e0b;
+  }
+  .nav-item.dirty .dirty-label {
+    font-size: 9px; color: #b45309; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.4px; margin-left: 4px;
+  }
+
+  /* Staged-edits banner */
+  .staged-banner {
+    padding: 10px 22px; background: #eef2ff; border-bottom: 1px solid #c7d2fe;
+    display: flex; gap: 10px; align-items: center; font-size: 12px; color: #3730a3;
+  }
+  .staged-banner .icon { font-size: 14px; }
+  .staged-banner .count-pill {
+    background: #4338ca; color: #fff; padding: 2px 8px; border-radius: 10px;
+    font-weight: 700; font-size: 11px;
+  }
+  .staged-banner .discard {
+    background: transparent; border: 0; color: #4338ca; font-size: 12px;
+    text-decoration: underline; cursor: pointer; font-family: inherit; margin-left: auto;
+  }
 
   .form-col { padding: 20px 24px; }
 
@@ -168,7 +192,7 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Edit configuration template · System-admin only · Opens from the <strong>Edit</strong> button on a template card in the create-org modal, or from the Config Templates admin page · Changes here affect ALL new orgs that later pick this template · Existing orgs' overrides are preserved</div>
+<div class="annot-banner">📐 MOCKUP · Edit configuration template · System-admin only · Opens from the <strong>Edit</strong> button on a template card in the create-org modal, or from the Config Templates admin page · Changes here affect ALL new orgs that later pick this template · Existing orgs' overrides are preserved · <strong>All edits across every left-nav section are staged locally and only committed when "Save changes" is pressed</strong> — switching tabs never discards edits, "Cancel" discards them all</div>
 
 <div class="bg-context"></div>
 <div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-onboarding-sysadmin.html</code> (clicked Edit on a template card)</div>
@@ -197,16 +221,25 @@
       </div>
     </div>
 
+    <!-- Staged-edits banner: appears once any section has unsaved edits -->
+    <div class="staged-banner">
+      <span class="icon">📝</span>
+      <span><strong>You have unsaved edits in</strong></span>
+      <span class="count-pill">3 sections</span>
+      <span>— Health score factors, Churn bands, Blind-spot detection. Switch freely between tabs; nothing is written until you press <strong>Save changes</strong>.</span>
+      <button class="discard">Discard all</button>
+    </div>
+
     <!-- Body: section nav + form -->
     <div class="m-body">
 
       <!-- Left: section nav -->
       <div class="nav-col">
         <div class="nav-item">Template metadata</div>
-        <div class="nav-item active">Health score factors <span class="count">5</span></div>
-        <div class="nav-item">Churn bands <span class="count">4</span></div>
+        <div class="nav-item active dirty">Health score factors <span class="count">5</span><span class="dirty-label">edited</span></div>
+        <div class="nav-item dirty">Churn bands <span class="count">4</span><span class="dirty-label">edited</span></div>
         <div class="nav-item">Saved email templates <span class="count">12</span></div>
-        <div class="nav-item">Blind-spot detection <span class="count">8</span></div>
+        <div class="nav-item dirty">Blind-spot detection <span class="count">8</span><span class="dirty-label">edited</span></div>
         <div class="nav-item">Integration fingerprints <span class="count">14 seed</span></div>
         <div class="nav-item">Onboarding milestones <span class="count">5</span></div>
         <div class="nav-item">Required operator inputs <span class="count">3</span></div>
@@ -300,11 +333,11 @@
     <!-- Footer -->
     <div class="m-foot">
       <div class="left-note">
-        <strong>24 orgs currently use this template.</strong> Saving will apply the new defaults to future orgs only; existing orgs keep their overrides.
+        <strong>24 orgs currently use this template · 3 sections have unsaved edits.</strong> Saving will commit all staged changes atomically and apply the new defaults to future orgs only; existing orgs keep their overrides.
       </div>
       <button class="btn btn-ghost">View change log</button>
-      <button class="btn btn-secondary">Cancel</button>
-      <button class="btn btn-primary">Save changes</button>
+      <button class="btn btn-secondary">Cancel (discard all)</button>
+      <button class="btn btn-primary">Save changes (3)</button>
     </div>
 
   </div>

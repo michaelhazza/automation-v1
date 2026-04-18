@@ -153,10 +153,10 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Opens when the operator clicks <strong>"Open chat →"</strong> in the settings page callout · Lets operators tweak ClientPulse config in natural language (no form-clicking) · Routes through Orchestrator → Configuration Agent → writes to operational_config</div>
+<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Site-wide assistant — opens from any settings page callout, the global nav, or a hotkey · Lets operators tweak <strong>any</strong> Synthetos configuration in natural language (agents, schedules, skills, ClientPulse, integrations…) · Routes through Orchestrator → Configuration Agent → writes to the relevant config store (`operational_config`, agent definitions, schedules, etc.)</div>
 
 <div class="bg-context"></div>
-<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-settings.html</code> (clicked "Open chat →" on the callout)</div>
+<div class="bg-hint">← invoked from: any settings page callout · global nav ("Ask the assistant") · keyboard shortcut (⌘K)</div>
 
 <div class="chat-popup">
 
@@ -165,7 +165,7 @@
     <div class="avatar">🤖</div>
     <div class="title-row">
       <h3>Configuration Assistant</h3>
-      <div class="status"><span class="dot"></span>Live · scope: Productivity Hub — SaaS</div>
+      <div class="status"><span class="dot"></span>Live · workspace: Productivity Hub — SaaS</div>
     </div>
     <button class="header-btn" title="Minimise">_</button>
     <button class="header-btn" title="Close">×</button>
@@ -174,7 +174,7 @@
   <!-- Context strip showing scope -->
   <div class="context-strip">
     <span class="label">Scope</span>
-    <span>Productivity Hub — SaaS · ClientPulse settings · changes write to your org's <code style="background:rgba(67,56,202,0.1);padding:1px 4px;border-radius:3px;">operational_config</code></span>
+    <span>Productivity Hub — SaaS · any agent · any schedule · any skill · any ClientPulse setting · any integration. I'll route to the right place and confirm before writing.</span>
   </div>
 
   <!-- Conversation -->
@@ -184,7 +184,7 @@
     <div class="msg agent">
       <div class="avatar">🤖</div>
       <div class="bubble">
-        Hi Kel — I can change any ClientPulse setting for you in plain English. Same effect as editing through the settings page, just faster when you know what you want.
+        Hi Kel — I can change any setting in your workspace in plain English. Agents, schedules, skills, integrations, ClientPulse… if it's in a settings page, I can edit it. Same effect as clicking through the UI, just faster when you know what you want. I'll always confirm before writing.
       </div>
     </div>
 
@@ -192,9 +192,10 @@
     <div class="suggested-chips">
       <div class="s-label">Try one of these</div>
       <button class="chip">Bump pipeline velocity weight to 0.35</button>
+      <button class="chip">Pause the Monday 7am briefing for two weeks</button>
+      <button class="chip">Give the Sales Analyst agent access to the CRM skill</button>
       <button class="chip">Disable the tier-downgrade retention alert</button>
-      <button class="chip">Reset blind-spot thresholds to defaults</button>
-      <button class="chip">Make the silent-channel alert fire at 10 days instead of 7</button>
+      <button class="chip">Reconnect the GoHighLevel integration</button>
       <button class="chip">Lower the Critical band ceiling from 19 to 15</button>
     </div>
 
@@ -280,7 +281,7 @@
   </div>
 
   <div class="chat-foot">
-    Changes are scoped to your org. Every edit is logged + reversible · <a href="#" style="color:#4338ca;text-decoration:none;">Open settings ↗</a>
+    Changes are scoped to your workspace. Every edit is logged + reversible · <a href="#" style="color:#4338ca;text-decoration:none;">Open settings ↗</a>
   </div>
 
 </div>

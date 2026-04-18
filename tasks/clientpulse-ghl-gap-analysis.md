@@ -30,6 +30,15 @@
 12. Current state of the GHL Agency seed + required template extension
 13. Intelligence Briefing + Weekly Digest integration
 14. Plain-English delivery summary (read this first)
+15. Action-type primitives — the 5 CRM-agnostic intervention actions *(added 2026-04-18)*
+16. Canonical merge fields — CRM-agnostic content composition *(added 2026-04-18)*
+17. Configuration Agent integration — making ClientPulse config editable via chat *(added 2026-04-18)*
+18. Template editor + system-admin governance model *(added 2026-04-18)*
+19. Onboarding flows — sysadmin create-org + orgadmin first-run *(added 2026-04-18)*
+20. UX decisions catalog + mockup index *(added 2026-04-18)*
+21. V1 vs V2 scope delineation *(added 2026-04-18)*
+
+> **Reading order for a fresh implementer:** §1 → §21 → §15 → §16 → §17 → §18 → §20 → §10 → §11.3 → deep-dive per-phase §§2–9 as needed.
 
 ---
 
@@ -1059,31 +1068,71 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 
 **Ship gate:** every sub-account has a churn assessment row with a band; dashboard high-risk widget no longer returns `[]`.
 
-### Phase 4 — Intervention pipeline
+### Phase 4 — Intervention pipeline (action primitives + merge fields)
 
-- Register `client_pulse_intervention` action type.
-- Migration: `client_pulse_intervention_templates`.
-- Seed Kel's six templates as system defaults.
-- Implement `proposeClientPulseInterventionsJob` + `measureInterventionOutcomeJob`.
-- Wire to `interventionService.checkCooldown` and existing `actions`/`reviewItems`.
+**Supersedes the earlier "six hardcoded intervention templates" plan** (see §15, decision D7).
 
-**Ship gate:** simulated declining sub-account produces a review-queue item with enough context for approve/reject in under 30 seconds.
+- Register the **5 action-type primitives** (§15.1) in `actionRegistry.ts`: `fire_automation`, `send_email`, `send_sms`, `create_task`, `operator_alert`. These are the registered action-type enum values; everything CRM-specific lives below in the adapter layer.
+- Migration: `client_pulse_interventions` (proposal record + chosen primitive + configured payload + status + outcome).
+- Build the **canonical merge field resolver** (§16): dot-path namespace resolver, JSON Schema for the namespace surface, `resolveMergeFields(template, context) → string`.
+- Build the **5 action-primitive editors** in the client (one React component per primitive, routed from the propose-intervention modal):
+  - `FireAutomationEditor` — live CRM automation dropdown (adapter-backed) + category filters.
+  - `EmailAuthoringEditor` — subject/body compose, merge-field chip picker, stacked preview, "Send test to me".
+  - `SmsAuthoringEditor` — 160-char body, merge-field chips, phone-bubble preview, test-send.
+  - `CreateTaskEditor` — title/notes/assignee/priority/due, CRM-task-card preview.
+  - `OperatorAlertEditor` — severity/recipients/channels/CTA, in-app preview, recipient tray integration.
+- **Skill: `fire_automation`** — calls adapter's `enrolInAutomation(contactId, automationId)` for whichever CRM the sub-account uses.
+- **Skill: `send_email`** — resolves merge fields, calls adapter's `sendEmail(contactId, subject, body)` (CRM-dispatched, preserves sending domain).
+- **Skill: `send_sms`** — resolves merge fields, calls adapter's `sendSms(contactId, body)`.
+- **Skill: `create_task`** — calls adapter's `createTask(contactId, title, notes, assignee, priority, dueAt)`.
+- **Skill: `operator_alert`** — writes to `operator_alerts` table + emits in-app notification + optional email + Slack via existing integration.
+- Wire all 5 primitives to `interventionService.checkCooldown` and existing `actions`/`reviewItems` (HITL gate).
+- Outcome signal: **band-change only in v1** (§21.2). A fired intervention that sees a band improvement within 14 days is counted as "worked"; no webhook attribution.
+- Implement `proposeClientPulseInterventionsJob` (detects scenarios → creates proposal review-items) and `measureInterventionOutcomeJob` (14-day band-change watcher).
+- Build the **propose-intervention modal** (step 1: pick primitive; step 2: "Configure [action] ↗" button opens the relevant editor).
+- Seed a small set of template-level "detection-pattern → suggested primitive" hints (configurable per template) so the proposer can default the primitive choice but the operator always picks.
 
-### Phase 5 — Dashboard + briefings + configuration UI
+**Ship gate:** simulated declining sub-account produces a review-queue item; operator picks primitive 2 (send email), composes with canonical merge fields, hits "Send test to me" (arrives correctly rendered), approves the real send, adapter dispatches via client CRM, audit row recorded. Band-change observed 14 days later is correctly attributed as the intervention outcome.
 
-- Portfolio grid with ColHeader sort/filter, sticky-three pills (Last Activity / Funnel Count / Calendar Quality), integration chips with usage badges, tier-migration arrow on grid row.
-- Per-client drill-down route `/clientpulse/subaccount/:id`.
-- Intervention queue widget on dashboard (top-5 pending; overflow → `/clientpulse/interventions`).
-- Revenue-at-risk + churn projection headlines.
-- Monday-morning email per §7.2: deep-linked per-client rows, band-change delta banner, pending-interventions count, agency-timezone delivery, one email per org.
-- **Sub-account Intelligence Briefing integration (§13.5):** add `render_portfolio_health_section_briefing` step (forward-looking, per-client) to `intelligence-briefing.playbook.ts`. Use `skipWhen` to no-op when ClientPulse module is not enabled.
-- **Sub-account Weekly Digest integration (§13.5):** add `render_portfolio_health_section_digest` step (backward-looking, per-client) to `weekly-digest.playbook.ts`. Same `skipWhen` guard.
-- **Build org-level playbooks (NEW — §13.3):** create `server/playbooks/intelligence-briefing-org.playbook.ts` and `server/playbooks/weekly-digest-org.playbook.ts`. Both declare `scope: 'org'` (requires Phase 0.5 engine refactor). Both ship with the ClientPulse render step (`skipWhen` guarded). The org-level briefing mockup and digest mockup are the design targets.
-- **Seed all four playbooks** into `system_playbook_templates` (currently only `.ts` files exist; no DB seed). New seed migration.
-- **Portfolio Rollup deprecation path (§13.3):** `portfolioRollupJob.ts` continues to run during the transition. Once org-level playbooks are seeded and stable, deprecate the job; the org-level playbooks supersede it.
-- `ClientPulseConfigPage` for factor weights, signal thresholds, band cutoffs, intervention templates, `staffActivity` config, `integrationFingerprints` seed library + learned fingerprints, Monday-email timezone + suppression rules.
+### Phase 4.5 — Configuration Agent extension (NEW — §17)
 
-**Ship gate:** Kel can open one screen, see all 180 clients ranked, drill into any one, approve or reject a proposed intervention, and edit the templates driving future proposals — all without touching code. Monday email arrives with deep links. Intelligence Briefing and Weekly Digest include a Portfolio Health section.
+Runs in parallel with Phase 5 UI work once the operational_config JSON Schema from Phase 0 is locked.
+
+- **Capability slugs** in `docs/capabilities.md` (Support-facing catalogue): `clientpulse.config.read|update|reset|history`.
+- **Pseudo-integration entry** in `docs/integration-reference.md`: `clientpulse_configuration` block (§17.2.2).
+- **Skill:** `server/skills/config_update_hierarchy_template.md` + registration in `actionRegistry.ts` + `skillExecutor.ts`. JSON-Schema-validated merge-update on `operational_config`; writes to `config_changes` audit table.
+- **Migration:** `config_changes` table (§17.2.6).
+- **Orchestrator routing:** add row to `docs/orchestrator-capability-routing-spec.md` for `clientpulse.config.*`. Keywords + context signals + structural signals.
+- **Configuration Assistant spec update:** add mutation tool #16 (`update_clientpulse_config`), move ClientPulse from out-of-scope to in-scope v2, add conversation examples matching the chat popup mockup.
+- **UI:** chat popup component (global, opens from settings callouts / global nav / ⌘K). Confirm-before-write card pattern matching existing Configuration Agent.
+
+**Ship gate:** sysadmin (seeded with test prompt) types "bump pipeline velocity weight to 0.35" in chat; Orchestrator routes to Configuration Agent; agent presents confirm card with before/after diff; operator confirms; skill writes to operational_config; config_changes row recorded; next-scan banner shown; settings page reflects the new value on refresh.
+
+### Phase 5 — Dashboard + briefings + configuration UI + admin surfaces
+
+- **Portfolio grid** (`dashboard.html`) with Google-Sheets-style ColHeader sort/filter, interactive filter chips, band column as first-class sortable, aggregate trend chart, intervention-queue widget.
+- **Per-client drilldown** (`drilldown.html`) route `/clientpulse/subaccount/:id` with humanised signal names (no technical slugs, per U17).
+- **Propose-intervention modal** (`propose-intervention.html`) with 5 primitive cards + "Configure [action] ↗" routing to editors.
+- **Inline-edit one-click override** (`inline-edit.html`) from blind-spot patterns — dropdown menu + toast, routes through Configuration Agent skill for the actual write.
+- **Settings page** (`settings.html`) with section editors + Configuration Assistant callout + saved email templates section.
+- **Operator alert recipient tray** (`operator-alert-received.html`) — in-app notification tray with expand/take-action/acknowledge/snooze/dismiss.
+- **Monday Intelligence Briefing** (org-level `intelligence-briefing.html` + per-client `briefing-per-client.html`) — forward-looking (§13.5). Add `render_portfolio_health_section_briefing` step to both playbooks with `skipWhen` gating.
+- **Friday Weekly Digest** (org-level `weekly-digest.html` + per-client `digest-per-client.html`) — backward-looking (§13.5). Add `render_portfolio_health_section_digest` step to both playbooks.
+- **Build org-level playbooks (NEW — §13.3):** create `server/playbooks/intelligence-briefing-org.playbook.ts` and `server/playbooks/weekly-digest-org.playbook.ts`. Both declare `scope: 'org'` (requires Phase 0.5 engine refactor). Both ship with ClientPulse render step (`skipWhen` guarded).
+- **Seed all four playbooks** into `system_playbook_templates` (new seed migration).
+- **Portfolio Rollup deprecation path (§13.3):** `portfolioRollupJob.ts` continues during transition; deprecate once org-level playbooks are stable.
+
+**Ship gate:** Kel can open the dashboard, see all 180 clients ranked, drill into any one, approve or reject a proposed intervention (via any of the 5 primitives), and configure via either the settings UI or chat — all without touching code. Monday briefing + Friday digest arrive org-level AND per-client with Portfolio Health sections populated.
+
+### Phase 5.5 — System-admin surfaces + onboarding (NEW — §§18, 19)
+
+- **Template editor modal** (`template-editor.html`) — full 10-section left-nav editor with per-section dirty-state badges, staged-edits banner, atomic save-across-sections, change-log view.
+- **Sysadmin create-org flow** (`onboarding-sysadmin.html`) — org metadata + template picker with Edit ↗ integration + required operator inputs + invite admins + atomic provision.
+- **Orgadmin first-run flow** (`onboarding-orgadmin.html`) — 4-screen guide: welcome → connect CRM → map pilot clients → set.
+- **Config Templates admin page** (list view for sysadmins) — linked from sysadmin nav; routes to template editor modal on row click.
+- **Audit log view for config_changes** — filters by org, path, source (chat/settings_ui/api/agent); clickable rows route to template editor with the relevant section pre-selected.
+
+**Ship gate:** sysadmin can create a new org from scratch picking a template (with optional in-flight edits), org admin receives invite, completes first-run, connects CRM, selects pilot sub-accounts, and lands on a populated dashboard within 24 hours.
 
 ### Phase 6 — Trial monitoring (post-launch)
 
@@ -1099,11 +1148,14 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 | Phase | Scope | Ballpark |
 |---|---|---|
 | 0 | Schema relax + polling scope | Small |
+| 0.5 | Playbook engine refactor for explicit org scope (§13.3) | Small–Medium |
 | 1 | Six adapter fns + two tables + webhook events | Medium |
 | 2 | Scoring job + snapshot table + skill registration | Small–Medium |
 | 3 | Churn evaluator + band config + defaults | Small |
-| 4 | Proposer + templates + outcome loop | Medium |
-| 5 | Dashboard + drill-down + config UI | Medium–Large |
+| 4 | 5 action primitives + 5 editor components + merge-field resolver + outcome loop | Medium–Large |
+| 4.5 | Configuration Agent extension (5 concrete additions, §17) | Small–Medium |
+| 5 | Dashboard + drilldown + briefings/digests + settings + alert tray | Medium–Large |
+| 5.5 | Template editor + create-org + first-run + audit log view | Medium |
 | 6 | Trial monitoring | Small–Medium |
 
 ---
@@ -1135,7 +1187,23 @@ These are baked-in design commitments from Kel's response to the first round of 
 | **D3** | **Intervention proposer = enabled by default for every GHL Agency configuration, including DFY.** The VAs managing DFY clients will use the proposer queue as a work surface. | DFY orgs are not a special case in the default template. Proposer output per sub-account per day governed by `maxProposalsPerDayPerSubaccount` (configurable). |
 | **D4** | **Trial onboarding milestone library (Phase 6 default):** `first_calendar_created` / `first_funnel_built` / `first_contact_imported` / `first_campaign_sent` / `first_automation_published` — accepted as the default set, start here. | Phase 6 seed migration populates these five as the default `client_pulse_onboarding_milestone_defs` rows; orgs can add/remove per org. |
 | **D5** | **Billing: cost per Synthetos org.** An agency owner running multiple GHL agency backends (Kel: SaaS + DFY) will have two separate Synthetos orgs and receive two separate invoices. No "sibling orgs" billing-level linking. | §3 stance reinforced. No composite-invoice or cross-org discount logic. Onboarding UX copy remains: "Each GHL agency backend becomes its own ClientPulse workspace." |
-| **D6 (new)** | **ClientPulse will be sold in two subscription tiers, anchored to Starboys pricing:** a **Monitor tier** (read-only portfolio monitoring + briefings/digests, anchored ~$1,200/mo) and an **Operate tier** (everything in Monitor + intervention proposer + HITL execution + outcome measurement, anchored ~$2,400/mo). See §12.4 for the tier feature split. | The existing `modules` + `subscriptions` schema (migration 0104) already supports per-module subscription rows; we extend with tier-level entitlements rather than adding a new entitlement system. |
+| **D6** | **ClientPulse will be sold in two subscription tiers, anchored to Starboys pricing:** a **Monitor tier** (read-only portfolio monitoring + briefings/digests, anchored ~$1,200/mo) and an **Operate tier** (everything in Monitor + intervention proposer + HITL execution + outcome measurement, anchored ~$2,400/mo). See §12.4 for the tier feature split. | The existing `modules` + `subscriptions` schema (migration 0104) already supports per-module subscription rows; we extend with tier-level entitlements rather than adding a new entitlement system. |
+
+#### Additional decisions from 2026-04-18 mockup review (D7–D14)
+
+| # | Decision | Consequence |
+|---|---|---|
+| **D7** | **Intervention = pick one of 5 CRM-agnostic action primitives, not a hardcoded playbook template.** Primitives: `fire_automation`, `send_email`, `send_sms`, `create_task`, `operator_alert`. See §15. | Replaces the earlier Phase 4 plan to seed "Kel's six templates". `actionRegistry.ts` registers 5 primitives; CRM-specific logic lives in adapter layer. The proposer surfaces detection patterns + suggested primitive, operator picks + configures. No "4-video funnel-setup nurture"-style content shipped in Synthetos. |
+| **D8** | **Email + SMS composed in Synthetos, dispatched via client's CRM.** Preserves the agency's sending-domain authentication + SMS provider contracts. | Adapter functions `sendEmail(contactId, subject, body)` and `sendSms(contactId, body)` become CRM-specific primitives with identical signatures across adapters. Synthetos never runs its own SMTP or SMS gateway for outbound. |
+| **D9** | **Canonical merge fields (`{{contact.firstName}}`, `{{signals.healthScore}}`, etc.) for all authored content.** Resolved in Synthetos before CRM dispatch — the CRM receives a fully-rendered string. See §16. | Merge-field resolver service built in Phase 4; JSON Schema for the namespace surface. V1 grammar is strict (no fallback syntax, no conditionals). |
+| **D10** | **Outcome signal = band-change only in V1.** No webhook-based attribution (open rate, reply rate, booked-call rate) until V2. See §21. | `measureInterventionOutcomeJob` watches for a band improvement within 14 days of intervention dispatch and attributes it. Keeps V1 scope tight. |
+| **D11** | **Configuration Agent extended to cover ClientPulse config (site-wide chat surface).** Same chat popup handles agents, schedules, skills, ClientPulse config, integrations. See §17. | Five concrete additions (§17.2): `clientpulse.config.*` capability slugs, `clientpulse_configuration` pseudo-integration, `config_update_hierarchy_template` skill, orchestrator routing row, Configuration Assistant spec update. `config_changes` audit table is a dependency. |
+| **D12** | **Template editor stages edits across all tabs until Save is pressed; Save is atomic; Cancel discards all.** See §18.3. | Template editor component uses local state + dirty-state tracking per section. One transaction writes all changed paths on save, producing a grouped batch of `config_changes` rows sharing the same `applied_at`. |
+| **D13** | **Org admins cannot create or fork templates in V1 — only override at the org level.** Templates are a sysadmin-vetted asset. See §18.6. | No "fork template" UI in V1. Template creation API is sysadmin-only. V2 may introduce forking if demand emerges. |
+| **D14** | **All user-facing copy uses humanised labels, never canonical slugs.** Comprehensive snake_case audit performed across all 20 mockups. See U17. | UI layer applies a `humanise(slug)` helper for any label derived from a canonical identifier. New UI features must pass a no-snake-case regex check in code review. |
+| **D15** | **Google-Sheets-style column headers on all data tables** (click-to-sort, filter dropdown on categorical columns). See U1 + architecture rule for Tables. | Matches the existing `SystemSkillsPage.tsx` pattern (`ColHeader` + `NameColHeader`). Extend the pattern to the portfolio grid, intervention queue, and audit log view. |
+| **D16** | **Config Assistant chat is site-wide, not ClientPulse-specific.** Opens from any settings callout, global nav, or ⌘K hotkey. | Chat popup component lives at the app-shell level, not under `/clientpulse/`. Initial context is scoped from the page that launched it but the conversation can span any configurable surface. |
+| **D17** | **Tasks from Primitive 4 live in the client's CRM, not a Synthetos task board.** Synthetos task board is for AI-agent work. | `create_task` adapter function writes to CRM task object (GHL task, HubSpot task, etc.). No Synthetos-side task record for operator work. |
 
 ### 11.4 Open questions for Kel (second round)
 
@@ -1613,4 +1681,596 @@ Adding a fifth playbook later (Monthly Board Report, Quarterly Business Review, 
 
 ---
 
-**End of document.** Next step: feed this gap analysis into the architect agent to produce an implementation plan for Phase 0 + Phase 1, since those are the two unblocking items with no dependencies on decisions still pending from Kel.
+## 15. Action-type primitives — the 5 CRM-agnostic intervention actions
+
+The pivot away from hardcoded intervention templates (per the 2026-04-18 design review) re-frames an intervention as **"pick one of five action primitives, configure it, send"**. Everything else in the intervention queue — severity, cadence, cooldown, approval gate — is metadata around the action.
+
+### 15.1 The five primitives
+
+| # | Primitive | Runs where | Composed where | V1 config contract |
+|---|-----------|-----------|----------------|--------------------|
+| 1 | **Fire automation** | Client's CRM (GHL workflow, HubSpot automation, etc.) | Operator picks an existing CRM automation from a live dropdown | `{ action: 'fire_automation', provider_type: 'ghl', external_automation_id: '...', contact_id: '...' }` |
+| 2 | **Send email** | Client's CRM (uses client's authenticated sending domain) | Synthetos — subject + body + canonical merge fields | `{ action: 'send_email', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
+| 3 | **Send SMS** | Client's CRM (uses client's SMS provider via CRM) | Synthetos — 160-char body + canonical merge fields | `{ action: 'send_sms', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
+| 4 | **Create task** | Client's CRM (task lives on CRM contact record) | Synthetos — title, notes, assignee, priority, due | `{ action: 'create_task', title, notes, assignee_user_id, priority, due_at }` |
+| 5 | **Operator alert** | Internal (Synthetos in-app + email + Slack) | Synthetos — severity, recipients, channels, CTA | `{ action: 'operator_alert', severity, recipient_user_ids, channels[], cta_action }` |
+
+### 15.2 Why these five
+
+- **Covers 100% of Kel's intervention patterns** from the interview — every example ("reactivate dormant client", "onboarding nudge", "tier-downgrade check-in", "silent-channel warning") decomposes into one or more of these five.
+- **Zero hardcoded playbook logic.** "4-video funnel-setup nurture" is not a Synthetos concept — it's a GHL workflow the client already has, and the operator points at it via Primitive 1.
+- **CRM-agnostic.** Primitives 1–4 execute via the canonical-adapter layer. Same API surface for GHL, HubSpot, Salesforce, Pipedrive. The word "workflow" is replaced with "automation" in user copy to remain neutral.
+- **Preserves the client's sending reputation.** Primitives 2 + 3 compose the content in Synthetos but dispatch through the client's CRM so existing domain authentication, SMS provider contracts, and unsubscribe logic are preserved. Synthetos never sends email/SMS on the client's behalf itself.
+
+### 15.3 Replaces what in the old gap analysis
+
+The old § 6.5 ("Action types to register") listed 7 action types, several of which were CRM-specific (`ghl.workflow.enrol`, `ghl.task.create`, `ghl.contact.tag`). This is superseded by the 5 primitives above. CRM-specific logic moves into the adapter layer; the registered action-type enum becomes the five-value set `{ fire_automation, send_email, send_sms, create_task, operator_alert }`.
+
+### 15.4 Contact-tag operations
+
+Previously called out as its own action type. Folded into Primitive 1 in v1 — most CRMs expose tag operations via their native automation system. If a v2 need emerges for direct tag writes outside an automation, add a sixth primitive then. Do not pre-build.
+
+### 15.5 Mockup references
+
+- Selector: `tasks/clientpulse-mockup-propose-intervention.html` (5 primitive cards in step 1 with "Runs in" badges)
+- Primitive 1 editor: `tasks/clientpulse-mockup-fire-automation.html`
+- Primitive 2 editor: `tasks/clientpulse-mockup-email-authoring.html`
+- Primitive 3 editor: `tasks/clientpulse-mockup-send-sms.html`
+- Primitive 4 editor: `tasks/clientpulse-mockup-create-task.html`
+- Primitive 5 editor: `tasks/clientpulse-mockup-operator-alert.html`
+- Primitive 5 recipient view: `tasks/clientpulse-mockup-operator-alert-received.html`
+
+---
+
+## 16. Canonical merge fields — CRM-agnostic content composition
+
+Primitives 2 (email), 3 (SMS), and 4 (task) all compose content in Synthetos using **canonical merge fields**. The substitution happens in Synthetos immediately before dispatch, so the content that lands in the client's CRM is a fully-resolved string — the CRM never sees a Synthetos merge token.
+
+### 16.1 Namespace shape
+
+| Namespace | Example fields | Source |
+|-----------|----------------|--------|
+| `contact` | `{{contact.firstName}}`, `{{contact.lastName}}`, `{{contact.email}}`, `{{contact.phone}}`, `{{contact.company}}`, `{{contact.owner.firstName}}` | `canonical_contacts` (populated by adapter) |
+| `subaccount` | `{{subaccount.name}}`, `{{subaccount.tier}}`, `{{subaccount.trialEndsOn}}` | `canonical_subaccount_mutations` / subaccount metadata |
+| `signals` | `{{signals.healthScore}}`, `{{signals.band}}`, `{{signals.lastActivityDays}}`, `{{signals.pipelineVelocity30d}}` | Derived from ClientPulse signal tables |
+| `org` | `{{org.name}}`, `{{org.operatorFirstName}}`, `{{org.supportEmail}}` | Agency-level settings |
+| `intervention` | `{{intervention.reason}}`, `{{intervention.triggerDate}}`, `{{intervention.band}}` | The intervention record itself |
+
+### 16.2 Why canonical (not CRM-native merge tokens)
+
+- **Same syntax across every CRM.** Operator doesn't need to know whether the client is on GHL (`{{contact.first_name}}` with snake_case) or HubSpot (`{{contact.firstname}}` lowercase-compressed) or Salesforce (`{!Contact.FirstName}` bang-syntax). One vocabulary, resolved in Synthetos.
+- **Works across clients on the same template.** A saved email template (§16.5) composed with `{{contact.firstName}}` works unchanged whether the client is on GHL, HubSpot, or a CRM added next quarter.
+- **Resolves to a fully-materialised string before CRM dispatch.** The CRM API receives e.g. `"Hi Sarah — we noticed…"`, not a merge token. No CRM-side merge logic required. No dependency on CRM merge-token documentation staying current.
+
+### 16.3 Resolution pipeline
+
+1. Operator composes content in the Synthetos authoring popup using canonical tokens.
+2. "Send test" button resolves tokens against the operator's own record (for primitive 2 and 3) — verifies the template renders.
+3. On real send, Synthetos resolves tokens against the target contact + signal snapshot + subaccount + org context, producing a rendered string.
+4. Adapter dispatches the rendered string via the CRM API (e.g. GHL messaging endpoint, HubSpot email send, etc.).
+
+### 16.4 Missing-value policy
+
+If a token resolves to null/empty (e.g. contact has no company name):
+
+- **Email/task:** render as empty string. Operator preview shows `⚠ empty` next to any token that would render blank so they can adjust before sending.
+- **SMS:** same rule, but with tighter character budget — the preview strips the blank cleanly (no double spaces).
+- **No v1 fallback syntax.** No `{{contact.firstName || "there"}}` — keep the grammar tight for v1; add default-value syntax only if authoring data shows a real demand pattern.
+
+### 16.5 Saved templates
+
+Canonical merge fields power the "Saved email templates" section on the settings page (and the equivalent for SMS in v2). Saved templates live at the **org level** (every operator in the agency shares them) and are versioned with `templateVersionId` on the `operational_config.savedTemplates[]` array. Referenced by primitive 2's `template_ref` as `synthetos:{uuid}`.
+
+### 16.6 Mockup references
+
+- Merge-field picker in compose: `tasks/clientpulse-mockup-email-authoring.html` (top toolbar chips)
+- Merge-field usage in SMS: `tasks/clientpulse-mockup-send-sms.html`
+- Task title/notes merge fields: `tasks/clientpulse-mockup-create-task.html`
+- Saved template list in settings: `tasks/clientpulse-mockup-settings.html` ("Saved email templates" section)
+
+---
+
+## 17. Configuration Agent integration — making ClientPulse config editable via chat
+
+The existing Configuration Agent (`docs/configuration-assistant-spec.md`) can adjust agent definitions, schedules, and skill bindings via natural language. It **cannot today adjust ClientPulse settings** — its mutation toolset does not include ClientPulse config, and the Orchestrator's routing model has no capability slug that would route a ClientPulse-config request to it. This section closes that gap so the same chat popup (mockup: `tasks/clientpulse-mockup-config-assistant-chat.html`) can rewrite health-score weights, disable blind-spot alerts, shift band thresholds, etc.
+
+### 17.1 Why this path (not a bespoke ClientPulse chat agent)
+
+- **One assistant, one vocabulary, one audit trail.** Operators already use the Configuration Assistant for agent/schedule edits; adding ClientPulse to its scope means they don't learn two chat surfaces.
+- **Settings UI stays primary.** The chat is a second UI over the same primitive (a merge-update on `operational_config`); the form is a third. Both paths write through the same skill so behaviour is identical no matter which surface the operator picks.
+- **Future-proof.** Any new ClientPulse configurable (a new blind-spot detector, a new intervention action-type, a new onboarding milestone) automatically becomes chat-addressable because the skill reads the JSON Schema of `operational_config` at runtime — no per-setting tool additions.
+
+### 17.2 The five concrete additions
+
+Five files (one new, four edits) land the natural-language path end-to-end.
+
+#### 17.2.1 `docs/capabilities.md` — new capability slugs
+
+Add to the agency-capabilities catalogue (Support-facing section, since capability slugs are for routing, not marketing copy):
+
+| Slug | Description | Gate level |
+|------|-------------|------------|
+| `clientpulse.config.read` | Read current ClientPulse configuration (effective values after template + overrides merge) | `auto` |
+| `clientpulse.config.update` | Apply a merge-update to the org's ClientPulse `operational_config` | `review` (HITL confirm step in chat) |
+| `clientpulse.config.reset` | Reset one or more keys back to template defaults | `review` |
+| `clientpulse.config.history` | Read the audit log of configuration changes for ClientPulse keys | `auto` |
+
+Slugs are namespaced under `clientpulse.config.*` so future modules (e.g. `workspacehealth.config.*`) can follow the same pattern without collision.
+
+#### 17.2.2 `docs/integration-reference.md` — new pseudo-integration entry
+
+ClientPulse config is conceptually an integration the Orchestrator can read/write against. Add a `clientpulse_configuration` block in the integration reference (structured YAML consistent with the existing pattern):
+
+```yaml
+- id: clientpulse_configuration
+  category: platform
+  scope: org
+  capabilities:
+    - clientpulse.config.read
+    - clientpulse.config.update
+    - clientpulse.config.reset
+    - clientpulse.config.history
+  auth: none  # reads + writes against org's own operational_config
+  notes: |
+    Pseudo-integration. Not a third-party system — represents the org's own
+    ClientPulse configuration store. Exposed so the Orchestrator can route
+    natural-language config requests to it.
+```
+
+The CI gate `scripts/verify-integration-reference.mjs` will pick up the new entry automatically. No new OAuth provider or MCP preset needed.
+
+#### 17.2.3 `server/skills/config_update_hierarchy_template.md` — new skill
+
+New skill file (one file under `server/skills/`, plus registration in `server/config/actionRegistry.ts` and `server/services/skillExecutor.ts`). Does a schema-validated merge-update on `hierarchyTemplates.operationalConfig` at the org level.
+
+**Skill contract:**
+
+```
+input:
+  orgId: uuid (required; derived from auth context, not passed by LLM)
+  path: string (dot-path into operational_config, e.g. "healthScoreFactors.pipeline_velocity.weight")
+  operation: 'set' | 'delete' | 'reset_to_default'
+  newValue: any (required for 'set', ignored otherwise)
+  reason: string (required — free-text; shown in audit log + change history UI)
+
+output:
+  previousValue: any
+  newValue: any
+  templateDefault: any
+  auditLogId: uuid
+  nextScanAt: timestamp (informational — when the change takes effect)
+
+validation:
+  - path must resolve to a leaf in the operational_config JSON Schema
+  - newValue must conform to the schema type for that path
+  - for weight fields (factors, blind-spot scoring): sum-constraint check (must still total 1.00)
+  - write wrapped in withPrincipalContext so RLS applies
+  - cross-check: org's template_id must match a template that declares this path
+
+audit:
+  - row written to config_changes table (new; see §17.2.6)
+  - payload: orgId, userId (or 'configuration_agent' if chat-initiated), path, op, before, after, reason, source ('chat' | 'settings_ui' | 'api')
+```
+
+The same skill is called by:
+
+- Chat popup confirm button → source `'chat'`
+- Settings page Save button → source `'settings_ui'`
+- Future programmatic API → source `'api'`
+
+One skill, one validation path, one audit trail.
+
+#### 17.2.4 `docs/orchestrator-capability-routing-spec.md` — document ClientPulse config as routable
+
+Add a new row to the Orchestrator's capability routing table so when the user says "bump pipeline velocity weight to 0.35" in any chat surface, the Orchestrator recognises this as a `clientpulse.config.update` request and routes to the Configuration Agent.
+
+**Routing hints (examples; non-exhaustive):**
+
+- keywords: `weight`, `threshold`, `band`, `silent channel`, `tier downgrade`, `blind spot`, `scan cycle`, `health factor`, `churn band`
+- context signals: user is currently viewing any `/clientpulse/*` page OR the chat was launched from a ClientPulse settings callout
+- structural signals: phrase refers to a known path in `operational_config` JSON Schema (confirmed by a tool call from Orchestrator to the schema)
+
+Routing a request into `clientpulse.config.*` implies the Configuration Agent handles the turn (with its existing confirm-before-write UX), not a ClientPulse-specific agent.
+
+#### 17.2.5 `docs/configuration-assistant-spec.md` — add mutation tool + update scope
+
+In the Configuration Assistant's spec document:
+
+- **Add mutation tool #16:** `update_clientpulse_config`. Wraps the `config_update_hierarchy_template` skill. Same confirm-before-write contract as the other 15 tools.
+- **Move ClientPulse config from "out of scope" to "in scope v2".** Update the scope section that currently lists it as excluded.
+- **Extend the prompt examples** to show a ClientPulse config-change conversation end-to-end (matching the `clientpulse-mockup-config-assistant-chat.html` flow).
+
+#### 17.2.6 New table: `config_changes` (audit log)
+
+One small new table is needed for the audit log the skill writes to:
+
+```
+config_changes
+  id              uuid pk
+  organisation_id uuid fk -> organisations(id)
+  user_id         uuid fk -> users(id) nullable  -- null when source = 'agent'
+  source          text enum('chat','settings_ui','api','agent','migration')
+  capability      text                            -- e.g. 'clientpulse.config.update'
+  path            text                            -- dot-path
+  operation       text enum('set','delete','reset_to_default')
+  previous_value  jsonb
+  new_value       jsonb
+  reason          text
+  applied_at      timestamptz default now()
+  reverted_at     timestamptz nullable
+  reverted_by     uuid fk -> users(id) nullable
+
+  index (organisation_id, applied_at desc)
+  index (organisation_id, path, applied_at desc)
+```
+
+RLS: org-scoped. Visible to sysadmins across orgs; org admins see only their own org's rows.
+
+Powers:
+- "View change log" button on the template editor (§18)
+- "See history" button in the chat popup
+- "Undo" button after an applied change (calls same skill with `operation: 'reset_to_default'` or with the `previous_value` as `newValue`)
+
+### 17.3 Bidirectional flow guarantee
+
+With these five additions, the three UIs converge on one write path:
+
+```
+  chat popup  ──┐
+                │
+  settings UI ──┼──► config_update_hierarchy_template skill ──► operational_config JSONB
+                │                                            ──► config_changes (audit)
+  briefing    ──┘
+  action btn
+```
+
+The "action button on the briefing" path (e.g. a briefing says "one-click: reset blind-spot thresholds to defaults" and the operator clicks it) calls the same skill with a pre-filled `path` + `operation` + `reason`. Every path produces the same audit row, the same effective config, and the same next-scan behaviour. No parallel code paths.
+
+### 17.4 Mockup references
+
+- Chat popup (generic, site-wide): `tasks/clientpulse-mockup-config-assistant-chat.html`
+- Chat entry point on settings page: `tasks/clientpulse-mockup-settings.html` (callout at top)
+- Settings UI (form-based path): `tasks/clientpulse-mockup-settings.html`
+
+### 17.5 V1 scope boundary for the Configuration Agent extension
+
+- **In v1:** path-level `set` + `reset_to_default` on scalar + single-level-object keys.
+- **Deferred to v2:** array-append/remove operations (adding a new saved email template via chat, adding a new blind-spot detector via chat), bulk operations (reset an entire section), conditional edits ("if my portfolio has > 100 clients then ..."). The chat can suggest these and hand off to the settings UI; it does not execute them in v1.
+
+This keeps the v1 surface tight enough to ship without getting dragged into schema-evolution-via-chat corner cases.
+
+---
+
+## 18. Template editor + system-admin governance model
+
+System admins (Synthetos staff) own the master configuration templates that power every org's default ClientPulse behaviour. Org admins (agency owners like Kel) inherit a template at org-creation time and can override individual values per-org; they cannot edit the template itself.
+
+### 18.1 Three roles, three surfaces
+
+| Role | Surface | Can edit |
+|------|---------|---------|
+| System admin | Template editor (`tasks/clientpulse-mockup-template-editor.html`) | The master template — health factors, band thresholds, saved email templates, blind-spot detectors, fingerprints, milestones, memory seeds, schedules, retention |
+| Org admin (agency owner) | Org settings page (`tasks/clientpulse-mockup-settings.html`) + Config Assistant chat | Any value — but every change becomes an **override** recorded against the org; the template is untouched |
+| Sub-account admin (client employee, future) | Sub-account view only | Nothing config-wise in v1. v2 may allow tuning cadences for their own workspace |
+
+### 18.2 Inheritance + override semantics
+
+```
+  (system master template)  operationalConfig_template
+                               ↓ copy-on-read at org creation
+  (org's operational_config)   operationalConfig_org
+                               ↓ effective merge
+  (runtime resolved value)     template.merge(org_overrides)
+```
+
+Rules:
+
+1. **Copy-on-read at org creation.** When a sysadmin creates a new org and picks a template, the template's `operationalConfig_template` is snapshotted into the org's `operational_config` as the baseline. The org now has a complete config, no lookup-chains.
+2. **Edits at the org level are overrides.** An org admin editing health-score weights mutates the org's own `operational_config`. The master template is not touched.
+3. **Template edits affect future orgs only.** When a sysadmin edits the master template, existing orgs are not retroactively updated. New orgs picking that template from then on inherit the updated defaults.
+4. **Exception: unmodified-value re-inheritance.** If an org has a value that exactly matches the template default at the time they were created (i.e. they never overrode it), the next scan cycle will pick up the new template default. This is tracked by comparing a change-log flag `isOverride: boolean` on each leaf, not by value-equality (which would break if an org happens to override to the same value).
+
+### 18.3 Template editor UX contract (from the mockup)
+
+- **All edits across every left-nav section are staged locally.** Switching tabs does not commit.
+- **Dirty-state indicator** on each left-nav item that has unsaved edits (amber dot + "edited" label).
+- **Staged-edits banner** at the top of the modal summarising all sections with unsaved edits.
+- **Save is atomic:** pressing "Save changes" commits the full staged diff in one transaction, producing one `config_changes` row per path changed, all sharing the same `applied_at` timestamp so they can be grouped in the audit UI.
+- **Cancel discards everything** (including staged edits from sections the operator never visited — they never applied).
+- **"View change log" button** in the footer routes to the audit-log view filtered to this template's changes.
+
+### 18.4 Left-nav sections (v1 scope)
+
+The template covers 10 configurable domains (matching the mockup left nav):
+
+1. **Template metadata** — slug, name, description, applicable CRM types
+2. **Health score factors** — list of weighted factors (sum-to-1.00 constraint)
+3. **Churn bands** — 4-band threshold ranges (Critical / At Risk / Watch / Healthy)
+4. **Saved email templates** — org-shared canonical-merge-field templates
+5. **Blind-spot detection** — the 8 detector definitions + thresholds
+6. **Integration fingerprints** — seed fingerprints for the fingerprint scanner (§2.0c)
+7. **Onboarding milestones** — the 5 default milestones for trial monitoring (§8)
+8. **Required operator inputs** — fields the Ops team must collect at onboarding
+9. **Memory seeds** — initial knowledge base entries for agents on this template
+10. **Scan + report schedule** — heartbeat offsets, briefing send times, digest cutoff
+11. **Data retention** — signal history retention, audit-log retention
+
+Each section has a dedicated editor component but all share the same staging-then-atomic-save behaviour.
+
+### 18.5 Entry points
+
+System admin reaches the template editor via:
+
+1. **Config Templates admin page** (list view → click a template → editor opens as a modal).
+2. **Create-org modal** (sysadmin picks a template for a new org and clicks the "Edit ↗" button on the template card — mockup: `tasks/clientpulse-mockup-onboarding-sysadmin.html`). Clicking Edit opens the same template editor modal in-place.
+3. **Audit log drill-down** (clicking a config-change row routes to the editor with the relevant section pre-selected).
+
+### 18.6 Vetting model
+
+Org admins cannot create their own templates in v1 — templates are a sysadmin-vetted asset. Rationale:
+
+- **Templates encode health-scoring defaults** that directly affect the product's signal quality. A badly-configured template (e.g. weights that don't sum, bands that overlap) would silently break every org that picks it.
+- **Saved email templates shipped in a template** become the defaults every operator on that template can use. Vetting prevents spammy/off-brand language from shipping at scale.
+- **Integration fingerprints** seed the Integration Fingerprint Scanner. Seed quality matters.
+- **Org admins get full override power at their own org's level** — that's where their editing surface lives. If a template is genuinely wrong for them, the right path is override-everything, not fork-the-template.
+
+v2 may introduce a "fork this template into your own" flow for orgs that want a persistent deviation, but that is an explicit escalation, not a default.
+
+### 18.7 Mockup references
+
+- Template editor modal: `tasks/clientpulse-mockup-template-editor.html`
+- Sysadmin create-org with template picker + Edit buttons: `tasks/clientpulse-mockup-onboarding-sysadmin.html`
+
+---
+
+## 19. Onboarding flows — sysadmin create-org + orgadmin first-run
+
+Two distinct onboarding surfaces, two distinct audiences. Keep them separate because the tasks and mental models differ.
+
+### 19.1 Sysadmin create-org flow
+
+**Audience:** Synthetos staff provisioning a new agency customer.
+
+**Surface:** `tasks/clientpulse-mockup-onboarding-sysadmin.html` (modal).
+
+**Steps:**
+
+1. **Org metadata** — name, slug, primary contact, billing contact, tier (Monitor / Operate — see § 12.4).
+2. **Pick a template** — cards for each available template (GHL Agency Intelligence, HubSpot Agency Intelligence, Internal Team, Multi-Location Retail). Each card shows:
+   - Short description
+   - Applicable CRM types
+   - How many existing orgs use it
+   - **"Edit ↗" button** → opens template editor modal (§18) in-place for last-minute tweaks before provisioning
+3. **Configure required operator inputs** — a template may declare fields the sysadmin must fill before org provisioning (e.g. "primary agency phone number" for the SMS-send scenario). Surface any unsatisfied required inputs as blocking form errors.
+4. **Invite org admins** — email addresses + role assignment; provisioning sends invite emails on create.
+5. **Provision** — atomic transaction:
+   - Create `organisations` row
+   - Snapshot the picked template's `operationalConfig_template` into the org's `operational_config`
+   - Seed the default system-managed agents (via existing three-tier agent model)
+   - Create the org-subaccount (Pattern C — see §13.3)
+   - Queue welcome emails to invited admins
+
+**Exit:** sysadmin sees confirmation + link to jump to the new org's dashboard as that org.
+
+### 19.2 Orgadmin first-run flow
+
+**Audience:** The agency owner (Kel) logging in for the first time after their invitation.
+
+**Surface:** `tasks/clientpulse-mockup-onboarding-orgadmin.html` (4-screen first-run guide).
+
+**Steps (each screen):**
+
+1. **"Welcome, your workspace is ready"** — high-level orientation. What ClientPulse does, what the operator will see on the dashboard in ~24 hours once the first scan completes.
+2. **"Connect your CRM"** — OAuth flow to the agency's GHL/HubSpot/etc. account. Explains scope (read-only v1.0 → extend to write on Operate-tier upgrade).
+3. **"Map your pilot clients"** — after OAuth, operator picks which sub-accounts to import. v1 recommends starting with 5–10 pilot clients rather than all 180 to keep the first-pass review manageable.
+4. **"You're set"** — summary of what happens next: first scan runs within the hour; dashboard populates as signals accumulate; Intelligence Briefing arrives Monday 07:00; Weekly Digest Friday 17:00.
+
+### 19.3 Post-onboarding state
+
+Immediately after orgadmin first-run completes:
+
+- Org has: CRM connected, sub-accounts imported (or import queued), default operational_config from template, default agents seeded.
+- Dashboard shows a **cold-start rendering** (§7.7) for 24h until signals accumulate — explicit "gathering data" state rather than misleading zero-scores.
+- First briefing + digest are suppressed in the first week (org_subaccount exists but hasn't yet accumulated enough signal to say anything useful) — set `first_briefing_after` on the subscription row.
+
+### 19.4 Resumability
+
+Both flows must be resumable:
+
+- **Sysadmin flow:** navigating away mid-flow persists a draft org record (`status: 'pending_provisioning'`). Coming back resumes at the last-unfilled step.
+- **Orgadmin flow:** navigating away leaves the org in first-run state; next login drops them back into whichever step is incomplete. No hard blocking — they can browse the dashboard (which will be mostly empty) but a persistent banner urges completion.
+
+### 19.5 Mockup references
+
+- Sysadmin create-org modal: `tasks/clientpulse-mockup-onboarding-sysadmin.html`
+- Orgadmin 4-screen first-run: `tasks/clientpulse-mockup-onboarding-orgadmin.html`
+
+---
+
+## 20. UX decisions catalog + mockup index
+
+Living register of UX decisions made across the 2026-04-17/18 design sessions. Every non-trivial decision is captured here so future iterations don't regress on the reasoning.
+
+### 20.1 Complete mockup index
+
+20 mockup files cover the full ClientPulse surface area end-to-end:
+
+| # | Mockup file | Surface | Audience |
+|---|-------------|---------|----------|
+| 1 | `clientpulse-mockup-dashboard.html` | Main portfolio grid (home view) | Org admin (Kel) |
+| 2 | `clientpulse-mockup-drilldown.html` | Per-client deep-dive page | Org admin |
+| 3 | `clientpulse-mockup-propose-intervention.html` | Modal: pick an action-type primitive | Org admin |
+| 4 | `clientpulse-mockup-fire-automation.html` | Primitive 1 editor (pick a CRM automation) | Org admin |
+| 5 | `clientpulse-mockup-email-authoring.html` | Primitive 2 editor (compose email) | Org admin |
+| 6 | `clientpulse-mockup-send-sms.html` | Primitive 3 editor (compose SMS) | Org admin |
+| 7 | `clientpulse-mockup-create-task.html` | Primitive 4 editor (create CRM task) | Org admin |
+| 8 | `clientpulse-mockup-operator-alert.html` | Primitive 5 editor (internal alert authoring) | Org admin |
+| 9 | `clientpulse-mockup-operator-alert-received.html` | Primitive 5 recipient view (in-app tray) | Org admin (alert recipient) |
+| 10 | `clientpulse-mockup-inline-edit.html` | One-click override from a blind-spot pattern | Org admin |
+| 11 | `clientpulse-mockup-settings.html` | Org-admin settings page | Org admin |
+| 12 | `clientpulse-mockup-config-assistant-chat.html` | Site-wide Configuration Agent chat popup | Org admin |
+| 13 | `clientpulse-mockup-template-editor.html` | System-admin template editor modal | Sysadmin |
+| 14 | `clientpulse-mockup-onboarding-sysadmin.html` | Create-org modal w/ template picker | Sysadmin |
+| 15 | `clientpulse-mockup-onboarding-orgadmin.html` | 4-screen first-run guide | Org admin |
+| 16 | `clientpulse-mockup-intelligence-briefing.html` | Monday 07:00 org-level forward briefing | Org admin |
+| 17 | `clientpulse-mockup-weekly-digest.html` | Friday 17:00 org-level backward digest | Org admin |
+| 18 | `clientpulse-mockup-briefing-per-client.html` | Monday 07:00 per-client briefing | Org admin / client-facing |
+| 19 | `clientpulse-mockup-digest-per-client.html` | Friday 17:00 per-client digest | Org admin / client-facing |
+| 20 | `clientpulse-mockup-capability-showcase.html` | Exhaustive detection-pattern reference | Internal / sales collateral |
+
+### 20.2 UX decisions catalog (U1–U20)
+
+Each decision: short name, what, why.
+
+**U1 — Portfolio grid uses Google-Sheets-style column headers.** Click-to-sort on any column (A→Z / Z→A toggles), with filter dropdown on categorical columns. Replaces an earlier "Sort pill + static chips" approach. Why: operator mental model matches Sheets; discoverability is higher; fewer UI chrome elements. Mockup: `dashboard.html`.
+
+**U2 — Band column is a first-class sortable column, not an incidental color bar.** Why: band is the primary grouping mechanism and needed to be directly actionable. Mockup: `dashboard.html`.
+
+**U3 — Filter chips are interactive, not static summary.** Clicking a chip (e.g. "At Risk · 12") toggles the filter. "+ Add filter" popover lets operator pick any column and values. Why: reading-as-filtering conflates state with controls; separating them was confusing. Mockup: `dashboard.html`.
+
+**U4 — Trend chart on dashboard shows aggregate portfolio motion only.** No per-client annotations. Why: client-specific events on an org-aggregate chart misled operators into thinking the chart was client-filtered. Mockup: `dashboard.html`.
+
+**U5 — 5 action-type primitives, not hardcoded playbook templates.** Why: supersedes templates like "4-video funnel-setup nurture" that presumed a specific client setup. See §15. Mockup: `propose-intervention.html`.
+
+**U6 — Each primitive has its own dedicated editor popup,** routed to via "Configure [action] ↗" button in the proposer step. Why: editors have very different affordances (CRM automation picker vs email compose vs SMS bubble preview) — one universal editor would be a mess. Mockups: `fire-automation.html`, `email-authoring.html`, `send-sms.html`, `create-task.html`, `operator-alert.html`.
+
+**U7 — Email + SMS authoring: compose on top, preview below (stacked).** Why: operator feedback that side-by-side forced too-narrow editors on laptop screens; stacked is natural top-to-bottom flow. Mockups: `email-authoring.html`, `send-sms.html`.
+
+**U8 — "Send test to me" button on email + SMS compose.** Why: deliverability verification catches domain-authentication + formatting issues before the operator sends to a real client.
+
+**U9 — Operator alert recipient can action the intervention from the in-app tray.** "Take action" button on an urgent alert routes to the propose-intervention modal with context pre-filled. Why: operators get alerts when they're mid-task; forcing them to navigate to the dashboard first adds friction. Mockup: `operator-alert-received.html`.
+
+**U10 — Config Assistant chat is site-wide, not ClientPulse-specific.** Opens from any settings callout, global nav, or ⌘K. Why: one assistant surface for all config, one vocabulary. Mockup: `config-assistant-chat.html`.
+
+**U11 — Config Assistant confirms before writing.** Every mutation goes through a structured confirmation card in-bubble with apply/cancel. Why: prevents "I meant 0.35 not 3.5" typos; matches the existing Configuration Assistant pattern. Mockup: `config-assistant-chat.html`.
+
+**U12 — Template editor stages all edits locally; Save is atomic across tabs.** Dirty-state badges on left-nav items; staged-edits banner summarises all pending changes. Why: sysadmin often needs to coordinate changes across multiple sections (e.g. raise a weight AND shift a band AND update a saved template) and losing work when clicking a tab is unacceptable. Mockup: `template-editor.html`.
+
+**U13 — Sysadmin can edit a template in-place from the create-org flow** via "Edit ↗" on the template card. Why: sysadmin is the same person vetting templates; roundtrip-to-admin-page breaks flow. Mockup: `onboarding-sysadmin.html`.
+
+**U14 — Org admins cannot create or fork templates in v1.** Only override at the org level. Why: template quality is signal quality; vetting belongs with sysadmins. See §18.6.
+
+**U15 — Intelligence Briefing (Mon 07:00) is forward-looking; Weekly Digest (Fri 17:00) is backward-looking.** Different roles. Briefing: "what to focus on this week." Digest: "what happened this week." Mockups: `intelligence-briefing.html`, `weekly-digest.html`. See §13.5.
+
+**U16 — Briefings + digests have org-level AND per-client variants.** Both coexist. Org variant is the agency-owner summary; per-client variant is optionally forwarded to the client as a status update. Mockups: `briefing-per-client.html`, `digest-per-client.html`.
+
+**U17 — No technical jargon in user-facing copy.** All canonical slugs humanised at the UI layer (e.g. `staff_activity_pulse` → "Staff activity"). Comprehensive snake_case audit performed. Why: operators are not engineers; leaking internal identifiers reads as unfinished. Affected mockups: `drilldown.html`, `dashboard.html`, `inline-edit.html`.
+
+**U18 — Tasks created by Primitive 4 live in the client's CRM, not a Synthetos task board.** Why: the Synthetos task board is for AI-agent work, not human work. Human tasks belong where the human does their CRM work. Mockup: `create-task.html`.
+
+**U19 — Synthetos composes, CRM dispatches (for email + SMS).** Preserves the agency's domain authentication and SMS provider contracts. Why: Synthetos is not an email/SMS provider and should not try to be one. See §15.1 row 2/3. Mockups: `email-authoring.html`, `send-sms.html`.
+
+**U20 — Cold-start state shown explicitly, not as zero-scores.** First 24h (and any sub-account with insufficient signal) renders a "gathering data" state rather than displaying 0 for health score. Why: zeros-as-unknowns mislead operators. See §7.7.
+
+### 20.3 Cross-reference
+
+- §15 Action primitives ← U5, U6, U7, U8, U18, U19
+- §17 Configuration Agent ← U10, U11
+- §18 Template editor ← U12, U13, U14
+- §13 Briefings/digests ← U15, U16
+- §7 Dashboard ← U1, U2, U3, U4, U17, U20
+
+---
+
+## 21. V1 vs V2 scope delineation
+
+The temptation throughout this design has been to build the "complete" product in one release. This section hard-draws the line. **V1 ships the proposer loop + outcome signal + intervention execution. V2 adds learning.**
+
+### 21.1 In-scope for V1
+
+**Signal ingestion**
+- 8 signals (§2) with adapter parity for GHL (other CRMs deferred to v1.1+).
+- Nightly + heartbeat polling cadence, no real-time webhook coverage except the critical 3 from §2.1.
+
+**Health + churn scoring**
+- Weighted composite health score (§4) with 5 default factors + template-driven customisation.
+- 4-band churn model (§5) with template-driven thresholds.
+- Confidence / cold-start handling (§4.4, §7.7).
+
+**Intervention execution**
+- All 5 action-type primitives (§15) — full editor UX for each.
+- Canonical merge fields (§16) with v1 grammar (namespace.field, no fallback syntax).
+- Manual proposer only — operator surfaces scenarios, operator triggers action. No auto-proposer.
+- HITL gate (gateLevel: 'review') on every action.
+- Outcome signal: **band-change only** (a proposed-and-fired intervention that lands in a visible band improvement is counted as "worked"). No webhook-based outcome attribution.
+
+**Portfolio surfaces**
+- Dashboard (§7) with Google-Sheets-style column UX.
+- Per-client drilldown.
+- Intelligence Briefing (Mon 07:00) + Weekly Digest (Fri 17:00) — both org-level and per-client variants.
+- In-app operator alerts + recipient tray.
+
+**Configuration**
+- Settings page with per-section editors.
+- Configuration Agent chat (§17) with v1-scope mutation contract (path-level set + reset_to_default).
+- Template editor (§18) for sysadmins.
+
+**Onboarding**
+- Sysadmin create-org flow with template picker + Edit integration.
+- Orgadmin 4-screen first-run.
+
+**Trial monitoring**
+- Milestone + nudge schema (§8).
+- Integrates as a special case of the intervention pipeline, not a separate subsystem.
+
+### 21.2 Deferred to V2
+
+**Learning / optimisation**
+- Auto-proposer (suggests interventions without operator trigger).
+- Per-template outcome analytics (which templates' configurations actually improve band transition rates).
+- Back-test runner (referenced by the Config Assistant's follow-up suggestion but not built — v2 introduces the execution engine).
+- Intervention effectiveness scoring beyond band-change (open rate, reply rate, booked-call rate via webhook attribution).
+
+**Configuration Agent v2**
+- Array-append/remove via chat (e.g. "add a new saved email template").
+- Bulk operations (e.g. "reset all blind-spot thresholds").
+- Conditional edits (e.g. "if my portfolio has >100 clients then ...").
+- Cross-org comparison queries (for agencies with multiple Synthetos orgs).
+
+**Multi-CRM**
+- HubSpot adapter (capability parity with GHL).
+- Pipedrive adapter.
+- Salesforce adapter (far future — scope discussion needed).
+
+**Template management**
+- Org-level fork of a system template.
+- Template versioning + migration (what happens when a sysadmin wants to ship a breaking change to an existing template).
+- Template marketplace / sharing between Synthetos orgs (explicitly a non-goal, per CLAUDE.md non-goals).
+
+**Client-facing surfaces**
+- Client portal where the client sees their own health score + intervention history.
+- Client-initiated acknowledgement of nudges ("I saw this; here's what I did").
+
+**Sub-account admin surfaces**
+- Per-sub-account tuning (v1 only sysadmin + orgadmin can configure).
+
+**Cross-org portfolio view**
+- For agency-of-agencies scenarios (§3.4). Not in V2 either — parked until real demand.
+
+### 21.3 Explicitly not doing (any version)
+
+Reaffirming the non-goals at a module level:
+
+- **No Synthetos-hosted email/SMS sending.** Always dispatch via client's CRM.
+- **No Synthetos-side CRM workflow authoring.** Operator points at existing CRM automations; we don't build a workflow designer.
+- **No workflow auto-install into client CRMs.** 522+ workflow installs × versioning = nightmare. Operators map existing workflows.
+- **No playbook marketplace for ClientPulse-specific content.** Templates stay sysadmin-vetted.
+- **No side-channel email/SMS send outside an intervention.** Every outbound is an intervention with audit + rollback + attribution. No "just send this" escape hatch.
+
+### 21.4 V1 ship criteria
+
+V1 ships when:
+
+1. One pilot agency (Kel / Productivity Hub) has the full loop working against their real GHL accounts.
+2. At least one complete intervention has been proposed, approved, executed via primitive 1 (fire automation), with band-change observed.
+3. Weekly Digest delivered for two consecutive Fridays with no operator-reported errors in content.
+4. Configuration Agent chat has applied at least one successful config change end-to-end (sysadmin-seeded pilot change counts).
+5. All 20 mockup surfaces are implemented with no placeholder states.
+
+Anything short of this is v1-alpha.
+
+---
+
+**End of document.**
+
+**Next step:** feed this gap analysis (especially §§15–21 added 2026-04-18) into the architect agent to produce an implementation plan starting with Phase 0 + Phase 0.5 + Phase 1, since those are the unblocking items with no dependencies on decisions still pending from Kel. Phase 4.5 (Configuration Agent extension) can run in parallel with Phase 5 once the `operational_config` JSON Schema is locked.
