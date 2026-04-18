@@ -354,85 +354,41 @@
 
       <div class="section-title" style="margin-top: 20px;"><span class="step-num">2</span>Configure the action</div>
 
-      <!-- When "Fire automation" is selected, the form is an automation picker -->
-      <div style="padding: 10px 12px; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
-        <div style="font-weight: 700; color: #92400e; margin-bottom: 3px;">Fire automation · Smith Dental (CRM: GHL)</div>
-        <div style="color: #78350f; line-height: 1.55;">
-          Live dropdown below lists every active automation in Smith Dental's CRM. Pick one — Synthetos enrols Dr. Marcia as a contact via the CRM's API. Zero pre-setup: <em>the agency already built these automations for their own client delivery</em>.
-        </div>
-      </div>
-
-      <div class="payload-form">
-        <div class="form-field">
-          <label>Automation to fire</label>
-          <select>
-            <option selected>Homepage Funnel Drip · 4 steps · 42 contacts enrolled (last edited 12 Feb)</option>
-            <option>Lead Nurture 2024 · 6 steps · 118 contacts enrolled</option>
-            <option>Q2 Campaign · 3 steps · 0 contacts enrolled (draft)</option>
-            <option>Re-engagement Sequence · 5 steps · 23 contacts enrolled</option>
-            <option>Welcome Series · 7 steps · 204 contacts enrolled</option>
-            <option disabled>────────────</option>
-            <option>Browse all 14 automations in Smith Dental →</option>
-          </select>
-          <div class="hint">Dropdown populated live from the client's CRM on every open. Only active automations shown by default. (For this client the CRM is GoHighLevel; other clients may be HubSpot / Pipedrive / etc. — same action primitive.)</div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-field">
-            <label>Contact to enrol</label>
-            <select>
-              <option selected>Dr. Marcia Smith · owner · primary contact</option>
-              <option>Stephanie Rodriguez · practice manager</option>
-              <option>All active contacts in the sub-account (204)</option>
-            </select>
+      <!-- Summary card: recaps Step 1 selection + CTA to open the dedicated editor -->
+      <div style="padding: 14px 16px; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 22px;">⚙️</div>
+          <div style="flex: 1;">
+            <div style="font-weight: 700; color: #92400e; font-size: 13px;">You picked: Fire automation</div>
+            <div style="color: #78350f; line-height: 1.55; font-size: 12px; margin-top: 2px;">
+              The dedicated editor shows every active automation in Smith Dental's CRM (live dropdown), plus contact picker, scheduling, rationale, and a step-by-step preview of the chosen automation.
+            </div>
           </div>
-          <div class="form-field">
-            <label>Start</label>
-            <select>
-              <option selected>Immediately on approval</option>
-              <option>Delay — schedule for later</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-field">
-          <label>Why this action? (recorded with the outcome)</label>
-          <textarea>0 funnels built since onboarding + 26 days of staff silence. Homepage Funnel Drip will prompt her to ship something live; includes 4-step sequence with conditional branching.</textarea>
-          <div class="hint">Shows in the intervention history + digest. Helps future pattern learning.</div>
+          <a href="clientpulse-mockup-fire-automation.html" target="_blank"
+             style="background: #4338ca; color: #fff; padding: 9px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; white-space: nowrap;">
+            Configure Fire automation ↗
+          </a>
         </div>
       </div>
 
-      <div class="section-title" style="margin-top: 16px;"><span class="step-num">3</span>Schedule + approval</div>
-
-      <div class="schedule-toggle">
-        <div class="schedule-option selected">
-          <div class="title">Submit to review queue</div>
-          <div class="sub">Standard flow · Kel approves before task goes to Sarah</div>
-        </div>
-        <div class="schedule-option">
-          <div class="title">Skip review (auto-assign)</div>
-          <div class="sub">Only available because you're the org admin and this is a task action, not an outbound message</div>
-        </div>
-      </div>
-
-      <!-- Preview -->
-      <div class="preview-card">
-        <div class="preview-header">Preview — how this lands in the review queue</div>
-        <div class="preview-subject">⚙️ Fire automation · Smith Dental · Homepage Funnel Drip</div>
-        <div class="preview-body">
-          Proposed by Kel (manual) · action: Fire automation · target: Dr. Marcia Smith · start: immediately on approval.
-          <br>Approve → contact enrolled in the automation · Reject → no action · Edit → opens this modal again. Outcome measured via band change in next scan cycles (v1 signal).
-        </div>
+      <!-- What happens on each action type — orienting note -->
+      <div style="padding: 10px 12px; background: #fafbfc; border: 1px dashed #d1d5db; border-radius: 6px; font-size: 11px; color: #6b7280; line-height: 1.55;">
+        <strong style="color: #374151;">Each action opens its own dedicated editor.</strong>
+        Fire automation → <code style="background:#fff;padding:1px 4px;border-radius:3px;">clientpulse-mockup-fire-automation.html</code> ·
+        Send email → <code style="background:#fff;padding:1px 4px;border-radius:3px;">clientpulse-mockup-email-authoring.html</code> ·
+        Send SMS → <code style="background:#fff;padding:1px 4px;border-radius:3px;">clientpulse-mockup-send-sms.html</code> ·
+        Create task → <code style="background:#fff;padding:1px 4px;border-radius:3px;">clientpulse-mockup-create-task.html</code> ·
+        Operator alert → <code style="background:#fff;padding:1px 4px;border-radius:3px;">clientpulse-mockup-operator-alert.html</code>.
+        Configure + submit happens there. This modal's job is just the scenario review + action-type pick.
       </div>
 
     </div>
 
     <!-- FOOTER -->
     <div class="modal-foot">
-      <div class="hint">Manual proposal · same downstream flow as the automated proposer · will record as a <em>manual-trigger</em> intervention in history.</div>
+      <div class="hint">Step 1 happens here · Step 2 opens the dedicated editor for the picked action · submission happens in that editor</div>
       <div>
         <button class="btn btn-secondary">Cancel</button>
-        <button class="btn btn-primary" style="margin-left: 8px;">Submit to review queue →</button>
       </div>
     </div>
 
