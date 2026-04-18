@@ -158,6 +158,48 @@
   }
   .sparkline-cell.cold { color: #9ca3af; font-size: 10px; font-style: italic; }
 
+  /* Portfolio band trend chart — shows how the Healthy/Watch/AtRisk/Critical
+     distribution evolves across the whole portfolio over time. */
+  .trend-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 18px 22px; margin-bottom: 20px;
+  }
+  .trend-head {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 14px;
+  }
+  .trend-head h3 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+  .trend-head .sub { font-size: 12px; color: #6b7280; margin-top: 3px; }
+  .trend-range { display: flex; gap: 4px; }
+  .trend-range button {
+    padding: 4px 10px; background: #f5f6f8; border: 1px solid transparent;
+    border-radius: 4px; font-size: 11px; font-weight: 600; color: #6b7280;
+    cursor: pointer; font-family: inherit;
+  }
+  .trend-range button.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+
+  .trend-chart { width: 100%; height: 180px; display: block; }
+  .trend-chart .healthy { fill: #86efac; fill-opacity: 0.9; }
+  .trend-chart .watch   { fill: #fde68a; fill-opacity: 0.9; }
+  .trend-chart .risk    { fill: #fdba74; fill-opacity: 0.9; }
+  .trend-chart .crit    { fill: #fca5a5; fill-opacity: 0.9; }
+  .trend-chart .grid { stroke: #e5e7eb; stroke-width: 0.5; stroke-dasharray: 2,2; }
+  .trend-chart text { font-size: 9px; fill: #6b7280; font-family: inherit; }
+  .trend-chart .now-line { stroke: #4338ca; stroke-width: 0.7; stroke-dasharray: 2,2; opacity: 0.6; }
+
+  .trend-legend {
+    display: flex; gap: 20px; margin-top: 14px; padding-top: 14px;
+    border-top: 1px solid #f0f1f3; flex-wrap: wrap;
+  }
+  .trend-legend .item { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+  .trend-legend .swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .trend-legend .label { color: #6b7280; }
+  .trend-legend .count { font-weight: 700; color: #1a1d23; }
+  .trend-legend .delta { font-size: 11px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+  .trend-legend .delta.up { background: #dcfce7; color: #166534; }
+  .trend-legend .delta.down { background: #fef2f2; color: #b91c1c; }
+  .trend-legend .delta.flat { background: #f0f1f3; color: #6b7280; }
+
   /* Intervention queue panel */
   .queue-panel .panel-head {
     padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
@@ -279,6 +321,115 @@
         <div class="label">MRR at Risk</div>
         <div class="value">$8,470</div>
         <div class="delta">Projected loss this month: 3 clients ($1,890)</div>
+      </div>
+    </div>
+
+    <!-- PORTFOLIO BAND TREND CHART
+         Shows how sub-accounts have moved between Healthy / Watch / At Risk / Critical
+         bands over the last 12 weeks. Stacked area = total visible, distribution visible. -->
+    <div class="trend-card">
+      <div class="trend-head">
+        <div>
+          <h3>Portfolio band trend</h3>
+          <div class="sub">How your clients have moved between bands over the last 12 weeks · Stacked total = portfolio size</div>
+        </div>
+        <div class="trend-range">
+          <button>4w</button>
+          <button class="active">12w</button>
+          <button>6m</button>
+          <button>1y</button>
+          <button>all</button>
+        </div>
+      </div>
+
+      <svg class="trend-chart" viewBox="0 0 640 180" preserveAspectRatio="none">
+
+        <!-- Y-axis gridlines -->
+        <line class="grid" x1="30" y1="20"  x2="640" y2="20"/>
+        <line class="grid" x1="30" y1="50"  x2="640" y2="50"/>
+        <line class="grid" x1="30" y1="80"  x2="640" y2="80"/>
+        <line class="grid" x1="30" y1="110" x2="640" y2="110"/>
+        <line class="grid" x1="30" y1="140" x2="640" y2="140"/>
+
+        <!-- Y-axis labels -->
+        <text x="26" y="23"  text-anchor="end">88</text>
+        <text x="26" y="53"  text-anchor="end">66</text>
+        <text x="26" y="83"  text-anchor="end">44</text>
+        <text x="26" y="113" text-anchor="end">22</text>
+        <text x="26" y="143" text-anchor="end">0</text>
+        <text x="16" y="80"  text-anchor="middle" transform="rotate(-90, 16, 80)" style="font-size: 8px;">clients</text>
+
+        <!-- Stacked areas (bottom-up: Critical > At Risk > Watch > Healthy) -->
+        <!-- Chart plot area: x = 30..640 (width 610), y = 20..140 (height 120). Scale: 88 clients → 120px, so 1 client ≈ 1.36px. Bottom y=140. -->
+
+        <!-- CRITICAL (bottom-most layer, red) — 3 clients consistently -->
+        <polygon class="crit"
+          points="30,140 30,136 85,136 140,136 195,136 250,136 305,136 360,136 415,136 470,136 525,136 580,136 640,136 640,140"/>
+
+        <!-- AT RISK (orange) — starts at yCrit, ends at yCrit+atRisk -->
+        <!-- Values: 8,8,8,7,8,8,7,7,7,8,8,7 → cumulative with C=3: 11,11,11,10,11,11,10,10,10,11,11,10 -->
+        <!-- y = 140 - cum*1.36 → 125, 125, 125, 126.4, 125, 125, 126.4, 126.4, 126.4, 125, 125, 126.4 -->
+        <polygon class="risk"
+          points="30,125 85,125 140,125 195,126.4 250,125 305,125 360,126.4 415,126.4 470,126.4 525,125 580,125 640,126.4
+                  640,136 580,136 525,136 470,136 415,136 360,136 305,136 250,136 195,136 140,136 85,136 30,136"/>
+
+        <!-- WATCH (amber) — starts at yAtRisk+Crit, ends at yAtRisk+Crit+Watch -->
+        <!-- Watch values: 18,17,16,17,15,14,16,15,14,14,15,14 → cum (C+R+W): 29,28,27,27,26,25,26,25,24,25,26,24 -->
+        <!-- y = 140 - cum*1.36 → 100.6, 101.9, 103.3, 103.3, 104.6, 106, 104.6, 106, 107.4, 106, 104.6, 107.4 -->
+        <polygon class="watch"
+          points="30,100.6 85,101.9 140,103.3 195,103.3 250,104.6 305,106 360,104.6 415,106 470,107.4 525,106 580,104.6 640,107.4
+                  640,126.4 580,125 525,125 470,126.4 415,126.4 360,126.4 305,125 250,125 195,126.4 140,125 85,125 30,125"/>
+
+        <!-- HEALTHY (green, top-most) — starts at yWatch+AtRisk+Crit, ends at total -->
+        <!-- Healthy values: 58,60,61,61,62,63,62,63,64,63,62,63 → cum (all): 87,88,88,88,88,88,88,88,88,88,88,87 -->
+        <!-- y = 140 - cum*1.36 → 21.68, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 20.32, 21.68 -->
+        <polygon class="healthy"
+          points="30,21.68 85,20.32 140,20.32 195,20.32 250,20.32 305,20.32 360,20.32 415,20.32 470,20.32 525,20.32 580,20.32 640,21.68
+                  640,107.4 580,104.6 525,106 470,107.4 415,106 360,104.6 305,106 250,104.6 195,103.3 140,103.3 85,101.9 30,100.6"/>
+
+        <!-- "Now" line at the right edge -->
+        <line class="now-line" x1="640" y1="15" x2="640" y2="145"/>
+        <text x="637" y="14" text-anchor="end" style="font-size:9px;fill:#4338ca;font-weight:600;">NOW</text>
+
+        <!-- X-axis labels (every 4 weeks) -->
+        <text x="30"  y="158" text-anchor="middle">12w ago</text>
+        <text x="250" y="158" text-anchor="middle">8w ago</text>
+        <text x="470" y="158" text-anchor="middle">4w ago</text>
+        <text x="640" y="158" text-anchor="end">today</text>
+
+        <!-- Key dates inline (when major tier changes happened on client visible in the data) -->
+        <text x="195" y="172" text-anchor="middle" style="fill:#b91c1c;font-size:9px;">Smith Dental $647→$347 (wk 4)</text>
+        <text x="470" y="172" text-anchor="middle" style="fill:#b91c1c;font-size:9px;">Bright $647→$347 (wk 9)</text>
+      </svg>
+
+      <div class="trend-legend">
+        <div class="item">
+          <span class="swatch" style="background:#86efac;"></span>
+          <span class="label">Healthy</span>
+          <span class="count">63</span>
+          <span class="delta up">+5 · 12wk</span>
+        </div>
+        <div class="item">
+          <span class="swatch" style="background:#fde68a;"></span>
+          <span class="label">Watch</span>
+          <span class="count">14</span>
+          <span class="delta up">−4 · 12wk</span>
+        </div>
+        <div class="item">
+          <span class="swatch" style="background:#fdba74;"></span>
+          <span class="label">At Risk</span>
+          <span class="count">7</span>
+          <span class="delta up">−1 · 12wk</span>
+        </div>
+        <div class="item">
+          <span class="swatch" style="background:#fca5a5;"></span>
+          <span class="label">Critical</span>
+          <span class="count">3</span>
+          <span class="delta flat">→ 0 · 12wk</span>
+        </div>
+        <div style="margin-left: auto; font-size: 11px; color: #6b7280;">
+          Source: <code style="background:#fafbfc;padding:1px 5px;border-radius:3px;font-size:10px;">client_pulse_churn_assessments</code> · weekly snapshot of the latest assessment per sub-account, aggregated to band counts.
+        </div>
       </div>
     </div>
 
