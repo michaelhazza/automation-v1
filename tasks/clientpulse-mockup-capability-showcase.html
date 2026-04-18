@@ -152,7 +152,7 @@
 <div class="toc">
   <h3>Sections</h3>
   <ul>
-    <li><a href="#s1">1. Pending intervention types</a></li>
+    <li><a href="#s1">1. Intervention scenarios + action primitives</a></li>
     <li><a href="#s2">2. Upcoming event types</a></li>
     <li><a href="#s3">3. Blind-spot / "team forgetting" patterns</a></li>
     <li><a href="#s4">4. Intervention outcome narratives</a></li>
@@ -173,10 +173,46 @@
 
   <!-- Sections appended here -->
 
-  <!-- Section 1 — Pending intervention types -->
+  <!-- Section 1 — Intervention scenarios + action primitives -->
   <div class="section-block" id="s1">
-    <h2>1. Pending intervention types</h2>
-    <p class="lead">What the proposer can queue for a sub-account. Each one becomes an <code>actions</code> row + a <code>reviewItems</code> card awaiting your one-click approval. Action type is <code>client_pulse_intervention</code>; the template slug (shown below each) controls trigger condition + message copy.</p>
+    <h2>1. Intervention scenarios + action primitives</h2>
+    <p class="lead">
+      <strong>Revised v1 model.</strong> The proposer <em>surfaces scenarios</em> (detection patterns worth addressing); the operator <em>executes an action</em> using one of five CRM-agnostic primitives. Action types are generic; the specifics (which CRM automation, which email copy, which task) are chosen at the moment. No pre-mapping per sub-account required.
+    </p>
+
+    <!-- Action primitives -->
+    <div style="padding: 14px 16px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; margin-bottom: 20px;">
+      <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #3730a3; font-weight: 700; margin-bottom: 10px;">The 5 action-type primitives (CRM-agnostic)</div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; font-size: 12px;">
+        <div style="padding: 10px; background: #fff; border: 1px solid #c7d2fe; border-radius: 6px;">
+          <div style="font-size: 16px; margin-bottom: 4px;">⚙️</div>
+          <div style="font-weight: 700; color: #1a1d23;">Fire automation</div>
+          <div style="font-size: 11px; color: #4c1d95; margin-top: 3px;">Enrol a contact in an existing CRM automation · operator picks which one from a live dropdown</div>
+        </div>
+        <div style="padding: 10px; background: #fff; border: 1px solid #c7d2fe; border-radius: 6px;">
+          <div style="font-size: 16px; margin-bottom: 4px;">✉︎</div>
+          <div style="font-weight: 700; color: #1a1d23;">Send email</div>
+          <div style="font-size: 11px; color: #4c1d95; margin-top: 3px;">Compose in Synthetos (editor, merge fields) · send via client's CRM</div>
+        </div>
+        <div style="padding: 10px; background: #fff; border: 1px solid #c7d2fe; border-radius: 6px;">
+          <div style="font-size: 16px; margin-bottom: 4px;">📱</div>
+          <div style="font-weight: 700; color: #1a1d23;">Send SMS</div>
+          <div style="font-size: 11px; color: #4c1d95; margin-top: 3px;">Compose in Synthetos · send via client's CRM / Twilio</div>
+        </div>
+        <div style="padding: 10px; background: #fff; border: 1px solid #c7d2fe; border-radius: 6px;">
+          <div style="font-size: 16px; margin-bottom: 4px;">📋</div>
+          <div style="font-weight: 700; color: #1a1d23;">Create task</div>
+          <div style="font-size: 11px; color: #4c1d95; margin-top: 3px;">Task lives in the client's CRM · VA sees it in their normal workflow</div>
+        </div>
+        <div style="padding: 10px; background: #fff; border: 1px solid #c7d2fe; border-radius: 6px;">
+          <div style="font-size: 16px; margin-bottom: 4px;">🔔</div>
+          <div style="font-weight: 700; color: #1a1d23;">Operator alert</div>
+          <div style="font-size: 11px; color: #4c1d95; margin-top: 3px;">Internal Synthetos notification · no outbound to client</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="lead" style="margin-bottom: 14px;">The entries below are the <strong>scenarios</strong> the proposer surfaces (detection patterns) — each maps to a recommended action primitive but leaves the specific choice to the operator at the moment. Slugs shown are internal detector identifiers, not user-visible strings.</p>
 
     <div class="card-list cols-2">
       <div class="card">

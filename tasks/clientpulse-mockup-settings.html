@@ -309,86 +309,83 @@
         </div>
       </div>
 
-      <!-- ═══════ Section 3: Intervention templates ═══════ -->
+      <!-- ═══════ Section 3: Saved email templates ═══════ -->
       <div class="sec-card">
         <div class="sec-head">
           <div class="left">
-            <h2>Intervention templates</h2>
-            <div class="desc">What the proposer can queue. Each row = one trigger + one action type + one message template.</div>
+            <h2>Saved email templates</h2>
+            <div class="desc">Reusable starting points for the Send email action. Compose once, reuse across any client. Not tied to any trigger or automation — just content.</div>
           </div>
           <div class="right">
-            <span class="override-badge">1 overridden · 1 disabled</span>
-            <a class="reset-link" href="#">Reset</a>
-            <button class="btn-mini primary">+ Add custom template</button>
+            <span class="default-badge">12 saved</span>
+            <a class="reset-link" href="#">Import from library</a>
+            <button class="btn-mini primary">+ New template</button>
           </div>
         </div>
         <div class="sec-body">
+          <p style="font-size: 12px; color: #6b7280; margin-bottom: 12px; padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; color: #1e40af;">
+            <strong>v1 model change:</strong> action types are generic primitives chosen at proposal time (Fire automation / Send email / Send SMS / Create task / Operator alert). There is no separate "intervention template library" with trigger conditions — the proposer surfaces scenarios; the operator picks the action. Email templates here are just reusable <em>content</em> — no trigger logic attached.
+          </p>
           <div class="tmpl-list">
 
             <div class="tmpl-row">
               <div class="toggle"></div>
               <div class="body">
-                <span class="slug">dormant_staff_activity_checkin</span>
-                <div class="title">Check-in email on 14-day silence</div>
-                <div class="desc">Template default. Fires when staff activity &ge; 14d quiet. Currently triggers 2–4× per week across the portfolio.</div>
+                <div class="title">Check-in — "everything OK?"</div>
+                <div class="desc">Light-touch outreach. Used 2–4× per week across the portfolio for dormant clients.</div>
               </div>
-              <span class="default-badge">template</span>
+              <span class="default-badge">system</span>
               <button class="btn-mini">Edit</button>
             </div>
 
             <div class="tmpl-row">
               <div class="toggle"></div>
               <div class="body">
-                <span class="slug">no_funnel_nurture</span>
-                <div class="title">4-video funnel-setup nurture</div>
-                <div class="desc">Template default. Fires when 0 funnels built after 30 days onboarded.</div>
+                <div class="title">Tier retention — "let's talk before Friday"</div>
+                <div class="desc">Retention outreach for clients after a tier downgrade. Lines up with the retention-call window.</div>
               </div>
-              <span class="default-badge">template</span>
+              <span class="override-badge">your template</span>
               <button class="btn-mini">Edit</button>
             </div>
 
             <div class="tmpl-row">
               <div class="toggle"></div>
               <div class="body">
-                <span class="slug">tier_downgrade_retention_alert</span>
-                <div class="title">Retention-call task to VA</div>
-                <div class="desc">You shortened the window from 90d → 60d so the retention task fires sooner.</div>
+                <div class="title">Funnel-setup helper</div>
+                <div class="desc">Paired with a Fire-automation action that enrols the contact in the client's funnel-nurture workflow.</div>
               </div>
-              <span class="override-badge">override</span>
-              <button class="btn-mini">Edit</button>
-            </div>
-
-            <div class="tmpl-row disabled">
-              <div class="toggle"></div>
-              <div class="body">
-                <span class="slug">third_party_ai_upsell</span>
-                <div class="title">Native GHL-AI upsell when CloseBot detected</div>
-                <div class="desc">You disabled this for Productivity Hub — your clients mostly prefer CloseBot, not native GHL AI.</div>
-              </div>
-              <span class="override-badge">disabled</span>
+              <span class="default-badge">system</span>
               <button class="btn-mini">Edit</button>
             </div>
 
             <div class="tmpl-row">
               <div class="toggle"></div>
               <div class="body">
-                <span class="slug">trial_milestone_nudge</span>
-                <div class="title">Trial milestone stalled-reminder</div>
-                <div class="desc">Template default. One nudge per stalled milestone, up to 5 per trial.</div>
+                <div class="title">Calendar setup nudge</div>
+                <div class="desc">Short email with a booking link to the VA's calendar.</div>
               </div>
-              <span class="default-badge">template</span>
+              <span class="default-badge">system</span>
               <button class="btn-mini">Edit</button>
             </div>
 
             <div class="tmpl-row">
               <div class="toggle"></div>
               <div class="body">
-                <span class="slug">calendar_setup_guide</span>
-                <div class="title">Calendar setup guide + VA-help offer</div>
-                <div class="desc">Template default.</div>
+                <div class="title">Thank-you / anniversary</div>
+                <div class="desc">Milestone-moment outreach. Celebrate rather than sell.</div>
               </div>
-              <span class="default-badge">template</span>
+              <span class="override-badge">your template</span>
               <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">+ 7 more saved templates</div>
+                <div class="desc">Browse the full library or create new ones.</div>
+              </div>
+              <span class="default-badge">&nbsp;</span>
+              <button class="btn-mini">View all</button>
             </div>
 
           </div>
