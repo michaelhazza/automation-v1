@@ -164,8 +164,9 @@
     <li><a href="#s10">10. Review-queue item types</a></li>
     <li><a href="#s11">11. Cold-start / insufficient-data states</a></li>
     <li><a href="#s12">12. Tier-migration events</a></li>
+    <li><a href="#s13">13. Agent action types (full taxonomy)</a></li>
   </ul>
-  <p class="muted" style="margin-top:10px;">Agent action types (50+ slugs) are listed in the chat cheatsheet rather than the mockup — too long to render usefully here.</p>
+  <p class="muted" style="margin-top:10px;">Section 13 lists every action an agent can take, even those that don't surface visually &mdash; they underpin everything else.</p>
 </div>
 
 <div class="page">
@@ -1479,6 +1480,469 @@
     <div style="margin-top: 14px; padding: 12px 14px; background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 12px; color: #065f46;">
       <strong>Module entitlement side-effect:</strong> when a tier changes, <code>org_subscriptions</code> updates; the allowlist resolver reflects the new module set immediately. Agents in the new <code>allowed_agent_slugs</code> resume; agents outside go dormant. Scheduled tasks for disallowed agents stop firing; run history preserved for audit.
     </div>
+  </div>
+
+  <!-- Section 13 — Agent action types (full taxonomy) -->
+  <div class="section-block" id="s13">
+    <h2>13. Agent action types (full taxonomy)</h2>
+    <p class="lead">
+      Every action an agent can invoke. These are the <em>capabilities</em> beneath everything in Sections 1&ndash;12 &mdash; most don't surface as a visible UI item, they underpin the system's ability to do work on behalf of a sub-account.
+      Source: <code>server/config/actionRegistry.ts</code> (50+ entries, each with <code>actionType</code>, <code>gateLevel</code>, <code>idempotencyStrategy</code>, <code>scopeRequirements</code>).
+      Items flagged <strong>[spec only]</strong> exist in design docs but aren't yet implemented. Items flagged <strong>[gated]</strong> require human approval before execution.
+    </p>
+
+    <!-- Group 1: Communication -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Communication &mdash; agency-branded outbound + internal</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-intervene">✉︎</div>
+        <div class="body">
+          <div class="slug">send_email [gated]</div>
+          <div class="title">Send email on behalf of the agency</div>
+          <div class="desc">Compose + send via Gmail / Outlook / GHL. Benefit: lets the proposer execute a check-in, nurture, or retention email with one human click &mdash; the core of the full Starboys replacement (D1).</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-intervene">📱</div>
+        <div class="body">
+          <div class="slug">send_sms [spec only, gated]</div>
+          <div class="title">Send SMS to a contact</div>
+          <div class="desc">Via GHL native SMS or Twilio. Benefit: higher open / reply rate than email for time-sensitive interventions; critical for clients whose decision-makers prefer text (e.g. the Ben @ Bright case).</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-intervene">📢</div>
+        <div class="body">
+          <div class="slug">post_to_slack</div>
+          <div class="title">Notify a Slack channel</div>
+          <div class="desc">Post structured alerts to an agency Slack channel. Benefit: keeps the agency team in the loop on Critical band entries, failed syncs, or intervention outcomes without requiring anyone to open the dashboard.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-intervene">🔔</div>
+        <div class="body">
+          <div class="slug">send_portal_notification</div>
+          <div class="title">In-product notification to a specific user</div>
+          <div class="example"><em>Real-time</em></div>
+          <div class="desc">Deliver a notification inside the Synthetos UI (with WebSocket push). Benefit: routes attention to one operator without spamming a channel &mdash; used when a single person needs to see something right now.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 2: CRM data mutation -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">CRM data mutation &mdash; write into the underlying platform</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-mover-up">➕</div>
+        <div class="body">
+          <div class="slug">create_contact</div>
+          <div class="title">Add a new contact to the sub-account CRM</div>
+          <div class="desc">Inserts into GHL / HubSpot / equivalent. Benefit: enables auto-enrolment from scraped events, webhook inputs, or form fills without the operator manually copy-pasting.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">✏️</div>
+        <div class="body">
+          <div class="slug">update_contact</div>
+          <div class="title">Modify fields, tags, or lifecycle stage</div>
+          <div class="desc">Updates <code>lifecycle_stage</code>, adds tags like <code>closed-won-q2</code>, tweaks custom fields. Benefit: keeps CRM state accurate automatically so segmentation + workflows stay correct.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">💼</div>
+        <div class="body">
+          <div class="slug">create_deal [gated]</div>
+          <div class="title">Open a new opportunity in the pipeline</div>
+          <div class="desc">Creates an opportunity with name, value, stage, associated contact. Benefit: captures deals surfaced from conversation analysis that would otherwise never get logged.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">🔄</div>
+        <div class="body">
+          <div class="slug">update_deal</div>
+          <div class="title">Advance stage, modify fields, re-assign</div>
+          <div class="desc">Pipeline stage moves, value updates, close-date changes. Benefit: keeps pipeline signal-rich rather than stale &mdash; critical for the pipeline-velocity health factor.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">🗄️</div>
+        <div class="body">
+          <div class="slug">update_record</div>
+          <div class="title">Generic record update in any connected tool</div>
+          <div class="desc">Works across HubSpot, Notion, Airtable, Monday. Benefit: lets ClientPulse write back into whichever tool the agency uses for the truth source, not just GHL.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-mover-up">📅</div>
+        <div class="body">
+          <div class="slug">create_event</div>
+          <div class="title">Schedule a calendar event</div>
+          <div class="desc">Books Google Calendar / GHL calendar slots. Benefit: lets the proposer auto-book a retention call or onboarding follow-up without a human having to chase calendar availability.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 3: Tasks + workflow -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Tasks + workflow orchestration</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-event">📋</div>
+        <div class="body">
+          <div class="slug">create_task</div>
+          <div class="title">Add an item to the internal task board</div>
+          <div class="desc">Creates a board card with title, description, assignee, due date. Benefit: the primary way the proposer assigns VA-facing work (e.g. "call Ben re: plan fit") without leaving the platform.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-event">➡️</div>
+        <div class="body">
+          <div class="slug">move_task</div>
+          <div class="title">Transition task through lifecycle columns</div>
+          <div class="desc">Todo &rarr; In Progress &rarr; Done etc. Benefit: lets agents auto-advance tasks they've completed without a human manually dragging cards.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-event">🔁</div>
+        <div class="body">
+          <div class="slug">reassign_task</div>
+          <div class="title">Move a task to a different owner</div>
+          <div class="desc">Both user &rarr; user and user &rarr; agent are valid targets. Benefit: supports the Team-capacity blind-spot pattern &mdash; agents can auto-redistribute stalled work.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-event">👥</div>
+        <div class="body">
+          <div class="slug">assign_task</div>
+          <div class="title">Delegate work to a worker agent</div>
+          <div class="desc">One agent hands off a sub-task to another agent with context. Benefit: enables multi-agent orchestration where a coordinator agent decomposes a job and farms pieces out.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-event">🎯</div>
+        <div class="body">
+          <div class="slug">triage_intake</div>
+          <div class="title">Route an incoming idea/bug/request</div>
+          <div class="desc">Categorises an intake item and drops it in the correct board column. Benefit: keeps the agency's inbox tidy; agents classify before a human has to read.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 4: Content creation -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Content creation</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-handoff">📄</div>
+        <div class="body">
+          <div class="slug">create_page</div>
+          <div class="title">Draft a landing page or funnel step</div>
+          <div class="desc">Writes a new GHL page / website block. Benefit: lets the proposer ship a "funnel-revival" intervention with draft copy + layout in one shot, ready for human review.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-handoff">✏️</div>
+        <div class="body">
+          <div class="slug">update_page [gated]</div>
+          <div class="title">Modify page HTML / copy</div>
+          <div class="desc">Edits an existing page's content, hero, social proof, CTAs. Benefit: the pattern behind Bright Marketing's funnel-refresh win (1.8% &rarr; 3.1% in 3 days).</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-handoff">🚀</div>
+        <div class="body">
+          <div class="slug">publish_page [gated]</div>
+          <div class="title">Flip a page to live</div>
+          <div class="desc">Separate gated action from <code>update_page</code> so a draft can be reviewed, edited further, then published. Benefit: multi-step approval without re-drafting.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-handoff">💻</div>
+        <div class="body">
+          <div class="slug">write_patch [dev-scoped, locked]</div>
+          <div class="title">Modify application code</div>
+          <div class="desc">Used by dev-mode agents working inside a sandboxed repo. Benefit: supports the "customise my own org" use case for technical agencies without exposing ClientPulse customers to it.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-handoff">🔀</div>
+        <div class="body">
+          <div class="slug">create_pr [dev-scoped, gated]</div>
+          <div class="title">Open a GitHub pull request</div>
+          <div class="desc">Creates a PR with diff + description. Benefit: makes the dev-mode loop auditable &mdash; nothing ships without a human-reviewed PR.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 5: Information retrieval -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Information retrieval &mdash; reading, searching, scraping</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-kpi">📥</div>
+        <div class="body">
+          <div class="slug">read_inbox</div>
+          <div class="title">Fetch recent emails from a connected mailbox</div>
+          <div class="desc">Reads Gmail / Outlook via OAuth. Benefit: gives agents the context of the conversation before they respond &mdash; no stale replies.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">🗂️</div>
+        <div class="body">
+          <div class="slug">read_data_source</div>
+          <div class="title">Query cascading context (board + subaccount + agent)</div>
+          <div class="desc">Pulls relevant state from multiple sources without the operator having to plumb it together. Benefit: agents start their runs with real context rather than generic boilerplate.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">📂</div>
+        <div class="body">
+          <div class="slug">read_codebase [dev-scoped]</div>
+          <div class="title">Read the contents of a file in the project</div>
+          <div class="desc">Used by dev-mode agents. Benefit: enables code-aware agents without exposing file-system access to customer-facing agents.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">🔎</div>
+        <div class="body">
+          <div class="slug">search_codebase [dev-scoped]</div>
+          <div class="title">Find code matching a pattern</div>
+          <div class="desc">Like grep but for the dev-mode agent. Benefit: fast navigation of large codebases during custom development work for the agency's own platform.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">🌐</div>
+        <div class="body">
+          <div class="slug">web_search [spec only]</div>
+          <div class="title">Search the public web</div>
+          <div class="desc">External search engine. Benefit: enables "research this client's competitors" or "find current industry benchmarks" workflows without the operator leaving the product.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">🔗</div>
+        <div class="body">
+          <div class="slug">fetch_url</div>
+          <div class="title">HTTP GET a specific URL</div>
+          <div class="desc">Returns response body + headers. Benefit: supports agent-driven API checks (e.g. "is this client's site up?") and structured-data fetches from known endpoints.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">📃</div>
+        <div class="body">
+          <div class="slug">scrape_url</div>
+          <div class="title">Extract content from a web page</div>
+          <div class="desc">Returns text / markdown / JSON depending on mode. Benefit: enables research workflows (e.g. "compare this landing page to competitor X") and monitoring for pages without APIs.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-kpi">🧠</div>
+        <div class="body">
+          <div class="slug">scrape_structured</div>
+          <div class="title">Adaptive-selector structured data extraction</div>
+          <div class="desc">Pulls out listings, prices, reviews, etc. with learned selectors. Benefit: powers competitive intelligence + lead-source scrapers that survive small page changes without maintenance.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 6: Approval + review -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Approval + review &mdash; the HITL primitives</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-review">🛑</div>
+        <div class="body">
+          <div class="slug">request_approval</div>
+          <div class="title">Route an action to the HITL queue</div>
+          <div class="desc">Creates a <code>reviewItems</code> row with payload + evidence. Benefit: the universal primitive behind every gated action &mdash; this is what makes the full-Starboys-replacement safe.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">❓</div>
+        <div class="body">
+          <div class="slug">ask_clarifying_question</div>
+          <div class="title">Pause the run, wait for user answer</div>
+          <div class="desc">Non-blocking by default (run sleeps, resumes on answer). Benefit: prevents agents from guessing when they shouldn't &mdash; quality over speed on ambiguous requests.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-review">⚡</div>
+        <div class="body">
+          <div class="slug">request_clarification</div>
+          <div class="title">Real-time question to a named human</div>
+          <div class="desc">WebSocket-pushed prompt with optional blocking timeout. Benefit: lets critical-path decisions get made during a run without losing context to a queue.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 7: ClientPulse-specific intelligence -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">ClientPulse intelligence &mdash; read-only scoring + write-on-approval interventions</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-outcome">📊</div>
+        <div class="body">
+          <div class="slug">compute_health_score</div>
+          <div class="title">Calculate account health 0&ndash;100</div>
+          <div class="desc">Weighted composite from configured factors (pipeline velocity, engagement, contact growth, revenue trend, platform activity). Benefit: the core primitive all of ClientPulse rides on; editable per org without code changes.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">🚨</div>
+        <div class="body">
+          <div class="slug">detect_anomaly</div>
+          <div class="title">Flag metric deviations vs baseline</div>
+          <div class="example"><em>2&sigma; default, configurable</em></div>
+          <div class="desc">Compares current metric values against a rolling historical baseline. Benefit: catches problems before the human does &mdash; the engine behind the blind-spot patterns in Section 3.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">⚠️</div>
+        <div class="body">
+          <div class="slug">compute_churn_risk</div>
+          <div class="title">Risk score + recommended intervention</div>
+          <div class="desc">Combines configured churn signals (trajectory decline, pipeline stagnation, engagement drop, low health). Benefit: turns raw signals into a band (Healthy/Watch/At Risk/Critical) + a proposed next action.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">💓</div>
+        <div class="body">
+          <div class="slug">compute_staff_activity_pulse</div>
+          <div class="title">Derived staff-activity composite</div>
+          <div class="desc">Aggregates staff-attributed mutations across contacts, opps, conversations, workflows, funnels, calendars. Benefit: the canonical replacement for "login data" &mdash; catches dead accounts that look alive by any other metric.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">🔍</div>
+        <div class="body">
+          <div class="slug">scan_integration_fingerprints</div>
+          <div class="title">Detect installed third-party tools</div>
+          <div class="desc">Walks canonical artefacts (conversation providers, workflow action types, webhook domains, tag/field prefixes) against the fingerprint library. Benefit: zero-setup awareness of CloseBot / Uphex / etc. across every sub-account.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">📑</div>
+        <div class="body">
+          <div class="slug">generate_portfolio_report</div>
+          <div class="title">Structured briefing across all clients</div>
+          <div class="desc">Writes a canonical <code>reports</code> row of type <code>portfolio_health</code>. Benefit: one source of truth that dashboard + briefing + digest + rollup all read from &mdash; no duplicated query logic.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">🧩</div>
+        <div class="body">
+          <div class="slug">query_subaccount_cohort</div>
+          <div class="title">Aggregated analysis across tagged clients</div>
+          <div class="desc">"Show me average CPL across all my home-services clients" / "which clients in the same cohort have recovered after a tier downgrade?". Benefit: powers cohort-deviation blind spots + comparative examples in briefings.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">🗺️</div>
+        <div class="body">
+          <div class="slug">read_org_insights</div>
+          <div class="title">Semantic search over cross-client memory</div>
+          <div class="desc">Retrieves learned patterns, beliefs, decisions across every sub-account in the org. Benefit: lets agents reuse hard-won lessons across the portfolio (e.g. "this template worked for 3 similar clients").</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">✍️</div>
+        <div class="body">
+          <div class="slug">write_org_insight</div>
+          <div class="title">Store an insight to org-level memory</div>
+          <div class="desc">Creates / updates a memory block scoped to the agency org (not a single sub-account). Benefit: portfolio-wide learnings stay portable &mdash; the flywheel that makes the product smarter over time.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-outcome">🎯</div>
+        <div class="body">
+          <div class="slug">trigger_account_intervention [gated]</div>
+          <div class="title">Propose an intervention for one account</div>
+          <div class="desc">Instantiates an <code>actions</code> row with <code>actionType='client_pulse_intervention'</code> + evidence + template slug. Benefit: the single entry-point that funnels every Section 1 intervention through the HITL queue.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 8: Monitoring + reporting -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">Monitoring + reporting</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-blindspot">📡</div>
+        <div class="body">
+          <div class="slug">monitor_webpage</div>
+          <div class="title">Recurring page-change detection with alerts</div>
+          <div class="desc">Watches a URL for content diffs; alerts on significant change. Benefit: supports "did the client's pricing page change?" or "did a competitor launch X?" watchlists without a human checking manually.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-blindspot">📈</div>
+        <div class="body">
+          <div class="slug">read_analytics [spec only]</div>
+          <div class="title">Fetch GA4 / analytics metrics</div>
+          <div class="desc">Per-client analytics pull via OAuth'd GA4 property. Benefit: adds "traffic trend" as a first-class health input alongside CRM activity &mdash; essential for lead-generation-focused clients.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-blindspot">📣</div>
+        <div class="body">
+          <div class="slug">publish_post [spec only, gated]</div>
+          <div class="title">Publish to a social media account</div>
+          <div class="desc">Schedule or immediately post to connected social channels. Benefit: closes the loop on content interventions &mdash; proposer drafts, human approves, platform posts.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group 9: System + metadata -->
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; margin-bottom: 8px; font-weight: 700;">System + metadata &mdash; what agents know about the platform itself</div>
+    <div class="card-list cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="marker m-integration">📚</div>
+        <div class="body">
+          <div class="slug">list_platform_capabilities</div>
+          <div class="title">Query the integration + capability catalogue</div>
+          <div class="desc">Returns the full set of integrations, skills, and actions the platform knows about. Benefit: lets agents answer "can we do X for this client?" without a human having to memorise the capability matrix.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-integration">🔌</div>
+        <div class="body">
+          <div class="slug">list_connections</div>
+          <div class="title">Show active OAuth / integration connections per org</div>
+          <div class="desc">Lists what's connected + health status of each. Benefit: the diagnostic layer that answers "why isn't CPL showing up?" with "because Google Ads isn't connected yet".</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-integration">🗺️</div>
+        <div class="body">
+          <div class="slug">check_capability_gap</div>
+          <div class="title">Is a capability configured / configurable / missing?</div>
+          <div class="desc">Drives the Orchestrator's four-path routing (A/B/C/D). Benefit: distinguishes "user has it but didn't enable it" from "platform literally can't do this" &mdash; so the reply is always accurate.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-integration">💡</div>
+        <div class="body">
+          <div class="slug">request_feature</div>
+          <div class="title">File a feature request from a live run</div>
+          <div class="desc">Creates a <code>feature_requests</code> row tagged with the triggering run + category (e.g. <code>new_capability</code> vs <code>system_promotion_candidate</code>). Benefit: turns every "I wish the product did X" moment into prioritisable data.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-integration">🧠</div>
+        <div class="body">
+          <div class="slug">update_memory_block</div>
+          <div class="title">Modify a named memory block</div>
+          <div class="desc">Creates or updates a belief / pattern / preference / etc. (Section 5). Benefit: the write primitive behind the system's ability to learn &mdash; corrections + auto-synthesis both route through here.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="marker m-integration">📖</div>
+        <div class="body">
+          <div class="slug">read_workspace</div>
+          <div class="title">Query workspace memories for context</div>
+          <div class="desc">Reads the workspace's memory graph to ground a run in what's already known. Benefit: agents start runs with full context &mdash; no more "explain this from scratch every time".</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footnote -->
+    <div style="margin-top: 14px; padding: 12px 14px; background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 12px; color: #065f46;">
+      <strong>Tiering note (per decision D6):</strong> the <em>read-only</em> intelligence + information-retrieval + system actions are available on the <strong>Monitor tier</strong> (~$1,200/mo anchor). The <em>write / execute / propose</em> actions &mdash; especially <code>send_email</code>, <code>send_sms</code>, <code>create_page</code>, <code>publish_page</code>, <code>trigger_account_intervention</code>, <code>create_event</code>, <code>create_deal</code> &mdash; unlock on the <strong>Operate tier</strong> (~$2,400/mo anchor). Monitor-tier orgs see health + risk + blind spots; Operate-tier orgs get the automated execution on top.
+    </div>
+
   </div>
 
 </div>
