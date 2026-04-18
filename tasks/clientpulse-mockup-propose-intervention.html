@@ -292,24 +292,27 @@
     <!-- RIGHT — build the intervention -->
     <div class="build-pane">
 
-      <div class="section-title"><span class="step-num">1</span>Pick a template</div>
+      <div class="section-title"><span class="step-num">1</span>Pick an action</div>
+      <p style="font-size: 11px; color: #6b7280; margin: -6px 0 12px; line-height: 1.55;">
+        Five generic action types. The proposer suggests which one fits the current signals; you pick the specifics (which GHL automation, which email, etc.) at the moment. No pre-setup per sub-account required.
+      </p>
 
       <div class="tmpl-row selected recommended">
         <div class="radio"></div>
         <div class="body">
-          <div class="title">Retention call task to VA <span class="badge">RECOMMENDED</span></div>
-          <div class="desc">Based on current signals (silence + tier downgrade), the proposer picks this. Creates a task assigned to Sarah with a call script.</div>
-          <span class="runs-in synthetos">▪ Runs in: Synthetos task board</span>
+          <div class="title">Fire GHL automation <span class="badge">RECOMMENDED</span></div>
+          <div class="desc">Enrol Dr. Marcia into an existing GHL automation in Smith Dental's account. Proposer suggests this because 0 funnels + 26d silence is a classic funnel-nurture scenario. You pick which automation.</div>
+          <span class="runs-in ghl-workflow">▪ Runs in: GHL workflow (Smith Dental sub-account)</span>
         </div>
-        <div class="action-icon">📞</div>
+        <div class="action-icon">⚙️</div>
       </div>
 
       <div class="tmpl-row">
         <div class="radio"></div>
         <div class="body">
-          <div class="title">Check-in email — "everything OK?"</div>
-          <div class="desc">Single email from the agency's GHL inbox to Dr. Marcia Smith. Already used 12 Apr without reply.</div>
-          <span class="runs-in ghl-email">▪ Runs in: GHL email (Smith Dental sub-account)</span>
+          <div class="title">Send email</div>
+          <div class="desc">Compose in Synthetos (subject, body, merge fields, preview). Send goes via Smith Dental's GHL using the agency's authenticated domain. Great for one-off check-ins, personal notes, and short bespoke messages.</div>
+          <span class="runs-in ghl-email">▪ Composed in Synthetos · sent via GHL (Smith Dental sub-account)</span>
         </div>
         <div class="action-icon">✉︎</div>
       </div>
@@ -317,84 +320,85 @@
       <div class="tmpl-row">
         <div class="radio"></div>
         <div class="body">
-          <div class="title">4-video funnel-setup nurture</div>
-          <div class="desc">Enrols Dr. Marcia into the <em>Funnel Setup Nurture</em> workflow in Smith Dental's GHL account. GHL handles the 4-step drip natively. <strong style="color:#065f46;">Workflow installed ✓</strong> (2 Feb).</div>
-          <span class="runs-in ghl-workflow">▪ Runs in: GHL workflow (Smith Dental sub-account)</span>
+          <div class="title">Send SMS</div>
+          <div class="desc">Same pattern as email — compose in Synthetos, send via the sub-account's GHL/Twilio using their existing phone number. Good when the contact prefers SMS (e.g. Ben at Bright Marketing).</div>
+          <span class="runs-in ghl-sms">▪ Composed in Synthetos · sent via GHL/Twilio</span>
         </div>
-        <div class="action-icon">▶︎</div>
+        <div class="action-icon">📱</div>
       </div>
 
       <div class="tmpl-row">
         <div class="radio"></div>
         <div class="body">
-          <div class="title">Calendar setup guide + VA-help offer</div>
-          <div class="desc">Single email via GHL. Includes booking link to Sarah's calendar.</div>
-          <span class="runs-in ghl-email">▪ Runs in: GHL email (Smith Dental sub-account)</span>
+          <div class="title">Create GHL task</div>
+          <div class="desc">Create a task inside Smith Dental's GHL account with assignee + due date + notes. The VA sees it in their normal GHL workflow — no hopping tools. Outcome tracked when the task is completed.</div>
+          <span class="runs-in synthetos">▪ Lives in: GHL tasks (Smith Dental sub-account)</span>
         </div>
-        <div class="action-icon">📅</div>
+        <div class="action-icon">📋</div>
       </div>
 
       <div class="tmpl-row">
         <div class="radio"></div>
         <div class="body">
-          <div class="title">Personal video from Kel — <em>custom</em></div>
-          <div class="desc">Free-form. Kel records a Loom, Synthetos sends it through GHL email + tracks delivery + replies.</div>
-          <span class="runs-in ghl-email">▪ Runs in: GHL email · tracked in Synthetos</span>
+          <div class="title">Operator alert</div>
+          <div class="desc">Internal notification to Kel (or another operator) only — no outbound to the client. Used when you want to flag a situation without taking action yet: "look at this client manually".</div>
+          <span class="runs-in synthetos">▪ Lives in: Synthetos (operator notification only)</span>
         </div>
-        <div class="action-icon">✍︎</div>
+        <div class="action-icon">🔔</div>
       </div>
 
       <!-- Architectural note -->
       <div style="margin-top: 10px; padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; color: #1e40af; line-height: 1.55;">
-        <strong>Execution model:</strong> Synthetos decides <em>which</em> intervention fits and orchestrates the handoff. Emails, SMS, and drip workflows run inside the client's GHL sub-account — uses the agency's authenticated sending domain and existing contact records. Tasks for your team live in Synthetos (or sync to GHL tasks if toggled on). Outcomes feed back via GHL webhooks + Synthetos board events.
+        <strong>v1 execution model:</strong> the proposer <em>surfaces</em> scenarios (issues worth addressing); the operator <em>executes</em> the action. Action types are generic primitives — you pick which GHL automation, which email, which task details at the moment. No pre-mapping per sub-account required. Emails / SMS / drips run inside the client's GHL; Synthetos orchestrates and tracks outcomes via webhooks.
       </div>
 
-      <div class="section-title" style="margin-top: 20px;"><span class="step-num">2</span>Customise the action</div>
+      <div class="section-title" style="margin-top: 20px;"><span class="step-num">2</span>Configure the action</div>
 
-      <!-- Destination block — where the task actually lands -->
-      <div style="padding: 10px 12px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
-        <div style="font-weight: 700; color: #3730a3; margin-bottom: 3px;">Task destination</div>
-        <div style="color: #4c1d95; line-height: 1.55;">
-          Lands in the <strong>Synthetos task board</strong> (visible to Kel + Sarah). Outcome tracked automatically on completion.
-          <label style="display: block; margin-top: 6px; font-weight: 500;">
-            <input type="checkbox" style="margin-right: 5px; vertical-align: middle;"> Also create a mirrored task inside Smith Dental's GHL account (for VAs who work primarily in GHL)
-          </label>
+      <!-- When "Fire GHL automation" is selected, the form is an automation picker -->
+      <div style="padding: 10px 12px; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
+        <div style="font-weight: 700; color: #92400e; margin-bottom: 3px;">Fire GHL automation · Smith Dental sub-account</div>
+        <div style="color: #78350f; line-height: 1.55;">
+          Live dropdown below lists every active workflow in Smith Dental's GHL. Pick one — Synthetos enrols Dr. Marcia as a contact via GHL's API. Zero pre-setup: <em>the agency already built these workflows for their own client delivery</em>.
         </div>
       </div>
 
       <div class="payload-form">
+        <div class="form-field">
+          <label>GHL automation</label>
+          <select>
+            <option selected>Homepage Funnel Drip · 4 steps · 42 contacts enrolled (last edited 12 Feb)</option>
+            <option>Lead Nurture 2024 · 6 steps · 118 contacts enrolled</option>
+            <option>Q2 Campaign · 3 steps · 0 contacts enrolled (draft)</option>
+            <option>Re-engagement Sequence · 5 steps · 23 contacts enrolled</option>
+            <option>Welcome Series · 7 steps · 204 contacts enrolled</option>
+            <option disabled>────────────</option>
+            <option>Browse all 14 workflows in Smith Dental's GHL →</option>
+          </select>
+          <div class="hint">Dropdown populated live via <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:10px;">GET /workflows?locationId=…</code> on every open. Only active workflows shown by default.</div>
+        </div>
+
         <div class="form-row">
           <div class="form-field">
-            <label>Assignee</label>
+            <label>Contact to enrol</label>
             <select>
-              <option selected>Sarah · VA</option>
-              <option>Kel · Agency owner</option>
-              <option>David · Account manager</option>
+              <option selected>Dr. Marcia Smith · owner · primary contact</option>
+              <option>Stephanie Rodriguez · practice manager</option>
+              <option>All active contacts in the sub-account (204)</option>
             </select>
           </div>
           <div class="form-field">
-            <label>Due by</label>
-            <input type="text" value="Fri 25 Apr · end of day">
+            <label>Start</label>
+            <select>
+              <option selected>Immediately on approval</option>
+              <option>Delay — schedule for later</option>
+            </select>
           </div>
         </div>
 
         <div class="form-field">
-          <label>Task title</label>
-          <input type="text" value="Retention call — Smith Dental (tier downgrade + 26d silence)">
-        </div>
-
-        <div class="form-field">
-          <label>Call script / notes for Sarah</label>
-          <textarea>Call Dr. Marcia Smith, aim for 10-min check-in.
-
-Angles:
- • Acknowledge the $647 → $147 move — no pitch, just listen
- • Ask about the practice's Q2 goals
- • Offer 30-day DFY funnel audit at no cost (template already built)
- • If she mentions leaving → escalate to Kel same day
-
-Avoid: upselling, defensive framing, scripted language.</textarea>
-          <div class="hint">Edit freely. The VA sees exactly this on their task card.</div>
+          <label>Why this action? (recorded with the outcome)</label>
+          <textarea>0 funnels built since onboarding + 26 days of staff silence. Homepage Funnel Drip will prompt her to ship something live; includes 4-step sequence with conditional branching.</textarea>
+          <div class="hint">Shows in the intervention history + digest. Helps future pattern learning.</div>
         </div>
       </div>
 
@@ -414,10 +418,10 @@ Avoid: upselling, defensive framing, scripted language.</textarea>
       <!-- Preview -->
       <div class="preview-card">
         <div class="preview-header">Preview — how this lands in the review queue</div>
-        <div class="preview-subject">📞 Retention call · Smith Dental · due Fri 25 Apr</div>
+        <div class="preview-subject">⚙️ Fire GHL automation · Smith Dental · Homepage Funnel Drip</div>
         <div class="preview-body">
-          Proposed by Kel (manual) · template: <em>tier_downgrade_retention_alert</em> · assignee: Sarah (VA).
-          Call script provided. Approve → task assigned · Reject → no action taken · Edit → opens this modal again.
+          Proposed by Kel (manual) · action: Fire GHL automation · target: Dr. Marcia Smith · start: immediately on approval.
+          <br>Approve → contact enrolled in GHL workflow · Reject → no action · Edit → opens this modal again. Outcome measured 72h after workflow completion.
         </div>
       </div>
 
