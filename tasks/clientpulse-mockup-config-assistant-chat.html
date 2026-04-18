@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Configuration Assistant chat — popup (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1; }
+  .bg-hint {
+    position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none;
+    font-size: 11px; color: #9ca3af;
+  }
+
+  /* Chat popup (floating on the bottom-right) */
+  .chat-popup {
+    position: fixed; bottom: 24px; right: 24px; z-index: 10;
+    width: 440px; height: 640px; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.06);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .chat-head {
+    padding: 12px 16px; background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%);
+    color: #fff;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .chat-head .avatar {
+    width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,0.2);
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .chat-head .title-row { flex: 1; }
+  .chat-head h3 { font-size: 14px; font-weight: 700; }
+  .chat-head .status { font-size: 11px; color: #c7d2fe; margin-top: 1px; display: flex; align-items: center; gap: 5px; }
+  .chat-head .status .dot { width: 6px; height: 6px; background: #6ee7b7; border-radius: 50%; }
+  .chat-head .header-btn {
+    background: rgba(255,255,255,0.1); color: #fff; border: 0;
+    width: 26px; height: 26px; border-radius: 5px; cursor: pointer; font-size: 13px;
+  }
+  .chat-head .header-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* Context strip */
+  .context-strip {
+    padding: 8px 14px; background: #eef2ff; border-bottom: 1px solid #c7d2fe;
+    font-size: 11px; color: #3730a3; display: flex; gap: 8px; align-items: center;
+  }
+  .context-strip .label {
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  /* Message list */
+  .msgs {
+    flex: 1; overflow-y: auto; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+
+  .msg { display: flex; gap: 8px; align-items: flex-start; max-width: 90%; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+    flex-shrink: 0;
+  }
+  .msg.user .avatar { background: #e5e7eb; color: #4b5563; }
+  .msg.agent .avatar {
+    background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%); color: #fff;
+  }
+
+  .bubble {
+    padding: 9px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+  }
+  .msg.user .bubble { background: #4338ca; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.agent .bubble { background: #f5f6f8; color: #1a1d23; border-bottom-left-radius: 4px; }
+
+  .msg .bubble code {
+    background: rgba(0,0,0,0.08); padding: 1px 5px; border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px;
+  }
+  .msg.user .bubble code { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .bubble .confirmation {
+    background: #d1fae5; border: 1px solid #a7f3d0; padding: 8px 10px; border-radius: 6px;
+    margin-top: 8px; font-size: 12px; color: #065f46;
+  }
+  .bubble .confirmation strong { color: #047857; }
+  .bubble .confirmation .detail {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px;
+    margin-top: 4px;
+  }
+
+  .bubble .actions-row {
+    display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .bubble .chip-btn {
+    font-size: 11px; padding: 4px 9px; background: #fff; color: #4338ca;
+    border: 1px solid #c7d2fe; border-radius: 11px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .bubble .chip-btn.subtle {
+    background: transparent; color: #6b7280; border-color: #e5e7eb;
+  }
+
+  .suggested-chips {
+    align-self: flex-start; display: flex; flex-wrap: wrap; gap: 5px;
+    max-width: 90%; margin-left: 34px;
+  }
+  .suggested-chips .s-label {
+    font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;
+    flex-basis: 100%;
+  }
+  .suggested-chips .chip {
+    font-size: 11px; padding: 5px 10px; background: #fff; color: #4338ca;
+    border: 1px solid #c7d2fe; border-radius: 11px; cursor: pointer; font-family: inherit;
+    font-weight: 500;
+  }
+  .suggested-chips .chip:hover { background: #eef2ff; }
+
+  .typing {
+    align-self: flex-start; display: flex; gap: 8px; align-items: center;
+    margin-left: 0; font-size: 11px; color: #9ca3af;
+  }
+
+  /* Input */
+  .input-row {
+    padding: 12px 14px; border-top: 1px solid #e5e7eb; background: #fff;
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  .input-row textarea {
+    flex: 1; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 18px;
+    font-size: 13px; font-family: inherit; resize: none; line-height: 1.4;
+    min-height: 36px; max-height: 100px;
+  }
+  .input-row textarea:focus { outline: none; border-color: #4338ca; }
+  .input-row .send-btn {
+    width: 36px; height: 36px; border-radius: 50%; background: #4338ca; color: #fff;
+    border: 0; cursor: pointer; font-size: 14px;
+  }
+  .input-row .send-btn:hover { background: #3730a3; }
+
+  .chat-foot {
+    padding: 6px 14px; background: #fafbfc; border-top: 1px solid #f0f1f3;
+    font-size: 10px; color: #9ca3af; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Opens when the operator clicks <strong>"Open chat →"</strong> in the settings page callout · Lets operators tweak ClientPulse config in natural language (no form-clicking) · Routes through Orchestrator → Configuration Agent → writes to operational_config</div>
+
+<div class="bg-context"></div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-settings.html</code> (clicked "Open chat →" on the callout)</div>
+
+<div class="chat-popup">
+
+  <!-- Header -->
+  <div class="chat-head">
+    <div class="avatar">🤖</div>
+    <div class="title-row">
+      <h3>Configuration Assistant</h3>
+      <div class="status"><span class="dot"></span>Live · scope: Productivity Hub — SaaS</div>
+    </div>
+    <button class="header-btn" title="Minimise">_</button>
+    <button class="header-btn" title="Close">×</button>
+  </div>
+
+  <!-- Context strip showing scope -->
+  <div class="context-strip">
+    <span class="label">Scope</span>
+    <span>Productivity Hub — SaaS · ClientPulse settings · changes write to your org's <code style="background:rgba(67,56,202,0.1);padding:1px 4px;border-radius:3px;">operational_config</code></span>
+  </div>
+
+  <!-- Conversation -->
+  <div class="msgs">
+
+    <!-- Assistant greeting -->
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        Hi Kel — I can change any ClientPulse setting for you in plain English. Same effect as editing through the settings page, just faster when you know what you want.
+      </div>
+    </div>
+
+    <!-- Suggestion chips -->
+    <div class="suggested-chips">
+      <div class="s-label">Try one of these</div>
+      <button class="chip">Bump pipeline velocity weight to 0.35</button>
+      <button class="chip">Disable the tier-downgrade retention alert</button>
+      <button class="chip">Reset blind-spot thresholds to defaults</button>
+      <button class="chip">Make the silent-channel alert fire at 10 days instead of 7</button>
+      <button class="chip">Lower the Critical band ceiling from 19 to 15</button>
+    </div>
+
+    <!-- User asks -->
+    <div class="msg user">
+      <div class="avatar">K</div>
+      <div class="bubble">
+        bump pipeline velocity weight to 0.35 and drop contact growth to 0.15
+      </div>
+    </div>
+
+    <!-- Assistant understands + confirms before applying -->
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        Got it. Two changes to <strong>Health score factors</strong>:
+
+        <div class="confirmation">
+          <strong>Pipeline velocity</strong> · 0.30 → <strong>0.35</strong> · <span style="color:#059669;">+0.05</span>
+          <div class="detail">operational_config.healthScoreFactors.pipeline_velocity.weight</div>
+        </div>
+
+        <div class="confirmation" style="margin-top: 6px;">
+          <strong>Contact growth</strong> · 0.15 → <strong>0.15</strong> · <span style="color:#6b7280;">unchanged (already 0.15)</span>
+          <div class="detail">operational_config.healthScoreFactors.contact_growth.weight</div>
+        </div>
+
+        Weights still sum to 1.00 after the change ✓
+        <br><br>
+        Apply these changes?
+
+        <div class="actions-row">
+          <button class="chip-btn" style="background:#4338ca;color:#fff;border-color:#4338ca;">Apply both</button>
+          <button class="chip-btn">Apply only pipeline velocity</button>
+          <button class="chip-btn subtle">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- User confirms -->
+    <div class="msg user">
+      <div class="avatar">K</div>
+      <div class="bubble">apply both</div>
+    </div>
+
+    <!-- Assistant confirms applied -->
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        Done ✓ Changes are live — next scan cycle (in ~3h) will use the new weights.
+
+        <div class="confirmation">
+          <strong>2 overrides saved</strong> to your org's operational_config.
+          <div class="detail">pipeline_velocity · 0.30 → 0.35<br>contact_growth · 0.15 (unchanged — already overridden)</div>
+        </div>
+
+        <div class="actions-row">
+          <button class="chip-btn">Undo</button>
+          <button class="chip-btn subtle">View in settings ↗</button>
+          <button class="chip-btn subtle">See history</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Follow-up suggestion from assistant -->
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        💡 Since you're tuning factors — want me to preview what the new weights would've scored each of your 87 clients over the last 30 days? I can run a back-test without touching live data.
+        <div class="actions-row">
+          <button class="chip-btn">Yes, run back-test</button>
+          <button class="chip-btn subtle">Not now</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Input row -->
+  <div class="input-row">
+    <textarea placeholder="Ask the assistant to change any setting…"></textarea>
+    <button class="send-btn">↑</button>
+  </div>
+
+  <div class="chat-foot">
+    Changes are scoped to your org. Every edit is logged + reversible · <a href="#" style="color:#4338ca;text-decoration:none;">Open settings ↗</a>
+  </div>
+
+</div>
+
+</body>
+</html>

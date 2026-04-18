@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Edit configuration template — system admin (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1; }
+  .bg-hint {
+    position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none;
+    font-size: 11px; color: #9ca3af;
+  }
+
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 30px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 900px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+
+  .m-head {
+    padding: 16px 22px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .sub .warn { color: #b45309; font-weight: 600; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  /* Warning banner: system-template scope */
+  .scope-banner {
+    padding: 12px 22px; background: #fffbeb; border-bottom: 1px solid #fde68a;
+    display: flex; gap: 12px; align-items: center; font-size: 12px; color: #78350f;
+  }
+  .scope-banner .icon { font-size: 18px; }
+  .scope-banner strong { color: #92400e; }
+  .scope-banner .detail { color: #92400e; line-height: 1.5; }
+
+  /* Section nav + body */
+  .m-body { display: grid; grid-template-columns: 180px 1fr; min-height: 560px; }
+  .nav-col {
+    background: #fafbfc; border-right: 1px solid #e5e7eb; padding: 12px 10px;
+  }
+  .nav-item {
+    padding: 7px 10px; border-radius: 4px; font-size: 12px; color: #374151; cursor: pointer;
+    margin-bottom: 2px;
+  }
+  .nav-item:hover { background: #eef2ff; color: #4338ca; }
+  .nav-item.active { background: #eef2ff; color: #4338ca; font-weight: 700; }
+  .nav-item .count {
+    float: right; color: #9ca3af; font-size: 11px;
+  }
+  .nav-item.active .count { color: #6366f1; }
+
+  .form-col { padding: 20px 24px; }
+
+  .section-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; margin-bottom: 4px; }
+  .section-desc { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+
+  /* Form fields */
+  .form-field { margin-bottom: 14px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* Factor sliders */
+  .factor-list { display: flex; flex-direction: column; gap: 8px; }
+  .factor-row {
+    display: grid; grid-template-columns: 1fr 110px 60px 24px; gap: 10px; align-items: center;
+    padding: 6px 0;
+  }
+  .factor-row .name { font-weight: 500; font-size: 13px; }
+  .factor-row .bar {
+    height: 5px; background: #e5e7eb; border-radius: 3px; position: relative;
+  }
+  .factor-row .fill { position: absolute; inset: 0 auto 0 0; background: #4338ca; border-radius: 3px; }
+  .factor-row .val {
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: #374151;
+    text-align: right;
+  }
+  .factor-row .delete-btn {
+    background: none; border: 0; color: #9ca3af; font-size: 14px; cursor: pointer;
+  }
+  .factor-row .delete-btn:hover { color: #b91c1c; }
+  .sum-row {
+    margin-top: 10px; padding: 8px 12px; background: #d1fae5; border: 1px solid #a7f3d0;
+    border-radius: 5px; font-size: 12px; color: #065f46;
+    display: flex; justify-content: space-between; font-weight: 600;
+  }
+  .sum-row.invalid { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+
+  .add-row {
+    padding: 8px 12px; background: #fafbfc; border: 1px dashed #c7d2fe; border-radius: 5px;
+    font-size: 12px; color: #4338ca; cursor: pointer; font-weight: 600; text-align: center;
+    margin-top: 6px;
+  }
+
+  /* Band rows */
+  .band-list { display: flex; flex-direction: column; gap: 8px; }
+  .band-row {
+    display: grid; grid-template-columns: auto 1fr 80px 80px; gap: 10px; align-items: center;
+    padding: 8px 10px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 5px;
+  }
+  .band-row .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .band-row .dot.healthy { background: #16a34a; }
+  .band-row .dot.watch { background: #d97706; }
+  .band-row .dot.atrisk { background: #ea580c; }
+  .band-row .dot.critical { background: #dc2626; }
+  .band-row .label { font-weight: 600; font-size: 13px; }
+  .band-row input {
+    width: 100%; padding: 5px 8px; border: 1px solid #e5e7eb; border-radius: 4px;
+    font-size: 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; text-align: center;
+  }
+
+  /* Saved templates + fingerprints list */
+  .item-list { display: flex; flex-direction: column; gap: 6px; }
+  .item-row {
+    padding: 10px 12px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 5px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  }
+  .item-row .toggle {
+    width: 28px; height: 16px; background: #4338ca; border-radius: 8px; position: relative; cursor: pointer;
+  }
+  .item-row .toggle::after {
+    content: ''; position: absolute; right: 2px; top: 2px; width: 12px; height: 12px; background: #fff;
+    border-radius: 50%;
+  }
+  .item-row.off .toggle { background: #d1d5db; }
+  .item-row.off .toggle::after { right: auto; left: 2px; }
+  .item-row .name { font-weight: 500; font-size: 13px; }
+  .item-row .meta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .item-row .edit-btn {
+    background: #fff; border: 1px solid #e5e7eb; font-size: 11px; padding: 4px 9px;
+    border-radius: 4px; cursor: pointer; font-weight: 500; color: #374151; font-family: inherit;
+  }
+  .item-row .edit-btn:hover { background: #f5f6f8; border-color: #d1d5db; }
+
+  /* Modal footer */
+  .m-foot {
+    padding: 14px 22px; background: #fafbfc; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .m-foot .left-note { font-size: 11px; color: #6b7280; flex: 1; }
+  .m-foot .left-note strong { color: #b45309; }
+  .btn { padding: 7px 14px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+  .btn-primary { background: #4338ca; color: #fff; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
+  .btn-ghost { background: transparent; color: #6b7280; border-color: transparent; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Edit configuration template · System-admin only · Opens from the <strong>Edit</strong> button on a template card in the create-org modal, or from the Config Templates admin page · Changes here affect ALL new orgs that later pick this template · Existing orgs' overrides are preserved</div>
+
+<div class="bg-context"></div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-onboarding-sysadmin.html</code> (clicked Edit on a template card)</div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+
+    <!-- Header -->
+    <div class="m-head">
+      <div>
+        <h2>Edit template · GHL Agency Intelligence</h2>
+        <div class="sub">
+          <code style="background:#f5f3ff;padding:1px 5px;border-radius:3px;">ghl-agency-intelligence</code>
+          · applied to <strong>24 active organisations</strong>
+          · <span class="warn">System-wide change</span>
+        </div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <!-- Scope warning -->
+    <div class="scope-banner">
+      <div class="icon">⚠️</div>
+      <div class="detail">
+        <strong>This edits the master template.</strong> Future organisations that pick <em>GHL Agency Intelligence</em> will inherit these values. Existing organisations keep their current <code>operational_config</code> — their org-level overrides aren't touched; any unmodified values will re-inherit from the new defaults on next scan. Changes logged with your user + timestamp for audit.
+      </div>
+    </div>
+
+    <!-- Body: section nav + form -->
+    <div class="m-body">
+
+      <!-- Left: section nav -->
+      <div class="nav-col">
+        <div class="nav-item">Template metadata</div>
+        <div class="nav-item active">Health score factors <span class="count">5</span></div>
+        <div class="nav-item">Churn bands <span class="count">4</span></div>
+        <div class="nav-item">Saved email templates <span class="count">12</span></div>
+        <div class="nav-item">Blind-spot detection <span class="count">8</span></div>
+        <div class="nav-item">Integration fingerprints <span class="count">14 seed</span></div>
+        <div class="nav-item">Onboarding milestones <span class="count">5</span></div>
+        <div class="nav-item">Required operator inputs <span class="count">3</span></div>
+        <div class="nav-item">Memory seeds <span class="count">1</span></div>
+        <div class="nav-item">Scan + report schedule</div>
+        <div class="nav-item">Data retention</div>
+      </div>
+
+      <!-- Right: active section (Health score factors) -->
+      <div class="form-col">
+        <div class="section-title">Health score factors</div>
+        <div class="section-desc">
+          Weighted composite (0–100) that drives every other ClientPulse signal for organisations on this template. Weights must sum to 1.00. Each factor's normalisation + period is editable on hover.
+        </div>
+
+        <div class="factor-list">
+          <div class="factor-row">
+            <div class="name">Pipeline velocity</div>
+            <div class="bar"><div class="fill" style="width:30%;"></div></div>
+            <div class="val">0.30</div>
+            <button class="delete-btn">⋯</button>
+          </div>
+          <div class="factor-row">
+            <div class="name">Conversation engagement</div>
+            <div class="bar"><div class="fill" style="width:25%;"></div></div>
+            <div class="val">0.25</div>
+            <button class="delete-btn">⋯</button>
+          </div>
+          <div class="factor-row">
+            <div class="name">Contact growth</div>
+            <div class="bar"><div class="fill" style="width:20%;"></div></div>
+            <div class="val">0.20</div>
+            <button class="delete-btn">⋯</button>
+          </div>
+          <div class="factor-row">
+            <div class="name">Revenue trend</div>
+            <div class="bar"><div class="fill" style="width:15%;"></div></div>
+            <div class="val">0.15</div>
+            <button class="delete-btn">⋯</button>
+          </div>
+          <div class="factor-row">
+            <div class="name">Platform activity</div>
+            <div class="bar"><div class="fill" style="width:10%;"></div></div>
+            <div class="val">0.10</div>
+            <button class="delete-btn">⋯</button>
+          </div>
+        </div>
+
+        <div class="sum-row">
+          <span>✓ Weights sum to 1.00</span>
+          <span style="font-weight: 500; color: #047857;">valid</span>
+        </div>
+
+        <div class="add-row">+ Add factor</div>
+
+        <!-- Inline preview of churn bands (next section) -->
+        <div style="margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+          <div class="section-title" style="font-size: 13px;">Churn bands (next section preview)</div>
+          <div class="band-list" style="margin-top: 10px;">
+            <div class="band-row">
+              <span class="dot healthy"></span>
+              <span class="label">Healthy</span>
+              <input value="70" disabled>
+              <input value="100" disabled>
+            </div>
+            <div class="band-row">
+              <span class="dot watch"></span>
+              <span class="label">Watch</span>
+              <input value="40" disabled>
+              <input value="69" disabled>
+            </div>
+            <div class="band-row">
+              <span class="dot atrisk"></span>
+              <span class="label">At Risk</span>
+              <input value="20" disabled>
+              <input value="39" disabled>
+            </div>
+            <div class="band-row">
+              <span class="dot critical"></span>
+              <span class="label">Critical</span>
+              <input value="0" disabled>
+              <input value="19" disabled>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="m-foot">
+      <div class="left-note">
+        <strong>24 orgs currently use this template.</strong> Saving will apply the new defaults to future orgs only; existing orgs keep their overrides.
+      </div>
+      <button class="btn btn-ghost">View change log</button>
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-primary">Save changes</button>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

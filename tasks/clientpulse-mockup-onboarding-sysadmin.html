@@ -137,7 +137,15 @@
   }
   .tmpl-card:hover { border-color: #c7d2fe; }
   .tmpl-card.selected { border-color: #4338ca; background: #f5f3ff; }
-  .tmpl-card .tname { font-weight: 600; font-size: 13px; margin-bottom: 3px; color: #1a1d23; }
+  .tmpl-card { position: relative; }
+  .tmpl-card .edit-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 4px;
+    padding: 3px 8px; font-size: 10px; color: #4338ca; font-weight: 600; cursor: pointer;
+    font-family: inherit; text-decoration: none;
+  }
+  .tmpl-card .edit-btn:hover { background: #eef2ff; border-color: #c7d2fe; }
+  .tmpl-card .tname { font-weight: 600; font-size: 13px; margin-bottom: 3px; color: #1a1d23; padding-right: 54px; }
   .tmpl-card .tname .checkmark {
     display: none; float: right; color: #4338ca; font-weight: 700;
   }
@@ -317,21 +325,25 @@
           <div class="pane-title" style="margin-top: 16px;">Configuration template</div>
           <div class="tmpl-grid">
             <div class="tmpl-card selected">
+              <a class="edit-btn" href="clientpulse-mockup-template-editor.html" target="_blank">Edit ↗</a>
               <div class="tname">GHL Agency Intelligence <span class="checkmark">✓</span></div>
               <div class="tdesc">Agency managing multi-client GHL portfolios. ClientPulse, interventions, integration fingerprints.</div>
               <div class="tincludes">5 health factors · 4 churn signals · 6 intervention templates · 12 fingerprints</div>
             </div>
             <div class="tmpl-card">
+              <a class="edit-btn" href="clientpulse-mockup-template-editor.html" target="_blank">Edit ↗</a>
               <div class="tname">HubSpot Agency Intelligence <span class="checkmark">✓</span></div>
               <div class="tdesc">Same pattern for agencies running client portfolios on HubSpot. Different OAuth scopes + fingerprint library.</div>
               <div class="tincludes">5 health factors · 4 churn signals · 6 intervention templates · 9 fingerprints</div>
             </div>
             <div class="tmpl-card">
+              <a class="edit-btn" href="clientpulse-mockup-template-editor.html" target="_blank">Edit ↗</a>
               <div class="tname">Internal Team Operations <span class="checkmark">✓</span></div>
               <div class="tdesc">Internal org with departments or projects instead of external clients. No tier-downgrade signal.</div>
               <div class="tincludes">4 health factors · 3 churn signals · 4 intervention templates · 0 fingerprints</div>
             </div>
             <div class="tmpl-card">
+              <a class="edit-btn" href="clientpulse-mockup-template-editor.html" target="_blank">Edit ↗</a>
               <div class="tname">Multi-Location Retail <span class="checkmark">✓</span></div>
               <div class="tdesc">Chain business with sub-accounts per location. Per-store KPIs + inventory anomaly detection.</div>
               <div class="tincludes">6 health factors · 5 churn signals · 5 intervention templates · 4 fingerprints</div>
