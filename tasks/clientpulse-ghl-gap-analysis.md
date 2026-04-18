@@ -42,10 +42,11 @@
 24. Pre-build engineering audit — claim-by-claim verification *(added 2026-04-18)*
 25. Implementer quick-reference appendix *(added 2026-04-18, per second-pass review)*
 26. Outstanding blockers + ship-gate tracker *(added 2026-04-18, per second-pass review)*
+27. Third-pass Codex review response *(added 2026-04-18)* — 5 real contradictions fixed (action-slug collision, intervention-table duplication, proposer vocabulary, timezone field, config-audit duplication)
 
 Scoring formula consolidation in §4.6 was also added 2026-04-18 per external review.
 
-> **Reading order for a fresh implementer:** §26 (blockers) → §25 (invariants quick-ref) → §1 → §21 → §24 → §15 → §16 → §17 (+ §17.6) → §18 → §20 → §4.6 → §22 → §23 → §10 → §11.3 → deep-dive §§2–9 as needed.
+> **Reading order for a fresh implementer:** §27 (recent fixes) → §26 (blockers) → §25 (invariants quick-ref) → §1 → §21 → §24 → §15 → §16 → §17 (+ §17.6) → §18 → §20 → §4.6 → §22 → §23 → §10 → §11.3 → deep-dive §§2–9 as needed.
 
 ---
 
@@ -820,7 +821,7 @@ The only **new** action type is `create_task_for_operator` if it does not alread
 - **Intervention queue widget** — embeds the relevant `reviewItems` (filtered by `action.actionType='client_pulse_intervention'`) directly on the dashboard with approve/reject inline. Kel's brief says "appear in the review queue with enough context to approve/reject in under 30 seconds".
 - **Revenue-at-risk headline** — sum of MRR across Watch/At-Risk/Critical bands. Requires `subaccounts.monthly_revenue_cents` or equivalent.
 - **Churn projection** — at current trajectory, projected lost clients this month. Requires the `interventionOutcomes` table to be populated so we can build a base rate.
-- **Monday-morning email render** — same report in HTML form, delivered at 08:00 in the agency's configured timezone (`organisations.timezone`; editable in `ClientPulseConfigPage`). Requirements: (a) each sub-account row is clickable and deep-links to its drill-down (`/clientpulse/subaccount/:id`), (b) a top banner surfacing any **band-change deltas** since last week ("3 newly At Risk, 1 recovered to Healthy"), (c) a pending-interventions count with a link to the queue, (d) a "View full dashboard" header link. Without deep links + delta banner the email is a dump; with them it's a launchpad Kel can act from.
+- **Monday-morning email render** — same report in HTML form, delivered at 08:00 in the schedule's configured timezone (`scheduledTasks.timezone`; editable per schedule in settings). Note: there is no `organisations.timezone` column in V1 — delivery timezone is a per-schedule property. If multi-schedule orgs later need a canonical agency-level default, add `organisations.timezone` with an explicit migration (out-of-scope for V1 per Codex I10, see §27). Requirements: (a) each sub-account row is clickable and deep-links to its drill-down (`/clientpulse/subaccount/:id`), (b) a top banner surfacing any **band-change deltas** since last week ("3 newly At Risk, 1 recovered to Healthy"), (c) a pending-interventions count with a link to the queue, (d) a "View full dashboard" header link. Without deep links + delta banner the email is a dump; with them it's a launchpad Kel can act from.
 
 Kel runs two Synthetos orgs per §3 (SaaS + DFY). Each org sends its own Monday email — no combining. If an org has zero attention-worthy accounts, suppress the email entirely (no "everything's fine" noise; the dashboard is always available if Kel wants to check proactively).
 
@@ -1162,8 +1163,8 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
 
 **Supersedes the earlier "six hardcoded intervention templates" plan** (see §15, decision D7).
 
-- Register the **5 action-type primitives** (§15.1) in `actionRegistry.ts`: `fire_automation`, `send_email`, `send_sms`, `create_task`, `operator_alert`. These are the registered action-type enum values; everything CRM-specific lives below in the adapter layer.
-- Migration: `client_pulse_interventions` (proposal record + chosen primitive + configured payload + status + outcome).
+- Register the **5 namespaced action-type primitives** (§15.1) in `actionRegistry.ts`: `crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`. These do **not** collide with the existing unprefixed `send_email` / `create_task` primitives, which retain their current direct-send / Synthetos-native-task semantics.
+- **No parallel `client_pulse_interventions` table** (revised 2026-04-18 per Codex pass). ClientPulse interventions are **projections over the existing `actions` + `reviewItems` + `interventionOutcomes` substrate**, not a parallel lifecycle. A proposal lands as a row in `actions` with `actionType IN (5 namespaced primitives)`, `gateLevel='review'`, and a ClientPulse-specific `metadataJson` payload capturing: `{ triggerEventId, triggerReason, bandAtProposal, healthScoreAtProposal, configVersion, recommendedBy: 'scenario_detector' | 'operator' | 'chat' }`. Approval flows through `reviewItems`; execution through the skill executor; outcome measurement writes to `interventionOutcomes` (which already exists). No table duplication, no split source of truth.
 - Build the **canonical merge field resolver** (§16): dot-path namespace resolver, JSON Schema for the namespace surface, `resolveMergeFields(template, context) → string`.
 - Build the **5 action-primitive editors** in the client (one React component per primitive, routed from the propose-intervention modal):
   - `FireAutomationEditor` — live CRM automation dropdown (adapter-backed) + category filters.
@@ -1171,11 +1172,11 @@ Runs in parallel with Phase 0, or immediately after it — independent of Phase 
   - `SmsAuthoringEditor` — 160-char body, merge-field chips, phone-bubble preview, test-send.
   - `CreateTaskEditor` — title/notes/assignee/priority/due, CRM-task-card preview.
   - `OperatorAlertEditor` — severity/recipients/channels/CTA, in-app preview, recipient tray integration.
-- **Skill: `fire_automation`** — calls adapter's `enrolInAutomation(contactId, automationId)` for whichever CRM the sub-account uses.
-- **Skill: `send_email`** — resolves merge fields, calls adapter's `sendEmail(contactId, subject, body)` (CRM-dispatched, preserves sending domain).
-- **Skill: `send_sms`** — resolves merge fields, calls adapter's `sendSms(contactId, body)`.
-- **Skill: `create_task`** — calls adapter's `createTask(contactId, title, notes, assignee, priority, dueAt)`.
-- **Skill: `operator_alert`** — writes to `operator_alerts` table + emits in-app notification + optional email + Slack via existing integration.
+- **Skill: `crm.fire_automation`** — calls adapter's `enrolInAutomation(contactId, automationId)` for whichever CRM the sub-account uses.
+- **Skill: `crm.send_email`** — resolves merge fields, calls adapter's `sendEmail(contactId, subject, body)` (CRM-dispatched, preserves sending domain). Distinct from the existing unprefixed `send_email` which sends via a connected Synthetos email provider directly.
+- **Skill: `crm.send_sms`** — resolves merge fields, calls adapter's `sendSms(contactId, body)`.
+- **Skill: `crm.create_task`** — calls adapter's `createTask(contactId, title, notes, assignee, priority, dueAt)`. Distinct from the existing unprefixed `create_task` which creates a Synthetos-native task on the agent task board.
+- **Skill: `clientpulse.operator_alert`** — writes to `operator_alerts` table + emits in-app notification + optional email + Slack via existing integration.
 - Wire all 5 primitives to `interventionService.checkCooldown` and existing `actions`/`reviewItems` (HITL gate).
 - Outcome signal: **band-change only in v1** (§21.2). A fired intervention that sees a band improvement within 14 days is counted as "worked"; no webhook attribution.
 - Implement `proposeClientPulseInterventionsJob` (detects scenarios → creates proposal review-items) and `measureInterventionOutcomeJob` (14-day band-change watcher).
@@ -1190,13 +1191,13 @@ Runs in parallel with Phase 5 UI work once the operational_config JSON Schema fr
 
 - **Capability slugs** in `docs/capabilities.md` (Support-facing catalogue): `clientpulse.config.read|update|reset|history`.
 - **Pseudo-integration entry** in `docs/integration-reference.md`: `clientpulse_configuration` block (§17.2.2).
-- **Skill:** `server/skills/config_update_hierarchy_template.md` + registration in `actionRegistry.ts` + `skillExecutor.ts`. JSON-Schema-validated merge-update on `operational_config`; writes to `config_changes` audit table.
-- **Migration:** `config_changes` table (§17.2.6).
+- **Skill:** `server/skills/config_update_hierarchy_template.md` + registration in `actionRegistry.ts` + `skillExecutor.ts`. JSON-Schema-validated merge-update on `operational_config`; writes audit rows to **existing** `config_history` table (no new audit table — revised 2026-04-18 per Codex pass, see §17.2.6).
+- **Migration:** none needed for the audit log — `config_history` already exists.
 - **Orchestrator routing:** add row to `docs/orchestrator-capability-routing-spec.md` for `clientpulse.config.*`. Keywords + context signals + structural signals.
 - **Configuration Assistant spec update:** add mutation tool #16 (`update_clientpulse_config`), move ClientPulse from out-of-scope to in-scope v2, add conversation examples matching the chat popup mockup.
 - **UI:** chat popup component (global, opens from settings callouts / global nav / ⌘K). Confirm-before-write card pattern matching existing Configuration Agent.
 
-**Ship gate:** sysadmin (seeded with test prompt) types "bump pipeline velocity weight to 0.35" in chat; Orchestrator routes to Configuration Agent; agent presents confirm card with before/after diff; operator confirms; skill writes to operational_config; config_changes row recorded; next-scan banner shown; settings page reflects the new value on refresh.
+**Ship gate:** sysadmin (seeded with test prompt) types "bump pipeline velocity weight to 0.35" in chat; Orchestrator routes to Configuration Agent; agent presents confirm card with before/after diff; operator confirms; skill writes to operational_config; `config_history` row recorded (entity_type='clientpulse_operational_config'); next-scan banner shown; settings page reflects the new value on refresh.
 
 ### Phase 5 — Dashboard + briefings + configuration UI + admin surfaces
 
@@ -1220,7 +1221,7 @@ Runs in parallel with Phase 5 UI work once the operational_config JSON Schema fr
 - **Sysadmin create-org flow** (`onboarding-sysadmin.html`) — org metadata + template picker with Edit ↗ integration + required operator inputs + invite admins + atomic provision.
 - **Orgadmin first-run flow** (`onboarding-orgadmin.html`) — 4-screen guide: welcome → connect CRM → map pilot clients → set.
 - **Config Templates admin page** (list view for sysadmins) — linked from sysadmin nav; routes to template editor modal on row click.
-- **Audit log view for config_changes** — filters by org, path, source (chat/settings_ui/api/agent); clickable rows route to template editor with the relevant section pre-selected.
+- **Audit log view over `config_history` filtered to `entity_type='clientpulse_operational_config'`** — filters by path, change_source (ui/api/config_agent/system_sync/restore); clickable rows route to template editor with the relevant section pre-selected.
 
 **Ship gate:** sysadmin can create a new org from scratch picking a template (with optional in-flight edits), org admin receives invite, completes first-run, connects CRM, selects pilot sub-accounts, and lands on a populated dashboard within 24 hours.
 
@@ -1287,8 +1288,8 @@ These are baked-in design commitments from Kel's response to the first round of 
 | **D8** | **Email + SMS composed in Synthetos, dispatched via client's CRM.** Preserves the agency's sending-domain authentication + SMS provider contracts. | Adapter functions `sendEmail(contactId, subject, body)` and `sendSms(contactId, body)` become CRM-specific primitives with identical signatures across adapters. Synthetos never runs its own SMTP or SMS gateway for outbound. |
 | **D9** | **Canonical merge fields (`{{contact.firstName}}`, `{{signals.healthScore}}`, etc.) for all authored content.** Resolved in Synthetos before CRM dispatch — the CRM receives a fully-rendered string. See §16. | Merge-field resolver service built in Phase 4; JSON Schema for the namespace surface. V1 grammar is strict (no fallback syntax, no conditionals). |
 | **D10** | **Outcome signal = band-change only in V1.** No webhook-based attribution (open rate, reply rate, booked-call rate) until V2. See §21. | `measureInterventionOutcomeJob` watches for a band improvement within 14 days of intervention dispatch and attributes it. Keeps V1 scope tight. |
-| **D11** | **Configuration Agent extended to cover ClientPulse config (site-wide chat surface).** Same chat popup handles agents, schedules, skills, ClientPulse config, integrations. See §17. | Five concrete additions (§17.2): `clientpulse.config.*` capability slugs, `clientpulse_configuration` pseudo-integration, `config_update_hierarchy_template` skill, orchestrator routing row, Configuration Assistant spec update. `config_changes` audit table is a dependency. |
-| **D12** | **Template editor stages edits across all tabs until Save is pressed; Save is atomic; Cancel discards all.** See §18.3. | Template editor component uses local state + dirty-state tracking per section. One transaction writes all changed paths on save, producing a grouped batch of `config_changes` rows sharing the same `applied_at`. |
+| **D11** | **Configuration Agent extended to cover ClientPulse config (site-wide chat surface).** Same chat popup handles agents, schedules, skills, ClientPulse config, integrations. See §17. | Five concrete additions (§17.2): `clientpulse.config.*` capability slugs, `clientpulse_configuration` pseudo-integration, `config_update_hierarchy_template` skill, orchestrator routing row, Configuration Assistant spec update. Audit reuses **existing** `config_history` table with `entity_type='clientpulse_operational_config'` — no new audit table. |
+| **D12** | **Template editor stages edits across all tabs until Save is pressed; Save is atomic; Cancel discards all.** See §18.3. | Template editor component uses local state + dirty-state tracking per section. One transaction writes all changed paths on save, producing a grouped batch of `config_history` rows sharing the same `session_id`. |
 | **D13** | **Org admins cannot create or fork templates in V1 — only override at the org level.** Templates are a sysadmin-vetted asset. See §18.6. | No "fork template" UI in V1. Template creation API is sysadmin-only. V2 may introduce forking if demand emerges. |
 | **D14** | **All user-facing copy uses humanised labels, never canonical slugs.** Comprehensive snake_case audit performed across all 20 mockups. See U17. | UI layer applies a `humanise(slug)` helper for any label derived from a canonical identifier. New UI features must pass a no-snake-case regex check in code review. |
 | **D15** | **Google-Sheets-style column headers on all data tables** (click-to-sort, filter dropdown on categorical columns). See U1 + architecture rule for Tables. | Matches the existing `SystemSkillsPage.tsx` pattern (`ColHeader` + `NameColHeader`). Extend the pattern to the portfolio grid, intervention queue, and audit log view. |
@@ -1777,13 +1778,15 @@ The pivot away from hardcoded intervention templates (per the 2026-04-18 design 
 
 ### 15.1 The five primitives
 
-| # | Primitive | Runs where | Composed where | V1 config contract |
-|---|-----------|-----------|----------------|--------------------|
-| 1 | **Fire automation** | Client's CRM (GHL workflow, HubSpot automation, etc.) | Operator picks an existing CRM automation from a live dropdown | `{ action: 'fire_automation', provider_type: 'ghl', external_automation_id: '...', contact_id: '...' }` |
-| 2 | **Send email** | Client's CRM (uses client's authenticated sending domain) | Synthetos — subject + body + canonical merge fields | `{ action: 'send_email', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
-| 3 | **Send SMS** | Client's CRM (uses client's SMS provider via CRM) | Synthetos — 160-char body + canonical merge fields | `{ action: 'send_sms', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
-| 4 | **Create task** | Client's CRM (task lives on CRM contact record) | Synthetos — title, notes, assignee, priority, due | `{ action: 'create_task', title, notes, assignee_user_id, priority, due_at }` |
-| 5 | **Operator alert** | Internal (Synthetos in-app + email + Slack) | Synthetos — severity, recipients, channels, CTA | `{ action: 'operator_alert', severity, recipient_user_ids, channels[], cta_action }` |
+> **Slug-collision note (added 2026-04-18 per Codex pass):** the existing `actionRegistry.ts` already defines `send_email` (`server/config/actionRegistry.ts:274`) and `create_task` (`actionRegistry.ts:325`) with direct-send / Synthetos-native task semantics. To avoid silently changing behaviour for existing callers, the ClientPulse primitives are **namespaced** — the CRM-dispatched variants use the `crm.` prefix, the internal alert variant uses the `clientpulse.` prefix. Old unprefixed references below are preserved in the contract column only to show shape; the registered slug is the namespaced one.
+
+| # | Primitive | Registered slug | Runs where | Composed where | V1 config contract |
+|---|-----------|-----------------|-----------|----------------|--------------------|
+| 1 | **Fire automation** | `crm.fire_automation` | Client's CRM (GHL workflow, HubSpot automation, etc.) | Operator picks an existing CRM automation from a live dropdown | `{ action: 'crm.fire_automation', provider_type: 'ghl', external_automation_id: '...', contact_id: '...' }` |
+| 2 | **Send email** | `crm.send_email` | Client's CRM (uses client's authenticated sending domain) | Synthetos — subject + body + canonical merge fields | `{ action: 'crm.send_email', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
+| 3 | **Send SMS** | `crm.send_sms` | Client's CRM (uses client's SMS provider via CRM) | Synthetos — 160-char body + canonical merge fields | `{ action: 'crm.send_sms', template_ref: 'synthetos:uuid', to_contact_id: '...' }` |
+| 4 | **Create task** | `crm.create_task` | Client's CRM (task lives on CRM contact record) | Synthetos — title, notes, assignee, priority, due | `{ action: 'crm.create_task', title, notes, assignee_user_id, priority, due_at }` |
+| 5 | **Operator alert** | `clientpulse.operator_alert` | Internal (Synthetos in-app + email + Slack) | Synthetos — severity, recipients, channels, CTA | `{ action: 'clientpulse.operator_alert', severity, recipient_user_ids, channels[], cta_action }` |
 
 ### 15.2 Why these five
 
@@ -1791,10 +1794,11 @@ The pivot away from hardcoded intervention templates (per the 2026-04-18 design 
 - **Zero hardcoded playbook logic.** "4-video funnel-setup nurture" is not a Synthetos concept — it's a GHL workflow the client already has, and the operator points at it via Primitive 1.
 - **CRM-agnostic.** Primitives 1–4 execute via the canonical-adapter layer. Same API surface for GHL, HubSpot, Salesforce, Pipedrive. The word "workflow" is replaced with "automation" in user copy to remain neutral.
 - **Preserves the client's sending reputation.** Primitives 2 + 3 compose the content in Synthetos but dispatch through the client's CRM so existing domain authentication, SMS provider contracts, and unsubscribe logic are preserved. Synthetos never sends email/SMS on the client's behalf itself.
+- **No slug collision.** The `crm.` + `clientpulse.` prefixes ensure zero conflict with the existing `send_email` / `create_task` action types, whose semantics remain unchanged.
 
 ### 15.3 Replaces what in the old gap analysis
 
-The old § 6.5 ("Action types to register") listed 7 action types, several of which were CRM-specific (`ghl.workflow.enrol`, `ghl.task.create`, `ghl.contact.tag`). This is superseded by the 5 primitives above. CRM-specific logic moves into the adapter layer; the registered action-type enum becomes the five-value set `{ fire_automation, send_email, send_sms, create_task, operator_alert }`.
+The old § 6.5 ("Action types to register") listed 7 action types, several of which were CRM-specific (`ghl.workflow.enrol`, `ghl.task.create`, `ghl.contact.tag`). This is superseded by the 5 primitives above. CRM-specific logic moves into the adapter layer; the registered action-type enum adds the five namespaced values `{ crm.fire_automation, crm.send_email, crm.send_sms, crm.create_task, clientpulse.operator_alert }` alongside the existing unprefixed primitives (which retain their current semantics).
 
 ### 15.4 Contact-tag operations
 
@@ -1938,8 +1942,14 @@ validation:
   - cross-check: org's template_id must match a template that declares this path
 
 audit:
-  - row written to config_changes table (new; see §17.2.6)
-  - payload: orgId, userId (or 'configuration_agent' if chat-initiated), path, op, before, after, reason, source ('chat' | 'settings_ui' | 'api')
+  - row written to EXISTING config_history table (see §17.2.6 — revised 2026-04-18 per Codex pass)
+  - entity_type: 'clientpulse_operational_config'
+  - entity_id: sha256(orgId + path) — stable hash so "all history for this path" queries work
+  - snapshot: full path + before + after + reason in the jsonb payload
+  - changed_by: userId (or NULL if agent-initiated)
+  - change_source: 'config_agent' (for chat) | 'ui' (for settings page) | 'api'
+  - change_summary: human-readable one-liner (e.g. "Pipeline velocity weight 0.30 → 0.35")
+  - version: auto-incremented per (organisation_id, entity_type, entity_id)
 ```
 
 The same skill is called by:
@@ -1970,36 +1980,43 @@ In the Configuration Assistant's spec document:
 - **Move ClientPulse config from "out of scope" to "in scope v2".** Update the scope section that currently lists it as excluded.
 - **Extend the prompt examples** to show a ClientPulse config-change conversation end-to-end (matching the `clientpulse-mockup-config-assistant-chat.html` flow).
 
-#### 17.2.6 New table: `config_changes` (audit log)
+#### 17.2.6 Audit log — reuse existing `config_history` (revised 2026-04-18 per Codex pass)
 
-One small new table is needed for the audit log the skill writes to:
+**Earlier drafts of this section proposed a new `config_changes` table. That has been rejected.** The existing `server/db/schema/configHistory.ts` already provides version-aware, org-scoped, source-tagged audit rows for configuration mutations with exactly the columns we need:
 
 ```
-config_changes
+config_history  (EXISTING — /server/db/schema/configHistory.ts)
   id              uuid pk
-  organisation_id uuid fk -> organisations(id)
-  user_id         uuid fk -> users(id) nullable  -- null when source = 'agent'
-  source          text enum('chat','settings_ui','api','agent','migration')
-  capability      text                            -- e.g. 'clientpulse.config.update'
-  path            text                            -- dot-path
-  operation       text enum('set','delete','reset_to_default')
-  previous_value  jsonb
-  new_value       jsonb
-  reason          text
-  applied_at      timestamptz default now()
-  reverted_at     timestamptz nullable
-  reverted_by     uuid fk -> users(id) nullable
-
-  index (organisation_id, applied_at desc)
-  index (organisation_id, path, applied_at desc)
+  organisation_id uuid fk
+  entity_type     text          ← 'clientpulse_operational_config' for ClientPulse writes
+  entity_id       uuid          ← sha256-derived UUID from (orgId + dot-path)
+  version         integer       ← auto-increment per (org, entity_type, entity_id)
+  snapshot        jsonb         ← { path, before, after, reason } payload
+  changed_by      uuid fk       ← user or NULL for agent-initiated
+  change_source   text enum     ← 'ui' | 'api' | 'config_agent' | 'system_sync' | 'restore'
+  session_id      uuid          ← for grouping atomic multi-path saves (§18.3)
+  change_summary  text          ← one-liner for change-log UI
+  changed_at      timestamptz
 ```
 
-RLS: org-scoped. Visible to sysadmins across orgs; org admins see only their own org's rows.
+**ClientPulse contract against the existing table:**
 
-Powers:
-- "View change log" button on the template editor (§18)
-- "See history" button in the chat popup
-- "Undo" button after an applied change (calls same skill with `operation: 'reset_to_default'` or with the `previous_value` as `newValue`)
+- **entity_type** = `'clientpulse_operational_config'` (new enum value; already text-typed so no schema change)
+- **entity_id** = deterministic UUID derived from `(organisation_id, dot_path)` so "all history for `healthScoreFactors.pipeline_velocity.weight`" queries work via a single `WHERE` clause
+- **session_id** = present when multiple paths are saved together from the template editor (§18.3) — groups them as an atomic edit
+- **snapshot** = `{ path: string, before: any, after: any, reason: string, operation: 'set' | 'delete' | 'reset_to_default' }`
+- **change_source** = `'config_agent'` (chat) / `'ui'` (settings page) / `'api'`
+- **changed_by** = user when operator confirmed; NULL when applied by a system agent
+
+**No new migration needed for the audit log itself.** Existing indexes (`config_history_org_idx`, `config_history_entity_idx`, `config_history_changed_at_idx`) already support the UI query patterns. If a later enhancement needs ClientPulse-specific indexing, add it as a targeted partial index on `entity_type='clientpulse_operational_config'`.
+
+**Powers:**
+- "View change log" button on the template editor (§18) — filter `WHERE entity_type='clientpulse_operational_config' AND organisation_id=?`
+- "See history" button in the chat popup — same filter, scoped to the current org
+- "Undo" button after an applied change — reads the last `config_history` row for the path, calls the skill with `operation: 'reset_to_default'` (or with `snapshot.before` as `newValue`)
+- Sysadmin cross-org audit view — same table, no org filter (bypass via sysadmin permissions, §25.4)
+
+RLS: **already enforced** on `config_history` per `server/config/rlsProtectedTables.ts`. No additional policies required.
 
 ### 17.3 Bidirectional flow guarantee
 
@@ -2009,7 +2026,7 @@ With these five additions, the three UIs converge on one write path:
   chat popup  ──┐
                 │
   settings UI ──┼──► config_update_hierarchy_template skill ──► operational_config JSONB
-                │                                            ──► config_changes (audit)
+                │                                            ──► config_history (existing audit table; §17.2.6)
   briefing    ──┘
   action btn
 ```
@@ -2041,9 +2058,9 @@ An external reviewer flagged that the chat is powerful and dangerous without exp
 | **Sum-constraint validation** | Weight-sum checks (factors sum to 1.00), band-overlap checks (no band range overlaps another) | Referenced in §17.2.3 | Implement as Zod refinements on the schema |
 | **Dry-run / preview** | Every chat-initiated mutation surfaces a before/after diff card in-bubble; operator clicks Apply to commit | Existing Configuration Assistant confirm-before-write pattern | Extend pattern to ClientPulse path; re-use `clientpulse.config.read` to compute preview without writing |
 | **Approval gate (for sensitive paths)** | Changes to certain paths require the action→review→approve pipeline, not inline commit | `actions.gateLevel='review'` + `reviewItems` table (exists) | Wire `config_update_hierarchy_template` skill to create an `actions` row with `gateLevel='review'` for paths flagged `sensitive: true` in the schema |
-| **Audit log** | Every mutation writes a `config_changes` row with before/after/source/user/reason | Table defined at §17.2.6; `configHistory` + `configBackups` infra already exists in `server/db/schema/` | Migration to create `config_changes` table (does not exist yet — confirmed by code search); writer in the skill handler |
-| **Rollback** | Every applied change can be reverted via `operation: 'reset_to_default'` or by re-applying `previous_value` from the audit row | `configBackups` table supports scope='config_agent' with lifecycle tracking | No new infra; add "Undo" button wired to `config_update_hierarchy_template` with `previous_value` from the last `config_changes` row |
-| **Versioning** | `config_changes` + `configHistory` together give the full mutation trail per org per path | `configHistory.changeSummary` + `changeSource` already present | Ensure ClientPulse writes also flow to `configHistory` in the same transaction |
+| **Audit log** | Every mutation writes a `config_history` row (entity_type='clientpulse_operational_config') with before/after/source/user/reason | Existing `config_history` table (`server/db/schema/configHistory.ts`); `configBackups` infra also exists | **No new audit table** (revised 2026-04-18 per Codex pass). Extension = new `entity_type` enum value + writer in the skill handler |
+| **Rollback** | Every applied change can be reverted via `operation: 'reset_to_default'` or by re-applying `snapshot.before` from the audit row | `configBackups` table supports scope='config_agent' with lifecycle tracking | No new infra; add "Undo" button wired to `config_update_hierarchy_template` with `snapshot.before` from the last `config_history` row |
+| **Versioning** | `config_history.version` auto-increments per (org, entity_type, entity_id) giving the full mutation trail per org per path | `configHistory.version`, `changeSummary`, `changeSource`, `sessionId` already present | Use existing columns; ClientPulse writes emit `session_id` to group atomic multi-path saves from template editor |
 
 #### 17.6.2 Which paths are "sensitive" (need approval gate)
 
@@ -2068,19 +2085,19 @@ When the schema rejects a mutation (e.g. operator asks for "set pipeline velocit
 
 1. Skill returns `{ ok: false, error: 'schema_validation_failed', details: [...] }`.
 2. Chat surface renders an error card: "Can't apply — pipeline_velocity.weight must be ≤ 1.0 (you asked for 2.0). Want me to use 0.5 instead?" with suggested-fix chips.
-3. No `config_changes` row written.
+3. No `config_history` row written (validation is a pre-condition; failed writes leave no audit row).
 4. No retry loop — operator must explicitly re-issue a valid request.
 
 #### 17.6.4 Audit-log visibility
 
-Every org admin can see their own org's `config_changes` history in the "View change log" button on the settings page (§18) and the template editor (§18). Filters: by path, by source (chat / settings UI / api / agent), by user, by date range. Row click → routes to the relevant editor with the path pre-selected.
+Every org admin can see their own org's `config_history` rows (filtered to `entity_type='clientpulse_operational_config'`) in the "View change log" button on the settings page (§18) and the template editor (§18). Filters: by path (via `snapshot.path`), by change_source (ui / api / config_agent / system_sync / restore), by user, by date range. Row click → routes to the relevant editor with the path pre-selected.
 
-Sysadmins see all orgs' config_changes in the admin audit-log view.
+Sysadmins see all orgs' config_history in the admin audit-log view (bypass via sysadmin permissions, §25.4).
 
 #### 17.6.5 Ship-gate addition
 
 Phase 4.5 ship-gate (§10) is amended to require:
-- `config_changes` table migrated
+- `config_history` writer for `entity_type='clientpulse_operational_config'` wired (no new table migration needed)
 - JSON Schema for `operational_config` authored with `sensitive` flags
 - At least one sensitive-path mutation successfully gated through action→review→approve
 - Undo button functional end-to-end
@@ -2122,7 +2139,7 @@ Rules:
 - **All edits across every left-nav section are staged locally.** Switching tabs does not commit.
 - **Dirty-state indicator** on each left-nav item that has unsaved edits (amber dot + "edited" label).
 - **Staged-edits banner** at the top of the modal summarising all sections with unsaved edits.
-- **Save is atomic:** pressing "Save changes" commits the full staged diff in one transaction, producing one `config_changes` row per path changed, all sharing the same `applied_at` timestamp so they can be grouped in the audit UI.
+- **Save is atomic:** pressing "Save changes" commits the full staged diff in one transaction, producing one `config_history` row per path changed, all sharing the same `session_id` so they can be grouped in the audit UI (via the existing `config_history_session_idx` index).
 - **Cancel discards everything** (including staged edits from sections the operator never visited — they never applied).
 - **"View change log" button** in the footer routes to the audit-log view filtered to this template's changes.
 
@@ -2337,7 +2354,7 @@ The temptation throughout this design has been to build the "complete" product i
 **Intervention execution**
 - All 5 action-type primitives (§15) — full editor UX for each.
 - Canonical merge fields (§16) with v1 grammar (namespace.field, no fallback syntax).
-- Manual proposer only — operator surfaces scenarios, operator triggers action. No auto-proposer.
+- **Automated scenario detection, manual action trigger.** The `proposeClientPulseInterventionsJob` scans signals and writes **review-queue items** (`reviewItems` rows) when a scenario fires; every action still requires an operator approval click before execution. There is no auto-execution path in V1. "Proposer" throughout this spec means "scenario detector that creates HITL-gated proposals," never "system that fires interventions without a human in the loop." Truly autonomous / auto-execution proposers are V2 only (see §21.2).
 - HITL gate (gateLevel: 'review') on every action.
 - Outcome signal: **band-change only** (a proposed-and-fired intervention that lands in a visible band improvement is counted as "worked"). No webhook-based outcome attribution.
 
@@ -2509,8 +2526,8 @@ No single SLA doc exists today. Consolidated here:
 | Intervention proposal surfaces after band change | ≤ 15 min (triggered from `computeSubaccountHealthJob` completion event) |
 | Intervention approve → execute (via CRM adapter) | ≤ 30s for p95 |
 | Outcome measurement after intervention | 14-day band-change window (see §23.3) |
-| Intelligence Briefing delivery | Monday 07:00 in org timezone ±5 min |
-| Weekly Digest delivery | Friday 17:00 in org timezone ±5 min |
+| Intelligence Briefing delivery | Monday 07:00 in the schedule's timezone ±5 min (`scheduledTasks.timezone`; there is no `organisations.timezone` column in V1, see I10 in §27) |
+| Weekly Digest delivery | Friday 17:00 in the schedule's timezone ±5 min (same source) |
 | Configuration change (chat or settings) → effective | Next scan cycle (≤ 15 min for per-sub-account settings; immediate for agent-run-level settings) |
 
 All SLAs are enforced via existing `STALE_THRESHOLDS` in `server/config/connectorPollingConfig.ts` (polling layer) and pg-boss `retryLimit` + `retryDelay` (job layer). No new SLA-enforcement infrastructure needed; this table is the contract the implementation is measured against.
@@ -2573,7 +2590,7 @@ An external reviewer submitted a spec review with 7 critical gaps + 4 secondary 
 | 4 | "No idempotency / retry model" | **FALSE** | `actions.idempotency_key` with unique constraint (`server/db/schema/actions.ts:42, 87`); agent-run dedup (`agentExecutionService.ts:166–175, 305–341`); `JOB_CONFIG` idempotency strategies (`server/config/jobConfig.ts:7–34`); `scripts/verify-job-idempotency-keys.sh` CI gate; `webhookDedupe.ts` | Cross-ref added to §23.3 (idempotencyKey in job contract) |
 | 5 | "Weak feedback loop — no causal linkage" | **SUBSTANTIALLY TRUE** | `interventionOutcomes` schema exists with `healthScoreBefore/After`, `deltaHealthScore`, `outcome`, `interventionId`, `configVersion`; `recordOutcome()` implemented; BUT `measureInterventionOutcomeJob` does not exist in `server/jobs/` | §23.3 added (job contract locked as Phase 4 blocker) |
 | 6 | "Multi-tenant isolation not addressed" | **FALSE** | 41 RLS-protected tables (`server/config/rlsProtectedTables.ts:43–328`); `withPrincipalContext.ts` sets 4 session vars per txn; migration 0168 protects canonical tables with dual-layer policies; `portfolioRollupService.ts:68` explicit invariant | Cross-ref added to §22.6 |
-| 7 | "Config assistant guardrails missing" | **PARTIALLY VALID** | Validation specced in §17.2.3; `configHistory` + `configBackups` infrastructure exists; `actions.gateLevel='review'` + `reviewItems` infrastructure exists; BUT `config_changes` table not yet migrated + ClientPulse config edits not yet routed through action→review gate | §17.6 added (7 required guardrails made ship-gate mandatory) |
+| 7 | "Config assistant guardrails missing" | **PARTIALLY VALID** | Validation specced in §17.2.3; `configHistory` + `configBackups` infrastructure exists; `actions.gateLevel='review'` + `reviewItems` infrastructure exists; audit reuses existing `config_history` with new entity_type — no migration needed; ClientPulse config edits still need wiring to action→review gate | §17.6 added (7 required guardrails made ship-gate mandatory); §17.2.6 revised 2026-04-18 to reuse `config_history` |
 | S1 | "No clear ingestion model" | **PARTIALLY VALID** | Polling config (`connectorPollingConfig.ts`), webhook handlers (`server/routes/webhooks/`), backfill design (`canonical-data-platform-roadmap.md:481–505`) all exist separately; BUT no single per-signal contract | §22 added (per-signal ingestion table) |
 | S2 | "No rate limiting / API quotas" | **VALID** | `RateLimiter` class exists (`server/lib/rateLimiter.ts`) + called from `connectorPollingService:87`; BUT GHL adapter (`server/adapters/ghlAdapter.ts`) does not invoke the rate limiter | §23.1 added (Phase 1 wiring blocker) |
 | S3 | "No latency / SLA expectations" | **PARTIALLY VALID** | `STALE_THRESHOLDS` in `connectorPollingConfig.ts` with warning/error multipliers; BUT no published SLA per surface | §23.2 added (published SLA table) |
@@ -2636,8 +2653,10 @@ All tables have: `organisation_id` (FK), `connector_config_id` (FK, where applic
 - `client_pulse_health_snapshots` (ClientPulse-shaped; supersedes generic `health_snapshots` for ClientPulse flows)
 - `client_pulse_integrations_detected` (fingerprint scanner output)
 - `client_pulse_milestone_progress` (trial monitoring)
-- `client_pulse_interventions` (proposals + approvals)
-- `config_changes` (audit log — §17.2.6)
+
+**Explicitly NOT a new table** (corrected 2026-04-18 per Codex pass):
+- **Interventions** reuse existing `actions` + `reviewItems` + `interventionOutcomes` — ClientPulse metadata lives in `actions.metadataJson`. See §10 Phase 4 for the metadata shape.
+- **Config changes audit** reuses existing `config_history` — ClientPulse writes use `entity_type='clientpulse_operational_config'` with the dot-path as `entity_id_hash`. See §17.2.6 (revised) for the extension contract.
 
 ### 25.2 Idempotency + retry contract
 
@@ -2722,7 +2741,7 @@ Explicit tracker for items that were flagged as still-open in the second-pass re
 |---|------|-------|--------|-------------|
 | B1 | **Wire `RateLimiter` into GHL adapter** — infra exists (`server/lib/rateLimiter.ts`), adapter makes direct HTTP calls without acquiring tokens. | Phase 1 | §23.1 + external review 2026-04-18 | Ship-gate for Phase 1. No production rollout against real GHL accounts without this. |
 | B2 | **Implement `measureInterventionOutcomeJob`** — schema + `recordOutcome()` exist, no job runs. Without it, the feedback loop is write-only. | Phase 4 | §23.3 + external review 2026-04-18 | Ship-gate for Phase 4. Outcome recording without measurement is a false-bottom claim. |
-| B3 | **Migrate `config_changes` audit table + wire Configuration Agent to write to it** — spec defines the table at §17.2.6, not yet migrated. | Phase 4.5 | §17.6 + external review 2026-04-18 | Ship-gate for Phase 4.5. Audit log is non-negotiable for config-via-chat. |
+| B3 | **Wire Configuration Agent to write ClientPulse edits to existing `config_history`** (entity_type='clientpulse_operational_config'). No new audit table — revised 2026-04-18 per Codex pass. | Phase 4.5 | §17.6 + §17.2.6 (revised) | Ship-gate for Phase 4.5. Audit log is non-negotiable for config-via-chat. |
 | B4 | **Author `operational_config` JSON Schema with `sensitive` flags** — needed for schema validation, sum-constraint checks, sensitive-path routing. | Phase 0 | §17.6.1, §17.6.2 | Ship-gate for Phase 0 (unblocks Phase 4.5 parallel work). |
 | B5 | **Implement sensitive-path routing through action→review queue** — Configuration Agent must create `actions` row with `gateLevel='review'` for paths flagged sensitive. | Phase 4.5 | §17.6.1 | Ship-gate for Phase 4.5. |
 | B6 | **Update Configuration Assistant chat UX copy to reflect dual-path governance** — greeting + banner + message templates must show "most changes apply instantly; sensitive changes route through review queue." | Phase 5 | §17.6 + external review 2026-04-18 + `clientpulse-mockup-config-assistant-chat.html` (updated 2026-04-18) | Ship-gate for Phase 5. Mockup updated; implementation must match. |
@@ -2742,6 +2761,64 @@ Explicit tracker for items that were flagged as still-open in the second-pass re
 Second-pass external reviewer called out that "approved with blocker list" is the right framing — not "needs major rethink." This section makes the blocker list explicit and separable from the design work so implementation can track them as discrete items rather than buried references inside longer sections.
 
 **Before marking v1 "shipped":** every B-row in §26.1 must be `done`. D-rows are technical debt to backlog, not gates.
+
+---
+
+## 27. Third-pass Codex review response (added 2026-04-18)
+
+A third-pass reviewer (Codex automated spec-review loop) surfaced 11 new concerns — 5 classified as CRITICAL (will break the build if shipped as-is), 6 as IMPORTANT (real technical-debt risks). Each was audited against spec + codebase. Result: 5 real contradictions fixed, 4 were pre-existing or reviewer-misread, 2 were valid clarifications.
+
+### 27.1 Per-claim verdict table
+
+| # | Claim | Verdict | Action taken |
+|---|-------|---------|--------------|
+| **C1** | Multi-agency / connector model contradiction (1 connector = 1 org vs multi-connector container) | **NOT A BUG** — §3 already takes the "1 GHL agency backend = 1 Synthetos org" stance explicitly. `connectorInstanceLabel` and multi-connector filters were already removed (§3, lines 488, 1029, 1110). Kel's SaaS and DFY orgs are two separate Synthetos orgs, not a multi-connector container. The `connectorConfigId` reference on line 795 is about the existing single-connector `connector_configs` table, not a multi-connector shim. | No spec change; clarification added here for future reviewers. |
+| **C2** | Non-existent GHL APIs reintroduced (`fetchLoginActivity`, `fetchInstalledIntegrations`, `ghl.read.login_activity`) | **NOT A BUG** — searched spec for all three literal strings; zero matches. §2 correctly says "GHL does not expose login data" + "GHL does not expose an installed-apps endpoint" and routes both to derived approaches (Staff Activity Pulse §2.0b + Integration Fingerprint Scanner §2.0c). The phrase "replaces login activity" appears in a bridge sentence, not as a phantom API call. | No spec change. |
+| **C3** | "Current state" wrong — spec claims `health_snapshots` / scoring executors / anomaly tracking don't exist but they do | **NOT A BUG (restate)** — §4.1 explicitly calls out these existing assets ("Health-score factors config — Works", "compute_health_score handler — Registered; delegates to intelligenceSkillExecutor", "Generic health_snapshots table — Exists"). §4.2 is explicit that the gap is **wiring**, not the substrate. §4.6 (scoring formula consolidation) now cross-references the exact code paths. | Strengthened wording in §4.1 is already present; no change needed. |
+| **C4** | Intervention system duplication — proposed `client_pulse_interventions` table overlaps existing `actions` + `reviewItems` + `interventionOutcomes` | **REAL CONTRADICTION — FIXED** | §10 Phase 4 rewritten: no parallel table; proposals land as `actions` rows with `actionType IN (5 namespaced primitives)`, `gateLevel='review'`, and ClientPulse-specific `metadataJson` shape `{ triggerEventId, triggerReason, bandAtProposal, healthScoreAtProposal, configVersion, recommendedBy }`. §25.1 updated to explicitly list "NOT a new table." |
+| **C5** | Action slug collision — `send_email` and `create_task` already exist in `actionRegistry.ts` with different semantics | **REAL CONTRADICTION — FIXED** | §15.1 rewritten: 5 primitives namespaced as `crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`. Existing unprefixed primitives retain their direct-send / Synthetos-native semantics unchanged. §10 Phase 4 + §15.3 updated. |
+| **I6** | Auto-proposer scope conflict (V1 manual only vs Phase 4 proposer) | **VOCABULARY FIX** | §21.1 revised: "Automated scenario detection, manual action trigger." The `proposeClientPulseInterventionsJob` detects scenarios and writes HITL-gated review items; it never auto-executes. V2 = auto-execution proposers, explicitly deferred. |
+| **I7** | OAuth scope source-of-truth drift (config vs route hardcode) | **ALREADY ADDRESSED** — §2.3 + Phase 0 already specify: (a) refactor `server/routes/ghl.ts` to build `scope=` from `OAUTH_PROVIDERS.ghl.scopes`; (b) extend config. This is a known Phase 0 action item, not a new gap. | No spec change; cross-referenced here. |
+| **I8** | Subscription vs tier duplication (`org_subscriptions.tier` vs existing `subscriptions` + `modules`) | **NOT A BUG (reviewer misread)** — §12.4 explicitly says "the existing `modules` + `subscriptions` + `orgSubscriptions` schema (migration 0104) already models per-org per-module entitlements. We extend it with a `tier` column on `orgSubscriptions` (enum: `'monitor'` \| `'operate'`) rather than introducing a parallel tiering system." The new column is a single extension, not a parallel table. | No spec change; clarification here. |
+| **I9** | Pattern C still leaking Pattern A (org-subaccount as execution layer) | **NOT A BUG (reviewer misread)** — §13.3 explicitly chose Pattern C and §13.3/§14.3 say `playbook_runs.subaccount_id` always means "a real client sub-account" post-refactor. Remaining references to the org-subaccount are portal/inbox concerns only (`publish_portal` target resolution), never execution-scoping. Line 2197 says this explicitly: "org-subaccount retained for portal/inbox concerns only." | No spec change; clarification here. |
+| **I10** | Timezone field undefined (`organisations.timezone` doesn't exist) | **REAL CONTRADICTION — FIXED** | §7.2 + §23.2 revised to use `scheduledTasks.timezone` (which does exist per `server/db/schema/scheduledTasks.ts:35`). Adding `organisations.timezone` is explicitly deferred — if multi-schedule orgs later need a canonical default, a migration is straightforward but not required for V1. |
+| **I11** | Config audit duplication — proposed new `config_changes` table overlaps existing `config_history` | **REAL CONTRADICTION — FIXED** | §17.2.6 rewritten: no new table. ClientPulse writes land in existing `config_history` with `entity_type='clientpulse_operational_config'`, `entity_id=sha256(orgId+path)`, atomic multi-path saves grouped by `session_id`. Every section that referenced `config_changes` (9 places) updated to `config_history`. §26 B3 blocker updated accordingly. |
+
+### 27.2 Net changes from this review
+
+**5 real bugs fixed:**
+- C4: no parallel interventions table; use `actions.metadataJson`
+- C5: 5 primitives namespaced as `crm.*` + `clientpulse.operator_alert`
+- I6: "proposer" clarified as "scenario detector with HITL gate"
+- I10: timezone resolved to `scheduledTasks.timezone`; `organisations.timezone` explicitly deferred
+- I11: audit log reuses existing `config_history` table, no migration
+
+**4 reviewer misreads clarified in this section:**
+- C1: §3 already resolves multi-agency via "two separate Synthetos orgs"
+- C2: phantom API endpoints do not appear in spec
+- C3: §4.1 already correctly describes existing substrate
+- I8: §12.4 already extends existing `orgSubscriptions.tier`, not a parallel table
+- I9: §13.3 already resolved Pattern C; remaining org-subaccount refs are portal/inbox only
+
+**2 cross-reference strengthens:**
+- I7: OAuth scope drift is a known Phase 0 action
+- (orchestrator routing extraction) — V2 concern, noted in §26.2 D1
+
+### 27.3 Impact on blockers (§26)
+
+| Before | After |
+|--------|-------|
+| B3: Migrate `config_changes` audit table | B3: **Wire existing `config_history` writer for `entity_type='clientpulse_operational_config'`** (no migration) |
+| B4: Author `operational_config` JSON Schema with `sensitive` flags | Unchanged |
+| B5: Sensitive-path routing through action→review | Unchanged — action rows use namespaced `crm.*` / `clientpulse.*` types, so no collision |
+
+Net: scope of B3 shrinks (no new table), no new blockers added.
+
+### 27.4 Meta-observation
+
+Third-pass reviews naturally surface more "consistency with existing system" issues than first-pass reviews, because the spec has gotten specific enough to collide with real code. The pattern this review surfaced — "spec proposes new X, reality already has X" — is an expected sign of convergence, not regression. Each of the 11 claims forced a re-audit of actual code; 5 forced real fixes, 4 forced clarifications, 2 were fully already addressed.
+
+The spec is now **substantially subordinate to existing infrastructure** in the right way: it names what already exists and describes the minimum new work to make it do the ClientPulse thing. That's the correct posture.
 
 ---
 
