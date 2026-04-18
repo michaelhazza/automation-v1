@@ -405,10 +405,6 @@
         <polyline points="40,124 96,128 153,130 209,134 265,132 322,136 378,140 435,142 491,144 547,146 604,150 660,152" fill="none" stroke="#b45309" stroke-width="0.6" opacity="0.4"/>
         <polyline points="40,24 96,24 153,24 209,24 265,22 322,22 378,22 435,22 491,22 547,22 604,26 660,26" fill="none" stroke="#15803d" stroke-width="0.6" opacity="0.4"/>
 
-        <!-- Tier-downgrade event markers -->
-        <line x1="209" y1="20" x2="209" y2="200" stroke="#b91c1c" stroke-width="0.6" stroke-dasharray="3,3" opacity="0.5"/>
-        <line x1="491" y1="20" x2="491" y2="200" stroke="#b91c1c" stroke-width="0.6" stroke-dasharray="3,3" opacity="0.5"/>
-
         <!-- "Now" line at right edge -->
         <line class="now-line" x1="660" y1="15" x2="660" y2="205"/>
         <text x="658" y="14" text-anchor="end" style="font-size:10px;fill:#4338ca;font-weight:700;">NOW</text>
@@ -418,10 +414,6 @@
         <text x="265" y="218" text-anchor="middle">8w ago</text>
         <text x="491" y="218" text-anchor="middle">4w ago</text>
         <text x="660" y="218" text-anchor="end">today</text>
-
-        <!-- Event annotations below the axis -->
-        <text x="209" y="238" text-anchor="middle" style="fill:#b91c1c;font-size:10px;font-weight:500;">Smith Dental · $647→$347</text>
-        <text x="491" y="238" text-anchor="middle" style="fill:#b91c1c;font-size:10px;font-weight:500;">Bright Marketing · $647→$347</text>
 
         <!-- Legend-in-chart dots for narrative: current position per band -->
         <circle cx="660" cy="194" r="2.5" fill="#b91c1c"/>
@@ -456,7 +448,7 @@
           <span class="delta flat">→ 0 · 12wk</span>
         </div>
         <div style="margin-left: auto; font-size: 11px; color: #6b7280;">
-          Source: <code style="background:#fafbfc;padding:1px 5px;border-radius:3px;font-size:10px;">client_pulse_churn_assessments</code> · weekly snapshot of the latest assessment per sub-account, aggregated to band counts.
+          Source: weekly band snapshot per sub-account, aggregated across your portfolio.
         </div>
       </div>
     </div>
@@ -947,7 +939,7 @@
     </div>
 
     <div class="footnote">
-      <strong>Where this data comes from:</strong> health snapshots + churn assessments (computed every 4 hours) + integration detections (from fingerprint scanner per §2.0c) + staff activity pulse (from <code>canonical_subaccount_mutations</code> per §2.0b). All thresholds, weights, and intervention templates are editable in <a href="#" style="color:#4338ca;">Configure</a>. The same data feeds Monday's Intelligence Briefing email and Friday's Weekly Digest (per §13).
+      <strong>Where this data comes from:</strong> health scores + churn assessments (recalculated every 4 hours) + detected third-party integrations + staff-activity tracking from your team's actions across contacts, deals, and conversations. All thresholds, weights, and intervention templates are editable in <a href="#" style="color:#4338ca;">Configure</a>. The same data feeds Monday's Intelligence Briefing and Friday's Weekly Digest.
     </div>
 
   </main>
