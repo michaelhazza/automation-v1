@@ -153,7 +153,7 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Site-wide assistant — opens from any settings page callout, the global nav, or a hotkey · Lets operators tweak <strong>any</strong> Synthetos configuration in natural language (agents, schedules, skills, ClientPulse, integrations…) · Routes through Orchestrator → Configuration Agent → writes to the relevant config store (`operational_config`, agent definitions, schedules, etc.)</div>
+<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Site-wide assistant — opens from any settings page callout, the global nav, or a hotkey · Natural-language config changes for agents, schedules, skills, ClientPulse, integrations · <strong>Dual-path governance:</strong> low-risk changes commit instantly after preview; sensitive changes (band thresholds · saved templates · scan schedule · retention) route through the review queue · Every change logged to <code>config_changes</code> with full diff + reason</div>
 
 <div class="bg-context"></div>
 <div class="bg-hint">← invoked from: any settings page callout · global nav ("Ask the assistant") · keyboard shortcut (⌘K)</div>
@@ -184,7 +184,9 @@
     <div class="msg agent">
       <div class="avatar">🤖</div>
       <div class="bubble">
-        Hi Kel — I can change any setting in your workspace in plain English. Agents, schedules, skills, integrations, ClientPulse… if it's in a settings page, I can edit it. Same effect as clicking through the UI, just faster when you know what you want. I'll always confirm before writing.
+        Hi Kel — I can help you change most settings in your workspace in plain English. I'll always show the diff and confirm before writing.
+        <br><br>
+        <span style="font-size: 11px; color: #6b7280;">💡 Low-risk changes (factor weights, toggles, cadences) apply instantly. <strong>Sensitive changes</strong> (band thresholds, saved email/SMS templates, scan schedule, data-retention) route through your review queue before going live.</span>
       </div>
     </div>
 
@@ -216,6 +218,7 @@
         <div class="confirmation">
           <strong>Pipeline velocity</strong> · 0.30 → <strong>0.35</strong> · <span style="color:#059669;">+0.05</span>
           <div class="detail">operational_config.healthScoreFactors.pipeline_velocity.weight</div>
+          <div style="margin-top: 4px; font-size: 10px; color: #059669; font-weight: 600;">⚡ LOW-RISK · applies instantly on approve</div>
         </div>
 
         <div class="confirmation" style="margin-top: 6px;">
@@ -223,7 +226,7 @@
           <div class="detail">operational_config.healthScoreFactors.contact_growth.weight</div>
         </div>
 
-        Weights still sum to 1.00 after the change ✓
+        ✓ Schema valid · weights still sum to 1.00 · no sum-constraint violation
         <br><br>
         Apply these changes?
 
@@ -245,10 +248,10 @@
     <div class="msg agent">
       <div class="avatar">🤖</div>
       <div class="bubble">
-        Done ✓ Changes are live — next scan cycle (in ~3h) will use the new weights.
+        Done ✓ Applied instantly (low-risk path). Next scan cycle (~3h) will use the new weights.
 
         <div class="confirmation">
-          <strong>2 overrides saved</strong> to your org's operational_config.
+          <strong>1 override saved</strong> to your org's operational_config · logged to <code>config_changes</code>.
           <div class="detail">pipeline_velocity · 0.30 → 0.35<br>contact_growth · 0.15 (unchanged — already overridden)</div>
         </div>
 
@@ -268,6 +271,58 @@
         <div class="actions-row">
           <button class="chip-btn">Yes, run back-test</button>
           <button class="chip-btn subtle">Not now</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Second turn: sensitive-path change routes through review -->
+    <div class="msg user">
+      <div class="avatar">K</div>
+      <div class="bubble">also lower the critical band ceiling from 19 to 15</div>
+    </div>
+
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        Got it — change to <strong>Churn bands</strong>:
+
+        <div class="confirmation" style="background: #fef3c7; border-color: #fde68a; color: #78350f;">
+          <strong>Critical band · ceiling</strong> · 19 → <strong>15</strong> · <span style="color:#b45309;">−4</span>
+          <div class="detail" style="color: #92400e;">operational_config.churnBands.critical.ceiling</div>
+          <div style="margin-top: 4px; font-size: 10px; color: #b45309; font-weight: 600;">⚠ SENSITIVE · re-classifies 12 clients · routes to review queue</div>
+        </div>
+
+        Band-threshold changes reclassify every client in the portfolio — so this one goes through review rather than applying instantly. I'll queue it for approval; it'll be live once you (or another org admin) approve.
+        <br><br>
+        <div style="font-size: 11px; color: #6b7280;">
+          <strong>Preview impact:</strong> 12 clients currently scored 15–19 would move from <span style="color:#dc2626;">Critical</span> → <span style="color:#ea580c;">At Risk</span> on next scan.
+        </div>
+
+        <div class="actions-row">
+          <button class="chip-btn" style="background:#4338ca;color:#fff;border-color:#4338ca;">Queue for review</button>
+          <button class="chip-btn subtle">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="msg user">
+      <div class="avatar">K</div>
+      <div class="bubble">queue it</div>
+    </div>
+
+    <div class="msg agent">
+      <div class="avatar">🤖</div>
+      <div class="bubble">
+        Queued ✓ Sitting in your review queue as <code>#R-4829</code>. Once approved the change lands on the next scan cycle (~3h).
+
+        <div class="confirmation">
+          <strong>Status:</strong> pending review · <strong>Audit:</strong> logged to <code>config_changes</code>
+          <div class="detail">source: chat · reason: "lower critical band ceiling to 15"</div>
+        </div>
+
+        <div class="actions-row">
+          <button class="chip-btn">Open review queue ↗</button>
+          <button class="chip-btn subtle">Cancel request</button>
         </div>
       </div>
     </div>

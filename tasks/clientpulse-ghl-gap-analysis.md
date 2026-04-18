@@ -40,10 +40,12 @@
 22. Ingestion contract — per-signal freshness, path, and backfill *(added 2026-04-18, per external review)*
 23. Rate limiting, SLA, and the `measureInterventionOutcomeJob` contract *(added 2026-04-18, per external review)*
 24. Pre-build engineering audit — claim-by-claim verification *(added 2026-04-18)*
+25. Implementer quick-reference appendix *(added 2026-04-18, per second-pass review)*
+26. Outstanding blockers + ship-gate tracker *(added 2026-04-18, per second-pass review)*
 
 Scoring formula consolidation in §4.6 was also added 2026-04-18 per external review.
 
-> **Reading order for a fresh implementer:** §1 → §21 → §24 (reviewer concerns addressed) → §15 → §16 → §17 (+ §17.6 guardrails) → §18 → §20 → §4.6 (scoring formula) → §22 (ingestion) → §23 (rate limit + SLA + outcome job) → §10 → §11.3 → deep-dive per-phase §§2–9 as needed.
+> **Reading order for a fresh implementer:** §26 (blockers) → §25 (invariants quick-ref) → §1 → §21 → §24 → §15 → §16 → §17 (+ §17.6) → §18 → §20 → §4.6 → §22 → §23 → §10 → §11.3 → deep-dive §§2–9 as needed.
 
 ---
 
@@ -2600,6 +2602,146 @@ Five claims were wrong in fact; the spec was updated to cross-reference the exis
 ### 24.4 Why this matters
 
 Reviewer feedback is valuable **precisely because** each claim forces us to point at real evidence. Five of eleven claims turned out to be wrong about the codebase but right about the spec — the spec didn't cross-reference enough existing infrastructure, so a smart external reader assumed it was missing. Six of eleven claims were genuinely actionable (partially or fully) and have concrete spec additions. Net: the spec is materially tighter, and the paper trail ensures future reviews don't re-litigate the same ground.
+
+---
+
+## 25. Implementer quick-reference appendix (added 2026-04-18, per second-pass reviewer)
+
+A compact reference so builders don't need to context-switch across `architecture.md`, `docs/canonical-data-platform-roadmap.md`, `server/config/*.ts`, or `server/lib/permissions.ts` to pick up the invariants this spec depends on. **Every table in this section is a pointer to authoritative infrastructure that already exists.** If the spec contradicts the pointer, the pointer is source-of-truth.
+
+### 25.1 Canonical tables
+
+All tables have: `organisation_id` (FK), `connector_config_id` (FK, where applicable), `external_id` (provider's ID), `UNIQUE(organisation_id, provider_type, external_id)`, RLS-protected via migration 0168, adapter writes via `canonicalDataService` methods.
+
+| Table | Purpose | Adapter write path | Schema file |
+|-------|---------|---------------------|-------------|
+| `canonical_accounts` | Sub-account / tenant record from provider | `adapter.ingestion.listAccounts()` → `upsertAccount()` | `server/db/schema/canonicalEntities.ts` |
+| `canonical_contacts` | Contact / lead record | `adapter.ingestion.fetchContacts()` → `upsertContact()` | `canonicalEntities.ts` |
+| `canonical_opportunities` | Deal / opportunity / pipeline record | `adapter.ingestion.fetchOpportunities()` → `upsertOpportunity()` | `canonicalEntities.ts` |
+| `canonical_conversations` | Message thread / conversation | `adapter.ingestion.fetchConversations()` → `upsertConversation()` | `canonicalEntities.ts` |
+| `canonical_revenue` | Financial transactions + MRR/ARR | `adapter.ingestion.fetchRevenue()` → `upsertRevenue()` | `canonicalEntities.ts` |
+| `canonical_metrics` | Current value of a named metric (e.g. `pipeline_velocity_30d`) | `adapter.ingestion.computeMetrics()` → `upsertMetric()` | `canonicalEntities.ts` |
+| `canonical_metric_history` | Append-only historical metric values (timeseries) | Same as above, with period slice | `canonicalEntities.ts` |
+| `canonical_subaccount_mutations` | Event log of staff-attributed writes (for Staff Activity Pulse §2.0b) | Adapter mutation webhook handlers | `server/db/schema/canonicalEntities.ts` |
+| `canonical_webhook_events` | Inbound webhook event dedup log | Webhook routers (`server/routes/webhooks/*`) | `canonicalEntities.ts` |
+| `health_snapshots` | Point-in-time health-score snapshot (with `factorBreakdown`) | `intelligenceSkillExecutor` on `compute_health_score` | `canonicalEntities.ts` |
+| `anomaly_events` | Detected deviation from baseline | `intelligenceSkillExecutor` on metric thresholds | `canonicalEntities.ts` |
+
+**Dictionary:** `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts` — 300+ lines describing purpose, columns, constraints, skill references, anti-patterns per table.
+
+**Roadmap:** `docs/canonical-data-platform-roadmap.md` covers program-level phases (P1–P6) including backfill lifecycle, RLS policies, principal-context migration.
+
+**ClientPulse-only additions** (not yet migrated; specified in §9.4 + §22):
+- `client_pulse_signal_observations` (timeseries, per-subaccount, per-signal)
+- `client_pulse_health_snapshots` (ClientPulse-shaped; supersedes generic `health_snapshots` for ClientPulse flows)
+- `client_pulse_integrations_detected` (fingerprint scanner output)
+- `client_pulse_milestone_progress` (trial monitoring)
+- `client_pulse_interventions` (proposals + approvals)
+- `config_changes` (audit log — §17.2.6)
+
+### 25.2 Idempotency + retry contract
+
+**Location of source-of-truth:** `server/config/jobConfig.ts:7–34` (strategy enum) + `scripts/verify-job-idempotency-keys.sh` (CI gate).
+
+| Layer | Mechanism | Column / key | Enforcement |
+|-------|-----------|--------------|-------------|
+| **Actions** | `actions.idempotency_key` + `UNIQUE(subaccountId, idempotencyKey)` | `server/db/schema/actions.ts:42, 87` | Schema-level — duplicate insert fails |
+| **Agent runs** | `agentRuns.idempotencyKey` returned from `agentExecutionService` if duplicate key submitted | `agentExecutionService.ts:166–175, 305–341` | Service-level — returns existing result |
+| **pg-boss jobs** | `idempotencyStrategy` per queue: `payload-key`, `singleton-key`, `one-shot`, `fifo` | `server/config/jobConfig.ts` — declared per queue | CI gate `verify-job-idempotency-keys.sh` fails if a queue lacks strategy |
+| **Webhooks** | In-memory TTL dedup store (10 min) | `server/lib/webhookDedupe.ts` | Handler-level — duplicate event id no-ops |
+| **Interventions** | `interventionService.checkCooldown(orgId, accountId, scope, windowHours)` | `server/services/interventionService.ts:13–49` | Service-level — returns early if within cooldown |
+
+**Retry policy:** every pg-boss queue declares `retryLimit` (2–5), `retryDelay` (seconds), `retryBackoff: true` (exponential). Dead-letter queues configured per tier.
+
+**ClientPulse contract:**
+- `idempotencyKey = hash(subaccountId + connectorPollRunId)` for signal-ingestion jobs (§4.3)
+- `idempotencyKey = measure_outcome:${interventionId}` for outcome-measurement job (§23.3)
+- `idempotencyKey = config_change:${orgId}:${path}:${timestamp}` for Configuration Agent mutations (§17.2)
+
+### 25.3 Multi-tenant enforcement
+
+**Location of source-of-truth:** `server/config/rlsProtectedTables.ts:43–328` (manifest), `server/db/withPrincipalContext.ts` (runtime), migration 0168 (canonical RLS policies).
+
+| Layer | Mechanism | Enforcement |
+|-------|-----------|-------------|
+| **Database** | PostgreSQL RLS policies on 41 tables | Every query filtered by `current_setting('app.organisation_id')` unless principal has bypass role |
+| **Session context** | `withPrincipalContext()` sets 4 session vars per txn: `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, `app.current_team_ids` | Required wrapper for every RLS-protected query |
+| **Route handler** | `req.orgId` extracted from auth token; `resolveSubaccount(subaccountId, orgId)` on every `:subaccountId` route | Middleware — `architecture.md` rule |
+| **Service** | Queries filter by `organisationId = req.orgId` (never `req.user.organisationId`) | Convention — code-review rule, CLAUDE.md |
+| **Job** | pg-boss job handlers re-validate `organisationId` before acting | Handler-level (`orchestratorFromTaskJob.ts:159–162` pattern) |
+| **Canonical writer** | Bypass role `canonical_writer` scoped to org-level writes only | Migration 0168 dual-layer policies |
+
+### 25.4 Permission layers
+
+**Location of source-of-truth:** `server/lib/permissions.ts:1–340`.
+
+**Role model:**
+- System admin — Synthetos staff (cross-org visibility via bypass role)
+- Org admin / Org manager / Org viewer — agency owners and staff (scoped to their organisation_id)
+- Subaccount admin / Subaccount manager / Subaccount user — (v2; not in v1 scope)
+
+**Atomic permission keys** (selected — full list in `permissions.ts`):
+
+| Key | Held by | Gates |
+|-----|---------|-------|
+| `ORG_PERMISSIONS.REVIEW_VIEW` | Org Admin, Manager, Viewer | See review queue |
+| `ORG_PERMISSIONS.REVIEW_APPROVE` | Org Admin, Manager | Approve items (including Config Agent sensitive-path changes, §17.6.2) |
+| `ORG_PERMISSIONS.CLIENTPULSE_CONFIG_EDIT` | Org Admin | Write to `operational_config` via settings UI or chat |
+| `ORG_PERMISSIONS.TEMPLATE_EDIT` | System admin only | Edit master templates (§18.6) |
+| `SUBACCOUNT_PERMISSIONS.INTERVENTION_CREATE` | Org Manager (for any subaccount they manage) | Propose interventions |
+| `SUBACCOUNT_PERMISSIONS.INTERVENTION_APPROVE` | Org Admin, Manager | Approve/execute interventions |
+
+**Enforcement pattern:** Express middleware stack — `authenticate` → permission guard → route handler. Guard rejects with 403 before handler runs. UI gates surface visibility via `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` (CLAUDE.md rule).
+
+**ClientPulse-specific gates:**
+- Config Agent sensitive-path writes require `REVIEW_APPROVE` on the resulting action row (§17.6).
+- Template editor is sysadmin-only (§18.6).
+- Saved email/SMS template edits are org-admin only and sensitive (§17.6.2).
+
+### 25.5 Key files per domain (ClientPulse-specific addendum to architecture.md)
+
+| Task | Start here |
+|------|------------|
+| Add a new ClientPulse signal | `server/services/connectorPollingService.ts` adapter wiring + `canonicalDictionaryRegistry.ts` dictionary entry + §22.1 ingestion contract row |
+| Add a health-score factor | `server/services/orgConfigService.ts:DEFAULT_HEALTH_SCORE_FACTORS` + `intelligenceSkillExecutor.ts` normalisation type + §4.6.2 table |
+| Add a blind-spot detector | Template editor §18 left-nav + detector definition in `operational_config.blindSpotDetection[]` |
+| Add an intervention primitive (beyond the 5) | `server/config/actionRegistry.ts` + adapter method + editor component + §15 primitive table |
+| Add a canonical merge field namespace | `server/services/mergeFieldResolver.ts` (Phase 4) + JSON Schema + §16.1 namespace table |
+| Wire a new sensitive config path | §17.6.2 sensitivity policy table + JSON Schema `sensitive: true` flag |
+| Add a new ClientPulse playbook (briefing / digest) | `server/playbooks/*.playbook.ts` + `system_playbook_templates` seed + §13.6 |
+
+---
+
+## 26. Outstanding blockers + ship-gate tracker (added 2026-04-18)
+
+Explicit tracker for items that were flagged as still-open in the second-pass review. These are not spec gaps — the spec calls them out — but they are **implementation items that must clear before rollout**.
+
+### 26.1 Ship-gate blockers (hard)
+
+| # | Item | Phase | Source | Owner check |
+|---|------|-------|--------|-------------|
+| B1 | **Wire `RateLimiter` into GHL adapter** — infra exists (`server/lib/rateLimiter.ts`), adapter makes direct HTTP calls without acquiring tokens. | Phase 1 | §23.1 + external review 2026-04-18 | Ship-gate for Phase 1. No production rollout against real GHL accounts without this. |
+| B2 | **Implement `measureInterventionOutcomeJob`** — schema + `recordOutcome()` exist, no job runs. Without it, the feedback loop is write-only. | Phase 4 | §23.3 + external review 2026-04-18 | Ship-gate for Phase 4. Outcome recording without measurement is a false-bottom claim. |
+| B3 | **Migrate `config_changes` audit table + wire Configuration Agent to write to it** — spec defines the table at §17.2.6, not yet migrated. | Phase 4.5 | §17.6 + external review 2026-04-18 | Ship-gate for Phase 4.5. Audit log is non-negotiable for config-via-chat. |
+| B4 | **Author `operational_config` JSON Schema with `sensitive` flags** — needed for schema validation, sum-constraint checks, sensitive-path routing. | Phase 0 | §17.6.1, §17.6.2 | Ship-gate for Phase 0 (unblocks Phase 4.5 parallel work). |
+| B5 | **Implement sensitive-path routing through action→review queue** — Configuration Agent must create `actions` row with `gateLevel='review'` for paths flagged sensitive. | Phase 4.5 | §17.6.1 | Ship-gate for Phase 4.5. |
+| B6 | **Update Configuration Assistant chat UX copy to reflect dual-path governance** — greeting + banner + message templates must show "most changes apply instantly; sensitive changes route through review queue." | Phase 5 | §17.6 + external review 2026-04-18 + `clientpulse-mockup-config-assistant-chat.html` (updated 2026-04-18) | Ship-gate for Phase 5. Mockup updated; implementation must match. |
+
+### 26.2 Non-blocking technical debt (track, don't gate)
+
+| # | Item | Deferred to | Source |
+|---|------|-------------|--------|
+| D1 | **Extract orchestrator routing logic into a dedicated `orchestratorRoutingService.ts`** — currently lives in the Orchestrator's system prompt. Maintainability risk as intervention types expand. | V2 | §24.1 row 3 + external review 2026-04-18 |
+| D2 | **Move webhook dedup store from in-memory TTL to Redis** — current implementation works for single-instance; noted in comments. | V2 / when horizontal scaling | `server/lib/webhookDedupe.ts` comments |
+| D3 | **Per-GHL-tier rate-limit quota config** — `operational_config.integrationRateLimits.ghl.{tier}.{rps, burst}` needs seeded values from Kel's GHL contact. | Phase 1 (needs Kel) | §23.1 |
+| D4 | **Back-test runner for scoring-config changes** — Configuration Agent surfaces "want to run a back-test?" CTA but the execution engine is V2. | V2 | §21.2 |
+| D5 | **V2 Config Agent mutations:** array-append/remove, bulk operations, conditional edits. | V2 | §17.5 |
+
+### 26.3 Why this section exists
+
+Second-pass external reviewer called out that "approved with blocker list" is the right framing — not "needs major rethink." This section makes the blocker list explicit and separable from the design work so implementation can track them as discrete items rather than buried references inside longer sections.
+
+**Before marking v1 "shipped":** every B-row in §26.1 must be `done`. D-rows are technical debt to backlog, not gates.
 
 ---
 
