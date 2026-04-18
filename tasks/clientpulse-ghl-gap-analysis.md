@@ -32,13 +32,18 @@
 14. Plain-English delivery summary (read this first)
 15. Action-type primitives — the 5 CRM-agnostic intervention actions *(added 2026-04-18)*
 16. Canonical merge fields — CRM-agnostic content composition *(added 2026-04-18)*
-17. Configuration Agent integration — making ClientPulse config editable via chat *(added 2026-04-18)*
+17. Configuration Agent integration — making ClientPulse config editable via chat *(added 2026-04-18)* — §17.6 guardrail requirements added post-review
 18. Template editor + system-admin governance model *(added 2026-04-18)*
 19. Onboarding flows — sysadmin create-org + orgadmin first-run *(added 2026-04-18)*
 20. UX decisions catalog + mockup index *(added 2026-04-18)*
 21. V1 vs V2 scope delineation *(added 2026-04-18)*
+22. Ingestion contract — per-signal freshness, path, and backfill *(added 2026-04-18, per external review)*
+23. Rate limiting, SLA, and the `measureInterventionOutcomeJob` contract *(added 2026-04-18, per external review)*
+24. Pre-build engineering audit — claim-by-claim verification *(added 2026-04-18)*
 
-> **Reading order for a fresh implementer:** §1 → §21 → §15 → §16 → §17 → §18 → §20 → §10 → §11.3 → deep-dive per-phase §§2–9 as needed.
+Scoring formula consolidation in §4.6 was also added 2026-04-18 per external review.
+
+> **Reading order for a fresh implementer:** §1 → §21 → §24 (reviewer concerns addressed) → §15 → §16 → §17 (+ §17.6 guardrails) → §18 → §20 → §4.6 (scoring formula) → §22 (ingestion) → §23 (rate limit + SLA + outcome job) → §10 → §11.3 → deep-dive per-phase §§2–9 as needed.
 
 ---
 
@@ -553,6 +558,87 @@ The spec calls for "null / baseline-building until 14 data points accumulated". 
 - New signals get a slug + a skill + an entry in `getHealthScoreFactors()` default config — no code branches.
 - The scoring skill is generic over `HealthScoreFactor[]`; it does not know about "GHL" or "funnels" — it only knows `signalSlug`, `weight`, `normalisation`.
 - Adding Kel's DFY-specific threshold is a per-connector-instance override on the same JSONB path, not a `if (agency === 'DFY')` branch.
+
+### 4.6 Consolidated scoring formula (added 2026-04-18, per external review)
+
+An external reviewer flagged that the formula is not consolidated in one place. This subsection is that consolidation — the algorithm is already implemented in code, this is the canonical reference.
+
+#### 4.6.1 Data contract
+
+**Input:** `HealthScoreFactor[]` from `getHealthScoreFactors(orgId)` (`server/services/orgConfigService.ts:28–34`) — array of `{ metricSlug, weight, label, periodType, normalisation: { type, minValue, maxValue, invertDirection } }`.
+
+**Per-factor observations:** read from `canonical_metrics` / `canonical_metric_history` (filtered by `accountId` + `metricSlug` + `periodType`).
+
+**Output:** `HealthSnapshot` row with `{ accountId, computedAt, overallScore: 0–100 | null, confidence: 'cold_start' | 'ok', factorBreakdown: [{ factor, score, weight }], inputObservationIds }`.
+
+#### 4.6.2 Per-factor normalisation (four types, implemented at `server/services/intelligenceSkillExecutor.ts:19–44`)
+
+Each factor's raw value is normalised to `score ∈ [0, 100]` via one of:
+
+| Type | Formula | Use case |
+|------|---------|----------|
+| `linear` | `clamp((value - min) / (max - min), 0, 1) * 100` | Values where higher = healthier (e.g. pipeline velocity) |
+| `inverse_linear` | `(1 - clamp((value - min) / (max - min), 0, 1)) * 100` | Values where lower = healthier (e.g. days-since-last-activity) |
+| `threshold` | `value >= threshold ? 100 : 0` | Binary signals (e.g. calendar configured yes/no) |
+| `percentile` | `rank(value, populationBucket) * 100` | Values compared against portfolio distribution (e.g. contact-growth rate vs peers) |
+
+`invertDirection: true` applied on any type flips the output (`100 - score`).
+
+#### 4.6.3 Composite formula + missing-data re-weighting
+
+Implemented at `intelligenceSkillExecutor.ts:300–310`:
+
+```
+factorResults = [...only factors with observations present]
+totalWeight   = sum(f.weight for f in factorResults)
+overallScore  = round(sum(f.score * (f.weight / totalWeight) for f in factorResults))
+```
+
+**Rationale:** if a factor is missing (e.g. revenue signal absent because the client hasn't connected Stripe), the remaining factors re-normalise to still sum to 1.00. This means **two sub-accounts with the same data produce the same score deterministically**, and a sub-account with partial data produces a score that's still bounded `[0, 100]` and interpretable — it's the weighted average of the factors that *did* score.
+
+#### 4.6.4 Cold-start cutover
+
+Implemented at `intelligenceSkillExecutor.ts:281–293`:
+
+```
+if count(observations in last 14d) < minimumDataPoints (default 14):
+   overallScore = null
+   confidence = 'cold_start'
+else:
+   confidence = 'ok'
+```
+
+`minimumDataPoints` is configurable per factor via `ColdStartConfig` (`orgConfigService.ts:72–76`).
+
+#### 4.6.5 Weight sum constraint
+
+- **At rest (config):** `getHealthScoreFactors()` enforces sum-to-1.00 via validation on write (settings UI + Configuration Agent both reject non-conforming writes — §17.2.3 validation rules).
+- **At runtime:** §4.6.3 re-weighting preserves the 1.00 sum over available factors, so the output is always on the same `[0, 100]` scale regardless of how many factors have data.
+
+#### 4.6.6 Determinism guarantee
+
+Given identical input observations + identical factor config, two scoring runs produce **byte-identical** snapshots:
+- Normalisation is pure arithmetic on immutable observations.
+- Weight re-normalisation is deterministic over the set of factors-with-data.
+- Rounding is stable (`Math.round` → integer 0–100).
+
+This satisfies the reviewer's "two identical clients score identically" concern. The formula is not probabilistic, not ML-trained, not path-dependent.
+
+#### 4.6.7 Band mapping (see §5.4)
+
+`overallScore → band` via configurable thresholds (`operational_config.churnBands`). Default: `Critical [0–19] · At Risk [20–39] · Watch [40–69] · Healthy [70–100]`. Band is recorded on the snapshot so drift in the band config doesn't retroactively reclassify history.
+
+#### 4.6.8 Where the formula lives in code
+
+| Component | File:line |
+|-----------|-----------|
+| Factor config loader | `server/services/orgConfigService.ts:28–34, 88–115` |
+| Normalisation implementations | `server/services/intelligenceSkillExecutor.ts:19–44` |
+| Missing-data re-weighting | `server/services/intelligenceSkillExecutor.ts:300–310` |
+| Cold-start gate | `server/services/intelligenceSkillExecutor.ts:281–293` |
+| Snapshot schema | `server/db/schema/canonicalEntities.ts:175–184` (`factorBreakdown` column) |
+
+Any future change to scoring logic **must** update all five files plus this subsection in lock-step. Per CLAUDE.md rule "Docs Stay In Sync With Code."
 
 ---
 
@@ -1941,6 +2027,63 @@ The "action button on the briefing" path (e.g. a briefing says "one-click: reset
 
 This keeps the v1 surface tight enough to ship without getting dragged into schema-evolution-via-chat corner cases.
 
+### 17.6 Guardrail requirements (added 2026-04-18, per external review)
+
+An external reviewer flagged that the chat is powerful and dangerous without explicit guardrails. This subsection locks in the guardrail contract. **None of these are optional for v1 — they are ship-gate requirements.**
+
+#### 17.6.1 Required guardrails (all must be wired before v1 release)
+
+| Guardrail | Shape | Existing building block | Gap to close |
+|-----------|-------|-------------------------|--------------|
+| **Schema validation** | Every `clientpulse.config.update` validated against `operational_config` JSON Schema before write | Skill contract in §17.2.3 declares validation rules | Author the JSON Schema file (`server/config/operationalConfigSchema.ts`) as part of Phase 0 |
+| **Sum-constraint validation** | Weight-sum checks (factors sum to 1.00), band-overlap checks (no band range overlaps another) | Referenced in §17.2.3 | Implement as Zod refinements on the schema |
+| **Dry-run / preview** | Every chat-initiated mutation surfaces a before/after diff card in-bubble; operator clicks Apply to commit | Existing Configuration Assistant confirm-before-write pattern | Extend pattern to ClientPulse path; re-use `clientpulse.config.read` to compute preview without writing |
+| **Approval gate (for sensitive paths)** | Changes to certain paths require the action→review→approve pipeline, not inline commit | `actions.gateLevel='review'` + `reviewItems` table (exists) | Wire `config_update_hierarchy_template` skill to create an `actions` row with `gateLevel='review'` for paths flagged `sensitive: true` in the schema |
+| **Audit log** | Every mutation writes a `config_changes` row with before/after/source/user/reason | Table defined at §17.2.6; `configHistory` + `configBackups` infra already exists in `server/db/schema/` | Migration to create `config_changes` table (does not exist yet — confirmed by code search); writer in the skill handler |
+| **Rollback** | Every applied change can be reverted via `operation: 'reset_to_default'` or by re-applying `previous_value` from the audit row | `configBackups` table supports scope='config_agent' with lifecycle tracking | No new infra; add "Undo" button wired to `config_update_hierarchy_template` with `previous_value` from the last `config_changes` row |
+| **Versioning** | `config_changes` + `configHistory` together give the full mutation trail per org per path | `configHistory.changeSummary` + `changeSource` already present | Ensure ClientPulse writes also flow to `configHistory` in the same transaction |
+
+#### 17.6.2 Which paths are "sensitive" (need approval gate)
+
+Not every config change needs review — bumping a weight by 0.05 on a pilot org is low-risk. The JSON Schema declares `sensitive: boolean` on each leaf; initial sensitivity flags:
+
+| Path pattern | Sensitive? | Reason |
+|--------------|-----------|--------|
+| `healthScoreFactors.*.weight` | No (auto-commit) | Reversible, bounded, frequent tuning |
+| `churnBands.*.threshold` | **Yes** | Band re-classifies every client in the portfolio; worth a second look |
+| `blindSpotDetection.*.enabled` | No | Toggle, reversible |
+| `blindSpotDetection.*.threshold` | No | Tuneable |
+| `savedTemplates[*]` | **Yes** | Shared across all operators; content is sent to clients |
+| `scanSchedule.*` | **Yes** | Affects every agent run cadence — easy to misconfigure and hard to notice |
+| `dataRetention.*` | **Yes** | Destructive; longer retention costs money, shorter deletes history |
+| `integrationFingerprints[*]` | No | Learned + tuneable |
+
+Sensitivity is a per-org override: an org admin can mark any path `sensitive: true` in their own operational_config to force approval for themselves.
+
+#### 17.6.3 Schema-validation failure UX
+
+When the schema rejects a mutation (e.g. operator asks for "set pipeline velocity weight to 2.0"):
+
+1. Skill returns `{ ok: false, error: 'schema_validation_failed', details: [...] }`.
+2. Chat surface renders an error card: "Can't apply — pipeline_velocity.weight must be ≤ 1.0 (you asked for 2.0). Want me to use 0.5 instead?" with suggested-fix chips.
+3. No `config_changes` row written.
+4. No retry loop — operator must explicitly re-issue a valid request.
+
+#### 17.6.4 Audit-log visibility
+
+Every org admin can see their own org's `config_changes` history in the "View change log" button on the settings page (§18) and the template editor (§18). Filters: by path, by source (chat / settings UI / api / agent), by user, by date range. Row click → routes to the relevant editor with the path pre-selected.
+
+Sysadmins see all orgs' config_changes in the admin audit-log view.
+
+#### 17.6.5 Ship-gate addition
+
+Phase 4.5 ship-gate (§10) is amended to require:
+- `config_changes` table migrated
+- JSON Schema for `operational_config` authored with `sensitive` flags
+- At least one sensitive-path mutation successfully gated through action→review→approve
+- Undo button functional end-to-end
+- Schema-validation failure renders helpful error (not a stack trace)
+
 ---
 
 ## 18. Template editor + system-admin governance model
@@ -2273,6 +2416,193 @@ Anything short of this is v1-alpha.
 
 ---
 
+## 22. Ingestion contract — per-signal freshness, path, and backfill (added 2026-04-18, per external review)
+
+An external reviewer flagged that polling, webhook, and backfill exist as independent components but no single contract specifies per-signal freshness. This section is that contract. It cross-references `docs/canonical-data-platform-roadmap.md` (which covers the platform-level ingestion model) and narrows it to the ClientPulse-specific signals from §2.
+
+### 22.1 Per-signal ingestion table
+
+For each of the 8 ClientPulse signals, declare: primary ingest path, fallback path, freshness SLA, backfill window, canonical destination.
+
+| # | Signal | Primary | Fallback | Freshness SLA | Backfill on connect | Canonical destination |
+|---|--------|---------|----------|---------------|---------------------|----------------------|
+| 1 | Last Activity (contact events) | Webhook (`ContactUpdate`, `OpportunityUpdate`) | Polling (hourly) | ≤ 5 min via webhook; ≤ 60 min via poll | 90 days | `canonical_contacts.last_activity_at` + `canonical_subaccount_mutations` |
+| 2 | Pipeline velocity | Polling (hourly) | — | ≤ 60 min | 90 days | `canonical_opportunities` → derived into `canonical_metrics` |
+| 3 | Funnel count + last-updated | Polling (daily 03:00 UTC) | Ad-hoc skill fetch | ≤ 24h | 30 days | `canonical_metrics` (metric_slug: `funnel_count`, `funnel_last_updated_days`) |
+| 4 | Calendar quality | Polling (daily 03:00 UTC) | Ad-hoc skill fetch | ≤ 24h | Current state only (no historical calendars) | `canonical_metrics` (metric_slug: `calendar_quality_score`) |
+| 5 | Conversation engagement | Webhook (`InboundMessage`, `OutboundMessage`) | Polling (hourly) | ≤ 5 min via webhook; ≤ 60 min via poll | 90 days | `canonical_conversations` |
+| 6 | Contact growth | Polling (hourly) | — | ≤ 60 min | 180 days | `canonical_contacts` → derived into `canonical_metrics` (metric_slug: `contact_growth_30d`) |
+| 7 | Revenue trend | Polling (daily 04:00 UTC, agency-billing or Stripe) | Ad-hoc skill fetch | ≤ 24h | 180 days | `canonical_revenue` → derived into `canonical_metrics` |
+| 8 | Staff activity (derived, §2.0b) | Polling (hourly) — derived from mutations stream | — | ≤ 60 min | 90 days | `canonical_subaccount_mutations` → derived into `canonical_metrics` (metric_slug: `staff_activity_score`) |
+| + | Integration fingerprint (§2.0c) | On-demand scan (fingerprint scanner job) | — | ≤ 24h (opportunistic) | Current state only | `client_pulse_integrations_detected` |
+| + | Onboarding milestone progress (§8) | Derived from signals 1, 3, 4, 7 | — | Same as source signals | Same as source | `client_pulse_milestone_progress` |
+
+**Note:** "Ad-hoc skill fetch" = a skill can trigger a fresh pull outside the poll cadence when the operator explicitly asks (e.g. "re-check calendar config for Smith Dental now"). This goes through the same adapter layer with full idempotency.
+
+### 22.2 Freshness SLA policy
+
+- **Green SLA (within spec):** signal observation timestamp is within the SLA column above.
+- **Amber SLA:** signal is 1×–2× the SLA window. Surface a warning indicator on dashboard tile + drill-down.
+- **Red SLA:** signal is > 2× the SLA window. Surface a blocking indicator; exclude the signal from composite health-score computation (it becomes a missing factor, which triggers the §4.6.3 re-weighting).
+
+SLA thresholds are evaluated by existing `STALE_THRESHOLDS` in `server/config/connectorPollingConfig.ts` (already has `warningMultiplier` + `errorMultiplier`). No new code; just per-signal configuration.
+
+### 22.3 Backfill lifecycle
+
+Every new connector connection goes through three phases on `integration_connections.sync_phase` (per `docs/canonical-data-platform-roadmap.md` §P1):
+
+1. **`backfill`** — pulls the historical window listed in §22.1 (up to 180 days). Health scoring is suppressed (`confidence: 'backfill'`) during this phase. Dashboard shows "importing history…"
+2. **`transition`** — backfill complete; waiting for first fresh poll to confirm live ingestion is working. Scoring begins in cold-start mode.
+3. **`live`** — steady state. Full SLA enforcement applied.
+
+Cutover between phases is idempotent + resumable — a crash during backfill resumes from the last-ingested observation.
+
+### 22.4 Webhook vs polling discipline
+
+- **If a webhook is configured and delivering**, webhook is the source of truth; the corresponding poll runs at a longer cadence (every 6h, as a consistency check + backfill for missed events).
+- **If webhook delivery falls behind** (no events received in 2× expected interval for that signal), poll cadence shortens back to the primary rate and an `operator_alert` is raised ("GHL webhook stopped delivering for Smith Dental — falling back to polling").
+- **Dedup:** webhook events are deduped via `canonical_webhook_events` + in-memory TTL store (`server/lib/webhookDedupe.ts`) on arrival. Same event id arriving twice is a no-op.
+
+### 22.5 Rate-limit interaction (see §23)
+
+Polling cadence from §22.1 is **per sub-account**. With 180 sub-accounts × 8 signals × various cadences, the aggregate call rate against GHL can exceed GHL's per-token rate limits. Rate-limit infrastructure (§23) is a hard dependency on these cadences being safely achievable.
+
+### 22.6 What this section does NOT cover
+
+- Webhook handler implementations per provider (lives in `server/routes/webhooks/`)
+- Adapter-specific polling logic (lives in `server/services/connectorPollingService.ts`)
+- Canonical dictionary field-level definitions (lives in `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts`)
+- Principal-context / RLS for canonical tables (lives in migration 0168 + `server/config/rlsProtectedTables.ts`)
+
+All of the above already exist. This section is the **ClientPulse-signal-level** contract that pins each of the 8 signals to a concrete ingest path + SLA so the scoring pipeline can declare "stale" / "missing" vs "fresh" deterministically.
+
+---
+
+## 23. Rate limiting, SLA, and the measureInterventionOutcomeJob contract (added 2026-04-18, per external review)
+
+Three concerns the reviewer raised that land in a single section because they share root causes.
+
+### 23.1 Rate limiting — close the GHL adapter gap
+
+**Audit finding:** `server/lib/rateLimiter.ts` implements a token-bucket `RateLimiter` and `connectorPollingService.ts:87` calls `getProviderRateLimiter(config.connectorType).acquire(config.id)` before ingestion. However, the GHL adapter (`server/adapters/ghlAdapter.ts`) makes direct HTTP calls outside the polling service and **does not invoke the rate limiter**. This is the gap.
+
+**Fix (Phase 1 blocker):**
+
+1. Every GHL adapter HTTP call routes through a new `server/adapters/ghlRateLimitedFetch.ts` wrapper that calls `getProviderRateLimiter('ghl').acquire(connectionId)` before `fetch()`.
+2. Rate-limit budget is configured per GHL tier (dev / Pro / Agency Pro) from `operational_config.integrationRateLimits.ghl.{tier}.{requestsPerSecond, burstTokens}`.
+3. When the bucket is empty, the wrapper **queues** the call (backpressure) rather than dropping or failing. Queued-call telemetry goes to `integration_health_metrics` so operators see when GHL is being throttled.
+4. Every call emits a `pollingCallCount` + `pollingLatencyMs` datum; Kel's GHL OAuth contact provides quota numbers to seed the config.
+
+**Ship gate:** simulated burst of 100 GHL calls in 1 second against a 10 req/s bucket is correctly throttled, queued, and drained without error.
+
+### 23.2 Published SLA table
+
+No single SLA doc exists today. Consolidated here:
+
+| Surface | SLA |
+|---------|-----|
+| Dashboard signal freshness (realtime signals: activity, messages) | ≤ 5 min via webhook; ≤ 60 min via poll fallback (see §22.1) |
+| Dashboard signal freshness (batch signals: funnels, calendars, revenue) | ≤ 24h |
+| Health-score recompute after new observation | ≤ 15 min (per-sub-account `computeSubaccountHealthJob` debounce) |
+| Intervention proposal surfaces after band change | ≤ 15 min (triggered from `computeSubaccountHealthJob` completion event) |
+| Intervention approve → execute (via CRM adapter) | ≤ 30s for p95 |
+| Outcome measurement after intervention | 14-day band-change window (see §23.3) |
+| Intelligence Briefing delivery | Monday 07:00 in org timezone ±5 min |
+| Weekly Digest delivery | Friday 17:00 in org timezone ±5 min |
+| Configuration change (chat or settings) → effective | Next scan cycle (≤ 15 min for per-sub-account settings; immediate for agent-run-level settings) |
+
+All SLAs are enforced via existing `STALE_THRESHOLDS` in `server/config/connectorPollingConfig.ts` (polling layer) and pg-boss `retryLimit` + `retryDelay` (job layer). No new SLA-enforcement infrastructure needed; this table is the contract the implementation is measured against.
+
+### 23.3 measureInterventionOutcomeJob — close the feedback loop
+
+**Audit finding:** `interventionOutcomes` table exists (`server/db/schema/interventionOutcomes.ts`) with `healthScoreBefore`, `healthScoreAfter`, `deltaHealthScore`, outcome classification. `recordOutcome()` function exists in `interventionService.ts:53–90`. However, **no background job actually triggers outcome measurement** — the spec (§10 Phase 4) calls for `measureInterventionOutcomeJob` but it does not exist in `server/jobs/`.
+
+Without this job, the feedback loop is incomplete: interventions can be recorded, but nothing measures whether they worked.
+
+**Contract for the missing job (Phase 4 blocker):**
+
+```
+measureInterventionOutcomeJob
+  trigger:       cron (hourly) — checks all interventions with status='executed'
+                 AND executed_at > now() - interval '14 days'
+                 AND outcome IS NULL
+  action:        for each candidate:
+                   - fetch current health_snapshot for the account
+                   - compare to healthScoreBefore stored on the intervention row
+                   - if days_since_execution >= 14:
+                       compute delta = currentScore - healthScoreBefore
+                       classify: delta > 5 = 'improved'
+                                 delta < -5 = 'worsened'
+                                 else      = 'unchanged'
+                       write intervention_outcomes row via recordOutcome()
+                   - if days_since_execution < 14:
+                       no-op (wait; will re-check next hour)
+  idempotency:   idempotencyKey = `measure_outcome:${interventionId}`
+                 (ensures the job can run every hour safely; recordOutcome() returns
+                  existing row if already measured)
+  retry:         retryLimit: 3, retryBackoff: true (standard pg-boss config)
+```
+
+**Signal for "band change" vs "score delta":** §21.1 defines v1 outcome as **band-change-only**. The job records both `deltaHealthScore` (numeric) and `bandChange` (`critical → at_risk`, etc.) on the outcome row. Band-change is the primary V1 signal; numeric delta is stored for V2 analytics (effectiveness scoring beyond band change).
+
+**Causal linkage:** the outcome row's `interventionId` + `actionId` + `configVersionAtDecision` fields give full traceability: intervention X (fired under config version Y) produced outcome Z. This powers V2 effectiveness analytics ("does tuning weight W from 0.3 → 0.4 improve intervention success rate?").
+
+**Ship gate (Phase 4):** simulated intervention fired against a cold-start sub-account, followed by synthetic observations that improve the health score past the band threshold; `measureInterventionOutcomeJob` runs, writes an outcome row with `bandChange: 'at_risk → watch'`, visible in the drilldown's intervention history.
+
+### 23.4 What this section does NOT cover
+
+- The existing rate-limiter implementation (`server/lib/rateLimiter.ts`) — no changes needed, only adapter wiring
+- The existing `interventionOutcomes` table — no schema changes needed, only the job
+- V2 effectiveness analytics — deferred (§21.2)
+
+---
+
+## 24. Pre-build engineering audit — claim-by-claim verification (added 2026-04-18)
+
+An external reviewer submitted a spec review with 7 critical gaps + 4 secondary gaps. A codebase audit was run against each claim (see `tasks/clientpulse-ghl-gap-analysis.md` session transcript 2026-04-18). This section records the findings so future reviewers (human or agent) can see what was verified vs what was genuinely missing.
+
+### 24.1 Claims-vs-reality table
+
+| # | Reviewer claim | Verdict | Evidence | Spec action taken |
+|---|----------------|---------|----------|-------------------|
+| 1 | "Missing canonical data model" | **FALSE** | 9 canonical tables (`canonical_accounts`, `canonical_contacts`, `canonical_opportunities`, `canonical_conversations`, `canonical_revenue`, `canonical_metrics`, `canonical_metric_history`, `health_snapshots`, `anomaly_events`); `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts` (300+ lines); `docs/canonical-data-platform-roadmap.md`; RLS via migration 0168 | Cross-ref added to §22.6 |
+| 2 | "Scoring not formally defined" | **PARTIALLY TRUE** | Implementation is rigorous (`intelligenceSkillExecutor.ts:19–310`: 4 normalisation types, cold-start, missing-data re-weighting) but spec doc did not consolidate the formula | §4.6 added (formula consolidation) |
+| 3 | "Orchestrator responsibilities blurred → monolith risk" | **PARTIALLY VALID** | `docs/orchestrator-capability-routing-spec.md` defines four-path routing; layers separated at service level (`hitlService`, `executionLayerService`, `skillExecutor`); BUT routing classification lives in LLM prompt, not in a dedicated code service | V2 concern — no spec change; noted for future extraction to a dedicated `orchestratorRoutingService.ts` |
+| 4 | "No idempotency / retry model" | **FALSE** | `actions.idempotency_key` with unique constraint (`server/db/schema/actions.ts:42, 87`); agent-run dedup (`agentExecutionService.ts:166–175, 305–341`); `JOB_CONFIG` idempotency strategies (`server/config/jobConfig.ts:7–34`); `scripts/verify-job-idempotency-keys.sh` CI gate; `webhookDedupe.ts` | Cross-ref added to §23.3 (idempotencyKey in job contract) |
+| 5 | "Weak feedback loop — no causal linkage" | **SUBSTANTIALLY TRUE** | `interventionOutcomes` schema exists with `healthScoreBefore/After`, `deltaHealthScore`, `outcome`, `interventionId`, `configVersion`; `recordOutcome()` implemented; BUT `measureInterventionOutcomeJob` does not exist in `server/jobs/` | §23.3 added (job contract locked as Phase 4 blocker) |
+| 6 | "Multi-tenant isolation not addressed" | **FALSE** | 41 RLS-protected tables (`server/config/rlsProtectedTables.ts:43–328`); `withPrincipalContext.ts` sets 4 session vars per txn; migration 0168 protects canonical tables with dual-layer policies; `portfolioRollupService.ts:68` explicit invariant | Cross-ref added to §22.6 |
+| 7 | "Config assistant guardrails missing" | **PARTIALLY VALID** | Validation specced in §17.2.3; `configHistory` + `configBackups` infrastructure exists; `actions.gateLevel='review'` + `reviewItems` infrastructure exists; BUT `config_changes` table not yet migrated + ClientPulse config edits not yet routed through action→review gate | §17.6 added (7 required guardrails made ship-gate mandatory) |
+| S1 | "No clear ingestion model" | **PARTIALLY VALID** | Polling config (`connectorPollingConfig.ts`), webhook handlers (`server/routes/webhooks/`), backfill design (`canonical-data-platform-roadmap.md:481–505`) all exist separately; BUT no single per-signal contract | §22 added (per-signal ingestion table) |
+| S2 | "No rate limiting / API quotas" | **VALID** | `RateLimiter` class exists (`server/lib/rateLimiter.ts`) + called from `connectorPollingService:87`; BUT GHL adapter (`server/adapters/ghlAdapter.ts`) does not invoke the rate limiter | §23.1 added (Phase 1 wiring blocker) |
+| S3 | "No latency / SLA expectations" | **PARTIALLY VALID** | `STALE_THRESHOLDS` in `connectorPollingConfig.ts` with warning/error multipliers; BUT no published SLA per surface | §23.2 added (published SLA table) |
+| S4 | "No security / permission model" | **FALSE** | `server/lib/permissions.ts:1–340` fully defined with atomic keys, role templates (Org Admin / Manager / Viewer, Subaccount Admin / Manager / User), RLS-enforced via `org_user_roles` and `subaccount_user_assignments` | Cross-ref added to §17.6.2 (sensitive-path approval gate uses existing `gateLevel='review'`) |
+
+### 24.2 Net-new spec additions from this review
+
+Five sections added / strengthened:
+
+- **§4.6** — Consolidated scoring formula (where the formula lives in code; determinism guarantee; missing-data re-weighting)
+- **§17.6** — Configuration Agent guardrail requirements (7 mandatory guardrails; sensitive-path definitions; validation-failure UX; ship-gate amendment)
+- **§22** — Per-signal ingestion contract (webhook vs polling, freshness SLA, backfill phases)
+- **§23** — Rate limiting + SLA table + `measureInterventionOutcomeJob` contract
+- **§24** — This verification audit itself
+
+### 24.3 No-op responses (reviewer was wrong)
+
+Five claims were wrong in fact; the spec was updated to cross-reference the existing infrastructure so future reviewers find it:
+
+- Canonical data model (claim 1) — point to `docs/canonical-data-platform-roadmap.md` + `canonicalDictionaryRegistry.ts`
+- Idempotency (claim 4) — point to `JOB_CONFIG` + `actions.idempotency_key`
+- Multi-tenant isolation (claim 6) — point to migration 0168 + `rlsProtectedTables.ts`
+- Security/permissions (S4) — point to `permissions.ts`
+- Orchestrator monolith risk (claim 3) — acknowledged as real v2 concern but not a v1 blocker
+
+### 24.4 Why this matters
+
+Reviewer feedback is valuable **precisely because** each claim forces us to point at real evidence. Five of eleven claims turned out to be wrong about the codebase but right about the spec — the spec didn't cross-reference enough existing infrastructure, so a smart external reader assumed it was missing. Six of eleven claims were genuinely actionable (partially or fully) and have concrete spec additions. Net: the spec is materially tighter, and the paper trail ensures future reviews don't re-litigate the same ground.
+
+---
+
 **End of document.**
 
-**Next step:** feed this gap analysis (especially §§15–21 added 2026-04-18) into the architect agent to produce an implementation plan starting with Phase 0 + Phase 0.5 + Phase 1, since those are the unblocking items with no dependencies on decisions still pending from Kel. Phase 4.5 (Configuration Agent extension) can run in parallel with Phase 5 once the `operational_config` JSON Schema is locked.
+**Next step:** feed this gap analysis (especially §§15–24 added 2026-04-18) into the architect agent to produce an implementation plan starting with Phase 0 + Phase 0.5 + Phase 1, since those are the unblocking items with no dependencies on decisions still pending from Kel. Phase 4.5 (Configuration Agent extension) can run in parallel with Phase 5 once the `operational_config` JSON Schema is locked.
