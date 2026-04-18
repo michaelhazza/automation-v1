@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Email authoring — compose in Synthetos, send via client's CRM (mockup)</title>
+<title>Send email — compose popup (mockup)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -14,372 +14,278 @@
     color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
   }
 
-  /* Header bar */
-  .app-head {
-    background: #0f172a; color: #e2e8f0; padding: 10px 20px;
-    display: flex; align-items: center; gap: 16px;
-    border-bottom: 1px solid #1e293b;
+  /* Background */
+  .bg-context {
+    position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1;
   }
-  .app-head .brand { font-weight: 600; color: #fff; font-size: 14px; }
-  .app-head .crumbs { color: #94a3b8; font-size: 12px; display: flex; gap: 6px; align-items: center; }
-  .app-head .crumbs a { color: #a5b4fc; text-decoration: none; }
-  .app-head .crumbs .sep { color: #475569; }
-  .app-head .spacer { flex: 1; }
-  .app-head .who { font-size: 11px; color: #94a3b8; }
+  .bg-hint {
+    position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none;
+    font-size: 11px; color: #9ca3af;
+  }
 
-  /* Page container */
-  .page { max-width: 1200px; margin: 0 auto; padding: 20px; }
-  .page-head {
-    display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px;
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
   }
-  .page-head h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
-  .page-head .sub { font-size: 12px; color: #6b7280; margin-top: 3px; }
-  .page-head .actions { display: flex; gap: 8px; }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 860px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18), 0 6px 14px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  /* Header */
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 {
+    font-size: 16px; font-weight: 700; letter-spacing: -0.2px;
+  }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close {
+    font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer;
+    padding: 0 6px;
+  }
+
+  /* Template chooser strip */
+  .tmpl-strip {
+    padding: 10px 20px; background: #fafbfc; border-bottom: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .tmpl-strip label {
+    font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px;
+    white-space: nowrap;
+  }
+  .tmpl-strip select {
+    flex: 1; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; background: #fff; font-family: inherit;
+  }
+  .tmpl-strip .manage-link {
+    font-size: 11px; color: #4338ca; text-decoration: none; font-weight: 600; white-space: nowrap;
+  }
+
+  /* Body: two cols */
+  .m-body {
+    display: grid; grid-template-columns: 1.1fr 1fr;
+  }
+  .compose-col {
+    padding: 16px 20px; border-right: 1px solid #f0f1f3;
+  }
+  .preview-col {
+    padding: 16px 20px; background: #fafbfc;
+  }
+  .col-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+    color: #6b7280; margin-bottom: 8px;
+  }
+
+  /* Compose form */
+  .form-field { margin-bottom: 10px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 150px; resize: vertical; font-family: inherit; line-height: 1.55; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* Merge field palette */
+  .merge-palette {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  }
+  .merge-chip {
+    padding: 2px 7px; background: #f5f3ff; color: #5b21b6;
+    border: 1px solid #ddd6fe; border-radius: 3px; font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    cursor: pointer;
+  }
+  .merge-chip:hover { background: #ddd6fe; }
+  .merge-palette-label {
+    font-size: 10px; color: #6b7280; margin-top: 8px;
+  }
+
+  /* Preview */
+  .preview-email {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;
+  }
+  .preview-email .pe-head {
+    padding: 10px 14px; border-bottom: 1px solid #f0f1f3; font-size: 11px;
+  }
+  .preview-email .pe-head .from { color: #1a1d23; font-weight: 600; }
+  .preview-email .pe-head .to { color: #6b7280; font-size: 10px; margin-top: 2px; }
+  .preview-email .pe-head .subject {
+    font-size: 13px; font-weight: 600; margin-top: 8px; color: #1a1d23;
+  }
+  .preview-email .pe-body {
+    padding: 14px; font-size: 13px; color: #1f2937; line-height: 1.55;
+  }
+  .preview-email .pe-body p { margin-bottom: 10px; }
+  .preview-email .pe-body .merged {
+    background: #fef3c7; padding: 1px 3px; border-radius: 2px;
+  }
+
+  /* Destination callout */
+  .dest-callout {
+    margin-top: 12px; padding: 10px 12px; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 6px; font-size: 11px; color: #3730a3; line-height: 1.5;
+  }
+  .dest-callout strong { color: #312e81; }
+
+  /* Footer */
+  .m-foot {
+    padding: 12px 20px; background: #fafbfc; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-foot .save-toggle {
+    font-size: 11px; color: #4338ca; display: flex; align-items: center; gap: 5px; cursor: pointer;
+    font-weight: 600;
+  }
+  .m-foot .btns { display: flex; gap: 6px; }
   .btn {
-    padding: 7px 14px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 6px 13px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer;
     border: 1px solid transparent; font-family: inherit;
   }
   .btn-primary { background: #4338ca; color: #fff; }
   .btn-primary:hover { background: #3730a3; }
   .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
-
-  /* Two-col layout */
-  .authoring { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
-
-  /* Left — composer */
-  .composer {
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
-  }
-  .c-section { padding: 14px 18px; border-bottom: 1px solid #f0f1f3; }
-  .c-section:last-child { border-bottom: none; }
-  .c-label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
-    color: #6b7280; margin-bottom: 6px;
-  }
-  .c-field input, .c-field select, .c-field textarea {
-    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
-    font-size: 13px; font-family: inherit; background: #fff;
-  }
-  .c-field textarea { min-height: 200px; resize: vertical; font-family: inherit; }
-  .c-field .hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
-
-  .body-editor-wrap { position: relative; }
-  .body-editor-toolbar {
-    background: #fafbfc; border: 1px solid #e5e7eb; border-bottom: none;
-    border-radius: 5px 5px 0 0; padding: 6px 10px;
-    display: flex; gap: 4px; align-items: center; flex-wrap: wrap;
-    font-size: 12px;
-  }
-  .body-editor-toolbar button {
-    padding: 3px 7px; background: transparent; border: 1px solid transparent; border-radius: 3px;
-    font-size: 12px; cursor: pointer; color: #374151; font-family: inherit;
-  }
-  .body-editor-toolbar button:hover { background: #fff; border-color: #e5e7eb; }
-  .body-editor-toolbar .sep { width: 1px; height: 16px; background: #e5e7eb; margin: 0 4px; }
-  .body-editor-toolbar .insert-merge {
-    margin-left: auto; color: #4338ca; font-weight: 600;
-    padding: 3px 9px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px;
-  }
-  .body-editor-wrap textarea {
-    border-radius: 0 0 5px 5px; border-top: none;
-  }
-
-  /* Merge field palette (chips) */
-  .merge-palette {
-    display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
-  }
-  .merge-chip {
-    padding: 3px 8px; background: #f5f3ff; color: #5b21b6;
-    border: 1px solid #ddd6fe; border-radius: 4px; font-size: 11px;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    cursor: pointer;
-  }
-  .merge-chip:hover { background: #ddd6fe; }
-
-  /* Two-col within a c-section */
-  .c-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-
-  /* Right — preview + destination */
-  .preview-col { display: flex; flex-direction: column; gap: 12px; }
-  .destination-card {
-    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 14px 18px;
-  }
-  .destination-card .d-title {
-    font-weight: 700; font-size: 13px; color: #3730a3; margin-bottom: 4px;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .destination-card .d-desc { font-size: 12px; color: #4c1d95; line-height: 1.5; margin-bottom: 10px; }
-  .destination-card .d-row {
-    display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 5px 0;
-    border-top: 1px solid #c7d2fe; font-size: 12px; color: #3730a3;
-  }
-  .destination-card .d-row .k { color: #6366f1; }
-  .destination-card .d-row .v { font-weight: 600; }
-
-  .preview-card {
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; flex: 1;
-  }
-  .preview-head {
-    padding: 10px 16px; background: #fafbfc; border-bottom: 1px solid #e5e7eb;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .preview-head h4 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
-    font-weight: 700;
-  }
-  .preview-head .contact-pick select {
-    font-size: 11px; padding: 3px 8px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fff;
-  }
-  .preview-email { padding: 0; }
-  .preview-email .peh {
-    padding: 12px 18px; border-bottom: 1px solid #f0f1f3; font-size: 12px;
-  }
-  .preview-email .peh .from { color: #1a1d23; font-weight: 600; margin-bottom: 2px; }
-  .preview-email .peh .to { color: #6b7280; font-size: 11px; }
-  .preview-email .peh .subject {
-    font-size: 15px; font-weight: 600; margin-top: 10px; color: #1a1d23;
-  }
-  .preview-email .pe-body {
-    padding: 18px; font-size: 14px; color: #1f2937; line-height: 1.6;
-  }
-  .preview-email .pe-body p { margin-bottom: 12px; }
-  .preview-email .pe-body .merged { background: #fef3c7; padding: 1px 3px; border-radius: 2px; }
-  .preview-email .pe-foot {
-    padding: 12px 18px; background: #fafbfc; border-top: 1px solid #f0f1f3;
-    font-size: 11px; color: #6b7280;
-  }
-
-  /* Template library strip */
-  .tmpl-strip {
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px;
-    margin-bottom: 14px;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  }
-  .tmpl-strip .label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
-    font-weight: 700; white-space: nowrap;
-  }
-  .tmpl-strip .tmpl-pill {
-    font-size: 12px; padding: 4px 10px; background: #fafbfc; border: 1px solid #e5e7eb;
-    border-radius: 14px; cursor: pointer; color: #374151;
-  }
-  .tmpl-strip .tmpl-pill.active {
-    background: #eef2ff; border-color: #4338ca; color: #4338ca; font-weight: 600;
-  }
-  .tmpl-strip .tmpl-pill:hover { background: #f5f6f8; }
-  .tmpl-strip .save-tmpl-toggle {
-    margin-left: auto; font-size: 12px; color: #4338ca; font-weight: 600;
-    display: flex; align-items: center; gap: 5px; cursor: pointer;
-  }
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Email authoring inside Automation OS · Opened when the operator picks <strong>Send email</strong> in the propose-intervention modal · Composition happens in Synthetos (editor, merge fields, preview) · Send is delivered via the client's connected CRM using the agency's authenticated domain</div>
+<div class="annot-banner">📐 MOCKUP · Send email compose popup · Platform primitive usable system-wide (not just ClientPulse) · Synthetos-native authoring with canonical merge fields · Send goes through the connected CRM to preserve domain authentication</div>
 
-<!-- App header -->
-<div class="app-head">
-  <div class="brand">🧠 Synthetos</div>
-  <div class="crumbs">
-    <a href="#">ClientPulse</a> <span class="sep">/</span>
-    <a href="#">Smith Dental</a> <span class="sep">/</span>
-    <a href="#">Propose intervention</a> <span class="sep">/</span>
-    <span>Compose email</span>
-  </div>
-  <div class="spacer"></div>
-  <div class="who">kel@kelmedia.com.au · org: Productivity Hub — SaaS</div>
-</div>
+<div class="bg-context"></div>
+<div class="bg-hint">← drill-down page (faded, behind modal)</div>
 
-<div class="page">
+<div class="modal-backdrop">
+  <div class="modal">
 
-  <!-- Page header -->
-  <div class="page-head">
-    <div>
-      <h1>Compose email · Smith Dental</h1>
-      <div class="sub">Authoring in Synthetos · will send via Smith Dental's CRM (GHL) using Productivity Hub's authenticated domain</div>
+    <!-- Header -->
+    <div class="m-head">
+      <div>
+        <h2>Compose email · Smith Dental</h2>
+        <div class="sub">Synthetos compose · delivery via Smith Dental's connected CRM using productivityhub.com.au</div>
+      </div>
+      <button class="close">×</button>
     </div>
-    <div class="actions">
-      <button class="btn btn-secondary">Cancel</button>
-      <button class="btn btn-secondary">Save as template</button>
-      <button class="btn btn-primary">Submit to review queue →</button>
+
+    <!-- Template chooser -->
+    <div class="tmpl-strip">
+      <label>Start from:</label>
+      <select>
+        <option>Blank (ad-hoc compose)</option>
+        <option selected>Check-in — "everything OK?" · used 42× across all clients</option>
+        <option>Tier retention — "let's talk before Friday" · used 8×</option>
+        <option>Funnel-setup helper · used 34×</option>
+        <option>Calendar setup nudge · used 19×</option>
+        <option>Thank-you / anniversary · used 6×</option>
+        <option>+ Browse all 12 Synthetos templates…</option>
+      </select>
+      <a class="manage-link" href="#">Manage templates ↗</a>
     </div>
-  </div>
 
-  <!-- Template library strip -->
-  <div class="tmpl-strip">
-    <span class="label">Start from a saved template:</span>
-    <span class="tmpl-pill active">Blank (compose fresh)</span>
-    <span class="tmpl-pill">Check-in — "everything OK?"</span>
-    <span class="tmpl-pill">Tier retention outreach</span>
-    <span class="tmpl-pill">Funnel-setup helper</span>
-    <span class="tmpl-pill">Calendar setup nudge</span>
-    <span class="tmpl-pill">Thank-you / anniversary</span>
-    <span class="tmpl-pill">+ Browse all (12)</span>
-    <label class="save-tmpl-toggle">
-      <input type="checkbox" style="margin-right: 4px;"> Save as a reusable template when I submit
-    </label>
-  </div>
+    <!-- Compose + preview -->
+    <div class="m-body">
 
-  <div class="authoring">
+      <!-- LEFT — compose -->
+      <div class="compose-col">
+        <div class="col-label">Compose</div>
 
-    <!-- LEFT — Composer -->
-    <div class="composer">
-
-      <!-- From / To -->
-      <div class="c-section">
-        <div class="c-row">
-          <div class="c-field">
-            <div class="c-label">From</div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>From</label>
             <select>
-              <option selected>Productivity Hub &lt;hello@productivityhub.com.au&gt; · authenticated in Smith Dental's GHL</option>
-              <option>Kel Andrews &lt;kel@kelmedia.com.au&gt; · personal</option>
-              <option>Sarah Chen (VA) &lt;sarah@productivityhub.com.au&gt;</option>
+              <option selected>hello@productivityhub.com.au · authenticated in Smith Dental's CRM</option>
+              <option>kel@kelmedia.com.au</option>
+              <option>sarah@productivityhub.com.au</option>
             </select>
-            <div class="hint">Send identity options come from Smith Dental's CRM-authenticated sender domains.</div>
           </div>
-          <div class="c-field">
-            <div class="c-label">To</div>
+          <div class="form-field">
+            <label>To</label>
             <select>
-              <option selected>Dr. Marcia Smith · owner · primary contact</option>
+              <option selected>Dr. Marcia Smith · primary</option>
               <option>Stephanie Rodriguez · practice manager</option>
-              <option>Add another recipient…</option>
             </select>
-            <div class="hint">Contacts pulled live from Smith Dental's CRM.</div>
           </div>
         </div>
-      </div>
 
-      <!-- Subject -->
-      <div class="c-section">
-        <div class="c-field">
-          <div class="c-label">Subject line</div>
+        <div class="form-field">
+          <label>Subject</label>
           <input type="text" value="Quick check-in, {{contact.firstName}}">
-          <div class="hint">Merge fields render live in the preview on the right. Click a chip below to insert.</div>
         </div>
-      </div>
 
-      <!-- Body -->
-      <div class="c-section">
-        <div class="c-field">
-          <div class="c-label">Body</div>
-          <div class="body-editor-wrap">
-            <div class="body-editor-toolbar">
-              <button><strong>B</strong></button>
-              <button><em>I</em></button>
-              <button><u>U</u></button>
-              <span class="sep"></span>
-              <button>≡</button>
-              <button>•</button>
-              <button>1.</button>
-              <span class="sep"></span>
-              <button>🔗 Link</button>
-              <button>🖼 Image</button>
-              <span class="insert-merge">＋ Insert merge field</span>
-            </div>
-            <textarea>Hi {{contact.firstName}},
+        <div class="form-field">
+          <label>Body</label>
+          <textarea>Hi {{contact.firstName}},
 
 Noticed you haven't been in for a bit — everything OK with {{client.name}}?
 
-When we set things up in {{subaccount.onboardedMonth}} the goal was to get you running 2-3 funnels. I'm seeing {{signals.funnelCount}} built so far and it's been {{signals.lastActivityDays}} days since your team logged a new contact. Thought I'd check in rather than assume.
+I'm seeing {{signals.funnelCount}} funnels built so far and it's been {{signals.lastActivityDays}} days since your team logged a new contact. Thought I'd check in rather than assume.
 
-If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call this week — or if you'd prefer, I can have Sarah handle a setup session free of charge.
-
-Either way, no pitch. Just wanted to reach out.
+If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call — or I can have Sarah handle a setup session free of charge.
 
 Kel @ Productivity Hub</textarea>
-          </div>
-          <div class="merge-palette">
-            <span class="merge-chip">{{contact.firstName}}</span>
-            <span class="merge-chip">{{contact.lastName}}</span>
-            <span class="merge-chip">{{contact.email}}</span>
-            <span class="merge-chip">{{client.name}}</span>
-            <span class="merge-chip">{{client.tier}}</span>
-            <span class="merge-chip">{{client.tierDirection}}</span>
-            <span class="merge-chip">{{subaccount.onboardedMonth}}</span>
-            <span class="merge-chip">{{signals.funnelCount}}</span>
-            <span class="merge-chip">{{signals.lastActivityDays}}</span>
-            <span class="merge-chip">{{signals.healthBand}}</span>
-            <span class="merge-chip">{{agency.name}}</span>
-            <span class="merge-chip">{{agency.ownerFirstName}}</span>
-          </div>
+        </div>
+
+        <div class="merge-palette-label">Canonical merge fields (same syntax across all CRMs):</div>
+        <div class="merge-palette">
+          <span class="merge-chip">{{contact.firstName}}</span>
+          <span class="merge-chip">{{contact.lastName}}</span>
+          <span class="merge-chip">{{contact.email}}</span>
+          <span class="merge-chip">{{client.name}}</span>
+          <span class="merge-chip">{{client.tier}}</span>
+          <span class="merge-chip">{{client.tierDirection}}</span>
+          <span class="merge-chip">{{signals.funnelCount}}</span>
+          <span class="merge-chip">{{signals.lastActivityDays}}</span>
+          <span class="merge-chip">{{signals.healthBand}}</span>
+          <span class="merge-chip">{{signals.healthScore}}</span>
+          <span class="merge-chip">{{agency.ownerFirstName}}</span>
         </div>
       </div>
 
-      <!-- Attachments + scheduling -->
-      <div class="c-section">
-        <div class="c-row">
-          <div class="c-field">
-            <div class="c-label">Attachments</div>
-            <input type="text" value="(none)" style="color:#9ca3af;">
-            <div class="hint">Image / PDF attachments sync through the CRM at send.</div>
-          </div>
-          <div class="c-field">
-            <div class="c-label">Send timing</div>
-            <select>
-              <option selected>Immediately on approval</option>
-              <option>Delay 24 hours</option>
-              <option>Schedule for a specific time</option>
-            </select>
-          </div>
-        </div>
-      </div>
+      <!-- RIGHT — preview + destination -->
+      <div class="preview-col">
+        <div class="col-label">Live preview · rendered with Smith Dental's real data</div>
 
-    </div>
-
-    <!-- RIGHT — Destination + live preview -->
-    <div class="preview-col">
-
-      <!-- Destination card -->
-      <div class="destination-card">
-        <div class="d-title">📬 Where this email sends from</div>
-        <div class="d-desc">
-          Synthetos composes → Smith Dental's CRM delivers. The send is a single API call to the client's CRM with the composed body. GHL uses the authenticated domain (SPF/DKIM already in place); reply lands in Smith Dental's inbox. Outcome is measured by band change in v1 — rich open/click/reply attribution deferred to v2.
-        </div>
-        <div class="d-row"><span class="k">Client CRM</span><span class="v">GoHighLevel (Smith Dental sub-account)</span></div>
-        <div class="d-row"><span class="k">Sending domain</span><span class="v">productivityhub.com.au · authenticated ✓</span></div>
-        <div class="d-row"><span class="k">API call</span><span class="v">POST /conversations/messages · type=Email</span></div>
-        <div class="d-row"><span class="k">Rate limit</span><span class="v">100 req / 10s per location · plenty of headroom</span></div>
-      </div>
-
-      <!-- Live preview -->
-      <div class="preview-card">
-        <div class="preview-head">
-          <h4>Live preview · rendered with real data</h4>
-          <div class="contact-pick">
-            <select>
-              <option selected>Render as: Dr. Marcia Smith</option>
-              <option>Render as: Stephanie Rodriguez</option>
-            </select>
-          </div>
-        </div>
         <div class="preview-email">
-          <div class="peh">
-            <div class="from"><strong>Productivity Hub</strong> &lt;hello@productivityhub.com.au&gt;</div>
+          <div class="pe-head">
+            <div class="from">Productivity Hub &lt;hello@productivityhub.com.au&gt;</div>
             <div class="to">→ marcia@smithdental.com.au</div>
             <div class="subject">Quick check-in, <span class="merged">Marcia</span></div>
           </div>
           <div class="pe-body">
             <p>Hi <span class="merged">Marcia</span>,</p>
-
             <p>Noticed you haven't been in for a bit — everything OK with <span class="merged">Smith Dental</span>?</p>
-
-            <p>When we set things up in <span class="merged">March 2025</span> the goal was to get you running 2-3 funnels. I'm seeing <span class="merged">0</span> built so far and it's been <span class="merged">26</span> days since your team logged a new contact. Thought I'd check in rather than assume.</p>
-
-            <p>If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call this week — or if you'd prefer, I can have Sarah handle a setup session free of charge.</p>
-
-            <p>Either way, no pitch. Just wanted to reach out.</p>
-
+            <p>I'm seeing <span class="merged">0</span> funnels built so far and it's been <span class="merged">26</span> days since your team logged a new contact. Thought I'd check in rather than assume.</p>
+            <p>If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call — or I can have Sarah handle a setup session free of charge.</p>
             <p>Kel @ Productivity Hub</p>
           </div>
-          <div class="pe-foot">
-            Merge fields filled from Smith Dental's current state · If any field is missing data at send time, the row is skipped (send aborted) rather than leaving empty braces.
-          </div>
+        </div>
+
+        <div class="dest-callout">
+          <strong>How this sends:</strong> Synthetos resolves all canonical merge fields into concrete values (using our signal data — not available via the CRM's own fields), then calls Smith Dental's CRM API to dispatch. CRM uses the authenticated domain for delivery. Outcome is measured by the next band assessment (v1 signal).
         </div>
       </div>
 
     </div>
 
-  </div>
+    <!-- Footer -->
+    <div class="m-foot">
+      <label class="save-toggle">
+        <input type="checkbox"> Save edits as a new Synthetos template (reusable across any CRM)
+      </label>
+      <div class="btns">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Submit to review queue →</button>
+      </div>
+    </div>
 
+  </div>
 </div>
 
 </body>
