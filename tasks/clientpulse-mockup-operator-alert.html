@@ -185,15 +185,32 @@
           </div>
           <div class="a-title">Smith Dental: eyeball check needed before Friday</div>
           <div class="a-body">Smith Dental is Critical (12) and the retention-call window closes Friday. Automated interventions haven't landed (check-in email 12 Apr, no reply). Worth a human look before the proposer fires anything else — this one might need a personal touch from Kel, not a VA task.</div>
+
+          <!-- Inline actions: take action routes into propose-intervention -->
+          <div style="display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f1f3; flex-wrap: wrap;">
+            <a href="clientpulse-mockup-propose-intervention.html" target="_blank"
+               style="background: #4338ca; color: #fff; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 12px;">
+              Take action →
+            </a>
+            <a href="clientpulse-mockup-drilldown.html" target="_blank"
+               style="background: #fff; color: #4338ca; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 12px; border: 1px solid #c7d2fe;">
+              Open client
+            </a>
+            <div style="flex: 1;"></div>
+            <button style="background: #f3f4f6; color: #4b5563; padding: 6px 11px; border-radius: 5px; font-size: 11px; font-weight: 500; border: 1px solid #e5e7eb; cursor: pointer; font-family: inherit;">Acknowledge</button>
+            <button style="background: #f3f4f6; color: #4b5563; padding: 6px 11px; border-radius: 5px; font-size: 11px; font-weight: 500; border: 1px solid #e5e7eb; cursor: pointer; font-family: inherit;">Snooze</button>
+            <button style="background: #fff; color: #9ca3af; padding: 6px 11px; border-radius: 5px; font-size: 11px; font-weight: 500; border: 1px solid #e5e7eb; cursor: pointer; font-family: inherit;">Dismiss</button>
+          </div>
+
           <div class="a-meta">
             <span>📎 Proposed by Kel</span>
-            <span>🔗 Smith Dental drill-down →</span>
+            <span>🔗 Client: Smith Dental</span>
           </div>
         </div>
       </div>
 
       <div class="dest-callout">
-        <strong>How this works:</strong> on approval, Synthetos writes a notification record + sends to selected channels (in-app + email). No CRM call, no client-facing action, no contact touched. Outcome for this action type is whether the operator <em>acknowledges</em> the alert (dismiss / snooze / mark handled) — recorded in the intervention history.
+        <strong>How this works:</strong> on approval, Synthetos writes a notification record + sends to selected channels (in-app + email). No CRM call, no client-facing action, no contact touched. The recipient can <strong>Take action →</strong> (opens the propose-intervention modal pre-loaded for this client — same 5 action-type primitives available), open the client's drill-down, or Acknowledge / Snooze / Dismiss. Outcome for this alert is whether it gets acknowledged or actioned — recorded in the intervention history.
       </div>
     </div>
 

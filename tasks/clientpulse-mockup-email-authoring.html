@@ -31,7 +31,7 @@
     padding: 40px 20px; overflow-y: auto;
   }
   .modal {
-    background: #fff; border-radius: 10px; max-width: 860px; width: 100%;
+    background: #fff; border-radius: 10px; max-width: 680px; width: 100%;
     box-shadow: 0 24px 48px rgba(0,0,0,0.18), 0 6px 14px rgba(0,0,0,0.08);
     overflow: hidden;
   }
@@ -67,15 +67,16 @@
     font-size: 11px; color: #4338ca; text-decoration: none; font-weight: 600; white-space: nowrap;
   }
 
-  /* Body: two cols */
+  /* Body: stacked (compose on top, preview below) — matches SMS pattern */
   .m-body {
-    display: grid; grid-template-columns: 1.1fr 1fr;
+    padding: 16px 20px;
   }
   .compose-col {
-    padding: 16px 20px; border-right: 1px solid #f0f1f3;
+    padding-bottom: 16px; margin-bottom: 16px;
+    border-bottom: 1px solid #f0f1f3;
   }
   .preview-col {
-    padding: 16px 20px; background: #fafbfc;
+    /* stacked below compose */
   }
   .col-label {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
@@ -92,7 +93,7 @@
     width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
     font-size: 13px; font-family: inherit; background: #fff;
   }
-  .form-field textarea { min-height: 150px; resize: vertical; font-family: inherit; line-height: 1.55; }
+  .form-field textarea { min-height: 180px; resize: vertical; font-family: inherit; line-height: 1.55; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
   /* Merge field palette */
