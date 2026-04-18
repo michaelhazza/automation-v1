@@ -80,7 +80,7 @@ The three real blockers (in severity order) are:
 | 8 | Weighted composite health score per sub-account | `compute_health_score` skill + `orgConfigService.getHealthScoreFactors()` + new `client_pulse_health_snapshots` table | Skill handler registered (`server/services/skillExecutor.ts:1269`), delegates to `intelligenceSkillExecutor` and writes the existing generic `health_snapshots`. Config configurable per-org. **No per-sub-account scheduler**, **no ClientPulse-shaped timeseries table**. | Execution + 1 new table |
 | 9 | Churn risk classification with configurable thresholds | `compute_churn_risk` skill + `orgConfigService.getChurnRiskSignals()` | Skill handler registered (`server/services/skillExecutor.ts:1279`). Config exists. **No per-sub-account scheduler**, **no `client_pulse_churn_assessments` timeseries table**. | Execution + 1 new table |
 | 10 | Monday morning one-screen view with trends | `ClientPulseDashboardPage.tsx` + new drill-down + `portfolioRollupJob` already Mon 08:00 | Job fires, aggregates empty data | Wiring |
-| 11 | Propose intervention → Kel approves → execute (HITL) | `actions` + `reviewItems` + `interventionOutcomes` (all exist) + new `actionType: 'client_pulse_intervention'` + proposer | Substrate exists; **no proposer, no registered action type** | Wiring + action registry entry |
+| 11 | Propose intervention → Kel approves → execute (HITL) | `actions` + `reviewItems` + `interventionOutcomes` (all exist) + 5 new namespaced action types (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert` — §15.1) + scenario-detector job | Substrate exists; **no scenario detector, no registered primitives** | Wiring + action registry entries (per §15 / §27 C5) |
 | 12 | Intervention cooldowns | `interventionService.checkCooldown` (exists) | Works; needs to be called from the new proposer | Wiring |
 | 13 | Trial progress monitoring + stalled-trial nudges | New onboarding-milestone table + reuse of health pipeline | Absent from code and canonical spec | New module |
 | 14 | Multi-agency per org (SaaS + DFY backends) | Resolved by design: one GHL agency backend = one Synthetos org (§3). `connector_configs` unique constraint on `(organisation_id, connector_type)` stays as-is. | Kel connects Productivity Hub — SaaS and Productivity Hub — DFY as two separate orgs. | **No change required** |
@@ -740,62 +740,61 @@ This is exactly `Detect → Propose → Approve → Execute` — our HITL primit
 
 ### 6.3 What is missing
 
-- **No `actionType: 'client_pulse_intervention'` registered** in `actionRegistry.ts`. Without this there is no way to create an action row for an intervention.
-- **No intervention proposer.** Nothing reads `client_pulse_churn_assessments`, decides which intervention template applies, and writes the action row + review item.
+- **None of the 5 namespaced intervention primitives (§15.1) are registered** in `actionRegistry.ts`: `crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`. Without these there is no way to create an action row for an intervention. (Earlier drafts proposed a single `actionType: 'client_pulse_intervention'`; superseded by §15 + §27 C5.)
+- **No scenario detector (proposer).** Nothing reads `client_pulse_churn_assessments`, picks a primitive, and writes the action row + review item. "Proposer" here means the automated scenario detector — it still writes HITL-gated `reviewItems`; operator approval remains the only execution path (§21.1, §27 I6).
 - **No intervention template storage.** Kel's table (login ≥ 14d → check-in email, no funnels → 4-video nurture, calendar broken → setup guide, tier downgrade → retention call alert, CloseBot detected → AI Studio comparison, trial stalled → step-specific nudge) must live somewhere editable per org.
 - **No outcome measurement loop.** `interventionOutcomes` exists but nothing schedules a "measure X hours after action.completedAt, write the outcome row".
 
 ### 6.4 Proposed canonical shape
 
-**Intervention templates table** (new, org-scoped):
+> **Revised 2026-04-18 per Codex pass (C4).** Earlier drafts proposed a dedicated `client_pulse_intervention_templates` table and a single catch-all `actionType: 'client_pulse_intervention'`. Both are superseded:
+> - **Intervention templates** (detection-pattern → suggested primitive mappings) fold into `operational_config.interventionTemplates[]` JSONB (editable per org via settings UI or Configuration Agent; no new table). Consistent with the "config-as-JSONB unless cardinality or relational needs demand a table" principle used elsewhere in this spec.
+> - **Intervention rows** are `actions` rows with one of the 5 namespaced primitive `actionType`s from §15.1 — no parallel table, no parallel lifecycle.
 
+**Intervention templates — `operational_config.interventionTemplates[]` shape:**
+
+```jsonc
+{
+  "interventionTemplates": [
+    {
+      "slug": "dormant_staff_activity_checkin",
+      "triggerSignalSlug": "staff_activity_pulse",
+      "triggerCondition": { "op": "zero_activity_days_gte", "value": 14 },
+      "suggestedPrimitive": "crm.send_email",
+      "defaultParams": { "templateRef": "synthetos:check-in-v1" },
+      "cooldownHours": 168,
+      "cooldownScope": "any_outcome",
+      "measurementWindowHours": 336
+    }
+    /* ... */
+  ]
+}
 ```
-client_pulse_intervention_templates(
-  id, organisationId, connectorConfigId (nullable),
-  slug,                       -- e.g. 'dormant_staff_activity_checkin'
-  triggerSignalSlug,          -- e.g. 'staff_activity_pulse'
-  triggerCondition JSONB,     -- e.g. {"op":"zero_activity_days_gte","value":14}
-  proposedActionType,         -- maps to actionRegistry entry
-  proposedActionParamsTemplate JSONB,  -- Handlebars-style, rendered per subaccount
-  cooldownHours, cooldownScope,
-  measurementWindowHours,     -- for outcome loop
-  deletedAt
-)
-```
 
-Seed Kel's six templates as **system defaults** (visible, editable, org can override).
+Seed Kel's six templates as **template-library defaults** on the `GHL Agency Intelligence` configuration template (§12.2); orgs can edit, disable, or add new ones via the settings UI or the Configuration Agent chat (both write to `operational_config` via the same skill — §17.3).
 
-**Intervention proposer job** (new pg-boss job):
+**Scenario-detector job** (new pg-boss job — `proposeClientPulseInterventionsJob`):
 
 Runs after each churn assessment scan. For each sub-account:
 
-1. Load active templates (system + org overrides, matching `connectorConfigId` or NULL).
-2. For each template whose trigger matches current observations + snapshot, check `interventionService.checkCooldown()`.
-3. If cooldown clear, render `proposedActionParamsTemplate` → create `actions` row with `gateLevel='review'` → `reviewItems` row appears automatically via existing trigger/service.
+1. Load `operational_config.interventionTemplates[]` (merged from template + org overrides).
+2. For each template whose `triggerCondition` matches current observations + snapshot, check `interventionService.checkCooldown()`.
+3. If cooldown clear, render `defaultParams` + canonical merge fields (§16) → create `actions` row with `actionType=suggestedPrimitive`, `gateLevel='review'`, and `metadataJson={ triggerTemplateSlug, triggerReason, bandAtProposal, healthScoreAtProposal, configVersion, recommendedBy: 'scenario_detector' }` → `reviewItems` row appears automatically via existing trigger/service.
 
-**Outcome measurement job** (new pg-boss job):
+**Outcome measurement job** (`measureInterventionOutcomeJob`, §23.3):
 
-Enqueued on `action.completed_at + template.measurementWindowHours`. Reads the next health snapshot; writes `interventionOutcomes` row; closes the loop.
+Runs hourly; for each action with `actionType IN (5 primitives)`, `status='executed'`, `executed_at > now() - 14d`, `outcome IS NULL` where `14d ≥ template.measurementWindowHours`: reads current health snapshot, compares to `metadataJson.healthScoreAtProposal`, writes `interventionOutcomes` row.
 
-### 6.5 Action types to register
+### 6.5 Action types to register (superseded)
 
-All of these live in `actionRegistry.ts` with the generic `actionCategory` they already have — we do not need a ClientPulse-specific registry:
-
-| Action type | Category | Gate | Idempotency | Notes |
-|---|---|---|---|---|
-| `send_email_campaign` | `api` | `review` | `keyed_write` | Existing email primitive; Kel's check-in emails, nurture sequences, setup guides |
-| `send_sms` | `api` | `review` | `keyed_write` | Optional; Kel mentioned SMS nudges in onboarding |
-| `create_task_for_operator` | `worker` | `auto` | `keyed_write` | For "tier downgrade detected — call Kel to book retention call" |
-| `send_portal_notification` | `api` | `auto` | `keyed_write` | In-dashboard alert only |
-| `propose_intervention` | meta | — | — | Not an action; a job that proposes the above actions |
-
-The only **new** action type is `create_task_for_operator` if it does not already exist — and even that is a general-purpose primitive, not ClientPulse-specific.
+The original list of 7 action types in this subsection is **superseded by §15.1** — the 5 namespaced primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`). See §15.3 for the rationale and §27 C5 for the slug-collision avoidance. No ClientPulse-specific registry needed; all 5 land in `actionRegistry.ts` alongside existing primitives.
 
 ### 6.6 Why this is non-hardcoded
 
-- Templates live in the DB, editable per org, with `connectorConfigId` scope so Kel can run different templates across SaaS vs DFY.
-- Trigger conditions are declarative JSONB, not code. Adding a new "if observation X meets predicate Y, propose Z" takes a row insert, not a deploy.
-- The proposer job is generic over `client_pulse_intervention_templates` — it does not know about login activity or CloseBot specifically.
+- Templates live in `operational_config` JSONB, editable per org via settings UI or Configuration Agent chat — one write path, one audit trail (§17.3).
+- Trigger conditions are declarative JSONB, not code. Adding a new "if observation X meets predicate Y, propose Z" takes an array-append to `operational_config.interventionTemplates[]`, not a deploy.
+- The scenario-detector job is generic over the template array — it does not know about login activity or CloseBot specifically.
+- Per-org tuning is a straight `operational_config` override at the org level; per-template-family tuning is an edit on the master configuration template (sysadmin-only, §18).
 
 ---
 
@@ -928,7 +927,7 @@ A new pg-boss job `evaluateOnboardingMilestonesJob` runs after each signal-obser
 
 ### 8.4 Reuse of existing primitives
 
-- Nudges = `client_pulse_intervention_templates` with trigger condition like `{"op":"milestone_stalled_hours","slug":"first_funnel_built","value":72}`.
+- Nudges = entries in `operational_config.interventionTemplates[]` (§6.4) with trigger condition like `{"op":"milestone_stalled_hours","slug":"first_funnel_built","value":72}`.
 - Nudge actions = existing email / SMS / portal notification action types.
 - HITL review = same `reviewItems` queue. Trial nudges may default to `gateLevel='auto'` to reduce Kel's review burden for low-risk nudges (decide per-org).
 - Conversion event = milestone `trial_converted` satisfied when subscription moves off trial tier.
@@ -973,7 +972,7 @@ compute_ai_feature_usage
 compute_health_score           # handler already registered; needs ClientPulse-shaped target table
 compute_churn_risk             # handler already registered; needs ClientPulse-shaped target table
 
-propose_client_pulse_interventions   # proposer
+propose_client_pulse_interventions   # scenario detector (writes HITL review items; never auto-executes — §21.1 / §27 I6)
 measure_intervention_outcome          # outcome loop
 evaluate_onboarding_milestones        # trial monitoring
 ```
@@ -1013,7 +1012,8 @@ subaccount_onboarding_milestones         # per-subaccount completion state
 
 # ── CONFIGURATION-LIBRARY tables (seeded per-CRM, extendable per-org) ──
 integration_fingerprints                 # system + org scope; fingerprint library
-client_pulse_intervention_templates      # per-org, editable
+# intervention-template library NOT a separate table: lives in
+#   operational_config.interventionTemplates[]  (JSONB, per §6.4 / §27 C4)
 client_pulse_onboarding_milestone_defs   # per-org, editable
 ```
 
@@ -1229,7 +1229,7 @@ Runs in parallel with Phase 5 UI work once the operational_config JSON Schema fr
 
 - Migrations + job as described in §8.
 - Seed default milestones.
-- Reuse `client_pulse_intervention_templates` for milestone-stalled nudges.
+- Reuse `operational_config.interventionTemplates[]` (§6.4) for milestone-stalled nudges — no new table.
 - UI: trial-cohort filter on dashboard.
 
 **Ship gate:** Kel reintroduces the 14-day trial knowing stalled users get auto-nudged with his approval.
@@ -1610,7 +1610,7 @@ The **ClientPulse section in each playbook must respect this split.** Same canon
 |---|---|
 | **Net portfolio movement** — band counts WoW, MRR-at-risk delta | `client_pulse_health_snapshots` + `client_pulse_churn_assessments` history |
 | **Intervention outcomes** — what was proposed, approved, executed, measured; correlations with band movement | `actions` + `interventionOutcomes` (per §5.3) |
-| **Pattern learnings** — which intervention templates correlated with band improvement, which didn't ("check-in 2/2 worked, funnel-nurture 0/1 — iterate template") | Aggregation over `interventionOutcomes` joined to `client_pulse_intervention_templates` |
+| **Pattern learnings** — which intervention templates correlated with band improvement, which didn't ("check-in 2/2 worked, funnel-nurture 0/1 — iterate template") | Aggregation over `interventionOutcomes` joined to `actions.metadataJson.triggerTemplateSlug` (templates live in `operational_config.interventionTemplates[]` per §6.4) |
 | **Top movers** — health-score gainers + losers this week with attribution | `client_pulse_health_snapshots` deltas |
 | **Forecast accuracy check** — how many of last Monday's predictions came true | Retrospective on Briefing forecasts (stored as a `reports` row of subtype `portfolio_health_forecast`) |
 | **Monday watchlist handoff** — bridge into next week's briefing | Composed from current top-N at-risk |
