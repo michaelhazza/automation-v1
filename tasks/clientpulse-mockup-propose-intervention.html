@@ -153,6 +153,14 @@
     margin-left: 6px; font-weight: 700; letter-spacing: 0.3px;
   }
   .tmpl-row .body .desc { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .tmpl-row .body .runs-in {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 10px;
+    font-weight: 600; margin-top: 5px; letter-spacing: 0.2px;
+  }
+  .tmpl-row .body .runs-in.synthetos { background: #eef2ff; color: #4338ca; }
+  .tmpl-row .body .runs-in.ghl-email { background: #d1fae5; color: #065f46; }
+  .tmpl-row .body .runs-in.ghl-workflow { background: #fef3c7; color: #92400e; }
+  .tmpl-row .body .runs-in.ghl-sms { background: #fae8ff; color: #86198f; }
   .tmpl-row .action-icon { font-size: 16px; color: #9ca3af; }
 
   /* Payload editor */
@@ -290,7 +298,8 @@
         <div class="radio"></div>
         <div class="body">
           <div class="title">Retention call task to VA <span class="badge">RECOMMENDED</span></div>
-          <div class="desc">Based on current signals (silence + tier downgrade) the proposer would pick this one. Creates an internal task for Sarah.</div>
+          <div class="desc">Based on current signals (silence + tier downgrade), the proposer picks this. Creates a task assigned to Sarah with a call script.</div>
+          <span class="runs-in synthetos">▪ Runs in: Synthetos task board</span>
         </div>
         <div class="action-icon">📞</div>
       </div>
@@ -299,7 +308,8 @@
         <div class="radio"></div>
         <div class="body">
           <div class="title">Check-in email — "everything OK?"</div>
-          <div class="desc">Light-touch email from the agency inbox. Already used 12 Apr without reply.</div>
+          <div class="desc">Single email from the agency's GHL inbox to Dr. Marcia Smith. Already used 12 Apr without reply.</div>
+          <span class="runs-in ghl-email">▪ Runs in: GHL email (Smith Dental sub-account)</span>
         </div>
         <div class="action-icon">✉︎</div>
       </div>
@@ -308,7 +318,8 @@
         <div class="radio"></div>
         <div class="body">
           <div class="title">4-video funnel-setup nurture</div>
-          <div class="desc">Matches the "0 funnels" signal. 4-day drip.</div>
+          <div class="desc">Enrols Dr. Marcia into the <em>Funnel Setup Nurture</em> workflow in Smith Dental's GHL account. GHL handles the 4-step drip natively. <strong style="color:#065f46;">Workflow installed ✓</strong> (2 Feb).</div>
+          <span class="runs-in ghl-workflow">▪ Runs in: GHL workflow (Smith Dental sub-account)</span>
         </div>
         <div class="action-icon">▶︎</div>
       </div>
@@ -317,7 +328,8 @@
         <div class="radio"></div>
         <div class="body">
           <div class="title">Calendar setup guide + VA-help offer</div>
-          <div class="desc">Matches low calendar coverage. Guide email + optional DFY.</div>
+          <div class="desc">Single email via GHL. Includes booking link to Sarah's calendar.</div>
+          <span class="runs-in ghl-email">▪ Runs in: GHL email (Smith Dental sub-account)</span>
         </div>
         <div class="action-icon">📅</div>
       </div>
@@ -326,12 +338,29 @@
         <div class="radio"></div>
         <div class="body">
           <div class="title">Personal video from Kel — <em>custom</em></div>
-          <div class="desc">Free-form. You draft a short loom and the system tracks it as a one-off intervention.</div>
+          <div class="desc">Free-form. Kel records a Loom, Synthetos sends it through GHL email + tracks delivery + replies.</div>
+          <span class="runs-in ghl-email">▪ Runs in: GHL email · tracked in Synthetos</span>
         </div>
         <div class="action-icon">✍︎</div>
       </div>
 
+      <!-- Architectural note -->
+      <div style="margin-top: 10px; padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; color: #1e40af; line-height: 1.55;">
+        <strong>Execution model:</strong> Synthetos decides <em>which</em> intervention fits and orchestrates the handoff. Emails, SMS, and drip workflows run inside the client's GHL sub-account — uses the agency's authenticated sending domain and existing contact records. Tasks for your team live in Synthetos (or sync to GHL tasks if toggled on). Outcomes feed back via GHL webhooks + Synthetos board events.
+      </div>
+
       <div class="section-title" style="margin-top: 20px;"><span class="step-num">2</span>Customise the action</div>
+
+      <!-- Destination block — where the task actually lands -->
+      <div style="padding: 10px 12px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
+        <div style="font-weight: 700; color: #3730a3; margin-bottom: 3px;">Task destination</div>
+        <div style="color: #4c1d95; line-height: 1.55;">
+          Lands in the <strong>Synthetos task board</strong> (visible to Kel + Sarah). Outcome tracked automatically on completion.
+          <label style="display: block; margin-top: 6px; font-weight: 500;">
+            <input type="checkbox" style="margin-right: 5px; vertical-align: middle;"> Also create a mirrored task inside Smith Dental's GHL account (for VAs who work primarily in GHL)
+          </label>
+        </div>
+      </div>
 
       <div class="payload-form">
         <div class="form-row">
