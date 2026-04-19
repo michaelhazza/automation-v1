@@ -180,27 +180,60 @@ export async function applyHierarchyTemplateConfigUpdate(
     // so the action is visible in the review queue UI. actionService handles
     // idempotency (dedup against non-terminal statuses), the pending_approval
     // state transition, and suspendUntil bookkeeping.
-    const reviewProposal = await actionService.proposeAction({
-      organisationId: input.organisationId,
-      subaccountId: null,
-      agentId: input.agentId!,
-      actionType: 'config_update_hierarchy_template',
-      idempotencyKey,
-      payload: {
-        templateId: input.templateId,
-        path: input.path,
-        value: input.value,
-        reason: input.reason,
-        sourceSession: input.sourceSession ?? null,
-      },
-      metadata: {
-        sensitivePath: true,
-        classification: 'sensitive',
-        sourceSession: input.sourceSession ?? null,
-        validationDigest: digest,
-        recommendedBy: 'config_agent',
-      },
-    });
+    //
+    // Concurrency note: actionService.proposeAction does SELECT-then-INSERT.
+    // Migration 0178 adds a partial unique index on
+    //   (organisation_id, idempotency_key) WHERE action_scope='org'
+    // so a concurrent second caller's INSERT fails with Postgres 23505
+    // instead of duplicating the row. We catch that here and re-look up
+    // the existing action — the end state is identical to the dedup path.
+    let reviewProposal: Awaited<ReturnType<typeof actionService.proposeAction>>;
+    try {
+      reviewProposal = await actionService.proposeAction({
+        organisationId: input.organisationId,
+        subaccountId: null,
+        agentId: input.agentId!,
+        actionType: 'config_update_hierarchy_template',
+        idempotencyKey,
+        payload: {
+          templateId: input.templateId,
+          path: input.path,
+          value: input.value,
+          reason: input.reason,
+          sourceSession: input.sourceSession ?? null,
+        },
+        metadata: {
+          sensitivePath: true,
+          classification: 'sensitive',
+          sourceSession: input.sourceSession ?? null,
+          validationDigest: digest,
+          recommendedBy: 'config_agent',
+        },
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const [existing] = await db
+          .select({ id: actions.id })
+          .from(actions)
+          .where(
+            and(
+              eq(actions.organisationId, input.organisationId),
+              eq(actions.idempotencyKey, idempotencyKey),
+              eq(actions.actionScope, 'org'),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          return {
+            committed: false,
+            actionId: existing.id,
+            classification: 'sensitive',
+            requiresApproval: true,
+          };
+        }
+      }
+      throw err;
+    }
 
     if (!reviewProposal.isNew) {
       // Duplicate — return existing action id.
@@ -390,4 +423,15 @@ async function commitMergeAndRecordHistory(p: {
     createdVersion = Number(versionRow?.v ?? 0);
   });
   return createdVersion;
+}
+
+/**
+ * Detect Postgres unique-violation (SQLSTATE 23505) from a caught error.
+ * Lets the sensitive-path write recover from a concurrent double-insert that
+ * the partial unique index `actions_org_idempotency_idx` would reject.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: string; cause?: { code?: string } };
+  return e.code === '23505' || e.cause?.code === '23505';
 }

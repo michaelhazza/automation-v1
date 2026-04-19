@@ -27,6 +27,7 @@ import {
   type ProposerCooldownState,
   type ProposerSnapshot,
 } from '../services/clientPulseInterventionProposerPure.js';
+import { validateInterventionActionMetadata } from '../services/interventionActionMetadata.js';
 import { logger } from '../lib/logger.js';
 import { createHash } from 'crypto';
 
@@ -224,7 +225,17 @@ export async function runProposeClientPulseInterventions(
     });
 
     try {
-      await db
+      const metadata = validateInterventionActionMetadata({
+        triggerTemplateSlug: proposal.templateSlug,
+        triggerReason: proposal.reason,
+        bandAtProposal: assessment.band,
+        healthScoreAtProposal: snapshot?.score ?? assessment.riskScore,
+        configVersion: assessment.configVersion ?? null,
+        recommendedBy: 'scenario_detector',
+        churnAssessmentId: data.churnAssessmentId ?? assessment.id,
+        priority: proposal.priority,
+      });
+      const result = await db
         .insert(actions)
         .values({
           organisationId,
@@ -238,19 +249,24 @@ export async function runProposeClientPulseInterventions(
           status: 'proposed',
           idempotencyKey,
           payloadJson: proposal.payload,
-          metadataJson: {
-            triggerTemplateSlug: proposal.templateSlug,
-            triggerReason: proposal.reason,
-            bandAtProposal: assessment.band,
-            healthScoreAtProposal: snapshot?.score ?? assessment.riskScore,
-            configVersion: assessment.configVersion ?? null,
-            recommendedBy: 'scenario_detector',
-            churnAssessmentId: data.churnAssessmentId ?? assessment.id,
-            priority: proposal.priority,
-          },
+          metadataJson: metadata,
         })
-        .onConflictDoNothing({ target: [actions.subaccountId, actions.idempotencyKey] });
-      created += 1;
+        .onConflictDoNothing({ target: [actions.subaccountId, actions.idempotencyKey] })
+        .returning({ id: actions.id });
+      if (result.length > 0) {
+        created += 1;
+      } else {
+        // Idempotency observability: a retry hit the same dedup key. Log
+        // with the full correlation context so we can trace to the
+        // originating churnAssessmentId on grep.
+        logger.info('clientpulse.intervention.proposer_deduped', {
+          organisationId,
+          subaccountId,
+          templateSlug: proposal.templateSlug,
+          actionType: proposal.actionType,
+          churnAssessmentId: data.churnAssessmentId ?? assessment.id,
+        });
+      }
     } catch (err) {
       logger.error('proposeClientPulseInterventions.insert_failed', {
         organisationId,

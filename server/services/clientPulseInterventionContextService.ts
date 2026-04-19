@@ -22,6 +22,7 @@ import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { logger } from '../lib/logger.js';
+import { validateInterventionActionMetadata } from './interventionActionMetadata.js';
 
 export const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
@@ -305,6 +306,19 @@ export async function createOperatorProposal(
     .digest('hex')
     .slice(0, 40);
 
+  // Build typed metadata and validate against the Phase 4 contract before
+  // write — prevents implicit schema creep on actions.metadataJson.
+  const metadata = validateInterventionActionMetadata({
+    triggerTemplateSlug: input.templateSlug ?? null,
+    triggerReason: input.rationale,
+    bandAtProposal: assessment?.band ?? null,
+    healthScoreAtProposal: snapshot?.score ?? null,
+    configVersion: assessment?.configVersion ?? null,
+    recommendedBy: 'operator_manual',
+    operatorRationale: input.rationale,
+    scheduleHint: input.scheduleHint ?? 'immediate',
+  });
+
   // Route through actionService.proposeAction() + reviewService.createReviewItem()
   // so the action appears in the review queue UI (pending_approval state +
   // suspendUntil bookkeeping handled by actionService).
@@ -317,16 +331,7 @@ export async function createOperatorProposal(
     // scheduleHint is merged into payload so the CRM adapter can read it at
     // execution time.
     payload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
-    metadata: {
-      triggerTemplateSlug: input.templateSlug ?? null,
-      triggerReason: input.rationale,
-      bandAtProposal: assessment?.band ?? null,
-      healthScoreAtProposal: snapshot?.score ?? null,
-      configVersion: assessment?.configVersion ?? null,
-      recommendedBy: 'operator_manual',
-      operatorRationale: input.rationale,
-      scheduleHint: input.scheduleHint ?? 'immediate',
-    },
+    metadata,
   });
 
   if (!proposed.isNew) {

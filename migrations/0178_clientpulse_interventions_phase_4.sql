@@ -41,4 +41,15 @@ CREATE INDEX IF NOT EXISTS actions_intervention_outcome_pending_idx
         )
     AND status IN ('completed', 'failed');
 
+-- 3. DB-level idempotency guarantee for org-scoped actions.
+--    The existing UNIQUE index `actions_idempotency_idx` is keyed on
+--    (subaccount_id, idempotency_key). Postgres treats NULL != NULL, so
+--    org-scoped actions (subaccount_id IS NULL) do NOT dedup via that
+--    index — a concurrent double-submit of a sensitive-path config update
+--    would land two rows with the same idempotency_key. This partial
+--    unique index closes the race.
+CREATE UNIQUE INDEX IF NOT EXISTS actions_org_idempotency_idx
+  ON actions (organisation_id, idempotency_key)
+  WHERE action_scope = 'org' AND subaccount_id IS NULL;
+
 COMMIT;
