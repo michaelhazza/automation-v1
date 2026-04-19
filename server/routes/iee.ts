@@ -4,14 +4,11 @@
 // ---------------------------------------------------------------------------
 
 import { Router } from 'express';
-import { eq, and, isNull } from 'drizzle-orm';
 import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { getIeeRunCost, queryIeeUsage, type UsageScope } from '../services/ieeUsageService.js';
-import { db } from '../db/index.js';
-import { ieeRuns } from '../db/schema/ieeRuns.js';
+import { getIeeRunCost, getIeeRunProgress, queryIeeUsage, type UsageScope } from '../services/ieeUsageService.js';
 
 const router = Router();
 
@@ -40,53 +37,11 @@ router.get(
   '/api/iee/runs/:ieeRunId/progress',
   authenticate,
   asyncHandler(async (req, res) => {
-    const ieeRunId = req.params.ieeRunId;
-    const [row] = await db
-      .select({
-        id: ieeRuns.id,
-        organisationId: ieeRuns.organisationId,
-        subaccountId: ieeRuns.subaccountId,
-        type: ieeRuns.type,
-        status: ieeRuns.status,
-        stepCount: ieeRuns.stepCount,
-        lastHeartbeatAt: ieeRuns.lastHeartbeatAt,
-        startedAt: ieeRuns.startedAt,
-        completedAt: ieeRuns.completedAt,
-        failureReason: ieeRuns.failureReason,
-        resultSummary: ieeRuns.resultSummary,
-      })
-      .from(ieeRuns)
-      .where(and(eq(ieeRuns.id, ieeRunId), isNull(ieeRuns.deletedAt)))
-      .limit(1);
-
-    if (!row) {
+    const progress = await getIeeRunProgress(req.params.ieeRunId, req.orgId!);
+    if (!progress) {
       throw { statusCode: 404, message: 'iee_run not found', errorCode: 'IEE_RUN_NOT_FOUND' };
     }
-    // Tenant scope enforcement. Cross-org lookups return 404 (not 403) to
-    // avoid leaking existence. Subaccount-scoped rows: a user with org
-    // permission CAN see them; subaccount-level auth is enforced on the
-    // parent agent_runs endpoints, not here.
-    if (row.organisationId !== req.orgId) {
-      throw { statusCode: 404, message: 'iee_run not found', errorCode: 'IEE_RUN_NOT_FOUND' };
-    }
-
-    const now = Date.now();
-    const heartbeatAgeSeconds = row.lastHeartbeatAt
-      ? Math.floor((now - new Date(row.lastHeartbeatAt).getTime()) / 1000)
-      : null;
-
-    res.json({
-      ieeRunId: row.id,
-      type: row.type,
-      status: row.status,
-      stepCount: row.stepCount,
-      lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
-      heartbeatAgeSeconds,
-      startedAt: row.startedAt?.toISOString() ?? null,
-      completedAt: row.completedAt?.toISOString() ?? null,
-      failureReason: row.failureReason ?? null,
-      resultSummary: row.resultSummary ?? null,
-    });
+    res.json(progress);
   }),
 );
 

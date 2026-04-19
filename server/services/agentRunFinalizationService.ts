@@ -26,60 +26,17 @@ import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
 import { emitAgentRunUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
+import {
+  mapIeeStatusToAgentRunStatus,
+  buildSummaryFromIeeRun,
+} from './agentRunFinalizationServicePure.js';
+
+// Re-export the pure helpers so existing importers don't need to update
+// their import paths. The DB-touching entry points below are the only
+// additions here.
+export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun };
 
 type IeeRun = typeof ieeRuns.$inferSelect;
-
-/**
- * Map a terminal iee_runs outcome to a terminal agent_runs status.
- *
- * Decisions baked in per docs/iee-delegation-lifecycle-spec.md Appendix A:
- *  - User-initiated cancellation (iee_runs.status='cancelled') → 'cancelled'
- *  - Worker-originated stoppage (failureReason='worker_terminated') → 'failed'
- *    (NOT 'cancelled' — worker termination is an infrastructure failure,
- *     not user intent)
- *  - timeout / budget_exceeded / step_limit_reached map to their closest
- *    existing parent enum value.
- *  - All other failures fall through to generic 'failed' with failureReason
- *    carried in the summary.
- */
-export function mapIeeStatusToAgentRunStatus(
-  ieeStatus: IeeRun['status'],
-  failureReason: IeeRun['failureReason'],
-): 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' {
-  if (ieeStatus === 'completed') return 'completed';
-  if (ieeStatus === 'cancelled') return 'cancelled';
-  switch (failureReason) {
-    case 'timeout':            return 'timeout';
-    case 'budget_exceeded':    return 'budget_exceeded';
-    case 'step_limit_reached': return 'loop_detected';
-    default:                   return 'failed';
-  }
-}
-
-/**
- * Build a human-readable summary for the parent agent_run from an iee_run
- * row. Prefers iee_runs.resultSummary when present; falls back to a
- * templated string derived from status + failureReason. Truncates at 500
- * chars with ellipsis.
- */
-export function buildSummaryFromIeeRun(ieeRun: IeeRun): string {
-  let summary: string;
-  const result = ieeRun.resultSummary as Record<string, unknown> | null;
-  if (result && typeof result.output === 'string' && result.output.length > 0) {
-    summary = result.output;
-  } else if (ieeRun.status === 'completed') {
-    summary = `IEE ${ieeRun.type} task completed`;
-  } else if (ieeRun.status === 'cancelled') {
-    summary = `IEE ${ieeRun.type} task cancelled`;
-  } else {
-    const reason = ieeRun.failureReason ?? 'unknown';
-    summary = `IEE ${ieeRun.type} task failed (${reason})`;
-  }
-  if (summary.length > 500) {
-    summary = summary.slice(0, 497) + '...';
-  }
-  return summary;
-}
 
 interface TokenTotals {
   inputTokens: number;
@@ -88,8 +45,19 @@ interface TokenTotals {
   llmCallCount: number;
 }
 
-async function aggregateTokensForIeeRun(ieeRunId: string): Promise<TokenTotals> {
-  const [row] = await db
+type TxLike = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Aggregate token + call counts from llm_requests for an iee_run.
+ *
+ * Takes a tx handle so the aggregation runs inside the same transaction as
+ * the parent-run update. Previously this was called BEFORE the transaction
+ * opened and llm_requests inserted in the window between the aggregation
+ * query and the transaction's FOR UPDATE lock were silently missed from
+ * the rolled-up counts (pr-reviewer blocker #4).
+ */
+async function aggregateTokensForIeeRun(tx: TxLike, ieeRunId: string): Promise<TokenTotals> {
+  const [row] = await tx
     .select({
       inputTokens: sql<number>`COALESCE(SUM(${llmRequests.tokensIn}), 0)::int`,
       outputTokens: sql<number>`COALESCE(SUM(${llmRequests.tokensOut}), 0)::int`,
@@ -137,18 +105,39 @@ export async function finaliseAgentRunFromIeeRun(
     return false;
   }
 
-  const tokens = await aggregateTokensForIeeRun(ieeRun.id);
-
   let performedTransition = false;
   let resolvedStatus: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | null = null;
 
   await db.transaction(async (tx) => {
+    // IMPORTANT: this transaction deliberately does NOT invoke the normal
+    // post-completion hooks that the non-IEE path runs in
+    // agentExecutionService (buildHandoffForRun, memoryCitationDetector,
+    // notifyPlaybookEngineOnAgentRunComplete, toolCallsLog snapshot write).
+    // IEE-delegated runs do not currently receive handoffs, memory-
+    // citation scoring, or playbook completion notifications. Tracked as
+    // a known gap; see docs/iee-delegation-lifecycle-spec.md "Out of
+    // scope" and pr-reviewer finding #11.
+    //
+    // Defensive re-check inside the transaction: the null guard at the
+    // function entry is correct today, but keeping the check here makes
+    // the transaction block self-contained so future refactors cannot
+    // accidentally lift it out. (pr-reviewer finding #7.)
+    if (!ieeRun.agentRunId) {
+      if (!ieeRun.eventEmittedAt) {
+        await tx
+          .update(ieeRuns)
+          .set({ eventEmittedAt: new Date(), updatedAt: new Date() })
+          .where(eq(ieeRuns.id, ieeRun.id));
+      }
+      return;
+    }
+
     // Row-level lock on the parent to prevent races between the event
     // handler and the reconciliation job.
     const [parent] = await tx
       .select()
       .from(agentRuns)
-      .where(eq(agentRuns.id, ieeRun.agentRunId!))
+      .where(eq(agentRuns.id, ieeRun.agentRunId))
       .for('update')
       .limit(1);
 
@@ -186,6 +175,11 @@ export async function finaliseAgentRunFromIeeRun(
     const durationMs = completedAt.getTime() - new Date(startedAt).getTime();
 
     if (!parentAlreadyTerminal) {
+      // Roll up token + call counts inside the transaction so late
+      // llm_requests inserts (up to the FOR UPDATE lock) are included.
+      // See aggregateTokensForIeeRun JSDoc for the race this avoids.
+      const tokens = await aggregateTokensForIeeRun(tx, ieeRun.id);
+
       await tx
         .update(agentRuns)
         .set({

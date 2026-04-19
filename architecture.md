@@ -1403,7 +1403,9 @@ Single canonicalisation path for URLs across the system (deduplication, comparis
 
 ### Agent run status enum — `shared/runStatus.ts`
 
-Single source of truth for the 11 agent run statuses (`queued`, `running`, `completed`, `failed`, `timeout`, `cancelled`, `budget_exceeded`, `loop_detected`, `pending_approval`, `pending_input`, `handoff`). Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `ReadonlySet`s, plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+Single source of truth for the 12 agent run statuses: `pending`, `running`, `delegated`, `completed`, `failed`, `timeout`, `cancelled`, `loop_detected`, `budget_exceeded`, `awaiting_clarification`, `waiting_on_clarification`, `completed_with_uncertainty`. Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `readonly arrays` (a single private `TERMINAL_SET` backs the hot-path `isTerminalRunStatus` check), plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+
+**`delegated`** (IEE Phase 0, `docs/iee-delegation-lifecycle-spec.md`): non-terminal. The run has been handed off to a delegated execution backend (IEE worker today; OpenClaw in future). Detail lives on the backend's row (`iee_runs`). Transitions to a terminal value via `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun` when the worker publishes the `iee-run-completed` event, or via the `maintenance:iee-main-app-reconciliation` cron if the event is lost. Included in `IN_FLIGHT_RUN_STATUSES`.
 
 **Client duplicate:** `client/src/lib/runStatus.ts` is a structural copy — the client tsconfig does not reach `shared/`. Drift between the two is caught by `server/services/__tests__/runStatusDriftPure.test.ts` (5 assertions: dict match, terminal/in-flight/awaiting array match, `isTerminalRunStatus` agreement for every value).
 

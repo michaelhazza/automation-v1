@@ -248,7 +248,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
     setTestModal({ conn });
     setTestAgentsLoading(true);
     try {
-      const { data } = await api.get(`/api/subaccounts/${subaccountId}/subaccount-agents`);
+      const { data } = await api.get(`/api/subaccounts/${subaccountId}/agents`);
       const rows: SubaccountAgentOption[] = (Array.isArray(data) ? data : (data.items ?? [])).map((row: {
         id: string;
         agentId: string;

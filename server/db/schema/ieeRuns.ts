@@ -62,10 +62,11 @@ export const ieeRuns = pgTable(
     // │      — atomic with reservation release                               │
     // │   3. worker/src/handlers/cleanupOrphans.ts::sweepReservationLeaks()  │
     // │      — atomic with reservation release                               │
-    // │   4. server/routes/agentRuns.ts cancellation handler                 │
-    // │      (IEE Phase 0) — writes 'cancelled' when the user cancels a     │
-    // │      delegated agent_run. Gated by WHERE status IN ('pending',      │
-    // │      'running') so cannot touch an already-terminal row.             │
+    // │   4. (Deferred — spec Step 8) user-initiated cancellation handler   │
+    // │      not yet implemented. When added, it will write status =        │
+    // │      'cancelled' gated by WHERE status IN ('pending', 'running',    │
+    // │      'delegated') so cannot touch an already-terminal row. Until    │
+    // │      Step 8 lands there are only three live callers.                │
     // │                                                                      │
     // │ All callers are gated by `WHERE status = ...` predicates that        │
     // │ prevent a terminal row from being touched twice. Future              │

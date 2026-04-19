@@ -75,6 +75,9 @@ export async function performLogin(
     connectionId: creds.id,
     loginUrl: config.loginUrl,
     hasSuccessSelector: !!config.successSelector,
+    // pr-reviewer #9 — surface the effective login timeout so operators
+    // can tell a timeout was due to a slow page vs an unreasonable cap.
+    timeoutMs,
   });
 
   try {

@@ -171,8 +171,12 @@ export async function retryUnemittedEvents(): Promise<number> {
       and(
         isNull(ieeRuns.eventEmittedAt),
         isNull(ieeRuns.deletedAt),
-        // Only terminal rows
-        sql`${ieeRuns.status} IN ('completed', 'failed')`,
+        // Only terminal rows. 'cancelled' added in IEE Phase 0 for
+        // symmetry with the main-app reconciliation sweep — if the
+        // initial emit for a cancelled run fails transiently, the sweep
+        // must re-emit. Previously the sweep skipped cancelled and the
+        // main-app Class 2 reconciliation was the sole recovery path.
+        sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
       ),
     )
     .limit(200);

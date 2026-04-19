@@ -3252,6 +3252,14 @@ export const playbookEngineService = {
           // executeRun is synchronous (awaits the agent loop). The hook in
           // playbookAgentRunHook fires from the success/failure paths in
           // agentExecutionService and routes back to the engine.
+          //
+          // IEE Phase 0 caveat: if the step is ever routed through an IEE
+          // execution mode (iee_browser / iee_dev), executeRun returns
+          // immediately with status='delegated' and the hook does NOT fire
+          // — the finalisation service intentionally skips playbook
+          // notification for delegated runs. Current playbook dispatches
+          // always use mode='api', so this is not live; update this path
+          // alongside the step config if IEE modes are ever enabled here.
         } catch (err) {
           logger.error('playbook_agent_step_dispatch_failed', {
             stepRunId: data.playbookStepRunId,

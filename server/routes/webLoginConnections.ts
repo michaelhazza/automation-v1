@@ -245,7 +245,7 @@ router.post(
 
     // Audit: user triggered a credential test.
     auditService.log({
-      organisationId: req.orgId,
+      organisationId: req.orgId!,
       actorId: req.user!.id,
       actorType: 'user',
       action: 'web_login_connection.test.saved',

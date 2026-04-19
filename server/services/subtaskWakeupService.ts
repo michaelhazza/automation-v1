@@ -12,7 +12,7 @@
  * one: it wakes on state-change events rather than waiting for its next heartbeat.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, agents, subaccountAgents, agentRuns } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -83,6 +83,10 @@ export const subtaskWakeupService = {
 
     // 4. Check if the orchestrator is already running for this subaccount.
     //    If so, skip — it will pick up the completion on its current cycle.
+    //    IEE Phase 0: 'delegated' is a non-terminal in-flight state; treat
+    //    it the same as 'running' here so a subtask completion doesn't
+    //    trigger a duplicate orchestrator run while one is waiting on the
+    //    IEE worker. See shared/runStatus.ts::IN_FLIGHT_RUN_STATUSES.
     const [runningRun] = await db
       .select({ id: agentRuns.id })
       .from(agentRuns)
@@ -90,7 +94,7 @@ export const subtaskWakeupService = {
         and(
           eq(agentRuns.subaccountId, subaccountId),
           eq(agentRuns.agentId, saLink.agentId),
-          eq(agentRuns.status, 'running')
+          inArray(agentRuns.status, ['running', 'delegated'])
         )
       )
       .limit(1);
