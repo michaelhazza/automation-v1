@@ -220,7 +220,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
-| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review | After `pr-reviewer` on Significant and Major tasks |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, pauses for HITL on anything directional. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After a draft spec is written, before starting implementation against it |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
 
@@ -232,8 +232,8 @@ Classify every task before starting:
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
 | **Standard** | 2–4 files, clear approach, no new patterns | Implement, then invoke pr-reviewer |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer → dual-reviewer |
-| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline; pr-reviewer → dual-reviewer before PR |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline; pr-reviewer before PR. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
 
 ### Invoking agents
 
@@ -253,8 +253,9 @@ Classify every task before starting:
 # Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
 
-# Second-phase Codex loop for CODE (Significant and Major tasks only)
-# Run AFTER pr-reviewer has fixed initial issues
+# Second-phase Codex loop for CODE — LOCAL DEV ONLY, manual trigger only.
+# dual-reviewer depends on the local Codex CLI. It is NOT available in Claude
+# Code on the web. Never auto-invoke — only run when the user explicitly asks.
 "dual-reviewer: [brief description of what was implemented]"
 
 # Spec review loop for SPEC DOCUMENTS (not code)
@@ -266,13 +267,24 @@ Classify every task before starting:
 
 For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done. The main session has implementation bias. The reviewer eliminates it.
 
-For **Significant and Major tasks**, also invoke `dual-reviewer` after `pr-reviewer`. This runs up to three Codex review iterations with Claude adjudicating each recommendation — accepting valid issues, rejecting items that conflict with project conventions, and documenting the reasoning. When `dual-reviewer` finishes, the PR is ready to create.
+**Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request.
 
-**Before creating any PR** — regardless of task size — always run `pr-reviewer` then `dual-reviewer` before creating the pull request. Do not create a PR without both reviewers having passed.
+### `dual-reviewer` is a local-development-only optional add-on
+
+`dual-reviewer` runs a Codex CLI review loop with Claude adjudicating each recommendation. It is **only available when the session is running locally** on a machine with the Codex CLI installed and authenticated — it does **not** run in Claude Code on the web, in CI, or in any remote sandbox.
+
+**Never auto-invoke `dual-reviewer`.** The main session must not spawn this agent on its own judgement, even for Significant or Major tasks. Auto-invocation in a non-local environment hangs the session waiting on a command that cannot execute, and silently burns time on a review the user did not ask for.
+
+**Only invoke `dual-reviewer` when:**
+
+1. The user **explicitly** asks for it (e.g. "run dual-reviewer", "do the Codex pass"), AND
+2. The session is local. If uncertain, ask the user before spawning.
+
+The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking findings are addressed. `dual-reviewer` is a power-user add-on for an extra pass when the local environment supports it — not a gate on the PR.
 
 ### Spec review is the equivalent pipeline for spec documents
 
-When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code. The agent:
+When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:
 
 - Reads `docs/spec-context.md` as framing ground truth before every run.
 - **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
@@ -296,8 +308,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `docs/canonical-data-platform-roadmap.md` — program-level spec. `spec-reviewer` complete (5 iterations, all HITL findings resolved). Spec is mechanically tight and ready for implementation. Drafting P1+P2+P3 combined implementation spec on this branch.
-**Active items:** P1+P2+P3 implementation spec in progress
+**In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
+**Active items:** ClientPulse Phases 0 + 0.5 + 1 + 2 + 3 (server-only, single PR on `claude/commit-to-main-y5BoZ`). Phase 4+ deferred to follow-up PR.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 

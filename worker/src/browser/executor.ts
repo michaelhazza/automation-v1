@@ -22,7 +22,7 @@ import { db } from '../db.js';
 import { ieeArtifacts } from '../../../server/db/schema/ieeArtifacts.js';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
-import { performLogin, LoginFailedError } from './login.js';
+import { performLoginWithRetry, LoginFailedError } from './login.js';
 import { ContractEnforcedPage } from './contractEnforcedPage.js';
 import {
   validateDownloadedArtifact,
@@ -36,9 +36,31 @@ import { sql } from 'drizzle-orm';
 import { subaccountAgents } from '../../../server/db/schema/subaccountAgents.js';
 import { agentRuns } from '../../../server/db/schema/agentRuns.js';
 
-const NAV_TIMEOUT_MS = 30_000;
+/**
+ * Default navigation timeout when no browserTaskContract is present or no
+ * per-task budget is specified. Used for legacy (non-contract) paths and
+ * as an upper cap for the contract-driven nav timeout (we never wait
+ * longer than NAV_TIMEOUT_MAX_MS on a single navigation to avoid one goto
+ * burning the whole task budget).
+ *
+ * Audit fix (Blocker #4): previously NAV_TIMEOUT_MS was a hard-coded 30s
+ * that ignored contract.timeoutMs. Slow paywall sites would time out at
+ * 30s regardless of the contract setting. Navigation timeout is now
+ * derived from the contract, capped at NAV_TIMEOUT_MAX_MS so a single
+ * slow goto cannot consume the entire task budget.
+ */
+const NAV_TIMEOUT_DEFAULT_MS = 30_000;
+const NAV_TIMEOUT_MAX_MS = 120_000;
 const ACTION_TIMEOUT_MS = 10_000;
 const SELECTOR_PRIMARY_TIMEOUT_MS = 5_000;
+
+function resolveNavigationTimeoutMs(contract: BrowserTaskContract | undefined): number {
+  if (!contract) return NAV_TIMEOUT_DEFAULT_MS;
+  // Cap the contract timeout so no single navigation can swallow the whole
+  // task budget. A fast-loading page still respects Playwright's own
+  // domcontentloaded signal — this cap only bounds the failure case.
+  return Math.min(contract.timeoutMs, NAV_TIMEOUT_MAX_MS);
+}
 
 export interface BuildBrowserExecutorInput {
   ieeRunId: string;
@@ -74,6 +96,11 @@ export async function buildBrowserExecutor(
 
   const page: Page = context.pages()[0] ?? (await context.newPage());
 
+  // Navigation timeout for the whole function. Used by the login_test
+  // post-login navigation, the startUrl navigation, and the per-step
+  // navigate action. See resolveNavigationTimeoutMs for derivation.
+  const navTimeoutMs = resolveNavigationTimeoutMs(input.browserTaskContract);
+
   // ── D7: deterministic paywall login BEFORE entering the LLM loop ─────────
   // Spec §6.4 / T20. The credentials object is fetched at this boundary,
   // used by performLogin, then dropped before the executor is returned so
@@ -85,7 +112,14 @@ export async function buildBrowserExecutor(
       input.ieeRunId,
       'login-failure.png',
     );
+
     let creds: Awaited<ReturnType<typeof getWebLoginConnectionForRun>> | null = null;
+    // Audit fix (Non-blocker #10): capture contentUrl + successSelector
+    // separately so the login_test post-login validation block can use
+    // them after `creds` is dropped by the finally clause.
+    let loginTestContentUrl: string | undefined;
+    let loginTestSuccessSelector: string | undefined;
+    let loginTestLoginUrl: string | undefined;
     try {
       creds = await getWebLoginConnectionForRun(
         {
@@ -95,7 +129,13 @@ export async function buildBrowserExecutor(
         },
         input.webLoginConnectionId,
       );
-      await performLogin(page, creds, {
+      loginTestContentUrl = creds.config.contentUrl;
+      loginTestSuccessSelector = creds.config.successSelector;
+      loginTestLoginUrl = creds.config.loginUrl;
+      // Audit fix (Non-blocker #12): retry transient failures up to 3
+      // attempts before giving up. Hard failures (wrong credentials,
+      // missing success-detection path) are NOT retried.
+      await performLoginWithRetry(page, creds, {
         runId: input.ieeRunId,
         correlationId,
         screenshotPath,
@@ -103,9 +143,46 @@ export async function buildBrowserExecutor(
     } catch (err) {
       // Surface as a structured failure so the run terminates with an
       // auth_failure rather than a generic crash.
+      //
+      // Audit fix (Non-blocker #7): persist the failure screenshot to
+      // iee_artifacts with kind='log' so operators can debug after the
+      // container is cleaned up. The screenshot file itself remains
+      // ephemeral in /tmp until artifact S3 upload lands (audit #6,
+      // deferred); in the meantime the row at least gives us a
+      // database-durable audit trail of which runs produced screenshots.
+      let persistedArtifactId: string | null = null;
+      if (err instanceof LoginFailedError && err.screenshotPath) {
+        try {
+          const [row] = await db
+            .insert(ieeArtifacts)
+            .values({
+              ieeRunId: input.ieeRunId,
+              organisationId: input.organisationId,
+              kind: 'log',
+              path: err.screenshotPath,
+              metadata: {
+                source: 'login_failure_screenshot',
+                detectionFailures: err.detectionFailures,
+                webLoginConnectionId: input.webLoginConnectionId,
+              } as object,
+            })
+            .returning({ id: ieeArtifacts.id });
+          persistedArtifactId = row?.id ?? null;
+        } catch (persistErr) {
+          logger.warn('iee.browser.login_screenshot_persist_failed', {
+            ieeRunId: input.ieeRunId,
+            error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+      }
+
       const detail =
         err instanceof LoginFailedError
-          ? { reasons: err.detectionFailures, screenshotPath: err.screenshotPath }
+          ? {
+              reasons: err.detectionFailures,
+              screenshotPath: err.screenshotPath,
+              screenshotArtifactId: persistedArtifactId,
+            }
           : { message: err instanceof Error ? err.message.slice(0, 200) : String(err) };
       try { await context.close(); } catch { /* swallow */ }
       throw new FailureError(failure('auth_failure', 'login_failed', detail));
@@ -116,10 +193,48 @@ export async function buildBrowserExecutor(
       creds = null;
     }
 
-    // T2 — login_test mode short-circuits here. Optionally navigate to the
-    // contentUrl for proof-of-paywall, capture a screenshot, then return a
-    // no-op executor that immediately signals 'done' to the loop.
+    // T2 — login_test mode short-circuits here.
+    //
+    // Audit fix (Non-blocker #10): navigate to contentUrl when configured
+    // and validate the resulting page. The operator needs to see whether
+    // the screenshot shows authenticated content or just the post-submit
+    // redirect landing page. Validation signals:
+    //   - navigatedToContentUrl — did we attempt a contentUrl navigation?
+    //   - urlChangedFromLogin   — did the final URL move away from loginUrl?
+    //   - successSelectorFound  — if a successSelector was configured, is
+    //                             it visible on the final page? (null if
+    //                             not configured — can't validate.)
     if (input.mode === 'login_test') {
+      let navigatedToContentUrl = false;
+      if (loginTestContentUrl) {
+        try {
+          await page.goto(loginTestContentUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: navTimeoutMs,
+          });
+          navigatedToContentUrl = true;
+        } catch (err) {
+          logger.warn('iee.browser.login_test.content_url_navigation_failed', {
+            ieeRunId: input.ieeRunId,
+            contentUrl: loginTestContentUrl,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      const finalUrl = page.url();
+      const urlChangedFromLogin = !!loginTestLoginUrl && finalUrl !== loginTestLoginUrl;
+
+      let successSelectorFound: boolean | null = null;
+      if (loginTestSuccessSelector) {
+        try {
+          await page.waitForSelector(loginTestSuccessSelector, { timeout: 3_000 });
+          successSelectorFound = true;
+        } catch {
+          successSelectorFound = false;
+        }
+      }
+
       const proofPath = path.join(env.WORKSPACE_BASE_DIR, input.ieeRunId, 'login-success.png');
       try {
         await page.screenshot({ path: proofPath, fullPage: false });
@@ -133,7 +248,12 @@ export async function buildBrowserExecutor(
       // catches this and finalizes the run as completed. Pure throw means
       // there is no executor object that can ever be passed into the loop.
       try { await context.close(); } catch { /* swallow */ }
-      throw new LoginTestComplete(proofPath);
+      throw new LoginTestComplete(proofPath, {
+        finalUrl,
+        navigatedToContentUrl,
+        urlChangedFromLogin,
+        successSelectorFound,
+      });
     }
 
     // ── capture_video mode short-circuit ───────────────────────────────────
@@ -197,7 +317,7 @@ export async function buildBrowserExecutor(
       // Route through the contract guard so startUrl is also subject to
       // the domain allow-list (pr-reviewer round 2 #2).
       if (contractGuard) {
-        await contractGuard.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        await contractGuard.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
         const violations = contractGuard.getViolations();
         if (violations.length > 0) {
           throw new FailureError(
@@ -208,17 +328,29 @@ export async function buildBrowserExecutor(
           );
         }
       } else {
-        await page.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        await page.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
       }
     } catch (err) {
-      // Contract violations must terminate the run; transient nav errors
-      // are logged and swallowed (legacy behaviour).
+      // Contract violations must terminate the run.
       if (err instanceof FailureError) throw err;
+      // Audit fix (Non-blocker #9): startUrl navigation failure is no longer
+      // silently swallowed. A failed initial navigation leaves the page at
+      // about:blank and the LLM loop then tries to click selectors on an
+      // empty page, producing confusing multi-step failures. Raise a clear
+      // failure so the run terminates with an actionable reason.
       logger.warn('iee.browser.start_url_failed', {
         ieeRunId: input.ieeRunId,
         startUrl: input.startUrl,
+        navTimeoutMs,
         error: err instanceof Error ? err.message : String(err),
       });
+      throw new FailureError(
+        failure('environment_error', 'start_url_navigation_failed', {
+          startUrl: input.startUrl,
+          navTimeoutMs,
+          error: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        }),
+      );
     }
   }
 
@@ -259,12 +391,12 @@ export async function buildBrowserExecutor(
           // observational. Without contract: behave as before (no contract,
           // no enforcement).
           if (contractGuard) {
-            await contractGuard.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+            await contractGuard.goto(action.url, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
             // Hard stop if the guard refused — assertNoContractViolations()
             // will throw and the loop will terminate.
             assertNoContractViolations();
           } else {
-            await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+            await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
           }
           lastResult = `navigated to ${action.url}`;
           return { output: { url: page.url() }, summary: lastResult };
@@ -286,7 +418,7 @@ export async function buildBrowserExecutor(
           return { output: { query: action.query, snippet: slice }, summary: lastResult };
         }
         case 'download': {
-          const downloadPromise = page.waitForEvent('download', { timeout: NAV_TIMEOUT_MS });
+          const downloadPromise = page.waitForEvent('download', { timeout: navTimeoutMs });
           await clickWithFallback(page, action.selector, undefined);
           const download = await downloadPromise;
           const suggestedName = download.suggestedFilename() || `download-${Date.now()}`;
@@ -522,9 +654,28 @@ void agentRuns;
 // run as completed without entering runExecutionLoop. Spec v3.4 §6.3.1 / T2.
 // ---------------------------------------------------------------------------
 
+/**
+ * LoginTestComplete sentinel. Thrown by buildBrowserExecutor after a
+ * successful login_test run; caught by browserTask.ts's login_test
+ * short-circuit and finalised as a completed run.
+ *
+ * Audit fix (Non-blocker #10): now carries post-login validation data so
+ * operators can tell whether the screenshot actually shows an authenticated
+ * content page or just the login page. The boolean fields distinguish
+ * "login succeeded AND content is reachable" from "login succeeded but the
+ * success-detection screenshot shows a stale / pre-auth page".
+ */
 export class LoginTestComplete {
   readonly _tag = 'LoginTestComplete' as const;
-  constructor(public readonly screenshotPath: string) {}
+  constructor(
+    public readonly screenshotPath: string,
+    public readonly validation: {
+      finalUrl: string;
+      navigatedToContentUrl: boolean;
+      urlChangedFromLogin: boolean;
+      successSelectorFound: boolean | null;
+    },
+  ) {}
 }
 
 /**
@@ -593,8 +744,17 @@ async function typeWithFallback(
 
 function buildFallbackSelector(selector: string, fallbackText: string | undefined): string | null {
   if (selector.startsWith('text=')) return null; // already text-based
+  // Audit fix (Non-blocker #8): use Playwright's case-insensitive regex
+  // text selector via /text/i. Previously `text=${JSON.stringify(str)}` was
+  // case-sensitive and whitespace-sensitive, so "Click Submit" failed to
+  // match a button that said "submit" on the page. Regex is evaluated
+  // against the trimmed text content of elements.
   if (fallbackText && fallbackText.trim().length > 0) {
-    return `text=${JSON.stringify(fallbackText)}`;
+    const trimmed = fallbackText.trim();
+    // Escape regex metacharacters so the LLM-provided text is matched
+    // literally, not as a pattern.
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return `text=/${escaped}/i`;
   }
   return `:has-text(${JSON.stringify(selector)})`;
 }

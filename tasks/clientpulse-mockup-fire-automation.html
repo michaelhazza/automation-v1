@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fire automation — enrol a contact in an existing CRM automation (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  /* Header bar */
+  .app-head {
+    background: #0f172a; color: #e2e8f0; padding: 10px 20px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 1px solid #1e293b;
+  }
+  .app-head .brand { font-weight: 600; color: #fff; font-size: 14px; }
+  .app-head .crumbs { color: #94a3b8; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .app-head .crumbs a { color: #a5b4fc; text-decoration: none; }
+  .app-head .crumbs .sep { color: #475569; }
+  .app-head .spacer { flex: 1; }
+  .parent-hint {
+    background: #fafbfc; border-bottom: 1px solid #e5e7eb; padding: 8px 20px;
+    font-size: 11px; color: #6b7280; display: flex; align-items: center; gap: 8px;
+  }
+  .parent-hint code {
+    background: #fff; padding: 1px 5px; border-radius: 3px;
+    border: 1px solid #e5e7eb; font-size: 10.5px;
+  }
+  .app-head .who { font-size: 11px; color: #94a3b8; }
+
+  /* Page container */
+  .page { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
+  .page-head h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .page-head .sub { font-size: 12px; color: #6b7280; margin-top: 3px; }
+  .page-head .actions { display: flex; gap: 8px; }
+  .btn {
+    padding: 7px 14px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid transparent; font-family: inherit;
+  }
+  .btn-primary { background: #4338ca; color: #fff; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
+
+  /* Layout: picker (left, wider) + details (right) */
+  .firer { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+
+  /* Left — the picker */
+  .picker-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .picker-head {
+    padding: 12px 18px; border-bottom: 1px solid #f0f1f3;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .picker-head h3 { font-size: 14px; font-weight: 700; }
+  .picker-head .sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .picker-head .refresh {
+    font-size: 11px; color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe;
+    padding: 4px 9px; border-radius: 4px; cursor: pointer; font-weight: 600;
+  }
+
+  .picker-search { padding: 10px 18px; border-bottom: 1px solid #f0f1f3; }
+  .picker-search input {
+    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; background: #fff; font-family: inherit;
+  }
+  .picker-search .filters {
+    display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .picker-search .filter-pill {
+    font-size: 11px; padding: 3px 10px; background: #fafbfc; border: 1px solid #e5e7eb;
+    border-radius: 11px; cursor: pointer; color: #374151;
+  }
+  .picker-search .filter-pill.active {
+    background: #eef2ff; border-color: #4338ca; color: #4338ca; font-weight: 600;
+  }
+
+  .picker-list { max-height: 520px; overflow-y: auto; }
+  .auto-row {
+    padding: 12px 18px; border-bottom: 1px solid #f5f6f8; cursor: pointer;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  }
+  .auto-row:last-child { border-bottom: none; }
+  .auto-row:hover { background: #fafbfc; }
+  .auto-row.selected {
+    background: #f5f3ff; border-left: 3px solid #4338ca; padding-left: 15px;
+  }
+  .auto-row .radio {
+    width: 14px; height: 14px; border: 2px solid #d1d5db; border-radius: 50%;
+    position: relative; flex-shrink: 0;
+  }
+  .auto-row.selected .radio { border-color: #4338ca; }
+  .auto-row.selected .radio::after {
+    content: ''; position: absolute; inset: 2px; background: #4338ca; border-radius: 50%;
+  }
+  .auto-row .info .name { font-weight: 600; font-size: 13px; color: #1a1d23; }
+  .auto-row .info .meta {
+    font-size: 11px; color: #6b7280; margin-top: 3px;
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .auto-row .info .meta .pill {
+    background: #f5f6f8; padding: 1px 7px; border-radius: 10px; font-weight: 500;
+  }
+  .auto-row .info .meta .pill.warn { background: #fef3c7; color: #92400e; }
+  .auto-row .info .meta .pill.ok   { background: #d1fae5; color: #065f46; }
+  .auto-row .info .meta .pill.cold { background: #f3f4f6; color: #6b7280; }
+  .auto-row .action-icon { font-size: 18px; color: #9ca3af; }
+
+  /* Right — details + preview */
+  .details-col { display: flex; flex-direction: column; gap: 12px; }
+
+  .selection-summary {
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 14px 18px;
+  }
+  .selection-summary .s-title {
+    font-weight: 700; font-size: 13px; color: #3730a3; margin-bottom: 4px;
+  }
+  .selection-summary .s-desc { font-size: 12px; color: #4c1d95; line-height: 1.55; }
+
+  .details-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .d-head {
+    padding: 12px 18px; background: #fafbfc; border-bottom: 1px solid #e5e7eb;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
+    font-weight: 700;
+  }
+  .d-body { padding: 14px 18px; }
+  .d-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+    color: #6b7280; margin-bottom: 5px;
+  }
+  .d-field { margin-bottom: 12px; }
+  .d-field:last-child { margin-bottom: 0; }
+  .d-field select, .d-field input, .d-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; background: #fff; font-family: inherit;
+  }
+  .d-field textarea { min-height: 70px; resize: vertical; }
+  .d-field .hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
+
+  /* Automation step-by-step preview */
+  .wf-preview { padding: 14px 18px; }
+  .wf-step {
+    padding: 10px 12px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 5px;
+    margin-bottom: 6px; display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center;
+    font-size: 12px;
+  }
+  .wf-step .n {
+    width: 20px; height: 20px; background: #4338ca; color: #fff; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+  }
+  .wf-step .body .name { font-weight: 600; font-size: 12px; color: #1a1d23; }
+  .wf-step .body .sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .wf-step .tag {
+    font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 600;
+    background: #e5e7eb; color: #4b5563;
+  }
+  .wf-step .tag.email { background: #d1fae5; color: #065f46; }
+  .wf-step .tag.wait  { background: #fef3c7; color: #92400e; }
+  .wf-step .tag.cond  { background: #fae8ff; color: #86198f; }
+
+  /* Preview summary card (like the review queue) */
+  .preview-card {
+    background: #fff; border: 1px dashed #d1d5db; border-radius: 6px; padding: 12px 14px;
+    font-size: 12px;
+  }
+  .preview-card .ph {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
+    font-weight: 700; margin-bottom: 6px;
+  }
+  .preview-card .pb { color: #374151; line-height: 1.55; }
+  .preview-card .pb strong { color: #1a1d23; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Fire automation · Opened when the operator picks <strong>Fire automation</strong> in the propose-intervention modal · Lists every active automation in the selected client's CRM (live, no pre-setup) · Zero configuration burden per sub-account</div>
+
+<!-- App header -->
+<div class="app-head">
+  <div class="brand">🧠 Synthetos</div>
+  <div class="crumbs">
+    <a href="#">ClientPulse</a> <span class="sep">/</span>
+    <a href="#">Smith Dental</a> <span class="sep">/</span>
+    <a href="#">Propose intervention</a> <span class="sep">/</span>
+    <span>Fire automation</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="who">kel@kelmedia.com.au · org: Productivity Hub — SaaS</div>
+</div>
+
+<!-- Parent-page hint so reviewers know how this picker fits in the flow -->
+<div class="parent-hint">
+  ⛶ Opened from <code>clientpulse-mockup-propose-intervention.html</code> (picked 'Fire automation' in step 1) · which opens from <code>clientpulse-mockup-drilldown.html</code> · which opens from <code>clientpulse-mockup-dashboard.html</code>
+</div>
+
+<div class="page">
+
+  <!-- Page header -->
+  <div class="page-head">
+    <div>
+      <h1>Fire automation · Smith Dental</h1>
+      <div class="sub">Enrol a contact into an existing automation in the client's CRM · 14 active automations found in Smith Dental · connected CRM: GoHighLevel</div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-secondary">Test enrol (me as contact)</button>
+      <button class="btn btn-primary">Submit to review queue →</button>
+    </div>
+  </div>
+
+  <div class="firer">
+
+    <!-- LEFT — The picker -->
+    <div class="picker-card">
+      <div class="picker-head">
+        <div>
+          <h3>Available automations in Smith Dental</h3>
+          <div class="sub">Fetched live from the client's CRM · 14 active, 3 drafts · last refreshed 6 seconds ago</div>
+        </div>
+        <button class="refresh">↻ Refresh</button>
+      </div>
+
+      <div class="picker-search">
+        <input type="text" placeholder="Search automations by name…">
+        <div class="filters">
+          <span class="filter-pill active">All (14)</span>
+          <span class="filter-pill">Nurture (4)</span>
+          <span class="filter-pill">Retention (2)</span>
+          <span class="filter-pill">Onboarding (3)</span>
+          <span class="filter-pill">Re-engagement (2)</span>
+          <span class="filter-pill">Campaign (3)</span>
+          <span class="filter-pill" style="background:#fffbeb;border-color:#fde68a;color:#92400e;">Include drafts</span>
+        </div>
+      </div>
+
+      <div class="picker-list">
+
+        <div class="auto-row selected">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Homepage Funnel Drip</div>
+            <div class="meta">
+              <span class="pill ok">4 steps</span>
+              <span class="pill">42 contacts currently enrolled</span>
+              <span class="pill">Edited 12 Feb</span>
+              <span class="pill">Category: Nurture</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Lead Nurture 2024</div>
+            <div class="meta">
+              <span class="pill ok">6 steps</span>
+              <span class="pill">118 contacts enrolled</span>
+              <span class="pill">Edited 3 Mar</span>
+              <span class="pill">Category: Nurture</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Re-engagement Sequence</div>
+            <div class="meta">
+              <span class="pill ok">5 steps</span>
+              <span class="pill">23 contacts enrolled</span>
+              <span class="pill">Edited 28 Mar</span>
+              <span class="pill">Category: Re-engagement</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Welcome Series</div>
+            <div class="meta">
+              <span class="pill ok">7 steps</span>
+              <span class="pill">204 contacts enrolled</span>
+              <span class="pill">Edited 10 Jan</span>
+              <span class="pill">Category: Onboarding</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Q2 Campaign</div>
+            <div class="meta">
+              <span class="pill cold">3 steps</span>
+              <span class="pill cold">0 contacts enrolled (never fired)</span>
+              <span class="pill warn">Draft — not published</span>
+              <span class="pill">Edited 2 Apr</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Tier Upgrade Offer</div>
+            <div class="meta">
+              <span class="pill ok">3 steps</span>
+              <span class="pill">8 contacts enrolled</span>
+              <span class="pill">Edited 14 Apr</span>
+              <span class="pill">Category: Retention</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Abandoned Cart Sequence</div>
+            <div class="meta">
+              <span class="pill ok">4 steps</span>
+              <span class="pill">67 contacts enrolled</span>
+              <span class="pill">Edited 22 Feb</span>
+              <span class="pill">Category: Re-engagement</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+        <div class="auto-row">
+          <div class="radio"></div>
+          <div class="info">
+            <div class="name">Monthly Newsletter</div>
+            <div class="meta">
+              <span class="pill ok">1 step</span>
+              <span class="pill">1,402 contacts enrolled</span>
+              <span class="pill">Edited 2 Apr</span>
+              <span class="pill">Category: Campaign</span>
+            </div>
+          </div>
+          <div class="action-icon">⚙️</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT — Details + preview -->
+    <div class="details-col">
+
+      <!-- Selection summary -->
+      <div class="selection-summary">
+        <div class="s-title">⚙️ Homepage Funnel Drip — selected</div>
+        <div class="s-desc">
+          4-step automation already built and active in Smith Dental's CRM. Zero setup required from you — just pick the contact and approve. The CRM handles delivery / timing / conditional branching natively from here.
+        </div>
+      </div>
+
+      <!-- Enrolment details -->
+      <div class="details-card">
+        <div class="d-head">Enrolment details</div>
+        <div class="d-body">
+          <div class="d-field">
+            <div class="d-label">Contact to enrol</div>
+            <select>
+              <option selected>Dr. Marcia Smith · owner · primary contact</option>
+              <option>Stephanie Rodriguez · practice manager</option>
+              <option>Multiple contacts (advanced)</option>
+            </select>
+            <div class="hint">Contact list fetched live from Smith Dental's CRM.</div>
+          </div>
+
+          <div class="d-field">
+            <div class="d-label">Start</div>
+            <select>
+              <option selected>Immediately on approval</option>
+              <option>Delay 24 hours</option>
+              <option>Schedule for a specific time</option>
+            </select>
+          </div>
+
+          <div class="d-field">
+            <div class="d-label">Rationale (recorded with the outcome)</div>
+            <textarea>0 funnels built since onboarding + 26 days of staff silence. Homepage Funnel Drip will prompt her to ship something live; 4-step sequence with conditional branching.</textarea>
+            <div class="hint">Shows in the intervention history + digest. Helps future pattern learning.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Automation step-by-step preview -->
+      <div class="details-card">
+        <div class="d-head">What this automation does (fetched from the client's CRM)</div>
+        <div class="wf-preview">
+          <div class="wf-step">
+            <div class="n">1</div>
+            <div class="body">
+              <div class="name">Send email — "Your first funnel in 15 minutes"</div>
+              <div class="sub">Subject: "Get your first funnel live today" · includes Loom walkthrough</div>
+            </div>
+            <span class="tag email">Email</span>
+          </div>
+          <div class="wf-step">
+            <div class="n">2</div>
+            <div class="body">
+              <div class="name">Wait 2 days</div>
+              <div class="sub">Skip if funnel created in the meantime</div>
+            </div>
+            <span class="tag wait">Wait</span>
+          </div>
+          <div class="wf-step">
+            <div class="n">3</div>
+            <div class="body">
+              <div class="name">Conditional branch · Funnel created?</div>
+              <div class="sub">Yes → exit sequence · No → continue to step 4</div>
+            </div>
+            <span class="tag cond">Conditional</span>
+          </div>
+          <div class="wf-step">
+            <div class="n">4</div>
+            <div class="body">
+              <div class="name">Send email — "Need a hand? Here are 3 options"</div>
+              <div class="sub">Lists template options + DFY offer · includes Sarah's calendar link</div>
+            </div>
+            <span class="tag email">Email</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Preview of review queue item -->
+      <div class="preview-card">
+        <div class="ph">Preview — how this lands in the review queue</div>
+        <div class="pb">
+          <strong>⚙️ Fire automation · Smith Dental · Homepage Funnel Drip</strong><br>
+          Proposed by Kel (manual) · target: Dr. Marcia Smith · start: immediately on approval.<br>
+          Approve → contact enrolled in the automation · Reject → no action · Edit → opens this picker again. Outcome measured by Smith Dental's band change in the next scan cycles (v1 signal).
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>

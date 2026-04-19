@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Create task — CRM task popup (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1; }
+  .bg-hint { position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none; font-size: 11px; color: #9ca3af; }
+
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 580px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .m-body { padding: 16px 20px; }
+
+  .form-field { margin-bottom: 12px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 110px; resize: vertical; font-family: inherit; line-height: 1.55; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+
+  /* Priority selector */
+  .priority-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .priority-option {
+    padding: 7px 10px; border: 1.5px solid #e5e7eb; border-radius: 5px; cursor: pointer;
+    font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .priority-option.low.selected { border-color: #6b7280; background: #f3f4f6; }
+  .priority-option.med.selected { border-color: #b45309; background: #fef3c7; color: #92400e; }
+  .priority-option.high.selected { border-color: #b91c1c; background: #fef2f2; color: #991b1b; }
+
+  /* Preview card */
+  .task-preview {
+    margin-top: 14px; padding: 12px 14px; background: #fafbfc; border: 1px solid #e5e7eb;
+    border-radius: 8px;
+  }
+  .task-preview .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+    color: #6b7280; margin-bottom: 8px;
+  }
+  .task-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .task-card .t-top {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  }
+  .task-card .t-top .priority {
+    font-size: 9px; padding: 2px 6px; border-radius: 10px; font-weight: 700;
+    background: #fee2e2; color: #991b1b; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .task-card .t-top .due { margin-left: auto; font-size: 11px; color: #b45309; font-weight: 600; }
+  .task-card .t-title { font-weight: 600; font-size: 13px; color: #1a1d23; margin-bottom: 3px; }
+  .task-card .t-notes { font-size: 11px; color: #4b5563; margin-bottom: 6px; line-height: 1.5; white-space: pre-wrap; }
+  .task-card .t-meta { font-size: 10px; color: #6b7280; display: flex; gap: 10px; padding-top: 6px; border-top: 1px solid #f0f1f3; }
+
+  .dest-callout {
+    margin-top: 12px; padding: 10px 12px; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 6px; font-size: 11px; color: #3730a3; line-height: 1.5;
+  }
+  .dest-callout strong { color: #312e81; }
+
+  .m-foot {
+    padding: 12px 20px; background: #fafbfc; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: flex-end; gap: 6px;
+  }
+  .btn { padding: 6px 13px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+  .btn-primary { background: #4338ca; color: #fff; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Create task · Popup opened from <strong>clientpulse-mockup-propose-intervention.html</strong> when operator picks 'Create task' and clicks Configure · Task lives in the client's CRM · Assignee pulled from CRM users</div>
+
+<div class="bg-context"></div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-propose-intervention.html</code> (modal) · behind that: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-drilldown.html</code></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+
+    <div class="m-head">
+      <div>
+        <h2>Create task · Smith Dental</h2>
+        <div class="sub">Task will land in Smith Dental's CRM · the assignee sees it in their normal CRM workflow</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+
+      <div class="form-field">
+        <label>Task title</label>
+        <input type="text" value="Retention call — Dr. Marcia Smith · tier downgrade + 26d silence">
+      </div>
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>Assignee</label>
+          <select>
+            <option selected>Sarah Chen · VA · primary for Smith Dental</option>
+            <option>Kel Andrews · agency owner</option>
+            <option>David Park · account manager</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Related contact</label>
+          <select>
+            <option selected>Dr. Marcia Smith · primary</option>
+            <option>Stephanie Rodriguez · practice manager</option>
+            <option>(no contact link)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row-3">
+        <div class="form-field">
+          <label>Due date</label>
+          <input type="text" value="Fri 25 Apr">
+        </div>
+        <div class="form-field">
+          <label>Due time</label>
+          <input type="text" value="end of day">
+        </div>
+        <div class="form-field">
+          <label>Priority</label>
+          <div class="priority-toggle">
+            <div class="priority-option low">Low</div>
+            <div class="priority-option med">Med</div>
+            <div class="priority-option high selected">High</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Notes / call script</label>
+        <textarea>Call Dr. Marcia Smith, aim for 10-min check-in.
+
+Angles:
+ • Acknowledge the $647 → $147 move — no pitch, just listen
+ • Ask about the practice's Q2 goals
+ • Offer 30-day DFY funnel audit at no cost
+ • If she mentions leaving → escalate to Kel same day
+
+Avoid: upselling, defensive framing, scripted language.</textarea>
+      </div>
+
+      <!-- Task preview -->
+      <div class="task-preview">
+        <div class="label">How this looks in Sarah's CRM task list</div>
+        <div class="task-card">
+          <div class="t-top">
+            <span class="priority">High</span>
+            <span class="due">Due Fri 25 Apr</span>
+          </div>
+          <div class="t-title">Retention call — Dr. Marcia Smith · tier downgrade + 26d silence</div>
+          <div class="t-notes">Call Dr. Marcia Smith, aim for 10-min check-in.
+
+Angles:
+ • Acknowledge the $647 → $147 move — no pitch, just listen
+ • Ask about the practice's Q2 goals
+ • Offer 30-day DFY funnel audit at no cost
+ • If she mentions leaving → escalate to Kel same day…</div>
+          <div class="t-meta">
+            <span>👤 Sarah Chen</span>
+            <span>🔗 Dr. Marcia Smith</span>
+            <span>📎 Proposed by ClientPulse</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dest-callout">
+        <strong>How this works:</strong> on approval, Synthetos calls Smith Dental's CRM to create this task (assignee + contact + due + notes all pushed via the CRM API). Sarah sees it in her normal CRM workflow — no hopping into Synthetos. Outcome (task completed / cancelled) is tracked via CRM webhooks when they fire; band change is measured regardless via the next scan.
+      </div>
+    </div>
+
+    <div class="m-foot">
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-primary">Submit to review queue →</button>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

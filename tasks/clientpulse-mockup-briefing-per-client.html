@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Monday Briefing — Bright Marketing Co (per-client)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .email-wrap { max-width: 680px; margin: 24px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+
+  .inbox-strip {
+    background: #fafbfc; padding: 12px 24px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .inbox-strip .from strong { color: #1a1d23; font-weight: 600; }
+
+  /* Header banner — client-specific, teal/cyan palette to differentiate from org-level briefing */
+  .banner {
+    background: linear-gradient(135deg, #134e4a 0%, #0e7490 100%);
+    color: #fff; padding: 24px;
+  }
+  .banner h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 4px; }
+  .banner .sub { font-size: 13px; color: #a5f3fc; }
+  .banner .sub strong { color: #fff; }
+
+  .section { padding: 24px; border-bottom: 1px solid #f0f1f3; }
+  .section:last-child { border-bottom: none; }
+  .section h2 {
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #6b7280; margin-bottom: 12px;
+  }
+  .section h2 .badge {
+    background: #ccfbf1; color: #115e59; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-left: 8px;
+  }
+  .section h2 .band {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 8px;
+    background: #fff7ed; color: #c2410c;
+  }
+
+  .tldr {
+    background: #ecfeff; border-left: 4px solid #06b6d4; padding: 16px 20px; border-radius: 6px;
+    margin-bottom: 18px;
+  }
+  .tldr h3 { font-size: 13px; font-weight: 700; color: #155e75; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tldr p { font-size: 14px; color: #1f2937; line-height: 1.6; }
+  .tldr p strong { color: #0c4a6e; }
+
+  /* Priority list (the action items for the week) */
+  .priority-list { display: flex; flex-direction: column; gap: 10px; }
+  .priority-item {
+    padding: 14px; border: 1px solid #f0f1f3; background: #fafbfc; border-radius: 6px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: flex-start;
+  }
+  .priority-item .marker {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #06b6d4; color: #fff; font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .priority-item .info .title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+  .priority-item .info .why { font-size: 12px; color: #4b5563; }
+  .priority-item .info .why strong { color: #1a1d23; }
+  .priority-item .due { font-size: 11px; color: #b45309; font-weight: 600; white-space: nowrap; padding-top: 4px; }
+
+  /* Event list */
+  .event-list { display: flex; flex-direction: column; gap: 6px; }
+  .event-item {
+    padding: 10px 12px; background: #fafbfc; border-radius: 4px;
+    display: grid; grid-template-columns: 60px 1fr auto; gap: 12px; align-items: center;
+    font-size: 13px;
+  }
+  .event-item .day { font-weight: 700; color: #0e7490; font-size: 12px; letter-spacing: 0.3px; }
+  .event-item .type { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; }
+
+  /* Health snapshot */
+  .snapshot {
+    display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center;
+    background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 18px;
+  }
+  .snapshot .score { font-size: 42px; font-weight: 700; color: #c2410c; line-height: 1; }
+  .snapshot .score-label { font-size: 11px; color: #9a3412; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; font-weight: 600; }
+  .snapshot .trend { font-size: 13px; color: #c2410c; font-weight: 600; }
+  .snapshot .signals { font-size: 12px; color: #7c2d12; margin-top: 6px; line-height: 1.5; }
+  .snapshot .signals span { display: inline-block; background: #fee2e2; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-top: 4px; color: #991b1b; }
+
+  /* Pending review CTA */
+  .pending-cta {
+    background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 14px;
+    display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit;
+  }
+  .pending-cta:hover { background: #fed7aa; }
+  .pending-cta .icon { font-size: 22px; }
+  .pending-cta .body { flex: 1; }
+  .pending-cta .body strong { display: block; font-size: 13px; color: #9a3412; margin-bottom: 2px; }
+  .pending-cta .body span { font-size: 12px; color: #7c2d12; }
+  .pending-cta .arrow { font-size: 18px; color: #9a3412; font-weight: 700; }
+
+  .cta-bar { text-align: center; padding: 24px; background: #fafbfc; }
+  .cta-bar a {
+    display: inline-block; padding: 12px 24px; background: #06b6d4; color: #fff;
+    text-decoration: none; font-weight: 600; font-size: 14px; border-radius: 6px;
+  }
+  .cta-bar a:hover { background: #0891b2; }
+
+  .footer { padding: 16px 24px; background: #1a1d23; color: #9ca3af; font-size: 11px; text-align: center; }
+  .footer a { color: #a5f3fc; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · DELIVERED BY existing playbook <code>intelligence-briefing.playbook.ts</code> · <code>scope: 'subaccount'</code> · Runs Mon 07:00 with <code>run.entity = subaccount</code> (ONE client) · Single-client focus; operator-view render · ClientPulse snapshot gated by <code>skipWhen: !modules.client_pulse.enabled</code> · Forward-looking content only.</div>
+
+<div class="email-wrap">
+
+  <!-- Inbox preview strip -->
+  <div class="inbox-strip">
+    <div class="from"><strong>Synthetos &lt;briefings@synthetos.app&gt;</strong> → kel@productivityhub.com</div>
+    <div class="date">Mon 17 Apr · 07:00</div>
+  </div>
+
+  <!-- Header -->
+  <div class="banner">
+    <h1>Bright Marketing Co — Monday Briefing</h1>
+    <div class="sub">Week of <strong>17–23 April 2026</strong> · ClientPulse band: <strong>At Risk (28)</strong> · Your client since Aug 2024</div>
+  </div>
+
+  <!-- TL;DR -->
+  <div class="section">
+    <h2>The week ahead — 30-second read</h2>
+    <div class="tldr">
+      <h3>What to do for Bright Marketing this week</h3>
+      <p>
+        <strong>Retention call window closes Friday</strong> — 89 days since the $647→$347 downgrade; historical pattern shows 73% of clients downgrade again within 90 days if no human touch.
+        <strong>2 opportunities stalled 12+ days in "Proposal Sent"</strong> — Ben needs a nudge or they'll die.
+        <strong>1 intervention awaiting your approval:</strong> retention-call task for the VA.
+        Staff activity trajectory is −6/week and projected to enter <strong>Critical (22)</strong> by Wednesday without intervention.
+      </p>
+    </div>
+  </div>
+
+  <!-- ClientPulse snapshot -->
+  <div class="section">
+    <h2>ClientPulse snapshot <span class="badge">forward-looking</span></h2>
+    <div class="snapshot">
+      <div>
+        <div class="score">28</div>
+        <div class="score-label">At Risk</div>
+      </div>
+      <div>
+        <div class="trend">↓ Projected 22 by Wed · Critical band</div>
+        <div class="signals">
+          <span>Staff activity −6/wk for 3 weeks</span>
+          <span>1 funnel (none edited 21d)</span>
+          <span>Calendar 3/3 ✓</span>
+          <span>CloseBot · 42 msgs/30d (−55%)</span>
+          <span>Tier ↓ $647→$347 (89d ago)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Priorities this week (FORWARD) -->
+  <div class="section">
+    <h2>Priorities for this client this week</h2>
+    <div class="priority-list">
+      <div class="priority-item">
+        <div class="marker">1</div>
+        <div class="info">
+          <div class="title">Book the retention call — window closes Friday</div>
+          <div class="why">
+            Bright downgraded $647→$347 on 18 Jan. We're at day 89 of the typical 90-day re-downgrade window.
+            <strong>Ben (owner) responds best to text, not email.</strong> Last touchpoint was 12 days ago.
+          </div>
+        </div>
+        <div class="due">Due Fri</div>
+      </div>
+
+      <div class="priority-item">
+        <div class="marker">2</div>
+        <div class="info">
+          <div class="title">Nudge 2 stalled opportunities in "Proposal Sent"</div>
+          <div class="why">
+            <strong>Chavez Auto Group</strong> (12 days, $4,200) and
+            <strong>Mountain Ridge Clinic</strong> (14 days, $2,800) have not been touched.
+            Historical win rate drops 48% after 14 days at this stage.
+          </div>
+        </div>
+        <div class="due">This week</div>
+      </div>
+
+      <div class="priority-item">
+        <div class="marker">3</div>
+        <div class="info">
+          <div class="title">Review + approve the retention-call task proposal</div>
+          <div class="why">
+            Orchestrator has drafted a VA task: "Call Ben re: plan fit, offer 30-day free done-for-you funnel audit."
+            Awaiting your one-click approval in the intervention queue.
+          </div>
+        </div>
+        <div class="due">Today</div>
+      </div>
+
+      <div class="priority-item">
+        <div class="marker">4</div>
+        <div class="info">
+          <div class="title">Revive the dormant funnel</div>
+          <div class="why">
+            The "Homepage → Consult" funnel hasn't been edited in 21 days. Conversion has dropped to 1.8% (was 3.4%).
+            <strong>Suggested:</strong> refresh hero copy + add social proof block.
+          </div>
+        </div>
+        <div class="due">This week</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pending intervention -->
+  <div class="section">
+    <h2>Awaiting your approval</h2>
+    <a class="pending-cta" href="clientpulse-mockup-dashboard.html">
+      <div class="icon">⏳</div>
+      <div class="body">
+        <strong>1 intervention queued for Bright Marketing</strong>
+        <span>Retention-call task · VA · 30-day DFY funnel audit offer · 30s to review</span>
+      </div>
+      <div class="arrow">→</div>
+    </a>
+  </div>
+
+  <!-- Upcoming events this week -->
+  <div class="section">
+    <h2>Upcoming this week</h2>
+    <div class="event-list">
+      <div class="event-item">
+        <div class="day">TUE</div>
+        <div>
+          <strong>Onboarding call — Mountain Ridge Clinic</strong>
+          <div class="type">APPOINTMENT · 14:00</div>
+        </div>
+        <div style="font-size:11px;color:#6b7280;">Ben owner</div>
+      </div>
+      <div class="event-item">
+        <div class="day">WED</div>
+        <div>
+          <strong>April Newsletter — scheduled send</strong>
+          <div class="type">EMAIL CAMPAIGN · 10:00 · 1,240 contacts</div>
+        </div>
+        <div style="font-size:11px;color:#6b7280;">Draft ready</div>
+      </div>
+      <div class="event-item">
+        <div class="day">THU</div>
+        <div>
+          <strong>Facebook ad budget ends — "Spring Promo"</strong>
+          <div class="type">AD CAMPAIGN · Uphex</div>
+        </div>
+        <div style="font-size:11px;color:#6b7280;">$340/day</div>
+      </div>
+      <div class="event-item">
+        <div class="day">FRI</div>
+        <div>
+          <strong>Retention-call window closes</strong>
+          <div class="type">CLIENTPULSE DEADLINE</div>
+        </div>
+        <div style="font-size:11px;color:#b45309;font-weight:600;">Act today</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Team note -->
+  <div class="section">
+    <h2>What your team might be forgetting</h2>
+    <p style="font-size:13px;color:#4b5563;line-height:1.6;">
+      The last outbound SMS from your team to any Bright contact was <strong>Sarah (account manager), 8 days ago</strong>.
+      Every other client of theirs with healthy retention has weekly staff-to-contact SMS. This client's silence is your silence.
+    </p>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-bar">
+    <a href="clientpulse-mockup-drilldown.html">Open Bright Marketing dashboard →</a>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    Synthetos Intelligence Briefing · Bright Marketing Co · Productivity Hub (SaaS)<br>
+    <a href="#">Configure this briefing</a> · <a href="#">Unsubscribe from per-client briefings</a>
+  </div>
+
+</div>
+
+</body>
+</html>

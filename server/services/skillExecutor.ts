@@ -1281,6 +1281,30 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWithActionAudit('compute_churn_risk', input, context, () =>
       executeComputeChurnRisk(input, context));
   },
+  compute_staff_activity_pulse: async (input, context) => {
+    const { executeComputeStaffActivityPulse } = await import('./computeStaffActivityPulseService.js');
+    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+      if (!subaccountId) throw new Error('subaccount_id is required');
+      return executeComputeStaffActivityPulse({
+        organisationId: context.organisationId,
+        subaccountId,
+        sourceRunId: input.source_run_id as string | undefined,
+      });
+    });
+  },
+  scan_integration_fingerprints: async (input, context) => {
+    const { executeScanIntegrationFingerprints } = await import('./scanIntegrationFingerprintsService.js');
+    return executeWithActionAudit('scan_integration_fingerprints', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+      if (!subaccountId) throw new Error('subaccount_id is required');
+      return executeScanIntegrationFingerprints({
+        organisationId: context.organisationId,
+        subaccountId,
+        sourceRunId: input.source_run_id as string | undefined,
+      });
+    });
+  },
   generate_portfolio_report: async (input, context) => {
     const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
     return executeWithActionAudit('generate_portfolio_report', input, context, () =>

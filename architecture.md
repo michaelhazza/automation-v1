@@ -542,7 +542,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
-| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `compute_staff_activity_pulse`, `scan_integration_fingerprints`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
 | GEO (AI Search) | `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare` |
 | Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
 | Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
@@ -1117,6 +1117,26 @@ Multi-subaccount rows (e.g. emails CC'd to multiple clients) use `canonical_row_
 
 RLS policies on all canonical and integration tables enforcing visibility based on principal type and scope. See the [RLS section](#row-level-security-rls--three-layer-fail-closed-data-isolation) for policy details.
 
+### P3C — ClientPulse canonical tables (migrations 0170–0177)
+
+ClientPulse Phases 0–3 + Phase 1 follow-ups add 12 new canonical and ClientPulse-specific tables. All land under the Canonical Data Platform contract: `UNIQUE(organisation_id, provider_type, external_id)` on canonical tables (global uniqueness), RLS + `canonical_writer` bypass, `rlsProtectedTables.ts` entry, `canonicalDictionaryRegistry.ts` entry.
+
+**Playbook engine scope refactor (migration 0171).** `playbook_runs.subaccount_id` becomes nullable; a new `scope` enum (`subaccount` | `org`) on both `playbook_runs` and `system_playbook_templates` disambiguates org-level vs sub-account-level runs. A CHECK constraint enforces valid scope/entity combinations. Callers requiring a sub-account use the `requireSubaccountId()` helper instead of asserting non-null.
+
+**Six canonical CRM-agnostic tables (migration 0172).** `canonical_subaccount_mutations` (per-mutation write log feeding the Staff Activity Pulse), `canonical_conversation_providers`, `canonical_workflow_definitions` (includes `actionTypes` + `outboundWebhookTargets` for fingerprint scanning), `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`. All share the column header `(organisation_id, subaccount_id, provider_type, external_id, observed_at, last_seen_at)` and the same RLS policy shape. Each is written by the connector-polling service; reads go through the ingestion + scanner services.
+
+**Three ClientPulse-specific timeseries (migrations 0172–0174).** `client_pulse_signal_observations` (8-signal observation timeseries), `client_pulse_health_snapshots` (health-score timeseries), `client_pulse_churn_assessments` (churn-band evaluations). Health snapshots + churn assessments are dual-written by the existing `compute_health_score` (`skillExecutor.ts:1269`) and `compute_churn_risk` (`:1279`) handlers — both write to the legacy `health_snapshots` table *and* the new ClientPulse-specific tables during the deprecation window. The legacy writes are scheduled for removal in a post-V1 cleanup.
+
+**Integration fingerprint scanner (migration 0177, bumped from 0176 after merge-conflict with IEE 0176).** `integration_fingerprints` (two-tier library — `scope='system'` rows are seeded and cross-tenant-readable; `scope='org'` rows are tenant-isolated and represent agency-specific learnings promoted from triaged unclassified signals), `integration_detections` (per-subaccount integration matches, non-partial unique on `(org, subaccount, integration_slug)`), `integration_unclassified_signals` (novel observations queue awaiting operator triage, with occurrence-count-based importance score). CloseBot + Uphex are seeded as `scope='system'` rows. The scanner runs via the new `scan_integration_fingerprints` skill; the observation-insert is the atomic win-gate against retry-driven counter inflation.
+
+**Two new skill handlers (Phase 1 follow-up).** `compute_staff_activity_pulse` (weighted-sum activity score from `canonical_subaccount_mutations` over configurable lookback windows; excludes automation users via outlier-volume classifier reading `operational_config.staffActivity.automationUserResolution`) and `scan_integration_fingerprints` (see above). Both use `idempotencyStrategy: 'keyed_write'` — poll cycles dedupe via `sourceRunId`; agent-skill invocations without a `sourceRunId` append fresh timeseries points by design.
+
+**Webhook handler expansion.** `server/routes/webhooks/ghlWebhook.ts` now writes `canonical_subaccount_mutations` for 10 GHL event types: the 6 existing canonical-upsert handlers (`ContactCreate`, `ContactUpdate`, `OpportunityStageUpdate`, `OpportunityStatusUpdate`, `ConversationCreated`, `ConversationUpdated`) are extended, and 4 new lifecycle handlers (`INSTALL`, `UNINSTALL`, `LocationCreate`, `LocationUpdate`) land as `entityType='account'` events. Outbound-message guard on conversation events: write only when `direction='outbound' AND userId IS NOT NULL AND conversationProviderId IS NULL`.
+
+**OAuth scope SSoT (locked contract g).** Expanded GHL scope list lives in `server/config/oauthProviders.ts` only — the duplicate in `server/routes/ghl.ts` was removed as part of Phase 0. `server/routes/ghl.ts` builds its authorisation URL from `OAUTH_PROVIDERS.ghl.scopes.join(' ')`. Expanded scopes apply to new authorisations only; existing tokens keep their originally-granted endpoints, and endpoints requiring new scopes gate themselves and mark observations `unavailable_missing_scope` when absent.
+
+**`operational_config` JSON Schema (Phase 0 ship-gate B4).** `server/services/operationalConfigSchema.ts` ships the JSON Schema for `hierarchyTemplates.operationalConfig` with `sensitive` flags on intervention-template paths. `SENSITIVE_CONFIG_PATHS` is the exported enumeration consumed by the (Phase 4.5) Configuration Agent's sensitive-path routing gate. Schema enforces weight-sum constraints (`healthScoreFactors` sums to 1.00) via Zod refinements.
+
 ### Key files
 
 | File | Purpose |
@@ -1141,6 +1161,9 @@ Sprint 2 introduces a defence-in-depth data isolation model. All three layers ar
 **Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
 
 **Principal-scoped (migrations 0167–0169):** P3B extends org-level RLS with visibility predicates on canonical data and integration tables. Tables: `integration_connections`, `integration_ingestion_stats`, `canonical_fields`, `canonical_row_versions`, `canonical_metric_history`, `canonical_row_subaccount_scopes`, `service_principals`, `teams`, `team_members`, `delegation_grants`, `agent_runs` (extended). Policies enforce:
+
+**ClientPulse canonical + derived tables (migrations 0172–0177)** are also registered in `rlsProtectedTables.ts` with org-scoped RLS + `canonical_writer` bypass: `canonical_subaccount_mutations`, `canonical_conversation_providers`, `canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`, `client_pulse_signal_observations`, `client_pulse_health_snapshots`, `client_pulse_churn_assessments`, `integration_fingerprints` (two-tier: system scope cross-tenant-readable, org scope tenant-isolated), `integration_detections`, `integration_unclassified_signals`. See the [ClientPulse Phase 1 follow-ups section](#p3c--clientpulse-canonical-tables-migrations-01700177) for the full roster.
+
 
 - **Org isolation** — all rows scoped to `app.organisation_id`
 - **Visibility predicates** — `private` rows visible only to `app.current_principal_id`; `shared_team` rows visible when `shared_team_ids && app.current_team_ids`; `shared_subaccount` and `shared_org` rows visible to all principals in scope
@@ -1318,9 +1341,12 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Migrations
 
-109 migrations (0001–0109, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0177` — ClientPulse Phase 1 follow-up: `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals` (bumped from 0176 after merge with IEE 0176)
+- `0176` — IEE Phase 0: denormalised `agent_runs.iee_run_id` column + in-flight partial index
+- `0170–0175` — ClientPulse Phases 0–3: template extension, playbook scope refactor, canonical mutation/artifact tables, health snapshots, churn assessments, ingestion idempotency
 - `0109` — `skill_analyzer_results.classificationFailed` + `classificationFailureReason` — distinguish API failure from genuine partial-overlap in Skill Analyzer Phase 3
 - `0108` — `scraping_selectors` + `scraping_cache` — learned element fingerprints and HTTP response cache for the Scraping Engine
 - `0107` — unique constraint on `workspace_memory_entries` — deduplication key for org subaccount memory migration idempotency
@@ -1403,7 +1429,9 @@ Single canonicalisation path for URLs across the system (deduplication, comparis
 
 ### Agent run status enum — `shared/runStatus.ts`
 
-Single source of truth for the 11 agent run statuses (`queued`, `running`, `completed`, `failed`, `timeout`, `cancelled`, `budget_exceeded`, `loop_detected`, `pending_approval`, `pending_input`, `handoff`). Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `ReadonlySet`s, plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+Single source of truth for the 12 agent run statuses: `pending`, `running`, `delegated`, `completed`, `failed`, `timeout`, `cancelled`, `loop_detected`, `budget_exceeded`, `awaiting_clarification`, `waiting_on_clarification`, `completed_with_uncertainty`. Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `readonly arrays` (a single private `TERMINAL_SET` backs the hot-path `isTerminalRunStatus` check), plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+
+**`delegated`** (IEE Phase 0, `docs/iee-delegation-lifecycle-spec.md`): non-terminal. The run has been handed off to a delegated execution backend (IEE worker today; OpenClaw in future). Detail lives on the backend's row (`iee_runs`). Transitions to a terminal value via `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun` when the worker publishes the `iee-run-completed` event, or via the `maintenance:iee-main-app-reconciliation` cron if the event is lost. Included in `IN_FLIGHT_RUN_STATUSES`.
 
 **Client duplicate:** `client/src/lib/runStatus.ts` is a structural copy — the client tsconfig does not reach `shared/`. Drift between the two is caught by `server/services/__tests__/runStatusDriftPure.test.ts` (5 assertions: dict match, terminal/in-flight/awaiting array match, `isTerminalRunStatus` agreement for every value).
 
@@ -1711,7 +1739,7 @@ Playbook Run (playbookRuns)
 | `systemPlaybookTemplateVersions` | Immutable version snapshots of system templates. |
 | `playbookTemplates` | Org-owned templates. `forkedFromSystemId`, `forkedFromVersion` nullable. |
 | `playbookTemplateVersions` | Immutable published versions of org templates. `definitionJson` holds the full DAG. |
-| `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
+| `playbookRuns` | Run instances. `subaccountId` (nullable since migration 0171), `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`, `scope` (`subaccount` \| `org`). CHECK constraint enforces scope/entity consistency: `subaccount` scope requires `subaccount_id`; `org` scope requires `subaccount_id IS NULL`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
 | `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
@@ -2060,15 +2088,17 @@ Main app (Replit/Express)        Worker (Docker, DigitalOcean)
 
 **Database is the only integration point.** No HTTP between app and worker.
 
-### Schema (migrations 0070, 0071)
+### Schema (migrations 0070, 0071, 0176)
 
 | Table | Purpose |
 |-------|---------|
-| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
-| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason`, `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
+| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), `failureReason` (shared `FailureReason` enum), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
+| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason` (shared `FailureReason` enum), `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
 | `ieeArtifacts` | Metadata for files/downloads emitted by a run. v1 stores metadata only; contents live on worker disk. |
 
 **LLM attribution** — `llmRequests` table gains `ieeRunId` (nullable FK) and `callSite` (`app`\|`worker`). Database CHECK constraint: `source_type <> 'iee' OR iee_run_id IS NOT NULL`.
+
+**Parent agent_run linkage** — migration 0176 adds `agent_runs.iee_run_id` (nullable, no FK) as a denormalised cache populated at delegation time by `agentExecutionService`. The run-detail API (`GET /api/agent-runs/:id`) and live-progress polling read it directly so callers never JOIN `iee_runs` at read time. Migration 0176 also adds a partial in-flight index `agent_runs_inflight_org_idx ON (organisation_id) WHERE status IN ('pending', 'running', 'delegated')` for hot-path live-count / dashboard queries.
 
 ### Routing — how a task reaches IEE
 
@@ -2079,11 +2109,29 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
   if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
   const { enqueueIEETask } = await import('./ieeExecutionService.js');
   const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
-  // Return synthetic loopResult — canonical state lives on the ieeRuns row.
+  // Park the parent agent_run in the non-terminal 'delegated' status (NOT
+  // a synthetic completion) and persist enqueueResult.ieeRunId on the
+  // denormalised iee_run_id column. Real terminal transition lands later
+  // via the iee-run-completed event handler (see §IEE delegation lifecycle).
 }
 ```
 
 `executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+
+### IEE delegation lifecycle (Phase 0 — `docs/iee-delegation-lifecycle-spec.md`)
+
+The IEE branch does NOT mark the parent `agent_run` complete at handoff time (the previous "synthetic completion" pattern lost real outcomes). Instead:
+
+1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
+2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
+3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun`. That service:
+   - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row.
+   - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
+   - Updates the parent with terminal status, summary, error fields, durationMs, token totals — gated on `status IN ('pending','running','delegated') AND completed_at IS NULL` for defence-in-depth.
+   - Emits `agent:run:completed` (run room) and `live:agent_completed` (subaccount room) post-commit so dashboards and sidebar counters decrement.
+4. **Reconciliation backstop** — `maintenance:iee-main-app-reconciliation` cron (every 2 min, registered in `queueService.ts`) calls `reconcileStuckDelegatedRuns()` to catch the "Class 2 orphan" case: parent stuck in `delegated` while `iee_runs` is already terminal (event handler crashed or event lost). 120-second grace window before reconciliation kicks in.
+
+Pure helpers live in `agentRunFinalizationServicePure.ts` (`mapIeeStatusToAgentRunStatus`, `buildSummaryFromIeeRun`) so the mapping table is testable without a DB. Tests in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` cover the full Appendix A mapping matrix plus summary-formatting edge cases.
 
 ### Services & Routes
 
@@ -2095,6 +2143,7 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
 | Route | File | Purpose |
 |-------|------|---------|
 | `GET /api/iee/runs/:ieeRunId/cost` | `iee.ts` | Per-run cost breakdown (app vs worker LLM, runtime) |
+| `GET /api/iee/runs/:ieeRunId/progress` | `iee.ts` | Live worker progress for a delegated run (step count, heartbeat age, status, failure reason). Subaccount-scoped boundary check via `?subaccountId=` query param. Backed by `ieeUsageService.getIeeRunProgress`. |
 | `GET /api/iee/usage/system` | `iee.ts` | System-wide explorer (system_admin) |
 | `GET /api/orgs/:orgId/iee/usage` | `iee.ts` | Org-scoped explorer |
 | `GET /api/subaccounts/:subaccountId/iee/usage` | `iee.ts` | Subaccount-scoped explorer |
@@ -2110,6 +2159,7 @@ Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerf
 | File | Purpose |
 |------|---------|
 | `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers) |
 | `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
 | `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
 | `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
@@ -2139,7 +2189,7 @@ runExecutionLoop():
 3. Step count exceeds `MAX_STEPS_PER_EXECUTION` → `step_limit_reached`
 4. Wall clock exceeds `MAX_EXECUTION_TIME_MS` → `timeout`
 
-`FailureReason` enum: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `unknown`.
+`FailureReason` enum is the canonical taxonomy in `shared/iee/failureReason.ts`. Both `ieeRuns.failureReason` and `ieeSteps.failureReason` reference the shared enum directly (no inline subsets). Core IEE execution-loop reasons: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `worker_terminated` | `unknown`. The full enum also includes connector reasons (`connector_timeout`, `rate_limited`, `data_incomplete`, `internal_error`), tenant-isolation reasons (`scope_violation`, `missing_org_context`), and playbook decision-step reasons (see `shared/iee/failureReason.ts`). `worker_terminated` is distinct from `cancelled` — it indicates the worker process died mid-run (e.g. SIGTERM during a deploy, container eviction, orphan detection) rather than a user-initiated cancel; the latter sets `iee_runs.status='cancelled'`.
 
 ### Idempotency & deduplication
 
@@ -2155,6 +2205,7 @@ Pattern in `ieeExecutionService`:
 | `running` | Return run id; let in-flight worker finish. |
 | `pending` | Return run id; queued job will pick it up. |
 | `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
+| `cancelled` | Treat like `failed` for retry-policy purposes. The retry-sweep on the worker (`worker/src/persistence/runs.ts`) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
 
 The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
 

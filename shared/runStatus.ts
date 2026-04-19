@@ -16,6 +16,10 @@
 export const AGENT_RUN_STATUS = {
   PENDING: 'pending',
   RUNNING: 'running',
+  // IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md): parent run has
+  // been handed off to a delegated execution backend (IEE worker today,
+  // OpenClaw in future). Non-terminal. Detail lives on the backend row.
+  DELEGATED: 'delegated',
   COMPLETED: 'completed',
   FAILED: 'failed',
   TIMEOUT: 'timeout',
@@ -32,6 +36,7 @@ export type AgentRunStatus = (typeof AGENT_RUN_STATUS)[keyof typeof AGENT_RUN_ST
 export const IN_FLIGHT_RUN_STATUSES: readonly AgentRunStatus[] = [
   AGENT_RUN_STATUS.PENDING,
   AGENT_RUN_STATUS.RUNNING,
+  AGENT_RUN_STATUS.DELEGATED,
 ];
 
 export const AWAITING_RUN_STATUSES: readonly AgentRunStatus[] = [

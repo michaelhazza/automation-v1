@@ -35,6 +35,12 @@ export type PlaybookRunStatus =
   | 'cancelled'
   | 'partial';
 
+// Playbook run scope (migration 0171, §13.3). `subaccount` is the historical
+// default — `subaccount_id` is always populated. `org` runs operate across the
+// entire organisation; `subaccount_id` is null and the CHECK constraint
+// `playbook_runs_scope_subaccount_consistency_chk` enforces the invariant.
+export type PlaybookScope = 'subaccount' | 'org';
+
 export const playbookRuns = pgTable(
   'playbook_runs',
   {
@@ -42,9 +48,10 @@ export const playbookRuns = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
-    subaccountId: uuid('subaccount_id')
-      .notNull()
-      .references(() => subaccounts.id),
+    // Nullable as of migration 0171 — org-scope runs have no subaccount.
+    // The scope column + CHECK constraint enforce the invariant.
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
+    scope: text('scope').notNull().default('subaccount').$type<PlaybookScope>(),
     templateVersionId: uuid('template_version_id')
       .notNull()
       .references(() => playbookTemplateVersions.id),

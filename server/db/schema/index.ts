@@ -74,6 +74,7 @@ export * from './orgAgentConfigs';
 export * from './connectorConfigs';
 export * from './canonicalAccounts';
 export * from './canonicalEntities';
+export * from './clientPulseCanonicalTables';
 export * from './subaccountTags';
 export * from './orgMemories';
 export * from './mcpServerConfigs';

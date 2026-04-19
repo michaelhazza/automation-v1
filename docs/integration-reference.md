@@ -415,21 +415,50 @@ required_scopes:
   - opportunities.readonly
   - opportunities.write
   - locations.readonly
+  - users.readonly
+  - calendars.readonly
+  - funnels.readonly
+  - conversations.readonly
+  - conversations/message.readonly
+  - businesses.readonly
+  - saas/subscription.readonly
+scope_behavior: |
+  Expanded scopes (ClientPulse Phase 1, added 2026-04-18) apply to new OAuth
+  authorisations only. Existing connections with the original 3-scope token
+  continue working for their originally-granted endpoints; endpoints that
+  require the new scopes (funnels, calendars, users, locations, saas) gate
+  themselves and mark observations `unavailable_missing_scope` when absent.
+  Re-consent is surfaced via a pilot-stage banner (Phase 5 surface).
+webhook_events:
+  - ContactCreate
+  - ContactUpdate
+  - OpportunityStageUpdate
+  - OpportunityStatusUpdate
+  - ConversationCreated
+  - ConversationUpdated
+  - INSTALL
+  - UNINSTALL
+  - LocationCreate
+  - LocationUpdate
 setup_steps_summary: Install the Synthetos GHL app and authorise sub-account access.
 setup_doc_link: null
 typical_use_cases:
   - Multi-tenant agency CRM automation
   - Per-subaccount pipeline reporting
   - Contact enrichment flows
+  - ClientPulse Staff Activity Pulse (weighted activity score from canonical CRM mutations)
+  - ClientPulse Integration Fingerprint Scanner (detects third-party tools from conversation providers, workflow action types, webhook domains, tag prefixes, custom-field prefixes, and contact sources)
 broadly_useful_patterns:
   - CRM pipeline reporting
   - Multi-location contact management
+  - Sub-account lifecycle tracking via INSTALL/UNINSTALL webhook events
 known_gaps:
   - Custom field propagation not fully automated
+  - SaaS-tier AI feature usage endpoint pending (ai_feature_usage signal currently placeholder)
 client_specific_patterns:
   - Subaccount IDs per agency client
 implemented_since: "2026-02-20"
-last_verified: "2026-04-17"
+last_verified: "2026-04-19"
 owner: platform-team
 ```
 

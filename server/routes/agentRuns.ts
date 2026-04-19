@@ -8,8 +8,9 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/index.js';
-import { eq, and, gte, sql } from 'drizzle-orm';
+import { eq, and, gte, sql, inArray, count } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 
 const router = Router();
 
@@ -305,6 +306,34 @@ router.get(
     });
 
     res.json(runs);
+  })
+);
+
+// ─── Activity: Org-scoped live-run count ──────────────────────────────────────
+//
+// Codex dual-review iteration 2 finding: AdminAgentsPage used to derive the
+// live-run badge from `/api/agent-activity?status=running,delegated&limit=100`
+// and count the array length. That capped the badge at 100 for orgs with more
+// in-flight runs and could desync with the WebSocket counter on refresh.
+// This endpoint returns a proper SQL count over IN_FLIGHT_RUN_STATUSES, org-
+// scoped, and excluding sub-agent runs (matching the subaccount /live-status
+// endpoint in routes/projects.ts).
+router.get(
+  '/api/agent-activity/live-count',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const [result] = await db
+      .select({ count: count() })
+      .from(agentRuns)
+      .where(and(
+        eq(agentRuns.organisationId, req.orgId!),
+        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
+        eq(agentRuns.isSubAgent, false),
+        eq(agentRuns.isTestRun, false),
+      ));
+
+    res.json({ runningAgents: Number(result?.count ?? 0) });
   })
 );
 

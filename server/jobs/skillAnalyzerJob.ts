@@ -47,7 +47,10 @@ import {
   detectSkillGraphCollision,
   type LibrarySkillSummary,
   type MergeWarning,
+  type ValidationThresholds,
 } from '../services/skillAnalyzerServicePure.js';
+import { effectiveTierMap } from '../services/skillAnalyzerConfigService.js';
+import type { SkillAnalyzerConfig } from '../db/schema/skillAnalyzerConfig.js';
 import {
   skillParserServicePure,
   ParsedSkill,
@@ -73,6 +76,16 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   }
 
   const organisationId = job.organisationId;
+
+  // v2 §11.11.4: all pipeline thresholds come from the job's config_snapshot,
+  // not the live table. Stale snapshots on pre-0155 jobs fall back to the
+  // hardcoded defaults inside validateMergeOutput / effectiveTierMap.
+  const configSnapshot = (job.configSnapshot ?? null) as SkillAnalyzerConfig | null;
+  const validationThresholds: ValidationThresholds = {
+    scopeExpansionStandardPct: configSnapshot?.scopeExpansionStandardThreshold,
+    scopeExpansionCriticalPct: configSnapshot?.scopeExpansionCriticalThreshold,
+    tierMap: effectiveTierMap(configSnapshot),
+  };
 
   // Idempotent: clear any prior results (support for retries)
   await clearResultsForJob(jobId);
@@ -594,6 +607,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           allLibrarySlugs,
           librarySkills,
           excludedId,
+          validationThresholds,
         ),
       ];
 
@@ -969,6 +983,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               allLibrarySlugs,
               librarySkills,
               excludedId,
+              validationThresholds,
             );
 
             // Prepend CLASSIFIER_FALLBACK when the rule-based path ran, so

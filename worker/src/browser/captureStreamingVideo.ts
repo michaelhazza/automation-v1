@@ -167,16 +167,28 @@ export async function captureStreamingVideo(
       .catch(() => undefined);
 
     // ── 4. Wait for the network listener to fire ─────────────────────────
+    //
+    // Audit fix (Non-blocker #11): if no video URL is snooped within the
+    // timeout, exit cleanly with a descriptive failure. The most common
+    // causes are documented in the failure detail so operators can
+    // diagnose without re-running.
     const timeoutPromise = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('capture_timeout')), captureTimeoutMs),
     );
     try {
       await Promise.race([capturePromise, timeoutPromise]);
     } catch {
+      logger.warn('worker.capture_video.no_media_url_detected', {
+        runId: opts.runId,
+        correlationId: opts.correlationId,
+        contentUrl: opts.contentUrl,
+        waitedMs: captureTimeoutMs,
+      });
       throw new FailureError(
-        failure('data_incomplete', 'video_url_not_captured', {
+        failure('data_incomplete', 'no_streaming_video_detected', {
           contentUrl: opts.contentUrl,
           waitedMs: captureTimeoutMs,
+          hint: 'No .mp4 or .m3u8 URL was requested by the page within the capture window. Common causes: (a) the startUrl is not a video page, (b) the page requires additional interaction before loading video, (c) the video is served from a domain not in the allowed list.',
         }),
       );
     }

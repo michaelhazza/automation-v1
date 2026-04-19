@@ -85,6 +85,11 @@ export const skillAnalyzerJobs = pgTable(
     // Atomic guard against concurrent Execute. POST /execute acquires via
     // UPDATE … WHERE execution_lock=false; concurrent calls see 409.
     executionLock: boolean('execution_lock').notNull().default(false),
+    // v2 §11.11.3 hardening: per-acquisition ownership token. Release
+    // UPDATEs gate on (executionLock=true AND executionLockToken=?) so a
+    // late-finishing process cannot clear a new owner's lock after a
+    // stale-lock unlock has reassigned ownership. Migration 0178.
+    executionLockToken: uuid('execution_lock_token'),
     executionStartedAt: timestamp('execution_started_at', { withTimezone: true }),
     executionFinishedAt: timestamp('execution_finished_at', { withTimezone: true }),
 

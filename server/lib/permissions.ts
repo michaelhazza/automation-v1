@@ -70,6 +70,10 @@ export const ORG_PERMISSIONS = {
   PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
   PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
   PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
+  // Org-scope playbook runs (migration 0171 / ClientPulse §13.3). Distinct from
+  // SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START because org-scope runs operate
+  // across the whole organisation rather than a single subaccount.
+  PLAYBOOK_RUNS_START: 'org.playbook_runs.start',
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
@@ -187,6 +191,7 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_RUNS_START,        description: 'Start org-scope Playbook runs',                 groupName: 'org.playbooks' },
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },

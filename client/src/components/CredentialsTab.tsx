@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import Modal from './Modal';
+
+interface SubaccountAgentOption {
+  id: string;
+  agentId: string;
+  name: string;
+}
 
 interface Connection {
   id: string;
@@ -56,6 +62,7 @@ interface Props {
 
 export default function CredentialsTab({ subaccountId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +72,18 @@ export default function CredentialsTab({ subaccountId }: Props) {
   const [webLoginForm, setWebLoginForm] = useState({ label: '', loginUrl: '', username: '', password: '' });
   const [webLoginSaving, setWebLoginSaving] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // Web login test modal (IEE Phase 0 — audit blocker #1).
+  // Firing a test requires picking an agent to attribute the test run to.
+  // The run goes through the same delegated-lifecycle plumbing as any other
+  // IEE browser task, so the user can watch it progress in the agent-run
+  // detail view.
+  const [testModal, setTestModal] = useState<{ conn: Connection } | null>(null);
+  const [testAgents, setTestAgents] = useState<SubaccountAgentOption[]>([]);
+  const [testAgentsLoading, setTestAgentsLoading] = useState(false);
+  const [selectedTestAgentId, setSelectedTestAgentId] = useState<string>('');
+  const [testFiring, setTestFiring] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
 
   // Provider dropdown
   const [showProviderMenu, setShowProviderMenu] = useState(false);
@@ -219,6 +238,73 @@ export default function CredentialsTab({ subaccountId }: Props) {
     setWebLoginModal({ conn });
   };
 
+  // IEE Phase 0 — open the test-connection modal and load the subaccount's
+  // agent list. The test fires a login_test IEE task against the saved
+  // credential, attributed to the chosen agent.
+  const openTestConnection = async (conn: Connection) => {
+    if (!subaccountId) return; // test is subaccount-scoped only
+    setTestError(null);
+    setSelectedTestAgentId('');
+    setTestModal({ conn });
+    setTestAgentsLoading(true);
+    try {
+      // Codex iteration-3 finding P2: use the narrow test-eligible-agents
+      // endpoint (gated on CONNECTIONS_MANAGE + AGENTS_EDIT) instead of the
+      // broader /agents route (gated on org-level SUBACCOUNTS_VIEW). Portal
+      // users with only subaccount-level permissions can now load this list.
+      const { data } = await api.get(
+        `/api/subaccounts/${subaccountId}/web-login-connections/test-eligible-agents`,
+      );
+      const rows: SubaccountAgentOption[] = (Array.isArray(data) ? data : []).map((row: {
+        id: string;
+        agentId: string;
+        name?: string;
+      }) => ({
+        id: row.id,
+        agentId: row.agentId,
+        name: row.name ?? 'Unnamed agent',
+      }));
+      setTestAgents(rows);
+      if (rows.length === 1) setSelectedTestAgentId(rows[0].id);
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Failed to load agents';
+      setTestError(msg);
+    } finally {
+      setTestAgentsLoading(false);
+    }
+  };
+
+  const fireTestConnection = async () => {
+    if (!subaccountId || !testModal) return;
+    const agent = testAgents.find((a) => a.id === selectedTestAgentId);
+    if (!agent) {
+      setTestError('Select an agent to attribute the test run to.');
+      return;
+    }
+    setTestFiring(true);
+    setTestError(null);
+    try {
+      const { data } = await api.post(
+        `/api/subaccounts/${subaccountId}/web-login-connections/${testModal.conn.id}/test`,
+        {
+          agentId: agent.agentId,
+          subaccountAgentId: agent.id,
+        },
+      );
+      setTestModal(null);
+      // Navigate to the run detail page — the delegated lifecycle +
+      // progress polling there gives the user live feedback on the test.
+      navigate(`/admin/subaccounts/${subaccountId}/runs/${data.agentRunId}`);
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string; message?: string } } }).response?.data?.error
+        ?? (err as { response?: { data?: { message?: string } } }).response?.data?.message
+        ?? 'Failed to start test';
+      setTestError(msg);
+    } finally {
+      setTestFiring(false);
+    }
+  };
+
   const saveWebLogin = async () => {
     setWebLoginSaving(true);
     setError(null);
@@ -360,6 +446,17 @@ export default function CredentialsTab({ subaccountId }: Props) {
                     {cfg.loginUrl && <span className="ml-2 text-xs text-slate-400 truncate max-w-xs">{cfg.loginUrl}</span>}
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Test button is subaccount-scoped only. The endpoint
+                        requires a subaccountAgentId, which org-scope callers
+                        can't provide without picking a subaccount first. */}
+                    {subaccountId && (
+                      <button
+                        onClick={() => openTestConnection(conn)}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+                      >
+                        Test
+                      </button>
+                    )}
                     <button
                       onClick={() => openEditWebLogin(conn)}
                       className="text-xs text-slate-500 hover:text-slate-800 underline"
@@ -416,6 +513,63 @@ export default function CredentialsTab({ subaccountId }: Props) {
             >
               {savingChannel ? 'Saving…' : 'Save'}
             </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Test Web Login modal — IEE Phase 0 audit blocker #1 */}
+      {testModal !== null && (
+        <Modal
+          title={`Test connection: ${testModal.conn.label ?? 'Web Login'}`}
+          onClose={() => setTestModal(null)}
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Fires a browser task that logs in with this connection's credentials
+              and verifies success. You can follow progress in the agent run
+              detail page after starting the test.
+            </p>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Attribute run to agent
+              </label>
+              {testAgentsLoading ? (
+                <div className="text-xs text-slate-400">Loading agents…</div>
+              ) : testAgents.length === 0 ? (
+                <div className="text-xs text-amber-600">
+                  No agents available in this subaccount. Assign at least one agent before testing.
+                </div>
+              ) : (
+                <select
+                  value={selectedTestAgentId}
+                  onChange={(e) => setSelectedTestAgentId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Select an agent…</option>
+                  {testAgents.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {testError && (
+              <div className="text-xs text-red-600">{testError}</div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setTestModal(null)}
+                className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={fireTestConnection}
+                disabled={testFiring || !selectedTestAgentId || testAgents.length === 0}
+                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {testFiring ? 'Starting…' : 'Start test'}
+              </button>
+            </div>
           </div>
         </Modal>
       )}

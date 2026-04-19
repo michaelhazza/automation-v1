@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, integer, jsonb, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { ieeRuns } from './ieeRuns';
+import type { FailureReason } from '../../../shared/iee/failureReason';
 
 // ---------------------------------------------------------------------------
 // iee_steps — one row per iteration of the IEE execution loop.
@@ -24,9 +25,13 @@ export const ieeSteps = pgTable(
     input:           jsonb('input').notNull(),
     output:          jsonb('output'),
     success:         boolean('success').notNull(),
-    // Extended via spec v3.4 §8.4 / T13 to match the broadened FailureReason
-    // enum (connector_timeout, rate_limited, data_incomplete, internal_error).
-    failureReason:   text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'connector_timeout' | 'rate_limited' | 'data_incomplete' | 'internal_error' | 'unknown'>(),
+    // References the shared FailureReason enum directly so step-level
+    // failure classification stays in lockstep with the run-level
+    // iee_runs.failureReason. Previously an inline subset lived here and
+    // drifted when new failure reasons were added (scope_violation,
+    // decision_*, worker_terminated), causing type errors when writers
+    // tried to assign a wider FailureReason to this narrower column.
+    failureReason:   text('failure_reason').$type<FailureReason>(),
     durationMs:      integer('duration_ms'),
 
     createdAt:       timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

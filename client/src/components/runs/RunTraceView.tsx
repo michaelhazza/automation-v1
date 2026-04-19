@@ -86,6 +86,10 @@ export interface RunDetail {
   deliverablesCreated: number;
   memoryStateAtStart: string | null;
   summary: string | null;
+  /** IEE Phase 0 — populated server-side when executionMode is iee_browser
+   *  or iee_dev so the UI can subscribe to progress without parsing the
+   *  summary string. Null for non-IEE runs. */
+  ieeRunId?: string | null;
   systemPromptTokens: number;
   handoffDepth: number;
   parentRunId: string | null;

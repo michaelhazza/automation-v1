@@ -87,11 +87,14 @@ export const playbookStepReviewService = {
         stepId: stepRun.stepId,
         reviewKind: context?.reviewKind ?? 'supervised_mode',
       });
-      emitSubaccountUpdate(run.subaccountId, 'playbook:step:awaiting_approval', {
-        runId: run.id,
-        stepRunId: stepRun.id,
-        stepId: stepRun.stepId,
-      });
+      // Org-scope runs (migration 0171) have no subaccount room to emit into.
+      if (run.subaccountId !== null) {
+        emitSubaccountUpdate(run.subaccountId, 'playbook:step:awaiting_approval', {
+          runId: run.id,
+          stepRunId: stepRun.id,
+          stepId: stepRun.stepId,
+        });
+      }
     }
   },
 };

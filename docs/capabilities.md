@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-16 (Execution infrastructure hardening — exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity)
+> **Last updated:** 2026-04-19 (ClientPulse Phase 1 follow-ups — Staff Activity Pulse + Integration Fingerprint Scanner skills, GHL webhook mutation writes covering 10 event types)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -394,6 +394,8 @@ Integrated Execution Environment for running agent work in isolated Docker conta
 
 - **Browser automation mode:** Agents execute multi-step browser tasks (logins, form submissions, structured scrapes, file downloads, paywalled content access) inside fully sandboxed containers with per-run cost tracking and budget controls. This is how agents do work on systems that don't have APIs.
 - **Development mode:** Agency-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a mandatory code review workflow with approved command lists and test execution. Not positioned as a standalone IDE.
+- **Live progress on long-running browser tasks:** delegated browser tasks surface real-time step count and worker heartbeat in the run-trace view while the agent is still working — operators see the work happening rather than a silent "in progress" spinner.
+- **Connection health validation:** stored credentials for paywalled and login-protected sites can be tested on demand — runs a real login attempt in a sandboxed browser and reports back, so credentials are verified before the agent depends on them.
 - **Full cost visibility** — both AI token costs and runtime costs are tracked per execution in the usage explorer, so agencies see their true cost of delivery — not just model spend.
 - All executions run in isolation with enforced gating; no agent touches host state.
 
@@ -529,7 +531,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Composite health scoring based on normalised CRM, engagement, and activity metrics
 - Anomaly detection compared against each account's own historical baseline
 - Intervention triggers (check-in, pause, escalation alert) proposed with human gating
-- ClientPulse dashboard for portfolio-wide health visibility at a glance
+- ClientPulse dashboard for portfolio-wide health visibility at a glance, powered by Staff Activity Pulse (weighted-sum activity scoring from CRM mutation events, with automation-user exclusion) and Integration Fingerprint Scanner (detects third-party tools installed in each sub-account from canonical artifact patterns)
 
 ### Customer Support Automation
 
@@ -581,7 +583,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 110 skills.
+Complete list of all 112 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -628,8 +630,10 @@ Complete list of all 110 skills.
 |-------|-------------|------|------|
 | `compute_churn_risk` | Evaluate churn risk signals and produce risk score with intervention recommendation | LLM | — |
 | `compute_health_score` | Calculate composite health score (0-100) for account | LLM | — |
+| `compute_staff_activity_pulse` | Calculate weighted activity score from canonical CRM mutations; excludes automation users via outlier-volume classifier | Deterministic | — |
 | `detect_anomaly` | Compare current metrics against historical baseline and flag deviations | LLM | — |
 | `detect_churn_risk` | Analyse account health signals to identify at-risk accounts | LLM | — |
+| `scan_integration_fingerprints` | Match canonical artifacts against a seed fingerprint library; emit per-subaccount detections and queue novel observations for operator triage | Deterministic | — |
 | `draft_followup` | Draft contextual follow-up email for stale deal or at-risk contact | LLM | — |
 | `enrich_contact` | Retrieve enrichment data for contact and write back to CRM | Deterministic | — |
 | `read_crm` | Retrieve contact, deal, and pipeline data from CRM | Deterministic | — |
@@ -784,7 +788,7 @@ Complete list of all 110 skills.
 | **Gmail** | OAuth2 | Send email, read inbox | Org or subaccount |
 | **Slack** | OAuth2 | Post messages, file uploads, thread conversations, HITL buttons (Block Kit), @mention agent dispatch, DM conversations | Org or subaccount |
 | **HubSpot** | OAuth2 | Contacts, deals, content; full CRM read/write | Org or subaccount |
-| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, location data; webhook ingestion (HMAC-SHA256) | Org (with concurrency cap) |
+| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, funnels, calendars, users, location and business metadata; webhook ingestion (HMAC-SHA256) covering 10 event types — contact / opportunity / conversation create + update, plus INSTALL / UNINSTALL / LocationCreate / LocationUpdate for sub-account lifecycle tracking | Org (with concurrency cap) |
 | **GitHub** | GitHub App | Fine-grained per-repo access, webhook events (issues, PRs, pushes), task creation from events | Org or subaccount |
 | **Teamwork Desk** | OAuth2 | Project and task management | Org or subaccount |
 | **Stripe** | API adapter | Payment transactions and subscription data | Org |
@@ -843,6 +847,7 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-19 | Sandboxed Runtime (IEE): add live-progress-on-long-running-browser-tasks bullet (real-time step count + heartbeat surfacing during delegated browser execution) and connection-health-validation bullet (on-demand login test for stored credentials before depending on them in a workflow). Reflects the IEE Phase 0 delegation lifecycle and Web Login Connection "Test Connection" UI. | — |
 | 2026-04-17 | Capability-aware Orchestrator + Platform Feature Request Pipeline: add two new customer-facing Product Capabilities sections covering deterministic four-path task routing (A configured / B narrow-configurable / C broad-configurable / D unsupported), atomic capability matching (capability map + active connection + granted scopes), graceful reference-degradation, auditable decision records, per-run budget, post-handoff verification, and the structured feature-request pipeline with system-promotion detection, 30-day dedupe, multi-channel delivery, and dogfooded task-board triage. Add machine-readable-source callout on Integrations Reference pointing to `docs/integration-reference.md` as the structured YAML backing the runtime capability catalogue. | — |
 | 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |
 | 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
