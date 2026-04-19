@@ -239,6 +239,7 @@ export async function finaliseAgentRunFromIeeRun(
         .where(and(
           eq(agentRuns.id, parent.id),
           inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
+          isNull(agentRuns.completedAt),
         ))
         .returning({ id: agentRuns.id });
       performedTransition = updated.length > 0;

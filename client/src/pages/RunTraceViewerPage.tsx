@@ -146,6 +146,15 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
         const { data } = await api.get(`/api/iee/runs/${ieeRunId}/progress${subaccountParam}`);
         if (cancelled) return;
         setIeeProgress(data);
+        // When the worker reports a terminal state, stop polling immediately
+        // and kick a parent-run refresh. The useEffect below handles the
+        // eventual-consistency gap (parent still 'delegated' for a moment).
+        if (['completed', 'failed', 'cancelled'].includes(data?.status)) {
+          cancelled = true;
+          clearTimer();
+          refreshRun();
+          return;
+        }
         const progressed = typeof data?.stepCount === 'number'
           && (data.stepCount !== lastStepCount || data.status !== lastStatus);
         if (progressed) {
