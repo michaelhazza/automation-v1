@@ -9,6 +9,18 @@ interface ExecuteResult {
   failed: number;
   errors: Array<{ resultId: string; error: string }>;
   backupId: string | null;
+  // v2 Fix 5: proposed agents whose skill attachments all failed — stay as
+  // drafts. Surfaced here so admins can review/promote manually.
+  pendingDraftAgents?: Array<{ agentId: string; slug: string; name: string }>;
+}
+
+/** Shape of a structured blocking reason returned by the server when
+ *  POST /execute hits the evaluateApprovalState gate. Spec §11.1. */
+interface BlockingReason {
+  resultId: string;
+  warningCode: string;
+  tier: string;
+  detail?: string;
 }
 
 interface RestoreResult {
@@ -29,6 +41,10 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
   const navigate = useNavigate();
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v2 §11.1: structured reasons[] payload returned with 409 responses when
+  // the server's evaluateApprovalState re-check rejects the run. Rendered as
+  // a per-result blocking list so reviewers know exactly what to fix.
+  const [blockingReasons, setBlockingReasons] = useState<BlockingReason[] | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
@@ -44,14 +60,35 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
 
   async function handleExecute() {
     setError(null);
+    setBlockingReasons(null);
     setExecuting(true);
     try {
       const res = await api.post(`/api/system/skill-analyser/jobs/${job.id}/execute`);
       onExecuted(res.data as ExecuteResult);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
-      const errBody = e?.response?.data?.error;
-      setError((typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Execution failed.');
+      const e = err as {
+        response?: {
+          status?: number;
+          data?: {
+            error?: unknown;
+            reasons?: BlockingReason[];
+          };
+        };
+        message?: string;
+      };
+      const data = e?.response?.data;
+      const errBody = data?.error;
+      // 409 MERGE_CRITICAL_WARNINGS carries a structured reasons[] array so
+      // the UI can render a per-result blocking list. Fall back to the plain
+      // error message for every other failure mode.
+      if (e?.response?.status === 409 && Array.isArray(data?.reasons) && data!.reasons!.length > 0) {
+        setBlockingReasons(data!.reasons!);
+      }
+      setError(
+        (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message)
+          ?? e?.message
+          ?? 'Execution failed.',
+      );
     } finally {
       setExecuting(false);
     }
@@ -129,7 +166,18 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
 
             {error && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {error}
+                <p className="font-medium mb-1">{error}</p>
+                {blockingReasons && (
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {blockingReasons.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="font-mono text-red-800">{r.warningCode}</span>
+                        <span className="text-red-600">({r.tier})</span>
+                        {r.detail && <span className="text-red-600">— {r.detail}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -169,6 +217,23 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
                   {executeResult.errors.map((e, i) => (
                     <p key={i} className="text-xs text-red-600">{e.error}</p>
                   ))}
+                </div>
+              )}
+              {executeResult.pendingDraftAgents && executeResult.pendingDraftAgents.length > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-amber-800 text-sm font-medium mb-1">
+                    {executeResult.pendingDraftAgents.length} proposed agent{executeResult.pendingDraftAgents.length === 1 ? '' : 's'} left in draft
+                  </p>
+                  <p className="text-xs text-amber-700 mb-2">
+                    Skill attachments failed for these agents. Review and promote manually.
+                  </p>
+                  <ul className="space-y-0.5 text-xs">
+                    {executeResult.pendingDraftAgents.map((a) => (
+                      <li key={a.agentId} className="text-amber-800">
+                        <span className="font-medium">{a.name}</span> <span className="text-amber-600">({a.slug})</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
               {executeResult.created === 0 && executeResult.updated === 0 && executeResult.failed === 0 && (

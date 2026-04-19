@@ -28,6 +28,24 @@ function stableStringify(value: unknown): string {
   return stringify(value);
 }
 
+/** v2 §11.11.7 helper: deterministic hash of a skill's content fields so
+ *  Execute can idempotent-skip a slug collision when the existing row was
+ *  created by a prior (crashed) run. */
+function hashSkillContent(s: {
+  name: string;
+  description: string | null;
+  definition: object | null;
+  instructions: string | null;
+}): string {
+  const payload = stableStringify({
+    name: s.name,
+    description: s.description ?? '',
+    definition: s.definition ?? null,
+    instructions: s.instructions ?? null,
+  });
+  return createHash('sha256').update(payload).digest('hex');
+}
+
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
  *  instances), so the standard `err instanceof Error ? err.message : String(err)`
@@ -88,6 +106,12 @@ export async function createJob(params: {
   }
   // For github and download, candidates are fetched during job processing
 
+  // v2 §11.11.4: capture the full config row at job start so mid-job config
+  // edits never apply to an in-flight run. Downstream stages (merge validation,
+  // approval gate, Execute) read from `jobs.config_snapshot`, not the live
+  // table.
+  const configSnapshot = await skillAnalyzerConfigService.snapshotForJob();
+
   const rows = await db
     .insert(skillAnalyzerJobs)
     .values({
@@ -98,6 +122,8 @@ export async function createJob(params: {
       parsedCandidates,
       status: 'pending',
       progressPct: 0,
+      configSnapshot,
+      configVersionUsed: configSnapshot.configVersion,
     })
     .returning({ id: skillAnalyzerJobs.id });
 
@@ -1125,6 +1151,65 @@ export async function executeApproved(params: {
   }
 }
 
+/** v2 §11.11.3: systemAdmin recovery for a stuck execution_lock. Only clears
+ *  the lock when it has been held longer than
+ *  `config.executionLockStaleSeconds` — prevents an operator from accidentally
+ *  yanking the rug out from under a live Execute. Router already enforces
+ *  `requireSystemAdmin`. */
+export async function unlockStaleExecution(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}): Promise<{ unlocked: true; heldForSeconds: number }> {
+  const { jobId, organisationId, userId } = params;
+  const jobRows = await db
+    .select({
+      id: skillAnalyzerJobs.id,
+      executionLock: skillAnalyzerJobs.executionLock,
+      executionStartedAt: skillAnalyzerJobs.executionStartedAt,
+    })
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+
+  const job = jobRows[0];
+  if (!job) throw { statusCode: 404, message: 'Job not found' };
+  if (!job.executionLock) {
+    throw {
+      statusCode: 409,
+      message: 'Execution lock is not held — nothing to unlock.',
+      errorCode: 'EXECUTION_LOCK_NOT_HELD',
+    };
+  }
+
+  const config = await skillAnalyzerConfigService.getConfig();
+  const staleThresholdMs = config.executionLockStaleSeconds * 1000;
+  const heldForMs = job.executionStartedAt
+    ? Date.now() - new Date(job.executionStartedAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  if (heldForMs < staleThresholdMs) {
+    throw {
+      statusCode: 409,
+      message: `Execution lock is not yet stale (held for ${Math.floor(heldForMs / 1000)}s, threshold ${config.executionLockStaleSeconds}s).`,
+      errorCode: 'EXECUTION_LOCK_FRESH',
+    };
+  }
+
+  await db
+    .update(skillAnalyzerJobs)
+    .set({ executionLock: false, executionFinishedAt: new Date() })
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.executionLock, true)));
+
+  logger.warn('[skillAnalyzer] stale execution lock cleared', {
+    jobId,
+    userId,
+    heldForSeconds: Math.floor(heldForMs / 1000),
+    staleThresholdSeconds: config.executionLockStaleSeconds,
+  });
+
+  return { unlocked: true, heldForSeconds: Math.floor(heldForMs / 1000) };
+}
+
 async function runExecute(params: {
   jobId: string;
   organisationId: string;
@@ -1409,14 +1494,55 @@ async function runExecute(params: {
       // schema level. A retired (isActive=false) row with the same slug
       // would slip past getSkillBySlug and explode at the constraint inside
       // the transaction. Use a direct DB query that ignores isActive.
+      //
+      // v2 §11.11.7: when a row already exists, hash-compare content against
+      // the candidate. Identical content → idempotent skip (a prior Execute
+      // crashed between the DB commit and the result-row update). Diverged
+      // content → hard fail as before.
       const existingRows = await db
-        .select({ id: systemSkills.id, isActive: systemSkills.isActive })
+        .select({
+          id: systemSkills.id,
+          isActive: systemSkills.isActive,
+          name: systemSkills.name,
+          description: systemSkills.description,
+          definition: systemSkills.definition,
+          instructions: systemSkills.instructions,
+        })
         .from(systemSkills)
         .where(eq(systemSkills.slug, candidate.slug))
         .limit(1);
       if (existingRows[0]) {
-        const msg = existingRows[0].isActive
-          ? `slug '${candidate.slug}' already exists in system_skills — pick a different slug or update the existing row instead`
+        const existing = existingRows[0];
+        const candidateHash = hashSkillContent({
+          name: candidate.name,
+          description: candidate.description,
+          definition: candidate.definition,
+          instructions: candidate.instructions,
+        });
+        const existingHash = hashSkillContent({
+          name: existing.name,
+          description: existing.description,
+          definition: existing.definition as object | null,
+          instructions: existing.instructions,
+        });
+        if (candidateHash === existingHash && existing.isActive) {
+          // Prior Execute created the skill but crashed before marking the
+          // result row success. Adopt the existing row and record a successful
+          // retry rather than failing on the collision.
+          logger.info('[skillAnalyzer] execute slug-collision idempotent skip', {
+            resultId: result.id,
+            slug: candidate.slug,
+            systemSkillId: existing.id,
+          });
+          await db
+            .update(skillAnalyzerResults)
+            .set({ executionResult: 'created', resultingSkillId: existing.id })
+            .where(eq(skillAnalyzerResults.id, result.id));
+          created++;
+          continue;
+        }
+        const msg = existing.isActive
+          ? `slug '${candidate.slug}' already exists in system_skills with different content — pick a different slug or update the existing row instead`
           : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
         await failResult(result.id, msg);
         continue;
@@ -2046,6 +2172,7 @@ export const skillAnalyzerService = {
   resetMergeToOriginal,
   resolveWarning,
   executeApproved,
+  unlockStaleExecution,
   updateJobProgress,
   retryClassification,
   bulkRetryFailedClassifications,
