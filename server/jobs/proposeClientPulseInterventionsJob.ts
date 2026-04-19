@@ -28,6 +28,10 @@ import {
   type ProposerSnapshot,
 } from '../services/clientPulseInterventionProposerPure.js';
 import { validateInterventionActionMetadata } from '../services/interventionActionMetadata.js';
+import {
+  enqueueInterventionProposal,
+  type InterventionActionType,
+} from '../services/clientPulseInterventionContextService.js';
 import { logger } from '../lib/logger.js';
 import { createHash } from 'crypto';
 
@@ -117,29 +121,56 @@ export async function runProposeClientPulseInterventions(
     // (b) action-table check: find a recent proposal for this subaccount +
     //     template within the cooldown window. Matches on metadataJson
     //     triggerTemplateSlug so each template's cooldown is independent.
+    //
+    // Scope-explicit query semantics (a `.limit(1)` with no orderBy is
+    // nondeterministic — if a completed and a non-completed row both exist
+    // in-window, picking either one would mis-classify under 'executed'
+    // scope). We query exactly what the scope requires:
+    //   - 'executed'    → existence of a status='completed' row
+    //   - 'proposed'    → existence of any non-terminal-or-completed row
+    //   - 'any_outcome' → existence of any row, but report which kind
+    //                     (prefer completed when both exist, via orderBy)
     let actionCheck: { allowed: boolean; reason?: string } = { allowed: true };
     if (outcomeCheck.allowed) {
-      const [recentAction] = await db
-        .select({ id: actions.id, status: actions.status })
-        .from(actions)
-        .where(
-          and(
-            eq(actions.organisationId, organisationId),
-            eq(actions.subaccountId, subaccountId),
-            sql`${actions.metadataJson}->>'triggerTemplateSlug' = ${template.slug}`,
-            gte(actions.createdAt, cooldownWindowStart),
-          ),
-        )
-        .limit(1);
-      if (recentAction) {
-        const isExecuted = recentAction.status === 'completed';
-        const scope = template.cooldownScope ?? 'executed';
-        if (scope === 'any_outcome') {
-          actionCheck = { allowed: false, reason: `cooldown:${isExecuted ? 'executed' : 'proposed'}` };
-        } else if (scope === 'executed' && isExecuted) {
+      const scope = template.cooldownScope ?? 'executed';
+      const baseConditions = and(
+        eq(actions.organisationId, organisationId),
+        eq(actions.subaccountId, subaccountId),
+        sql`${actions.metadataJson}->>'triggerTemplateSlug' = ${template.slug}`,
+        gte(actions.createdAt, cooldownWindowStart),
+      );
+
+      if (scope === 'executed') {
+        const [executed] = await db
+          .select({ id: actions.id })
+          .from(actions)
+          .where(and(baseConditions, eq(actions.status, 'completed')))
+          .limit(1);
+        if (executed) actionCheck = { allowed: false, reason: 'cooldown:executed' };
+      } else if (scope === 'proposed') {
+        const [recent] = await db
+          .select({ id: actions.id })
+          .from(actions)
+          .where(baseConditions)
+          .limit(1);
+        if (recent) actionCheck = { allowed: false, reason: 'cooldown:proposed' };
+      } else {
+        // any_outcome — surface whichever flavour exists; prefer completed
+        // when both do so the reason string is accurate.
+        const [executed] = await db
+          .select({ id: actions.id })
+          .from(actions)
+          .where(and(baseConditions, eq(actions.status, 'completed')))
+          .limit(1);
+        if (executed) {
           actionCheck = { allowed: false, reason: 'cooldown:executed' };
-        } else if (scope === 'proposed') {
-          actionCheck = { allowed: false, reason: 'cooldown:proposed' };
+        } else {
+          const [recent] = await db
+            .select({ id: actions.id })
+            .from(actions)
+            .where(baseConditions)
+            .limit(1);
+          if (recent) actionCheck = { allowed: false, reason: 'cooldown:proposed' };
         }
       }
     }
@@ -235,36 +266,32 @@ export async function runProposeClientPulseInterventions(
         churnAssessmentId: data.churnAssessmentId ?? assessment.id,
         priority: proposal.priority,
       });
-      const result = await db
-        .insert(actions)
-        .values({
-          organisationId,
-          subaccountId,
-          agentId: scenarioAgentId,
-          actionScope: 'subaccount',
-          actionType: proposal.actionType,
-          actionCategory: proposal.actionType === 'clientpulse.operator_alert' ? 'worker' : 'api',
-          isExternal: proposal.actionType !== 'clientpulse.operator_alert',
-          gateLevel: 'review',
-          status: 'proposed',
-          idempotencyKey,
-          payloadJson: proposal.payload,
-          metadataJson: metadata,
-        })
-        .onConflictDoNothing({ target: [actions.subaccountId, actions.idempotencyKey] })
-        .returning({ id: actions.id });
-      if (result.length > 0) {
+
+      // Route through the shared review-lifecycle helper so scenario-
+      // detector proposals create review_items the same way operator-
+      // driven submissions do — operators see them in the queue, gate
+      // bookkeeping (pending_approval, suspendUntil) is consistent.
+      const enqueued = await enqueueInterventionProposal({
+        organisationId,
+        subaccountId,
+        agentId: scenarioAgentId,
+        actionType: proposal.actionType as InterventionActionType,
+        idempotencyKey,
+        payload: proposal.payload,
+        metadata,
+        reviewReasoning: proposal.reason,
+      });
+      if (enqueued.isNew) {
         created += 1;
       } else {
-        // Idempotency observability: a retry hit the same dedup key. Log
-        // with the full correlation context so we can trace to the
-        // originating churnAssessmentId on grep.
+        // Idempotency observability: a retry hit the same dedup key.
         logger.info('clientpulse.intervention.proposer_deduped', {
           organisationId,
           subaccountId,
           templateSlug: proposal.templateSlug,
           actionType: proposal.actionType,
           churnAssessmentId: data.churnAssessmentId ?? assessment.id,
+          existingActionId: enqueued.actionId,
         });
       }
     } catch (err) {

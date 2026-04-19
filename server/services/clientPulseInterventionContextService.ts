@@ -119,8 +119,8 @@ export async function buildInterventionContext(params: {
     .limit(10);
 
   const cooldownState: { blocked: boolean; reason?: string } = { blocked: false };
+  const templates = await orgConfigService.getInterventionTemplates(organisationId);
   if (assessment?.accountId) {
-    const templates = await orgConfigService.getInterventionTemplates(organisationId);
     for (const template of templates) {
       const check = await interventionService.checkCooldown(
         organisationId,
@@ -135,6 +135,14 @@ export async function buildInterventionContext(params: {
       }
     }
   }
+
+  // Derive recommendedActionType: pick the highest-priority template whose
+  // `targets` includes the current band AND has a registered actionType.
+  // Mirrors the proposer's eligibility filter (read-only). Null when the
+  // band is unknown or no template applies — the UI hides the "Recommended"
+  // badge in that case.
+  const recommendedActionType =
+    assessment?.band != null ? pickRecommendedActionType(templates, assessment.band) : null;
 
   return {
     subaccount: { id: subaccountId, name: subaccountName },
@@ -152,8 +160,29 @@ export async function buildInterventionContext(params: {
         (a.metadataJson as Record<string, unknown> | null)?.triggerTemplateSlug as string | null | undefined ?? null,
     })),
     cooldownState,
-    recommendedActionType: null,
+    recommendedActionType,
   };
+}
+
+function pickRecommendedActionType(
+  templates: Awaited<ReturnType<typeof orgConfigService.getInterventionTemplates>>,
+  band: string,
+): InterventionActionType | null {
+  const eligible = templates
+    .filter((t) => {
+      if (!t.actionType) return false;
+      if (!INTERVENTION_ACTION_TYPES.includes(t.actionType as InterventionActionType)) return false;
+      const targets = t.targets;
+      return !targets || targets.length === 0 || targets.includes(band as 'healthy' | 'watch' | 'atRisk' | 'critical');
+    })
+    .sort((a, b) => {
+      const pa = a.priority ?? 0;
+      const pb = b.priority ?? 0;
+      if (pa !== pb) return pb - pa;
+      return a.slug.localeCompare(b.slug);
+    });
+  const top = eligible[0];
+  return top?.actionType ? (top.actionType as InterventionActionType) : null;
 }
 
 export interface OperatorProposalInput {
@@ -319,43 +348,78 @@ export async function createOperatorProposal(
     scheduleHint: input.scheduleHint ?? 'immediate',
   });
 
-  // Route through actionService.proposeAction() + reviewService.createReviewItem()
-  // so the action appears in the review queue UI (pending_approval state +
-  // suspendUntil bookkeeping handled by actionService).
-  const proposed = await actionService.proposeAction({
+  // scheduleHint is merged into payload so the CRM adapter can read it at
+  // execution time.
+  const payloadWithSchedule = { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' };
+  const enqueued = await enqueueInterventionProposal({
     organisationId,
     subaccountId,
     agentId: agentRow.id,
     actionType: input.actionType,
     idempotencyKey,
-    // scheduleHint is merged into payload so the CRM adapter can read it at
-    // execution time.
-    payload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
+    payload: payloadWithSchedule,
     metadata,
+    reviewReasoning: input.rationale,
   });
 
-  if (!proposed.isNew) {
-    // Idempotency observability: the same operator submission (same
-    // payload + subaccount + actionType) hit an existing row. The Date.now()
-    // component of the key should make this rare, so when it happens it's
-    // worth logging — it usually means the UI double-submitted or the
-    // request was retried.
+  if (!enqueued.isNew) {
     logger.info('clientpulse.intervention.operator_proposal_deduped', {
       organisationId,
       subaccountId,
       actionType: input.actionType,
-      existingActionId: proposed.actionId,
-      status: proposed.status,
+      existingActionId: enqueued.actionId,
     });
-    return { id: proposed.actionId, actionType: input.actionType, isNew: false };
   }
 
-  const actionRow = await actionService.getAction(proposed.actionId, organisationId);
-  await reviewService.createReviewItem(actionRow, {
-    actionType: input.actionType,
-    reasoning: input.rationale,
-    proposedPayload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
+  return { id: enqueued.actionId, actionType: input.actionType, isNew: enqueued.isNew };
+}
+
+/**
+ * Shared helper used by both the operator-driven path and the scenario-
+ * detector job: routes an intervention proposal through `actionService`
+ * (idempotent dedup + state transition + suspendUntil bookkeeping) and
+ * creates the matching `review_items` row so operators see it in the
+ * review queue. Centralising this lifecycle here means automated and
+ * manual proposals always traverse the same gates.
+ *
+ * Caller has already:
+ *   - validated the payload against `actionRegistry.parameterSchema`
+ *   - validated the metadata via `validateInterventionActionMetadata`
+ *   - computed an `idempotencyKey`
+ *
+ * Returns `{ actionId, isNew }` so callers can distinguish a fresh
+ * proposal from a dedup hit. When `isNew=false`, the review item is NOT
+ * re-created (it either already exists or the action is past pending).
+ */
+export async function enqueueInterventionProposal(params: {
+  organisationId: string;
+  subaccountId: string;
+  agentId: string;
+  actionType: InterventionActionType;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  reviewReasoning: string;
+}): Promise<{ actionId: string; isNew: boolean }> {
+  const proposed = await actionService.proposeAction({
+    organisationId: params.organisationId,
+    subaccountId: params.subaccountId,
+    agentId: params.agentId,
+    actionType: params.actionType,
+    idempotencyKey: params.idempotencyKey,
+    payload: params.payload,
+    metadata: params.metadata,
   });
 
-  return { id: proposed.actionId, actionType: input.actionType, isNew: true };
+  if (!proposed.isNew) {
+    return { actionId: proposed.actionId, isNew: false };
+  }
+
+  const actionRow = await actionService.getAction(proposed.actionId, params.organisationId);
+  await reviewService.createReviewItem(actionRow, {
+    actionType: params.actionType,
+    reasoning: params.reviewReasoning,
+    proposedPayload: params.payload,
+  });
+  return { actionId: proposed.actionId, isNew: true };
 }
