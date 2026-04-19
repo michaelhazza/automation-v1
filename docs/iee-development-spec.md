@@ -5,6 +5,7 @@
 **Source brief:** `AutomationOS IEE Development Brief` (2026-04)
 **Branch:** `claude/automate-video-transcript-workflow-NXXVf`
 **Related docs:**
+- `docs/iee-delegation-lifecycle-spec.md` — **Phase 0 lifecycle correction (READ FIRST).** Replaces the v1 "park the parent agent_run with a synthetic loopResult" behaviour described in Part 9 below. The current implementation parks the parent in a non-terminal `delegated` status, then transitions it to a real terminal state via the `iee-run-completed` pg-boss event handler, with a 2-minute reconciliation cron as backstop. Migration 0176 adds the `agent_runs.iee_run_id` denormalised column and the in-flight partial index.
 - `docs/execution-contracts.md` (existing action/execution contracts)
 - `docs/pgboss-zod-hardening-spec.md` (pg-boss payload validation conventions)
 - `tasks/windows-iee-setup-guide.md` (local Windows setup, companion to this spec)

@@ -147,6 +147,11 @@ export interface AgentRunRequest {
   /**
    * Optional IEE task. Required when executionMode is 'iee_browser' or
    * 'iee_dev'. Spec §9.1.
+   *
+   * Fields extended to pass through to the worker's browser executor:
+   *  - mode ('standard' | 'login_test' | 'capture_video')
+   *  - webLoginConnectionId (for paywall workflows; audit blocker #1 wiring)
+   *  - playSelector (capture_video mode)
    */
   ieeTask?: {
     type: 'browser' | 'dev';
@@ -156,6 +161,9 @@ export interface AgentRunRequest {
     repoUrl?: string;
     branch?: string;
     commands?: string[];
+    mode?: 'standard' | 'login_test' | 'capture_video';
+    webLoginConnectionId?: string;
+    playSelector?: string;
   };
   taskId?: string;
   triggerContext?: Record<string, unknown>;
@@ -221,7 +229,13 @@ export interface AgentRunRequest {
 
 export interface AgentRunResult {
   runId: string;
-  status: 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'delegated' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md).
+  // When returned, the agent run has been handed off to a delegated backend
+  // (IEE worker). Terminal state is reached asynchronously via the
+  // iee-run-completed event handler. Callers that need a terminal result
+  // must subscribe to WebSocket `agent:run:completed` or poll the agent
+  // run status until it leaves 'delegated'.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -229,6 +243,12 @@ export interface AgentRunResult {
   tasksCreated: number;
   tasksUpdated: number;
   deliverablesCreated: number;
+  /** Present only when status === 'delegated'. Identifies the iee_runs row
+   *  that will eventually produce the terminal state. */
+  ieeRunId?: string;
+  /** Present only when status === 'delegated' and the enqueue hit an
+   *  existing idempotent row. */
+  delegationDeduplicated?: boolean;
 }
 
 /** Task with its joined agent relation resolved */
@@ -880,11 +900,17 @@ export const agentExecutionService = {
 
       if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
         // ── 8z. IEE — Integrated Execution Environment ──────────────────
-        // Spec §9.1. Enqueues a pg-boss job picked up by the worker. The
-        // worker writes terminal status to iee_runs and (in a future
-        // iteration) the agent run can be resumed when the row completes.
-        // For v1 the agent run completes immediately with a synthetic
-        // loopResult; the canonical execution state lives on the iee_run.
+        // Phase 0 (docs/iee-delegation-lifecycle-spec.md): transition the
+        // parent agent run to the non-terminal 'delegated' state and
+        // return early. The worker will reach a terminal state on
+        // iee_runs and emit an 'iee-run-completed' pg-boss event; the
+        // main-app handler (server/jobs/ieeRunCompletedHandler.ts) then
+        // finalises the parent via finaliseAgentRunFromIeeRun.
+        //
+        // IMPORTANT: we deliberately skip the post-completion hooks at
+        // the bottom of this function (handoff build, memory scoring,
+        // playbook engine notification, etc.). Those fire from the event
+        // handler's finalisation path when the delegation terminates.
         if (!request.ieeTask) {
           throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
         }
@@ -901,22 +927,37 @@ export const agentExecutionService = {
           agentRunId: run.id,
           correlationId: run.id,
         });
-        loopResult = {
-          summary: `IEE ${expectedType} task enqueued (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
-          toolCallsLog: [{
-            type: 'iee_handoff',
-            ieeRunId: enqueueResult.ieeRunId,
-            deduplicated: enqueueResult.deduplicated,
-            mode: effectiveMode,
-          }],
+
+        // Park the parent run in 'delegated' state. Do NOT set completedAt.
+        // Persist ieeRunId as a first-class column (migration 0176) so
+        // callers never need to parse it out of the summary string and
+        // can fetch progress via the denormalised reference directly.
+        await db.update(agentRuns).set({
+          status: 'delegated',
+          ieeRunId: enqueueResult.ieeRunId,
+          summary: `Delegated to IEE ${expectedType} (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
+          lastActivityAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(agentRuns.id, run.id));
+
+        emitAgentRunUpdate(run.id, 'agent:run:delegated', {
+          ieeRunId: enqueueResult.ieeRunId,
+          mode: effectiveMode,
+          deduplicated: enqueueResult.deduplicated,
+        });
+
+        return {
+          runId: run.id,
+          status: 'delegated',
+          summary: null,
           totalToolCalls: 0,
-          inputTokens: 0,
-          outputTokens: 0,
           totalTokens: 0,
+          durationMs: Date.now() - startTime,
           tasksCreated: 0,
           tasksUpdated: 0,
           deliverablesCreated: 0,
-          finalStatus: 'completed',
+          ieeRunId: enqueueResult.ieeRunId,
+          delegationDeduplicated: enqueueResult.deduplicated,
         };
       } else if (effectiveMode === 'claude-code') {
         // ── 8a. Claude Code CLI execution ──────────────────────────────

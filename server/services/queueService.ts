@@ -680,6 +680,25 @@ export const queueService = {
         }
       });
 
+      // IEE Phase 0 — main-app reconciliation for "Class 2" stuck runs.
+      // See docs/iee-delegation-lifecycle-spec.md Step 4. The worker-side
+      // cleanup-orphans sweep already handles Class 1 (unemitted events) and
+      // Class 3 (worker death). This sweep catches the remaining case: a
+      // parent agent_run stuck in 'delegated' while its iee_runs row is
+      // already terminal (event handler crashed post-DB-write, or DLQ
+      // exhaustion).
+      await (boss as any).work('maintenance:iee-main-app-reconciliation', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { reconcileStuckDelegatedRuns } = await import('./agentRunFinalizationService.js');
+          await withTimeout(reconcileStuckDelegatedRuns().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:iee-main-app-reconciliation', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Memory & Briefings Phase 2 — weekly quality-adjust job (S4, feature-flagged)
       await (boss as any).work('maintenance:memory-entry-quality-adjust', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -876,6 +895,8 @@ export const queueService = {
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
       // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // IEE Phase 0 — main-app reconciliation for stuck 'delegated' runs (every 2 minutes)
+      await boss.schedule('maintenance:iee-main-app-reconciliation', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
       // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
