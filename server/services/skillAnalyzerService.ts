@@ -1546,9 +1546,18 @@ async function runExecute(params: {
       // the transaction. Use a direct DB query that ignores isActive.
       //
       // v2 §11.11.7: when a row already exists, hash-compare content against
-      // the candidate. Identical content → idempotent skip (a prior Execute
-      // crashed between the DB commit and the result-row update). Diverged
+      // the candidate. Identical content → idempotent adopt (runs the
+      // version-write + agent-attach effects against the existing row, so
+      // an external-actor Case B scenario still wires up intent). Diverged
       // content → hard fail as before.
+      let adoptedExistingSkill: {
+        id: string;
+        slug: string;
+        name: string;
+        description: string | null;
+        definition: object | null;
+        instructions: string | null;
+      } | null = null;
       const existingRows = await db
         .select({
           id: systemSkills.id,
@@ -1576,26 +1585,41 @@ async function runExecute(params: {
           instructions: existing.instructions,
         });
         if (candidateHash === existingHash && existing.isActive) {
-          // Prior Execute created the skill but crashed before marking the
-          // result row success. Adopt the existing row and record a successful
-          // retry rather than failing on the collision.
-          logger.info('[skillAnalyzer] execute slug-collision idempotent skip', {
+          // Two distinct sub-cases produce a content-match collision:
+          //   A. A prior Execute for this same job created the skill and then
+          //      crashed before marking the result row success. Every
+          //      downstream effect (version write, agent attach) completed in
+          //      that prior transaction.
+          //   B. An external actor (admin UI, seed script, another job)
+          //      created a skill whose content happens to match ours. None of
+          //      our downstream effects have run yet.
+          //
+          // We can't tell A from B from the skill row alone, but we don't
+          // need to: version-write is idempotent via `idempotencyKey` and
+          // the agent-attach loop already guards with
+          // `currentSlugs.includes(created.slug)`. Running the effects
+          // unconditionally fixes Case B silently losing attachments while
+          // staying a no-op in Case A.
+          logger.info('[skillAnalyzer] execute slug-collision idempotent adopt', {
             resultId: result.id,
             slug: candidate.slug,
             systemSkillId: existing.id,
           });
-          await db
-            .update(skillAnalyzerResults)
-            .set({ executionResult: 'created', resultingSkillId: existing.id })
-            .where(eq(skillAnalyzerResults.id, result.id));
-          created++;
+          adoptedExistingSkill = {
+            id: existing.id,
+            slug: candidate.slug,
+            name: existing.name,
+            description: existing.description,
+            definition: existing.definition as object | null,
+            instructions: existing.instructions,
+          };
+        } else {
+          const msg = existing.isActive
+            ? `slug '${candidate.slug}' already exists in system_skills with different content — pick a different slug or update the existing row instead`
+            : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
+          await failResult(result.id, msg);
           continue;
         }
-        const msg = existing.isActive
-          ? `slug '${candidate.slug}' already exists in system_skills with different content — pick a different slug or update the existing row instead`
-          : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
-        await failResult(result.id, msg);
-        continue;
       }
       // Open the per-result transaction. Inside: create the skill, then
       // for every selected agent proposal look up the live agent row and
@@ -1607,7 +1631,12 @@ async function runExecute(params: {
       // reflects only overall transaction success.
       try {
         const newSkill = await db.transaction(async (tx) => {
-          const created = await systemSkillService.createSystemSkill(
+          // Branch: on an idempotent adopt we skip createSystemSkill (slug
+          // already exists with matching content) but still run version
+          // write + agent attach against the existing row. writeVersion's
+          // idempotencyKey makes this safe on retry; the attach loop guards
+          // with `currentSlugs.includes(...)` for the same reason.
+          const created = adoptedExistingSkill ?? await systemSkillService.createSystemSkill(
             {
               slug: candidate.slug,
               handlerKey: 'generic_methodology',
@@ -1626,7 +1655,9 @@ async function runExecute(params: {
             definition: created.definition as object,
             instructions: created.instructions,
             changeType: 'create',
-            changeSummary: `Created by Skill Analyzer job ${jobId}`,
+            changeSummary: adoptedExistingSkill
+              ? `Adopted pre-existing skill by Skill Analyzer job ${jobId}`
+              : `Created by Skill Analyzer job ${jobId}`,
             authoredBy: params.userId,
             idempotencyKey: `sa:${jobId}:${created.id}:create`,
             tx,
