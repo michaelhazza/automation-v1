@@ -51,8 +51,12 @@ export const canonicalSubaccountMutations = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
+    // Includes subaccountId — mutation event IDs are location-scoped in
+    // GHL (and most CRMs), not globally unique within the provider. See
+    // migration 0172 for the full rationale.
     uniq: uniqueIndex('canonical_subaccount_mutations_unique').on(
       table.organisationId,
+      table.subaccountId,
       table.providerType,
       table.externalId,
     ),

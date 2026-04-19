@@ -22,6 +22,7 @@
  * The composite skills that compute their real values land in Phase 2+.
  */
 
+import { sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   clientPulseSignalObservations,
@@ -248,7 +249,7 @@ export async function upsertContactSource(
       target: [canonicalContactSources.organisationId, canonicalContactSources.providerType, canonicalContactSources.externalId],
       set: {
         lastSeenAt: new Date(),
-        occurrenceCount: canonicalContactSources.occurrenceCount, // increment intent — Phase 2 refines to `+1`
+        occurrenceCount: sql`${canonicalContactSources.occurrenceCount} + 1`,
       },
     });
 }

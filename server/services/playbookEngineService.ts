@@ -728,7 +728,9 @@ export const playbookEngineService = {
         await upsertSubaccountOnboardingState({
           runId,
           organisationId: run.organisationId,
-          subaccountId: requireSubaccountId(run),
+          // Helper accepts string | null — onboarding state is skipped for
+          // org-scope runs rather than throwing at the terminal path.
+          subaccountId: run.subaccountId,
           playbookSlug: run.playbookSlug,
           isOnboardingRun: run.isOnboardingRun,
           runStatus: 'cancelled',
@@ -835,7 +837,8 @@ export const playbookEngineService = {
         await upsertSubaccountOnboardingState({
           runId,
           organisationId: run.organisationId,
-          subaccountId: requireSubaccountId(run),
+          // Helper accepts string | null; skip onboarding state for org-scope.
+          subaccountId: run.subaccountId,
           playbookSlug: run.playbookSlug,
           isOnboardingRun: run.isOnboardingRun,
           runStatus: finalStatus,
@@ -2161,7 +2164,8 @@ export const playbookEngineService = {
     await upsertSubaccountOnboardingState({
       runId: run.id,
       organisationId: run.organisationId,
-      subaccountId: requireSubaccountId(run),
+      // Helper accepts string | null; skip onboarding state for org-scope.
+      subaccountId: run.subaccountId,
       playbookSlug: run.playbookSlug,
       isOnboardingRun: run.isOnboardingRun,
       runStatus: parentStatus as PlaybookRun['status'],
@@ -2425,7 +2429,8 @@ export const playbookEngineService = {
       await upsertSubaccountOnboardingState({
         runId: run.id,
         organisationId: run.organisationId,
-        subaccountId: requireSubaccountId(run),
+        // Helper accepts string | null; skip onboarding state for org-scope.
+        subaccountId: run.subaccountId,
         playbookSlug: run.playbookSlug,
         isOnboardingRun: run.isOnboardingRun,
         runStatus: 'failed',
@@ -2837,7 +2842,8 @@ export const playbookEngineService = {
           await upsertSubaccountOnboardingState({
             runId: run.id,
             organisationId: run.organisationId,
-            subaccountId: requireSubaccountId(run),
+            // Helper accepts string | null; skip onboarding state for org-scope.
+            subaccountId: run.subaccountId,
             playbookSlug: run.playbookSlug,
             isOnboardingRun: run.isOnboardingRun,
             runStatus: 'failed',
@@ -2997,7 +3003,8 @@ export const playbookEngineService = {
       await upsertSubaccountOnboardingState({
         runId: run.id,
         organisationId: run.organisationId,
-        subaccountId: requireSubaccountId(run),
+        // Helper accepts string | null; skip onboarding state for org-scope.
+        subaccountId: run.subaccountId,
         playbookSlug: run.playbookSlug,
         isOnboardingRun: run.isOnboardingRun,
         runStatus: 'failed',

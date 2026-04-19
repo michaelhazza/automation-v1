@@ -46,8 +46,16 @@ CREATE TABLE canonical_subaccount_mutations (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Note: UNIQUE includes subaccount_id because mutation event IDs are
+-- location-scoped in GHL (and most CRMs), not globally unique within the
+-- provider. Same external_id can legitimately appear in two sub-accounts
+-- under the same org (e.g. two locations independently fire ContactCreate
+-- with overlapping numeric IDs). Adding subaccount_id prevents false
+-- unique-constraint violations. The §25.1 contract is still honoured: for
+-- tables whose external_id IS globally unique (contacts, opportunities),
+-- the 3-column form applies. Mutation events are the exception.
 CREATE UNIQUE INDEX canonical_subaccount_mutations_unique
-  ON canonical_subaccount_mutations (organisation_id, provider_type, external_id);
+  ON canonical_subaccount_mutations (organisation_id, subaccount_id, provider_type, external_id);
 
 CREATE INDEX canonical_subaccount_mutations_sub_occurred_idx
   ON canonical_subaccount_mutations (subaccount_id, occurred_at DESC);
