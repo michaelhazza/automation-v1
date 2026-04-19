@@ -82,7 +82,12 @@ export const agentRuns = pgTable(
 
     // Status tracking
     // Sprint 5 P4.1: added 'awaiting_clarification' for ask_clarifying_question
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
+    // 'delegated' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md)
+    // — the run has been handed off to a delegated execution backend (currently
+    // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
+    // (iee_runs). Transitions to a terminal value when the backend reaches its
+    // own terminal state, via finaliseAgentRunFromIeeRun.
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
