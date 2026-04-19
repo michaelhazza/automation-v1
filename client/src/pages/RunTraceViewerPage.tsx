@@ -25,15 +25,18 @@ interface IeeProgress {
 }
 
 /**
- * Extract the ieeRunId from the delegated-run summary string. Format is
- * controlled server-side by agentExecutionService (Phase 0):
- *   "Delegated to IEE browser (ieeRunId=<uuid>...)".
+ * Polling bounds (external review Blocker 5).
+ *
+ *  - Polling only runs while the tab is visible (document.visibilityState).
+ *    Multiple tabs on the same run-detail page no longer all hammer the
+ *    server in parallel when the user is not looking at them.
+ *  - Max total poll duration caps the loop so a stuck 'delegated' parent
+ *    that never transitions — e.g. the worker died AND the reconciliation
+ *    cron also failed — stops polling after a finite time. The user can
+ *    refresh the page to resume.
  */
-function extractIeeRunId(summary: string | null | undefined): string | null {
-  if (!summary) return null;
-  const match = summary.match(/ieeRunId=([0-9a-f-]{36})/i);
-  return match?.[1] ?? null;
-}
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 
 export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const { subaccountId, runId: routeRunId } = useParams<{ subaccountId: string; runId: string }>();
@@ -94,8 +97,12 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   // for step count + heartbeat age. Stop polling the moment the parent
   // status leaves 'delegated' (either to a terminal state via the event
   // handler, or via the reconciliation cron).
+  //
+  // External review Blocker 4: ieeRunId is now a first-class field on the
+  // /api/agent-runs/:id response, so we no longer regex-parse it from the
+  // summary string. Falls back to null for non-IEE runs.
   const ieeRunId = run?.status === AGENT_RUN_STATUS.DELEGATED
-    ? extractIeeRunId(run?.summary)
+    ? (run?.ieeRunId ?? null)
     : null;
 
   useEffect(() => {
@@ -104,18 +111,53 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       return;
     }
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startedAt = Date.now();
+    const subaccountParam = subaccountId ? `?subaccountId=${subaccountId}` : '';
+
     const fetchProgress = async () => {
+      if (cancelled) return;
+      // External review Blocker 5 — stop polling after the max duration
+      // rather than hammering indefinitely.
+      if (Date.now() - startedAt >= POLL_MAX_DURATION_MS) {
+        if (interval) clearInterval(interval);
+        interval = null;
+        return;
+      }
       try {
-        const { data } = await api.get(`/api/iee/runs/${ieeRunId}/progress`);
+        const { data } = await api.get(`/api/iee/runs/${ieeRunId}/progress${subaccountParam}`);
         if (!cancelled) setIeeProgress(data);
       } catch {
         // Transient fetch failures are acceptable — the next tick will retry.
       }
     };
-    fetchProgress();
-    const interval = setInterval(fetchProgress, 3_000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [ieeRunId]);
+
+    // External review Blocker 5 — pause polling when the tab is hidden to
+    // avoid N parallel poll loops across tabs and the wake-up thundering
+    // herd on battery-sensitive devices.
+    const startPolling = () => {
+      if (interval) return;
+      fetchProgress();
+      interval = setInterval(fetchProgress, POLL_INTERVAL_MS);
+    };
+    const stopPolling = () => {
+      if (interval) clearInterval(interval);
+      interval = null;
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') startPolling();
+      else stopPolling();
+    };
+
+    if (document.visibilityState === 'visible') startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [ieeRunId, subaccountId]);
 
   // When progress reports a terminal IEE state but the parent run hasn't
   // caught up yet (eventual consistency), trigger a refresh so the user

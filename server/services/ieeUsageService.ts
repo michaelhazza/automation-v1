@@ -121,11 +121,27 @@ export interface IeeRunProgress {
 export async function getIeeRunProgress(
   ieeRunId: string,
   organisationId: string,
+  options: {
+    /**
+     * Subaccount-boundary enforcement (external review High-risk #11).
+     *
+     * When the caller is operating in subaccount scope, pass the
+     * subaccount id here. The lookup then refuses to surface an iee_run
+     * whose subaccount id does not match. Without this guard a user with
+     * only subaccount A access, who has somehow learned a ieeRunId
+     * belonging to subaccount B, could fetch progress for that run.
+     *
+     * When the caller is operating at org scope (no current subaccount
+     * context), leave this undefined and the boundary check is skipped.
+     */
+    subaccountId?: string | null;
+  } = {},
 ): Promise<IeeRunProgress | null> {
   const [row] = await db
     .select({
       id: ieeRuns.id,
       organisationId: ieeRuns.organisationId,
+      subaccountId: ieeRuns.subaccountId,
       type: ieeRuns.type,
       status: ieeRuns.status,
       stepCount: ieeRuns.stepCount,
@@ -143,6 +159,13 @@ export async function getIeeRunProgress(
   // Tenant scope enforcement — cross-org callers receive null (route layer
   // maps null → 404 without leaking existence).
   if (row.organisationId !== organisationId) return null;
+  // Subaccount-scope enforcement when a subaccount is provided. If the row
+  // has no subaccountId (org-level IEE run) the check is skipped.
+  if (options.subaccountId !== undefined && options.subaccountId !== null) {
+    if (row.subaccountId && row.subaccountId !== options.subaccountId) {
+      return null;
+    }
+  }
 
   const now = Date.now();
   const heartbeatAgeSeconds = row.lastHeartbeatAt

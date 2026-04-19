@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import type PgBoss from 'pg-boss';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
 import { budgetReservations } from '../../../server/db/schema/budgetReservations.js';
@@ -89,8 +89,13 @@ export interface FinalizeRunInput {
 /** Terminal status write. Releases the budget reservation atomically. */
 export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   const totalCostCents = input.llmCostCents + input.runtimeCostCents;
+  // Terminal immutability guard: only update if the row is still in a
+  // non-terminal state. If claimed is empty the row was already terminal
+  // (double delivery, reconcile pre-empt, etc.) and we must not emit a
+  // second reconnect event. External review Blocker 7.
+  let claimedThisCall = false;
   await db.transaction(async (tx) => {
-    await tx
+    const claimed = await tx
       .update(ieeRuns)
       .set({
         status:             input.status,
@@ -107,7 +112,19 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
         totalCostCents,
         updatedAt:          new Date(),
       })
-      .where(eq(ieeRuns.id, input.ieeRunId));
+      .where(and(
+        eq(ieeRuns.id, input.ieeRunId),
+        inArray(ieeRuns.status, ['pending', 'running']),
+      ))
+      .returning({ id: ieeRuns.id });
+    if (claimed.length === 0) {
+      logger.warn('iee.finalize.already_terminal', {
+        ieeRunId: input.ieeRunId,
+        attemptedStatus: input.status,
+      });
+      return;
+    }
+    claimedThisCall = true;
 
     // Release the soft reservation (committed status closes the lifecycle)
     await tx
@@ -119,6 +136,13 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       .where(eq(budgetReservations.idempotencyKey, `iee:${input.ieeRunId}`));
   });
 
+  if (!claimedThisCall) {
+    // No terminal write happened this call — skip the event emit so the
+    // main-app handler only sees one iee-run-completed per run. The
+    // cleanup sweep will re-emit if the original event was lost.
+    return;
+  }
+
   // ── Reconnect hook (Appendix A.1 / reviewer round 2) ──────────────────────
   // Emit a pg-boss event so the main app can subscribe and resume the parent
   // agent run. Best-effort: a failure to emit must not undo the terminal
@@ -127,6 +151,11 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   if (bossRef) {
     try {
       await bossRef.send('iee-run-completed', {
+        // Event version — bump on any breaking change to the payload
+        // shape. Consumers reject unknown versions rather than silently
+        // mis-parsing. External review Blocker 6 — relevant for the
+        // Phase 5 external-worker trust boundary but cheap to add now.
+        version: 1,
         // Reviewer round 4 #1 — deterministic dedup key. The retry sweep
         // re-emits any terminal row whose eventEmittedAt is still NULL,
         // including rows where the original send succeeded but the column
@@ -185,6 +214,7 @@ export async function retryUnemittedEvents(): Promise<number> {
   for (const r of candidates) {
     try {
       await bossRef.send('iee-run-completed', {
+        version: 1,
         // Same deterministic dedup key as the primary emit site so a
         // consumer dedupe table can collapse the two paths to one event.
         eventKey: `${r.id}:${r.status}`,

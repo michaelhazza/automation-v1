@@ -19,7 +19,7 @@
  * See docs/iee-delegation-lifecycle-spec.md §3–5 for the full design.
  */
 
-import { eq, sql, and, isNull } from 'drizzle-orm';
+import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
@@ -211,7 +211,13 @@ export async function finaliseAgentRunFromIeeRun(
       // See aggregateTokensForIeeRun JSDoc for the race this avoids.
       const tokens = await aggregateTokensForIeeRun(tx, ieeRun.id);
 
-      await tx
+      // Defence-in-depth: gate the terminal transition on the parent's
+      // current status being non-terminal. FOR UPDATE + the
+      // parentAlreadyTerminal check above already serialise writers, but
+      // this WHERE adds a DB-level guarantee that a future refactor
+      // losing the application check cannot accidentally overwrite a
+      // terminal parent row. (External review finding: Blocker 2.)
+      const updated = await tx
         .update(agentRuns)
         .set({
           status: terminalStatus,
@@ -230,8 +236,12 @@ export async function finaliseAgentRunFromIeeRun(
           lastActivityAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(agentRuns.id, parent.id));
-      performedTransition = true;
+        .where(and(
+          eq(agentRuns.id, parent.id),
+          inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
+        ))
+        .returning({ id: agentRuns.id });
+      performedTransition = updated.length > 0;
     }
 
     if (!ieeRun.eventEmittedAt) {

@@ -37,7 +37,18 @@ router.get(
   '/api/iee/runs/:ieeRunId/progress',
   authenticate,
   asyncHandler(async (req, res) => {
-    const progress = await getIeeRunProgress(req.params.ieeRunId, req.orgId!);
+    // Optional subaccount-scope hint (external review High-risk #11). When
+    // the client is on a subaccount-scoped page it passes its subaccount
+    // id and the service refuses to surface a row belonging to a different
+    // subaccount. Org-scope callers omit the query param.
+    const rawSubaccountId = typeof req.query.subaccountId === 'string'
+      ? req.query.subaccountId
+      : null;
+    const progress = await getIeeRunProgress(
+      req.params.ieeRunId,
+      req.orgId!,
+      { subaccountId: rawSubaccountId },
+    );
     if (!progress) {
       throw { statusCode: 404, message: 'iee_run not found', errorCode: 'IEE_RUN_NOT_FOUND' };
     }

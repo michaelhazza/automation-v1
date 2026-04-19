@@ -132,12 +132,33 @@ export const agentActivityService = {
             })),
           };
 
+    // IEE Phase 0 — when the run was delegated to an IEE worker, include
+    // the associated iee_run id as a first-class field so clients don't
+    // have to parse it from the summary string. External review Blocker 4.
+    // Only looked up for iee_* execution modes to avoid a pointless JOIN
+    // on every non-IEE agent-run fetch.
+    let ieeRunId: string | null = null;
+    if (row.run.executionMode === 'iee_browser' || row.run.executionMode === 'iee_dev') {
+      const { ieeRuns } = await import('../db/schema/ieeRuns.js');
+      const [iee] = await db
+        .select({ id: ieeRuns.id })
+        .from(ieeRuns)
+        .where(and(
+          eq(ieeRuns.agentRunId, runId),
+          isNull(ieeRuns.deletedAt),
+        ))
+        .orderBy(desc(ieeRuns.createdAt))
+        .limit(1);
+      ieeRunId = iee?.id ?? null;
+    }
+
     return {
       ...row.run,
       agentName: row.agentName,
       agentSlug: row.agentSlug,
       subaccountName: row.subaccountName,
       mcpCallSummary,
+      ieeRunId,
     };
   },
 
