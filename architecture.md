@@ -2038,15 +2038,17 @@ Main app (Replit/Express)        Worker (Docker, DigitalOcean)
 
 **Database is the only integration point.** No HTTP between app and worker.
 
-### Schema (migrations 0070, 0071)
+### Schema (migrations 0070, 0071, 0176)
 
 | Table | Purpose |
 |-------|---------|
-| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
-| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason`, `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
+| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), `failureReason` (shared `FailureReason` enum), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
+| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason` (shared `FailureReason` enum), `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
 | `ieeArtifacts` | Metadata for files/downloads emitted by a run. v1 stores metadata only; contents live on worker disk. |
 
 **LLM attribution** — `llmRequests` table gains `ieeRunId` (nullable FK) and `callSite` (`app`\|`worker`). Database CHECK constraint: `source_type <> 'iee' OR iee_run_id IS NOT NULL`.
+
+**Parent agent_run linkage** — migration 0176 adds `agent_runs.iee_run_id` (nullable, no FK) as a denormalised cache populated at delegation time by `agentExecutionService`. The run-detail API (`GET /api/agent-runs/:id`) and live-progress polling read it directly so callers never JOIN `iee_runs` at read time. Migration 0176 also adds a partial in-flight index `agent_runs_inflight_org_idx ON (organisation_id) WHERE status IN ('pending', 'running', 'delegated')` for hot-path live-count / dashboard queries.
 
 ### Routing — how a task reaches IEE
 
@@ -2057,11 +2059,29 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
   if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
   const { enqueueIEETask } = await import('./ieeExecutionService.js');
   const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
-  // Return synthetic loopResult — canonical state lives on the ieeRuns row.
+  // Park the parent agent_run in the non-terminal 'delegated' status (NOT
+  // a synthetic completion) and persist enqueueResult.ieeRunId on the
+  // denormalised iee_run_id column. Real terminal transition lands later
+  // via the iee-run-completed event handler (see §IEE delegation lifecycle).
 }
 ```
 
 `executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+
+### IEE delegation lifecycle (Phase 0 — `docs/iee-delegation-lifecycle-spec.md`)
+
+The IEE branch does NOT mark the parent `agent_run` complete at handoff time (the previous "synthetic completion" pattern lost real outcomes). Instead:
+
+1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
+2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
+3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun`. That service:
+   - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row.
+   - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
+   - Updates the parent with terminal status, summary, error fields, durationMs, token totals — gated on `status IN ('pending','running','delegated') AND completed_at IS NULL` for defence-in-depth.
+   - Emits `agent:run:completed` (run room) and `live:agent_completed` (subaccount room) post-commit so dashboards and sidebar counters decrement.
+4. **Reconciliation backstop** — `maintenance:iee-main-app-reconciliation` cron (every 2 min, registered in `queueService.ts`) calls `reconcileStuckDelegatedRuns()` to catch the "Class 2 orphan" case: parent stuck in `delegated` while `iee_runs` is already terminal (event handler crashed or event lost). 120-second grace window before reconciliation kicks in.
+
+Pure helpers live in `agentRunFinalizationServicePure.ts` (`mapIeeStatusToAgentRunStatus`, `buildSummaryFromIeeRun`) so the mapping table is testable without a DB. Tests in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` cover the full Appendix A mapping matrix plus summary-formatting edge cases.
 
 ### Services & Routes
 
@@ -2073,6 +2093,7 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
 | Route | File | Purpose |
 |-------|------|---------|
 | `GET /api/iee/runs/:ieeRunId/cost` | `iee.ts` | Per-run cost breakdown (app vs worker LLM, runtime) |
+| `GET /api/iee/runs/:ieeRunId/progress` | `iee.ts` | Live worker progress for a delegated run (step count, heartbeat age, status, failure reason). Subaccount-scoped boundary check via `?subaccountId=` query param. Backed by `ieeUsageService.getIeeRunProgress`. |
 | `GET /api/iee/usage/system` | `iee.ts` | System-wide explorer (system_admin) |
 | `GET /api/orgs/:orgId/iee/usage` | `iee.ts` | Org-scoped explorer |
 | `GET /api/subaccounts/:subaccountId/iee/usage` | `iee.ts` | Subaccount-scoped explorer |
@@ -2088,6 +2109,7 @@ Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerf
 | File | Purpose |
 |------|---------|
 | `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers) |
 | `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
 | `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
 | `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
@@ -2117,7 +2139,7 @@ runExecutionLoop():
 3. Step count exceeds `MAX_STEPS_PER_EXECUTION` → `step_limit_reached`
 4. Wall clock exceeds `MAX_EXECUTION_TIME_MS` → `timeout`
 
-`FailureReason` enum: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `unknown`.
+`FailureReason` enum is the canonical taxonomy in `shared/iee/failureReason.ts`. Both `ieeRuns.failureReason` and `ieeSteps.failureReason` reference the shared enum directly (no inline subsets). Core IEE execution-loop reasons: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `worker_terminated` | `unknown`. The full enum also includes connector reasons (`connector_timeout`, `rate_limited`, `data_incomplete`, `internal_error`), tenant-isolation reasons (`scope_violation`, `missing_org_context`), and playbook decision-step reasons (see `shared/iee/failureReason.ts`). `worker_terminated` is distinct from `cancelled` — it indicates the worker process died mid-run (e.g. SIGTERM during a deploy, container eviction, orphan detection) rather than a user-initiated cancel; the latter sets `iee_runs.status='cancelled'`.
 
 ### Idempotency & deduplication
 
@@ -2133,6 +2155,7 @@ Pattern in `ieeExecutionService`:
 | `running` | Return run id; let in-flight worker finish. |
 | `pending` | Return run id; queued job will pick it up. |
 | `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
+| `cancelled` | Treat like `failed` for retry-policy purposes. The retry-sweep on the worker (`worker/src/persistence/runs.ts`) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
 
 The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
 
