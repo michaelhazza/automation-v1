@@ -94,6 +94,27 @@ const WATCHDOG_INTERVAL_SECONDS = 60;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Narrow `run.subaccountId` to `string` for subaccount-scoped operations.
+ *
+ * Migration 0171 made `playbook_runs.subaccount_id` nullable so org-scope
+ * runs can exist (§13.3). Code paths that only make sense for subaccount
+ * runs call this helper to assert and narrow the type. The CHECK constraint
+ * `playbook_runs_scope_subaccount_consistency_chk` means scope='subaccount'
+ * always has a non-null subaccount_id at runtime, so this throw is purely
+ * a defence against programming errors (e.g. a future handler accidentally
+ * dispatching an org-scope run through a subaccount-only code path).
+ */
+function requireSubaccountId(run: PlaybookRun): string {
+  if (run.subaccountId === null) {
+    throw new Error(
+      `playbook run ${run.id} has scope='${run.scope}' with no subaccount_id; ` +
+      `callsite expected a subaccount-scope run`,
+    );
+  }
+  return run.subaccountId;
+}
+
 function rehydrateDefinition(stored: Record<string, unknown>): PlaybookDefinition {
   return stored as unknown as PlaybookDefinition;
 }
@@ -154,10 +175,15 @@ async function resolvePlaybookSlugForRun(run: PlaybookRun): Promise<string | nul
  * system side, filtering by the resolved slug.
  */
 async function hasPriorSuccessfulRunForSlug(
-  subaccountId: string,
+  subaccountId: string | null,
   slug: string,
   excludeRunId: string,
 ): Promise<boolean> {
+  // Org-scope runs (migration 0171) have no subaccount — the "prior run for
+  // this subaccount+slug" question has no meaning. Callers that are
+  // subaccount-scoped either narrow the type or this guard makes the result
+  // deterministic for org-scope paths.
+  if (subaccountId === null) return false;
   const [orgHit] = await db
     .select({ id: playbookRuns.id })
     .from(playbookRuns)
@@ -223,6 +249,12 @@ async function finaliseRunKnowledgeBindings(
   const bindings = def.knowledgeBindings ?? [];
   if (bindings.length === 0) return;
 
+  // Knowledge bindings are a subaccount-scoped concern (they bind to the
+  // subaccount's knowledge graph). Org-scope runs (migration 0171) have no
+  // subaccount and cannot produce subaccount-scoped bindings.
+  if (run.subaccountId === null) return;
+  const subaccountId: string = run.subaccountId;
+
   const slug = await resolvePlaybookSlugForRun(run);
   if (!slug) {
     logger.warn('playbook_knowledge_binding_slug_missing', { runId: run.id });
@@ -286,7 +318,7 @@ async function finaliseRunKnowledgeBindings(
     try {
       const result = await upsertFromPlaybook({
         organisationId: run.organisationId,
-        subaccountId: run.subaccountId,
+        subaccountId: requireSubaccountId(run),
         label: binding.blockLabel,
         content: serialised,
         mergeStrategy: binding.mergeStrategy ?? 'replace',
@@ -473,7 +505,7 @@ async function materialisePendingStepRuns(
  */
 async function emitPlaybookEvent(
   runId: string,
-  subaccountId: string,
+  subaccountId: string | null,
   type: string,
   payload: Record<string, unknown>,
   options?: { suppressWebSocket?: boolean }
@@ -513,7 +545,8 @@ async function emitPlaybookEvent(
 
   emitPlaybookRunUpdate(runId, type, { ...payload, sequence });
   // Coarse subaccount-level event for dashboard / inbox badge updates.
-  if (type === 'playbook:run:status') {
+  // Org-scope runs (migration 0171) have no subaccount room to emit into.
+  if (type === 'playbook:run:status' && subaccountId !== null) {
     emitSubaccountUpdate(subaccountId, type, { runId, ...payload, sequence });
   }
 }
@@ -695,6 +728,8 @@ export const playbookEngineService = {
         await upsertSubaccountOnboardingState({
           runId,
           organisationId: run.organisationId,
+          // Helper accepts string | null — onboarding state is skipped for
+          // org-scope runs rather than throwing at the terminal path.
           subaccountId: run.subaccountId,
           playbookSlug: run.playbookSlug,
           isOnboardingRun: run.isOnboardingRun,
@@ -802,6 +837,7 @@ export const playbookEngineService = {
         await upsertSubaccountOnboardingState({
           runId,
           organisationId: run.organisationId,
+          // Helper accepts string | null; skip onboarding state for org-scope.
           subaccountId: run.subaccountId,
           playbookSlug: run.playbookSlug,
           isOnboardingRun: run.isOnboardingRun,
@@ -1126,7 +1162,7 @@ export const playbookEngineService = {
             playbookStepRunId: sr.id,
             playbookRunId: run.id,
             organisationId: run.organisationId,
-            subaccountId: run.subaccountId,
+            subaccountId: requireSubaccountId(run),
             agentId: resolvedAgentId,
             stepId: step.id,
             attempt: sr.attempt,
@@ -1288,7 +1324,7 @@ export const playbookEngineService = {
         try {
           const result = await executeActionCall({
             organisationId: run.organisationId,
-            subaccountId: run.subaccountId,
+            subaccountId: requireSubaccountId(run),
             agentId: configAgentId,
             playbookStepRunId: sr.id,
             playbookRunId: run.id,
@@ -1452,7 +1488,7 @@ export const playbookEngineService = {
             playbookStepRunId: sr.id,
             playbookRunId: run.id,
             organisationId: run.organisationId,
-            subaccountId: run.subaccountId,
+            subaccountId: requireSubaccountId(run),
             agentId: resolvedAgentId,
             stepId: step.id,
             attempt: sr.attempt,
@@ -2128,6 +2164,7 @@ export const playbookEngineService = {
     await upsertSubaccountOnboardingState({
       runId: run.id,
       organisationId: run.organisationId,
+      // Helper accepts string | null; skip onboarding state for org-scope.
       subaccountId: run.subaccountId,
       playbookSlug: run.playbookSlug,
       isOnboardingRun: run.isOnboardingRun,
@@ -2261,6 +2298,10 @@ export const playbookEngineService = {
         .values({
           organisationId,
           subaccountId: source.subaccountId,
+          // Carry forward the scope so org-scope replays don't violate the
+          // playbook_runs_scope_subaccount_consistency_chk CHECK constraint
+          // (migration 0171 — scope='org' requires subaccountId=null).
+          scope: source.scope,
           templateVersionId: source.templateVersionId,
           status: 'pending',
           contextJson: replayContext as unknown as Record<string, unknown>,
@@ -2392,6 +2433,7 @@ export const playbookEngineService = {
       await upsertSubaccountOnboardingState({
         runId: run.id,
         organisationId: run.organisationId,
+        // Helper accepts string | null; skip onboarding state for org-scope.
         subaccountId: run.subaccountId,
         playbookSlug: run.playbookSlug,
         isOnboardingRun: run.isOnboardingRun,
@@ -2453,7 +2495,7 @@ export const playbookEngineService = {
           const fieldValue = outputObj[step.referenceBinding.field];
           if (fieldValue !== undefined && fieldValue !== null && `${fieldValue}`.trim().length > 0) {
             const created = await writeReferenceFromBinding({
-              subaccountId: run.subaccountId,
+              subaccountId: requireSubaccountId(run),
               organisationId: run.organisationId,
               name: step.referenceBinding.name,
               value: String(fieldValue),
@@ -2723,7 +2765,7 @@ export const playbookEngineService = {
             playbookStepRunId: sr.id,
             playbookRunId: run.id,
             organisationId: run.organisationId,
-            subaccountId: run.subaccountId,
+            subaccountId: requireSubaccountId(run),
             agentId: resolvedAgentId,
             stepId: step.id,
             attempt: sr.attempt,
@@ -2804,6 +2846,7 @@ export const playbookEngineService = {
           await upsertSubaccountOnboardingState({
             runId: run.id,
             organisationId: run.organisationId,
+            // Helper accepts string | null; skip onboarding state for org-scope.
             subaccountId: run.subaccountId,
             playbookSlug: run.playbookSlug,
             isOnboardingRun: run.isOnboardingRun,
@@ -2964,6 +3007,7 @@ export const playbookEngineService = {
       await upsertSubaccountOnboardingState({
         runId: run.id,
         organisationId: run.organisationId,
+        // Helper accepts string | null; skip onboarding state for org-scope.
         subaccountId: run.subaccountId,
         playbookSlug: run.playbookSlug,
         isOnboardingRun: run.isOnboardingRun,

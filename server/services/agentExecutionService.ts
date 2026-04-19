@@ -929,7 +929,7 @@ export const agentExecutionService = {
         });
 
         // Park the parent run in 'delegated' state. Do NOT set completedAt.
-        // Persist ieeRunId as a first-class column (migration 0170) so
+        // Persist ieeRunId as a first-class column (migration 0176) so
         // callers never need to parse it out of the summary string and
         // can fetch progress via the denormalised reference directly.
         await db.update(agentRuns).set({

@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { env } from '../lib/env.js';
+import { OAUTH_PROVIDERS } from '../config/oauthProviders.js';
 
 // In-memory store for OAuth state nonces (production: use session or DB)
 const pendingOAuthStates = new Map<string, { orgId: string; expiresAt: number }>();
@@ -31,8 +32,9 @@ router.get('/api/ghl/oauth-url', authenticate, asyncHandler(async (req, res) => 
   pendingOAuthStates.set(state, { orgId, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10min expiry
 
   const redirectUri = encodeURIComponent(`${env.APP_BASE_URL}/api/ghl/oauth/callback`);
-  const scopes = encodeURIComponent('locations.readonly contacts.readonly opportunities.readonly conversations.readonly payments.readonly businesses.readonly');
-  const url = `https://marketplace.gohighlevel.com/oauth/chooselocation?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scopes}&state=${state}`;
+  // SSoT: scope list lives in OAUTH_PROVIDERS.ghl.scopes — never hardcode here.
+  const scopes = encodeURIComponent(OAUTH_PROVIDERS.ghl.scopes.join(' '));
+  const url = `${OAUTH_PROVIDERS.ghl.authUrl}?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scopes}&state=${state}`;
 
   res.json({ url });
 }));

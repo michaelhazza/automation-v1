@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClientPulse Settings — Org Admin (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  /* App frame */
+  .app { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 34px); }
+  .rail {
+    background: #0f172a; color: #cbd5e1; padding: 18px 14px; font-size: 13px;
+  }
+  .rail .brand { color: #fff; font-weight: 600; font-size: 14px; margin-bottom: 22px; }
+  .rail-section { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #64748b; font-weight: 700; margin: 14px 0 6px; }
+  .rail-item {
+    padding: 7px 10px; border-radius: 5px; color: #cbd5e1; cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .rail-item:hover { background: #1e293b; }
+  .rail-item.active { background: #4338ca; color: #fff; font-weight: 600; }
+  .rail-item .ico { width: 14px; font-size: 13px; text-align: center; }
+
+  .main { padding: 0; overflow-y: auto; }
+  .page-head {
+    background: #fff; padding: 20px 28px 16px; border-bottom: 1px solid #e5e7eb;
+  }
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .page-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  .page-head .sub { font-size: 13px; color: #6b7280; margin-top: 4px; }
+
+  /* Template-locked banner */
+  .tmpl-banner {
+    background: linear-gradient(90deg, #ede9fe 0%, #faf5ff 100%);
+    border: 1px solid #ddd6fe; border-radius: 8px; padding: 14px 18px;
+    margin: 18px 28px 24px; display: flex; gap: 14px; align-items: center;
+  }
+  .tmpl-banner .icon { width: 36px; height: 36px; background: #6366f1; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; flex-shrink: 0; }
+  .tmpl-banner .body { flex: 1; }
+  .tmpl-banner .title { font-weight: 600; font-size: 14px; color: #3730a3; }
+  .tmpl-banner .title code { background: rgba(99, 102, 241, 0.1); padding: 2px 7px; border-radius: 3px; font-size: 12px; }
+  .tmpl-banner .desc { font-size: 12px; color: #4c1d95; margin-top: 3px; }
+  .tmpl-banner .cta { font-size: 12px; color: #4338ca; text-decoration: none; font-weight: 600; }
+
+  /* Content area */
+  .content { padding: 0 28px 40px; max-width: 1080px; }
+
+  /* Section cards (each setting category) */
+  .sec-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .sec-head {
+    padding: 14px 20px; border-bottom: 1px solid #f0f1f3;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .sec-head .left h2 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .sec-head .left .desc { font-size: 12px; color: #6b7280; }
+  .sec-head .right { display: flex; align-items: center; gap: 10px; }
+  .reset-link {
+    font-size: 11px; color: #6b7280; text-decoration: none;
+  }
+  .reset-link:hover { color: #4338ca; }
+  .override-badge {
+    font-size: 10px; background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 10px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .default-badge {
+    font-size: 10px; background: #f0f1f3; color: #6b7280; padding: 3px 8px; border-radius: 10px;
+    font-weight: 500;
+  }
+
+  /* Setting rows */
+  .sec-body { padding: 12px 20px 18px; }
+  .setting-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid #f5f6f8;
+  }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-row .label-col .name { font-weight: 500; font-size: 13px; color: #1a1d23; }
+  .setting-row .label-col .hint { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .setting-row .value-col { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: #374151; white-space: nowrap; }
+  .setting-row .value-col .badge { display: block; margin-top: 2px; text-align: right; }
+  .setting-row .action-col {
+    display: flex; gap: 6px;
+  }
+  .btn-mini {
+    padding: 4px 9px; background: #fff; border: 1px solid #e5e7eb; border-radius: 4px;
+    font-size: 11px; color: #374151; cursor: pointer; font-weight: 500;
+  }
+  .btn-mini:hover { background: #f5f6f8; }
+  .btn-mini.primary { background: #4338ca; color: #fff; border-color: #4338ca; }
+  .btn-mini.danger { color: #b91c1c; }
+
+  /* Slider row (for weight sliders) */
+  .slider-row { display: grid; grid-template-columns: 1fr 100px 70px 24px auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f5f6f8; }
+  .slider-row:last-child { border-bottom: none; }
+  .slider-row .slider-label { font-size: 13px; font-weight: 500; }
+  .slider-row .slider-track {
+    height: 5px; background: #e5e7eb; border-radius: 3px; position: relative; cursor: pointer;
+  }
+  .slider-row .slider-fill {
+    position: absolute; left: 0; top: 0; bottom: 0; background: #4338ca; border-radius: 3px;
+  }
+  .slider-row .slider-handle {
+    position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
+    width: 14px; height: 14px; background: #fff; border: 2px solid #4338ca;
+    border-radius: 50%; cursor: grab; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .slider-row.override .slider-fill { background: #c2410c; }
+  .slider-row.override .slider-handle { border-color: #c2410c; }
+  .slider-row .slider-val {
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    color: #374151; text-align: right; cursor: text;
+    padding: 3px 6px; border-radius: 4px; border: 1px solid transparent;
+  }
+  .slider-row .slider-val:hover { background: #f5f6f8; border-color: #e5e7eb; }
+  .slider-row .edit-pencil {
+    width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+    color: #6b7280; cursor: pointer; font-size: 12px; border-radius: 4px;
+  }
+  .slider-row .edit-pencil:hover { background: #eef2ff; color: #4338ca; }
+  .sum-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0 0; margin-top: 6px; border-top: 1px solid #e5e7eb; font-size: 12px;
+  }
+  .sum-row.valid { color: #15803d; font-weight: 600; }
+  .sum-row.invalid { color: #b91c1c; font-weight: 600; }
+
+  /* Template list (intervention templates + fingerprints) */
+  .tmpl-list { display: flex; flex-direction: column; gap: 8px; }
+  .tmpl-row {
+    padding: 11px 13px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 6px;
+    display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center;
+  }
+  .tmpl-row.disabled { opacity: 0.55; }
+  .tmpl-row .toggle {
+    width: 30px; height: 18px; background: #4338ca; border-radius: 9px; position: relative; cursor: pointer;
+  }
+  .tmpl-row .toggle::after {
+    content: ''; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; background: #fff; border-radius: 50%;
+  }
+  .tmpl-row.disabled .toggle { background: #d1d5db; }
+  .tmpl-row.disabled .toggle::after { right: auto; left: 2px; }
+  .tmpl-row .body .slug { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; color: #5b21b6; background: #f5f3ff; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-bottom: 3px; }
+  .tmpl-row .body .title { font-size: 13px; font-weight: 500; }
+  .tmpl-row .body .desc { font-size: 11px; color: #6b7280; margin-top: 2px; }
+
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Org-admin view · Settings page for ClientPulse overrides · Template is locked (set by system admin); org admin can override specific values per-category with "reset to template default" always available.</div>
+
+<div class="app">
+
+  <!-- Left rail -->
+  <div class="rail">
+    <div class="brand">🧠 Synthetos</div>
+    <div class="rail-section">Productivity Hub — SaaS</div>
+    <div class="rail-item"><span class="ico">📊</span> Dashboard</div>
+    <div class="rail-item"><span class="ico">👥</span> Clients</div>
+    <div class="rail-item"><span class="ico">📥</span> Review queue · 3</div>
+    <div class="rail-item"><span class="ico">📈</span> Reports</div>
+    <div class="rail-item"><span class="ico">📒</span> Memory</div>
+    <div class="rail-item"><span class="ico">🔌</span> Integrations</div>
+    <div class="rail-section">Configuration</div>
+    <div class="rail-item active"><span class="ico">⚙️</span> ClientPulse settings</div>
+    <div class="rail-item"><span class="ico">🏢</span> Organisation</div>
+    <div class="rail-item"><span class="ico">👤</span> Team</div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+
+    <!-- Page header -->
+    <div class="page-head">
+      <div class="breadcrumb"><a href="#">Settings</a> · ClientPulse</div>
+      <h1>ClientPulse settings</h1>
+      <div class="sub">Tune thresholds, intervention templates, and detection rules for your organisation. Every value shows whether it's a template default or your own override.</div>
+    </div>
+
+    <!-- Chat-assistant helper callout -->
+    <div style="margin: 18px 28px 20px; padding: 14px 18px; background: linear-gradient(90deg, #f5f3ff 0%, #ecfeff 100%); border: 1px solid #ddd6fe; border-radius: 8px; display: flex; gap: 14px; align-items: center;">
+      <div style="width: 34px; height: 34px; background: #6366f1; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; flex-shrink: 0;">💬</div>
+      <div style="flex: 1;">
+        <div style="font-weight: 600; font-size: 14px; color: #3730a3; margin-bottom: 2px;">Don't want to click through settings? Just ask.</div>
+        <div style="font-size: 12px; color: #4c1d95;">Try: <em>"bump pipeline velocity weight to 0.35"</em> · <em>"disable the tier-downgrade retention alert"</em> · <em>"reset blind-spot thresholds to defaults"</em> — the Configuration Assistant handles it exactly the same way as editing here.</div>
+      </div>
+      <a href="#" style="font-size: 12px; color: #4338ca; text-decoration: none; font-weight: 600; flex-shrink: 0;">Open chat →</a>
+    </div>
+
+    <div class="content">
+
+      <!-- ═══════ Section 1: Health score factors ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Health score factors</h2>
+            <div class="desc">Weighted composite (0–100) that drives every other ClientPulse signal.</div>
+          </div>
+          <div class="right">
+            <span class="override-badge">2 overridden</span>
+            <a class="reset-link" href="#">Reset all to template defaults</a>
+          </div>
+        </div>
+        <div class="sec-body">
+
+          <div class="slider-row">
+            <div class="slider-label">Pipeline velocity</div>
+            <div class="slider-track"><div class="slider-fill" style="width: 30%;"></div><div class="slider-handle"></div></div>
+            <div class="slider-val" contenteditable="true">0.30</div>
+            <div class="edit-pencil" title="Edit">✎</div>
+            <span class="default-badge">template</span>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label">Conversation engagement</div>
+            <div class="slider-track"><div class="slider-fill" style="width: 25%;"></div><div class="slider-handle"></div></div>
+            <div class="slider-val" contenteditable="true">0.25</div>
+            <div class="edit-pencil" title="Edit">✎</div>
+            <span class="default-badge">template</span>
+          </div>
+
+          <div class="slider-row override">
+            <div class="slider-label">Contact growth</div>
+            <div class="slider-track"><div class="slider-fill" style="width: 15%;"></div><div class="slider-handle"></div></div>
+            <div class="slider-val" contenteditable="true">0.15</div>
+            <div class="edit-pencil" title="Edit">✎</div>
+            <span class="override-badge">override</span>
+          </div>
+
+          <div class="slider-row override">
+            <div class="slider-label">Revenue trend</div>
+            <div class="slider-track"><div class="slider-fill" style="width: 20%;"></div><div class="slider-handle"></div></div>
+            <div class="slider-val" contenteditable="true">0.20</div>
+            <div class="edit-pencil" title="Edit">✎</div>
+            <span class="override-badge">override</span>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label">Platform activity</div>
+            <div class="slider-track"><div class="slider-fill" style="width: 10%;"></div><div class="slider-handle"></div></div>
+            <div class="slider-val" contenteditable="true">0.10</div>
+            <div class="edit-pencil" title="Edit">✎</div>
+            <span class="default-badge">template</span>
+          </div>
+
+          <div class="sum-row valid">
+            <span>Weights sum to 1.00 ✓</span>
+            <span style="color: #6b7280; font-weight: 400;">You bumped Contact growth down (from 0.20) and Revenue trend up (from 0.15) to better match your SaaS-tier churn pattern.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ Section 2: Churn bands ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Churn bands</h2>
+            <div class="desc">Health-score ranges that drive the dashboard colour coding + which sub-accounts trigger interventions.</div>
+          </div>
+          <div class="right">
+            <span class="default-badge">all template defaults</span>
+            <a class="reset-link" href="#">Reset</a>
+          </div>
+        </div>
+        <div class="sec-body">
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🟢 Healthy</div>
+              <div class="hint">No surfacing on the dashboard attention list.</div>
+            </div>
+            <div class="value-col">70 – 100<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit range</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🟡 Watch</div>
+              <div class="hint">Shows in the "watch list" widget. No proposer interventions.</div>
+            </div>
+            <div class="value-col">40 – 69<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit range</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🟠 At Risk</div>
+              <div class="hint">Dashboard top; intervention proposer fires here.</div>
+            </div>
+            <div class="value-col">20 – 39<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit range</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🔴 Critical</div>
+              <div class="hint">Pinned top + operator push notification.</div>
+            </div>
+            <div class="value-col">0 – 19<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit range</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ Section 3: Saved email templates ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Saved email templates</h2>
+            <div class="desc">Reusable starting points for the Send email action. Compose once, reuse across any client. Not tied to any trigger or automation — just content.</div>
+          </div>
+          <div class="right">
+            <span class="default-badge">12 saved</span>
+            <a class="reset-link" href="#">Import from library</a>
+            <button class="btn-mini primary">+ New template</button>
+          </div>
+        </div>
+        <div class="sec-body">
+          <p style="font-size: 12px; color: #6b7280; margin-bottom: 12px; padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; color: #1e40af;">
+            <strong>v1 model change:</strong> action types are generic primitives chosen at proposal time (Fire automation / Send email / Send SMS / Create task / Operator alert). There is no separate "intervention template library" with trigger conditions — the proposer surfaces scenarios; the operator picks the action. Email templates here are just reusable <em>content</em> — no trigger logic attached.
+          </p>
+          <div class="tmpl-list">
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">Check-in — "everything OK?"</div>
+                <div class="desc">Light-touch outreach. Used 2–4× per week across the portfolio for dormant clients.</div>
+              </div>
+              <span class="default-badge">system</span>
+              <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">Tier retention — "let's talk before Friday"</div>
+                <div class="desc">Retention outreach for clients after a tier downgrade. Lines up with the retention-call window.</div>
+              </div>
+              <span class="override-badge">your template</span>
+              <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">Funnel-setup helper</div>
+                <div class="desc">Paired with a Fire-automation action that enrols the contact in the client's funnel-nurture workflow.</div>
+              </div>
+              <span class="default-badge">system</span>
+              <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">Calendar setup nudge</div>
+                <div class="desc">Short email with a booking link to the VA's calendar.</div>
+              </div>
+              <span class="default-badge">system</span>
+              <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">Thank-you / anniversary</div>
+                <div class="desc">Milestone-moment outreach. Celebrate rather than sell.</div>
+              </div>
+              <span class="override-badge">your template</span>
+              <button class="btn-mini">Edit</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div class="toggle"></div>
+              <div class="body">
+                <div class="title">+ 7 more saved templates</div>
+                <div class="desc">Browse the full library or create new ones.</div>
+              </div>
+              <span class="default-badge">&nbsp;</span>
+              <button class="btn-mini">View all</button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ Section 4: Blind-spot patterns ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Blind-spot detection</h2>
+            <div class="desc">Patterns surfaced in "what your team might be forgetting" on per-client briefings.</div>
+          </div>
+          <div class="right">
+            <span class="override-badge">1 overridden · 1 disabled</span>
+            <a class="reset-link" href="#">Reset</a>
+          </div>
+        </div>
+        <div class="sec-body">
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">📵 Silent channel</div>
+              <div class="hint">Flag if no outbound on a channel for N days vs portfolio baseline.</div>
+            </div>
+            <div class="value-col">threshold: 7 days<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">⏰ Unread conversation aging</div>
+              <div class="hint">Flag inbound messages unanswered past the threshold.</div>
+            </div>
+            <div class="value-col">threshold: 24 hours<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">⏳ Pipeline stage stall</div>
+              <div class="hint">Deal stalled past stage baseline → flagged. You tightened it to catch slippage sooner.</div>
+            </div>
+            <div class="value-col">threshold: 10 days (was 14)<span class="badge"><span class="override-badge">override</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">💳 Failed payment unresolved</div>
+              <div class="hint">Declined card not retried within cadence.</div>
+            </div>
+            <div class="value-col">threshold: 48 hours<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">📭 Campaign performance drift</div>
+              <div class="hint">Open/click rates trending below baseline over 3 sends.</div>
+            </div>
+            <div class="value-col">threshold: 15% below baseline<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row" style="opacity: 0.55;">
+            <div class="label-col">
+              <div class="name">🕵️ Competitor mention detected</div>
+              <div class="hint">You disabled this inline from a briefing — too many false positives.</div>
+            </div>
+            <div class="value-col">disabled<span class="badge"><span class="override-badge">disabled</span></span></div>
+            <div class="action-col"><button class="btn-mini primary">Re-enable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🗂️ Data sync stale</div>
+              <div class="hint">Operational alert if a sub-account connector hasn't refreshed for N hours.</div>
+            </div>
+            <div class="value-col">threshold: 36 hours<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">🎰 Multi-signal composite risk</div>
+              <div class="hint">≥3 negative indicators co-occurring within a short window.</div>
+            </div>
+            <div class="value-col">signals: 3 / window: 7 days<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button><button class="btn-mini danger">Disable</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ Section 5: Integration fingerprints ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Integration fingerprints</h2>
+            <div class="desc">Patterns used to auto-detect third-party tools installed in sub-accounts. Your library extends the template's seed library.</div>
+          </div>
+          <div class="right">
+            <span class="default-badge">12 template · 4 learned</span>
+            <a class="reset-link" href="#">Reset learned</a>
+          </div>
+        </div>
+        <div class="sec-body">
+          <div class="tmpl-list">
+
+            <div class="tmpl-row">
+              <div style="width:30px; text-align:center; font-size: 18px;">🤖</div>
+              <div class="body">
+                <span class="slug">closebot · system-scope</span>
+                <div class="title">CloseBot — AI conversation provider</div>
+                <div class="desc">Matches <code>conversationProviderId ^closebot:</code> + workflow action types <code>^closebot.</code> + webhook domain <code>api.closebot.ai</code>. Seeded in GHL Agency template.</div>
+              </div>
+              <span class="default-badge">template</span>
+              <button class="btn-mini">View</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div style="width:30px; text-align:center; font-size: 18px;">📊</div>
+              <div class="body">
+                <span class="slug">uphex · system-scope</span>
+                <div class="title">Uphex — paid ads sharing</div>
+                <div class="desc">Matches webhook domain <code>hooks.uphex.com</code> + custom field prefix <code>uphex_</code>. Seeded in GHL Agency template.</div>
+              </div>
+              <span class="default-badge">template</span>
+              <button class="btn-mini">View</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div style="width:30px; text-align:center; font-size: 18px;">📱</div>
+              <div class="body">
+                <span class="slug">twilio · system-scope</span>
+                <div class="title">Twilio — SMS provider</div>
+                <div class="desc">Matches <code>conversationProviderId ^twilio:</code> + webhook domain <code>*.twil.io</code>.</div>
+              </div>
+              <span class="default-badge">template</span>
+              <button class="btn-mini">View</button>
+            </div>
+
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; font-weight: 700; margin: 14px 0 6px; padding-left: 2px;">Learned from your portfolio (org-scope)</div>
+
+            <div class="tmpl-row">
+              <div style="width:30px; text-align:center; font-size: 18px;">🤖</div>
+              <div class="body">
+                <span class="slug">funnel-lift-io · org-scope</span>
+                <div class="title">Funnel-Lift — funnel optimisation</div>
+                <div class="desc">Classified by you on 9 Apr when unknown webhook <code>hooks.funnel-lift.io</code> showed up across 7 of your sub-accounts. Retroactively tagged all matches.</div>
+              </div>
+              <span class="override-badge">learned</span>
+              <button class="btn-mini">Promote to system</button>
+              <button class="btn-mini danger">Delete</button>
+            </div>
+
+            <div class="tmpl-row">
+              <div style="width:30px; text-align:center; font-size: 18px;">📞</div>
+              <div class="body">
+                <span class="slug">plivo · org-scope</span>
+                <div class="title">Plivo — voice/SMS provider</div>
+                <div class="desc">Classified by you on 14 Apr. Matches <code>conversationProviderId ^plivo:</code>. Currently detected on 4 subs.</div>
+              </div>
+              <span class="override-badge">learned</span>
+              <button class="btn-mini">Promote to system</button>
+              <button class="btn-mini danger">Delete</button>
+            </div>
+
+            <div style="padding: 12px 14px; background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 6px; margin-top: 4px; font-size: 12px; color: #155e75;">
+              <strong>2 unclassified signals awaiting your one-click label.</strong> <a href="#" style="color: #0891b2; text-decoration: none; font-weight: 600;">Review unclassified →</a>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ Section 6: Onboarding milestones ═══════ -->
+      <div class="sec-card">
+        <div class="sec-head">
+          <div class="left">
+            <h2>Trial onboarding milestones</h2>
+            <div class="desc">For sub-accounts in <code>isInTrial=true</code> — deadlines that drive the trial-milestone nudge intervention.</div>
+          </div>
+          <div class="right">
+            <span class="default-badge">5 template defaults</span>
+            <a class="reset-link" href="#">Reset</a>
+            <button class="btn-mini primary">+ Add milestone</button>
+          </div>
+        </div>
+        <div class="sec-body">
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">1. First calendar created</div>
+              <div class="hint">Evaluator: <code>canonical_calendars.count ≥ 1</code></div>
+            </div>
+            <div class="value-col">deadline: day 3<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">2. First funnel built</div>
+              <div class="hint">Evaluator: <code>canonical_funnels.count ≥ 1</code></div>
+            </div>
+            <div class="value-col">deadline: day 7<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">3. First contact imported</div>
+              <div class="hint">Evaluator: <code>canonical_contacts.count ≥ 10</code></div>
+            </div>
+            <div class="value-col">deadline: day 3<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">4. First campaign sent</div>
+              <div class="hint">Evaluator: at least one broadcast or workflow-driven send recorded.</div>
+            </div>
+            <div class="value-col">deadline: day 10<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="label-col">
+              <div class="name">5. First automation published</div>
+              <div class="hint">Evaluator: <code>canonical_workflow_definitions.published_count ≥ 1</code></div>
+            </div>
+            <div class="value-col">deadline: day 14<span class="badge"><span class="default-badge">template</span></span></div>
+            <div class="action-col"><button class="btn-mini">Edit</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer note -->
+      <div style="padding: 16px 20px; background: #fafbfc; border: 1px dashed #d1d5db; border-radius: 8px; margin-top: 6px; font-size: 12px; color: #6b7280;">
+        💡 <strong style="color:#374151;">Keeping track of overrides.</strong> Every override you set here is stored in your org's <code>operational_config</code> JSONB and versioned. If the system admin ever updates the base template (e.g. adds a new intervention template), your overrides are preserved and you'll see a notification: "Template updated — 2 new defaults available, your 4 overrides unchanged."
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

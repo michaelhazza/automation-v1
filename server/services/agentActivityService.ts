@@ -133,7 +133,7 @@ export const agentActivityService = {
           };
 
     // ieeRunId is now a denormalised column on agent_runs (migration
-    // 0170) written by agentExecutionService at delegation time. No
+    // 0176) written by agentExecutionService at delegation time. No
     // JOIN or subquery needed at read time — the value is already on
     // row.run. Spread carries it through.
     return {

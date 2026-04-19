@@ -33,14 +33,19 @@ export function mapRunStatusToOnboardingStatus(
 export async function upsertSubaccountOnboardingState(params: {
   runId: string;
   organisationId: string;
-  subaccountId: string;
+  // Nullable post-migration 0171 — org-scope playbook runs have no subaccount.
+  // Onboarding state is inherently subaccount-scoped, so we skip silently for
+  // null. This prevents org-scope terminal paths from throwing (pr-reviewer
+  // catch 2026-04-18: requireSubaccountId on terminal state left runs zombie).
+  subaccountId: string | null;
   playbookSlug: string | null;
   isOnboardingRun: boolean;
   runStatus: PlaybookRunStatus;
   startedAt: Date | null;
   completedAt: Date | null;
 }): Promise<void> {
-  if (!params.isOnboardingRun || !params.playbookSlug) return;
+  if (!params.isOnboardingRun || !params.playbookSlug || params.subaccountId === null) return;
+  const subaccountId: string = params.subaccountId;
 
   const status = mapRunStatusToOnboardingStatus(params.runStatus);
   const now = new Date();
@@ -50,7 +55,7 @@ export async function upsertSubaccountOnboardingState(params: {
       .insert(subaccountOnboardingState)
       .values({
         organisationId: params.organisationId,
-        subaccountId: params.subaccountId,
+        subaccountId,
         playbookSlug: params.playbookSlug,
         status,
         lastRunId: params.runId,
@@ -77,7 +82,7 @@ export async function upsertSubaccountOnboardingState(params: {
   } catch (err) {
     logger.error('subaccount_onboarding_state_upsert_failed', {
       runId: params.runId,
-      subaccountId: params.subaccountId,
+      subaccountId,
       playbookSlug: params.playbookSlug,
       error: err instanceof Error ? err.message : String(err),
     });
