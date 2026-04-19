@@ -1,4 +1,4 @@
--- 0176_clientpulse_integration_fingerprints.sql
+-- 0177_clientpulse_integration_fingerprints.sql
 -- ClientPulse Phase 1 follow-up: integration-fingerprint scanner state (§2.0c).
 --
 -- Three generic, CRM-agnostic tables power the scanner:

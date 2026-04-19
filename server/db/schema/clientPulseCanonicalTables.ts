@@ -438,7 +438,7 @@ export type ClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inf
 export type NewClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inferInsert;
 
 // ===========================================================================
-// integration_fingerprints — Phase 1 follow-up scanner library (migration 0176)
+// integration_fingerprints — Phase 1 follow-up scanner library (migration 0177)
 // ===========================================================================
 
 export type IntegrationFingerprintScope = 'system' | 'org';
@@ -462,7 +462,7 @@ export const integrationFingerprints = pgTable(
     fingerprintType: text('fingerprint_type').notNull().$type<IntegrationFingerprintType>(),
     fingerprintValue: text('fingerprint_value'),
     fingerprintPattern: text('fingerprint_pattern'),
-    // numeric(3,2) in the DB (see migration 0176). Drizzle `numeric` returns
+    // numeric(3,2) in the DB (see migration 0177). Drizzle `numeric` returns
     // strings at query time — the pure matcher parses to Number where it
     // needs to compare confidences.
     confidence: numeric('confidence', { precision: 3, scale: 2 }).notNull().default('0.80'),
@@ -470,7 +470,7 @@ export const integrationFingerprints = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    // Partial index — mirrors migration 0176 WHERE deleted_at IS NULL.
+    // Partial index — mirrors migration 0177 WHERE deleted_at IS NULL.
     slugTypeIdx: index('integration_fingerprints_slug_type_idx')
       .on(table.integrationSlug, table.fingerprintType)
       .where(sql`${table.deletedAt} IS NULL`),
@@ -481,7 +481,7 @@ export type IntegrationFingerprint = typeof integrationFingerprints.$inferSelect
 export type NewIntegrationFingerprint = typeof integrationFingerprints.$inferInsert;
 
 // ===========================================================================
-// integration_detections — per-sub matches (migration 0176)
+// integration_detections — per-sub matches (migration 0177)
 // ===========================================================================
 
 export const integrationDetections = pgTable(
@@ -513,7 +513,7 @@ export type IntegrationDetection = typeof integrationDetections.$inferSelect;
 export type NewIntegrationDetection = typeof integrationDetections.$inferInsert;
 
 // ===========================================================================
-// integration_unclassified_signals — triage queue (migration 0176)
+// integration_unclassified_signals — triage queue (migration 0177)
 // ===========================================================================
 
 export const integrationUnclassifiedSignals = pgTable(
@@ -527,7 +527,7 @@ export const integrationUnclassifiedSignals = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
     occurrenceCount: integer('occurrence_count').notNull().default(1),
-    // numeric(5,2) in the DB (see migration 0176). Drizzle `numeric` returns
+    // numeric(5,2) in the DB (see migration 0177). Drizzle `numeric` returns
     // strings at query time — callers comparing importanceScore values should
     // parse with Number() before ordering / comparing.
     importanceScore: numeric('importance_score', { precision: 5, scale: 2 }).notNull().default('0'),

@@ -180,8 +180,8 @@ Scope: webhook expansion + 2 real skill handlers + integration-fingerprint table
 
 | Path | Purpose |
 |------|---------|
-| `migrations/0176_clientpulse_integration_fingerprints.sql` | Create `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals`; seed library from `operational_config.integrationFingerprints.seedLibrary` (CloseBot, Uphex minimum). |
-| `migrations/0176_clientpulse_integration_fingerprints.down.sql` | Rollback pair. |
+| `migrations/0177_clientpulse_integration_fingerprints.sql` | Create `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals`; seed library from `operational_config.integrationFingerprints.seedLibrary` (CloseBot, Uphex minimum). Bumped from 0176 after merge with IEE 0176_iee_run_id_and_inflight_index.sql landed on main. |
+| `migrations/0177_clientpulse_integration_fingerprints.down.sql` | Rollback pair. |
 | `server/skills/computeStaffActivityPulse.ts` | Real handler for `compute_staff_activity_pulse`. |
 | `server/skills/scanIntegrationFingerprints.ts` | Real handler for `scan_integration_fingerprints`. |
 | `server/services/__tests__/computeStaffActivityPulsePure.test.ts` | Pure tests for the staff-activity algorithm. |
@@ -198,7 +198,7 @@ Scope: webhook expansion + 2 real skill handlers + integration-fingerprint table
 | `server/services/skillExecutor.ts` | Add two case-statements adjacent to `compute_health_score` (:1269) and `compute_churn_risk` (:1279). Decrement `capabilityQueryCallCount` if these skills call capability discovery. |
 | `server/config/canonicalDictionaryRegistry.ts` | Add 6 Phase-1 canonical-table entries (locked contract (i)). |
 
-### §9.3 Migration 0176 contents
+### §9.3 Migration 0177 contents
 
 Tables per spec §2.0c lines 318–354. Columns (summary, full DDL at implementation time):
 
@@ -254,7 +254,7 @@ Pure tests (no DB), 4–6 cases each:
 - `npx tsx server/services/__tests__/computeStaffActivityPulsePure.test.ts` — pass.
 - `npx tsx server/services/__tests__/scanIntegrationFingerprintsPure.test.ts` — pass.
 - `npx tsx server/services/__tests__/ghlWebhookMutationsPure.test.ts` — pass.
-- Migration dry-run: `psql -f migrations/0176_... && psql -f migrations/0176_....down.sql && psql -f migrations/0176_....sql`.
+- Migration dry-run: `psql -f migrations/0177_... && psql -f migrations/0177_....down.sql && psql -f migrations/0177_....sql`.
 - Fixture-driven skill run against seeded `canonical_subaccount_mutations` produces non-null observation value for 7 of 8 signals (ai_feature_usage remains placeholder).
 
 **Pilot-gated (not blocking this PR, verified post-merge):**
@@ -266,7 +266,7 @@ Pure tests (no DB), 4–6 cases each:
 
 Recommended 4 commits on this PR:
 
-1. Migration 0176 + rollback + `rlsProtectedTables.ts` additions + seed rows.
+1. Migration 0177 + rollback + `rlsProtectedTables.ts` additions + seed rows.
 2. `canonicalDictionaryRegistry.ts` entries for the 6 Phase-1 canonical tables (locked contract (i)).
 3. Webhook handler expansion (4 new events + mutation writes on 6 existing) + pure tests.
 4. Two skill handlers + registry + executor wiring + pure tests.

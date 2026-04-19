@@ -388,23 +388,24 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0174_clientpulse_churn_assessments.sql',
     rationale: 'ClientPulse churn-risk band assessments per sub-account — leak reveals which clients are flagged as at-risk.',
   },
-  // 0176 — ClientPulse Phase 1 follow-up: integration fingerprint scanner state
+  // 0177 — ClientPulse Phase 1 follow-up: integration fingerprint scanner state
+  // (bumped from 0176 after merge-conflict with IEE 0176_iee_run_id_and_inflight_index.sql)
   {
     tableName: 'integration_fingerprints',
     schemaFile: 'clientPulseCanonicalTables.ts',
-    policyMigration: '0176_clientpulse_integration_fingerprints.sql',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
     rationale: 'Integration-fingerprint library (system + org scope). System rows are cross-tenant readable; org rows reveal the agency\'s vendor catalogue.',
   },
   {
     tableName: 'integration_detections',
     schemaFile: 'clientPulseCanonicalTables.ts',
-    policyMigration: '0176_clientpulse_integration_fingerprints.sql',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
     rationale: 'Per-sub-account integration detections — leak reveals which third-party vendors each client uses.',
   },
   {
     tableName: 'integration_unclassified_signals',
     schemaFile: 'clientPulseCanonicalTables.ts',
-    policyMigration: '0176_clientpulse_integration_fingerprints.sql',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
     rationale: 'Novel fingerprint observations awaiting operator triage — leak reveals unclassified third-party activity per sub-account.',
   },
 ];

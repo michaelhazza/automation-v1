@@ -497,7 +497,7 @@ export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
     commonJoins: ['subaccounts via subaccount_id'],
     antiPatterns: [],
   },
-  // ── ClientPulse Phase 1 follow-up: integration fingerprint scanner (migration 0176) ──
+  // ── ClientPulse Phase 1 follow-up: integration fingerprint scanner (migration 0177) ──
   {
     tableName: 'integration_fingerprints',
     humanName: 'Integration Fingerprints',
