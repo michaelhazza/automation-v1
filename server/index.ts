@@ -116,6 +116,7 @@ import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
 import configHistoryRouter from './routes/configHistory.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
+import clientpulseMergeFieldsRouter from './routes/clientpulseMergeFields.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -316,6 +317,7 @@ app.use(modulesRouter);
 app.use(onboardingRouter);
 app.use(configHistoryRouter);
 app.use(clientpulseReportsRouter);
+app.use(clientpulseMergeFieldsRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *

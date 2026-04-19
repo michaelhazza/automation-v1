@@ -1314,6 +1314,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('trigger_account_intervention', input, context);
   },
 
+  // ── ClientPulse Phase 4 intervention primitives (all review-gated) ────
+  // Scenario-detector proposes, operator approves in the /review queue.
+  'crm.fire_automation': async (input, context) => {
+    return proposeReviewGatedAction('crm.fire_automation', input, context);
+  },
+  'crm.send_email': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_email', input, context);
+  },
+  'crm.send_sms': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_sms', input, context);
+  },
+  'crm.create_task': async (input, context) => {
+    return proposeReviewGatedAction('crm.create_task', input, context);
+  },
+  'clientpulse.operator_alert': async (input, context) => {
+    return proposeReviewGatedAction('clientpulse.operator_alert', input, context);
+  },
+
   // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
   analyse_42macro_transcript: async (input) => {
     return executeMethodologySkill('analyse_42macro_transcript', input, {

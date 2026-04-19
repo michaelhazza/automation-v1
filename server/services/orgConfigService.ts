@@ -175,6 +175,9 @@ export interface OperationalConfig {
   churnBands?: ChurnBands;
   interventionDefaults?: InterventionDefaults;
   onboardingMilestones?: OnboardingMilestoneDef[];
+  // Phase 4 — spec-aligned alias for `interventionTypes`. Either key may be
+  // present; the accessor prefers `interventionTemplates` when both exist.
+  interventionTemplates?: InterventionType[];
 }
 
 // ── Default fallbacks (used when no template is applied) ──────────────────
@@ -398,6 +401,17 @@ export const orgConfigService = {
   async getOnboardingMilestoneDefs(orgId: string): Promise<OnboardingMilestoneDef[]> {
     const config = await this.getOperationalConfig(orgId);
     return config?.onboardingMilestones ?? [];
+  },
+
+  /**
+   * Phase 4 — intervention templates (the catalogue the scenario detector + UI
+   * pick from). Reads the spec-aligned `interventionTemplates` key if present,
+   * falling back to the pre-existing `interventionTypes` key so existing
+   * hierarchyTemplate data keeps working.
+   */
+  async getInterventionTemplates(orgId: string): Promise<InterventionType[]> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.interventionTemplates ?? config?.interventionTypes ?? [];
   },
 };
 
