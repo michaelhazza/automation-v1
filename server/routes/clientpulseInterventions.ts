@@ -29,13 +29,29 @@ router.get(
 );
 
 // ── POST /api/clientpulse/subaccounts/:subaccountId/interventions/propose ──
-const proposeBodySchema = z.object({
-  actionType: z.enum(INTERVENTION_ACTION_TYPES),
-  payload: z.record(z.unknown()),
-  scheduleHint: z.enum(['immediate', 'delay_24h', 'scheduled']).optional(),
-  rationale: z.string().min(1).max(5_000),
-  templateSlug: z.string().optional(),
-});
+const proposeBodySchema = z
+  .object({
+    actionType: z.enum(INTERVENTION_ACTION_TYPES),
+    payload: z.record(z.unknown()),
+    scheduleHint: z.enum(['immediate', 'delay_24h', 'scheduled']).optional(),
+    rationale: z.string().min(1).max(5_000),
+    templateSlug: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    // scheduleHint='scheduled' requires payload.scheduledFor — catch at the
+    // request boundary so the editor sees a precise 400 instead of the
+    // service layer's later MISSING_SCHEDULE.
+    if (val.scheduleHint === 'scheduled') {
+      const sf = (val.payload as Record<string, unknown>).scheduledFor;
+      if (typeof sf !== 'string' || sf.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['payload', 'scheduledFor'],
+          message: 'scheduledFor is required when scheduleHint=scheduled',
+        });
+      }
+    }
+  });
 
 router.post(
   '/api/clientpulse/subaccounts/:subaccountId/interventions/propose',

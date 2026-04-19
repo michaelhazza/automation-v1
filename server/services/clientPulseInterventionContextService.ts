@@ -20,6 +20,8 @@ import { orgConfigService } from './orgConfigService.js';
 import { interventionService } from './interventionService.js';
 import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
+import { getActionDefinition } from '../config/actionRegistry.js';
+import { logger } from '../lib/logger.js';
 
 export const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
@@ -166,6 +168,8 @@ export interface OperatorProposalInput {
 export interface OperatorProposalResult {
   id: string;
   actionType: string;
+  /** True if a fresh action row was created; false when actionService dedup returned an existing row. */
+  isNew: boolean;
 }
 
 /**
@@ -174,12 +178,51 @@ export interface OperatorProposalResult {
  * then inserts an `actions` row with `gateLevel='review'` and the Phase 4
  * metadata schema (locked contract (b), recommendedBy='operator_manual').
  *
- * Throws `{ statusCode, message, errorCode }` on quota exceeded or when the
- * system Portfolio Health agent is not linked to the org.
+ * Validates `input.payload` against the action's `parameterSchema` from the
+ * action registry — this closes the gap between free-form editor input and
+ * the strongly-typed primitive contracts. Invalid payloads throw
+ * `{ statusCode: 400, errorCode: 'INVALID_PAYLOAD', issues }`.
+ *
+ * `scheduleHint='scheduled'` requires `scheduledFor` (ISO timestamp) —
+ * enforced here at the service boundary.
+ *
+ * Throws `{ statusCode, message, errorCode }` on quota exceeded, validation
+ * failure, or when the system Portfolio Health agent is not linked.
  */
 export async function createOperatorProposal(
   input: OperatorProposalInput,
 ): Promise<OperatorProposalResult> {
+  // 1. Validate payload against the registered parameterSchema so editors
+  //    can't submit shapes that would silently fail in the review queue.
+  const definition = getActionDefinition(input.actionType);
+  if (!definition) {
+    throw { statusCode: 400, message: `Unknown action type: ${input.actionType}`, errorCode: 'UNKNOWN_ACTION_TYPE' };
+  }
+  const parseResult = definition.parameterSchema.safeParse(input.payload);
+  if (!parseResult.success) {
+    throw {
+      statusCode: 400,
+      message: 'Payload does not match action schema',
+      errorCode: 'INVALID_PAYLOAD',
+      issues: parseResult.error.issues,
+    };
+  }
+
+  // 2. scheduleHint='scheduled' must carry a scheduledFor timestamp. The
+  //    per-primitive handlers also check this at execute time; surfacing it
+  //    at proposal time lets the UI show a precise error instead of a
+  //    generic 422 later.
+  if (input.scheduleHint === 'scheduled') {
+    const sf = (input.payload as Record<string, unknown>).scheduledFor;
+    if (typeof sf !== 'string' || !sf) {
+      throw {
+        statusCode: 400,
+        message: 'scheduledFor is required when scheduleHint=scheduled',
+        errorCode: 'MISSING_SCHEDULE',
+      };
+    }
+  }
+
   const { organisationId, subaccountId } = input;
   const defaults = await orgConfigService.getInterventionDefaults(organisationId);
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -286,6 +329,22 @@ export async function createOperatorProposal(
     },
   });
 
+  if (!proposed.isNew) {
+    // Idempotency observability: the same operator submission (same
+    // payload + subaccount + actionType) hit an existing row. The Date.now()
+    // component of the key should make this rare, so when it happens it's
+    // worth logging — it usually means the UI double-submitted or the
+    // request was retried.
+    logger.info('clientpulse.intervention.operator_proposal_deduped', {
+      organisationId,
+      subaccountId,
+      actionType: input.actionType,
+      existingActionId: proposed.actionId,
+      status: proposed.status,
+    });
+    return { id: proposed.actionId, actionType: input.actionType, isNew: false };
+  }
+
   const actionRow = await actionService.getAction(proposed.actionId, organisationId);
   await reviewService.createReviewItem(actionRow, {
     actionType: input.actionType,
@@ -293,5 +352,5 @@ export async function createOperatorProposal(
     proposedPayload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
   });
 
-  return { id: proposed.actionId, actionType: input.actionType };
+  return { id: proposed.actionId, actionType: input.actionType, isNew: true };
 }

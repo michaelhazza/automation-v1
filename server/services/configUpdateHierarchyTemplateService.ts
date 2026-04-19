@@ -31,6 +31,7 @@ import {
   validateProposedConfig,
   validationDigest,
   buildConfigHistorySnapshotShape,
+  isValidConfigPath,
 } from './configUpdateHierarchyTemplatePure.js';
 import { createHash } from 'crypto';
 
@@ -101,13 +102,29 @@ export type ConfigUpdateResult =
     }
   | {
       committed: false;
-      errorCode: 'SCHEMA_INVALID' | 'SUM_CONSTRAINT_VIOLATED' | 'TEMPLATE_NOT_FOUND' | 'AGENT_REQUIRED_FOR_SENSITIVE';
+      errorCode:
+        | 'SCHEMA_INVALID'
+        | 'SUM_CONSTRAINT_VIOLATED'
+        | 'TEMPLATE_NOT_FOUND'
+        | 'AGENT_REQUIRED_FOR_SENSITIVE'
+        | 'INVALID_PATH';
       message: string;
     };
 
 export async function applyHierarchyTemplateConfigUpdate(
   input: ConfigUpdateInput,
 ): Promise<ConfigUpdateResult> {
+  // Reject paths whose root segment is not in the allow-list. Catches typos
+  // like `alertLimits.notificationThresholdd` that would otherwise pass
+  // schema validation via `.passthrough()` and silently create a new field.
+  if (!isValidConfigPath(input.path)) {
+    return {
+      committed: false,
+      errorCode: 'INVALID_PATH',
+      message: `Unknown config path root: '${input.path.split('.')[0]}'. See ALLOWED_CONFIG_ROOT_KEYS.`,
+    };
+  }
+
   const [template] = await db
     .select({
       id: hierarchyTemplates.id,

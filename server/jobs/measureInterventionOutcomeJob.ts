@@ -91,6 +91,11 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
 
   summary.examined = actionRows.length;
 
+  // Cache intervention templates per org to avoid N×M config loads inside
+  // the loop. With 200 actions spanning 10 orgs that's 10 fetches instead
+  // of 200.
+  const templatesByOrg = new Map<string, Awaited<ReturnType<typeof orgConfigService.getInterventionTemplates>>>();
+
   for (const row of actionRows) {
     try {
       const meta = (row.metadata_json ?? {}) as {
@@ -100,8 +105,11 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
         configVersion?: string;
       };
 
-      // Honour per-template measurementWindowHours. Default 24h.
-      const templates = await orgConfigService.getInterventionTemplates(row.organisation_id);
+      let templates = templatesByOrg.get(row.organisation_id);
+      if (!templates) {
+        templates = await orgConfigService.getInterventionTemplates(row.organisation_id);
+        templatesByOrg.set(row.organisation_id, templates);
+      }
       const template = templates.find((t) => t.slug === meta.triggerTemplateSlug);
       const windowHours = template?.measurementWindowHours ?? 24;
       const windowEnds = new Date(row.executed_at.getTime() + windowHours * 60 * 60 * 1000);

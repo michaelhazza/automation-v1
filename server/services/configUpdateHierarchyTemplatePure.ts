@@ -20,6 +20,56 @@ import {
 
 export type WriteClassification = 'non_sensitive' | 'sensitive';
 
+/**
+ * The explicitly-defined root keys on `operational_config`. A write path
+ * whose root segment is not in this set is rejected to prevent typos
+ * from silently creating new fields — `operationalConfigSchema` uses
+ * `.passthrough()` so unknown roots would otherwise validate.
+ *
+ * Keep in sync with `OperationalConfig` interface in `orgConfigService.ts`.
+ */
+export const ALLOWED_CONFIG_ROOT_KEYS: readonly string[] = Object.freeze([
+  // Scoring + risk
+  'healthScoreFactors',
+  'anomalyConfig',
+  'churnRiskSignals',
+  'churnBands',
+  // Interventions
+  'interventionTypes',
+  'interventionTemplates',
+  'interventionDefaults',
+  // Governance / limits
+  'alertLimits',
+  'coldStartConfig',
+  'dataRetention',
+  // Execution scaling
+  'scanFrequencyHours',
+  'reportSchedule',
+  'dedupWindowMinutes',
+  'maxAccountsPerRun',
+  'maxConcurrentEvaluations',
+  'maxRunDurationMs',
+  'accountPriorityMode',
+  'maxSkipCyclesPerAccount',
+  'metricAvailabilityMode',
+  'templateMigrationMode',
+  // ClientPulse additions
+  'staffActivity',
+  'integrationFingerprints',
+  'onboardingMilestones',
+]);
+
+/**
+ * Validate that the root segment of the path is in the allow-list. A typo
+ * like `alertLimits.notificationThresholdd` would otherwise pass schema
+ * validation (via `.passthrough()`) and silently create a new field.
+ */
+export function isValidConfigPath(path: string): boolean {
+  if (!path || path.length === 0) return false;
+  const root = path.split('.')[0];
+  return ALLOWED_CONFIG_ROOT_KEYS.includes(root);
+}
+
 export interface PatchInput {
   path: string;
   value: unknown;

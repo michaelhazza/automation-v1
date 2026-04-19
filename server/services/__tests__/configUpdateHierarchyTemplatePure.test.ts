@@ -11,6 +11,8 @@ import {
   validateProposedConfig,
   validationDigest,
   buildConfigHistorySnapshotShape,
+  isValidConfigPath,
+  ALLOWED_CONFIG_ROOT_KEYS,
 } from '../configUpdateHierarchyTemplatePure.js';
 
 let passed = 0;
@@ -131,6 +133,31 @@ test('13. validationDigest — different input produces different digest', () =>
 });
 
 // ── Config history snapshot shape ─────────────────────────────────────────
+
+// ── Path validation (typo guard) ─────────────────────────────────────────
+
+test('15. isValidConfigPath — known root allowed', () => {
+  assert(isValidConfigPath('alertLimits.notificationThreshold'), 'alertLimits ok');
+  assert(isValidConfigPath('healthScoreFactors'), 'array root ok');
+  assert(isValidConfigPath('interventionDefaults.cooldownHours'), 'nested ok');
+});
+
+test('16. isValidConfigPath — typo in root rejected', () => {
+  assert(!isValidConfigPath('alertLimitz.foo'), 'alertLimitz rejected');
+  assert(!isValidConfigPath('healthscorefactors'), 'case-sensitive');
+  assert(!isValidConfigPath('arbitrary.new.key'), 'unknown root rejected');
+});
+
+test('17. isValidConfigPath — empty path rejected', () => {
+  assert(!isValidConfigPath(''), 'empty rejected');
+  assert(!isValidConfigPath('.leading'), 'leading-dot rejected');
+});
+
+test('18. ALLOWED_CONFIG_ROOT_KEYS includes all documented roots', () => {
+  for (const root of ['healthScoreFactors', 'churnBands', 'interventionDefaults', 'staffActivity', 'alertLimits', 'dataRetention']) {
+    assert(ALLOWED_CONFIG_ROOT_KEYS.includes(root), `missing root: ${root}`);
+  }
+});
 
 test('14. buildConfigHistorySnapshotShape — snapshot includes proposed config', () => {
   const out = buildConfigHistorySnapshotShape({
