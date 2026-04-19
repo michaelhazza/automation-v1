@@ -11,6 +11,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { users } from './users';
+import type { PlaybookScope } from './playbookRuns';
 
 // ---------------------------------------------------------------------------
 // System Playbook Templates — platform-shipped, read-only via API
@@ -23,6 +24,9 @@ export const systemPlaybookTemplates = pgTable(
     slug: text('slug').notNull().unique(),
     name: text('name').notNull(),
     description: text('description').notNull().default(''),
+    // Added migration 0171 (§13.3). Declares whether this template runs at
+    // subaccount or org scope. Historical rows default to 'subaccount'.
+    scope: text('scope').notNull().default('subaccount').$type<PlaybookScope>(),
     latestVersion: integer('latest_version').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

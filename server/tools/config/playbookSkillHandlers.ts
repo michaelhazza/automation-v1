@@ -68,7 +68,11 @@ export async function executeConfigPublishPlaybookOutputToPortal(
       .insert(portalBriefs)
       .values({
         organisationId: context.organisationId,
-        subaccountId: run.subaccountId,
+        // Portal briefs are subaccount-scoped; org-scope runs (migration 0171)
+        // cannot produce a portal brief. Caller already filters upstream.
+        subaccountId: run.subaccountId ?? (() => {
+          throw new Error(`playbook run ${run.id} has no subaccount; cannot create portal brief`);
+        })(),
         runId,
         playbookSlug,
         title,

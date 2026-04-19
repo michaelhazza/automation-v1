@@ -22,7 +22,7 @@ One PR on `claude/commit-to-main-y5BoZ` covering Phases **0 + 0.5 + 1 + 2 + 3** 
 | # | Name | Status | Notes |
 |---|------|--------|-------|
 | 1 | Phase 0 — Template extension + OAuth scope | **done** | Migration 0170, 5 accessors, operationalConfigSchema (B4), SSoT fix on routes/ghl.ts. 18 Pure tests pass. Zero new typecheck errors. |
-| 2 | Phase 0.5 — Playbook engine scope refactor | in progress | Substrate only — no org-level playbook shipped yet |
+| 2 | Phase 0.5 — Playbook engine scope refactor | **done** | Migration 0171 adds scope enum + nullable subaccount_id + CHECK + partial index. requireSubaccountId helper introduced. Zero new typecheck errors. |
 | 3 | Phase 1 — Signal ingestion (6 adapters + canonical writes + B1 RateLimiter) | pending | Ship-gate requires observations for 8 signals |
 | 4 | Phase 2 — Health-score execution (re-target existing handler) | pending | No parallel handler file |
 | 5 | Phase 3 — Churn risk evaluation (re-target existing handler) | pending | Kel-validated signals |
