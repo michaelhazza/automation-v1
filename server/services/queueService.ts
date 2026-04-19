@@ -413,6 +413,22 @@ export const queueService = {
   },
 
   /**
+   * Generic job enqueue — used by event-driven follow-on jobs (e.g. the
+   * ClientPulse intervention proposer that fires after compute_churn_risk).
+   * Thin wrapper over the backend's send method so callers don't need to
+   * reach into getQueueBackend() directly.
+   */
+  async sendJob(queueName: string, data: object): Promise<void> {
+    if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+      // In-memory backend used in tests / dev has no named-queue routing;
+      // silently no-op so calling code stays the same.
+      return;
+    }
+    const boss = await getPgBoss();
+    await boss.send(queueName, data);
+  },
+
+  /**
    * M-17: Delete expired execution_files rows.
    */
   async cleanupExpiredExecutionFiles(): Promise<number> {
@@ -775,6 +791,24 @@ export const queueService = {
           throw err;
         }
       });
+
+      // ClientPulse Phase 4 — scenario-detector proposer (event-driven, fires
+      // at the tail of compute_churn_risk per sub-account).
+      await (boss as any).work('clientpulse:propose-interventions', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runProposeClientPulseInterventions } = await import('../jobs/proposeClientPulseInterventionsJob.js');
+          await withTimeout(
+            runProposeClientPulseInterventions(job.data).then(() => undefined),
+            60_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:propose-interventions', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
 
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +

@@ -61,6 +61,20 @@ export interface InterventionType {
   connectorAction?: string;
   cooldownHours?: number;
   cooldownScope?: 'proposed' | 'executed' | 'any_outcome';
+
+  // ── Phase 4 extensions (optional; existing templates stay valid) ──
+  /** Registered actionType slug (e.g. `crm.send_email`); wins over legacy `action`. */
+  actionType?: string;
+  /** Which bands this template targets. Empty/undefined = all bands. */
+  targets?: Array<'healthy' | 'watch' | 'atRisk' | 'critical'>;
+  /** Priority for tie-breaking when multiple templates match. Higher wins. */
+  priority?: number;
+  /** How long after execution before outcome can be measured (hours). Default: 24. */
+  measurementWindowHours?: number;
+  /** Default payload to prefill into the action (editor can override). */
+  payloadDefaults?: Record<string, unknown>;
+  /** Human-readable reason surfaced on the proposed action + outcome history. */
+  defaultReason?: string;
 }
 
 export interface AlertLimits {
