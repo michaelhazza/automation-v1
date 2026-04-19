@@ -4,6 +4,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { agentRuns } from './agentRuns';
+import type { FailureReason } from '../../../shared/iee/failureReason';
 
 // ---------------------------------------------------------------------------
 // iee_runs — Integrated Execution Environment runs
@@ -104,14 +105,14 @@ export const ieeRuns = pgTable(
     startedAt:        timestamp('started_at', { withTimezone: true }),
     completedAt:      timestamp('completed_at', { withTimezone: true }),
 
-    // Outcome — extended via spec v3.4 §8.4 / T13: connector_timeout,
-    // rate_limited, data_incomplete, internal_error added for the
-    // Reporting Agent paths. Existing values retained.
-    // 'worker_terminated' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md
-    // decision 1) — distinguishes worker-originated stoppage (shutdown
-    // drain, container eviction, orphan detection) from user-initiated
-    // cancellation. User cancellation sets status='cancelled' instead.
-    failureReason:    text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'connector_timeout' | 'rate_limited' | 'data_incomplete' | 'internal_error' | 'worker_terminated' | 'unknown'>(),
+    // Outcome. The TS union is the full shared FailureReason enum
+    // (shared/iee/failureReason.ts) so the schema and the worker's
+    // throwable failure taxonomy stay in lockstep. Previously an inline
+    // subset of the enum lived here and drifted — causing pre-existing
+    // type errors in worker/src/persistence/runs.ts and steps.ts where a
+    // wider FailureReason was being assigned to a narrower column type.
+    // Any future enum extension now automatically propagates.
+    failureReason:    text('failure_reason').$type<FailureReason>(),
     resultSummary:    jsonb('result_summary'),
     stepCount:        integer('step_count').notNull().default(0),
 
