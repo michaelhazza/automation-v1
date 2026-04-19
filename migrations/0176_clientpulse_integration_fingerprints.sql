@@ -103,9 +103,11 @@ CREATE TABLE integration_detections (
   deleted_at timestamptz
 );
 
+-- Non-partial unique. soft-delete (deleted_at) is a forward-compatibility
+-- affordance; in v1 the scanner always upserts unconditionally so ON CONFLICT
+-- matches the whole index without a partial predicate.
 CREATE UNIQUE INDEX integration_detections_unique
-  ON integration_detections (organisation_id, subaccount_id, integration_slug)
-  WHERE deleted_at IS NULL;
+  ON integration_detections (organisation_id, subaccount_id, integration_slug);
 
 CREATE INDEX integration_detections_org_slug_idx
   ON integration_detections (organisation_id, integration_slug)

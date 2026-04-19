@@ -1148,6 +1148,44 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
   },
 
+  compute_staff_activity_pulse: {
+    actionType: 'compute_staff_activity_pulse',
+    description: 'Compute the Staff Activity Pulse signal for a subaccount — weighted sum of human-attributed mutations over the configured lookback windows. Writes a real observation row, replacing the Phase 1 placeholder.',
+    actionCategory: 'worker',
+    topics: ['reporting'],
+    isExternal: false,
+    readPath: 'canonical',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['subaccount_id'],
+    parameterSchema: z.object({
+      subaccount_id: z.string().describe('Subaccount UUID'),
+      source_run_id: z.string().optional().describe('Poll-cycle run id for idempotency'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  scan_integration_fingerprints: {
+    actionType: 'scan_integration_fingerprints',
+    description: 'Scan a subaccount\'s canonical fingerprint-bearing artifacts against the integration fingerprint library and record detections + unclassified signals. Writes a real observation row, replacing the Phase 1 placeholder.',
+    actionCategory: 'worker',
+    topics: ['reporting'],
+    isExternal: false,
+    readPath: 'canonical',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['subaccount_id'],
+    parameterSchema: z.object({
+      subaccount_id: z.string().describe('Subaccount UUID'),
+      source_run_id: z.string().optional().describe('Poll-cycle run id for idempotency'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
   generate_portfolio_report: {
     actionType: 'generate_portfolio_report',
     description: 'Generate a structured portfolio intelligence briefing across the entire organisation.',
