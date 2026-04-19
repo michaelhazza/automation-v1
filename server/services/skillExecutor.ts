@@ -67,6 +67,30 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
     case 'propose_doc_update': return executeDocProposalApproved(payload, context);
     case 'write_docs': return executeWriteDocsApproved(payload, context);
+
+    // ── Phase 4.5 — config_update_hierarchy_template approval-execute ──────
+    // When the operator approves a sensitive-path config change, re-validate
+    // (drift check) and commit the merge + config_history row (B5 ship gate).
+    case 'config_update_hierarchy_template': {
+      const { executeApprovedHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+      const actionId = (ctx as unknown as { actionId?: string }).actionId ?? '';
+      const result = await executeApprovedHierarchyTemplateConfigUpdate({
+        actionId,
+        organisationId: context.organisationId,
+      });
+      if (!result.success) {
+        throw new Error(`${result.errorCode}: ${result.message}`);
+      }
+      return result;
+    }
+
+    // ── Phase 4 — clientpulse.operator_alert approval-execute ──────────────
+    // Fanout (in-app, email, slack) is a future phase. For now, acknowledge
+    // successful approval so the action reaches status=completed and cooldown
+    // semantics are preserved. The payload is validated at proposal time.
+    case 'clientpulse.operator_alert':
+      return { queued: true, channels: payload.channels };
+
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));

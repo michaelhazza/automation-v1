@@ -92,20 +92,62 @@ export async function runProposeClientPulseInterventions(
     : null;
 
   // 3. Cooldown state — one check per template against the account+template.
+  // Two-source check:
+  //   a) intervention_outcomes (for older executed interventions — outcome rows
+  //      are only written after the measurement window, so they miss recent ones)
+  //   b) actions table (for proposals/executions within the current cooldown
+  //      window, before the outcome row has been written)
   const cooldownState: ProposerCooldownState = { perTemplate: {} };
-  if (assessment.accountId) {
-    for (const template of templates) {
-      const check = await interventionService.checkCooldown(
+  for (const template of templates) {
+    const cooldownHours = template.cooldownHours ?? 24;
+    const cooldownWindowStart = new Date(Date.now() - cooldownHours * 60 * 60 * 1000);
+
+    // (a) outcome-based check (works for older interventions)
+    let outcomeCheck: { allowed: boolean; reason?: string } = { allowed: true };
+    if (assessment.accountId) {
+      outcomeCheck = await interventionService.checkCooldown(
         organisationId,
         assessment.accountId,
         template.slug,
         template,
       );
-      cooldownState.perTemplate[template.slug] = {
-        allowed: check.allowed,
-        reason: check.reason,
-      };
     }
+
+    // (b) action-table check: find a recent proposal for this subaccount +
+    //     template within the cooldown window. Matches on metadataJson
+    //     triggerTemplateSlug so each template's cooldown is independent.
+    let actionCheck: { allowed: boolean; reason?: string } = { allowed: true };
+    if (outcomeCheck.allowed) {
+      const [recentAction] = await db
+        .select({ id: actions.id, status: actions.status })
+        .from(actions)
+        .where(
+          and(
+            eq(actions.organisationId, organisationId),
+            eq(actions.subaccountId, subaccountId),
+            sql`${actions.metadataJson}->>'triggerTemplateSlug' = ${template.slug}`,
+            gte(actions.createdAt, cooldownWindowStart),
+          ),
+        )
+        .limit(1);
+      if (recentAction) {
+        const isExecuted = recentAction.status === 'completed';
+        const scope = template.cooldownScope ?? 'executed';
+        if (scope === 'any_outcome') {
+          actionCheck = { allowed: false, reason: `cooldown:${isExecuted ? 'executed' : 'proposed'}` };
+        } else if (scope === 'executed' && isExecuted) {
+          actionCheck = { allowed: false, reason: 'cooldown:executed' };
+        } else if (scope === 'proposed') {
+          actionCheck = { allowed: false, reason: 'cooldown:proposed' };
+        }
+      }
+    }
+
+    const effective = outcomeCheck.allowed ? actionCheck : outcomeCheck;
+    cooldownState.perTemplate[template.slug] = {
+      allowed: effective.allowed,
+      reason: effective.reason,
+    };
   }
 
   // 4. Quota state — count actions proposed in the rolling 24h window for this

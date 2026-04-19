@@ -18,6 +18,8 @@ import {
 } from '../db/schema/clientPulseCanonicalTables.js';
 import { orgConfigService } from './orgConfigService.js';
 import { interventionService } from './interventionService.js';
+import { actionService } from './actionService.js';
+import { reviewService } from './reviewService.js';
 
 export const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
@@ -250,6 +252,9 @@ export async function createOperatorProposal(
     .orderBy(desc(clientPulseHealthSnapshots.observedAt))
     .limit(1);
 
+  // Include timestamp in idempotency key so each manual operator submission
+  // creates a fresh action (operators may propose the same action type
+  // multiple times, e.g. different contacts for crm.send_email).
   const idempotencyKey = createHash('sha256')
     .update(
       `operator:${subaccountId}:${input.actionType}:${JSON.stringify(input.payload)}:${Date.now()}`,
@@ -257,32 +262,36 @@ export async function createOperatorProposal(
     .digest('hex')
     .slice(0, 40);
 
-  const [inserted] = await db
-    .insert(actions)
-    .values({
-      organisationId,
-      subaccountId,
-      agentId: agentRow.id,
-      actionScope: 'subaccount',
-      actionType: input.actionType,
-      actionCategory: input.actionType === 'clientpulse.operator_alert' ? 'worker' : 'api',
-      isExternal: input.actionType !== 'clientpulse.operator_alert',
-      gateLevel: 'review',
-      status: 'proposed',
-      idempotencyKey,
-      payloadJson: input.payload,
-      metadataJson: {
-        triggerTemplateSlug: input.templateSlug ?? null,
-        triggerReason: input.rationale,
-        bandAtProposal: assessment?.band ?? null,
-        healthScoreAtProposal: snapshot?.score ?? null,
-        configVersion: assessment?.configVersion ?? null,
-        recommendedBy: 'operator_manual',
-        operatorRationale: input.rationale,
-        scheduleHint: input.scheduleHint ?? 'immediate',
-      },
-    })
-    .returning({ id: actions.id, actionType: actions.actionType });
+  // Route through actionService.proposeAction() + reviewService.createReviewItem()
+  // so the action appears in the review queue UI (pending_approval state +
+  // suspendUntil bookkeeping handled by actionService).
+  const proposed = await actionService.proposeAction({
+    organisationId,
+    subaccountId,
+    agentId: agentRow.id,
+    actionType: input.actionType,
+    idempotencyKey,
+    // scheduleHint is merged into payload so the CRM adapter can read it at
+    // execution time.
+    payload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
+    metadata: {
+      triggerTemplateSlug: input.templateSlug ?? null,
+      triggerReason: input.rationale,
+      bandAtProposal: assessment?.band ?? null,
+      healthScoreAtProposal: snapshot?.score ?? null,
+      configVersion: assessment?.configVersion ?? null,
+      recommendedBy: 'operator_manual',
+      operatorRationale: input.rationale,
+      scheduleHint: input.scheduleHint ?? 'immediate',
+    },
+  });
 
-  return { id: inserted.id, actionType: inserted.actionType };
+  const actionRow = await actionService.getAction(proposed.actionId, organisationId);
+  await reviewService.createReviewItem(actionRow, {
+    actionType: input.actionType,
+    reasoning: input.rationale,
+    proposedPayload: { ...input.payload, scheduleHint: input.scheduleHint ?? 'immediate' },
+  });
+
+  return { id: proposed.actionId, actionType: input.actionType };
 }

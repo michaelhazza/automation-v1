@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import {
   applyHierarchyTemplateConfigUpdate,
   resolveDefaultHierarchyTemplateId,
@@ -28,6 +29,7 @@ const applyBodySchema = z.object({
 router.post(
   '/api/clientpulse/config/apply',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -56,7 +58,7 @@ router.post(
       value: parsed.data.value,
       reason: parsed.data.reason,
       sourceSession: parsed.data.sessionId ?? null,
-      changedByUserId: (req as { userId?: string }).userId ?? null,
+      changedByUserId: req.user?.id ?? null,
       agentId,
     });
 

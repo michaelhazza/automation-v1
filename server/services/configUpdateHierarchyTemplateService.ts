@@ -23,6 +23,8 @@ import { configHistory } from '../db/schema/configHistory.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
 import { configHistoryService } from './configHistoryService.js';
+import { actionService } from './actionService.js';
+import { reviewService } from './reviewService.js';
 import {
   applyPathPatch,
   classifyWritePath,
@@ -157,65 +159,58 @@ export async function applyHierarchyTemplateConfigUpdate(
       .digest('hex')
       .slice(0, 40);
 
-    // Pre-check dedup: the unique index `(subaccount_id, idempotency_key)`
-    // is NULL-equals-NULL-false under Postgres semantics, so org-scoped
-    // actions (subaccount_id IS NULL) do not dedup via ON CONFLICT. Use an
-    // explicit pre-check keyed on (organisationId, idempotencyKey) — the
-    // org-scope path is low-throughput (operator-driven) so the extra
-    // round-trip is negligible and the semantics are exact.
-    const [existing] = await db
-      .select({ id: actions.id })
-      .from(actions)
-      .where(
-        and(
-          eq(actions.organisationId, input.organisationId),
-          eq(actions.idempotencyKey, idempotencyKey),
-          eq(actions.actionScope, 'org'),
-        ),
-      )
-      .limit(1);
-    if (existing) {
+    // Route through actionService.proposeAction() + reviewService.createReviewItem()
+    // so the action is visible in the review queue UI. actionService handles
+    // idempotency (dedup against non-terminal statuses), the pending_approval
+    // state transition, and suspendUntil bookkeeping.
+    const reviewProposal = await actionService.proposeAction({
+      organisationId: input.organisationId,
+      subaccountId: null,
+      agentId: input.agentId!,
+      actionType: 'config_update_hierarchy_template',
+      idempotencyKey,
+      payload: {
+        templateId: input.templateId,
+        path: input.path,
+        value: input.value,
+        reason: input.reason,
+        sourceSession: input.sourceSession ?? null,
+      },
+      metadata: {
+        sensitivePath: true,
+        classification: 'sensitive',
+        sourceSession: input.sourceSession ?? null,
+        validationDigest: digest,
+        recommendedBy: 'config_agent',
+      },
+    });
+
+    if (!reviewProposal.isNew) {
+      // Duplicate — return existing action id.
       return {
         committed: false,
-        actionId: existing.id,
+        actionId: reviewProposal.actionId,
         classification: 'sensitive',
         requiresApproval: true,
       };
     }
 
-    const [inserted] = await db
-      .insert(actions)
-      .values({
-        organisationId: input.organisationId,
-        subaccountId: null,
-        agentId: input.agentId,
-        actionScope: 'org',
-        actionType: 'config_update_hierarchy_template',
-        actionCategory: 'worker',
-        isExternal: false,
-        gateLevel: 'review',
-        status: 'proposed',
-        idempotencyKey,
-        payloadJson: {
-          templateId: input.templateId,
-          path: input.path,
-          value: input.value,
-          reason: input.reason,
-          sourceSession: input.sourceSession ?? null,
-        },
-        metadataJson: {
-          sensitivePath: true,
-          classification: 'sensitive',
-          sourceSession: input.sourceSession ?? null,
-          validationDigest: digest,
-          recommendedBy: 'config_agent',
-        },
-      })
-      .returning({ id: actions.id });
+    // Create a review queue entry so operators can see and approve this change.
+    const actionRow = await actionService.getAction(reviewProposal.actionId, input.organisationId);
+    await reviewService.createReviewItem(actionRow, {
+      actionType: 'config_update_hierarchy_template',
+      reasoning: `Sensitive config path: ${input.path}. Reason: ${input.reason}`,
+      proposedPayload: {
+        templateId: input.templateId,
+        path: input.path,
+        value: input.value,
+        reason: input.reason,
+      },
+    });
 
     return {
       committed: false,
-      actionId: inserted.id,
+      actionId: reviewProposal.actionId,
       classification: 'sensitive',
       requiresApproval: true,
     };

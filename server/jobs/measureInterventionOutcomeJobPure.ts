@@ -94,7 +94,10 @@ export function decideOutcomeMeasurement(params: {
       organisationId: params.action.organisationId,
       interventionId: params.action.id,
       accountId: params.accountId,
-      interventionTypeSlug: params.action.actionType,
+      // Use the template slug when available so cooldown lookups in
+      // checkCooldown() (which key on template.slug) find this outcome row.
+      // Fall back to actionType for actions created without a template.
+      interventionTypeSlug: params.action.metadata.triggerTemplateSlug ?? params.action.actionType,
       healthScoreBefore: params.action.metadata.healthScoreAtProposal,
       healthScoreAfter: params.postSnapshot?.score,
       measuredAfterHours: windowHours,

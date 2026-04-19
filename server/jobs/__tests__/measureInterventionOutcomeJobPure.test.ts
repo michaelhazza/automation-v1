@@ -178,7 +178,9 @@ test('B2 SHIP GATE: synthetic end-to-end — atRisk → watch band change, +18 d
   assert(decision.kind === 'measure', `kind=${decision.kind}`);
   const args = decision.recordArgs!;
   assert(args.interventionId === 'act-b2-1', 'interventionId = action.id');
-  assert(args.interventionTypeSlug === 'crm.send_email', 'slug');
+  // After the cooldown-key fix: templateSlug takes precedence over actionType
+  // so checkCooldown() can match outcome rows keyed on template.slug.
+  assert(args.interventionTypeSlug === 'check_in', 'slug (templateSlug wins over actionType)');
   assert(args.healthScoreBefore === 38, `before=${args.healthScoreBefore}`);
   assert(args.healthScoreAfter === 56, `after=${args.healthScoreAfter}`);
   assert(args.measuredAfterHours === 24, 'measuredAfterHours');
