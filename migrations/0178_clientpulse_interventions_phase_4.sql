@@ -39,6 +39,6 @@ CREATE INDEX IF NOT EXISTS actions_intervention_outcome_pending_idx
           'crm.create_task',
           'clientpulse.operator_alert'
         )
-    AND status = 'completed';
+    AND status IN ('completed', 'failed');
 
 COMMIT;

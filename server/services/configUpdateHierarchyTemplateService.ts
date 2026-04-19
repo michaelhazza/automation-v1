@@ -15,11 +15,13 @@
  *                      and then commits the merge + writes config_history.
  */
 
-import { eq, and, max } from 'drizzle-orm';
+import { eq, and, isNull, max } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { hierarchyTemplates } from '../db/schema/hierarchyTemplates.js';
 import { actions } from '../db/schema/actions.js';
 import { configHistory } from '../db/schema/configHistory.js';
+import { agents } from '../db/schema/agents.js';
+import { systemAgents } from '../db/schema/systemAgents.js';
 import { configHistoryService } from './configHistoryService.js';
 import {
   applyPathPatch,
@@ -29,6 +31,45 @@ import {
   buildConfigHistorySnapshotShape,
 } from './configUpdateHierarchyTemplatePure.js';
 import { createHash } from 'crypto';
+
+/**
+ * Resolve the org's default subaccount hierarchy template id — used by the
+ * Configuration Assistant chat popup when the operator doesn't name a
+ * template explicitly. Returns null when no default is configured.
+ */
+export async function resolveDefaultHierarchyTemplateId(
+  organisationId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ id: hierarchyTemplates.id })
+    .from(hierarchyTemplates)
+    .where(
+      and(
+        eq(hierarchyTemplates.organisationId, organisationId),
+        eq(hierarchyTemplates.isDefaultForSubaccount, true),
+        isNull(hierarchyTemplates.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/**
+ * Resolve the org's Portfolio Health agent id — used by sensitive-path
+ * enqueue for the `agentId` FK. Returns null when the system agent is not
+ * yet linked (e.g. org hasn't applied the ClientPulse template).
+ */
+export async function resolvePortfolioHealthAgentId(
+  organisationId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .where(and(eq(agents.organisationId, organisationId), eq(systemAgents.slug, 'portfolio-health-agent')))
+    .limit(1);
+  return row?.id ?? null;
+}
 
 export interface ConfigUpdateInput {
   organisationId: string;
@@ -75,6 +116,7 @@ export async function applyHierarchyTemplateConfigUpdate(
       and(
         eq(hierarchyTemplates.id, input.templateId),
         eq(hierarchyTemplates.organisationId, input.organisationId),
+        isNull(hierarchyTemplates.deletedAt),
       ),
     )
     .limit(1);
@@ -115,6 +157,32 @@ export async function applyHierarchyTemplateConfigUpdate(
       .digest('hex')
       .slice(0, 40);
 
+    // Pre-check dedup: the unique index `(subaccount_id, idempotency_key)`
+    // is NULL-equals-NULL-false under Postgres semantics, so org-scoped
+    // actions (subaccount_id IS NULL) do not dedup via ON CONFLICT. Use an
+    // explicit pre-check keyed on (organisationId, idempotencyKey) — the
+    // org-scope path is low-throughput (operator-driven) so the extra
+    // round-trip is negligible and the semantics are exact.
+    const [existing] = await db
+      .select({ id: actions.id })
+      .from(actions)
+      .where(
+        and(
+          eq(actions.organisationId, input.organisationId),
+          eq(actions.idempotencyKey, idempotencyKey),
+          eq(actions.actionScope, 'org'),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      return {
+        committed: false,
+        actionId: existing.id,
+        classification: 'sensitive',
+        requiresApproval: true,
+      };
+    }
+
     const [inserted] = await db
       .insert(actions)
       .values({
@@ -143,28 +211,7 @@ export async function applyHierarchyTemplateConfigUpdate(
           recommendedBy: 'config_agent',
         },
       })
-      .onConflictDoNothing({ target: [actions.subaccountId, actions.idempotencyKey] })
       .returning({ id: actions.id });
-
-    if (!inserted) {
-      // Duplicate — look up the existing row by idempotencyKey.
-      const [dup] = await db
-        .select({ id: actions.id })
-        .from(actions)
-        .where(
-          and(
-            eq(actions.organisationId, input.organisationId),
-            eq(actions.idempotencyKey, idempotencyKey),
-          ),
-        )
-        .limit(1);
-      return {
-        committed: false,
-        actionId: dup?.id ?? '',
-        classification: 'sensitive',
-        requiresApproval: true,
-      };
-    }
 
     return {
       committed: false,
@@ -239,6 +286,7 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
       and(
         eq(hierarchyTemplates.id, payload.templateId),
         eq(hierarchyTemplates.organisationId, params.organisationId),
+        isNull(hierarchyTemplates.deletedAt),
       ),
     )
     .limit(1);

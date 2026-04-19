@@ -2,12 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { applyHierarchyTemplateConfigUpdate } from '../services/configUpdateHierarchyTemplateService.js';
-import { db } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
-import { agents } from '../db/schema/agents.js';
-import { systemAgents } from '../db/schema/systemAgents.js';
-import { hierarchyTemplates } from '../db/schema/hierarchyTemplates.js';
+import {
+  applyHierarchyTemplateConfigUpdate,
+  resolveDefaultHierarchyTemplateId,
+  resolvePortfolioHealthAgentId,
+} from '../services/configUpdateHierarchyTemplateService.js';
 
 const router = Router();
 
@@ -38,30 +37,17 @@ router.post(
       throw { statusCode: 400, message: 'Invalid request body', errorCode: 'INVALID_BODY' };
     }
 
-    // Resolve templateId: explicit or the org's default subaccount template.
-    let templateId = parsed.data.templateId;
+    const templateId =
+      parsed.data.templateId ?? (await resolveDefaultHierarchyTemplateId(orgId));
     if (!templateId) {
-      const [t] = await db
-        .select({ id: hierarchyTemplates.id })
-        .from(hierarchyTemplates)
-        .where(
-          and(
-            eq(hierarchyTemplates.organisationId, orgId),
-            eq(hierarchyTemplates.isDefaultForSubaccount, true),
-          ),
-        )
-        .limit(1);
-      if (!t) throw { statusCode: 409, message: 'No default hierarchy template for this org', errorCode: 'TEMPLATE_NOT_FOUND' };
-      templateId = t.id;
+      throw {
+        statusCode: 409,
+        message: 'No default hierarchy template for this org',
+        errorCode: 'TEMPLATE_NOT_FOUND',
+      };
     }
 
-    // Resolve the portfolio-health-agent for sensitive-path action enqueue.
-    const [agentRow] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
-      .where(and(eq(agents.organisationId, orgId), eq(systemAgents.slug, 'portfolio-health-agent')))
-      .limit(1);
+    const agentId = (await resolvePortfolioHealthAgentId(orgId)) ?? undefined;
 
     const result = await applyHierarchyTemplateConfigUpdate({
       organisationId: orgId,
@@ -71,7 +57,7 @@ router.post(
       reason: parsed.data.reason,
       sourceSession: parsed.data.sessionId ?? null,
       changedByUserId: (req as { userId?: string }).userId ?? null,
-      agentId: agentRow?.id,
+      agentId,
     });
 
     res.json(result);
