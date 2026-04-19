@@ -201,6 +201,12 @@ const DEFAULT_CHURN_RISK_SIGNALS: ChurnRiskSignal[] = [
   { signalSlug: 'pipeline_stagnation', weight: 0.25, type: 'metric_threshold', metricSlug: 'pipeline_velocity', condition: 'above_value', thresholdValue: 60 },
   { signalSlug: 'engagement_decline', weight: 0.25, type: 'metric_threshold', metricSlug: 'conversation_engagement', condition: 'below_value', thresholdValue: 30 },
   { signalSlug: 'low_health', weight: 0.20, type: 'health_score_level', thresholdValue: 40 },
+  // ClientPulse Phase 3 additions (§10 Phase 3). Seeded with weight=0 so the
+  // default weight sum stays at 1.0 and existing orgs see no behaviour change.
+  // Post-launch tuning with Kel's portfolio data will rebalance weights.
+  { signalSlug: 'no_funnel_built', weight: 0, type: 'metric_threshold', metricSlug: 'funnel_count', condition: 'below_value', thresholdValue: 1 },
+  { signalSlug: 'feature_breadth_floor', weight: 0, type: 'metric_threshold', metricSlug: 'ai_feature_usage', condition: 'below_value', thresholdValue: 1 },
+  { signalSlug: 'tier_downgrade_trend', weight: 0, type: 'metric_trend', metricSlug: 'subscription_tier', condition: 'declining_over_periods', periods: 3 },
 ];
 
 const DEFAULT_ALERT_LIMITS: AlertLimits = {

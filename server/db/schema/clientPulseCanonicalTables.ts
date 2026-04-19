@@ -321,3 +321,41 @@ export const clientPulseHealthSnapshots = pgTable(
 
 export type ClientPulseHealthSnapshot = typeof clientPulseHealthSnapshots.$inferSelect;
 export type NewClientPulseHealthSnapshot = typeof clientPulseHealthSnapshots.$inferInsert;
+
+// ===========================================================================
+// client_pulse_churn_assessments — Phase 3 derived risk scores (migration 0174)
+// ===========================================================================
+
+export type ChurnBand = 'healthy' | 'watch' | 'atRisk' | 'critical';
+
+export const clientPulseChurnAssessments = pgTable(
+  'client_pulse_churn_assessments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id),
+    accountId: uuid('account_id'),
+    riskScore: integer('risk_score').notNull(),
+    band: text('band').notNull().$type<ChurnBand>(),
+    drivers: jsonb('drivers').notNull().default([]).$type<Array<{ signal: string; contribution: number }>>(),
+    interventionType: text('intervention_type'),
+    configVersion: text('config_version'),
+    algorithmVersion: text('algorithm_version'),
+    observedAt: timestamp('observed_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    subObservedIdx: index('client_pulse_churn_assessments_sub_observed_idx').on(
+      table.subaccountId,
+      table.observedAt,
+    ),
+    orgBandIdx: index('client_pulse_churn_assessments_org_band_idx').on(
+      table.organisationId,
+      table.band,
+      table.observedAt,
+    ),
+  }),
+);
+
+export type ClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inferSelect;
+export type NewClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inferInsert;

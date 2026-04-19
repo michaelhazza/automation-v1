@@ -4,7 +4,32 @@ import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
 import { db } from '../db/index.js';
-import { clientPulseHealthSnapshots, type HealthTrend } from '../db/schema/clientPulseCanonicalTables.js';
+import {
+  clientPulseHealthSnapshots,
+  clientPulseChurnAssessments,
+  type HealthTrend,
+  type ChurnBand,
+} from '../db/schema/clientPulseCanonicalTables.js';
+
+/**
+ * Map a 0–100 risk score to a churn band using the org's configured bands.
+ *
+ * Churn bands in operational_config are expressed on the HEALTH axis (e.g.
+ * `healthy: [70,100]` means a health-equivalent score of 70–100). Since this
+ * handler produces a risk score (higher = worse), we invert to a health
+ * equivalent (`100 - riskScore`) before band matching. Config-driven — no
+ * hardcoded thresholds.
+ */
+function riskScoreToBand(
+  riskScore: number,
+  bands: { healthy: readonly number[]; watch: readonly number[]; atRisk: readonly number[]; critical: readonly number[] },
+): ChurnBand {
+  const healthEquiv = 100 - riskScore;
+  if (healthEquiv >= bands.healthy[0] && healthEquiv <= bands.healthy[1]) return 'healthy';
+  if (healthEquiv >= bands.watch[0] && healthEquiv <= bands.watch[1]) return 'watch';
+  if (healthEquiv >= bands.atRisk[0] && healthEquiv <= bands.atRisk[1]) return 'atRisk';
+  return 'critical';
+}
 
 // ---------------------------------------------------------------------------
 // Intelligence Skill Executors (v2.0 — config-driven)
@@ -541,6 +566,31 @@ export async function executeComputeChurnRisk(
   const topDrivers = [...signalResults].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
 
   const latestSnapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, context.organisationId);
+
+  // Dual-write to client_pulse_churn_assessments (migration 0174, locked
+  // contract (f)). Skips cleanly if the canonical account has no subaccount
+  // linkage so legacy org-only accounts don't break the handler.
+  const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
+  if (account?.subaccountId) {
+    try {
+      const bands = await orgConfigService.getChurnBands(context.organisationId);
+      const band = riskScoreToBand(riskScore, bands);
+      await db.insert(clientPulseChurnAssessments).values({
+        organisationId: context.organisationId,
+        subaccountId: account.subaccountId,
+        accountId,
+        riskScore,
+        band,
+        drivers: topDrivers.map(d => ({ signal: d.signal, contribution: d.contribution })),
+        interventionType,
+        configVersion,
+        algorithmVersion: ALGORITHM_VERSION,
+      });
+    } catch (cpErr) {
+      console.error('[IntelligenceSkills] ClientPulse churn assessment write failed:',
+        cpErr instanceof Error ? cpErr.message : String(cpErr));
+    }
+  }
 
   return {
     accountId,

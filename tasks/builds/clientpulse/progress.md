@@ -25,7 +25,7 @@ One PR on `claude/commit-to-main-y5BoZ` covering Phases **0 + 0.5 + 1 + 2 + 3** 
 | 2 | Phase 0.5 — Playbook engine scope refactor | **done** | Migration 0171 adds scope enum + nullable subaccount_id + CHECK + partial index. requireSubaccountId helper introduced. Zero new typecheck errors. |
 | 3 | Phase 1 — Signal ingestion (6 adapters + canonical writes + B1 RateLimiter) | **done (substrate)** | Migration 0172 + 6 new adapter fns + RateLimiter wiring (B1) + ingestion service + polling integration. 9 Pure tests pass. Deferred to Phase 1.follow-up: webhook handlers (INSTALL/UNINSTALL/LocationCreate/Update + existing handlers writing canonical_subaccount_mutations); canonicalDictionary entries. staff_activity_pulse, integration_fingerprint, ai_feature_usage write placeholder observations. |
 | 4 | Phase 2 — Health-score execution (re-target existing handler) | **done** | Migration 0173 adds client_pulse_health_snapshots. executeComputeHealthScore dual-writes to new + existing tables. No parallel handler file. Zero new typecheck errors. |
-| 5 | Phase 3 — Churn risk evaluation (re-target existing handler) | pending | Kel-validated signals |
+| 5 | Phase 3 — Churn risk evaluation (re-target existing handler) | **done** | Migration 0174 adds client_pulse_churn_assessments. executeComputeChurnRisk dual-writes with band derived from churnBands config. 3 new default signals seeded at weight=0. No parallel handler file. Zero new typecheck errors. |
 
 ## Locked contracts (non-negotiable, carried from intake)
 

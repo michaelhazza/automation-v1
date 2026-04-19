@@ -381,6 +381,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0173_clientpulse_health_snapshots.sql',
     rationale: 'ClientPulse health-score timeseries per sub-account — leak reveals portfolio health posture.',
   },
+  // 0174 — ClientPulse Phase 3 churn risk assessments
+  {
+    tableName: 'client_pulse_churn_assessments',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0174_clientpulse_churn_assessments.sql',
+    rationale: 'ClientPulse churn-risk band assessments per sub-account — leak reveals which clients are flagged as at-risk.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */
