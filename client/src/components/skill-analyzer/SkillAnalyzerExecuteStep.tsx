@@ -15,12 +15,14 @@ interface ExecuteResult {
 }
 
 /** Shape of a structured blocking reason returned by the server when
- *  POST /execute hits the evaluateApprovalState gate. Spec §11.1. */
+ *  POST /execute hits the evaluateApprovalState gate. Mirrors
+ *  `ApprovalBlockingReason` in server/services/skillAnalyzerServicePure.ts.
+ *  Spec §11.1. */
 interface BlockingReason {
-  resultId: string;
   warningCode: string;
   tier: string;
-  detail?: string;
+  message: string;
+  field?: string;
 }
 
 interface RestoreResult {
@@ -43,8 +45,11 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
   const [error, setError] = useState<string | null>(null);
   // v2 §11.1: structured reasons[] payload returned with 409 responses when
   // the server's evaluateApprovalState re-check rejects the run. Rendered as
-  // a per-result blocking list so reviewers know exactly what to fix.
+  // a per-result blocking list so reviewers know exactly what to fix. The
+  // server also returns the top-level `resultId` so the UI can pinpoint
+  // which row is blocking.
   const [blockingReasons, setBlockingReasons] = useState<BlockingReason[] | null>(null);
+  const [blockingResultId, setBlockingResultId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
@@ -61,6 +66,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
   async function handleExecute() {
     setError(null);
     setBlockingReasons(null);
+    setBlockingResultId(null);
     setExecuting(true);
     try {
       const res = await api.post(`/api/system/skill-analyser/jobs/${job.id}/execute`);
@@ -72,6 +78,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
           data?: {
             error?: unknown;
             reasons?: BlockingReason[];
+            resultId?: string;
           };
         };
         message?: string;
@@ -83,6 +90,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
       // error message for every other failure mode.
       if (e?.response?.status === 409 && Array.isArray(data?.reasons) && data!.reasons!.length > 0) {
         setBlockingReasons(data!.reasons!);
+        if (typeof data!.resultId === 'string') setBlockingResultId(data!.resultId);
       }
       setError(
         (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message)
@@ -168,15 +176,23 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                 <p className="font-medium mb-1">{error}</p>
                 {blockingReasons && (
-                  <ul className="mt-2 space-y-1 text-xs">
-                    {blockingReasons.map((r, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="font-mono text-red-800">{r.warningCode}</span>
-                        <span className="text-red-600">({r.tier})</span>
-                        {r.detail && <span className="text-red-600">— {r.detail}</span>}
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {blockingResultId && (
+                      <p className="text-xs text-red-600 mt-1">
+                        Blocking result: <span className="font-mono">{blockingResultId}</span>
+                      </p>
+                    )}
+                    <ul className="mt-2 space-y-1 text-xs">
+                      {blockingReasons.map((r) => (
+                        <li key={`${r.warningCode}:${r.field ?? ''}`} className="flex gap-2">
+                          <span className="font-mono text-red-800">{r.warningCode}</span>
+                          <span className="text-red-600">({r.tier})</span>
+                          {r.field && <span className="text-red-600">[{r.field}]</span>}
+                          <span className="text-red-600">— {r.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
               </div>
             )}

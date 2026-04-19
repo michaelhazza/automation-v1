@@ -12,7 +12,7 @@ import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningRes
 import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 /** Deterministic JSON stringify (sorted keys) for hashing. */
 function stableStringify(value: unknown): string {
@@ -1115,9 +1115,20 @@ export async function executeApproved(params: {
 
   // v2 §11.11.3: atomic execution-lock acquisition. Concurrent Execute calls
   // land here and see 409 until the current run finishes.
+  //
+  // Ownership token: minted here and written in the same atomic UPDATE that
+  // takes the lock. Release UPDATEs gate on this token so a late-finishing
+  // process (e.g., after a stale-lock unlock reassigned the lock) cannot
+  // clear the new owner's lock.
+  const lockToken = randomUUID();
   const lockRows = await db
     .update(skillAnalyzerJobs)
-    .set({ executionLock: true, executionStartedAt: new Date(), executionFinishedAt: null })
+    .set({
+      executionLock: true,
+      executionLockToken: lockToken,
+      executionStartedAt: new Date(),
+      executionFinishedAt: null,
+    })
     .where(and(
       eq(skillAnalyzerJobs.id, jobId),
       eq(skillAnalyzerJobs.organisationId, organisationId),
@@ -1143,11 +1154,23 @@ export async function executeApproved(params: {
   try {
     return await runExecute(params);
   } finally {
-    // Release the lock unconditionally — success, partial failure, or thrown error.
+    // Release the lock unconditionally — but only if we still own it. The
+    // token guard prevents a late-finishing process from clearing a fresh
+    // owner's lock after a stale-lock unlock reassigned ownership.
+    // executionStartedAt is cleared so a subsequent unlock call can tell
+    // the difference between "never ran" and "ran and finished".
     await db
       .update(skillAnalyzerJobs)
-      .set({ executionLock: false, executionFinishedAt: new Date() })
-      .where(eq(skillAnalyzerJobs.id, jobId));
+      .set({
+        executionLock: false,
+        executionLockToken: null,
+        executionStartedAt: null,
+        executionFinishedAt: new Date(),
+      })
+      .where(and(
+        eq(skillAnalyzerJobs.id, jobId),
+        eq(skillAnalyzerJobs.executionLockToken, lockToken),
+      ));
   }
 }
 
@@ -1181,12 +1204,20 @@ export async function unlockStaleExecution(params: {
       errorCode: 'EXECUTION_LOCK_NOT_HELD',
     };
   }
+  // A lock with no executionStartedAt is an inconsistent state — never
+  // assume infinite age and silently nuke it. Bail with a dedicated code so
+  // the operator can investigate (likely needs a direct DB fix).
+  if (!job.executionStartedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Execution lock has no start timestamp — refusing to unlock without one. Inspect the job row directly.',
+      errorCode: 'EXECUTION_LOCK_NO_START',
+    };
+  }
 
   const config = await skillAnalyzerConfigService.getConfig();
   const staleThresholdMs = config.executionLockStaleSeconds * 1000;
-  const heldForMs = job.executionStartedAt
-    ? Date.now() - new Date(job.executionStartedAt).getTime()
-    : Number.POSITIVE_INFINITY;
+  const heldForMs = Date.now() - new Date(job.executionStartedAt).getTime();
   if (heldForMs < staleThresholdMs) {
     throw {
       statusCode: 409,
@@ -1195,10 +1226,29 @@ export async function unlockStaleExecution(params: {
     };
   }
 
-  await db
+  // Clear the lock, token, and start timestamp. The affected-row check
+  // closes the narrow window where the live Execute's `finally` ran between
+  // our staleness check and this UPDATE — returning 0 rows means the lock
+  // was already released, which we surface distinctly rather than falsely
+  // claiming to have unlocked it.
+  const cleared = await db
     .update(skillAnalyzerJobs)
-    .set({ executionLock: false, executionFinishedAt: new Date() })
-    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.executionLock, true)));
+    .set({
+      executionLock: false,
+      executionLockToken: null,
+      executionStartedAt: null,
+      executionFinishedAt: new Date(),
+    })
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.executionLock, true)))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (!cleared[0]) {
+    throw {
+      statusCode: 409,
+      message: 'Lock was released concurrently by the running Execute. No action needed.',
+      errorCode: 'EXECUTION_LOCK_RELEASED_CONCURRENTLY',
+    };
+  }
 
   logger.warn('[skillAnalyzer] stale execution lock cleared', {
     jobId,
