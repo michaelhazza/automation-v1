@@ -130,6 +130,13 @@
   .hist-item .hi-outcome.improved { color: #15803d; }
   .hist-item .hi-outcome.unchanged { color: #6b7280; }
   .hist-item .hi-outcome.worsened { color: #b91c1c; }
+  /* B2 band-change attribution badges (new in Phase 6 — shown on every history row that has an intervention_outcomes row) */
+  .band-change-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 12px; font-size: 10.5px; font-weight: 700; margin-left: 6px; }
+  .band-change-badge.improved { background: #d1fae5; color: #065f46; }
+  .band-change-badge.unchanged { background: #f3f4f6; color: #4b5563; }
+  .band-change-badge.worsened { background: #fee2e2; color: #991b1b; }
+  .b2-attribution { font-size: 10.5px; color: #6b7280; margin-top: 4px; padding: 4px 8px; background: #f9fafb; border-radius: 4px; display: inline-block; }
+  .b2-attribution code { background: #fff; padding: 1px 4px; border-radius: 3px; border: 1px solid #e5e7eb; font-size: 10px; }
   .hist-item .badge {
     align-self: start; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 8px;
     text-transform: uppercase; letter-spacing: 0.4px;
@@ -153,7 +160,7 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · DELIVERED AS A REACT PAGE at <code>/clientpulse/subaccount/:id</code> · Route does NOT exist today; new page to build. Reads same canonical tables as the dashboard but scoped to one sub-account. NO playbook involvement.</div>
+<div class="annot-banner">📐 MOCKUP v2 · /clientpulse/clients/:subaccountId · <strong>Phase 6</strong> pilot enablement · Per-client drilldown — mounts the same <em>ProposeInterventionModal</em> from the dashboard high-risk widget plus full intervention history with B2 outcome attribution (improved / unchanged / worsened + band-change badges) · "Open Configuration Assistant" entry point in the page header · Reads canonical ClientPulse tables scoped to one subaccount</div>
 <div class="container">
 
   <div class="breadcrumb">
@@ -182,6 +189,7 @@
     </div>
     <div class="actions">
       <button class="primary">Propose intervention</button>
+      <button class="secondary">💬 Open Config Assistant</button>
       <button class="secondary">View in GHL ↗</button>
       <button class="secondary">Pause monitoring</button>
       <button class="secondary">Export history</button>
@@ -341,7 +349,8 @@
             <div class="hi-when">12 Apr 2026 · 09:14</div>
             <div class="hi-trigger">Triggered by: <strong>Activity dropped 50% week-over-week</strong> (2 weeks ago)</div>
             <div class="hi-action">📧 Send check-in email — "How are things going with the platform?"</div>
-            <div class="hi-outcome unchanged">→ Outcome: client opened email but no reply. Health score unchanged after 72h.</div>
+            <div class="hi-outcome unchanged">→ Outcome: client opened email but no reply. Health score unchanged after 72h. <span class="band-change-badge unchanged">⏸ Critical → Critical</span></div>
+            <div class="b2-attribution">B2 attribution · <code>healthScoreBefore=18</code> → <code>healthScoreAfter=19</code> · delta +1 · measured 72h post-execute</div>
           </div>
           <span class="badge approved">Approved &amp; sent</span>
         </div>
@@ -350,7 +359,8 @@
             <div class="hi-when">29 Mar 2026 · 14:08</div>
             <div class="hi-trigger">Triggered by: <strong>Tier downgrade detected</strong></div>
             <div class="hi-action">📋 Create retention task for Kel — "Call Smith Dental about $347 → $147 downgrade"</div>
-            <div class="hi-outcome improved">→ Outcome: call made on 30 Mar, conversation logged. Health score temporarily stable for 5 days.</div>
+            <div class="hi-outcome improved">→ Outcome: call made on 30 Mar, conversation logged. Health score climbed +18 within 24h. <span class="band-change-badge improved">↑ atRisk → watch</span></div>
+            <div class="b2-attribution">B2 attribution · <code>healthScoreBefore=38</code> → <code>healthScoreAfter=56</code> · delta +18 · band changed (improved) · measured 24h post-execute</div>
           </div>
           <span class="badge approved">Approved</span>
         </div>

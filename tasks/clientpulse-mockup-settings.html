@@ -158,7 +158,7 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Org-admin view · Settings page for ClientPulse overrides · Template is locked (set by system admin); org admin can override specific values per-category with "reset to template default" always available.</div>
+<div class="annot-banner">📐 MOCKUP v2 · /clientpulse/settings · <strong>Phase 5</strong> typed editors · After Phase A platform cleanup, this page edits the <strong>org-level operational config</strong> (lives on the organisation, not on a subaccount blueprint) · Same data is editable conversationally via the <em>Configuration Assistant popup</em> — both paths write through <code>POST /api/organisation/config/apply</code> with full diff + audit · Defaults seeded from the adopted Organisation Template; org admin can override per-field with "reset to template default" always available · Sensitive paths (weights · churn bands · intervention defaults · alert limits) route through the review queue when changed</div>
 
 <div class="app">
 
@@ -188,14 +188,21 @@
       <div class="sub">Tune thresholds, intervention templates, and detection rules for your organisation. Every value shows whether it's a template default or your own override.</div>
     </div>
 
-    <!-- Chat-assistant helper callout -->
+    <!-- Chat-assistant helper callout — opens the Configuration Assistant popup (Option 2 from Phase A) -->
     <div style="margin: 18px 28px 20px; padding: 14px 18px; background: linear-gradient(90deg, #f5f3ff 0%, #ecfeff 100%); border: 1px solid #ddd6fe; border-radius: 8px; display: flex; gap: 14px; align-items: center;">
       <div style="width: 34px; height: 34px; background: #6366f1; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; flex-shrink: 0;">💬</div>
       <div style="flex: 1;">
         <div style="font-weight: 600; font-size: 14px; color: #3730a3; margin-bottom: 2px;">Don't want to click through settings? Just ask.</div>
-        <div style="font-size: 12px; color: #4c1d95;">Try: <em>"bump pipeline velocity weight to 0.35"</em> · <em>"disable the tier-downgrade retention alert"</em> · <em>"reset blind-spot thresholds to defaults"</em> — the Configuration Assistant handles it exactly the same way as editing here.</div>
+        <div style="font-size: 12px; color: #4c1d95;">Try: <em>"bump pipeline velocity weight to 0.35"</em> · <em>"disable the tier-downgrade retention alert"</em> · <em>"reset blind-spot thresholds to defaults"</em> — the Configuration Assistant works generically across all platform settings (agents, schedules, integrations, ClientPulse) and writes through the same audit trail as the typed editors below.</div>
       </div>
-      <a href="#" style="font-size: 12px; color: #4338ca; text-decoration: none; font-weight: 600; flex-shrink: 0;">Open chat →</a>
+      <button style="font-size: 12px; background: #4338ca; color: #fff; border: 0; padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; flex-shrink: 0;">Open Configuration Assistant ↗</button>
+    </div>
+
+    <!-- Provenance strip explaining where these values come from after Phase A -->
+    <div style="margin: 0 28px 18px; padding: 10px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 11.5px; color: #6b7280; display: flex; gap: 18px; align-items: center;">
+      <span><strong style="color:#374151;">Where these values live:</strong> <code style="background:#fff;padding:1px 5px;border-radius:3px;border:1px solid #e5e7eb;">organisations.operational_config_override</code> (post-Phase-A)</span>
+      <span><strong style="color:#374151;">Defaults from:</strong> Organisation Template "GHL Agency Intelligence" v3</span>
+      <span style="margin-left:auto;"><a href="#" style="color:#4338ca;text-decoration:none;font-weight:600;">View change history →</a></span>
     </div>
 
     <div class="content">
