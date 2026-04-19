@@ -84,6 +84,73 @@ export interface DataRetentionConfig {
   canonicalEntityDays: number | null;
 }
 
+// ── ClientPulse operational-config block types (§12.2 Gap A) ──────────────
+
+export interface StaffActivityMutationType {
+  type: string;
+  weight: number;
+}
+
+export interface StaffActivityDefinition {
+  countedMutationTypes: StaffActivityMutationType[];
+  excludedUserKinds: Array<'automation' | 'contact' | 'unknown' | 'staff'>;
+  automationUserResolution: {
+    strategy: 'outlier_by_volume' | 'named_list';
+    threshold: number;
+    cacheMonths: number;
+  };
+  lookbackWindowsDays: number[];
+  churnFlagThresholds: {
+    zeroActivityDays: number;
+    weekOverWeekDropPct: number;
+  };
+}
+
+export interface IntegrationFingerprintPattern {
+  type: 'conversation_provider_id' | 'workflow_action_type' | 'outbound_webhook_domain' | 'custom_field_prefix' | 'tag_prefix' | 'contact_source';
+  value?: string;
+  valuePattern?: string;
+}
+
+export interface IntegrationFingerprintSeed {
+  integrationSlug: string;
+  displayName: string;
+  vendorUrl?: string;
+  fingerprints: IntegrationFingerprintPattern[];
+  confidence: number;
+}
+
+export interface IntegrationFingerprintConfig {
+  seedLibrary: IntegrationFingerprintSeed[];
+  scanFingerprintTypes: string[];
+  unclassifiedSignalPromotion: {
+    surfaceAfterOccurrenceCount: number;
+    surfaceAfterSubaccountCount: number;
+  };
+}
+
+export interface ChurnBands {
+  healthy: [number, number];
+  watch: [number, number];
+  atRisk: [number, number];
+  critical: [number, number];
+}
+
+export interface InterventionDefaults {
+  cooldownHours: number;
+  cooldownScope: 'proposed' | 'executed' | 'any_outcome';
+  defaultGateLevel: 'auto' | 'review';
+  maxProposalsPerDayPerSubaccount: number;
+  maxProposalsPerDayPerOrg: number;
+}
+
+export interface OnboardingMilestoneDef {
+  slug: string;
+  label: string;
+  targetDays: number;
+  signal: string;
+}
+
 export interface OperationalConfig {
   healthScoreFactors?: HealthScoreFactor[];
   anomalyConfig?: AnomalyConfig;
@@ -102,6 +169,12 @@ export interface OperationalConfig {
   maxSkipCyclesPerAccount?: number;
   metricAvailabilityMode?: 'strict' | 'lenient';
   templateMigrationMode?: 'gradual' | 'hard_reset' | 'dual_run';
+  // ClientPulse additions (§12.2 Gap A)
+  staffActivity?: StaffActivityDefinition;
+  integrationFingerprints?: IntegrationFingerprintConfig;
+  churnBands?: ChurnBands;
+  interventionDefaults?: InterventionDefaults;
+  onboardingMilestones?: OnboardingMilestoneDef[];
 }
 
 // ── Default fallbacks (used when no template is applied) ──────────────────
@@ -139,6 +212,67 @@ const DEFAULT_ALERT_LIMITS: AlertLimits = {
 const DEFAULT_COLD_START: ColdStartConfig = {
   minimumDataPoints: 14,
   allowHeuristicScoring: false,
+};
+
+// ── ClientPulse defaults — seeded by migration 0170 into the GHL Agency template ──
+// These fallbacks only fire if an org has no template applied. Post-migration every
+// GHL Agency org gets the seeded JSONB; new-template authors get a structured default.
+
+const DEFAULT_STAFF_ACTIVITY: StaffActivityDefinition = {
+  countedMutationTypes: [
+    { type: 'contact_created', weight: 1.0 },
+    { type: 'contact_updated', weight: 0.5 },
+    { type: 'opportunity_stage_changed', weight: 2.0 },
+    { type: 'opportunity_status_changed', weight: 1.5 },
+    { type: 'message_sent_outbound', weight: 1.5 },
+    { type: 'note_added', weight: 1.0 },
+    { type: 'task_completed', weight: 1.0 },
+    { type: 'workflow_edited', weight: 3.0 },
+    { type: 'funnel_edited', weight: 3.0 },
+    { type: 'calendar_configured', weight: 2.0 },
+  ],
+  excludedUserKinds: ['automation', 'contact', 'unknown'],
+  automationUserResolution: {
+    strategy: 'outlier_by_volume',
+    threshold: 0.6,
+    cacheMonths: 1,
+  },
+  lookbackWindowsDays: [7, 30, 90],
+  churnFlagThresholds: {
+    zeroActivityDays: 14,
+    weekOverWeekDropPct: 50,
+  },
+};
+
+const DEFAULT_INTEGRATION_FINGERPRINTS: IntegrationFingerprintConfig = {
+  seedLibrary: [],
+  scanFingerprintTypes: [
+    'conversation_provider_id',
+    'workflow_action_type',
+    'outbound_webhook_domain',
+    'custom_field_prefix',
+    'tag_prefix',
+    'contact_source',
+  ],
+  unclassifiedSignalPromotion: {
+    surfaceAfterOccurrenceCount: 50,
+    surfaceAfterSubaccountCount: 3,
+  },
+};
+
+const DEFAULT_CHURN_BANDS: ChurnBands = {
+  healthy: [70, 100],
+  watch: [40, 69],
+  atRisk: [20, 39],
+  critical: [0, 19],
+};
+
+const DEFAULT_INTERVENTION_DEFAULTS: InterventionDefaults = {
+  cooldownHours: 48,
+  cooldownScope: 'executed',
+  defaultGateLevel: 'review',
+  maxProposalsPerDayPerSubaccount: 1,
+  maxProposalsPerDayPerOrg: 20,
 };
 
 // ── Service ───────────────────────────────────────────────────────────────
@@ -231,6 +365,33 @@ export const orgConfigService = {
     if (!config) return 'no-config';
     const hash = crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
     return hash.substring(0, 16);
+  },
+
+  // ── ClientPulse accessors (§12.2 Gap B) ─────────────────────────────────
+
+  async getStaffActivityDefinition(orgId: string): Promise<StaffActivityDefinition> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.staffActivity ?? DEFAULT_STAFF_ACTIVITY;
+  },
+
+  async getIntegrationFingerprintConfig(orgId: string): Promise<IntegrationFingerprintConfig> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.integrationFingerprints ?? DEFAULT_INTEGRATION_FINGERPRINTS;
+  },
+
+  async getChurnBands(orgId: string): Promise<ChurnBands> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.churnBands ?? DEFAULT_CHURN_BANDS;
+  },
+
+  async getInterventionDefaults(orgId: string): Promise<InterventionDefaults> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.interventionDefaults ?? DEFAULT_INTERVENTION_DEFAULTS;
+  },
+
+  async getOnboardingMilestoneDefs(orgId: string): Promise<OnboardingMilestoneDef[]> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.onboardingMilestones ?? [];
   },
 };
 
