@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-16 (Execution infrastructure hardening — exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity)
+> **Last updated:** 2026-04-19 (ClientPulse Phase 1 follow-ups — Staff Activity Pulse + Integration Fingerprint Scanner skills, GHL webhook mutation writes covering 10 event types)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -531,7 +531,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Composite health scoring based on normalised CRM, engagement, and activity metrics
 - Anomaly detection compared against each account's own historical baseline
 - Intervention triggers (check-in, pause, escalation alert) proposed with human gating
-- ClientPulse dashboard for portfolio-wide health visibility at a glance
+- ClientPulse dashboard for portfolio-wide health visibility at a glance, powered by Staff Activity Pulse (weighted-sum activity scoring from CRM mutation events, with automation-user exclusion) and Integration Fingerprint Scanner (detects third-party tools installed in each sub-account from canonical artifact patterns)
 
 ### Customer Support Automation
 
@@ -583,7 +583,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 110 skills.
+Complete list of all 112 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -630,8 +630,10 @@ Complete list of all 110 skills.
 |-------|-------------|------|------|
 | `compute_churn_risk` | Evaluate churn risk signals and produce risk score with intervention recommendation | LLM | — |
 | `compute_health_score` | Calculate composite health score (0-100) for account | LLM | — |
+| `compute_staff_activity_pulse` | Calculate weighted activity score from canonical CRM mutations; excludes automation users via outlier-volume classifier | Deterministic | — |
 | `detect_anomaly` | Compare current metrics against historical baseline and flag deviations | LLM | — |
 | `detect_churn_risk` | Analyse account health signals to identify at-risk accounts | LLM | — |
+| `scan_integration_fingerprints` | Match canonical artifacts against a seed fingerprint library; emit per-subaccount detections and queue novel observations for operator triage | Deterministic | — |
 | `draft_followup` | Draft contextual follow-up email for stale deal or at-risk contact | LLM | — |
 | `enrich_contact` | Retrieve enrichment data for contact and write back to CRM | Deterministic | — |
 | `read_crm` | Retrieve contact, deal, and pipeline data from CRM | Deterministic | — |
@@ -786,7 +788,7 @@ Complete list of all 110 skills.
 | **Gmail** | OAuth2 | Send email, read inbox | Org or subaccount |
 | **Slack** | OAuth2 | Post messages, file uploads, thread conversations, HITL buttons (Block Kit), @mention agent dispatch, DM conversations | Org or subaccount |
 | **HubSpot** | OAuth2 | Contacts, deals, content; full CRM read/write | Org or subaccount |
-| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, location data; webhook ingestion (HMAC-SHA256) | Org (with concurrency cap) |
+| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, funnels, calendars, users, location and business metadata; webhook ingestion (HMAC-SHA256) covering 10 event types — contact / opportunity / conversation create + update, plus INSTALL / UNINSTALL / LocationCreate / LocationUpdate for sub-account lifecycle tracking | Org (with concurrency cap) |
 | **GitHub** | GitHub App | Fine-grained per-repo access, webhook events (issues, PRs, pushes), task creation from events | Org or subaccount |
 | **Teamwork Desk** | OAuth2 | Project and task management | Org or subaccount |
 | **Stripe** | API adapter | Payment transactions and subscription data | Org |
