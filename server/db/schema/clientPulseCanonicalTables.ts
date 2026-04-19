@@ -495,7 +495,6 @@ export const integrationDetections = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
     usageIndicatorJson: jsonb('usage_indicator_json').notNull().default({}).$type<Record<string, unknown>>(),
-    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     uniq: uniqueIndex('integration_detections_unique').on(
@@ -503,9 +502,10 @@ export const integrationDetections = pgTable(
       table.subaccountId,
       table.integrationSlug,
     ),
-    orgSlugIdx: index('integration_detections_org_slug_idx')
-      .on(table.organisationId, table.integrationSlug)
-      .where(sql`${table.deletedAt} IS NULL`),
+    orgSlugIdx: index('integration_detections_org_slug_idx').on(
+      table.organisationId,
+      table.integrationSlug,
+    ),
   }),
 );
 

@@ -118,19 +118,17 @@ CREATE TABLE integration_detections (
   matched_fingerprint_id uuid NOT NULL REFERENCES integration_fingerprints(id),
   first_seen_at timestamptz NOT NULL DEFAULT now(),
   last_seen_at timestamptz NOT NULL DEFAULT now(),
-  usage_indicator_json jsonb NOT NULL DEFAULT '{}'::jsonb,
-  deleted_at timestamptz
+  usage_indicator_json jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
--- Non-partial unique. soft-delete (deleted_at) is a forward-compatibility
--- affordance; in v1 the scanner always upserts unconditionally so ON CONFLICT
--- matches the whole index without a partial predicate.
+-- Scanner owns every row and refreshes it on every scan. There is no
+-- user-facing delete action in v1; if one emerges later, introduce it via a
+-- separate migration rather than a half-wired deleted_at column.
 CREATE UNIQUE INDEX integration_detections_unique
   ON integration_detections (organisation_id, subaccount_id, integration_slug);
 
 CREATE INDEX integration_detections_org_slug_idx
-  ON integration_detections (organisation_id, integration_slug)
-  WHERE deleted_at IS NULL;
+  ON integration_detections (organisation_id, integration_slug);
 
 ALTER TABLE integration_detections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_detections FORCE ROW LEVEL SECURITY;

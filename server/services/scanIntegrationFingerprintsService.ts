@@ -104,14 +104,14 @@ export async function executeScanIntegrationFingerprints(
           integrationDetections.subaccountId,
           integrationDetections.integrationSlug,
         ],
-        // Re-observation refreshes the pointer + clears any prior soft-delete.
-        // If an operator dismissed the detection and the scanner sees the
-        // integration again, the semantically correct state is "present".
+        // Re-observation refreshes last_seen_at + the match pointer so a
+        // library change (e.g. higher-confidence pattern added) is picked up
+        // on the next scan. firstSeenAt is left alone — the initial detection
+        // timestamp is meaningful for cohort analysis.
         set: {
           lastSeenAt: now,
           matchedFingerprintId: d.matchedFingerprintId,
           usageIndicatorJson: { match: d.evidence },
-          deletedAt: null,
         },
       });
   }
@@ -125,6 +125,12 @@ export async function executeScanIntegrationFingerprints(
       firstSeenAt: now,
       lastSeenAt: now,
       occurrenceCount: 1,
+      // V1 heuristic: importance_score tracks occurrence_count so the triage
+      // query `ORDER BY importance_score DESC` returns the most-seen signals
+      // first. Phase 2+ upgrade path: weight by unique-subaccount reach (e.g.
+      // `occurrence_count * ln(unique_subaccounts)`) so a pattern seen once
+      // in 50 subs outranks a pattern seen 50 times in one sub.
+      importanceScore: '1',
     };
     await db
       .insert(integrationUnclassifiedSignals)
@@ -139,6 +145,7 @@ export async function executeScanIntegrationFingerprints(
         set: {
           lastSeenAt: now,
           occurrenceCount: sql`${integrationUnclassifiedSignals.occurrenceCount} + 1`,
+          importanceScore: sql`${integrationUnclassifiedSignals.occurrenceCount} + 1`,
         },
       });
   }

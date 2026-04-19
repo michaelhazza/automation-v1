@@ -111,6 +111,42 @@ test('scan picks highest-confidence pattern when multiple library rows match', (
   assert(result.detections[0].confidence === 0.95, 'confidence carried through');
 });
 
+test('scan tie-breaks on equal confidence by smallest fingerprint id (deterministic)', () => {
+  const library: FingerprintLibraryEntry[] = [
+    // Same slug + type + confidence — reverse-sorted ids so library order
+    // alone would pick 'zeta'; tie-breaker must pick 'alpha'.
+    entry({ id: 'zeta',  integrationSlug: 'closebot', fingerprintType: 'tag_prefix', fingerprintPattern: '^closebot:', confidence: 0.9 }),
+    entry({ id: 'alpha', integrationSlug: 'closebot', fingerprintType: 'tag_prefix', fingerprintPattern: '^closebot:', confidence: 0.9 }),
+  ];
+  const observations: Observation[] = [{ signalType: 'tag_prefix', signalValue: 'closebot:ft-test' }];
+  const result = scanFingerprintsPure(observations, library);
+  assert(result.detections.length === 1, 'one detection');
+  assert(
+    result.detections[0].matchedFingerprintId === 'alpha',
+    `deterministic tie-breaker should pick 'alpha', got ${result.detections[0].matchedFingerprintId}`,
+  );
+});
+
+test('scan cross-observation tie-break preserves smallest-id winner', () => {
+  const library: FingerprintLibraryEntry[] = [
+    entry({ id: 'alpha', integrationSlug: 'closebot', fingerprintType: 'conversation_provider_id', fingerprintPattern: '^closebot:', confidence: 0.9 }),
+    entry({ id: 'zeta',  integrationSlug: 'closebot', fingerprintType: 'tag_prefix',               fingerprintPattern: '^closebot:', confidence: 0.9 }),
+  ];
+  // Both observations match different patterns at the same confidence. The
+  // first write ('zeta' on first obs) must not overwrite with the second
+  // ('alpha' on second obs) unless alpha < zeta lexically — which it does.
+  const observations: Observation[] = [
+    { signalType: 'tag_prefix', signalValue: 'closebot:x' },
+    { signalType: 'conversation_provider_id', signalValue: 'closebot:y' },
+  ];
+  const result = scanFingerprintsPure(observations, library);
+  assert(result.detections.length === 1, 'one detection per slug');
+  assert(
+    result.detections[0].matchedFingerprintId === 'alpha',
+    `alpha wins the per-slug tie, got ${result.detections[0].matchedFingerprintId}`,
+  );
+});
+
 test('scan handles multiple integrations matched independently', () => {
   const library: FingerprintLibraryEntry[] = [
     entry({ id: 'cb', integrationSlug: 'closebot', fingerprintType: 'conversation_provider_id', fingerprintPattern: '^closebot:', confidence: 0.95 }),

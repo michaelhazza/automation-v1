@@ -71,13 +71,27 @@ export function scanFingerprintsPure(
     let best: { entry: FingerprintLibraryEntry } | null = null;
     for (const entry of candidates) {
       if (!matchesFingerprint(entry, obs.signalValue)) continue;
-      if (!best || entry.confidence > best.entry.confidence) {
+      if (!best) {
+        best = { entry };
+        continue;
+      }
+      // Deterministic tie-breaker: on equal confidence, prefer the lower
+      // fingerprint id. Prevents flaky ordering across runs when the library
+      // contains multiple patterns with identical confidence (e.g. two regex
+      // variants seeded at 0.95).
+      if (entry.confidence > best.entry.confidence) {
+        best = { entry };
+      } else if (entry.confidence === best.entry.confidence && entry.id < best.entry.id) {
         best = { entry };
       }
     }
     if (best) {
       const existing = bySlug.get(best.entry.integrationSlug);
-      if (!existing || best.entry.confidence > existing.confidence) {
+      const replaceExisting =
+        !existing ||
+        best.entry.confidence > existing.confidence ||
+        (best.entry.confidence === existing.confidence && best.entry.id < existing.matchedFingerprintId);
+      if (replaceExisting) {
         bySlug.set(best.entry.integrationSlug, {
           integrationSlug: best.entry.integrationSlug,
           matchedFingerprintId: best.entry.id,
@@ -102,6 +116,10 @@ export function matchesFingerprint(entry: FingerprintLibraryEntry, observedValue
   }
   if (entry.fingerprintPattern !== null) {
     try {
+      // TODO(perf): precompile regexes at library-load time once the seed set
+      // grows past ~50 entries. At the current scale (10 seeds × a few dozen
+      // observations per scan) the compile cost is negligible and is not
+      // worth the cache-invalidation complexity on library updates.
       const re = new RegExp(entry.fingerprintPattern);
       return re.test(observedValue);
     } catch {
