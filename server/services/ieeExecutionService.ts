@@ -81,7 +81,8 @@ export interface EnqueueIEETaskInput {
 export interface EnqueueIEETaskResult {
   ieeRunId: string;
   deduplicated: boolean;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  // 'cancelled' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md)
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 }
 
 // ---------------------------------------------------------------------------

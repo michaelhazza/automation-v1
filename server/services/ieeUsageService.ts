@@ -101,6 +101,92 @@ export async function getIeeRunCost(
 }
 
 // ---------------------------------------------------------------------------
+// Per-run progress — backs the Phase 0 delegated-status live progress panel
+// (client polls every 3s while parent agent_run is 'delegated').
+// ---------------------------------------------------------------------------
+
+export interface IeeRunProgress {
+  ieeRunId: string;
+  type: 'browser' | 'dev';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  stepCount: number;
+  lastHeartbeatAt: string | null;   // ISO
+  heartbeatAgeSeconds: number | null;
+  startedAt: string | null;         // ISO
+  completedAt: string | null;       // ISO
+  failureReason: string | null;
+  resultSummary: unknown;
+}
+
+export async function getIeeRunProgress(
+  ieeRunId: string,
+  organisationId: string,
+  options: {
+    /**
+     * Subaccount-boundary enforcement (external review High-risk #11).
+     *
+     * When the caller is operating in subaccount scope, pass the
+     * subaccount id here. The lookup then refuses to surface an iee_run
+     * whose subaccount id does not match. Without this guard a user with
+     * only subaccount A access, who has somehow learned a ieeRunId
+     * belonging to subaccount B, could fetch progress for that run.
+     *
+     * When the caller is operating at org scope (no current subaccount
+     * context), leave this undefined and the boundary check is skipped.
+     */
+    subaccountId?: string | null;
+  } = {},
+): Promise<IeeRunProgress | null> {
+  const [row] = await db
+    .select({
+      id: ieeRuns.id,
+      organisationId: ieeRuns.organisationId,
+      subaccountId: ieeRuns.subaccountId,
+      type: ieeRuns.type,
+      status: ieeRuns.status,
+      stepCount: ieeRuns.stepCount,
+      lastHeartbeatAt: ieeRuns.lastHeartbeatAt,
+      startedAt: ieeRuns.startedAt,
+      completedAt: ieeRuns.completedAt,
+      failureReason: ieeRuns.failureReason,
+      resultSummary: ieeRuns.resultSummary,
+    })
+    .from(ieeRuns)
+    .where(and(eq(ieeRuns.id, ieeRunId), isNull(ieeRuns.deletedAt)))
+    .limit(1);
+
+  if (!row) return null;
+  // Tenant scope enforcement — cross-org callers receive null (route layer
+  // maps null → 404 without leaking existence).
+  if (row.organisationId !== organisationId) return null;
+  // Subaccount-scope enforcement when a subaccount is provided. If the row
+  // has no subaccountId (org-level IEE run) the check is skipped.
+  if (options.subaccountId !== undefined && options.subaccountId !== null) {
+    if (row.subaccountId && row.subaccountId !== options.subaccountId) {
+      return null;
+    }
+  }
+
+  const now = Date.now();
+  const heartbeatAgeSeconds = row.lastHeartbeatAt
+    ? Math.floor((now - new Date(row.lastHeartbeatAt).getTime()) / 1000)
+    : null;
+
+  return {
+    ieeRunId: row.id,
+    type: row.type as 'browser' | 'dev',
+    status: row.status,
+    stepCount: row.stepCount,
+    lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
+    heartbeatAgeSeconds,
+    startedAt: row.startedAt?.toISOString() ?? null,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    failureReason: row.failureReason ?? null,
+    resultSummary: row.resultSummary ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Aggregated query — backs the §11.8 Usage Explorer page
 // ---------------------------------------------------------------------------
 

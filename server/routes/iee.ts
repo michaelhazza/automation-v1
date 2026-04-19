@@ -8,7 +8,7 @@ import { authenticate, requireOrgPermission, requireSubaccountPermission, requir
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { getIeeRunCost, queryIeeUsage, type UsageScope } from '../services/ieeUsageService.js';
+import { getIeeRunCost, getIeeRunProgress, queryIeeUsage, type UsageScope } from '../services/ieeUsageService.js';
 
 const router = Router();
 
@@ -22,6 +22,37 @@ router.get(
     const ieeRunId = req.params.ieeRunId;
     const breakdown = await getIeeRunCost(ieeRunId, req.orgId!);
     res.json(breakdown);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IEE Phase 0 — progress polling + full-row fetch.
+// Backs the "Delegated" run UI state during active delegation. Light client-
+// side polling (every 3–5s) is the Phase 0 substitute for full WebSocket
+// streaming — see docs/iee-delegation-lifecycle-spec.md Step 6.
+// Also addresses audit finding: no single-row iee_runs endpoint existed,
+// forcing consumers to query the DB directly.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  '/api/iee/runs/:ieeRunId/progress',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    // Optional subaccount-scope hint (external review High-risk #11). When
+    // the client is on a subaccount-scoped page it passes its subaccount
+    // id and the service refuses to surface a row belonging to a different
+    // subaccount. Org-scope callers omit the query param.
+    const rawSubaccountId = typeof req.query.subaccountId === 'string'
+      ? req.query.subaccountId
+      : null;
+    const progress = await getIeeRunProgress(
+      req.params.ieeRunId,
+      req.orgId!,
+      { subaccountId: rawSubaccountId },
+    );
+    if (!progress) {
+      throw { statusCode: 404, message: 'iee_run not found', errorCode: 'IEE_RUN_NOT_FOUND' };
+    }
+    res.json(progress);
   }),
 );
 

@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { projects, agentRuns } from '../db/schema/index.js';
-import { eq, and, isNull, desc, count } from 'drizzle-orm';
+import { eq, and, isNull, desc, count, inArray } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 
 const router = Router();
 
@@ -155,7 +156,14 @@ router.delete(
 
 /**
  * GET /api/subaccounts/:subaccountId/live-status
- * Returns count of currently running agent runs for the sidebar badge.
+ * Returns count of currently in-flight agent runs for the sidebar badge.
+ *
+ * Codex dual-review finding #2: this count must include IEE-delegated runs
+ * so that live-badge resyncs (initial load, socket reconnect) don't drop
+ * to zero while a delegated run is waiting on the worker. The
+ * 'live:agent_started' socket event fires unconditionally in
+ * agentExecutionService before the delegated branch; if this endpoint only
+ * counted 'running', every full refresh would desync the badge.
  */
 router.get(
   '/api/subaccounts/:subaccountId/live-status',
@@ -169,7 +177,7 @@ router.get(
       .from(agentRuns)
       .where(and(
         eq(agentRuns.subaccountId, subaccountId),
-        eq(agentRuns.status, 'running'),
+        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
         eq(agentRuns.isSubAgent, false),
       ));
 

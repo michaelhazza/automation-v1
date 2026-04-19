@@ -423,6 +423,18 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
+  // Consumes pg-boss events emitted by the worker after terminal iee_runs
+  // writes, and finalises the parent agent_runs row accordingly.
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerIeeRunCompletedHandler } = await import('./jobs/ieeRunCompletedHandler.js');
+      await registerIeeRunCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register iee-run-completed handler', err);
+    }
+  }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.
   try {
