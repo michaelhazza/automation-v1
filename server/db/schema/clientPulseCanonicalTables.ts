@@ -470,10 +470,10 @@ export const integrationFingerprints = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    slugTypeIdx: index('integration_fingerprints_slug_type_idx').on(
-      table.integrationSlug,
-      table.fingerprintType,
-    ),
+    // Partial index — mirrors migration 0176 WHERE deleted_at IS NULL.
+    slugTypeIdx: index('integration_fingerprints_slug_type_idx')
+      .on(table.integrationSlug, table.fingerprintType)
+      .where(sql`${table.deletedAt} IS NULL`),
   }),
 );
 
@@ -527,7 +527,10 @@ export const integrationUnclassifiedSignals = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
     occurrenceCount: integer('occurrence_count').notNull().default(1),
-    importanceScore: doublePrecision('importance_score').notNull().default(0),
+    // numeric(5,2) in the DB (see migration 0176). Drizzle `numeric` returns
+    // strings at query time — callers comparing importanceScore values should
+    // parse with Number() before ordering / comparing.
+    importanceScore: numeric('importance_score', { precision: 5, scale: 2 }).notNull().default('0'),
     resolvedToIntegrationSlug: text('resolved_to_integration_slug'),
     resolvedBy: uuid('resolved_by'),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
