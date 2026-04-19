@@ -50,7 +50,7 @@ export function computeStaffActivityPulse(
   let excludedUserMutationCount = 0;
   const eligible: MutationRow[] = [];
   for (const m of mutations) {
-    if (excluded.has(m.externalUserKind as never)) {
+    if (excluded.has(m.externalUserKind)) {
       excludedUserMutationCount += 1;
       continue;
     }
