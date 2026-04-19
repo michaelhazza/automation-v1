@@ -226,18 +226,24 @@ async function fetchActivePlaybookRuns(orgId: string, subaccountId?: string): Pr
   const conditions = [
     eq(playbookRuns.organisationId, orgId),
     eq(playbookRuns.status, 'awaiting_input'),
+    // Priority feed is subaccount-scoped by contract (FeedEntry.subaccountId is
+    // non-nullable). Org-scope runs (migration 0171) surface through an
+    // org-level feed once Phase 5 ships — skip them here.
+    eq(playbookRuns.scope, 'subaccount'),
   ];
   if (subaccountId) conditions.push(eq(playbookRuns.subaccountId, subaccountId));
 
   const rows = await db.select().from(playbookRuns).where(and(...conditions)).limit(30);
 
-  return rows.map((r) => ({
-    source: 'playbook_run' as const,
-    id: r.id,
-    subaccountId: r.subaccountId,
-    severity: 'warning' as const,
-    ageHours: ageInHours(r.createdAt),
-    assignedSubaccountId: r.subaccountId,
-    metadata: { status: r.status },
-  }));
+  return rows
+    .filter((r): r is typeof r & { subaccountId: string } => r.subaccountId !== null)
+    .map((r) => ({
+      source: 'playbook_run' as const,
+      id: r.id,
+      subaccountId: r.subaccountId,
+      severity: 'warning' as const,
+      ageHours: ageInHours(r.createdAt),
+      assignedSubaccountId: r.subaccountId,
+      metadata: { status: r.status },
+    }));
 }

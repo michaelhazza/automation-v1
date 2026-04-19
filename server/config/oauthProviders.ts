@@ -52,7 +52,22 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   ghl: {
     authUrl: 'https://marketplace.leadconnectorhq.com/oauth/chooselocation',
     tokenUrl: 'https://services.leadconnectorhq.com/oauth/token',
-    scopes: ['contacts.readonly', 'contacts.write', 'opportunities.readonly'],
+    // ClientPulse signal ingestion requires scopes beyond the core CRM set (§12.2 Gap E).
+    // Endpoints that need scopes not present on an existing token gate themselves and
+    // mark observations `unavailable_missing_scope` — re-consent flow surfaces at Phase 5.
+    scopes: [
+      'contacts.readonly',
+      'contacts.write',
+      'opportunities.readonly',
+      'locations.readonly',
+      'users.readonly',
+      'calendars.readonly',
+      'funnels.readonly',
+      'conversations.readonly',
+      'conversations/message.readonly',
+      'businesses.readonly',
+      'saas/subscription.readonly',
+    ],
   },
 
   teamwork: {

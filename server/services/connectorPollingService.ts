@@ -7,6 +7,7 @@ import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
+import { ingestClientPulseSignalsForSubaccount } from './clientPulseIngestionService.js';
 
 // ---------------------------------------------------------------------------
 // Connector Polling Service — scheduled data ingestion from external platforms
@@ -81,6 +82,31 @@ export const connectorPollingService = {
 
     const connConfig = (config.configJson ?? {}) as Record<string, unknown>;
     const errors: Array<{ accountId: string; error: string }> = [];
+    // ── pollRunId contract ────────────────────────────────────────────────
+    //
+    // pollRunId represents a single LOGICAL sync attempt, not a transport
+    // attempt. Combined with migration 0175's partial UNIQUE on
+    // (org, subaccount, signal_slug, source_run_id) and onConflictDoNothing
+    // on insert, this gives retry idempotency at the sync-boundary level.
+    //
+    // Invariants for future code paths that read / reuse this id:
+    //   - A retry of the SAME logical sync (pg-boss retry, manual re-run
+    //     after failure) MUST reuse the same pollRunId so conflicting rows
+    //     no-op rather than double-insert.
+    //   - A NEW logical sync (next scheduled cycle, or a re-ingest after
+    //     the first run is complete) MUST generate a fresh pollRunId so
+    //     new observations are not silently dropped by the unique index.
+    //   - Partial-retry-with-additional-data within the same logical
+    //     window is NOT supported by this design. If the adapter returns
+    //     additional rows on retry, they are dropped. The correct response
+    //     is to trigger a new sync with a new pollRunId rather than
+    //     reusing this one.
+    //
+    // Do not thread pollRunId into derived-state writes (tier history,
+    // churn assessments, health snapshots) — those have their own change-
+    // detection / scheduling invariants independent of ingestion retry.
+    const { randomUUID } = await import('node:crypto');
+    const pollRunId = randomUUID();
 
     try {
       // 1. Sync accounts list
@@ -200,6 +226,30 @@ export const connectorPollingService = {
               // Metric computation failure should not fail the sync
               console.error(`[ConnectorPolling] Metric computation failed for ${dbAccount.externalId}:`,
                 metricErr instanceof Error ? metricErr.message : String(metricErr));
+            }
+          }
+
+          // ClientPulse signal ingestion — §2, §4.3. Writes one row per signal
+          // into client_pulse_signal_observations (ship-gate Phase 1). GHL-only
+          // for now; a second CRM would need its own fetchers in a parallel path.
+          if (config.connectorType === 'ghl' && dbAccount.subaccountId) {
+            try {
+              await ingestClientPulseSignalsForSubaccount({
+                organisationId: config.organisationId,
+                subaccountId: dbAccount.subaccountId,
+                connectorType: 'ghl',
+                connection: connection as never,
+                accountExternalId: dbAccount.externalId,
+                connectorConfigId: config.id,
+                sourceRunId: pollRunId,
+                contactCount: contacts.length,
+                opportunityCount: opportunities.length,
+                conversationCount: conversations.length,
+              });
+            } catch (cpErr) {
+              // ClientPulse ingestion failure should not fail the poll cycle.
+              console.error(`[ConnectorPolling] ClientPulse ingestion failed for ${dbAccount.externalId}:`,
+                cpErr instanceof Error ? cpErr.message : String(cpErr));
             }
           }
 
