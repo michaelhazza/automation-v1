@@ -325,6 +325,55 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0168_p3b_canonical_rls.sql',
     rationale: 'External service credentials — principal-scoped visibility protects connection ownership and tokens.',
   },
+  // 0172 — ClientPulse Phase 1 canonical + derived tables
+  {
+    tableName: 'canonical_subaccount_mutations',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Staff activity mutation log (§2.0b) — leaks reveal per-sub-account staff work patterns.',
+  },
+  {
+    tableName: 'canonical_conversation_providers',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Fingerprint source for third-party conversation providers (§2.0c) — reveals which integrations the sub-account uses.',
+  },
+  {
+    tableName: 'canonical_workflow_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Fingerprint source from workflow action types + webhook targets (§2.0c) — reveals automation posture.',
+  },
+  {
+    tableName: 'canonical_tag_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Tag vocabulary per sub-account (§2.0c) — reveals segmentation + third-party tag conventions.',
+  },
+  {
+    tableName: 'canonical_custom_field_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Custom field keys per sub-account (§2.0c) — reveals CRM customisation + third-party prefix patterns.',
+  },
+  {
+    tableName: 'canonical_contact_sources',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Contact attribution sources per sub-account (§2.0c) — reveals acquisition channels and third-party origin markers.',
+  },
+  {
+    tableName: 'client_pulse_signal_observations',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Timeseries of ClientPulse churn-predictive signals per sub-account — cross-tenant leak reveals client health state.',
+  },
+  {
+    tableName: 'subaccount_tier_history',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Subscription tier migration timeseries — reveals pricing posture and downgrade patterns per sub-account.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

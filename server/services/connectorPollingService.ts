@@ -7,6 +7,7 @@ import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
+import { ingestClientPulseSignalsForSubaccount } from './clientPulseIngestionService.js';
 
 // ---------------------------------------------------------------------------
 // Connector Polling Service — scheduled data ingestion from external platforms
@@ -200,6 +201,29 @@ export const connectorPollingService = {
               // Metric computation failure should not fail the sync
               console.error(`[ConnectorPolling] Metric computation failed for ${dbAccount.externalId}:`,
                 metricErr instanceof Error ? metricErr.message : String(metricErr));
+            }
+          }
+
+          // ClientPulse signal ingestion — §2, §4.3. Writes one row per signal
+          // into client_pulse_signal_observations (ship-gate Phase 1). GHL-only
+          // for now; a second CRM would need its own fetchers in a parallel path.
+          if (config.connectorType === 'ghl' && dbAccount.subaccountId) {
+            try {
+              await ingestClientPulseSignalsForSubaccount({
+                organisationId: config.organisationId,
+                subaccountId: dbAccount.subaccountId,
+                connectorType: 'ghl',
+                connection: connection as never,
+                accountExternalId: dbAccount.externalId,
+                connectorConfigId: config.id,
+                contactCount: contacts.length,
+                opportunityCount: opportunities.length,
+                conversationCount: conversations.length,
+              });
+            } catch (cpErr) {
+              // ClientPulse ingestion failure should not fail the poll cycle.
+              console.error(`[ConnectorPolling] ClientPulse ingestion failed for ${dbAccount.externalId}:`,
+                cpErr instanceof Error ? cpErr.message : String(cpErr));
             }
           }
 
