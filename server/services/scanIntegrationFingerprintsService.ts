@@ -25,6 +25,18 @@
  * index (migration 0175 `WHERE source_run_id IS NOT NULL`) and each append
  * a fresh observation + fresh side effects — the timeseries semantics match
  * compute_staff_activity_pulse.
+ *
+ * **Known tradeoff — gate position.** The win-gate sits *after* the scan
+ * compute so the observation payload can include real counts
+ * (`detectionCount`, `unclassifiedCount`, per-detection slug + confidence).
+ * A retry of a conflicting sourceRunId therefore still pays the cost of
+ * loading canonical artifacts + running the matcher before short-circuiting
+ * on the observation insert. At current scale (hundreds of subs × tens of
+ * observations × ~10 seed patterns per poll) that cost is negligible. If
+ * poll cadence or library size grows meaningfully, move the observation
+ * insert to the top with a minimal payload and UPDATE it with the real
+ * counts after compute completes. Explicitly deferred to a Phase 5+
+ * optimisation pass — tracked in `tasks/builds/clientpulse/progress.md`.
  */
 
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
