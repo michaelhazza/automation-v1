@@ -40,6 +40,7 @@ import {
   index,
   uniqueIndex,
   doublePrecision,
+  numeric,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
@@ -61,6 +62,9 @@ export const CANONICAL_UNIQUENESS_MODE: Record<string, CanonicalUniquenessMode> 
   canonical_tag_definitions: 'global',
   canonical_custom_field_definitions: 'global',
   canonical_contact_sources: 'global',
+  integration_fingerprints: 'global',
+  integration_detections: 'scoped',
+  integration_unclassified_signals: 'scoped',
 };
 
 /**
@@ -432,3 +436,118 @@ export const clientPulseChurnAssessments = pgTable(
 
 export type ClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inferSelect;
 export type NewClientPulseChurnAssessment = typeof clientPulseChurnAssessments.$inferInsert;
+
+// ===========================================================================
+// integration_fingerprints — Phase 1 follow-up scanner library (migration 0177)
+// ===========================================================================
+
+export type IntegrationFingerprintScope = 'system' | 'org';
+export type IntegrationFingerprintType =
+  | 'conversation_provider_id'
+  | 'workflow_action_type'
+  | 'outbound_webhook_domain'
+  | 'custom_field_prefix'
+  | 'tag_prefix'
+  | 'contact_source';
+
+export const integrationFingerprints = pgTable(
+  'integration_fingerprints',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    scope: text('scope').notNull().$type<IntegrationFingerprintScope>(),
+    organisationId: uuid('organisation_id').references(() => organisations.id),
+    integrationSlug: text('integration_slug').notNull(),
+    displayName: text('display_name').notNull(),
+    vendorUrl: text('vendor_url'),
+    fingerprintType: text('fingerprint_type').notNull().$type<IntegrationFingerprintType>(),
+    fingerprintValue: text('fingerprint_value'),
+    fingerprintPattern: text('fingerprint_pattern'),
+    // numeric(3,2) in the DB (see migration 0177). Drizzle `numeric` returns
+    // strings at query time — the pure matcher parses to Number where it
+    // needs to compare confidences.
+    confidence: numeric('confidence', { precision: 3, scale: 2 }).notNull().default('0.80'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => ({
+    // Partial index — mirrors migration 0177 WHERE deleted_at IS NULL.
+    slugTypeIdx: index('integration_fingerprints_slug_type_idx')
+      .on(table.integrationSlug, table.fingerprintType)
+      .where(sql`${table.deletedAt} IS NULL`),
+  }),
+);
+
+export type IntegrationFingerprint = typeof integrationFingerprints.$inferSelect;
+export type NewIntegrationFingerprint = typeof integrationFingerprints.$inferInsert;
+
+// ===========================================================================
+// integration_detections — per-sub matches (migration 0177)
+// ===========================================================================
+
+export const integrationDetections = pgTable(
+  'integration_detections',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id),
+    integrationSlug: text('integration_slug').notNull(),
+    matchedFingerprintId: uuid('matched_fingerprint_id').notNull().references(() => integrationFingerprints.id),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    usageIndicatorJson: jsonb('usage_indicator_json').notNull().default({}).$type<Record<string, unknown>>(),
+  },
+  (table) => ({
+    uniq: uniqueIndex('integration_detections_unique').on(
+      table.organisationId,
+      table.subaccountId,
+      table.integrationSlug,
+    ),
+    orgSlugIdx: index('integration_detections_org_slug_idx').on(
+      table.organisationId,
+      table.integrationSlug,
+    ),
+  }),
+);
+
+export type IntegrationDetection = typeof integrationDetections.$inferSelect;
+export type NewIntegrationDetection = typeof integrationDetections.$inferInsert;
+
+// ===========================================================================
+// integration_unclassified_signals — triage queue (migration 0177)
+// ===========================================================================
+
+export const integrationUnclassifiedSignals = pgTable(
+  'integration_unclassified_signals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id),
+    signalType: text('signal_type').notNull().$type<IntegrationFingerprintType>(),
+    signalValue: text('signal_value').notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    occurrenceCount: integer('occurrence_count').notNull().default(1),
+    // numeric(5,2) in the DB (see migration 0177). Drizzle `numeric` returns
+    // strings at query time — callers comparing importanceScore values should
+    // parse with Number() before ordering / comparing.
+    importanceScore: numeric('importance_score', { precision: 5, scale: 2 }).notNull().default('0'),
+    resolvedToIntegrationSlug: text('resolved_to_integration_slug'),
+    resolvedBy: uuid('resolved_by'),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    dismissedAsIrrelevant: boolean('dismissed_as_irrelevant').notNull().default(false),
+  },
+  (table) => ({
+    uniq: uniqueIndex('integration_unclassified_signals_unique').on(
+      table.organisationId,
+      table.subaccountId,
+      table.signalType,
+      table.signalValue,
+    ),
+    openIdx: index('integration_unclassified_signals_open_idx')
+      .on(table.organisationId, table.signalType, table.importanceScore)
+      .where(sql`${table.resolvedAt} IS NULL AND ${table.dismissedAsIrrelevant} = false`),
+  }),
+);
+
+export type IntegrationUnclassifiedSignal = typeof integrationUnclassifiedSignals.$inferSelect;
+export type NewIntegrationUnclassifiedSignal = typeof integrationUnclassifiedSignals.$inferInsert;

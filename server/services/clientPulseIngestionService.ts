@@ -8,18 +8,19 @@
  * exist for all 8 signals across every sub-account.
  *
  * Eight signals (§2):
- *   1. staff_activity_pulse    — computed from canonical_subaccount_mutations
+ *   1. staff_activity_pulse    — real value from executeComputeStaffActivityPulse (Phase 1 follow-up)
  *   2. funnel_count            — fetchFunnels().length
  *   3. calendar_quality        — ratio of calendars with team members (fetchCalendars+Users)
- *   4. contact_activity        — placeholder from contacts fetcher count
- *   5. integration_fingerprint — placeholder; real value from scan_integration_fingerprints skill
+ *   4. contact_activity        — derived from contacts fetcher count
+ *   5. integration_fingerprint — real value from executeScanIntegrationFingerprints (Phase 1 follow-up)
  *   6. subscription_tier       — fetchSubscription().tier
- *   7. ai_feature_usage        — placeholder from conversation providers fingerprints
- *   8. opportunity_pipeline    — placeholder from opportunities count
+ *   7. ai_feature_usage        — placeholder from conversation providers fingerprints (pending)
+ *   8. opportunity_pipeline    — derived from opportunities count
  *
- * Signals that require additional pipelines (staff_activity_pulse, integration_fingerprint,
- * ai_feature_usage) write observations with `availability='unavailable_other'` in Phase 1.
- * The composite skills that compute their real values land in Phase 2+.
+ * Phase 1 follow-up replaced the placeholders for signals 1 and 5 with real
+ * skill-service calls. Signal 7 (ai_feature_usage) remains a placeholder until
+ * the GHL SaaS/subscription AI-feature endpoint is wired (tier-gated; deferred
+ * until Operate-tier rollout).
  */
 
 import { sql, eq, desc } from 'drizzle-orm';
@@ -41,6 +42,8 @@ import {
   observationFromCalendars,
   observationFromSubscription,
 } from './clientPulseIngestionServicePure.js';
+import { executeComputeStaffActivityPulse } from './computeStaffActivityPulseService.js';
+import { executeScanIntegrationFingerprints } from './scanIntegrationFingerprintsService.js';
 
 // Re-export Pure helpers so existing callers continue to import from this module.
 export {
@@ -121,29 +124,11 @@ export async function ingestClientPulseSignalsForSubaccount(
     availability: 'available',
   });
 
-  // Placeholder signals for ship gate — real values computed by Phase 2+ skills.
-  // Writing stubs keeps dashboard queries non-empty and satisfies the ship
-  // gate ("rows for all eight signals across every sub-account").
-  //
-  // Every placeholder carries `phase: 'placeholder'` in jsonPayload so
-  // dashboards + monitoring can distinguish a deliberately-skipped signal
-  // (pending its Phase 2+ compute skill) from a genuine fetch failure. Real
-  // `unavailable_other` observations come from CRM API errors and do not
-  // carry the `phase` key.
-  observations.push({
-    ...base,
-    signalSlug: 'staff_activity_pulse',
-    numericValue: null,
-    jsonPayload: { phase: 'placeholder', note: 'pending_compute_staff_activity_pulse_skill' },
-    availability: 'unavailable_other',
-  });
-  observations.push({
-    ...base,
-    signalSlug: 'integration_fingerprint',
-    numericValue: null,
-    jsonPayload: { phase: 'placeholder', note: 'pending_scan_integration_fingerprints_skill' },
-    availability: 'unavailable_other',
-  });
+  // ai_feature_usage remains a placeholder — the GHL SaaS/subscription
+  // AI-feature endpoint is tier-gated and not wired in v1. Marking it
+  // `phase: 'placeholder'` lets dashboards distinguish this deliberate skip
+  // from a real CRM fetch failure (which would write availability without
+  // the `phase` key).
   observations.push({
     ...base,
     signalSlug: 'ai_feature_usage',
@@ -212,7 +197,43 @@ export async function ingestClientPulseSignalsForSubaccount(
     }
   }
 
-  return { observationsWritten: observations.length, errors };
+  // Phase 1 follow-up: real values for staff_activity_pulse + integration_fingerprint.
+  // Invoked after the base observations insert so the two skills write their
+  // own observation rows with `availability='available'` — the batch insert
+  // above no longer includes placeholders for these signals. Either call
+  // failing is a per-signal concern (collected in `errors`) and does not
+  // block the poll cycle from recording what it did collect.
+  let derivedObservationsWritten = 0;
+  try {
+    const staffResult = await executeComputeStaffActivityPulse({
+      organisationId: input.organisationId,
+      subaccountId: input.subaccountId,
+      connectorConfigId: input.connectorConfigId,
+      sourceRunId: input.sourceRunId,
+      now,
+    });
+    if (staffResult.observationId) derivedObservationsWritten += 1;
+  } catch (err) {
+    errors.push(`staff_activity_pulse_failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  try {
+    const scanResult = await executeScanIntegrationFingerprints({
+      organisationId: input.organisationId,
+      subaccountId: input.subaccountId,
+      connectorConfigId: input.connectorConfigId,
+      sourceRunId: input.sourceRunId,
+      now,
+    });
+    if (scanResult.observationId) derivedObservationsWritten += 1;
+  } catch (err) {
+    errors.push(`scan_integration_fingerprints_failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  return {
+    observationsWritten: observations.length + derivedObservationsWritten,
+    errors,
+  };
 }
 
 // ── Canonical fingerprint-bearing table writers (§2.0c) ──────────────────

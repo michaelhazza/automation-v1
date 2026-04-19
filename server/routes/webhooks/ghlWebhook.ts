@@ -6,6 +6,8 @@ import { eq, and } from 'drizzle-orm';
 import { adapters } from '../../adapters/index.js';
 import { canonicalDataService } from '../../services/canonicalDataService.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
+import { recordGhlMutation } from '../../services/ghlWebhookMutationsService.js';
+import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';
 
 const router = Router();
 
@@ -146,6 +148,30 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
           transactionDate: normalised.data.createdAt ? new Date(normalised.data.createdAt as string) : undefined,
         });
         break;
+
+      case 'account':
+        // INSTALL / UNINSTALL / LocationCreate / LocationUpdate — no canonical
+        // row upsert here (location lifecycle is materialised via the
+        // listAccounts poll path). The mutation writer below records it.
+        break;
+    }
+
+    // Record the mutation row for Staff Activity Pulse (§2.0b). Runs AFTER
+    // the canonical upsert so the mutation log is always in sync with
+    // downstream state. Safe no-op when the event doesn't map to a mutation.
+    const mutationResult = await recordGhlMutation({
+      organisationId: orgId,
+      subaccountId: dbAccount.subaccountId,
+      event: event as GhlEventEnvelope,
+    });
+    if (mutationResult.status === 'error') {
+      console.warn(
+        `[GHL Webhook] Mutation write failed for ${normalised.eventType} (${locationId}): ${mutationResult.error}`,
+      );
+    } else if (mutationResult.status === 'skipped_no_subaccount') {
+      console.warn(
+        `[GHL Webhook] Account ${locationId} has no subaccount mapping — skipping mutation ${mutationResult.mutationType}`,
+      );
     }
 
     console.log(`[GHL Webhook] Processed ${normalised.eventType} for account ${locationId}`);

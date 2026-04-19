@@ -274,7 +274,11 @@ export const ghlAdapter: IntegrationAdapter = {
       const mapping = mapGhlEventType(eventType);
       if (!mapping) return null;
 
-      const entityExternalId = (event.id as string) ?? (event.contactId as string) ?? '';
+      // Location-scoped events (INSTALL/UNINSTALL/LocationCreate/LocationUpdate)
+      // use locationId as their entity id — there is no separate entity record.
+      const entityExternalId = mapping.entityType === 'account'
+        ? locationId
+        : (event.id as string) ?? (event.contactId as string) ?? '';
       const sourceTs = event.dateAdded ? String(event.dateAdded) : event.dateUpdated ? String(event.dateUpdated) : '';
       const externalEventId = event.traceId
         ? String(event.traceId)
@@ -336,6 +340,12 @@ function mapGhlEventType(eventType: string): { normalisedType: string; entityTyp
       return { normalisedType: eventType, entityType: 'conversation' };
     case 'InvoiceCreated': case 'PaymentReceived':
       return { normalisedType: eventType, entityType: 'revenue' };
+    // Location-lifecycle events (§2.0b Phase 1 follow-up). We don't upsert a
+    // canonical row for these — they're recorded as canonical_subaccount_mutations
+    // only — so entityType='account' routes them past the upsert switch but
+    // still flows through the mutation writer.
+    case 'INSTALL': case 'UNINSTALL': case 'LocationCreate': case 'LocationUpdate':
+      return { normalisedType: eventType, entityType: 'account' };
     default:
       return null;
   }

@@ -542,7 +542,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
-| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `compute_staff_activity_pulse`, `scan_integration_fingerprints`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
 | GEO (AI Search) | `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare` |
 | Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
 | Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
@@ -1117,6 +1117,26 @@ Multi-subaccount rows (e.g. emails CC'd to multiple clients) use `canonical_row_
 
 RLS policies on all canonical and integration tables enforcing visibility based on principal type and scope. See the [RLS section](#row-level-security-rls--three-layer-fail-closed-data-isolation) for policy details.
 
+### P3C — ClientPulse canonical tables (migrations 0170–0177)
+
+ClientPulse Phases 0–3 + Phase 1 follow-ups add 12 new canonical and ClientPulse-specific tables. All land under the Canonical Data Platform contract: `UNIQUE(organisation_id, provider_type, external_id)` on canonical tables (global uniqueness), RLS + `canonical_writer` bypass, `rlsProtectedTables.ts` entry, `canonicalDictionaryRegistry.ts` entry.
+
+**Playbook engine scope refactor (migration 0171).** `playbook_runs.subaccount_id` becomes nullable; a new `scope` enum (`subaccount` | `org`) on both `playbook_runs` and `system_playbook_templates` disambiguates org-level vs sub-account-level runs. A CHECK constraint enforces valid scope/entity combinations. Callers requiring a sub-account use the `requireSubaccountId()` helper instead of asserting non-null.
+
+**Six canonical CRM-agnostic tables (migration 0172).** `canonical_subaccount_mutations` (per-mutation write log feeding the Staff Activity Pulse), `canonical_conversation_providers`, `canonical_workflow_definitions` (includes `actionTypes` + `outboundWebhookTargets` for fingerprint scanning), `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`. All share the column header `(organisation_id, subaccount_id, provider_type, external_id, observed_at, last_seen_at)` and the same RLS policy shape. Each is written by the connector-polling service; reads go through the ingestion + scanner services.
+
+**Three ClientPulse-specific timeseries (migrations 0172–0174).** `client_pulse_signal_observations` (8-signal observation timeseries), `client_pulse_health_snapshots` (health-score timeseries), `client_pulse_churn_assessments` (churn-band evaluations). Health snapshots + churn assessments are dual-written by the existing `compute_health_score` (`skillExecutor.ts:1269`) and `compute_churn_risk` (`:1279`) handlers — both write to the legacy `health_snapshots` table *and* the new ClientPulse-specific tables during the deprecation window. The legacy writes are scheduled for removal in a post-V1 cleanup.
+
+**Integration fingerprint scanner (migration 0177, bumped from 0176 after merge-conflict with IEE 0176).** `integration_fingerprints` (two-tier library — `scope='system'` rows are seeded and cross-tenant-readable; `scope='org'` rows are tenant-isolated and represent agency-specific learnings promoted from triaged unclassified signals), `integration_detections` (per-subaccount integration matches, non-partial unique on `(org, subaccount, integration_slug)`), `integration_unclassified_signals` (novel observations queue awaiting operator triage, with occurrence-count-based importance score). CloseBot + Uphex are seeded as `scope='system'` rows. The scanner runs via the new `scan_integration_fingerprints` skill; the observation-insert is the atomic win-gate against retry-driven counter inflation.
+
+**Two new skill handlers (Phase 1 follow-up).** `compute_staff_activity_pulse` (weighted-sum activity score from `canonical_subaccount_mutations` over configurable lookback windows; excludes automation users via outlier-volume classifier reading `operational_config.staffActivity.automationUserResolution`) and `scan_integration_fingerprints` (see above). Both use `idempotencyStrategy: 'keyed_write'` — poll cycles dedupe via `sourceRunId`; agent-skill invocations without a `sourceRunId` append fresh timeseries points by design.
+
+**Webhook handler expansion.** `server/routes/webhooks/ghlWebhook.ts` now writes `canonical_subaccount_mutations` for 10 GHL event types: the 6 existing canonical-upsert handlers (`ContactCreate`, `ContactUpdate`, `OpportunityStageUpdate`, `OpportunityStatusUpdate`, `ConversationCreated`, `ConversationUpdated`) are extended, and 4 new lifecycle handlers (`INSTALL`, `UNINSTALL`, `LocationCreate`, `LocationUpdate`) land as `entityType='account'` events. Outbound-message guard on conversation events: write only when `direction='outbound' AND userId IS NOT NULL AND conversationProviderId IS NULL`.
+
+**OAuth scope SSoT (locked contract g).** Expanded GHL scope list lives in `server/config/oauthProviders.ts` only — the duplicate in `server/routes/ghl.ts` was removed as part of Phase 0. `server/routes/ghl.ts` builds its authorisation URL from `OAUTH_PROVIDERS.ghl.scopes.join(' ')`. Expanded scopes apply to new authorisations only; existing tokens keep their originally-granted endpoints, and endpoints requiring new scopes gate themselves and mark observations `unavailable_missing_scope` when absent.
+
+**`operational_config` JSON Schema (Phase 0 ship-gate B4).** `server/services/operationalConfigSchema.ts` ships the JSON Schema for `hierarchyTemplates.operationalConfig` with `sensitive` flags on intervention-template paths. `SENSITIVE_CONFIG_PATHS` is the exported enumeration consumed by the (Phase 4.5) Configuration Agent's sensitive-path routing gate. Schema enforces weight-sum constraints (`healthScoreFactors` sums to 1.00) via Zod refinements.
+
 ### Key files
 
 | File | Purpose |
@@ -1141,6 +1161,9 @@ Sprint 2 introduces a defence-in-depth data isolation model. All three layers ar
 **Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
 
 **Principal-scoped (migrations 0167–0169):** P3B extends org-level RLS with visibility predicates on canonical data and integration tables. Tables: `integration_connections`, `integration_ingestion_stats`, `canonical_fields`, `canonical_row_versions`, `canonical_metric_history`, `canonical_row_subaccount_scopes`, `service_principals`, `teams`, `team_members`, `delegation_grants`, `agent_runs` (extended). Policies enforce:
+
+**ClientPulse canonical + derived tables (migrations 0172–0177)** are also registered in `rlsProtectedTables.ts` with org-scoped RLS + `canonical_writer` bypass: `canonical_subaccount_mutations`, `canonical_conversation_providers`, `canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`, `client_pulse_signal_observations`, `client_pulse_health_snapshots`, `client_pulse_churn_assessments`, `integration_fingerprints` (two-tier: system scope cross-tenant-readable, org scope tenant-isolated), `integration_detections`, `integration_unclassified_signals`. See the [ClientPulse Phase 1 follow-ups section](#p3c--clientpulse-canonical-tables-migrations-01700177) for the full roster.
+
 
 - **Org isolation** — all rows scoped to `app.organisation_id`
 - **Visibility predicates** — `private` rows visible only to `app.current_principal_id`; `shared_team` rows visible when `shared_team_ids && app.current_team_ids`; `shared_subaccount` and `shared_org` rows visible to all principals in scope
@@ -1318,9 +1341,12 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Migrations
 
-109 migrations (0001–0109, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0177` — ClientPulse Phase 1 follow-up: `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals` (bumped from 0176 after merge with IEE 0176)
+- `0176` — IEE Phase 0: denormalised `agent_runs.iee_run_id` column + in-flight partial index
+- `0170–0175` — ClientPulse Phases 0–3: template extension, playbook scope refactor, canonical mutation/artifact tables, health snapshots, churn assessments, ingestion idempotency
 - `0109` — `skill_analyzer_results.classificationFailed` + `classificationFailureReason` — distinguish API failure from genuine partial-overlap in Skill Analyzer Phase 3
 - `0108` — `scraping_selectors` + `scraping_cache` — learned element fingerprints and HTTP response cache for the Scraping Engine
 - `0107` — unique constraint on `workspace_memory_entries` — deduplication key for org subaccount memory migration idempotency
@@ -1689,7 +1715,7 @@ Playbook Run (playbookRuns)
 | `systemPlaybookTemplateVersions` | Immutable version snapshots of system templates. |
 | `playbookTemplates` | Org-owned templates. `forkedFromSystemId`, `forkedFromVersion` nullable. |
 | `playbookTemplateVersions` | Immutable published versions of org templates. `definitionJson` holds the full DAG. |
-| `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
+| `playbookRuns` | Run instances. `subaccountId` (nullable since migration 0171), `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`, `scope` (`subaccount` \| `org`). CHECK constraint enforces scope/entity consistency: `subaccount` scope requires `subaccount_id`; `org` scope requires `subaccount_id IS NULL`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
 | `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
