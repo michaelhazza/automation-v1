@@ -63,6 +63,37 @@ export const CANONICAL_UNIQUENESS_MODE: Record<string, CanonicalUniquenessMode> 
   canonical_contact_sources: 'global',
 };
 
+/**
+ * Runtime assertion helper — turns the CANONICAL_UNIQUENESS_MODE contract
+ * from passive documentation into active enforcement. Call before any upsert
+ * into a canonical table to catch contract violations at the write boundary
+ * rather than letting a bad row silently land and corrupt downstream
+ * uniqueness assumptions.
+ *
+ * Rules:
+ *   - `scoped` tables require a non-null subaccountId
+ *   - `global` tables: no additional restriction (subaccountId may or may not
+ *     be present as a data column; the uniqueness index does not key on it)
+ *   - Unknown table names are a programmer error (hard throw)
+ */
+export function assertCanonicalUniqueness(
+  tableName: string,
+  ctx: { subaccountId?: string | null },
+): void {
+  const mode = CANONICAL_UNIQUENESS_MODE[tableName];
+  if (!mode) {
+    throw new Error(
+      `assertCanonicalUniqueness: table '${tableName}' is not registered in CANONICAL_UNIQUENESS_MODE. ` +
+      `Add an entry before upserting.`,
+    );
+  }
+  if (mode === 'scoped' && (ctx.subaccountId === null || ctx.subaccountId === undefined)) {
+    throw new Error(
+      `assertCanonicalUniqueness: table '${tableName}' is SCOPED — subaccountId is required but was ${ctx.subaccountId}.`,
+    );
+  }
+}
+
 // ── Shared helper types ───────────────────────────────────────────────────
 
 export type ExternalUserKind = 'staff' | 'automation' | 'contact' | 'unknown';

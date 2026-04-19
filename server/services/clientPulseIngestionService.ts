@@ -30,6 +30,7 @@ import {
   canonicalConversationProviders,
   canonicalTagDefinitions,
   canonicalContactSources,
+  assertCanonicalUniqueness,
   type NewClientPulseSignalObservation,
 } from '../db/schema/clientPulseCanonicalTables.js';
 import { ghlClientPulseFetchers } from '../adapters/ghlAdapter.js';
@@ -179,11 +180,15 @@ export async function ingestClientPulseSignalsForSubaccount(
   // unchanged observations keeps the timeseries clean for churn analysis.
   if (subResult.availability === 'available' && subResult.data.tier) {
     try {
+      // Deterministic "most recent" — observedAt is the primary sort key, with
+      // createdAt + id as tiebreakers so two rows written in the same
+      // millisecond still have a stable ordering. Prevents the phantom-insert
+      // case where Postgres's plan chooses a non-deterministic row.
       const [latest] = await db
         .select({ tier: subaccountTierHistory.tier, active: subaccountTierHistory.active })
         .from(subaccountTierHistory)
         .where(eq(subaccountTierHistory.subaccountId, input.subaccountId))
-        .orderBy(desc(subaccountTierHistory.observedAt))
+        .orderBy(desc(subaccountTierHistory.observedAt), desc(subaccountTierHistory.createdAt), desc(subaccountTierHistory.id))
         .limit(1);
 
       const tierChanged = !latest || latest.tier !== subResult.data.tier;
@@ -225,6 +230,7 @@ export async function upsertConversationProvider(
     displayName?: string;
   },
 ): Promise<void> {
+  assertCanonicalUniqueness('canonical_conversation_providers', { subaccountId: input.subaccountId });
   await db
     .insert(canonicalConversationProviders)
     .values({
@@ -245,6 +251,7 @@ export async function upsertConversationProvider(
 export async function upsertTagDefinition(
   input: { organisationId: string; subaccountId: string; providerType: string; tagName: string },
 ): Promise<void> {
+  assertCanonicalUniqueness('canonical_tag_definitions', { subaccountId: input.subaccountId });
   const externalId = `${input.subaccountId}:${input.tagName}`;
   await db
     .insert(canonicalTagDefinitions)
@@ -266,6 +273,7 @@ export async function upsertTagDefinition(
 export async function upsertContactSource(
   input: { organisationId: string; subaccountId: string; providerType: string; sourceValue: string },
 ): Promise<void> {
+  assertCanonicalUniqueness('canonical_contact_sources', { subaccountId: input.subaccountId });
   const externalId = `${input.subaccountId}:${input.sourceValue}`;
   await db
     .insert(canonicalContactSources)

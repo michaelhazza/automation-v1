@@ -13,6 +13,7 @@ import {
   observationFromSubscription,
   CLIENT_PULSE_SIGNAL_SLUGS,
 } from '../clientPulseIngestionServicePure.js';
+import { assertCanonicalUniqueness, CANONICAL_UNIQUENESS_MODE } from '../../db/schema/clientPulseCanonicalTables.js';
 
 let passed = 0;
 let failed = 0;
@@ -168,6 +169,63 @@ test('observationFromSubscription — inactive plan still writes numericValue=0'
     data: { tier: 'basic', active: false, raw: {} },
   });
   assert(r.numericValue === 0, 'numericValue should be 0 for inactive');
+});
+
+// ── assertCanonicalUniqueness — enforce scoped-mode requires subaccountId ──
+
+test('assertCanonicalUniqueness allows scoped table with subaccountId', () => {
+  assertCanonicalUniqueness('canonical_subaccount_mutations', { subaccountId: 'sub-1' });
+  // If no throw, pass
+});
+
+test('assertCanonicalUniqueness throws on scoped table without subaccountId', () => {
+  let threw = false;
+  try {
+    assertCanonicalUniqueness('canonical_subaccount_mutations', { subaccountId: null });
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'should throw when scoped table has null subaccountId');
+});
+
+test('assertCanonicalUniqueness throws on scoped table with undefined subaccountId', () => {
+  let threw = false;
+  try {
+    assertCanonicalUniqueness('canonical_subaccount_mutations', {});
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'should throw when scoped table has no subaccountId key');
+});
+
+test('assertCanonicalUniqueness allows global table with or without subaccountId', () => {
+  assertCanonicalUniqueness('canonical_conversation_providers', { subaccountId: 'sub-1' });
+  assertCanonicalUniqueness('canonical_conversation_providers', { subaccountId: null });
+  // Global tables tolerate either — uniqueness index does not key on subaccountId
+});
+
+test('assertCanonicalUniqueness throws on unregistered table', () => {
+  let threw = false;
+  try {
+    assertCanonicalUniqueness('bogus_not_a_real_table', { subaccountId: 'sub-1' });
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'should throw on unknown table');
+});
+
+test('CANONICAL_UNIQUENESS_MODE covers all 6 canonical tables from migration 0172', () => {
+  const expected = [
+    'canonical_subaccount_mutations',
+    'canonical_conversation_providers',
+    'canonical_workflow_definitions',
+    'canonical_tag_definitions',
+    'canonical_custom_field_definitions',
+    'canonical_contact_sources',
+  ];
+  for (const t of expected) {
+    assert(CANONICAL_UNIQUENESS_MODE[t] !== undefined, `missing mode for ${t}`);
+  }
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
