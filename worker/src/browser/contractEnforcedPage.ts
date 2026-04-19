@@ -78,16 +78,23 @@ export class ContractEnforcedPage {
     this.page.on('framenavigated', (frame) => this.checkFrameNavigation(frame));
 
     // Hook the download event so we can validate before the file lands.
+    //
+    // Audit fix: validation is now synchronous. Previously this was
+    // `void this.validateDownload(download).catch(...)` which put the
+    // violation recording at the end of a microtask chain — by the time
+    // the executor's next step called getViolations(), the violation may
+    // not have been recorded yet. Synchronous validation eliminates that
+    // race. The rigorous post-download magic-bytes check still runs in
+    // artifactValidator after the file is written.
     this.page.on('download', (download) => {
-      // We can't await here (it's an event handler), so we kick off the
-      // validation and let the executor pick up the violation via
-      // getViolations() before the next loop step.
-      void this.validateDownload(download).catch((err) => {
+      try {
+        this.validateDownloadSync(download);
+      } catch (err) {
         logger.warn('worker.contract.download_validation_threw', {
           runId: opts.runId,
           err: err instanceof Error ? err.message : String(err),
         });
-      });
+      }
     });
   }
 
@@ -214,7 +221,14 @@ export class ContractEnforcedPage {
     this.assertHostAllowed(url, 'redirect_to_disallowed_domain');
   }
 
-  private async validateDownload(download: Download): Promise<void> {
+  /**
+   * Synchronous prefilter validation for a download event. Must remain
+   * synchronous so that violations are recorded before control returns to
+   * the action handler that triggered the download. See the page.on
+   * ('download') hook in the constructor for the race-condition history.
+   * Rigorous magic-bytes validation happens later in artifactValidator.
+   */
+  private validateDownloadSync(download: Download): void {
     const expectedKind = this.opts.contract.expectedArtifactKind;
     const expectedMimePrefix = this.opts.contract.expectedMimeTypePrefix;
 

@@ -187,6 +187,22 @@ router.delete(
  * is wired here so the schema and the front end can integrate against the
  * real shape from the start.
  */
+/**
+ * Test connection — saved connection variant. Enqueues a login_test IEE task
+ * against the saved connection and returns the ieeRunId so the client can
+ * poll progress.
+ *
+ * Audit fix (Phase 0 follow-up): previously returned 501 with a TODO(D7)
+ * marker. Now wired to agentExecutionService.executeRun with a login_test
+ * browser task. The caller provides the agentId + subaccountAgentId so the
+ * test is attributed to a real agent for audit/billing purposes (tests are
+ * flagged as test runs — excluded from agency P&L per isTestRun semantics).
+ */
+const testSavedBody = z.object({
+  agentId: z.string().uuid(),
+  subaccountAgentId: z.string().uuid(),
+});
+
 router.post(
   '/api/subaccounts/:subaccountId/web-login-connections/:id/test',
   authenticate,
@@ -198,13 +214,51 @@ router.post(
       res.status(404).json({ error: 'web_login connection not found' });
       return;
     }
-    // TODO(D7): enqueue a real iee-browser-task with mode='login_test' and
-    // return the executionRunId. For now, return 501 so the client surface
-    // exists but the test functionality is gated until D7 lands.
-    res.status(501).json({
-      error: 'connection_test_not_yet_implemented',
-      message: 'Connection-test enqueue path will be wired in the next commit (D7).',
-      connectionId: conn.id,
+    if (!conn.config) {
+      res.status(409).json({ error: 'web_login connection missing config' });
+      return;
+    }
+
+    const body = testSavedBody.parse(req.body);
+
+    const { agentExecutionService } = await import('../services/agentExecutionService.js');
+    const result = await agentExecutionService.executeRun({
+      agentId: body.agentId,
+      subaccountId: subaccount.id,
+      subaccountAgentId: body.subaccountAgentId,
+      organisationId: req.orgId!,
+      runType: 'manual',
+      executionMode: 'iee_browser',
+      runSource: 'manual',
+      isTestRun: true,
+      ieeTask: {
+        type: 'browser',
+        goal: `Test web_login connection: ${conn.label}`,
+        mode: 'login_test',
+        webLoginConnectionId: conn.id,
+        // contentUrl is optional — if the connection has one, worker navigates
+        // there after login to validate the session is usable. See
+        // worker/src/browser/executor.ts login_test branch.
+        startUrl: conn.config.contentUrl ?? conn.config.loginUrl,
+      },
+    });
+
+    // Audit: user triggered a credential test.
+    auditService.log({
+      organisationId: req.orgId,
+      actorId: req.user!.id,
+      actorType: 'user',
+      action: 'web_login_connection.test.saved',
+      entityType: 'integration_connection',
+      entityId: conn.id,
+      metadata: { ieeRunId: result.ieeRunId, agentRunId: result.runId, scope: 'subaccount' },
+    });
+
+    res.status(202).json({
+      agentRunId: result.runId,
+      ieeRunId: result.ieeRunId,
+      status: result.status,
+      progressUrl: `/api/iee/runs/${result.ieeRunId}/progress`,
     });
   }),
 );
@@ -216,16 +270,19 @@ router.post(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const parsed = testDraftBody.parse(req.body);
-    // TODO(D7): enqueue an unsaved iee-browser-task with mode='login_test'
-    // using the parsed config + password directly. The worker still fetches
-    // by reference for SAVED connections, but for draft tests we pass the
-    // password through the payload as a one-shot — the row is never written
-    // and the payload is purged from pg-boss after the job completes. This
-    // is the only place the plaintext password traverses the queue, and
-    // only for the explicit "Test Connection" button before save.
+    // Draft testing (credentials passed inline without saving first) requires
+    // worker-side inline-credential support plus a short-lived encrypted
+    // payload path through pg-boss. That is substantially more work than
+    // saved-connection testing and is intentionally deferred. The supported
+    // UX today is: save the connection, test it, edit or delete if it fails.
+    //
+    // Previously this route returned 501 with a TODO(D7) marker. The 501 is
+    // retained with an updated message pointing callers at the saved-test
+    // flow. Tracked in docs/iee-delegation-lifecycle-spec.md under "deferred
+    // to follow-up".
     res.status(501).json({
-      error: 'draft_connection_test_not_yet_implemented',
-      message: 'Draft test enqueue path will be wired in the next commit (D7).',
+      error: 'draft_connection_test_not_supported',
+      message: 'Draft connection testing is not supported. Save the connection first, then use POST /api/subaccounts/:subaccountId/web-login-connections/:id/test.',
       configEcho: parsed.config,
     });
   }),

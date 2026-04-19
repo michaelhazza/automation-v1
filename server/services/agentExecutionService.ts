@@ -147,6 +147,11 @@ export interface AgentRunRequest {
   /**
    * Optional IEE task. Required when executionMode is 'iee_browser' or
    * 'iee_dev'. Spec §9.1.
+   *
+   * Fields extended to pass through to the worker's browser executor:
+   *  - mode ('standard' | 'login_test' | 'capture_video')
+   *  - webLoginConnectionId (for paywall workflows; audit blocker #1 wiring)
+   *  - playSelector (capture_video mode)
    */
   ieeTask?: {
     type: 'browser' | 'dev';
@@ -156,6 +161,9 @@ export interface AgentRunRequest {
     repoUrl?: string;
     branch?: string;
     commands?: string[];
+    mode?: 'standard' | 'login_test' | 'capture_video';
+    webLoginConnectionId?: string;
+    playSelector?: string;
   };
   taskId?: string;
   triggerContext?: Record<string, unknown>;

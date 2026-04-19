@@ -201,6 +201,56 @@ export async function performLogin(
 }
 
 /**
+ * Retry-aware wrapper around `performLogin` (audit Non-blocker #12).
+ *
+ * Classifies LoginFailedError reasons into two buckets:
+ *
+ *   - HARD    — detection succeeded but returned negative (selector missed,
+ *               URL unchanged, no session cookie set). These indicate the
+ *               login itself didn't take, or credentials are wrong. Retry
+ *               would not change the outcome.
+ *
+ *   - TRANSIENT — navigation timeouts, network errors, temporary CDN
+ *               failures. These can resolve on a second attempt.
+ *
+ * Retries with exponential backoff: 1s, 2s, 4s. Default 3 attempts total.
+ */
+export async function performLoginWithRetry(
+  page: Page,
+  creds: DecryptedWebLoginCredentials,
+  opts: { runId: string; correlationId: string; screenshotPath: string; maxAttempts?: number },
+): Promise<PerformLoginResult> {
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const HARD_FAILURES = new Set(['selector_not_found', 'url_unchanged', 'no_session_cookie']);
+  let lastError: LoginFailedError | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await performLogin(page, creds, opts);
+    } catch (err) {
+      if (!(err instanceof LoginFailedError)) throw err;
+      lastError = err;
+      // If every detection failure is in the HARD set, this is deterministic
+      // — retry won't help. Throw immediately.
+      const hasTransient = err.detectionFailures.some((r) => !HARD_FAILURES.has(r));
+      if (!hasTransient) throw err;
+      if (attempt < maxAttempts) {
+        const backoffMs = 1_000 * Math.pow(2, attempt - 1);
+        logger.warn('worker.perform_login.retry', {
+          runId: opts.runId,
+          correlationId: opts.correlationId,
+          attempt,
+          maxAttempts,
+          backoffMs,
+          reason: err.message.slice(0, 200),
+        });
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+  }
+  throw lastError ?? new Error('performLoginWithRetry: no error captured');
+}
+
+/**
  * Capture a screenshot for failure diagnosis. Best-effort — if the page is
  * already closed or the screenshot capture itself throws, we log and
  * return null rather than masking the original failure.
