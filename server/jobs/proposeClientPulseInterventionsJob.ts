@@ -32,8 +32,8 @@ import {
   enqueueInterventionProposal,
   type InterventionActionType,
 } from '../services/clientPulseInterventionContextService.js';
+import { buildScenarioDetectorIdempotencyKey } from '../services/clientPulseInterventionIdempotencyPure.js';
 import { logger } from '../lib/logger.js';
-import { createHash } from 'crypto';
 
 export interface ProposeClientPulseInterventionsJobData {
   organisationId: string;
@@ -249,7 +249,7 @@ export async function runProposeClientPulseInterventions(
 
   let created = 0;
   for (const proposal of result.proposals) {
-    const idempotencyKey = buildProposalIdempotencyKey({
+    const idempotencyKey = buildScenarioDetectorIdempotencyKey({
       subaccountId,
       templateSlug: proposal.templateSlug,
       churnAssessmentId: data.churnAssessmentId ?? assessment.id,
@@ -269,8 +269,9 @@ export async function runProposeClientPulseInterventions(
 
       // Route through the shared review-lifecycle helper so scenario-
       // detector proposals create review_items the same way operator-
-      // driven submissions do — operators see them in the queue, gate
-      // bookkeeping (pending_approval, suspendUntil) is consistent.
+      // driven submissions do. The helper also emits the structured
+      // `clientpulse.intervention.enqueued` lifecycle event covering
+      // both created + deduped outcomes, so no extra log call here.
       const enqueued = await enqueueInterventionProposal({
         organisationId,
         subaccountId,
@@ -280,20 +281,10 @@ export async function runProposeClientPulseInterventions(
         payload: proposal.payload,
         metadata,
         reviewReasoning: proposal.reason,
+        source: 'scenario_detector',
+        churnAssessmentId: data.churnAssessmentId ?? assessment.id,
       });
-      if (enqueued.isNew) {
-        created += 1;
-      } else {
-        // Idempotency observability: a retry hit the same dedup key.
-        logger.info('clientpulse.intervention.proposer_deduped', {
-          organisationId,
-          subaccountId,
-          templateSlug: proposal.templateSlug,
-          actionType: proposal.actionType,
-          churnAssessmentId: data.churnAssessmentId ?? assessment.id,
-          existingActionId: enqueued.actionId,
-        });
-      }
+      if (enqueued.isNew) created += 1;
     } catch (err) {
       logger.error('proposeClientPulseInterventions.insert_failed', {
         organisationId,
@@ -309,15 +300,6 @@ export async function runProposeClientPulseInterventions(
     proposalsSuppressed: result.suppressed.length,
     skipped: false,
   };
-}
-
-function buildProposalIdempotencyKey(p: {
-  subaccountId: string;
-  templateSlug: string;
-  churnAssessmentId: string;
-}): string {
-  const raw = `clientpulse:intervention:${p.subaccountId}:${p.templateSlug}:${p.churnAssessmentId}`;
-  return createHash('sha256').update(raw).digest('hex').slice(0, 40);
 }
 
 async function resolveScenarioDetectorAgentId(organisationId: string): Promise<string | null> {

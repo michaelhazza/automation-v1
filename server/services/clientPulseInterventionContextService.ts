@@ -23,6 +23,10 @@ import { reviewService } from './reviewService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { logger } from '../lib/logger.js';
 import { validateInterventionActionMetadata } from './interventionActionMetadata.js';
+import {
+  buildScenarioDetectorIdempotencyKey,
+  buildOperatorIdempotencyKey,
+} from './clientPulseInterventionIdempotencyPure.js';
 
 export const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
@@ -325,15 +329,16 @@ export async function createOperatorProposal(
     .orderBy(desc(clientPulseHealthSnapshots.observedAt))
     .limit(1);
 
-  // Include timestamp in idempotency key so each manual operator submission
-  // creates a fresh action (operators may propose the same action type
-  // multiple times, e.g. different contacts for crm.send_email).
-  const idempotencyKey = createHash('sha256')
-    .update(
-      `operator:${subaccountId}:${input.actionType}:${JSON.stringify(input.payload)}:${Date.now()}`,
-    )
-    .digest('hex')
-    .slice(0, 40);
+  // Deterministic idempotency key — keyed on (subaccount, actionType,
+  // payload-hash, scheduleHint, templateSlug) so a UI double-click dedups
+  // but a distinct contact / subject / schedule produces a distinct key.
+  const idempotencyKey = buildOperatorIdempotencyKey({
+    subaccountId,
+    actionType: input.actionType,
+    payload: input.payload,
+    scheduleHint: input.scheduleHint,
+    templateSlug: input.templateSlug ?? null,
+  });
 
   // Build typed metadata and validate against the Phase 4 contract before
   // write — prevents implicit schema creep on actions.metadataJson.
@@ -360,16 +365,8 @@ export async function createOperatorProposal(
     payload: payloadWithSchedule,
     metadata,
     reviewReasoning: input.rationale,
+    source: 'operator_manual',
   });
-
-  if (!enqueued.isNew) {
-    logger.info('clientpulse.intervention.operator_proposal_deduped', {
-      organisationId,
-      subaccountId,
-      actionType: input.actionType,
-      existingActionId: enqueued.actionId,
-    });
-  }
 
   return { id: enqueued.actionId, actionType: input.actionType, isNew: enqueued.isNew };
 }
@@ -382,14 +379,28 @@ export async function createOperatorProposal(
  * review queue. Centralising this lifecycle here means automated and
  * manual proposals always traverse the same gates.
  *
+ * **Idempotency contract (non-negotiable):**
+ * `idempotencyKey` MUST be a deterministic function of the logical
+ * intervention identity. Same logical intervention → same key, regardless
+ * of caller / retry / concurrent worker. Use the helpers below:
+ *
+ *   - `buildScenarioDetectorIdempotencyKey({ subaccountId, templateSlug,
+ *     churnAssessmentId })` for system-generated proposals.
+ *   - `buildOperatorIdempotencyKey({ subaccountId, actionType, payload,
+ *     scheduleHint })` for operator-driven submits — keyed on the payload
+ *     hash so a UI double-click dedups, but a different contact / subject /
+ *     schedule produces a distinct key.
+ *
  * Caller has already:
  *   - validated the payload against `actionRegistry.parameterSchema`
  *   - validated the metadata via `validateInterventionActionMetadata`
- *   - computed an `idempotencyKey`
  *
- * Returns `{ actionId, isNew }` so callers can distinguish a fresh
- * proposal from a dedup hit. When `isNew=false`, the review item is NOT
- * re-created (it either already exists or the action is past pending).
+ * Returns `{ actionId, isNew, source }` so callers can distinguish a
+ * fresh proposal from a dedup hit. When `isNew=false`, the review item is
+ * NOT re-created (it either already exists or the action is past pending).
+ *
+ * Always emits a structured `clientpulse.intervention.enqueued` lifecycle
+ * event for analytics + debugging.
  */
 export async function enqueueInterventionProposal(params: {
   organisationId: string;
@@ -400,7 +411,11 @@ export async function enqueueInterventionProposal(params: {
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   reviewReasoning: string;
-}): Promise<{ actionId: string; isNew: boolean }> {
+  /** Distinguishes scenario-detector vs operator-driven proposals on the lifecycle event. */
+  source: 'scenario_detector' | 'operator_manual';
+  /** Optional correlation id (churnAssessmentId for scenario-detector, sessionId for operator). */
+  churnAssessmentId?: string;
+}): Promise<{ actionId: string; isNew: boolean; source: typeof params.source }> {
   const proposed = await actionService.proposeAction({
     organisationId: params.organisationId,
     subaccountId: params.subaccountId,
@@ -411,15 +426,35 @@ export async function enqueueInterventionProposal(params: {
     metadata: params.metadata,
   });
 
-  if (!proposed.isNew) {
-    return { actionId: proposed.actionId, isNew: false };
+  let isNew = proposed.isNew;
+  if (isNew) {
+    const actionRow = await actionService.getAction(proposed.actionId, params.organisationId);
+    await reviewService.createReviewItem(actionRow, {
+      actionType: params.actionType,
+      reasoning: params.reviewReasoning,
+      proposedPayload: params.payload,
+    });
   }
 
-  const actionRow = await actionService.getAction(proposed.actionId, params.organisationId);
-  await reviewService.createReviewItem(actionRow, {
+  // Single structured lifecycle event — debugging anchor + analytics base.
+  logger.info('clientpulse.intervention.enqueued', {
+    organisationId: params.organisationId,
+    subaccountId: params.subaccountId,
     actionType: params.actionType,
-    reasoning: params.reviewReasoning,
-    proposedPayload: params.payload,
+    source: params.source,
+    idempotencyKey: params.idempotencyKey,
+    outcome: isNew ? 'created' : 'deduped',
+    actionId: proposed.actionId,
+    churnAssessmentId: params.churnAssessmentId,
+    templateSlug: (params.metadata as Record<string, unknown>).triggerTemplateSlug,
   });
-  return { actionId: proposed.actionId, isNew: true };
+
+  return { actionId: proposed.actionId, isNew, source: params.source };
 }
+
+// Re-export the pure key builders so callers that only need keys can import
+// from this service file too.
+export {
+  buildScenarioDetectorIdempotencyKey,
+  buildOperatorIdempotencyKey,
+};
