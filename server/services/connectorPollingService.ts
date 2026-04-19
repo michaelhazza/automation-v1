@@ -82,10 +82,29 @@ export const connectorPollingService = {
 
     const connConfig = (config.configJson ?? {}) as Record<string, unknown>;
     const errors: Array<{ accountId: string; error: string }> = [];
-    // One poll-cycle id seeds source_run_id on every observation written in
-    // this cycle. Combined with the partial UNIQUE index from migration 0175
-    // + onConflictDoNothing, pg-boss retries of the same cycle no-op rather
-    // than producing duplicate observations.
+    // ── pollRunId contract ────────────────────────────────────────────────
+    //
+    // pollRunId represents a single LOGICAL sync attempt, not a transport
+    // attempt. Combined with migration 0175's partial UNIQUE on
+    // (org, subaccount, signal_slug, source_run_id) and onConflictDoNothing
+    // on insert, this gives retry idempotency at the sync-boundary level.
+    //
+    // Invariants for future code paths that read / reuse this id:
+    //   - A retry of the SAME logical sync (pg-boss retry, manual re-run
+    //     after failure) MUST reuse the same pollRunId so conflicting rows
+    //     no-op rather than double-insert.
+    //   - A NEW logical sync (next scheduled cycle, or a re-ingest after
+    //     the first run is complete) MUST generate a fresh pollRunId so
+    //     new observations are not silently dropped by the unique index.
+    //   - Partial-retry-with-additional-data within the same logical
+    //     window is NOT supported by this design. If the adapter returns
+    //     additional rows on retry, they are dropped. The correct response
+    //     is to trigger a new sync with a new pollRunId rather than
+    //     reusing this one.
+    //
+    // Do not thread pollRunId into derived-state writes (tier history,
+    // churn assessments, health snapshots) — those have their own change-
+    // detection / scheduling invariants independent of ingestion retry.
     const { randomUUID } = await import('node:crypto');
     const pollRunId = randomUUID();
 
