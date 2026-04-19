@@ -12,7 +12,7 @@ import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningRes
 import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 /** Deterministic JSON stringify (sorted keys) for hashing. */
 function stableStringify(value: unknown): string {
@@ -26,6 +26,24 @@ function stableStringify(value: unknown): string {
     return '{' + keys.map(k => JSON.stringify(k) + ':' + stringify((v as Record<string, unknown>)[k])).join(',') + '}';
   };
   return stringify(value);
+}
+
+/** v2 §11.11.7 helper: deterministic hash of a skill's content fields so
+ *  Execute can idempotent-skip a slug collision when the existing row was
+ *  created by a prior (crashed) run. */
+function hashSkillContent(s: {
+  name: string;
+  description: string | null;
+  definition: object | null;
+  instructions: string | null;
+}): string {
+  const payload = stableStringify({
+    name: s.name,
+    description: s.description ?? '',
+    definition: s.definition ?? null,
+    instructions: s.instructions ?? null,
+  });
+  return createHash('sha256').update(payload).digest('hex');
 }
 
 /** Best-effort string extraction for thrown values. Services in this codebase
@@ -88,6 +106,12 @@ export async function createJob(params: {
   }
   // For github and download, candidates are fetched during job processing
 
+  // v2 §11.11.4: capture the full config row at job start so mid-job config
+  // edits never apply to an in-flight run. Downstream stages (merge validation,
+  // approval gate, Execute) read from `jobs.config_snapshot`, not the live
+  // table.
+  const configSnapshot = await skillAnalyzerConfigService.snapshotForJob();
+
   const rows = await db
     .insert(skillAnalyzerJobs)
     .values({
@@ -98,6 +122,8 @@ export async function createJob(params: {
       parsedCandidates,
       status: 'pending',
       progressPct: 0,
+      configSnapshot,
+      configVersionUsed: configSnapshot.configVersion,
     })
     .returning({ id: skillAnalyzerJobs.id });
 
@@ -1089,9 +1115,20 @@ export async function executeApproved(params: {
 
   // v2 §11.11.3: atomic execution-lock acquisition. Concurrent Execute calls
   // land here and see 409 until the current run finishes.
+  //
+  // Ownership token: minted here and written in the same atomic UPDATE that
+  // takes the lock. Release UPDATEs gate on this token so a late-finishing
+  // process (e.g., after a stale-lock unlock reassigned the lock) cannot
+  // clear the new owner's lock.
+  const lockToken = randomUUID();
   const lockRows = await db
     .update(skillAnalyzerJobs)
-    .set({ executionLock: true, executionStartedAt: new Date(), executionFinishedAt: null })
+    .set({
+      executionLock: true,
+      executionLockToken: lockToken,
+      executionStartedAt: new Date(),
+      executionFinishedAt: null,
+    })
     .where(and(
       eq(skillAnalyzerJobs.id, jobId),
       eq(skillAnalyzerJobs.organisationId, organisationId),
@@ -1117,12 +1154,110 @@ export async function executeApproved(params: {
   try {
     return await runExecute(params);
   } finally {
-    // Release the lock unconditionally — success, partial failure, or thrown error.
+    // Release the lock unconditionally — but only if we still own it. The
+    // token guard prevents a late-finishing process from clearing a fresh
+    // owner's lock after a stale-lock unlock reassigned ownership.
+    // executionStartedAt is cleared so a subsequent unlock call can tell
+    // the difference between "never ran" and "ran and finished".
     await db
       .update(skillAnalyzerJobs)
-      .set({ executionLock: false, executionFinishedAt: new Date() })
-      .where(eq(skillAnalyzerJobs.id, jobId));
+      .set({
+        executionLock: false,
+        executionLockToken: null,
+        executionStartedAt: null,
+        executionFinishedAt: new Date(),
+      })
+      .where(and(
+        eq(skillAnalyzerJobs.id, jobId),
+        eq(skillAnalyzerJobs.executionLockToken, lockToken),
+      ));
   }
+}
+
+/** v2 §11.11.3: systemAdmin recovery for a stuck execution_lock. Only clears
+ *  the lock when it has been held longer than
+ *  `config.executionLockStaleSeconds` — prevents an operator from accidentally
+ *  yanking the rug out from under a live Execute. Router already enforces
+ *  `requireSystemAdmin`. */
+export async function unlockStaleExecution(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}): Promise<{ unlocked: true; heldForSeconds: number }> {
+  const { jobId, organisationId, userId } = params;
+  const jobRows = await db
+    .select({
+      id: skillAnalyzerJobs.id,
+      executionLock: skillAnalyzerJobs.executionLock,
+      executionStartedAt: skillAnalyzerJobs.executionStartedAt,
+    })
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+
+  const job = jobRows[0];
+  if (!job) throw { statusCode: 404, message: 'Job not found' };
+  if (!job.executionLock) {
+    throw {
+      statusCode: 409,
+      message: 'Execution lock is not held — nothing to unlock.',
+      errorCode: 'EXECUTION_LOCK_NOT_HELD',
+    };
+  }
+  // A lock with no executionStartedAt is an inconsistent state — never
+  // assume infinite age and silently nuke it. Bail with a dedicated code so
+  // the operator can investigate (likely needs a direct DB fix).
+  if (!job.executionStartedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Execution lock has no start timestamp — refusing to unlock without one. Inspect the job row directly.',
+      errorCode: 'EXECUTION_LOCK_NO_START',
+    };
+  }
+
+  const config = await skillAnalyzerConfigService.getConfig();
+  const staleThresholdMs = config.executionLockStaleSeconds * 1000;
+  const heldForMs = Date.now() - new Date(job.executionStartedAt).getTime();
+  if (heldForMs < staleThresholdMs) {
+    throw {
+      statusCode: 409,
+      message: `Execution lock is not yet stale (held for ${Math.floor(heldForMs / 1000)}s, threshold ${config.executionLockStaleSeconds}s).`,
+      errorCode: 'EXECUTION_LOCK_FRESH',
+    };
+  }
+
+  // Clear the lock, token, and start timestamp. The affected-row check
+  // closes the narrow window where the live Execute's `finally` ran between
+  // our staleness check and this UPDATE — returning 0 rows means the lock
+  // was already released, which we surface distinctly rather than falsely
+  // claiming to have unlocked it.
+  const cleared = await db
+    .update(skillAnalyzerJobs)
+    .set({
+      executionLock: false,
+      executionLockToken: null,
+      executionStartedAt: null,
+      executionFinishedAt: new Date(),
+    })
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.executionLock, true)))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (!cleared[0]) {
+    throw {
+      statusCode: 409,
+      message: 'Lock was released concurrently by the running Execute. No action needed.',
+      errorCode: 'EXECUTION_LOCK_RELEASED_CONCURRENTLY',
+    };
+  }
+
+  logger.warn('[skillAnalyzer] stale execution lock cleared', {
+    jobId,
+    userId,
+    heldForSeconds: Math.floor(heldForMs / 1000),
+    staleThresholdSeconds: config.executionLockStaleSeconds,
+  });
+
+  return { unlocked: true, heldForSeconds: Math.floor(heldForMs / 1000) };
 }
 
 async function runExecute(params: {
@@ -1409,17 +1544,82 @@ async function runExecute(params: {
       // schema level. A retired (isActive=false) row with the same slug
       // would slip past getSkillBySlug and explode at the constraint inside
       // the transaction. Use a direct DB query that ignores isActive.
+      //
+      // v2 §11.11.7: when a row already exists, hash-compare content against
+      // the candidate. Identical content → idempotent adopt (runs the
+      // version-write + agent-attach effects against the existing row, so
+      // an external-actor Case B scenario still wires up intent). Diverged
+      // content → hard fail as before.
+      let adoptedExistingSkill: {
+        id: string;
+        slug: string;
+        name: string;
+        description: string | null;
+        definition: object | null;
+        instructions: string | null;
+      } | null = null;
       const existingRows = await db
-        .select({ id: systemSkills.id, isActive: systemSkills.isActive })
+        .select({
+          id: systemSkills.id,
+          isActive: systemSkills.isActive,
+          name: systemSkills.name,
+          description: systemSkills.description,
+          definition: systemSkills.definition,
+          instructions: systemSkills.instructions,
+        })
         .from(systemSkills)
         .where(eq(systemSkills.slug, candidate.slug))
         .limit(1);
       if (existingRows[0]) {
-        const msg = existingRows[0].isActive
-          ? `slug '${candidate.slug}' already exists in system_skills — pick a different slug or update the existing row instead`
-          : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
-        await failResult(result.id, msg);
-        continue;
+        const existing = existingRows[0];
+        const candidateHash = hashSkillContent({
+          name: candidate.name,
+          description: candidate.description,
+          definition: candidate.definition,
+          instructions: candidate.instructions,
+        });
+        const existingHash = hashSkillContent({
+          name: existing.name,
+          description: existing.description,
+          definition: existing.definition as object | null,
+          instructions: existing.instructions,
+        });
+        if (candidateHash === existingHash && existing.isActive) {
+          // Two distinct sub-cases produce a content-match collision:
+          //   A. A prior Execute for this same job created the skill and then
+          //      crashed before marking the result row success. Every
+          //      downstream effect (version write, agent attach) completed in
+          //      that prior transaction.
+          //   B. An external actor (admin UI, seed script, another job)
+          //      created a skill whose content happens to match ours. None of
+          //      our downstream effects have run yet.
+          //
+          // We can't tell A from B from the skill row alone, but we don't
+          // need to: version-write is idempotent via `idempotencyKey` and
+          // the agent-attach loop already guards with
+          // `currentSlugs.includes(created.slug)`. Running the effects
+          // unconditionally fixes Case B silently losing attachments while
+          // staying a no-op in Case A.
+          logger.info('[skillAnalyzer] execute slug-collision idempotent adopt', {
+            resultId: result.id,
+            slug: candidate.slug,
+            systemSkillId: existing.id,
+          });
+          adoptedExistingSkill = {
+            id: existing.id,
+            slug: candidate.slug,
+            name: existing.name,
+            description: existing.description,
+            definition: existing.definition as object | null,
+            instructions: existing.instructions,
+          };
+        } else {
+          const msg = existing.isActive
+            ? `slug '${candidate.slug}' already exists in system_skills with different content — pick a different slug or update the existing row instead`
+            : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
+          await failResult(result.id, msg);
+          continue;
+        }
       }
       // Open the per-result transaction. Inside: create the skill, then
       // for every selected agent proposal look up the live agent row and
@@ -1431,7 +1631,12 @@ async function runExecute(params: {
       // reflects only overall transaction success.
       try {
         const newSkill = await db.transaction(async (tx) => {
-          const created = await systemSkillService.createSystemSkill(
+          // Branch: on an idempotent adopt we skip createSystemSkill (slug
+          // already exists with matching content) but still run version
+          // write + agent attach against the existing row. writeVersion's
+          // idempotencyKey makes this safe on retry; the attach loop guards
+          // with `currentSlugs.includes(...)` for the same reason.
+          const created = adoptedExistingSkill ?? await systemSkillService.createSystemSkill(
             {
               slug: candidate.slug,
               handlerKey: 'generic_methodology',
@@ -1450,7 +1655,9 @@ async function runExecute(params: {
             definition: created.definition as object,
             instructions: created.instructions,
             changeType: 'create',
-            changeSummary: `Created by Skill Analyzer job ${jobId}`,
+            changeSummary: adoptedExistingSkill
+              ? `Adopted pre-existing skill by Skill Analyzer job ${jobId}`
+              : `Created by Skill Analyzer job ${jobId}`,
             authoredBy: params.userId,
             idempotencyKey: `sa:${jobId}:${created.id}:create`,
             tx,
@@ -2046,6 +2253,7 @@ export const skillAnalyzerService = {
   resetMergeToOriginal,
   resolveWarning,
   executeApproved,
+  unlockStaleExecution,
   updateJobProgress,
   retryClassification,
   bulkRetryFailedClassifications,
