@@ -809,6 +809,22 @@ export const queueService = {
         }
       });
 
+      // ClientPulse Phase 4 — hourly outcome-measurement sweep (B2 ship gate).
+      await (boss as any).work('clientpulse:measure-outcomes', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMeasureInterventionOutcomes } = await import('../jobs/measureInterventionOutcomeJob.js');
+          await withTimeout(
+            runMeasureInterventionOutcomes().then(() => undefined),
+            300_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:measure-outcomes', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
 
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
@@ -940,6 +956,8 @@ export const queueService = {
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
       // Memory & Briefings Phase 5 — daily protected-block divergence sweep (4am)
       await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
+      // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
+      await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

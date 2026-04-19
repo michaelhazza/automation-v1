@@ -17,6 +17,13 @@
 
 BEGIN;
 
+-- 0. Extend intervention_outcomes with band-change attribution (B2 ship gate).
+ALTER TABLE intervention_outcomes
+  ADD COLUMN IF NOT EXISTS band_before text,
+  ADD COLUMN IF NOT EXISTS band_after text,
+  ADD COLUMN IF NOT EXISTS band_changed boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS execution_failed boolean NOT NULL DEFAULT false;
+
 -- 1. Proposer query — template-cooldown check
 CREATE INDEX IF NOT EXISTS actions_metadata_template_slug_idx
   ON actions ((metadata_json->>'triggerTemplateSlug'))
