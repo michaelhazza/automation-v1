@@ -2298,6 +2298,10 @@ export const playbookEngineService = {
         .values({
           organisationId,
           subaccountId: source.subaccountId,
+          // Carry forward the scope so org-scope replays don't violate the
+          // playbook_runs_scope_subaccount_consistency_chk CHECK constraint
+          // (migration 0171 — scope='org' requires subaccountId=null).
+          scope: source.scope,
           templateVersionId: source.templateVersionId,
           status: 'pending',
           contextJson: replayContext as unknown as Record<string, unknown>,
