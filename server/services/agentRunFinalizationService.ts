@@ -24,7 +24,7 @@ import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
-import { emitAgentRunUpdate } from '../websocket/emitters.js';
+import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
 import {
   mapIeeStatusToAgentRunStatus,
@@ -107,6 +107,14 @@ export async function finaliseAgentRunFromIeeRun(
 
   let performedTransition = false;
   let resolvedStatus: 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | null = null;
+  // Captured inside the tx so we can emit the subaccount-level
+  // 'live:agent_completed' event after commit (Codex dual-review finding #3).
+  // The non-IEE execution path emits this event from agentExecutionService,
+  // but the IEE delegation branch returns early before those emitters run,
+  // so the sidebar/live counters never decrement for delegated runs.
+  let parentSubaccountId: string | null = null;
+  let parentIsSubAgent = false;
+  let parentAgentId: string | null = null;
 
   await db.transaction(async (tx) => {
     // IMPORTANT: this transaction deliberately does NOT invoke the normal
@@ -169,10 +177,33 @@ export async function finaliseAgentRunFromIeeRun(
 
     const terminalStatus = mapIeeStatusToAgentRunStatus(ieeRun.status, ieeRun.failureReason);
     resolvedStatus = terminalStatus;
+    parentSubaccountId = parent.subaccountId ?? null;
+    parentIsSubAgent = parent.isSubAgent ?? false;
+    parentAgentId = parent.agentId ?? null;
     const summary = buildSummaryFromIeeRun(ieeRun);
     const startedAt = parent.startedAt ?? ieeRun.startedAt ?? parent.createdAt;
     const completedAt = ieeRun.completedAt ?? new Date();
     const durationMs = completedAt.getTime() - new Date(startedAt).getTime();
+
+    // Codex iteration-3 finding P2: on failure, the RunTraceView "Error
+    // Details" panel reads agent_runs.errorMessage + errorDetail. The
+    // previous IEE finaliser only set status + summary, so delegated-run
+    // failures showed an empty panel even though the worker produced a
+    // concrete failureReason and resultSummary payload.
+    const isFailureStatus = terminalStatus === 'failed'
+      || terminalStatus === 'timeout'
+      || terminalStatus === 'loop_detected'
+      || terminalStatus === 'budget_exceeded';
+    const errorMessage = isFailureStatus
+      ? `IEE run ${ieeRun.failureReason ?? 'failed'}`
+      : null;
+    const errorDetail = isFailureStatus
+      ? {
+          failureReason: ieeRun.failureReason,
+          ieeRunId: ieeRun.id,
+          resultSummary: ieeRun.resultSummary,
+        }
+      : null;
 
     if (!parentAlreadyTerminal) {
       // Roll up token + call counts inside the transaction so late
@@ -185,6 +216,8 @@ export async function finaliseAgentRunFromIeeRun(
         .set({
           status: terminalStatus,
           summary,
+          errorMessage,
+          errorDetail,
           completedAt,
           durationMs,
           inputTokens: tokens.inputTokens,
@@ -215,6 +248,26 @@ export async function finaliseAgentRunFromIeeRun(
       finalStatus: resolvedStatus,
       failureReason: ieeRun.failureReason ?? null,
     });
+
+    // Codex dual-review finding #3: the non-IEE path pairs every
+    // 'live:agent_started' emission with a matching 'live:agent_completed'
+    // on the subaccount room when the run terminates. IEE-delegated runs
+    // also fire 'live:agent_started' at enqueue time (agentExecutionService
+    // runs that emission before the delegation branch), so without the
+    // mirror emission here the Layout sidebar badge and AdminAgentsPage
+    // counter never decrement for delegated runs — they stay stuck until
+    // the next full REST reload. Only subaccount-scoped, non-sub-agent
+    // runs update these badges, matching the emission rules on the
+    // start/complete pair in agentExecutionService.
+    if (parentSubaccountId && !parentIsSubAgent) {
+      emitSubaccountUpdate(parentSubaccountId, 'live:agent_completed', {
+        runId: ieeRun.agentRunId,
+        agentId: parentAgentId,
+        ieeRunId: ieeRun.id,
+        finalStatus: resolvedStatus,
+      });
+    }
+
     logger.info('agentRunFinalization.transitioned', {
       ieeRunId: ieeRun.id,
       agentRunId: ieeRun.agentRunId,

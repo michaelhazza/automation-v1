@@ -248,16 +248,21 @@ export default function CredentialsTab({ subaccountId }: Props) {
     setTestModal({ conn });
     setTestAgentsLoading(true);
     try {
-      const { data } = await api.get(`/api/subaccounts/${subaccountId}/agents`);
-      const rows: SubaccountAgentOption[] = (Array.isArray(data) ? data : (data.items ?? [])).map((row: {
+      // Codex iteration-3 finding P2: use the narrow test-eligible-agents
+      // endpoint (gated on CONNECTIONS_MANAGE + AGENTS_EDIT) instead of the
+      // broader /agents route (gated on org-level SUBACCOUNTS_VIEW). Portal
+      // users with only subaccount-level permissions can now load this list.
+      const { data } = await api.get(
+        `/api/subaccounts/${subaccountId}/web-login-connections/test-eligible-agents`,
+      );
+      const rows: SubaccountAgentOption[] = (Array.isArray(data) ? data : []).map((row: {
         id: string;
         agentId: string;
-        agent?: { name?: string };
         name?: string;
       }) => ({
         id: row.id,
         agentId: row.agentId,
-        name: row.agent?.name ?? row.name ?? 'Unnamed agent',
+        name: row.name ?? 'Unnamed agent',
       }));
       setTestAgents(rows);
       if (rows.length === 1) setSelectedTestAgentId(rows[0].id);

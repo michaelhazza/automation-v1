@@ -22,12 +22,15 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
+import { and, eq } from 'drizzle-orm';
 import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { webLoginConnectionService } from '../services/webLoginConnectionService.js';
 import { auditService } from '../services/auditService.js';
+import { db } from '../db/index.js';
+import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 
 const router = Router();
 
@@ -102,6 +105,47 @@ router.post(
       metadata: { subaccountId: subaccount.id, label: parsed.label },
     });
     res.status(201).json(created);
+  }),
+);
+
+/**
+ * Codex iteration-3 finding P2: the test modal needs the subaccount's
+ * agent list to let the operator attribute the run. Listing via the
+ * existing GET /api/subaccounts/:subaccountId/agents is gated on
+ * ORG_PERMISSIONS.SUBACCOUNTS_VIEW, which portal users with
+ * subaccount-level CONNECTIONS_MANAGE do not hold — they'd see
+ * "Failed to load agents" and be blocked from testing.
+ *
+ * This narrow endpoint returns only the fields the test modal needs,
+ * gated on the same CONNECTIONS_MANAGE + AGENTS_EDIT pair that the
+ * /test endpoint requires. Declared before GET /:id so Express does
+ * not route `test-eligible-agents` through the :id parameter.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/web-login-connections/test-eligible-agents',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { agents } = await import('../db/schema/agents.js');
+    const rows = await db
+      .select({
+        id: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        isActive: subaccountAgents.isActive,
+        name: agents.name,
+      })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, req.orgId!),
+          eq(subaccountAgents.subaccountId, subaccount.id),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
+    res.json(rows);
   }),
 );
 
@@ -207,6 +251,13 @@ router.post(
   '/api/subaccounts/:subaccountId/web-login-connections/:id/test',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
+  // Codex iteration-3 finding P1: this endpoint now enqueues a real
+  // agent run via executeRun, so it must require the same permission
+  // the other test-run endpoints do (AGENTS_EDIT) — not just the
+  // connection-management perm. Otherwise a user who can manage
+  // credentials but not trigger agent runs could launch billed
+  // browser jobs through this path.
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const conn = await webLoginConnectionService.getById(req.params.id, req.orgId!, subaccount.id);
@@ -220,6 +271,32 @@ router.post(
     }
 
     const body = testSavedBody.parse(req.body);
+
+    // Codex dual-review finding #1: prove the supplied subaccount-agent link
+    // actually belongs to this subaccount AND matches the supplied agentId
+    // before handing the execution service a client-controlled pair.
+    // executeRun loads the link solely by subaccountAgentId; without this
+    // guard, a crafted POST could attribute the test run to one subaccount
+    // in the URL while running against another's agent link, corrupting
+    // budget/config/audit attribution.
+    const [link] = await db
+      .select({
+        id: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        subaccountId: subaccountAgents.subaccountId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.id, body.subaccountAgentId),
+          eq(subaccountAgents.subaccountId, subaccount.id),
+          eq(subaccountAgents.agentId, body.agentId),
+        ),
+      );
+    if (!link) {
+      res.status(404).json({ error: 'subaccount_agent_not_found_for_subaccount' });
+      return;
+    }
 
     const { agentExecutionService } = await import('../services/agentExecutionService.js');
     const result = await agentExecutionService.executeRun({

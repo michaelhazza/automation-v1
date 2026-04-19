@@ -53,14 +53,18 @@ export function mapIeeStatusToAgentRunStatus(
 /**
  * Build a human-readable summary for the parent agent_run from an iee_run
  * row. Prefers iee_runs.resultSummary.output when present as a non-empty
- * string; falls back to a templated string derived from status +
- * failureReason. Truncates at 500 chars with ellipsis.
+ * string. When output is a structured object (login_test / capture_video
+ * worker paths), formats it per-mode. Falls back to a templated string
+ * derived from status + failureReason. Truncates at 500 chars with ellipsis.
  */
 export function buildSummaryFromIeeRun(run: SummaryInput): string {
   let summary: string;
   const result = run.resultSummary as Record<string, unknown> | null;
-  if (result && typeof result.output === 'string' && result.output.length > 0) {
-    summary = result.output;
+  const output = result?.output;
+  if (typeof output === 'string' && output.length > 0) {
+    summary = output;
+  } else if (output && typeof output === 'object') {
+    summary = formatObjectOutput(output as Record<string, unknown>, run);
   } else if (run.status === 'completed') {
     summary = `IEE ${run.type} task completed`;
   } else if (run.status === 'cancelled') {
@@ -73,4 +77,33 @@ export function buildSummaryFromIeeRun(run: SummaryInput): string {
     summary = summary.slice(0, 497) + '...';
   }
   return summary;
+}
+
+function formatObjectOutput(
+  output: Record<string, unknown>,
+  run: SummaryInput,
+): string {
+  const mode = typeof output.mode === 'string' ? output.mode : null;
+  if (mode === 'login_test') {
+    const validation = output.validation as Record<string, unknown> | undefined;
+    const urlChanged = validation?.urlChangedFromLogin === true;
+    const navigated = validation?.navigatedToContentUrl === true;
+    const selector = validation?.successSelectorFound;
+    const parts = [urlChanged ? 'URL changed' : 'no URL change'];
+    if (navigated) parts.push('content URL reached');
+    if (selector === true) parts.push('success selector found');
+    else if (selector === false) parts.push('success selector missing');
+    return `Login test: ${parts.join(', ')}`;
+  }
+  if (mode === 'capture_video') {
+    const source = typeof output.source === 'string' ? output.source : 'unknown source';
+    const sizeBytes = typeof output.sizeBytes === 'number' ? output.sizeBytes : null;
+    return sizeBytes !== null
+      ? `Video captured from ${source} (${sizeBytes} bytes)`
+      : `Video captured from ${source}`;
+  }
+  if (run.status === 'completed') return `IEE ${run.type} task completed`;
+  if (run.status === 'cancelled') return `IEE ${run.type} task cancelled`;
+  const reason = run.failureReason ?? 'unknown';
+  return `IEE ${run.type} task failed (${reason})`;
 }

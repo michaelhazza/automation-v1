@@ -160,12 +160,78 @@ test('does NOT truncate output strings of exactly 500 chars', () => {
   assertEqual(buildSummaryFromIeeRun(run), exact, 'passed through unchanged');
 });
 
-test('ignores non-string resultSummary.output (falls back to template)', () => {
+test('ignores unknown-shape object resultSummary.output (falls back to template)', () => {
   const run = makeIeeRun({
     status: 'completed',
     resultSummary: { output: { nested: 'object' } } as unknown,
   });
   assertEqual(buildSummaryFromIeeRun(run), 'IEE browser task completed', 'template fallback');
+});
+
+test('formats login_test object output using validation fields', () => {
+  const run = makeIeeRun({
+    status: 'completed',
+    resultSummary: {
+      output: {
+        mode: 'login_test',
+        screenshotPath: '/tmp/ss.png',
+        validation: {
+          finalUrl: 'https://example.com/dashboard',
+          navigatedToContentUrl: true,
+          urlChangedFromLogin: true,
+          successSelectorFound: true,
+        },
+      },
+    } as unknown,
+  });
+  assertEqual(
+    buildSummaryFromIeeRun(run),
+    'Login test: URL changed, content URL reached, success selector found',
+    'login_test validation summary',
+  );
+});
+
+test('formats login_test object output when selector missing', () => {
+  const run = makeIeeRun({
+    status: 'completed',
+    resultSummary: {
+      output: {
+        mode: 'login_test',
+        screenshotPath: '/tmp/ss.png',
+        validation: {
+          finalUrl: 'https://example.com/login',
+          navigatedToContentUrl: false,
+          urlChangedFromLogin: false,
+          successSelectorFound: false,
+        },
+      },
+    } as unknown,
+  });
+  assertEqual(
+    buildSummaryFromIeeRun(run),
+    'Login test: no URL change, success selector missing',
+    'login_test soft-failure summary',
+  );
+});
+
+test('formats capture_video object output with size', () => {
+  const run = makeIeeRun({
+    status: 'completed',
+    resultSummary: {
+      output: {
+        mode: 'capture_video',
+        artifactId: 'art-1',
+        source: 'mediasoup',
+        sizeBytes: 12345,
+        contentHash: 'sha256:abc',
+      },
+    } as unknown,
+  });
+  assertEqual(
+    buildSummaryFromIeeRun(run),
+    'Video captured from mediasoup (12345 bytes)',
+    'capture_video summary',
+  );
 });
 
 test('ignores empty-string resultSummary.output (falls back to template)', () => {

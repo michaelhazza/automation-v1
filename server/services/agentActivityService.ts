@@ -26,7 +26,17 @@ export const agentActivityService = {
     if (params.organisationId) conditions.push(eq(agentRuns.organisationId, params.organisationId));
     if (params.subaccountId) conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
     if (params.agentId) conditions.push(eq(agentRuns.agentId, params.agentId));
-    if (params.status) conditions.push(eq(agentRuns.status, params.status as 'completed' | 'failed'));
+    if (params.status) {
+      // Codex dual-review finding #2: accept a comma-separated status list so
+      // "live agent count" queries can include in-flight states beyond
+      // 'running' (notably 'delegated' for IEE-backed runs).
+      const statuses = params.status.split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(eq(agentRuns.status, statuses[0] as 'completed' | 'failed'));
+      } else if (statuses.length > 1) {
+        conditions.push(inArray(agentRuns.status, statuses as ('completed' | 'failed')[]) as ReturnType<typeof eq>);
+      }
+    }
     // Default: exclude test runs (spec §4.7). Pass includeTestRuns=true to show them.
     if (!params.includeTestRuns) conditions.push(eq(agentRuns.isTestRun, false));
 
