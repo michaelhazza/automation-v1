@@ -34,8 +34,13 @@ interface IeeProgress {
  *    that never transitions — e.g. the worker died AND the reconciliation
  *    cron also failed — stops polling after a finite time. The user can
  *    refresh the page to resume.
+ *  - Exponential backoff: the interval grows along the schedule below
+ *    when consecutive polls return no progress change. Reset to the
+ *    base interval whenever the worker reports meaningful progress
+ *    (stepCount advanced or status changed). Under active work the
+ *    feel is snappy; when the worker is idle we stop hammering.
  */
-const POLL_INTERVAL_MS = 3_000;
+const POLL_BACKOFF_SCHEDULE_MS = [3_000, 5_000, 10_000] as const;
 const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 
 export default function RunTraceViewerPage({ user: _user }: { user: User }) {
@@ -111,38 +116,62 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       return;
     }
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Track stepCount across polls so we can detect "no progress" and
+    // back off. Reset the backoff index whenever the worker reports
+    // forward progress (stepCount advanced OR status changed).
+    let lastStepCount = -1;
+    let lastStatus = '';
+    let backoffIdx = 0;
     const startedAt = Date.now();
     const subaccountParam = subaccountId ? `?subaccountId=${subaccountId}` : '';
 
-    const fetchProgress = async () => {
-      if (cancelled) return;
-      // External review Blocker 5 — stop polling after the max duration
-      // rather than hammering indefinitely.
-      if (Date.now() - startedAt >= POLL_MAX_DURATION_MS) {
-        if (interval) clearInterval(interval);
-        interval = null;
-        return;
-      }
-      try {
-        const { data } = await api.get(`/api/iee/runs/${ieeRunId}/progress${subaccountParam}`);
-        if (!cancelled) setIeeProgress(data);
-      } catch {
-        // Transient fetch failures are acceptable — the next tick will retry.
-      }
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
     };
 
-    // External review Blocker 5 — pause polling when the tab is hidden to
-    // avoid N parallel poll loops across tabs and the wake-up thundering
-    // herd on battery-sensitive devices.
+    const scheduleNext = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'visible') return; // resumed by visibilitychange
+      if (Date.now() - startedAt >= POLL_MAX_DURATION_MS) return;
+      const delay = POLL_BACKOFF_SCHEDULE_MS[Math.min(backoffIdx, POLL_BACKOFF_SCHEDULE_MS.length - 1)];
+      timer = setTimeout(fetchProgress, delay);
+    };
+
+    const fetchProgress = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const { data } = await api.get(`/api/iee/runs/${ieeRunId}/progress${subaccountParam}`);
+        if (cancelled) return;
+        setIeeProgress(data);
+        const progressed = typeof data?.stepCount === 'number'
+          && (data.stepCount !== lastStepCount || data.status !== lastStatus);
+        if (progressed) {
+          backoffIdx = 0;
+          lastStepCount = typeof data.stepCount === 'number' ? data.stepCount : lastStepCount;
+          lastStatus = typeof data.status === 'string' ? data.status : lastStatus;
+        } else {
+          backoffIdx = Math.min(backoffIdx + 1, POLL_BACKOFF_SCHEDULE_MS.length - 1);
+        }
+      } catch {
+        // Transient fetch failures — advance the backoff so we don't
+        // hammer a flapping endpoint, then try again on the next tick.
+        backoffIdx = Math.min(backoffIdx + 1, POLL_BACKOFF_SCHEDULE_MS.length - 1);
+      }
+      scheduleNext();
+    };
+
+    // Pause polling when the tab is hidden (avoid N parallel poll loops
+    // across tabs and the thundering herd on resume). Resume immediately
+    // when the tab becomes visible again.
     const startPolling = () => {
-      if (interval) return;
+      if (timer) return;
       fetchProgress();
-      interval = setInterval(fetchProgress, POLL_INTERVAL_MS);
     };
     const stopPolling = () => {
-      if (interval) clearInterval(interval);
-      interval = null;
+      clearTimer();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') startPolling();
@@ -154,7 +183,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
 
     return () => {
       cancelled = true;
-      stopPolling();
+      clearTimer();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [ieeRunId, subaccountId]);

@@ -152,6 +152,14 @@ export const agentRuns = pgTable(
     // to find the originating step run.
     playbookStepRunId: uuid('playbook_step_run_id'),
 
+    // IEE Phase 0 denormalised reference (migration 0170). When the run
+    // is delegated to an IEE worker, agentExecutionService writes the
+    // iee_runs.id here at delegation time. Read directly by the run
+    // detail API to avoid a read-time JOIN. Non-IEE runs leave this
+    // null. No FK constraint — this is a denormalised cache, not an
+    // integrity contract.
+    ieeRunId: uuid('iee_run_id'),
+
     // Heartbeat — stale run detection (GSD-2 adoption)
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
     lastToolStartedAt: timestamp('last_tool_started_at', { withTimezone: true }),
@@ -209,6 +217,17 @@ export const agentRuns = pgTable(
     // P3A: principal model index (migration 0164)
     principalIdx: index('agent_runs_principal_idx')
       .on(table.principalType, table.principalId),
+    // IEE Phase 0 denormalised cache + reverse lookup (migration 0170)
+    ieeRunIdIdx: index('agent_runs_iee_run_id_idx')
+      .on(table.ieeRunId)
+      .where(sql`${table.ieeRunId} IS NOT NULL`),
+    // IEE Phase 0 — hot path for live-count / dashboard / polling endpoints
+    // that filter on status IN ('pending','running','delegated'). A
+    // partial btree is much smaller than a general (org, status) index
+    // (migration 0170).
+    inflightOrgIdx: index('agent_runs_inflight_org_idx')
+      .on(table.organisationId)
+      .where(sql`${table.status} IN ('pending', 'running', 'delegated')`),
   })
 );
 

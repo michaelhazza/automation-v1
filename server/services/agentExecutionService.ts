@@ -929,8 +929,12 @@ export const agentExecutionService = {
         });
 
         // Park the parent run in 'delegated' state. Do NOT set completedAt.
+        // Persist ieeRunId as a first-class column (migration 0170) so
+        // callers never need to parse it out of the summary string and
+        // can fetch progress via the denormalised reference directly.
         await db.update(agentRuns).set({
           status: 'delegated',
+          ieeRunId: enqueueResult.ieeRunId,
           summary: `Delegated to IEE ${expectedType} (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
           lastActivityAt: new Date(),
           updatedAt: new Date(),
