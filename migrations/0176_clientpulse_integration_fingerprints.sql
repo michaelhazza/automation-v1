@@ -92,18 +92,27 @@ CREATE POLICY integration_fingerprints_read ON integration_fingerprints
     OR organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- Writers bypass tenant isolation but must supply an organisation_id for org-scope rows;
--- system-scope rows are seeded via this migration (and by sysadmin flows that run with
--- elevated context — not covered in this PR).
+-- Writer policy is scoped to the writing session's own organisation. The
+-- prior form allowed `scope = 'system' OR org = current_setting(...)`, which
+-- also lets a tenant writer INSERT/UPDATE system-scope rows — and since
+-- system-scope rows are readable by every tenant, that's a cross-tenant
+-- integrity hole. Seeding system rows is done above, BEFORE RLS is enabled;
+-- any future runtime promotion of an unclassified signal into a system-scope
+-- fingerprint must run through a separate privileged-role path (not
+-- canonical_writer), and is deliberately out of Phase 1 scope.
+--
+-- Reads of system-scope rows are unaffected — the `integration_fingerprints_read`
+-- policy above (FOR SELECT, applied to PUBLIC) still allows every tenant to
+-- SELECT system rows alongside their own org rows.
 CREATE POLICY integration_fingerprints_writer_bypass ON integration_fingerprints
   FOR ALL TO canonical_writer
   USING (
-    scope = 'system'
-    OR organisation_id = current_setting('app.organisation_id', true)::uuid
+    scope = 'org'
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   )
   WITH CHECK (
-    scope = 'system'
-    OR organisation_id = current_setting('app.organisation_id', true)::uuid
+    scope = 'org'
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
 -- ===========================================================================

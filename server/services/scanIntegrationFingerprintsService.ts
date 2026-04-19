@@ -10,21 +10,21 @@
  *   - client_pulse_signal_observations (the signal row that replaces the
  *     Phase 1 placeholder; numericValue = detection count)
  *
- * The scan is idempotent within a pollRunId — repeated runs refresh
- * last_seen_at without creating duplicates. Pure matching logic lives in
- * `scanIntegrationFingerprintsPure.ts`; this wrapper owns only DB I/O.
- *
  * ── Idempotency contract ────────────────────────────────────────────────
  *
- * `integration_detections` + `integration_unclassified_signals` upserts are
- * naturally idempotent via their own unique indexes (re-observation refreshes
- * last_seen_at + increments occurrence_count; it never duplicates rows).
+ * The observation row is the atomic "I own this run" gate. We insert it with
+ * `onConflictDoNothing` against `(org, subaccount, signal_slug, source_run_id)`
+ * FIRST; if the insert returned a row, we are the sole winner for this
+ * sourceRunId and proceed to write detections + unclassified. If the insert
+ * conflicted (a prior retry of the same run already landed the observation),
+ * we short-circuit with `skipped: 'conflict_exists'` and do NOT touch
+ * detections/unclassified. This prevents retry-driven inflation of
+ * `occurrence_count` + `importance_score` on the unclassified-signals table.
  *
- * The signal observation row is keyed on `(org, subaccount, signal_slug,
- * source_run_id)` per migration 0175's partial unique index. Poll-cycle
- * invocations share a pollRunId and de-dupe cleanly. Agent-skill invocations
- * without a source_run_id bypass the partial index and append a new row —
- * same timeseries semantics as compute_staff_activity_pulse.
+ * Agent-skill invocations without a sourceRunId bypass the partial unique
+ * index (migration 0175 `WHERE source_run_id IS NOT NULL`) and each append
+ * a fresh observation + fresh side effects — the timeseries semantics match
+ * compute_staff_activity_pulse.
  */
 
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
@@ -85,6 +85,49 @@ export async function executeScanIntegrationFingerprints(
   assertCanonicalUniqueness('integration_detections', { subaccountId: input.subaccountId });
   assertCanonicalUniqueness('integration_unclassified_signals', { subaccountId: input.subaccountId });
 
+  // Win-the-run gate — see module-level idempotency contract. Insert the
+  // observation FIRST; only the first attempt for a given sourceRunId gets a
+  // row back. Subsequent retries short-circuit without touching detections
+  // or unclassified, which prevents counter inflation on the latter.
+  const obsRow: NewClientPulseSignalObservation = {
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    connectorConfigId: input.connectorConfigId ?? undefined,
+    signalSlug: 'integration_fingerprint',
+    observedAt: now,
+    numericValue: detections.length,
+    jsonPayload: {
+      detectionCount: detections.length,
+      detections: detections.map((d) => ({ integrationSlug: d.integrationSlug, confidence: d.confidence })),
+      unclassifiedCount: unclassified.length,
+      algorithm: 'library_match_v1',
+    },
+    sourceRunId: input.sourceRunId,
+    availability: 'available',
+  };
+
+  const [inserted] = await db
+    .insert(clientPulseSignalObservations)
+    .values(obsRow)
+    .onConflictDoNothing({
+      target: [
+        clientPulseSignalObservations.organisationId,
+        clientPulseSignalObservations.subaccountId,
+        clientPulseSignalObservations.signalSlug,
+        clientPulseSignalObservations.sourceRunId,
+      ],
+    })
+    .returning({ id: clientPulseSignalObservations.id });
+
+  if (!inserted) {
+    return {
+      detectionCount: detections.length,
+      unclassifiedCount: unclassified.length,
+      skipped: 'conflict_exists',
+    };
+  }
+
+  // We won the run — safe to apply side effects.
   for (const d of detections) {
     const row: NewIntegrationDetection = {
       organisationId: input.organisationId,
@@ -150,41 +193,10 @@ export async function executeScanIntegrationFingerprints(
       });
   }
 
-  const obsRow: NewClientPulseSignalObservation = {
-    organisationId: input.organisationId,
-    subaccountId: input.subaccountId,
-    connectorConfigId: input.connectorConfigId ?? undefined,
-    signalSlug: 'integration_fingerprint',
-    observedAt: now,
-    numericValue: detections.length,
-    jsonPayload: {
-      detectionCount: detections.length,
-      detections: detections.map((d) => ({ integrationSlug: d.integrationSlug, confidence: d.confidence })),
-      unclassifiedCount: unclassified.length,
-      algorithm: 'library_match_v1',
-    },
-    sourceRunId: input.sourceRunId,
-    availability: 'available',
-  };
-
-  const [inserted] = await db
-    .insert(clientPulseSignalObservations)
-    .values(obsRow)
-    .onConflictDoNothing({
-      target: [
-        clientPulseSignalObservations.organisationId,
-        clientPulseSignalObservations.subaccountId,
-        clientPulseSignalObservations.signalSlug,
-        clientPulseSignalObservations.sourceRunId,
-      ],
-    })
-    .returning({ id: clientPulseSignalObservations.id });
-
   return {
-    observationId: inserted?.id,
+    observationId: inserted.id,
     detectionCount: detections.length,
     unclassifiedCount: unclassified.length,
-    skipped: inserted ? undefined : 'conflict_exists',
   };
 }
 
