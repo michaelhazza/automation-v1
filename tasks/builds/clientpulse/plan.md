@@ -169,3 +169,104 @@ After all 5 phases land:
 - (f) `skillExecutor.ts:1269` and `:1279` re-targeted (dual-write); no parallel handler files
 - (g) OAuth scope SSoT in `oauthProviders.ts`; `server/routes/ghl.ts` duplicate removed
 - (h) Every new canonical table has `UNIQUE(org, provider_type, external_id)`, RLS migration, `rlsProtectedTables.ts` entry, `canonicalDictionaryRegistry.ts` entry
+
+---
+
+## §9. Phase 1 follow-ups
+
+Scope: webhook expansion + 2 real skill handlers + integration-fingerprint tables/seed + canonical dictionary entries. Replaces placeholder observations for `staff_activity_pulse` and `integration_fingerprint`. `ai_feature_usage` stays placeholder (deferred to Operate-tier).
+
+### §9.1 Files to create
+
+| Path | Purpose |
+|------|---------|
+| `migrations/0176_clientpulse_integration_fingerprints.sql` | Create `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals`; seed library from `operational_config.integrationFingerprints.seedLibrary` (CloseBot, Uphex minimum). |
+| `migrations/0176_clientpulse_integration_fingerprints.down.sql` | Rollback pair. |
+| `server/skills/computeStaffActivityPulse.ts` | Real handler for `compute_staff_activity_pulse`. |
+| `server/skills/scanIntegrationFingerprints.ts` | Real handler for `scan_integration_fingerprints`. |
+| `server/services/__tests__/computeStaffActivityPulsePure.test.ts` | Pure tests for the staff-activity algorithm. |
+| `server/services/__tests__/scanIntegrationFingerprintsPure.test.ts` | Pure tests for fingerprint matching + unclassified-signal writes. |
+| `server/services/__tests__/ghlWebhookMutationsPure.test.ts` | Pure tests for the 10 event → mutation mappings (includes `externalUserKind` outlier heuristic). |
+
+### §9.2 Files to modify
+
+| Path | Change |
+|------|--------|
+| `server/routes/webhooks/ghlWebhook.ts` | Add switch cases for `INSTALL`, `UNINSTALL`, `LocationCreate`, `LocationUpdate`; extend existing 6 handlers to write `canonical_subaccount_mutations`. |
+| `server/adapters/ghlAdapter.ts` (webhook normaliser) | Add 4 new event shapes to `normaliseEvent()`. |
+| `server/config/actionRegistry.ts` | Register `compute_staff_activity_pulse`, `scan_integration_fingerprints`. |
+| `server/services/skillExecutor.ts` | Add two case-statements adjacent to `compute_health_score` (:1269) and `compute_churn_risk` (:1279). Decrement `capabilityQueryCallCount` if these skills call capability discovery. |
+| `server/config/canonicalDictionaryRegistry.ts` | Add 6 Phase-1 canonical-table entries (locked contract (i)). |
+
+### §9.3 Migration 0176 contents
+
+Tables per spec §2.0c lines 318–354. Columns (summary, full DDL at implementation time):
+
+- `integration_fingerprints` — `id, organisation_id NULL (NULL=system scope), provider_type, pattern_type, pattern_value, matched_capability, confidence_weight, active, created_at`. Unique on `(COALESCE(organisation_id, '00000000-...'), provider_type, pattern_type, pattern_value)`.
+- `integration_detections` — `id, organisation_id, subaccount_id, fingerprint_id, detected_at, poll_run_id, source_table, source_row_id, confidence`. Unique on `(subaccount_id, fingerprint_id, source_row_id)`.
+- `integration_unclassified_signals` — `id, organisation_id, subaccount_id, provider_type, signal_key, sample_value, seen_count, first_seen_at, last_seen_at`. Unique on `(subaccount_id, provider_type, signal_key)`.
+
+All three added to `rlsProtectedTables.ts` + RLS policies in same migration. Seed at least CloseBot + Uphex fingerprints into `integration_fingerprints` with `organisation_id=NULL`.
+
+### §9.4 Webhook handler contract
+
+| Event | mutationType | sourceEntity | externalUserId source | Notes |
+|-------|--------------|--------------|----------------------|-------|
+| ContactCreate | `contact_created` | `contact` | `event.contact.createdBy` | existing handler extended |
+| ContactUpdate | `contact_updated` | `contact` | `event.contact.updatedBy` | existing handler extended |
+| OpportunityStageUpdate | `opportunity_stage_changed` | `opportunity` | `event.opportunity.updatedBy` | existing handler extended |
+| OpportunityStatusUpdate | `opportunity_status_changed` | `opportunity` | `event.opportunity.updatedBy` | existing handler extended |
+| ConversationCreated | `message_sent_outbound` | `conversation` | `event.message.userId` | only when `direction='outbound' AND userId IS NOT NULL AND conversationProviderId IS NULL` |
+| ConversationUpdated | `message_sent_outbound` | `conversation` | same | same guard |
+| INSTALL | `app_installed` | `location` | `event.installedBy` | new normaliser + handler |
+| UNINSTALL | `app_uninstalled` | `location` | `event.uninstalledBy` | new normaliser + handler |
+| LocationCreate | `location_created` | `location` | `event.createdBy` | new normaliser + handler |
+| LocationUpdate | `location_updated` | `location` | `event.updatedBy` | new normaliser + handler |
+
+`externalUserKind` resolved via `resolveUserKindByVolume(orgId, subaccountId, externalUserId)` — implements `outlier_by_volume` with `threshold=0.6` from `getStaffActivityDefinition(orgId).automationUserResolution`. Returns `'human' | 'automation' | 'unknown'`.
+
+### §9.5 Skill: compute_staff_activity_pulse
+
+- Input: `{ orgId, subaccountId, lookbackDays? }`.
+- Output: observation row `{ signalKey: 'staff_activity_pulse', value: weightedScore, metadata: { countsByType, windowDays, excludedUsers } }`.
+- Algorithm: read `canonical_subaccount_mutations` within `lookbackWindowsDays` (from config); filter out `externalUserKind ∈ excludedUserKinds`; sum `count * countedMutationTypes[type].weight`; normalise per config; write to `client_pulse_signal_observations`.
+- Idempotency: `(subaccountId, 'staff_activity_pulse', date_trunc('day', now()))`.
+
+### §9.6 Skill: scan_integration_fingerprints
+
+- Input: `{ orgId, subaccountId }`.
+- Output: observation `{ signalKey: 'integration_fingerprint', value: detectionCount, metadata: { detections: [...], unclassified: [...] } }`.
+- Algorithm: iterate `integration_fingerprints` (system + org-scoped); match against the 5 canonical artifact tables (`canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`, `canonical_conversation_providers`) filtered to subaccount; upsert `integration_detections`; rows that look like integration fingerprints (name prefix/suffix, provider-specific patterns) but match nothing get upserted to `integration_unclassified_signals` with `seen_count` bumped.
+- Idempotency: `(subaccountId, 'integration_fingerprint', pollRunId)`.
+
+### §9.7 Tests
+
+Pure tests (no DB), 4–6 cases each:
+
+- **computeStaffActivityPulsePure**: weights applied correctly; excluded user-kind filtered; zero-mutation subaccount returns 0 not NaN; lookback window respected; config missing falls back to defaults.
+- **scanIntegrationFingerprintsPure**: exact match; case-insensitive prefix match; system + org fingerprints both considered; unmatched candidate routed to unclassified; duplicate detection idempotent.
+- **ghlWebhookMutationsPure**: each of the 10 events produces the correct row; outlier heuristic classifies majority user as `human` and low-volume as `automation`; unknown user returns `'unknown'`; ConversationCreated with `conversationProviderId IS NOT NULL` writes NO mutation row.
+
+### §9.8 Ship-gate verification
+
+**In-session (blocking the commit):**
+- `npx tsc --noEmit -p server/tsconfig.json` — zero new errors.
+- `npx tsx server/services/__tests__/computeStaffActivityPulsePure.test.ts` — pass.
+- `npx tsx server/services/__tests__/scanIntegrationFingerprintsPure.test.ts` — pass.
+- `npx tsx server/services/__tests__/ghlWebhookMutationsPure.test.ts` — pass.
+- Migration dry-run: `psql -f migrations/0176_... && psql -f migrations/0176_....down.sql && psql -f migrations/0176_....sql`.
+- Fixture-driven skill run against seeded `canonical_subaccount_mutations` produces non-null observation value for 7 of 8 signals (ai_feature_usage remains placeholder).
+
+**Pilot-gated (not blocking this PR, verified post-merge):**
+- Live GHL webhook replay populates `canonical_subaccount_mutations` for real sub-accounts.
+- Outlier heuristic threshold (0.6) tuned against real user-volume distributions.
+- Fingerprint library grown beyond CloseBot/Uphex seed via ops review of `integration_unclassified_signals`.
+
+### §9.9 Commit granularity
+
+Recommended 4 commits on this PR:
+
+1. Migration 0176 + rollback + `rlsProtectedTables.ts` additions + seed rows.
+2. `canonicalDictionaryRegistry.ts` entries for the 6 Phase-1 canonical tables (locked contract (i)).
+3. Webhook handler expansion (4 new events + mutation writes on 6 existing) + pure tests.
+4. Two skill handlers + registry + executor wiring + pure tests.
