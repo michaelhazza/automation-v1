@@ -82,6 +82,12 @@ export const connectorPollingService = {
 
     const connConfig = (config.configJson ?? {}) as Record<string, unknown>;
     const errors: Array<{ accountId: string; error: string }> = [];
+    // One poll-cycle id seeds source_run_id on every observation written in
+    // this cycle. Combined with the partial UNIQUE index from migration 0175
+    // + onConflictDoNothing, pg-boss retries of the same cycle no-op rather
+    // than producing duplicate observations.
+    const { randomUUID } = await import('node:crypto');
+    const pollRunId = randomUUID();
 
     try {
       // 1. Sync accounts list
@@ -216,6 +222,7 @@ export const connectorPollingService = {
                 connection: connection as never,
                 accountExternalId: dbAccount.externalId,
                 connectorConfigId: config.id,
+                sourceRunId: pollRunId,
                 contactCount: contacts.length,
                 opportunityCount: opportunities.length,
                 conversationCount: conversations.length,

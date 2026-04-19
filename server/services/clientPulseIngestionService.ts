@@ -22,7 +22,7 @@
  * The composite skills that compute their real values land in Phase 2+.
  */
 
-import { sql } from 'drizzle-orm';
+import { sql, eq, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   clientPulseSignalObservations,
@@ -123,18 +123,24 @@ export async function ingestClientPulseSignalsForSubaccount(
   // Placeholder signals for ship gate — real values computed by Phase 2+ skills.
   // Writing stubs keeps dashboard queries non-empty and satisfies the ship
   // gate ("rows for all eight signals across every sub-account").
+  //
+  // Every placeholder carries `phase: 'placeholder'` in jsonPayload so
+  // dashboards + monitoring can distinguish a deliberately-skipped signal
+  // (pending its Phase 2+ compute skill) from a genuine fetch failure. Real
+  // `unavailable_other` observations come from CRM API errors and do not
+  // carry the `phase` key.
   observations.push({
     ...base,
     signalSlug: 'staff_activity_pulse',
     numericValue: null,
-    jsonPayload: { note: 'pending_compute_staff_activity_pulse_skill' },
+    jsonPayload: { phase: 'placeholder', note: 'pending_compute_staff_activity_pulse_skill' },
     availability: 'unavailable_other',
   });
   observations.push({
     ...base,
     signalSlug: 'integration_fingerprint',
     numericValue: null,
-    jsonPayload: { note: 'pending_scan_integration_fingerprints_skill' },
+    jsonPayload: { phase: 'placeholder', note: 'pending_scan_integration_fingerprints_skill' },
     availability: 'unavailable_other',
   });
   observations.push({
@@ -142,33 +148,60 @@ export async function ingestClientPulseSignalsForSubaccount(
     signalSlug: 'ai_feature_usage',
     numericValue: null,
     jsonPayload: {
+      phase: 'placeholder',
       note: 'pending_conversation_provider_analysis',
       conversationCount: input.conversationCount,
     },
     availability: 'unavailable_other',
   });
 
-  // Persist observations.
+  // Persist observations. Migration 0175 adds a partial UNIQUE index on
+  // (org, subaccount, signal_slug, source_run_id) WHERE source_run_id IS NOT
+  // NULL — onConflictDoNothing makes retries idempotent rather than noisy.
   try {
-    await db.insert(clientPulseSignalObservations).values(observations);
+    await db
+      .insert(clientPulseSignalObservations)
+      .values(observations)
+      .onConflictDoNothing({
+        target: [
+          clientPulseSignalObservations.organisationId,
+          clientPulseSignalObservations.subaccountId,
+          clientPulseSignalObservations.signalSlug,
+          clientPulseSignalObservations.sourceRunId,
+        ],
+      });
   } catch (err) {
     errors.push(`observations_insert_failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Persist tier history if subscription fetch was available.
+  // Persist tier history if subscription fetch was available AND the tier or
+  // active flag differs from the most recent observation. Collapsing
+  // unchanged observations keeps the timeseries clean for churn analysis.
   if (subResult.availability === 'available' && subResult.data.tier) {
     try {
-      await db.insert(subaccountTierHistory).values({
-        organisationId: input.organisationId,
-        subaccountId: input.subaccountId,
-        observedAt: now,
-        tier: subResult.data.tier,
-        tierSource: 'api',
-        planId: subResult.data.planId,
-        active: subResult.data.active,
-        nextBillingDate: subResult.data.nextBillingDate ? new Date(subResult.data.nextBillingDate) : undefined,
-        sourceRunId: input.sourceRunId,
-      });
+      const [latest] = await db
+        .select({ tier: subaccountTierHistory.tier, active: subaccountTierHistory.active })
+        .from(subaccountTierHistory)
+        .where(eq(subaccountTierHistory.subaccountId, input.subaccountId))
+        .orderBy(desc(subaccountTierHistory.observedAt))
+        .limit(1);
+
+      const tierChanged = !latest || latest.tier !== subResult.data.tier;
+      const activeChanged = !latest || latest.active !== (subResult.data.active ?? null);
+
+      if (tierChanged || activeChanged) {
+        await db.insert(subaccountTierHistory).values({
+          organisationId: input.organisationId,
+          subaccountId: input.subaccountId,
+          observedAt: now,
+          tier: subResult.data.tier,
+          tierSource: 'api',
+          planId: subResult.data.planId,
+          active: subResult.data.active,
+          nextBillingDate: subResult.data.nextBillingDate ? new Date(subResult.data.nextBillingDate) : undefined,
+          sourceRunId: input.sourceRunId,
+        });
+      }
     } catch (err) {
       errors.push(`tier_history_insert_failed: ${err instanceof Error ? err.message : String(err)}`);
     }

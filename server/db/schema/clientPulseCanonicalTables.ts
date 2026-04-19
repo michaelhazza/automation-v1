@@ -4,9 +4,29 @@
  * Spec: tasks/clientpulse-ghl-gap-analysis.md §9.4, §25.1.
  *
  * Six canonical tables (CRM-agnostic, adapter-populated) + two derived tables
- * (skill-written). Every canonical table honours the §25.1 uniqueness contract
- * `UNIQUE(organisation_id, provider_type, external_id)` and has RLS enabled
- * keyed on `current_setting('app.organisation_id')`.
+ * (skill-written). Every table has RLS enabled keyed on
+ * `current_setting('app.organisation_id')`.
+ *
+ * ── Canonical uniqueness modes ─────────────────────────────────────────────
+ *
+ * The §25.1 contract declares `UNIQUE(organisation_id, provider_type,
+ * external_id)` for canonical tables, but this is a two-mode contract in
+ * practice:
+ *
+ *   GLOBAL mode — `UNIQUE(org, provider_type, external_id)`. The provider's
+ *   external id is globally unique within the provider (e.g. GHL contact IDs,
+ *   opportunity IDs). Used by: canonical_conversation_providers,
+ *   canonical_workflow_definitions, canonical_tag_definitions,
+ *   canonical_custom_field_definitions, canonical_contact_sources.
+ *
+ *   SCOPED mode — `UNIQUE(org, subaccount_id, provider_type, external_id)`.
+ *   The provider's external id is location-scoped; the same id can legitimately
+ *   appear in two sub-accounts. Used by: canonical_subaccount_mutations.
+ *
+ * When adding a new canonical table, declare which mode it uses in the
+ * `CANONICAL_UNIQUENESS_MODE` map below, and shape its index accordingly.
+ * Future fingerprint-scanner code can key off the mode rather than
+ * hand-rolling the uniqueness assumption per table.
  */
 
 import {
@@ -24,6 +44,24 @@ import {
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { subaccounts } from './subaccounts.js';
+
+// ── Uniqueness-mode registry ──────────────────────────────────────────────
+//
+// Single source of truth for which canonical tables use GLOBAL vs SCOPED
+// uniqueness. Future writers / upsert helpers can consume this to shape
+// their `.onConflictDoUpdate({ target: [...] })` calls without hand-rolling
+// the column list per call site.
+
+export type CanonicalUniquenessMode = 'global' | 'scoped';
+
+export const CANONICAL_UNIQUENESS_MODE: Record<string, CanonicalUniquenessMode> = {
+  canonical_subaccount_mutations: 'scoped',
+  canonical_conversation_providers: 'global',
+  canonical_workflow_definitions: 'global',
+  canonical_tag_definitions: 'global',
+  canonical_custom_field_definitions: 'global',
+  canonical_contact_sources: 'global',
+};
 
 // ── Shared helper types ───────────────────────────────────────────────────
 
