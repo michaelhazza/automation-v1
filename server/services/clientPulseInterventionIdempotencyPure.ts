@@ -43,7 +43,7 @@ export function buildOperatorIdempotencyKey(p: {
   scheduleHint?: 'immediate' | 'delay_24h' | 'scheduled';
   templateSlug?: string | null;
 }): string {
-  const canonicalPayload = JSON.stringify(p.payload, Object.keys(p.payload).sort());
+  const canonicalPayload = canonicalStringify(p.payload);
   const raw = [
     'clientpulse:intervention:operator',
     p.subaccountId,
@@ -53,4 +53,25 @@ export function buildOperatorIdempotencyKey(p: {
     canonicalPayload,
   ].join(':');
   return createHash('sha256').update(raw).digest('hex').slice(0, 40);
+}
+
+/**
+ * Recursive canonical JSON serialiser — sorts object keys at every depth so
+ * the output is deterministic regardless of insertion order. Required for
+ * idempotency-key derivation: payloads with nested objects (e.g. the
+ * operator-alert `recipients: { kind, value }`) must contribute every leaf
+ * to the hash, otherwise distinct intents would dedup.
+ *
+ * The naive `JSON.stringify(obj, Object.keys(obj).sort())` is wrong here —
+ * the replacer-array filter applies recursively, dropping every nested key
+ * not in the top-level allowlist.
+ */
+export function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys
+    .map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`)
+    .join(',')}}`;
 }
