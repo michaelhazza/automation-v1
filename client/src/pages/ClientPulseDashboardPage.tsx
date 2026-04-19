@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
 import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
+import ConfigAssistantChatPopup from '../components/clientpulse/ConfigAssistantChatPopup';
 
 interface Props { user: User; }
 
@@ -47,6 +48,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   const [subscription, setSubscription] = useState<OrgSubscription | null>(null);
   const [ghlConnected, setGhlConnected] = useState<boolean | null>(null);
   const [proposingFor, setProposingFor] = useState<{ id: string; name: string } | null>(null);
+  const [configAssistantOpen, setConfigAssistantOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -79,6 +81,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <GuidedTour />
+      <ConfigAssistantChatPopup open={configAssistantOpen} onClose={() => setConfigAssistantOpen(false)} />
       {proposingFor && (
         <ProposeInterventionModal
           subaccountId={proposingFor.id}
@@ -107,15 +110,23 @@ export default function ClientPulseDashboardPage({ user }: Props) {
       )}
 
       {/* Greeting */}
-      <div className="mb-6">
-        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
-          Portfolio Health
-        </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
-          {health
-            ? `${health.totalClients} clients monitored. Last updated just now.`
-            : 'Connect your Go High Level account to start monitoring.'}
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
+            Portfolio Health
+          </h1>
+          <p className="text-sm text-slate-500 mt-1.5">
+            {health
+              ? `${health.totalClients} clients monitored. Last updated just now.`
+              : 'Connect your Go High Level account to start monitoring.'}
+          </p>
+        </div>
+        <button
+          onClick={() => setConfigAssistantOpen(true)}
+          className="shrink-0 px-3 py-1.5 rounded-md text-[12.5px] font-semibold bg-white border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+        >
+          Config Assistant
+        </button>
       </div>
 
       {/* GHL not connected empty state */}

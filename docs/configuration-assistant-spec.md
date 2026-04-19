@@ -224,7 +224,7 @@ All tools below are system skills assigned exclusively to the Configuration Assi
 
 Universal skills (`ask_clarifying_question`, `read_workspace`, `web_search`, `read_codebase`, `search_agent_history`, `read_priority_feed`) are also available since they bypass allowlists. `ask_clarifying_question` is particularly useful during the discovery phase.
 
-### 4.1 Mutation tools (15)
+### 4.1 Mutation tools (16)
 
 These tools create or modify configuration entities. All mutation tools use `defaultGateLevel: 'review'` in the action registry so the user must approve before execution. All use `idempotencyStrategy: 'keyed_write'` for safe retries. All record a `config_history` entry before applying the change.
 
@@ -245,6 +245,7 @@ These tools create or modify configuration entities. All mutation tools use `def
 | 13 | `config_attach_data_source` | Attach a knowledge source (URL or uploaded file) to an agent, subaccount link, or scheduled task | `agentDataSourceService.createDataSource()` | name, sourceType ('http_url' or 'file_upload'), sourcePath, contentType, priority, maxTokenBudget, loadingMode, cacheMinutes; plus one of: agentId, subaccountAgentId, scheduledTaskId |
 | 14 | `config_update_data_source` | Update an existing data source's priority, loading mode, or content type | `agentDataSourceService.updateDataSource()` | dataSourceId, plus any updatable fields |
 | 15 | `config_remove_data_source` | Remove a data source from an agent, link, or task | `agentDataSourceService.deleteDataSource()` | dataSourceId |
+| 29 | `config_update_hierarchy_template` | Apply a single dot-path patch to a hierarchy template's `operational_config` JSONB (ClientPulse scoring weights, churn bands, intervention defaults, alert limits, etc.). Sensitive paths route through the review queue (§17.6.2). Added in the ClientPulse Phase 4.5 extension — numbering picks up after `config_restore_version` (28). | `configUpdateHierarchyTemplateService.applyHierarchyTemplateConfigUpdate()` | templateId, path, value, reason, sourceSession |
 
 **Design note — why separate link update tools (6-9) exist alongside the generic update (5):** Narrower tools produce more reliable LLM tool selection. When the user says "make the SEO agent run weekly for Client X," the AI should reach for `config_set_link_schedule` specifically, not a generic update with 15 optional fields. The specific tools are the primary interface; the generic `config_update_link` is the catch-all for less common combinations.
 
@@ -273,7 +274,7 @@ These tools query current configuration state. They have `defaultGateLevel: 'aut
 | 27 | `config_view_history` | List version history for a given entity (entity type + entity ID) | `auto` |
 | 28 | `config_restore_version` | Restore an entity to a previous version from config history | `review` |
 
-**Total: 28 skill tool handlers** (15 mutation, 9 read-only, 4 validation/history).
+**Total: 29 skill tool handlers** (16 mutation, 9 read-only, 4 validation/history). Tool #29 (`config_update_hierarchy_template`) was added in the ClientPulse Phase 4.5 extension and brings ClientPulse operational_config into the Configuration Assistant's in-scope surface.
 
 ### 4.4 Action registry entries
 

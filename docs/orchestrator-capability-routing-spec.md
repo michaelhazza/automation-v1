@@ -353,6 +353,28 @@ Without explicit rules, the taxonomy grows inconsistently: `read_email` vs `inbo
 
 **Review gate for new taxonomy entries:** Any PR that adds a new capability slug to the taxonomy (beyond adding an alias to an existing slug) requires a Synthetos team review comment acknowledging the new entry. This is enforced by a CODEOWNERS rule on `docs/integration-reference.md`. The intent is to keep the taxonomy deliberately small — capability explosion via careless growth is the failure mode.
 
+### 3.7.1 ClientPulse configuration routing hints (Phase 4.5 extension)
+
+The ClientPulse operational_config block is a first-class capability surface — operator queries like "bump pipeline velocity weight to 0.35", "lower the alert notification threshold", "change churn band thresholds" all resolve to the same skill (`config_update_hierarchy_template`). Surface these via four capability slugs in the taxonomy:
+
+- `clientpulse.config.read` — return current values from `operational_config` (scoring factors, churn bands, intervention defaults, alert limits).
+- `clientpulse.config.update` — single dot-path patch via `config_update_hierarchy_template` skill.
+- `clientpulse.config.reset` — revert a path (or the whole config) to hierarchy template defaults. Factory-reset semantic.
+- `clientpulse.config.history` — browse `config_history` rows with `entity_type='clientpulse_operational_config'`.
+
+**Routing phrases that trigger the ClientPulse config surface:**
+
+- "weights" / "scoring weights" / "health score weights" → `clientpulse.config.read` or `.update`
+- "cooldown" / "intervention cooldown" / "propose again" → `.update` (sensitive path, routes through review)
+- "churn band" / "at-risk threshold" / "band cutoff" → `.update` (sensitive path)
+- "alert limit" / "notification threshold" / "alert cap" → `.update` (typically non-sensitive except `maxAlertsPerRun`)
+- "config history" / "who changed" / "change log" → `.history`
+- "reset to default" / "factory reset" / "undo all changes" → `.reset`
+
+**Sensitive vs non-sensitive:** the Orchestrator does not need to decide — it routes the skill call, and the skill's service-layer classifier (via `SENSITIVE_CONFIG_PATHS`) decides whether the write commits inline or queues for approval. The user-facing message in either case is surfaced by the skill response (`{ committed, requiresApproval }`).
+
+**Agent mapping:** the Configuration Assistant agent is the primary carrier for these slugs. When the Orchestrator resolves a ClientPulse-config query, it hands off to the Configuration Assistant chat surface rather than attempting to execute inline — this gives the operator a confirm-before-write card with before/after diff.
+
 ### 3.8 What the doc is NOT
 
 - **Not a marketing asset.** This lives alongside `docs/architecture.md` as developer- and agent-facing documentation. The customer-facing integration list lives in `docs/capabilities.md` and is narrative, not structured. The two stay aligned but the audiences and tones are different.

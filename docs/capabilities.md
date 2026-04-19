@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-19 (ClientPulse Phase 1 follow-ups — Staff Activity Pulse + Integration Fingerprint Scanner skills, GHL webhook mutation writes covering 10 event types)
+> **Last updated:** 2026-04-19 (ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension for operational_config)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -532,6 +532,15 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Anomaly detection compared against each account's own historical baseline
 - Intervention triggers (check-in, pause, escalation alert) proposed with human gating
 - ClientPulse dashboard for portfolio-wide health visibility at a glance, powered by Staff Activity Pulse (weighted-sum activity scoring from CRM mutation events, with automation-user exclusion) and Integration Fingerprint Scanner (detects third-party tools installed in each sub-account from canonical artifact patterns)
+- **Intervention pipeline** (Phase 4): scenario-detector proposes CRM-side actions (fire automation, send email, send SMS, create task) plus internal operator alerts — every proposal queued for operator approval before execution. Hourly outcome-measurement job tracks post-intervention band change (improved / unchanged / worsened) over a 14-day measurement window so operators see which interventions actually move the needle.
+- **Configuration Assistant for account-health knobs** (Phase 4.5): operators change scoring weights, churn band thresholds, intervention cooldown hours, and alert limits via a guided confirm-before-write surface. Every change is audit-logged; changes to governance-critical knobs (weights, cooldowns, alert caps) route through the review queue for a second pair of eyes.
+
+**ClientPulse configuration capabilities (for capability-aware routing):**
+
+- `clientpulse.config.read` — inspect current operational_config values for the org.
+- `clientpulse.config.update` — propose a single dot-path change; routes through the sensitive-path gate when required.
+- `clientpulse.config.reset` — revert to the hierarchy template's defaults (factory reset semantic).
+- `clientpulse.config.history` — browse the audit trail of past changes with snapshot diffs.
 
 ### Customer Support Automation
 
