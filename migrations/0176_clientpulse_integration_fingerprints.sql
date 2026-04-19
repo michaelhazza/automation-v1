@@ -63,6 +63,25 @@ CREATE INDEX integration_fingerprints_slug_type_idx
   ON integration_fingerprints (integration_slug, fingerprint_type)
   WHERE deleted_at IS NULL;
 
+-- ===========================================================================
+-- Seed BEFORE enabling RLS. Postgres does not enforce row-level security until
+-- ENABLE ROW LEVEL SECURITY runs; seeding first lets the migration role insert
+-- without needing BYPASSRLS or a canonical_writer session context. Every
+-- subsequent write from application code happens under RLS.
+-- ===========================================================================
+
+INSERT INTO integration_fingerprints (scope, integration_slug, display_name, vendor_url, fingerprint_type, fingerprint_value, fingerprint_pattern, confidence) VALUES
+  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'conversation_provider_id', NULL, '^closebot:', 0.95),
+  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'workflow_action_type',     NULL, '^closebot\.',  0.95),
+  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'outbound_webhook_domain',  'api.closebot.ai', NULL, 0.95),
+  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'custom_field_prefix',      NULL, '^closebot_',   0.85),
+  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'tag_prefix',               NULL, '^closebot:',   0.85),
+  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'conversation_provider_id', NULL, '^uphex:',      0.95),
+  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'workflow_action_type',     NULL, '^uphex\.',     0.95),
+  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'outbound_webhook_domain',  'api.uphex.com',   NULL, 0.95),
+  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'custom_field_prefix',      NULL, '^uphex_',      0.85),
+  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'tag_prefix',               NULL, '^uphex:',      0.85);
+
 ALTER TABLE integration_fingerprints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_fingerprints FORCE ROW LEVEL SECURITY;
 
@@ -174,23 +193,5 @@ CREATE POLICY integration_unclassified_signals_read ON integration_unclassified_
   FOR SELECT USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid
   );
-
--- ===========================================================================
--- Seed — CloseBot + Uphex patterns at system scope.
--- Confidence 0.95 for high-signal patterns (provider IDs, domains), 0.85 for
--- looser prefix patterns. Additional vendors land via operator triage later.
--- ===========================================================================
-
-INSERT INTO integration_fingerprints (scope, integration_slug, display_name, vendor_url, fingerprint_type, fingerprint_value, fingerprint_pattern, confidence) VALUES
-  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'conversation_provider_id', NULL, '^closebot:', 0.95),
-  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'workflow_action_type',     NULL, '^closebot\.',  0.95),
-  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'outbound_webhook_domain',  'api.closebot.ai', NULL, 0.95),
-  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'custom_field_prefix',      NULL, '^closebot_',   0.85),
-  ('system', 'closebot', 'CloseBot', 'https://closebot.ai', 'tag_prefix',               NULL, '^closebot:',   0.85),
-  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'conversation_provider_id', NULL, '^uphex:',      0.95),
-  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'workflow_action_type',     NULL, '^uphex\.',     0.95),
-  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'outbound_webhook_domain',  'api.uphex.com',   NULL, 0.95),
-  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'custom_field_prefix',      NULL, '^uphex_',      0.85),
-  ('system', 'uphex',    'Uphex',    'https://uphex.com',    'tag_prefix',               NULL, '^uphex:',      0.85);
 
 COMMIT;

@@ -95,6 +95,20 @@ test('OpportunityStatusUpdate → opportunity_status_changed', () => {
   assertEq(result.externalUserId, 'user-5', 'externalUserId');
 });
 
+test('ConversationUpdated with outbound staff message → message_sent_outbound', () => {
+  const result = normaliseGhlMutation({
+    type: 'ConversationUpdated',
+    locationId: 'loc-1',
+    traceId: 'trace-upd',
+    id: 'conv-100',
+    message: { id: 'msg-2', direction: 'outbound', userId: 'user-7' },
+  });
+  assert(result !== null, 'should map');
+  assertEq(result.mutationType, 'message_sent_outbound', 'mutationType');
+  assertEq(result.sourceEntity, 'conversation', 'sourceEntity');
+  assertEq(result.externalUserId, 'user-7', 'externalUserId');
+});
+
 test('ConversationCreated with outbound staff message → message_sent_outbound', () => {
   const result = normaliseGhlMutation({
     type: 'ConversationCreated',

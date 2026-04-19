@@ -1164,7 +1164,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
+    idempotencyStrategy: 'keyed_write',
   },
 
   scan_integration_fingerprints: {
@@ -1183,7 +1183,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
+    idempotencyStrategy: 'keyed_write',
   },
 
   generate_portfolio_report: {

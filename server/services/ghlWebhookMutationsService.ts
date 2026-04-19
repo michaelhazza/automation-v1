@@ -118,6 +118,7 @@ async function resolveExternalUserKind(input: ResolveUserKindInput): Promise<Ext
     .from(canonicalSubaccountMutations)
     .where(
       and(
+        eq(canonicalSubaccountMutations.organisationId, input.organisationId),
         eq(canonicalSubaccountMutations.subaccountId, input.subaccountId),
         gte(canonicalSubaccountMutations.occurredAt, since),
       ),

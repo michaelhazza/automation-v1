@@ -13,6 +13,18 @@
  * The scan is idempotent within a pollRunId — repeated runs refresh
  * last_seen_at without creating duplicates. Pure matching logic lives in
  * `scanIntegrationFingerprintsPure.ts`; this wrapper owns only DB I/O.
+ *
+ * ── Idempotency contract ────────────────────────────────────────────────
+ *
+ * `integration_detections` + `integration_unclassified_signals` upserts are
+ * naturally idempotent via their own unique indexes (re-observation refreshes
+ * last_seen_at + increments occurrence_count; it never duplicates rows).
+ *
+ * The signal observation row is keyed on `(org, subaccount, signal_slug,
+ * source_run_id)` per migration 0175's partial unique index. Poll-cycle
+ * invocations share a pollRunId and de-dupe cleanly. Agent-skill invocations
+ * without a source_run_id bypass the partial index and append a new row —
+ * same timeseries semantics as compute_staff_activity_pulse.
  */
 
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
@@ -65,7 +77,8 @@ export async function executeScanIntegrationFingerprints(
   const now = input.now ?? new Date();
 
   const library = input.libraryOverride ?? (await loadLibrary(input.organisationId));
-  const observations = input.observationsOverride ?? (await loadObservations(input.subaccountId));
+  const observations =
+    input.observationsOverride ?? (await loadObservations(input.organisationId, input.subaccountId));
 
   const { detections, unclassified } = scanFingerprintsPure(observations, library);
 
@@ -202,17 +215,30 @@ async function loadLibrary(organisationId: string): Promise<FingerprintLibraryEn
     fingerprintType: r.fingerprintType as IntegrationFingerprintType,
     fingerprintValue: r.fingerprintValue,
     fingerprintPattern: r.fingerprintPattern,
-    confidence: r.confidence,
+    // Drizzle returns numeric() as string — parse to number so the matcher can
+    // compare confidences numerically.
+    confidence: Number(r.confidence),
   }));
 }
 
-async function loadObservations(subaccountId: string): Promise<Observation[]> {
+async function loadObservations(organisationId: string, subaccountId: string): Promise<Observation[]> {
   const observations: Observation[] = [];
+
+  // All five loaders filter on BOTH organisationId + subaccountId per
+  // CLAUDE.md architecture rules ("all queries filter by organisationId").
+  // subaccount UUIDs are globally unique by construction, so the org filter
+  // is belt-and-braces; the convention makes RLS enforcement deterministic
+  // and auditable by inspection.
 
   const providers = await db
     .select({ externalId: canonicalConversationProviders.externalId })
     .from(canonicalConversationProviders)
-    .where(eq(canonicalConversationProviders.subaccountId, subaccountId));
+    .where(
+      and(
+        eq(canonicalConversationProviders.organisationId, organisationId),
+        eq(canonicalConversationProviders.subaccountId, subaccountId),
+      ),
+    );
   for (const p of providers) {
     observations.push({ signalType: 'conversation_provider_id', signalValue: p.externalId });
   }
@@ -223,7 +249,12 @@ async function loadObservations(subaccountId: string): Promise<Observation[]> {
       webhookTargets: canonicalWorkflowDefinitions.outboundWebhookTargets,
     })
     .from(canonicalWorkflowDefinitions)
-    .where(eq(canonicalWorkflowDefinitions.subaccountId, subaccountId));
+    .where(
+      and(
+        eq(canonicalWorkflowDefinitions.organisationId, organisationId),
+        eq(canonicalWorkflowDefinitions.subaccountId, subaccountId),
+      ),
+    );
   for (const w of workflows) {
     for (const t of (w.actionTypes as string[] | null) ?? []) {
       observations.push({ signalType: 'workflow_action_type', signalValue: t });
@@ -236,7 +267,12 @@ async function loadObservations(subaccountId: string): Promise<Observation[]> {
   const tags = await db
     .select({ tagName: canonicalTagDefinitions.tagName })
     .from(canonicalTagDefinitions)
-    .where(eq(canonicalTagDefinitions.subaccountId, subaccountId));
+    .where(
+      and(
+        eq(canonicalTagDefinitions.organisationId, organisationId),
+        eq(canonicalTagDefinitions.subaccountId, subaccountId),
+      ),
+    );
   for (const t of tags) {
     observations.push({ signalType: 'tag_prefix', signalValue: t.tagName });
   }
@@ -244,7 +280,12 @@ async function loadObservations(subaccountId: string): Promise<Observation[]> {
   const fields = await db
     .select({ fieldKey: canonicalCustomFieldDefinitions.fieldKey })
     .from(canonicalCustomFieldDefinitions)
-    .where(eq(canonicalCustomFieldDefinitions.subaccountId, subaccountId));
+    .where(
+      and(
+        eq(canonicalCustomFieldDefinitions.organisationId, organisationId),
+        eq(canonicalCustomFieldDefinitions.subaccountId, subaccountId),
+      ),
+    );
   for (const f of fields) {
     observations.push({ signalType: 'custom_field_prefix', signalValue: f.fieldKey });
   }
@@ -252,7 +293,12 @@ async function loadObservations(subaccountId: string): Promise<Observation[]> {
   const sources = await db
     .select({ sourceValue: canonicalContactSources.sourceValue })
     .from(canonicalContactSources)
-    .where(eq(canonicalContactSources.subaccountId, subaccountId));
+    .where(
+      and(
+        eq(canonicalContactSources.organisationId, organisationId),
+        eq(canonicalContactSources.subaccountId, subaccountId),
+      ),
+    );
   for (const s of sources) {
     observations.push({ signalType: 'contact_source', signalValue: s.sourceValue });
   }

@@ -40,6 +40,7 @@ import {
   index,
   uniqueIndex,
   doublePrecision,
+  numeric,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
@@ -61,6 +62,7 @@ export const CANONICAL_UNIQUENESS_MODE: Record<string, CanonicalUniquenessMode> 
   canonical_tag_definitions: 'global',
   canonical_custom_field_definitions: 'global',
   canonical_contact_sources: 'global',
+  integration_fingerprints: 'global',
   integration_detections: 'scoped',
   integration_unclassified_signals: 'scoped',
 };
@@ -460,7 +462,10 @@ export const integrationFingerprints = pgTable(
     fingerprintType: text('fingerprint_type').notNull().$type<IntegrationFingerprintType>(),
     fingerprintValue: text('fingerprint_value'),
     fingerprintPattern: text('fingerprint_pattern'),
-    confidence: doublePrecision('confidence').notNull().default(0.80),
+    // numeric(3,2) in the DB (see migration 0176). Drizzle `numeric` returns
+    // strings at query time — the pure matcher parses to Number where it
+    // needs to compare confidences.
+    confidence: numeric('confidence', { precision: 3, scale: 2 }).notNull().default('0.80'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -493,10 +498,14 @@ export const integrationDetections = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    orgSlugIdx: index('integration_detections_org_slug_idx').on(
+    uniq: uniqueIndex('integration_detections_unique').on(
       table.organisationId,
+      table.subaccountId,
       table.integrationSlug,
     ),
+    orgSlugIdx: index('integration_detections_org_slug_idx')
+      .on(table.organisationId, table.integrationSlug)
+      .where(sql`${table.deletedAt} IS NULL`),
   }),
 );
 
@@ -524,6 +533,17 @@ export const integrationUnclassifiedSignals = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     dismissedAsIrrelevant: boolean('dismissed_as_irrelevant').notNull().default(false),
   },
+  (table) => ({
+    uniq: uniqueIndex('integration_unclassified_signals_unique').on(
+      table.organisationId,
+      table.subaccountId,
+      table.signalType,
+      table.signalValue,
+    ),
+    openIdx: index('integration_unclassified_signals_open_idx')
+      .on(table.organisationId, table.signalType, table.importanceScore)
+      .where(sql`${table.resolvedAt} IS NULL AND ${table.dismissedAsIrrelevant} = false`),
+  }),
 );
 
 export type IntegrationUnclassifiedSignal = typeof integrationUnclassifiedSignals.$inferSelect;

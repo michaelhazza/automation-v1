@@ -10,6 +10,19 @@
  * Exposed as the `compute_staff_activity_pulse` skill. Also importable
  * directly from the polling-cycle code so fresh observations land in the
  * same transaction window as the other signal writes.
+ *
+ * ── Idempotency contract ────────────────────────────────────────────────
+ *
+ * The conflict target is `(org, subaccount, signal_slug, source_run_id)`
+ * — migration 0175's partial unique index. When called from the polling
+ * cycle with a shared `sourceRunId`, duplicate observations are de-duped
+ * by `onConflictDoNothing`. When called as an agent skill **without** a
+ * `sourceRunId`, the partial index does not fire (it is WHERE source_run_id
+ * IS NOT NULL), so repeated agent invocations append additional observation
+ * rows. This is intentional: the signal is a timeseries; agent-driven
+ * recomputes produce new data points rather than overwriting the last one.
+ * Callers needing "one observation per day" semantics should either pass a
+ * stable run id or query the latest row by observedAt at read time.
  */
 
 import { and, eq, gte } from 'drizzle-orm';
@@ -66,6 +79,7 @@ export async function executeComputeStaffActivityPulse(
       .from(canonicalSubaccountMutations)
       .where(
         and(
+          eq(canonicalSubaccountMutations.organisationId, input.organisationId),
           eq(canonicalSubaccountMutations.subaccountId, input.subaccountId),
           gte(canonicalSubaccountMutations.occurredAt, since),
         ),
