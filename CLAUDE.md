@@ -309,7 +309,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 ## Current focus
 
 **In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 4 + 4.5 on branch `claude/clientpulse-phase-4-development-ED1D9`. Phase 4 (intervention pipeline: 5 action primitives + scenario-detector proposer + outcome-measurement job closing B2 + proposer UI) and Phase 4.5 (Configuration Agent extension closing B3 + B5) land in a single PR.
+**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. Ship-gates B2 (outcome attribution), B3 (config_history audit), B5 (sensitive-path gating) all closed. Next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors).
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -323,6 +323,10 @@ Quick reference for "where do I start when adding X". This is the index, not the
 |------|------------|
 | Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
 | Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
+| Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |
+| Modify the ClientPulse intervention proposer | `server/jobs/proposeClientPulseInterventionsJob.ts` (orchestration) + `server/services/clientPulseInterventionProposerPure.ts` (matcher logic) — never bypass `enqueueInterventionProposal()` |
+| Modify the outcome measurement job | `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` (decision pure fn) — band attribution + cooldown integrity hinge on the args passed to `interventionService.recordOutcome()` |
+| Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
 | Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
 | Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
 | Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
