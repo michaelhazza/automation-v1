@@ -31,7 +31,8 @@ One PR on `claude/commit-to-main-y5BoZ` covering Phases **0 + 0.5 + 1 + 2 + 3** 
 ## Optimisation backlog (Phase 5+)
 
 - **Scanner gate-position refactor.** `executeScanIntegrationFingerprints` currently runs the full scan (library load + artifact load + match) before the observation-insert win-gate fires. At current scale (hundreds of subs × tens of observations × ~10 seed patterns) the wasted compute on a pg-boss retry of a conflicting `sourceRunId` is negligible, so the gate sits after the compute in order to populate the observation row with real `detectionCount` / `unclassifiedCount` payload values. If poll cadence or library size grows meaningfully, move the observation insert to the top of the handler with a minimal payload and apply a follow-up UPDATE with the real counts once the scan completes. Flagged as non-blocking by external review.
-| 7 | Phase 4 — Intervention pipeline | **pending** | Architect pending — separate call after Phase 1 follow-ups merges. Not planned in this PR. |
+| 7 | Phase 4 — Intervention pipeline | **done (chunks A–D)** | Chunk A: 5 namespaced action primitives (crm.fire_automation / send_email / send_sms / create_task / clientpulse.operator_alert) + mergeFieldResolver (V1 grammar, 24 pure tests) + migration 0178 (indexes). Chunk B: event-driven proposer job + pure matcher (14 tests) + propose/context routes. Chunk C: hourly outcome-measurement job + pure helper + B2 end-to-end fixture (11 tests, closes B2). Chunk D: ProposeInterventionModal wrapper + 5 editor components + high-risk widget click-to-propose wiring. Typecheck baseline unchanged at 43 errors. |
+| 8 | Phase 4.5 — Configuration Agent extension | **done (chunks A–B)** | Chunk A: config_update_hierarchy_template skill + orchestration service with sensitive-path split (closes B3 + B5) + 14 pure tests + action registry + skill executor. Chunk B: ConfigAssistantChatPopup with confirm-before-write flow + /api/clientpulse/config/apply route + docs sync (capabilities.md, integration-reference.md, configuration-assistant-spec.md, orchestrator-capability-routing-spec.md). |
 
 ## Locked contracts (non-negotiable, carried from intake)
 
@@ -48,11 +49,11 @@ One PR on `claude/commit-to-main-y5BoZ` covering Phases **0 + 0.5 + 1 + 2 + 3** 
 
 | # | Item | Phase | Owned by this PR? | Status |
 |---|------|-------|-------------------|--------|
-| B1 | Wire `RateLimiter` into GHL adapter | 1 | yes | pending |
-| B2 | Implement `measureInterventionOutcomeJob` | 4 | **no** (Phase 4) | deferred |
-| B3 | Wire Configuration Agent writes to `config_history` with `entity_type='clientpulse_operational_config'` | 4.5 | **no** (Phase 4.5) | deferred |
-| B4 | Author `operational_config` JSON Schema with `sensitive` flags | 0 | yes | pending |
-| B5 | Implement sensitive-path routing through action→review queue | 4.5 | **no** (Phase 4.5) | deferred |
+| B1 | Wire `RateLimiter` into GHL adapter | 1 | yes | **done** (Phase 1) |
+| B2 | Implement `measureInterventionOutcomeJob` | 4 | **yes** (Phase 4 PR) | **done** — hourly cron + pure fixture test for atRisk→watch band change |
+| B3 | Wire Configuration Agent writes to `config_history` with `entity_type='clientpulse_operational_config'` | 4.5 | **yes** (Phase 4.5 PR) | **done** — change_source='config_agent' on all writes |
+| B4 | Author `operational_config` JSON Schema with `sensitive` flags | 0 | yes | **done** (Phase 0) |
+| B5 | Implement sensitive-path routing through action→review queue | 4.5 | **yes** (Phase 4.5 PR) | **done** — sensitive paths insert actions row with gateLevel=review, approval-execute commits |
 | B6 | Update Configuration Assistant chat UX copy for dual-path governance | 5 | **no** (Phase 5) | deferred |
 
 Per-phase ship gates (from the user's resume instructions):

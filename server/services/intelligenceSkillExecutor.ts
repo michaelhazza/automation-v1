@@ -572,10 +572,11 @@ export async function executeComputeChurnRisk(
   // linkage so legacy org-only accounts don't break the handler.
   const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
   if (account?.subaccountId) {
+    let assessmentId: string | null = null;
     try {
       const bands = await orgConfigService.getChurnBands(context.organisationId);
       const band = riskScoreToBand(riskScore, bands);
-      await db.insert(clientPulseChurnAssessments).values({
+      const [inserted] = await db.insert(clientPulseChurnAssessments).values({
         organisationId: context.organisationId,
         subaccountId: account.subaccountId,
         accountId,
@@ -585,10 +586,27 @@ export async function executeComputeChurnRisk(
         interventionType,
         configVersion,
         algorithmVersion: ALGORITHM_VERSION,
-      });
+      }).returning({ id: clientPulseChurnAssessments.id });
+      assessmentId = inserted?.id ?? null;
     } catch (cpErr) {
       console.error('[IntelligenceSkills] ClientPulse churn assessment write failed:',
         cpErr instanceof Error ? cpErr.message : String(cpErr));
+    }
+
+    // Phase 4 — enqueue the scenario-detector proposer. Wrapped in try/catch
+    // so a failure to enqueue does not roll back the churn assessment above.
+    if (assessmentId) {
+      try {
+        const { queueService } = await import('./queueService.js');
+        await queueService.sendJob('clientpulse:propose-interventions', {
+          organisationId: context.organisationId,
+          subaccountId: account.subaccountId,
+          churnAssessmentId: assessmentId,
+        });
+      } catch (enqErr) {
+        console.error('[IntelligenceSkills] proposer enqueue failed:',
+          enqErr instanceof Error ? enqErr.message : String(enqErr));
+      }
     }
   }
 

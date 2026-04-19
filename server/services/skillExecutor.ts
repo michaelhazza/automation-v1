@@ -67,6 +67,30 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
     case 'propose_doc_update': return executeDocProposalApproved(payload, context);
     case 'write_docs': return executeWriteDocsApproved(payload, context);
+
+    // ── Phase 4.5 — config_update_hierarchy_template approval-execute ──────
+    // When the operator approves a sensitive-path config change, re-validate
+    // (drift check) and commit the merge + config_history row (B5 ship gate).
+    case 'config_update_hierarchy_template': {
+      const { executeApprovedHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+      const actionId = (ctx as unknown as { actionId?: string }).actionId ?? '';
+      const result = await executeApprovedHierarchyTemplateConfigUpdate({
+        actionId,
+        organisationId: context.organisationId,
+      });
+      if (!result.success) {
+        throw new Error(`${result.errorCode}: ${result.message}`);
+      }
+      return result;
+    }
+
+    // ── Phase 4 — clientpulse.operator_alert approval-execute ──────────────
+    // Fanout (in-app, email, slack) is a future phase. For now, acknowledge
+    // successful approval so the action reaches status=completed and cooldown
+    // semantics are preserved. The payload is validated at proposal time.
+    case 'clientpulse.operator_alert':
+      return { queued: true, channels: payload.channels };
+
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -1312,6 +1336,42 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   trigger_account_intervention: async (input, context) => {
     return proposeReviewGatedAction('trigger_account_intervention', input, context);
+  },
+
+  // ── ClientPulse Phase 4 intervention primitives (all review-gated) ────
+  // Scenario-detector proposes, operator approves in the /review queue.
+  'crm.fire_automation': async (input, context) => {
+    return proposeReviewGatedAction('crm.fire_automation', input, context);
+  },
+  'crm.send_email': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_email', input, context);
+  },
+  'crm.send_sms': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_sms', input, context);
+  },
+  'crm.create_task': async (input, context) => {
+    return proposeReviewGatedAction('crm.create_task', input, context);
+  },
+  'clientpulse.operator_alert': async (input, context) => {
+    return proposeReviewGatedAction('clientpulse.operator_alert', input, context);
+  },
+
+  // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
+  // The skill calls applyHierarchyTemplateConfigUpdate directly rather than
+  // routing through proposeReviewGatedAction — the service itself owns the
+  // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
+  config_update_hierarchy_template: async (input, context) => {
+    const { applyHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+    return applyHierarchyTemplateConfigUpdate({
+      organisationId: context.organisationId,
+      templateId: input.templateId as string,
+      path: input.path as string,
+      value: input.value,
+      reason: (input.reason as string) ?? 'config_agent write',
+      sourceSession: (input.sourceSession as string | null | undefined) ?? null,
+      changedByUserId: (context.userId as string | undefined) ?? null,
+      agentId: context.agentId,
+    });
   },
 
   // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──

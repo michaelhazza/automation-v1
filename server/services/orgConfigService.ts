@@ -61,6 +61,20 @@ export interface InterventionType {
   connectorAction?: string;
   cooldownHours?: number;
   cooldownScope?: 'proposed' | 'executed' | 'any_outcome';
+
+  // ── Phase 4 extensions (optional; existing templates stay valid) ──
+  /** Registered actionType slug (e.g. `crm.send_email`); wins over legacy `action`. */
+  actionType?: string;
+  /** Which bands this template targets. Empty/undefined = all bands. */
+  targets?: Array<'healthy' | 'watch' | 'atRisk' | 'critical'>;
+  /** Priority for tie-breaking when multiple templates match. Higher wins. */
+  priority?: number;
+  /** How long after execution before outcome can be measured (hours). Default: 24. */
+  measurementWindowHours?: number;
+  /** Default payload to prefill into the action (editor can override). */
+  payloadDefaults?: Record<string, unknown>;
+  /** Human-readable reason surfaced on the proposed action + outcome history. */
+  defaultReason?: string;
 }
 
 export interface AlertLimits {
@@ -175,6 +189,9 @@ export interface OperationalConfig {
   churnBands?: ChurnBands;
   interventionDefaults?: InterventionDefaults;
   onboardingMilestones?: OnboardingMilestoneDef[];
+  // Phase 4 — spec-aligned alias for `interventionTypes`. Either key may be
+  // present; the accessor prefers `interventionTemplates` when both exist.
+  interventionTemplates?: InterventionType[];
 }
 
 // ── Default fallbacks (used when no template is applied) ──────────────────
@@ -398,6 +415,17 @@ export const orgConfigService = {
   async getOnboardingMilestoneDefs(orgId: string): Promise<OnboardingMilestoneDef[]> {
     const config = await this.getOperationalConfig(orgId);
     return config?.onboardingMilestones ?? [];
+  },
+
+  /**
+   * Phase 4 — intervention templates (the catalogue the scenario detector + UI
+   * pick from). Reads the spec-aligned `interventionTemplates` key if present,
+   * falling back to the pre-existing `interventionTypes` key so existing
+   * hierarchyTemplate data keeps working.
+   */
+  async getInterventionTemplates(orgId: string): Promise<InterventionType[]> {
+    const config = await this.getOperationalConfig(orgId);
+    return config?.interventionTemplates ?? config?.interventionTypes ?? [];
   },
 };
 
