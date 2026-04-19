@@ -542,7 +542,6 @@ export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
       { name: 'first_seen_at', type: 'timestamptz', purpose: 'First detection timestamp' },
       { name: 'last_seen_at', type: 'timestamptz', purpose: 'Most-recent detection timestamp' },
       { name: 'usage_indicator_json', type: 'jsonb', purpose: 'Usage proxy (e.g. {"messages_30d": 450}) — CRM-agnostic' },
-      { name: 'deleted_at', type: 'timestamptz', purpose: 'Soft delete' },
     ],
     foreignKeys: [
       { column: 'subaccount_id', referencesTable: 'subaccounts', referencesColumn: 'id' },
@@ -552,7 +551,7 @@ export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
     cardinality: '1:N',
     skillReferences: ['scan_integration_fingerprints'],
     exampleQueries: [
-      'SELECT integration_slug, last_seen_at FROM integration_detections WHERE subaccount_id = $subId AND deleted_at IS NULL',
+      'SELECT integration_slug, last_seen_at FROM integration_detections WHERE subaccount_id = $subId',
     ],
     commonJoins: ['integration_fingerprints via matched_fingerprint_id', 'subaccounts via subaccount_id'],
     antiPatterns: ['Do not insert duplicates — the scanner upserts; use (org, subaccount, integration_slug) as the natural key'],
