@@ -3,6 +3,8 @@ import { orgMemoryService } from './orgMemoryService.js';
 import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
+import { db } from '../db/index.js';
+import { clientPulseHealthSnapshots, type HealthTrend } from '../db/schema/clientPulseCanonicalTables.js';
 
 // ---------------------------------------------------------------------------
 // Intelligence Skill Executors (v2.0 — config-driven)
@@ -316,7 +318,8 @@ export async function executeComputeHealthScore(
   // Confidence: ratio of factors with data
   const confidence = Math.min(1.0, factorsWithData / factors.length);
 
-  // Write snapshot
+  // Write snapshot to the generic health_snapshots table (retained for
+  // existing non-ClientPulse readers during the deprecation window).
   const snapshot = await canonicalDataService.writeHealthSnapshot({
     organisationId: context.organisationId,
     accountId,
@@ -327,6 +330,33 @@ export async function executeComputeHealthScore(
     configVersion,
     algorithmVersion: ALGORITHM_VERSION,
   });
+
+  // Dual-write to client_pulse_health_snapshots (migration 0173, §11.2 R2).
+  // The ClientPulse dashboard + churn evaluator read from this table; the
+  // generic health_snapshots table is retained for legacy readers and will
+  // be deprecated in a follow-up PR once every caller has migrated.
+  //
+  // Keyed by subaccountId (ClientPulse's unit of observation) rather than
+  // the canonical accountId. Falls back gracefully if the canonical account
+  // has no subaccount linkage.
+  if (account.subaccountId) {
+    try {
+      await db.insert(clientPulseHealthSnapshots).values({
+        organisationId: context.organisationId,
+        subaccountId: account.subaccountId,
+        accountId,
+        score: compositeScore,
+        factorBreakdown: factorResults.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })),
+        trend: trend as HealthTrend,
+        confidence,
+        configVersion,
+        algorithmVersion: ALGORITHM_VERSION,
+      });
+    } catch (cpErr) {
+      console.error('[IntelligenceSkills] ClientPulse snapshot dual-write failed:',
+        cpErr instanceof Error ? cpErr.message : String(cpErr));
+    }
+  }
 
   // Top factors for explanation
   const topFactors = [...factorResults]

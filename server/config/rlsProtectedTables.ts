@@ -374,6 +374,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0172_clientpulse_canonical_tables.sql',
     rationale: 'Subscription tier migration timeseries — reveals pricing posture and downgrade patterns per sub-account.',
   },
+  // 0173 — ClientPulse Phase 2 derived timeseries
+  {
+    tableName: 'client_pulse_health_snapshots',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0173_clientpulse_health_snapshots.sql',
+    rationale: 'ClientPulse health-score timeseries per sub-account — leak reveals portfolio health posture.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

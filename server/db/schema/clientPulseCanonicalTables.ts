@@ -284,3 +284,40 @@ export const subaccountTierHistory = pgTable(
 
 export type SubaccountTierHistory = typeof subaccountTierHistory.$inferSelect;
 export type NewSubaccountTierHistory = typeof subaccountTierHistory.$inferInsert;
+
+// ===========================================================================
+// client_pulse_health_snapshots — Phase 2 derived scores (migration 0173)
+// ===========================================================================
+
+export type HealthTrend = 'improving' | 'stable' | 'declining';
+
+export const clientPulseHealthSnapshots = pgTable(
+  'client_pulse_health_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id),
+    accountId: uuid('account_id'),
+    score: integer('score').notNull(),
+    factorBreakdown: jsonb('factor_breakdown').notNull().default([]).$type<Array<{ factor: string; score: number; weight: number }>>(),
+    trend: text('trend').notNull().default('stable').$type<HealthTrend>(),
+    confidence: doublePrecision('confidence').notNull().default(0),
+    configVersion: text('config_version'),
+    algorithmVersion: text('algorithm_version'),
+    observedAt: timestamp('observed_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    subObservedIdx: index('client_pulse_health_snapshots_sub_observed_idx').on(
+      table.subaccountId,
+      table.observedAt,
+    ),
+    orgObservedIdx: index('client_pulse_health_snapshots_org_observed_idx').on(
+      table.organisationId,
+      table.observedAt,
+    ),
+  }),
+);
+
+export type ClientPulseHealthSnapshot = typeof clientPulseHealthSnapshots.$inferSelect;
+export type NewClientPulseHealthSnapshot = typeof clientPulseHealthSnapshots.$inferInsert;
