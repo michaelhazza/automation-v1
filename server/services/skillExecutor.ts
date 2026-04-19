@@ -1332,6 +1332,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('clientpulse.operator_alert', input, context);
   },
 
+  // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
+  // The skill calls applyHierarchyTemplateConfigUpdate directly rather than
+  // routing through proposeReviewGatedAction — the service itself owns the
+  // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
+  config_update_hierarchy_template: async (input, context) => {
+    const { applyHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+    return applyHierarchyTemplateConfigUpdate({
+      organisationId: context.organisationId,
+      templateId: input.templateId as string,
+      path: input.path as string,
+      value: input.value,
+      reason: (input.reason as string) ?? 'config_agent write',
+      sourceSession: (input.sourceSession as string | null | undefined) ?? null,
+      changedByUserId: (context.userId as string | undefined) ?? null,
+      agentId: context.agentId,
+    });
+  },
+
   // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
   analyse_42macro_transcript: async (input) => {
     return executeMethodologySkill('analyse_42macro_transcript', input, {
