@@ -68,6 +68,7 @@ test('day 31 into a short month: Jan 31 - 1 month', () => {
   // consistent answer is so a future JS engine change would flag.
   assert(cutoff.getUTCFullYear() === 2025, 'year - 1');
   assert(cutoff.getUTCMonth() === 11, 'December (0-indexed 11)');
+  assert(cutoff.getUTCDate() === 31, 'day preserved (V8 month-overflow stable at 31)');
 });
 
 console.log('');

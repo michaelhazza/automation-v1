@@ -291,7 +291,6 @@ Respond with ONLY the JSON object. No preamble, no markdown fences.`;
           sourceType: 'system',
           agentName: 'agent-briefing',
           taskType: 'memory_compile',
-          executionPhase: 'execution',
           routingMode: 'ceiling',
         },
       });

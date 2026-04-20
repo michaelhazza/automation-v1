@@ -11,9 +11,7 @@ import type { PnlResponse, PnlResponseMeta } from '../../shared/types/systemPnl.
 // does cross-organisation reads by design — this is the one admin surface
 // that is intentionally cross-tenant.
 //
-// Response envelope: { data, meta } per §19.9. `meta.ledgerRowsScanned` is
-// surfaced as a cheap heuristic for "how big was the period?" without a
-// separate COUNT query.
+// Response envelope: { data, meta } per §19.9.
 // ---------------------------------------------------------------------------
 
 const router = Router();
@@ -22,11 +20,21 @@ function defaultMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+// Parse and validate `month` query param. Format `YYYY-MM`, month 01–12.
+// Invalid values throw a 400 — prevents silent zero-result responses and
+// NaN period keys downstream in `previousMonth()`.
+function parseMonthParam(raw: unknown): string {
+  const month = (typeof raw === 'string' && raw.length > 0) ? raw : defaultMonth();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw { statusCode: 400, errorCode: 'INVALID_MONTH', message: 'month must be YYYY-MM format, month 01–12' };
+  }
+  return month;
+}
+
 function wrap<TData>(data: TData, period: string): PnlResponse<TData> {
   const meta: PnlResponseMeta = {
     period,
-    generatedAt:       new Date().toISOString(),
-    ledgerRowsScanned: 0,                    // placeholder — populated by callers that can afford a COUNT
+    generatedAt: new Date().toISOString(),
   };
   return { data, meta };
 }
@@ -36,7 +44,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const data = await systemPnlService.getPnlSummary({ month });
     res.json(wrap(data, month));
   }),
@@ -47,7 +55,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const data = await systemPnlService.getByOrganisation({ month }, limit);
     res.json(wrap(data, month));
@@ -59,7 +67,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const data = await systemPnlService.getBySubaccount({ month }, limit);
     res.json(wrap(data, month));
@@ -71,7 +79,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const data = await systemPnlService.getBySourceType({ month });
     res.json(wrap(data, month));
   }),
@@ -82,7 +90,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const data = await systemPnlService.getByProviderModel({ month });
     res.json(wrap(data, month));
   }),
@@ -104,7 +112,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const month = (req.query.month as string) || defaultMonth();
+    const month = parseMonthParam(req.query.month);
     const limit = Math.min(Number(req.query.limit) || 10, 100);
     const data = await systemPnlService.getTopCalls({ month }, limit);
     res.json(wrap(data, month));

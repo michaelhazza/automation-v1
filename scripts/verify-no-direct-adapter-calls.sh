@@ -53,12 +53,20 @@ import_pattern="from.*providers/(${providers_alt})Adapter"
 # ── 2. Explicit call sites (e.g. anthropicAdapter.call(...)) ───────────────
 call_pattern="(${providers_alt})Adapter\\.call"
 
+# ── 3. Direct HTTP to provider endpoints (dark-call regression guard) ──────
+# A function that bypasses every adapter entirely by calling
+# fetch('https://api.anthropic.com/...') directly is invisible to patterns
+# 1 and 2. This pattern catches any code that points raw HTTP at a known
+# provider endpoint — the B6 regression from the LLM observability review.
+direct_http_pattern="(fetch|axios|got|node-fetch)\\s*\\(\\s*['\"]https://(api\\.anthropic\\.com|api\\.openai\\.com|generativelanguage\\.googleapis\\.com|openrouter\\.ai)"
+
 # Collect raw matches (file:line:content), then filter against exempt paths
 # and the whitelist.
 raw_matches="$(
   {
     grep -rnE "$import_pattern" server/ --include='*.ts' || true
     grep -rnE "$call_pattern" server/ --include='*.ts' || true
+    grep -rnE "$direct_http_pattern" server/ --include='*.ts' || true
   } | \
     grep -v 'server/services/llmRouter.ts:' | \
     grep -v 'server/services/providers/' | \

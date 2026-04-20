@@ -56,6 +56,7 @@ export default function SystemPnlPage() {
   const [trend, setTrend]         = useState<DailyTrendRow[]>([]);
   const [topCalls, setTopCalls]   = useState<TopCallRow[]>([]);
   const [loading, setLoading]     = useState<boolean>(true);
+  const [error, setError]         = useState<string | null>(null);
 
   // Per-tab sort state. Null = default (server-returned) order.
   const [orgSort,    setOrgSort]    = useState<PnlSortState<OrgSortKey>    | null>(null);
@@ -73,6 +74,7 @@ export default function SystemPnlPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [s, o, sb, st, pm, tr, tc] = await Promise.all([
         api.get<PnlResponse<PnlSummary>>(`/api/admin/llm-pnl/summary?month=${month}`),
@@ -92,6 +94,13 @@ export default function SystemPnlPage() {
       setTrend(tr.data.data);
       setTopCalls(tc.data.data);
       setLastRefresh(new Date());
+    } catch (err: unknown) {
+      // Surface the failure explicitly — pre-fix, any non-2xx silenced all
+      // KPI cards with no indication that anything had gone wrong.
+      const message = (err && typeof err === 'object' && 'message' in err)
+        ? String((err as { message: unknown }).message)
+        : 'Failed to load P&L data.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -168,6 +177,19 @@ export default function SystemPnlPage() {
           </div>
         </div>
 
+        {/* Error banner */}
+        {error && (
+          <div className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={fetchAll}
+              className="text-xs px-2 py-1 border border-rose-300 rounded hover:bg-rose-100"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* KPI cards */}
         {summary && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -219,7 +241,7 @@ export default function SystemPnlPage() {
         </div>
 
         {/* Top calls by cost */}
-        <div className="mb-6">
+        <div id="top-calls-section" className="mb-6 scroll-mt-6">
           <PnlTopCallsList
             rows={topCalls}
             limit={topCallsLimit}

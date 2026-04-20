@@ -96,17 +96,25 @@ export async function archiveOldLedgerRows(): Promise<ArchiveResult> {
             created_at
           FROM llm_requests
           WHERE id IN (SELECT id FROM doomed)
-          ON CONFLICT (idempotency_key) DO NOTHING
+          ON CONFLICT DO NOTHING
           RETURNING id
         )
-        DELETE FROM llm_requests
-        WHERE id IN (SELECT id FROM inserted)
-        RETURNING 1;
+        -- DELETE joins doomed, not inserted: if a row is already in the
+        -- archive (idempotency_key or id collision), ON CONFLICT DO NOTHING
+        -- silently drops it from inserted. We still want to remove that
+        -- row from the live table — otherwise it stays forever, re-entering
+        -- doomed every night and the live table never shrinks.
+        , deleted AS (
+          DELETE FROM llm_requests
+          WHERE id IN (SELECT id FROM doomed)
+          RETURNING 1
+        )
+        SELECT COUNT(*)::int AS moved FROM deleted;
       `);
-      // drizzle/postgres-js returns a RowList (array-like) — each element
-      // is the RETURNING row (`1`). Length is the count of deleted rows.
-      const rowList = result as unknown as ArrayLike<unknown>;
-      return rowList.length ?? 0;
+      // drizzle/postgres-js returns a RowList with a single row `{ moved: N }`.
+      const rowList = result as unknown as ArrayLike<{ moved: number }>;
+      const first = rowList.length > 0 ? rowList[0] : undefined;
+      return first?.moved ?? 0;
       },
     );
 

@@ -94,6 +94,9 @@ async function platformTotals(tx: OrgScopedTx, month: string): Promise<{
   overheadCents: number;
   requests: number;
 }> {
+  // Reads via llm_requests_all (migration 0189) so months crossing the
+  // retention boundary continue to report accurately against the archive
+  // (pr-review log B5, spec §11 / §12.4).
   const rows = await tx.execute<{
     revenue_cents: number; cost_cents: number; overhead_cents: number; requests: number;
   }>(sql`
@@ -102,7 +105,7 @@ async function platformTotals(tx: OrgScopedTx, month: string): Promise<{
       COALESCE(SUM(ROUND(cost_raw * 100)::int), 0)                                             AS cost_cents,
       COALESCE(SUM(ROUND(cost_raw * 100)::int) FILTER (WHERE source_type IN ('system','analyzer')), 0) AS overhead_cents,
       COUNT(*)::int                                                                            AS requests
-    FROM llm_requests
+    FROM llm_requests_all
     WHERE billing_month = ${month}
       AND status IN ('success', 'partial')
   `);
@@ -200,7 +203,7 @@ export async function getByOrganisation(
       COALESCE(ca.total_cost_cents, 0)                    AS revenue_cents,
       COALESCE((
         SELECT ROUND(SUM(cost_raw * 100))::int
-        FROM llm_requests r
+        FROM llm_requests_all r
         WHERE r.organisation_id = o.id
           AND r.billing_month   = ${period.month}
           AND r.status IN ('success', 'partial')
@@ -220,23 +223,35 @@ export async function getByOrganisation(
       ORDER BY effective_from DESC
       LIMIT 1
     ) omc ON TRUE
-    WHERE COALESCE(ca.total_cost_cents, 0) > 0
-       OR EXISTS (
-         SELECT 1 FROM llm_requests r
-         WHERE r.organisation_id = o.id AND r.billing_month = ${period.month}
-       )
+    WHERE o.deleted_at IS NULL
+      AND (
+        COALESCE(ca.total_cost_cents, 0) > 0
+        OR EXISTS (
+          SELECT 1 FROM llm_requests_all r
+          WHERE r.organisation_id = o.id AND r.billing_month = ${period.month}
+        )
+      )
     ORDER BY cost_cents DESC
     LIMIT ${limit}
   `);
 
   const platform = await platformTotals(tx, period.month);
 
-  const orgs: OrgRow[] = [];
-  for (const r of rows) {
+  // Batch sparklines in a single query keyed by org id — previously this was
+  // one query per org (N+1), which at 50 orgs added ~250ms to the admin page
+  // load. pr-review S1. Normalisation stays in `normaliseSparkline`, shared
+  // with the single-org path.
+  const sparklinesByOrg = await fetchSparklinesByOrgBatch(
+    tx,
+    rows.map((r) => r.org_id),
+    period.month,
+  );
+
+  const orgs: OrgRow[] = rows.map((r) => {
     const revenue = Number(r.revenue_cents);
     const cost    = Number(r.cost_cents);
     const profit  = revenue - cost;
-    orgs.push({
+    return {
       organisationId:   r.org_id,
       organisationName: r.org_name,
       slug:             r.slug,
@@ -248,12 +263,9 @@ export async function getByOrganisation(
       profitCents:      profit,
       marginPct:        revenue > 0 ? Math.round((profit / revenue) * 10000) / 100 : 0,
       pctOfRevenue:     pctOfTotal(revenue, platform.revenueCents),
-      // Sparkline: 30 normalised daily cost values. Fetched lazily here —
-      // if this turns out to dominate page-load time we promote into a
-      // dedicated aggregate dimension per §17 deferred items.
-      trendSparkline:   await fetchOrgSparkline(tx, r.org_id, period.month),
-    });
-  }
+      trendSparkline:   sparklinesByOrg.get(r.org_id) ?? [],
+    };
+  });
 
   // Aggregated overhead row — sum of system + analyzer cost across all orgs.
   const overheadRows = await getBySourceTypeTx(tx, period);
@@ -266,19 +278,43 @@ export async function getByOrganisation(
   });
 }
 
-async function fetchOrgSparkline(tx: OrgScopedTx, orgId: string, month: string): Promise<number[]> {
-  const rows = await tx.execute<{ day: string; cost_cents: number }>(sql`
-    SELECT period_key AS day, total_cost_cents AS cost_cents
+function normaliseSparkline(costs: number[]): number[] {
+  if (costs.length === 0) return [];
+  const max = Math.max(...costs);
+  return costs.map((c) => (max > 0 ? c / max : 0));
+}
+
+async function fetchSparklinesByOrgBatch(
+  tx: OrgScopedTx,
+  orgIds: string[],
+  month: string,
+): Promise<Map<string, number[]>> {
+  const byOrg = new Map<string, number[]>();
+  if (orgIds.length === 0) return byOrg;
+
+  // `ANY($1::text[])` — single index scan, fans out to N orgs in one round
+  // trip. Returns rows grouped by org_id; we bucket into per-org arrays
+  // and normalise each independently (max-scale per org, per spec §11.4).
+  const rows = await tx.execute<{ entity_id: string; day: string; cost_cents: number }>(sql`
+    SELECT entity_id, period_key AS day, total_cost_cents AS cost_cents
     FROM cost_aggregates
     WHERE entity_type = 'organisation'
-      AND entity_id   = ${orgId}
+      AND entity_id   = ANY(${orgIds}::text[])
       AND period_type = 'daily'
       AND period_key LIKE ${month + '-%'}
-    ORDER BY period_key ASC
+    ORDER BY entity_id, period_key ASC
   `);
-  if (rows.length === 0) return [];
-  const max = Math.max(...rows.map((r) => Number(r.cost_cents)));
-  return rows.map((r) => (max > 0 ? Number(r.cost_cents) / max : 0));
+
+  const rawByOrg = new Map<string, number[]>();
+  for (const r of rows) {
+    const arr = rawByOrg.get(r.entity_id) ?? [];
+    arr.push(Number(r.cost_cents));
+    rawByOrg.set(r.entity_id, arr);
+  }
+  for (const [orgId, costs] of rawByOrg) {
+    byOrg.set(orgId, normaliseSparkline(costs));
+  }
+  return byOrg;
 }
 
 // ── 3. getBySubaccount ────────────────────────────────────────────────────
@@ -304,7 +340,7 @@ export async function getBySubaccount(period: Period, limit = 100): Promise<Suba
       COALESCE(ca.total_cost_cents, 0)                    AS revenue_cents,
       COALESCE((
         SELECT ROUND(SUM(cost_raw * 100))::int
-        FROM llm_requests r
+        FROM llm_requests_all r
         WHERE r.subaccount_id = s.id
           AND r.billing_month = ${period.month}
           AND r.status IN ('success', 'partial')
@@ -378,7 +414,7 @@ async function getBySourceTypeTx(tx: OrgScopedTx, period: Period): Promise<Sourc
       COUNT(*)::int                                         AS requests,
       COALESCE(SUM(cost_with_margin_cents), 0)              AS revenue_cents,
       COALESCE(ROUND(SUM(cost_raw * 100)), 0)               AS cost_cents
-    FROM llm_requests
+    FROM llm_requests_all
     WHERE billing_month = ${period.month}
       AND status IN ('success', 'partial')
     GROUP BY source_type
@@ -402,7 +438,7 @@ async function getBySourceTypeTx(tx: OrgScopedTx, period: Period): Promise<Sourc
       costCents,
       profitCents:  computeProfitCents(revenueCents, costCents),
       marginPct:    computeMarginPct(revenueCents, costCents),
-      pctOfCost:    pctOfTotal(costCents, platform.costCents + platform.overheadCents),
+      pctOfCost:    pctOfTotal(costCents, platform.costCents),
     };
   });
 }
@@ -430,7 +466,7 @@ export async function getByProviderModel(period: Period): Promise<ProviderModelR
       COALESCE(SUM(cost_with_margin_cents), 0)              AS revenue_cents,
       COALESCE(ROUND(SUM(cost_raw * 100)), 0)               AS cost_cents,
       ROUND(AVG(provider_latency_ms))::int                  AS avg_latency_ms
-    FROM llm_requests
+    FROM llm_requests_all
     WHERE billing_month = ${period.month}
       AND status IN ('success', 'partial')
     GROUP BY provider, model
@@ -452,7 +488,7 @@ export async function getByProviderModel(period: Period): Promise<ProviderModelR
       profitCents:  profit,
       marginPct:    revenue > 0 ? Math.round((profit / revenue) * 10000) / 100 : 0,
       avgLatencyMs: Number(r.avg_latency_ms ?? 0),
-      pctOfCost:    pctOfTotal(cost, platform.costCents + platform.overheadCents),
+      pctOfCost:    pctOfTotal(cost, platform.costCents),
     };
   });
   });
@@ -473,7 +509,7 @@ export async function getDailyTrend(days = 30): Promise<DailyTrendRow[]> {
         COALESCE(SUM(cost_with_margin_cents), 0)                                                   AS revenue_cents,
         COALESCE(ROUND(SUM(cost_raw * 100)), 0)                                                    AS cost_cents,
         COALESCE(ROUND(SUM(cost_raw * 100)) FILTER (WHERE source_type IN ('system','analyzer')), 0) AS overhead_cents
-      FROM llm_requests
+      FROM llm_requests_all
       WHERE created_at >= NOW() - (${days} || ' days')::interval
         AND status IN ('success', 'partial')
       GROUP BY billing_day
@@ -524,7 +560,7 @@ export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRo
       r.cost_with_margin_cents,
       r.cost_raw::text                   AS cost_raw,
       r.status
-    FROM llm_requests r
+    FROM llm_requests_all r
     LEFT JOIN organisations o ON o.id = r.organisation_id AND r.source_type NOT IN ('system','analyzer')
     LEFT JOIN subaccounts s   ON s.id = r.subaccount_id
     LEFT JOIN LATERAL (
@@ -535,6 +571,7 @@ export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRo
       LIMIT 1
     ) omc ON TRUE
     WHERE r.billing_month = ${period.month}
+      AND r.status IN ('success', 'partial')
     ORDER BY r.cost_raw DESC
     LIMIT ${limit}
   `);
@@ -569,41 +606,16 @@ export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRo
 
 export async function getCallDetail(id: string): Promise<CallDetail | null> {
   return adminRead('getCallDetail', async (tx) => {
-  // UNION ALL against the archive so detail-drawer lookups keep working
-  // for rows moved out of the live table by the nightly retention job
-  // (spec §12.4 / §15.5). Live table is checked first; archive is a
-  // second-chance lookup.
+  // llm_requests_all (migration 0189) unions live + archive so detail-drawer
+  // lookups keep working for rows moved by the nightly retention job
+  // (spec §12.4 / §15.5).
   const rows = await tx.execute<Record<string, unknown>>(sql`
-    WITH combined AS (
-      SELECT r.*
-      FROM llm_requests r
-      WHERE r.id = ${id}
-      UNION ALL
-      SELECT
-        r.id, r.idempotency_key, r.organisation_id, r.subaccount_id, r.user_id,
-        r.source_type, r.run_id, r.execution_id, r.iee_run_id, r.source_id,
-        r.feature_tag, r.call_site, r.agent_name, r.task_type,
-        r.provider, r.model, r.provider_request_id,
-        r.tokens_in, r.tokens_out, r.provider_tokens_in, r.provider_tokens_out,
-        r.cost_raw, r.cost_with_margin, r.cost_with_margin_cents, r.margin_multiplier, r.fixed_fee_cents,
-        r.request_payload_hash, r.response_payload_hash,
-        r.provider_latency_ms, r.router_overhead_ms,
-        r.status, r.error_message, r.attempt_number,
-        r.parse_failure_raw_excerpt, r.abort_reason,
-        r.cached_prompt_tokens,
-        r.execution_phase, r.capability_tier, r.was_downgraded, r.routing_reason,
-        r.was_escalated, r.escalation_reason,
-        r.requested_provider, r.requested_model, r.fallback_chain,
-        r.billing_month, r.billing_day, r.created_at
-      FROM llm_requests_archive r
-      WHERE r.id = ${id}
-    )
     SELECT
       c.*,
       o.name AS organisation_name,
       s.name AS subaccount_name,
       omc.margin_multiplier AS margin_multiplier
-    FROM combined c
+    FROM llm_requests_all c
     LEFT JOIN organisations o ON o.id = c.organisation_id
     LEFT JOIN subaccounts s   ON s.id = c.subaccount_id
     LEFT JOIN LATERAL (
@@ -613,6 +625,7 @@ export async function getCallDetail(id: string): Promise<CallDetail | null> {
       ORDER BY effective_from DESC
       LIMIT 1
     ) omc ON TRUE
+    WHERE c.id = ${id}
     LIMIT 1
   `);
 

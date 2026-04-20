@@ -19,8 +19,7 @@
 //                                             adapter calls (NODE_ENV='test')
 // ---------------------------------------------------------------------------
 
-const ROUTER_FRAME_PATTERN   = /server[\/\\]services[\/\\]llmRouter\./;
-const PROVIDER_FRAME_PATTERN = /server[\/\\]services[\/\\]providers[\/\\]/;
+const ROUTER_FRAME_PATTERN = /server[\/\\]services[\/\\]llmRouter\./;
 
 export function assertCalledFromRouter(): void {
   // In test mode, adapters are legitimately called directly — every adapter
@@ -31,15 +30,14 @@ export function assertCalledFromRouter(): void {
   const stack = new Error().stack ?? '';
   const frames = stack.split('\n');
 
-  // Skip the first two frames: Error + this assert function. The next frame
-  // is the caller (i.e. the adapter's `call()`), followed by the adapter's
-  // own caller — we scan the full stack for router/provider frames so
-  // intra-provider fallback paths are correctly recognised.
-  const hasRouterOrProviderFrame = frames.some(
-    (f) => ROUTER_FRAME_PATTERN.test(f) || PROVIDER_FRAME_PATTERN.test(f),
-  );
+  // Only the router may call provider adapters. All provider-to-provider
+  // fallback is orchestrated by the router's own providerLoop — there is no
+  // intra-provider path that bypasses the router. Checking only for the router
+  // frame avoids the previous bug where the adapter's own frame (always present
+  // in the stack) matched PROVIDER_FRAME_PATTERN, making the guard a no-op.
+  const hasRouterFrame = frames.some((f) => ROUTER_FRAME_PATTERN.test(f));
 
-  if (!hasRouterOrProviderFrame) {
+  if (!hasRouterFrame) {
     throw {
       statusCode: 500,
       code: 'ADAPTER_DIRECT_CALL',

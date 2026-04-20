@@ -185,7 +185,6 @@ export interface CallDetail extends TopCallRow {
 export interface PnlResponseMeta {
   period:             string;                // 'YYYY-MM' or daily-window tag
   generatedAt:        string;                // ISO 8601
-  ledgerRowsScanned:  number;
 }
 
 export interface PnlResponse<TData> {
