@@ -112,6 +112,10 @@ import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 // ClientPulse module routes
+// Side-effect import — registers ClientPulse's sensitive operational_config
+// dot-paths with the module-composable registry before any route registers.
+// Per spec §3.6 / §4.10(3): top of the route-wiring section.
+import './modules/clientpulse/registerSensitivePaths.js';
 import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
 import configHistoryRouter from './routes/configHistory.js';

@@ -1,23 +1,33 @@
 /**
- * configUpdateHierarchyTemplateService — orchestration for the Configuration
+ * configUpdateOrganisationService — orchestration for the Configuration
  * Agent's write path. Closes ship-gates B3 (config_history audit with
  * change_source='config_agent') and B5 (sensitive-path routing through
  * action→review queue).
  *
+ * Session 1 renamed this service from `configUpdateHierarchyTemplateService`
+ * and retargeted the writer at `organisations.operational_config_override`
+ * per contract (h) — the organisation is now the single org-owned source of
+ * truth for operational-config overrides.
+ *
  * Flow:
- *   1. Load current operational_config for (organisationId, templateId).
- *   2. Deep-merge the proposed patch.
+ *   1. Load the org's current operational_config_override (+ applied system
+ *      template's defaults).
+ *   2. Deep-merge the proposed patch against the override layer.
  *   3. Validate the full merged config (schema + sum constraints).
- *   4. Classify the path: sensitive vs non-sensitive (§17.6.2 gating).
- *   5. Non-sensitive → direct merge + config_history row (change_source='config_agent').
- *      Sensitive     → insert `actions` row with gateLevel='review', status='proposed'.
- *                      Operator approves; approval-execute handler re-runs 1–3
- *                      and then commits the merge + writes config_history.
+ *   4. Classify the path: sensitive vs non-sensitive (spec §3.6 / contract (n)).
+ *   5. Non-sensitive → direct merge into operational_config_override +
+ *                      config_history row (change_source='config_agent',
+ *                      entity_type='organisation_operational_config').
+ *      Sensitive     → insert `actions` row with gateLevel='review',
+ *                      status='proposed'. Operator approves; approval-execute
+ *                      handler re-runs 1–3 and then commits the merge + writes
+ *                      config_history.
  */
 
-import { eq, and, isNull, max } from 'drizzle-orm';
+import { eq, and, max } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { hierarchyTemplates } from '../db/schema/hierarchyTemplates.js';
+import { organisations } from '../db/schema/organisations.js';
+import { systemHierarchyTemplates } from '../db/schema/systemHierarchyTemplates.js';
 import { actions } from '../db/schema/actions.js';
 import { configHistory } from '../db/schema/configHistory.js';
 import { agents } from '../db/schema/agents.js';
@@ -32,30 +42,9 @@ import {
   validationDigest,
   buildConfigHistorySnapshotShape,
   isValidConfigPath,
-} from './configUpdateHierarchyTemplatePure.js';
+} from './configUpdateOrganisationConfigPure.js';
+import { resolveEffectiveOperationalConfig } from './orgOperationalConfigMigrationPure.js';
 import { createHash } from 'crypto';
-
-/**
- * Resolve the org's default subaccount hierarchy template id — used by the
- * Configuration Assistant chat popup when the operator doesn't name a
- * template explicitly. Returns null when no default is configured.
- */
-export async function resolveDefaultHierarchyTemplateId(
-  organisationId: string,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ id: hierarchyTemplates.id })
-    .from(hierarchyTemplates)
-    .where(
-      and(
-        eq(hierarchyTemplates.organisationId, organisationId),
-        eq(hierarchyTemplates.isDefaultForSubaccount, true),
-        isNull(hierarchyTemplates.deletedAt),
-      ),
-    )
-    .limit(1);
-  return row?.id ?? null;
-}
 
 /**
  * Resolve the org's Portfolio Health agent id — used by sensitive-path
@@ -76,7 +65,6 @@ export async function resolvePortfolioHealthAgentId(
 
 export interface ConfigUpdateInput {
   organisationId: string;
-  templateId: string;
   path: string;
   value: unknown;
   reason: string;
@@ -105,18 +93,20 @@ export type ConfigUpdateResult =
       errorCode:
         | 'SCHEMA_INVALID'
         | 'SUM_CONSTRAINT_VIOLATED'
-        | 'TEMPLATE_NOT_FOUND'
+        | 'ORGANISATION_NOT_FOUND'
         | 'AGENT_REQUIRED_FOR_SENSITIVE'
         | 'INVALID_PATH';
       message: string;
     };
 
-export async function applyHierarchyTemplateConfigUpdate(
+/**
+ * Apply a single dot-path/value patch to the caller's organisation's
+ * operational_config_override. Non-sensitive paths commit inline; sensitive
+ * paths route through the review queue.
+ */
+export async function applyOrganisationConfigUpdate(
   input: ConfigUpdateInput,
 ): Promise<ConfigUpdateResult> {
-  // Reject paths whose root segment is not in the allow-list. Catches typos
-  // like `alertLimits.notificationThresholdd` that would otherwise pass
-  // schema validation via `.passthrough()` and silently create a new field.
   if (!isValidConfigPath(input.path)) {
     return {
       committed: false,
@@ -125,33 +115,41 @@ export async function applyHierarchyTemplateConfigUpdate(
     };
   }
 
-  const [template] = await db
+  const [org] = await db
     .select({
-      id: hierarchyTemplates.id,
-      operationalConfig: hierarchyTemplates.operationalConfigSeed,
+      id: organisations.id,
+      operationalConfigOverride: organisations.operationalConfigOverride,
+      appliedSystemTemplateId: organisations.appliedSystemTemplateId,
     })
-    .from(hierarchyTemplates)
-    .where(
-      and(
-        eq(hierarchyTemplates.id, input.templateId),
-        eq(hierarchyTemplates.organisationId, input.organisationId),
-        isNull(hierarchyTemplates.deletedAt),
-      ),
-    )
+    .from(organisations)
+    .where(eq(organisations.id, input.organisationId))
     .limit(1);
 
-  if (!template) {
+  if (!org) {
     return {
       committed: false,
-      errorCode: 'TEMPLATE_NOT_FOUND',
-      message: `hierarchy template ${input.templateId} not found in org ${input.organisationId}`,
+      errorCode: 'ORGANISATION_NOT_FOUND',
+      message: `organisation ${input.organisationId} not found`,
     };
   }
 
-  const current = (template.operationalConfig ?? {}) as Record<string, unknown>;
-  const proposed = applyPathPatch(current, { path: input.path, value: input.value });
+  // Load system defaults so validation runs against the effective config
+  // (defaults deep-merged with override). Absent system template → {}.
+  let systemDefaults: Record<string, unknown> = {};
+  if (org.appliedSystemTemplateId) {
+    const [sys] = await db
+      .select({ defaults: systemHierarchyTemplates.operationalDefaults })
+      .from(systemHierarchyTemplates)
+      .where(eq(systemHierarchyTemplates.id, org.appliedSystemTemplateId))
+      .limit(1);
+    systemDefaults = (sys?.defaults as Record<string, unknown>) ?? {};
+  }
 
-  const validation = validateProposedConfig(proposed);
+  const currentOverride = (org.operationalConfigOverride as Record<string, unknown>) ?? {};
+  const proposedOverride = applyPathPatch(currentOverride, { path: input.path, value: input.value });
+  const proposedEffective = resolveEffectiveOperationalConfig(systemDefaults, proposedOverride);
+
+  const validation = validateProposedConfig(proposedEffective);
   if (!validation.ok) {
     return {
       committed: false,
@@ -170,23 +168,12 @@ export async function applyHierarchyTemplateConfigUpdate(
         message: 'agentId is required to enqueue sensitive-path review',
       };
     }
-    const digest = validationDigest(proposed);
+    const digest = validationDigest(proposedEffective);
     const idempotencyKey = createHash('sha256')
-      .update(`config_update:${input.templateId}:${input.path}:${digest}`)
+      .update(`config_update:${input.organisationId}:${input.path}:${digest}`)
       .digest('hex')
       .slice(0, 40);
 
-    // Route through actionService.proposeAction() + reviewService.createReviewItem()
-    // so the action is visible in the review queue UI. actionService handles
-    // idempotency (dedup against non-terminal statuses), the pending_approval
-    // state transition, and suspendUntil bookkeeping.
-    //
-    // Concurrency note: actionService.proposeAction does SELECT-then-INSERT.
-    // Migration 0178 adds a partial unique index on
-    //   (organisation_id, idempotency_key) WHERE action_scope='org'
-    // so a concurrent second caller's INSERT fails with Postgres 23505
-    // instead of duplicating the row. We catch that here and re-look up
-    // the existing action — the end state is identical to the dedup path.
     let reviewProposal: Awaited<ReturnType<typeof actionService.proposeAction>>;
     try {
       reviewProposal = await actionService.proposeAction({
@@ -196,7 +183,6 @@ export async function applyHierarchyTemplateConfigUpdate(
         actionType: 'config_update_organisation_config',
         idempotencyKey,
         payload: {
-          templateId: input.templateId,
           path: input.path,
           value: input.value,
           reason: input.reason,
@@ -236,7 +222,6 @@ export async function applyHierarchyTemplateConfigUpdate(
     }
 
     if (!reviewProposal.isNew) {
-      // Duplicate — return existing action id.
       return {
         committed: false,
         actionId: reviewProposal.actionId,
@@ -245,13 +230,11 @@ export async function applyHierarchyTemplateConfigUpdate(
       };
     }
 
-    // Create a review queue entry so operators can see and approve this change.
     const actionRow = await actionService.getAction(reviewProposal.actionId, input.organisationId);
     await reviewService.createReviewItem(actionRow, {
       actionType: 'config_update_organisation_config',
       reasoning: `Sensitive config path: ${input.path}. Reason: ${input.reason}`,
       proposedPayload: {
-        templateId: input.templateId,
         path: input.path,
         value: input.value,
         reason: input.reason,
@@ -266,11 +249,10 @@ export async function applyHierarchyTemplateConfigUpdate(
     };
   }
 
-  // Non-sensitive path: write directly + record history.
-  const version = await commitMergeAndRecordHistory({
+  // Non-sensitive: write the override + record history atomically.
+  const version = await commitOverrideAndRecordHistory({
     organisationId: input.organisationId,
-    templateId: input.templateId,
-    proposedConfig: proposed,
+    proposedOverride,
     path: input.path,
     reason: input.reason,
     sourceSession: input.sourceSession,
@@ -286,11 +268,11 @@ export async function applyHierarchyTemplateConfigUpdate(
 }
 
 /**
- * Approval-execute handler: runs when a sensitive-path action lands in
- * status=approved. Re-loads the current config, re-validates (drift check),
+ * Approval-execute handler — runs when a sensitive-path action reaches
+ * status=approved. Re-loads the current override, re-validates (drift check),
  * and if valid, commits the merge + writes config_history.
  */
-export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
+export async function executeApprovedOrganisationConfigUpdate(params: {
   actionId: string;
   organisationId: string;
 }): Promise<
@@ -312,7 +294,6 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
     return { success: false, errorCode: 'ACTION_NOT_FOUND', message: 'action missing' };
   }
   const payload = action.payloadJson as {
-    templateId: string;
     path: string;
     value: unknown;
     reason: string;
@@ -320,31 +301,37 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
   };
   const originalDigest = (action.metadataJson as { validationDigest?: string } | null)?.validationDigest;
 
-  // Re-load current + re-compute proposed + validate (drift check).
-  const [template] = await db
+  const [org] = await db
     .select({
-      id: hierarchyTemplates.id,
-      operationalConfig: hierarchyTemplates.operationalConfigSeed,
+      id: organisations.id,
+      operationalConfigOverride: organisations.operationalConfigOverride,
+      appliedSystemTemplateId: organisations.appliedSystemTemplateId,
     })
-    .from(hierarchyTemplates)
-    .where(
-      and(
-        eq(hierarchyTemplates.id, payload.templateId),
-        eq(hierarchyTemplates.organisationId, params.organisationId),
-        isNull(hierarchyTemplates.deletedAt),
-      ),
-    )
+    .from(organisations)
+    .where(eq(organisations.id, params.organisationId))
     .limit(1);
-  if (!template) {
-    return { success: false, errorCode: 'TEMPLATE_NOT_FOUND', message: 'template gone' };
+  if (!org) {
+    return { success: false, errorCode: 'ORGANISATION_NOT_FOUND', message: 'organisation gone' };
   }
-  const current = (template.operationalConfig ?? {}) as Record<string, unknown>;
-  const proposed = applyPathPatch(current, { path: payload.path, value: payload.value });
-  const validation = validateProposedConfig(proposed);
+
+  let systemDefaults: Record<string, unknown> = {};
+  if (org.appliedSystemTemplateId) {
+    const [sys] = await db
+      .select({ defaults: systemHierarchyTemplates.operationalDefaults })
+      .from(systemHierarchyTemplates)
+      .where(eq(systemHierarchyTemplates.id, org.appliedSystemTemplateId))
+      .limit(1);
+    systemDefaults = (sys?.defaults as Record<string, unknown>) ?? {};
+  }
+
+  const currentOverride = (org.operationalConfigOverride as Record<string, unknown>) ?? {};
+  const proposedOverride = applyPathPatch(currentOverride, { path: payload.path, value: payload.value });
+  const proposedEffective = resolveEffectiveOperationalConfig(systemDefaults, proposedOverride);
+  const validation = validateProposedConfig(proposedEffective);
   if (!validation.ok) {
     return { success: false, errorCode: validation.errorCode!, message: validation.message ?? 'failed' };
   }
-  const currentDigest = validationDigest(proposed);
+  const currentDigest = validationDigest(proposedEffective);
   if (originalDigest && originalDigest !== currentDigest) {
     return {
       success: false,
@@ -353,10 +340,9 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
     };
   }
 
-  const version = await commitMergeAndRecordHistory({
+  const version = await commitOverrideAndRecordHistory({
     organisationId: params.organisationId,
-    templateId: payload.templateId,
-    proposedConfig: proposed,
+    proposedOverride,
     path: payload.path,
     reason: payload.reason,
     sourceSession: payload.sourceSession,
@@ -368,39 +354,31 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
 
 // ── Internal helpers ──────────────────────────────────────────────────────
 
-async function commitMergeAndRecordHistory(p: {
+async function commitOverrideAndRecordHistory(p: {
   organisationId: string;
-  templateId: string;
-  proposedConfig: Record<string, unknown>;
+  proposedOverride: Record<string, unknown>;
   path: string;
   reason: string;
   sourceSession?: string | null;
   changedByUserId: string | null;
 }): Promise<number> {
-  // Use a single transaction so the write + history insert are atomic.
-  // configHistoryService.recordHistory supports optional tx; we pass ours in.
   let createdVersion = 0;
   await db.transaction(async (tx) => {
     await tx
-      .update(hierarchyTemplates)
-      .set({ operationalConfigSeed: p.proposedConfig, updatedAt: new Date() })
-      .where(
-        and(
-          eq(hierarchyTemplates.id, p.templateId),
-          eq(hierarchyTemplates.organisationId, p.organisationId),
-        ),
-      );
+      .update(organisations)
+      .set({ operationalConfigOverride: p.proposedOverride, updatedAt: new Date() })
+      .where(eq(organisations.id, p.organisationId));
 
     const snap = buildConfigHistorySnapshotShape({
-      proposedConfig: p.proposedConfig,
+      proposedConfig: p.proposedOverride,
       path: p.path,
       reason: p.reason,
       sourceSession: p.sourceSession,
     });
     await configHistoryService.recordHistory(
       {
-        entityType: 'clientpulse_operational_config',
-        entityId: p.templateId,
+        entityType: 'organisation_operational_config',
+        entityId: p.organisationId,
         organisationId: p.organisationId,
         snapshot: snap.snapshot,
         changedBy: p.changedByUserId,
@@ -415,8 +393,8 @@ async function commitMergeAndRecordHistory(p: {
       .from(configHistory)
       .where(
         and(
-          eq(configHistory.entityType, 'clientpulse_operational_config'),
-          eq(configHistory.entityId, p.templateId),
+          eq(configHistory.entityType, 'organisation_operational_config'),
+          eq(configHistory.entityId, p.organisationId),
           eq(configHistory.organisationId, p.organisationId),
         ),
       );

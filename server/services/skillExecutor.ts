@@ -72,9 +72,9 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     // When the operator approves a sensitive-path config change, re-validate
     // (drift check) and commit the merge + config_history row (B5 ship gate).
     case 'config_update_organisation_config': {
-      const { executeApprovedHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+      const { executeApprovedOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
       const actionId = (ctx as unknown as { actionId?: string }).actionId ?? '';
-      const result = await executeApprovedHierarchyTemplateConfigUpdate({
+      const result = await executeApprovedOrganisationConfigUpdate({
         actionId,
         organisationId: context.organisationId,
       });
@@ -1357,15 +1357,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
 
   // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
-  // The skill calls applyHierarchyTemplateConfigUpdate directly rather than
+  // The skill calls applyOrganisationConfigUpdate directly rather than
   // routing through proposeReviewGatedAction — the service itself owns the
   // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
-  // Chunk A.2 renames the dispatch target to configUpdateOrganisationService.
   config_update_organisation_config: async (input, context) => {
-    const { applyHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
-    return applyHierarchyTemplateConfigUpdate({
+    const { applyOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
+    return applyOrganisationConfigUpdate({
       organisationId: context.organisationId,
-      templateId: input.templateId as string,
       path: input.path as string,
       value: input.value,
       reason: (input.reason as string) ?? 'config_agent write',
