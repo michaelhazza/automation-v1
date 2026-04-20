@@ -1,7 +1,7 @@
 /**
  * interventionActionMetadataSchema — typed contract for `actions.metadataJson`
  * when the action is a Phase 4 intervention primitive (the 5 namespaced
- * `crm.*` / `clientpulse.operator_alert` slugs).
+ * `crm.*` / `notify_operator` slugs).
  *
  * Purpose: prevent implicit schema creep. The metadata column is JSONB, so
  * anything could land there at runtime — this zod schema locks the shape

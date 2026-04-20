@@ -32,7 +32,7 @@ const INTERVENTION_ACTION_TYPES = [
   'crm.send_email',
   'crm.send_sms',
   'crm.create_task',
-  'clientpulse.operator_alert',
+  'notify_operator',
 ];
 
 export interface MeasureOutcomesJobSummary {
@@ -67,7 +67,7 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
       a.metadata_json
     FROM actions a
     WHERE a.action_type IN (
-      'crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','clientpulse.operator_alert'
+      'crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','notify_operator'
     )
       AND (a.status = 'completed' OR a.status = 'failed')
       AND a.executed_at IS NOT NULL

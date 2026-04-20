@@ -128,7 +128,7 @@ export async function applyHierarchyTemplateConfigUpdate(
   const [template] = await db
     .select({
       id: hierarchyTemplates.id,
-      operationalConfig: hierarchyTemplates.operationalConfig,
+      operationalConfig: hierarchyTemplates.operationalConfigSeed,
     })
     .from(hierarchyTemplates)
     .where(
@@ -193,7 +193,7 @@ export async function applyHierarchyTemplateConfigUpdate(
         organisationId: input.organisationId,
         subaccountId: null,
         agentId: input.agentId!,
-        actionType: 'config_update_hierarchy_template',
+        actionType: 'config_update_organisation_config',
         idempotencyKey,
         payload: {
           templateId: input.templateId,
@@ -248,7 +248,7 @@ export async function applyHierarchyTemplateConfigUpdate(
     // Create a review queue entry so operators can see and approve this change.
     const actionRow = await actionService.getAction(reviewProposal.actionId, input.organisationId);
     await reviewService.createReviewItem(actionRow, {
-      actionType: 'config_update_hierarchy_template',
+      actionType: 'config_update_organisation_config',
       reasoning: `Sensitive config path: ${input.path}. Reason: ${input.reason}`,
       proposedPayload: {
         templateId: input.templateId,
@@ -324,7 +324,7 @@ export async function executeApprovedHierarchyTemplateConfigUpdate(params: {
   const [template] = await db
     .select({
       id: hierarchyTemplates.id,
-      operationalConfig: hierarchyTemplates.operationalConfig,
+      operationalConfig: hierarchyTemplates.operationalConfigSeed,
     })
     .from(hierarchyTemplates)
     .where(
@@ -383,7 +383,7 @@ async function commitMergeAndRecordHistory(p: {
   await db.transaction(async (tx) => {
     await tx
       .update(hierarchyTemplates)
-      .set({ operationalConfig: p.proposedConfig, updatedAt: new Date() })
+      .set({ operationalConfigSeed: p.proposedConfig, updatedAt: new Date() })
       .where(
         and(
           eq(hierarchyTemplates.id, p.templateId),

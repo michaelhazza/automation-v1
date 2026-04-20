@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { resolveActionSlug } from '../config/actionRegistry.js';
 import {
   buildInterventionContext,
   createOperatorProposal,
@@ -61,7 +62,14 @@ router.post(
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
     const sub = await resolveSubaccount(req.params.subaccountId, orgId);
 
-    const parsed = proposeBodySchema.safeParse(req.body);
+    // Defensive slug normalisation per contract (l) — inbound action-type
+    // surfaces run through resolveActionSlug so legacy callers still work
+    // after the Session 1 rename.
+    const rawBody = req.body as Record<string, unknown> | null | undefined;
+    const normalisedBody = rawBody && typeof rawBody.actionType === 'string'
+      ? { ...rawBody, actionType: resolveActionSlug(rawBody.actionType) }
+      : rawBody;
+    const parsed = proposeBodySchema.safeParse(normalisedBody);
     if (!parsed.success) {
       throw { statusCode: 400, message: 'Invalid request body', errorCode: 'INVALID_BODY' };
     }

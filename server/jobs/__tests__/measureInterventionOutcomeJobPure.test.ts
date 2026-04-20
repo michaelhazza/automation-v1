@@ -118,7 +118,7 @@ test('operator_alert: window elapsed, no post snapshot → still measures (null 
     id: 'a-1',
     organisationId: 'org-1',
     subaccountId: 'sub-1',
-    actionType: 'clientpulse.operator_alert',
+    actionType: 'notify_operator',
     status: 'completed',
     executedAt: new Date('2026-04-19T00:00:00Z'),
     metadata: { bandAtProposal: 'atRisk' },

@@ -12,8 +12,9 @@ import crypto from 'crypto';
 // Org Config Service — loads and merges operational config from templates
 //
 // Chain: orgAgentConfigs.appliedTemplateId → hierarchyTemplates →
-//        hierarchyTemplates.operationalConfig (org overrides) merged with
-//        systemHierarchyTemplates.operationalDefaults (template defaults)
+//        hierarchyTemplates.operationalConfigSeed (legacy override source —
+//        retargeted to organisations.operational_config_override in Chunk A.2)
+//        merged with systemHierarchyTemplates.operationalDefaults.
 // ---------------------------------------------------------------------------
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -333,7 +334,7 @@ export const orgConfigService = {
     }
 
     // Deep merge: org overrides take precedence, nested objects merged (not replaced)
-    const orgOverrides = (orgTemplate.operationalConfig as Record<string, unknown>) ?? {};
+    const orgOverrides = (orgTemplate.operationalConfigSeed as Record<string, unknown>) ?? {};
     return deepMerge(systemDefaults, orgOverrides) as OperationalConfig;
   },
 

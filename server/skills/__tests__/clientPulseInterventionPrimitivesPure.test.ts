@@ -5,7 +5,7 @@
  *   - crm.send_email
  *   - crm.send_sms
  *   - crm.create_task
- *   - clientpulse.operator_alert
+ *   - notify_operator (renamed from clientpulse.operator_alert in Session 1)
  *
  * Runnable via:
  *   npx tsx server/skills/__tests__/clientPulseInterventionPrimitivesPure.test.ts
@@ -248,7 +248,7 @@ test('create_task: idempotency key differs on title change', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// clientpulse.operator_alert
+// notify_operator (formerly clientpulse.operator_alert — Session 1 contract (i))
 // ═════════════════════════════════════════════════════════════════════════
 
 test('operator_alert: valid payload passes', () => {

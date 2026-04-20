@@ -33,7 +33,7 @@ export const INTERVENTION_ACTION_TYPES = [
   'crm.send_email',
   'crm.send_sms',
   'crm.create_task',
-  'clientpulse.operator_alert',
+  'notify_operator',
 ] as const;
 
 export type InterventionActionType = typeof INTERVENTION_ACTION_TYPES[number];

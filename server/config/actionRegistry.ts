@@ -2711,18 +2711,17 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
   },
-  config_update_hierarchy_template: {
-    actionType: 'config_update_hierarchy_template',
-    description: 'Apply a single dot-path patch to a hierarchy template operational_config JSONB. Writes config_history with change_source=config_agent. Sensitive paths route through review queue.',
+  config_update_organisation_config: {
+    actionType: 'config_update_organisation_config',
+    description: 'Apply a single dot-path patch to the organisation\'s operational_config_override JSONB. Writes config_history with change_source=config_agent. Sensitive paths route through review queue.',
     actionCategory: 'worker',
     topics: ['clientpulse', 'config', 'agent'],
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
     createsBoardTask: false,
-    payloadFields: ['templateId', 'path', 'value', 'reason', 'sourceSession'],
+    payloadFields: ['path', 'value', 'reason', 'sourceSession'],
     parameterSchema: z.object({
-      templateId: z.string().describe('hierarchy_templates.id'),
       path: z.string().describe('dot-path into operational_config (e.g. alertLimits.notificationThreshold)'),
       value: z.unknown().describe('JSON-serialisable new value'),
       reason: z.string().describe('Operator rationale (logged)'),
@@ -2737,8 +2736,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
-  'clientpulse.operator_alert': {
-    actionType: 'clientpulse.operator_alert',
+  notify_operator: {
+    actionType: 'notify_operator',
     description: 'Internal operator-facing alert — writes a notification row + (on approval) fans out to configured channels (in-app, email, slack).',
     actionCategory: 'worker',
     topics: ['clientpulse', 'intervention', 'alert'],
@@ -2768,9 +2767,61 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
 };
 
-/** Check if an action type is known */
+/**
+ * Legacy action-slug aliases.
+ *
+ * Per contract (l) in tasks/builds/clientpulse/session-1-foundation-spec.md
+ * §1.3: all inbound action-slug surfaces MUST normalise via `resolveActionSlug`.
+ * Routes, webhook handlers, queue consumers, anything that receives an
+ * `action_type` from an external caller.
+ *
+ * The migration in `0181_rename_operator_alert.sql` rewrites historical rows,
+ * but in-flight job payloads, cached definitions, dashboard filters, and
+ * external callers may still carry the pre-Session-1 slug. Resolving via this
+ * map is defence in depth — once per process per alias hit is logged so drift
+ * is visible without swamping the log.
+ *
+ * Append-only: entries can be added but never silently removed. Removal
+ * requires a deliberate code change.
+ */
+export const ACTION_SLUG_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  'clientpulse.operator_alert': 'notify_operator',
+  config_update_hierarchy_template: 'config_update_organisation_config',
+});
+
+const loggedAliasHits = new Set<string>();
+
+/**
+ * Normalise an inbound action-type slug to its canonical registered form.
+ *
+ * Returns the canonical slug if the input matches an alias; returns the input
+ * unchanged otherwise. First hit per alias per process logs a warning so alias
+ * consumption is observable without log spam.
+ */
+export function resolveActionSlug(slug: string): string {
+  const canonical = ACTION_SLUG_ALIASES[slug];
+  if (canonical === undefined) return slug;
+  if (!loggedAliasHits.has(slug)) {
+    loggedAliasHits.add(slug);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
+    );
+  }
+  return canonical;
+}
+
+/**
+ * Test-only — reset the log-once set so tests can assert the first-hit log
+ * fires exactly once per alias per process. Never call from production code.
+ */
+export function __resetActionSlugAliasLogOnceForTests(): void {
+  loggedAliasHits.clear();
+}
+
+/** Check if an action type is known. Routes through the alias resolver. */
 export function getActionDefinition(actionType: string): ActionDefinition | undefined {
-  return ACTION_REGISTRY[actionType];
+  return ACTION_REGISTRY[resolveActionSlug(actionType)];
 }
 
 /**
