@@ -127,6 +127,60 @@ Branch: `claude/clientpulse-session-1-foundation`. Spec: `tasks/builds/clientpul
 
 ---
 
+## Session 2 — real CRM wiring + drilldown + polish (2026-04-20)
+
+Branch: `claude/clientpulse-session-2-arch-gzYlZ`. Spec: `tasks/builds/clientpulse/session-2-spec.md`. Plan: `tasks/builds/clientpulse/session-2-plan.md`.
+
+**Chunks landed:**
+
+| # | Chunk | Ship gate | Summary |
+|---|-------|-----------|---------|
+| 1 | Architect pass | — | `session-2-plan.md` (775 lines) — ship-gate crosswalk, file inventory attributed per chunk, 13 per-chunk build subsections, risk register, decisions log. |
+| 2 | **B.1** — `apiAdapter` real GHL wiring | **S2-6.1 ✓** | Pure classifier (10-case test) + 5 endpoint mappings + HTTP dispatcher with idempotency-key forwarding + structured log + §2.6 precondition gate (validationDigest drift check + per-subaccount advisory lock + timeout budget). Migration 0185 pre-documents `actions.replay_of_action_id` per contract (s). |
+| 3 | **B.2** — Live-data pickers | **S2-6.2 ✓** | 5 new subaccount-scoped GET routes + `crmLiveDataService` (60 s in-memory cache) + `ghlReadHelpers` + reusable `<LiveDataPicker>` component (200 ms debounce, keyboard nav, 429 backoff). 4 editor rewires (FireAutomation/EmailAuthoring/SendSms/CreateTask). |
+| 4 | **B.3** — Drilldown page | **S2-6.3 ✓** | `/clientpulse/clients/:subaccountId` shipped with Q5-locked minimal surface: header + signal panel + 90-day band-transitions table + intervention history with outcome badges + contextual "Open Configuration Assistant" trigger. Pure `deriveOutcomeBadge` (11-case test) + `drilldownService` + 4 new routes. Dashboard high-risk rows deep-link in. |
+| 5 | **C.1** — `notify_operator` fan-out | **S2-8.3 ✓** | `notifyOperatorFanoutService` orchestrator + in-app/email/slack channel adapters + pure availability+plan module (8-case test). Slack webhook read from `organisations.settings.slackWebhookUrl`. `skillExecutor.ts` notify_operator case rewired. |
+| 6 | **C.2** — Outcome-weighted recommendation | **S2-8.1 ✓** | Pure `pickRecommendedTemplate` (8-case test) with `outcome_weighted / priority_fallback / no_candidates` reason + `aggregateOutcomesByTemplate` in context service + `recommendedReason` on response. Badge differentiates in ProposeInterventionModal. |
+| 7 | **C.3** — Typed `InterventionTemplatesEditor` | **S2-8.4 ✓** | List+expand form editor + 5 per-actionType payload sub-editors + `MergeFieldPicker` (static vocabulary) + round-trip module preserving unknown fields verbatim. JSON editor kept as advanced fallback toggle. |
+| 8 | **C.4** — Dual-path UX + per-block deep-links | **B6 ✓ (component)** | `ConfigUpdateToolResult` + `parseConfigUpdateToolResult` ship three distinct result shapes (`applied_inline / queued_for_review / error`) with unknown-shape JSON fallback. `configAssistantPrompts.buildBlockContextPrompt` + "Ask the assistant →" button on every block card. |
+| 10 | **D.1 (minimal)** — `createFromTemplate` | partial | Service method lands (stamps `applied_system_template_id` + writes config_history creation-event). Modal rebuild + hierarchy_templates/system-agent seed (spec §11.1.1 steps 3–4) deferred. |
+| 11 | **D.2** — Typed Settings editors (9 blocks) | — | Compact functional editors for healthScoreFactors, churnRiskSignals, churnBands, interventionDefaults, alertLimits, dataRetention, onboardingMilestones, staffActivity, integrationFingerprints + shared `ArrayEditor` + `NormalisationFieldset` primitives. Settings page dispatches on `block.path`; JSON fallback preserved for unhandled paths. |
+| 13 | **D.4 (partial)** — `recordHistory` refactor | partial | `recordHistory` now returns `Promise<number>` (the version it wrote); `configUpdateOrganisationService.commitOverrideAndRecordHistory` drops the redundant SELECT MAX round-trip. Integration test file (8-case matrix) deferred. |
+
+**Chunks deferred within Session 2 (flagged, not silent):**
+
+- **Chunk 9 (C.5)** — wizard scan-frequency + alert-cadence controls. Schema fields confirmed present (`scanFrequencyHours`, `alertLimits`) at kickoff, but the current `OnboardingWizardPage` Step 3 shows sync progress, not a config-defaults screen; spec §10.2's assumed Screen-3 structure has diverged. UI wiring deferred; schema is ready.
+- **Chunk 12 (D.3)** — `<ConfigAssistantPanel>` extraction. Spec §11.3.4 itself notes "Contract (k) is structurally honoured today" via Session 1 URL-param plumbing; the extraction is a large refactor of `ConfigAssistantPage`'s message pipeline (~500 lines). Deferred to Session 3.
+- **D.1 modal rebuild** — create-org modal UX (template picker + tier toggle + live preview + organisations.tier migration) lands with the remaining template-aware seeding.
+- **Chunk 13 integration test** — `organisationConfig.integration.test.ts` (8-case matrix) pending DB-fixture layer first-classed in the test infra.
+- **Chunk 8 dual-path UX wire-up** into `ConfigAssistantPage` message pipeline — component + parser ready; pipeline currently filters tool_result messages entirely, wiring lands with the D.3 panel extraction.
+- **GHL `merge-field-vocabulary` endpoint** — static token list ships; dynamic endpoint deferred.
+- **On-call recipient role audit** — `notify_operator` preset falls back to "all org members" until the audit lands.
+- **OAuth refresh-on-expire for apiAdapter** — adapter reads `access_token` directly from `integration_connections`; refresh semantics pending Session 3.
+
+**Ship-gate matrix:**
+
+| Gate | Status | Verification |
+|------|--------|--------------|
+| S2-6.1 (apiAdapter GHL wiring) | passed | Pure classifier 10/10, precondition gate live, migration 0185 landed |
+| S2-6.2 (Live-data pickers) | passed | 5 routes + service + 4 editor rewires; typecheck baseline held |
+| S2-6.3 (Drilldown page) | passed | Outcome-badge pure 11/11, 4 routes + page + 4 components |
+| S2-8.1 (Outcome-weighted recommendation) | passed | Pure decision function 8/8 + aggregation query + recommendedReason surfaced |
+| S2-8.3 (notify_operator fan-out) | passed | Availability+plan pure 8/8 + 3 channel adapters + skillExecutor rewire |
+| S2-8.4 (Typed templates editor) | passed | List+edit form + 5 per-actionType sub-editors + round-trip module |
+| B6 (Dual-path UX copy) | partial | Component + parser ship; page wire-up deferred with D.3 |
+| S2-D.1 (createFromTemplate) | partial | Core service method + audit event; modal rebuild deferred |
+| S2-D.2 (9 typed editors) | passed | 9 editors + 2 shared primitives + Settings page dispatcher |
+| S2-D.3 (Panel extraction) | deferred | Session 1 URL-param plumbing remains valid per spec §11.3.4 |
+| S2-D.4 (Integration test + recordHistory) | partial | recordHistory returns version; integration test deferred |
+
+**Sanity gate (final run):**
+- Server typecheck: **43 = baseline** (zero new errors across 12 commits).
+- Client typecheck: **11 = baseline** (zero new errors).
+- Pure tests: classifier (10), drilldownOutcomeBadge (11), recommendedIntervention (8), notifyOperatorFanout availability (8) — all green.
+
+---
+
 ## Blocker (active — escalated to user 2026-04-18)
 
 **Feature-coordinator cannot invoke sibling subagents from within its own process.**

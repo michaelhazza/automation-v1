@@ -325,8 +325,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. Ship-gates B2 (outcome attribution), B3 (config_history audit), B5 (sensitive-path gating) all closed. Next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors).
+**In-flight spec:** `tasks/builds/clientpulse/session-2-spec.md` — ClientPulse Session 2 (real CRM wiring + drilldown + polish). Plan at `tasks/builds/clientpulse/session-2-plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
+**Active items:** Session 2 shipped on branch `claude/clientpulse-session-2-arch-gzYlZ` (2026-04-20) — ship gates S2-6.1, S2-6.2, S2-6.3, S2-8.1, S2-8.3, S2-8.4, S2-D.2 closed in full; B6, S2-D.1, S2-D.4 partial. Chunks 9 (wizard cadence) and 12 (panel extraction) deferred to Session 3; see `progress.md` for the full deferred list. Typecheck baseline (43 server / 11 client) held across all 12 commits.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
