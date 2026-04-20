@@ -34,6 +34,32 @@ type PreconditionResult =
       detail?: string;
     };
 
+/**
+ * Structured log for precondition-gate blocks. Keyed on actionId so downstream
+ * log analysis can distinguish adapter-dispatch failures (via apiAdapter's own
+ * `apiAdapter.dispatch` log line) from engine-side blocks that never reached
+ * the adapter. Complements the `execution_failed` action_event row by giving
+ * operators a greppable line at dispatch time.
+ */
+function logPreconditionBlock(params: {
+  actionId: string;
+  organisationId: string;
+  subaccountId: string | null;
+  blockedReason: string;
+  detail?: string;
+}): void {
+  console.log(
+    JSON.stringify({
+      evt: 'executionLayer.precondition_block',
+      actionId: params.actionId,
+      organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
+      blockedReason: params.blockedReason,
+      detail: params.detail ?? null,
+    }),
+  );
+}
+
 async function acquireSubaccountLock(params: {
   organisationId: string;
   subaccountId: string | null;
@@ -109,6 +135,13 @@ export const executionLayerService = {
     // Preconditions 2 + 4 — payload digest re-check + timeout budget.
     const preconditionResult = checkPreconditions(action);
     if (!preconditionResult.ok) {
+      logPreconditionBlock({
+        actionId,
+        organisationId,
+        subaccountId: action.subaccountId,
+        blockedReason: preconditionResult.blockedReason,
+        detail: preconditionResult.detail,
+      });
       await actionService.markBlocked(
         actionId,
         organisationId,
@@ -129,6 +162,13 @@ export const executionLayerService = {
       subaccountId: action.subaccountId,
     });
     if (!lockHandle.acquired) {
+      logPreconditionBlock({
+        actionId,
+        organisationId,
+        subaccountId: action.subaccountId,
+        blockedReason: 'concurrent_execute',
+        detail: 'pg_try_advisory_lock returned false',
+      });
       await actionService.markBlocked(
         actionId,
         organisationId,

@@ -21,9 +21,33 @@ import { policyEngineService } from './policyEngineService.js';
 // pass a stable synthetic key — e.g. actionType + a stable business key.
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonical JSON stringification with recursive key sorting. Unlike
+ * `JSON.stringify(value, Object.keys(value).sort())` — whose 2nd arg is an
+ * allowlist applied at every depth (thus silently dropping nested keys) —
+ * this walks the value and sorts object keys at every level before emitting.
+ * Arrays retain order (positional semantics). Used by both the idempotency-key
+ * hash and the validationDigest drift check so two logically-identical
+ * payloads always produce the same string regardless of key insertion order.
+ */
+function canonicaliseJson(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicaliseJson).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicaliseJson(v)}`).join(',')}}`;
+  }
+  if (value === undefined) return 'null';
+  // primitives — strings, numbers, booleans — JSON.stringify handles encoding.
+  return JSON.stringify(value);
+}
+
 export function hashActionArgs(args: Record<string, unknown>): string {
-  // Canonicalise: sort keys alphabetically to make the hash order-independent.
-  const canonical = JSON.stringify(args, Object.keys(args).sort());
+  const canonical = canonicaliseJson(args);
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
@@ -34,7 +58,7 @@ export function hashActionArgs(args: Record<string, unknown>): string {
  * compared byte-for-byte — a drift triggers `blocked: drift_detected`.
  */
 export function computeValidationDigest(payload: Record<string, unknown>): string {
-  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  const canonical = canonicaliseJson(payload);
   return createHash('sha256').update(canonical).digest('hex');
 }
 
