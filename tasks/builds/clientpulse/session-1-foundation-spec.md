@@ -67,6 +67,43 @@ Introduced this session:
 - (j) **Settings page and Configuration Assistant are equal surfaces on the same mechanism.** Both write through the same config-update service layer (`configUpdateOrganisationService.applyOrganisationConfigUpdate`), produce the same `config_history` audit trail, and respect the same sensitive-path split. The Settings page reaches this layer directly via `POST /api/organisation/config/apply` (§4); the Configuration Assistant reaches it via the `config_update_organisation_config` skill invoked through the existing `/api/agents/:agentId/conversations/...` agent loop (§5). No surface has privileged access.
 - (k) **Session lifecycle for the Configuration Assistant popup:** opening a popup resumes the most recent agent run < 15 minutes old, else creates a fresh one. Closing the popup does not kill the run. Background execution surfaces via the minimised pill.
 - (l) **All inbound action-slug surfaces MUST normalise via `resolveActionSlug`.** Routes, webhook handlers, queue consumers, anything that receives an `action_type` from an external caller. Legacy slugs are expected to appear for at least 2-3 releases; defensive normalisation is the contract, not the exception.
+- (m) **Intervention state machine is strictly linear.** The `actions` row progresses `proposed → (approved | rejected | blocked) → executing → (completed | failed | skipped)`. No branching states, no intermediate sub-states. Transitions validated at `actionService.transition()` against `LEGAL_TRANSITIONS` (server/config/actionRegistry.ts). Any new state that feels necessary is an architectural change + needs a separate spec round — not an implementation-time addition.
+- (n) **Config gating is pure; execution is deterministic.** Validation (`applyPathPatch` + `validateProposedConfig` + `classifyWritePath`) produces no side effects — same input → same output. The approval-execute phase never mutates config during execution; it re-validates for drift then applies the already-validated merge in a single transaction. Never interleave validation with execution.
+- (o) **Canonical intervention idempotency key pattern.** Every intervention surface derives its key from: `clientpulse:intervention:{source}:{subaccountId|orgId}:{templateSlug|actionType}:{correlation}`, where `source ∈ {scenario_detector, operator_manual, ...}` and `correlation` is the logical-identity anchor (e.g. churnAssessmentId for scenario_detector, payload-hash for operator_manual). Any new intervention trigger (polling, webhook, API) MUST follow this pattern. Implemented in `clientPulseInterventionIdempotencyPure.ts`; new triggers extend the existing pure module rather than inventing their own format.
+- (p) **Atomicity boundaries are explicit.** Each DB transaction is the unit of atomicity. Specifically:
+  - Action insert + `review_items` insert → separate writes; operator-visible lag is acceptable. Reconciliation: a periodic sweep creates missing `review_items` rows for any `actions` row with `gateLevel='review' AND status='proposed' AND NOT EXISTS (review_items WHERE action_id=…)`.
+  - Config write + `config_history` insert → atomic (same tx). Never partial.
+  - Intervention execution (adapter call) + `actions.status` transition → separate ops. Reconciliation: the `stale-run-cleanup` job transitions orphan `executing` rows to `failed` after the execution timeout.
+  - Action completion + `intervention_outcomes` insert → eventual; outcome-measurement job closes the gap on the next hourly tick.
+- (q) **Correlation key contract.** Every log, event emission, and audit row that touches the intervention lifecycle MUST carry `actionId` as a first-class correlation key. Specifically:
+  - Log calls: `logger.info('clientpulse.intervention.*', { ..., actionId })` — applies to proposer enqueue, dedup, approval, execute, outcome-measure, failure.
+  - `config_history.change_summary` for intervention-related config changes references the triggering action via "triggered by action <id>" when applicable.
+  - `action_events` already carries action_id via FK — no change needed there.
+  - The existing `clientpulse.intervention.enqueued` lifecycle event already complies; new events inherit the pattern.
+- (r) **Replayability is a first-class constraint.** Every intervention-decision function is pure-testable with deterministic inputs → deterministic outputs. `proposeClientPulseInterventionsPure()`, `decideOutcomeMeasurement()`, `validateInterventionActionMetadata()`, `applyPathPatch()`, `validateProposedConfig()`, `classifyWritePath()`, `resolveMergeFields()`, `canonicalStringify()`, `buildScenarioDetectorIdempotencyKey()`, `buildOperatorIdempotencyKey()` — all already pure. Any new intervention-decision logic added in Session 1 MUST live in a `*Pure.ts` module. I/O wrappers can exist around it but decision logic never lives inside them.
+
+### §1.4 Layering — Decision vs Execution
+
+Make the layering explicit so it doesn't drift in implementation:
+
+- **Decision layer** — proposer job, intervention context service, Configuration Assistant agent loop, pure matchers. Produces proposals, validates config, computes recommendations, evaluates policy. Writes `actions` rows (+ review items) but does NOT call adapters or external APIs.
+- **Execution layer** — execution-layer service + adapters (`apiAdapter`, `workerAdapter`, `devopsAdapter`). Consumes approved `actions` rows. Dumb and deterministic — reads the payload, calls the external system, writes the result. Never re-runs decision logic.
+
+Any code that crosses this boundary (decision calling execution, or execution branching on new decisions) is a smell and should be split. The operator approval in between is the only gate that bridges the two layers.
+
+### §1.5 Intervention envelope — conceptual, not structural
+
+The "intervention envelope" is the conceptual object `{ actions row + intervention_outcomes row + all config_history rows tagged with actionId }`. It is materialised across tables, not unified into a single row:
+
+- `actions.payloadJson` — proposed intervention payload
+- `actions.metadataJson` — decision context (validated by `interventionActionMetadataSchema`)
+- `actions.status` + `gateLevel` + `approvedBy` — approval state
+- `actions.resultJson` + `executedAt` — execution state + result
+- `intervention_outcomes` row — band-change attribution + measured outcome
+- `config_history` rows (when the intervention triggered a config write) — audit trail
+
+Queries that need the "full envelope" join on `action.id` = `intervention_outcomes.intervention_id` = `config_history` where applicable. Do NOT introduce a materialised `interventions` view table — the envelope lives where the data is written.
+
 ## §2. Phase A — data-model separation for org-level operational config
 
 ### §2.1 The problem being solved
@@ -574,15 +611,19 @@ Response:
 
 ```typescript
 {
-  effective: OperationalConfig;                 // merged deep-merge result
-  overrides: OperationalConfig | null;          // just the org override row (nullable)
-  systemDefaults: OperationalConfig | null;     // the underlying system template defaults (null iff appliedSystemTemplateId is null)
+  effective: OperationalConfig;                         // merged deep-merge result; fully-normalised
+  overrides: DeepPartial<OperationalConfig> | null;     // raw sparse row from organisations.operational_config_override
+  systemDefaults: OperationalConfig | null;             // the underlying system template defaults (null iff appliedSystemTemplateId is null)
   appliedSystemTemplateId: string | null;
   appliedSystemTemplateName: string | null;
 }
 ```
 
+The `overrides` field is the **raw sparse JSON row** — it is NOT schema-filled with defaults; missing keys signal "no explicit override at this path." The Settings UI's per-field override-indicator reads this shape directly (via `hasExplicitOverride(overrides, path)`). `effective` is the merged result (system defaults + overrides + code-level schema defaults for unwritten leaves) and MUST conform to `OperationalConfig` end-to-end.
+
 `systemDefaults` is `null` iff the org has no adopted system template (`appliedSystemTemplateId IS NULL`). Under Option A this is only possible for legacy pre-Session-1 orgs that never ran through `createFromTemplate` — new orgs always have `appliedSystemTemplateId` set (§7.2 step 1). When `systemDefaults` is `null`, the Settings UI disables the "reset to template default" button across the board (no baseline to reset to) and the provenance strip shows "Adopted template: none (legacy org)." `effective` is still a valid `OperationalConfig` in this case — it is the raw `overrides` value deep-merged with `{}`, i.e. whatever the org has explicitly written, falling back to the code-level schema defaults for any unwritten leaf.
+
+**Type-signature note (iter-5 spec-reviewer 5.2).** The `overrides: DeepPartial<OperationalConfig> | null` type is deliberate — it replaces an earlier `OperationalConfig | null` draft that implied a fully-normalised object. Runtime schema validation on the effective-read hot path (`operationalConfigSchema.parse(deepMerge(...))` in §2.6) is **deferred to Session 2 or later** — adding `.parse()` to every effective-read is a posture change (throws on partially-invalid legacy override rows) that needs a deliberate decision + repair migration + validity gate. Session 1 keeps the existing `deepMerge(...) as OperationalConfig` cast; §10.3 notes this explicitly as a chunk-A.1 clarification.
 
 **Override-detection contract (consistent with §6.7's option-a reset semantic):** the Settings UI derives **two** per-leaf states from the response:
 
@@ -719,7 +760,7 @@ Server-side delta owned by §5: extend the existing `GET /api/agents/:agentId/co
 
 Used by:
 
-- ClientPulse Settings page: "Ask the assistant to change this" links next to each editor block.
+- ClientPulse Settings page: page-level "Open Configuration Assistant" button (per §6.1). Per-block contextual deep-links ("Ask the assistant to change this" next to each editor card) are **deferred to Session 2** — see §10.7.
 - Drilldown page (Session 2): "Open Config Assistant" button.
 - Dashboard high-risk widget (future): context-specific prompts.
 
@@ -966,11 +1007,11 @@ Gate logic: a new `organisations.onboarding_completed_at: timestamp nullable` co
 
 **Screen 2 — Connect GoHighLevel.** OAuth soft-gate per `tasks/clientpulse-mockup-onboarding-orgadmin.html`. Two buttons: "Connect GHL" (kicks off OAuth) or "Skip for now" (workspace usable, ClientPulse data empty state until connected). Both advance to screen 3.
 
-**Screen 3 — Configure key defaults.** Three sliders / inputs surfacing the most impactful overrides:
+**Screen 3 — Configure key defaults.** One impactful override, surfacing the churn-band cutoffs for immediate operator adjustment; other tuning happens in ClientPulse Settings post-onboarding.
 
-- Scan frequency (hours): default 24, slider 6–72
-- Alert cadence: daily / weekly / monthly / off
-- Churn-band cutoffs: collapsed summary view showing "Healthy 75–100 · Watch 51–74 · At-risk 26–50 · Critical 0–25" with a "Adjust thresholds" link that opens the ClientPulse Settings page inline (or defers).
+- Churn-band cutoffs: collapsed summary view showing "Healthy 75–100 · Watch 51–74 · At-risk 26–50 · Critical 0–25" with a "Adjust thresholds" link that opens the ClientPulse Settings page inline (or defers). Sensitive path — the Save on the expanded editor queues the change via the standard review-queue flow; wizard continues either way.
+
+Previous draft surfaced two additional controls on this screen (Scan frequency + Alert cadence). Per iter-5 spec-reviewer directional 5.1, both are dropped from Session 1 — neither was threaded through §6.2's editor inventory, §4's schema, or §9's file work. Adding them would be material scope creep; removing them is the smallest reversible call. Operators tune both post-onboarding via ClientPulse Settings.
 
 On Next, **only fields the operator actually changed on screen 3 are POSTed** via `POST /api/organisation/config/apply` — one POST per dirty leaf path. Advancing without editing anything performs no config write and leaves `organisations.operational_config_override` `NULL`, preserving the Option A "override row is initialised by the first explicit edit" contract (§7.2 step 2, §10.1). Non-sensitive paths commit immediately; sensitive paths queue but the wizard continues — user re-visits the review queue later. Each successful or queued Screen-3 POST produces the normal `config_history` row via the standard `/api/organisation/config/apply` write path (entity_type `organisation_operational_config`, non-NULL `snapshot_after`); if the operator changes nothing, the only history entry remains the §7.2 step-6 creation marker with `snapshot_after=NULL`.
 
@@ -1316,6 +1357,9 @@ All prior open questions have been resolved inline in their sections. Consolidat
 - Typed `InterventionTemplatesEditor` (Phase 8 — pulled out of Session 1 scope per §10.5)
 - Template-switch flow for existing orgs
 - Dedicated `ORG_PERMISSIONS.CONFIG_EDIT` split
+- Per-block "Ask the assistant" deep-links on ClientPulse Settings cards (iter-5 spec-reviewer 5.3 resolution — deferred to Session 2 Phase 6 drilldown + Phase 8 widget polish where per-block contextual prompts combine with high-risk account context for higher leverage)
+- Wizard Screen-3 scan-frequency + alert-cadence controls (iter-5 spec-reviewer 5.1 resolution — dropped from Session 1 wizard scope; operator tunes post-onboarding via ClientPulse Settings)
+- Runtime `operationalConfigSchema.parse()` on the effective-read hot path (iter-5 spec-reviewer 5.2 resolution — requires deliberate posture change + validity gate + repair migration; not Session-1-appropriate)
 
 ### §10.8 Items deliberately left as chunk-kickoff audits (non-blocking)
 
