@@ -90,12 +90,23 @@ registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx
       return result;
     }
 
-    // ── Phase 4 — notify_operator approval-execute ─────────────────────────
-    // Fanout (in-app, email, slack) is a future phase. For now, acknowledge
-    // successful approval so the action reaches status=completed and cooldown
-    // semantics are preserved. The payload is validated at proposal time.
-    case 'notify_operator':
-      return { queued: true, channels: payload.channels };
+    // ── Session 2 — notify_operator fan-out (spec §7.3) ──────────────────
+    case 'notify_operator': {
+      const fanoutModule = await import('./notifyOperatorFanoutService.js');
+      const alertPayload = payload as unknown as import('./notifyOperatorFanoutService.js').OperatorAlertPayload;
+      const actionId = (context as unknown as { actionId?: string }).actionId ?? '';
+      const fanoutResults = await fanoutModule.fanoutOperatorAlert({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        actionId,
+        payload: alertPayload,
+      });
+      return {
+        queued: true,
+        channels: alertPayload.channels,
+        fanoutResults,
+      };
+    }
 
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }

@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-19 (ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension for operational_config)
+> **Last updated:** 2026-04-20 (ClientPulse Session 2 — real CRM intervention dispatch, live-data pickers, per-client drilldown, outcome-weighted recommendation, multi-channel operator alerts)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -533,6 +533,10 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Intervention triggers (check-in, pause, escalation alert) proposed with human gating
 - ClientPulse dashboard for portfolio-wide health visibility at a glance, powered by Staff Activity Pulse (weighted-sum activity scoring from CRM mutation events, with automation-user exclusion) and Integration Fingerprint Scanner (detects third-party tools installed in each sub-account from canonical artifact patterns)
 - **Intervention pipeline** (Phase 4): scenario-detector proposes CRM-side actions (fire automation, send email, send SMS, create task) plus internal operator alerts — every proposal queued for operator approval before execution. Hourly outcome-measurement job tracks post-intervention band change (improved / unchanged / worsened) over a 14-day measurement window so operators see which interventions actually move the needle.
+- **Real CRM dispatch + outcome-weighted recommendations** (Session 2): approved interventions now cross the wire to the connected CRM with idempotent retry semantics and per-subaccount concurrency locks — not stubs. As outcome data accumulates, the recommended intervention for any risk band promotes the option that historically produced the best band improvement, falling back to configured priority when trial data is thin. Operators see the recommendation rationale inline (outcome-weighted vs priority fallback).
+- **Per-client drilldown** (Session 2): one-click into any client surfaces current health score with 7-day delta, top contributing risk signals, 90-day band-transition timeline, full intervention history with outcome badges, and a contextual "Open Configuration Assistant" trigger seeded with that client's situation.
+- **Live CRM-data pickers** (Session 2): every intervention editor ships searchable dropdowns backed by the connected CRM — choose the real workflow, contact, assignee user, from-address, or from-number from live data instead of copy-pasting IDs. Rate-limit aware with graceful backoff.
+- **Multi-channel operator alerts** (Session 2): internal operator alerts fan out across email and configured chat webhooks based on per-channel availability — one alert, reaching the operator wherever they are. The in-app surface is the review queue itself (where the alert row is written at proposal time). A dedicated per-user in-app notification record is on the roadmap for an upcoming release.
 - **Configuration Assistant for account-health knobs** (Phase 4.5): operators change scoring weights, churn band thresholds, intervention cooldown hours, and alert limits via a guided confirm-before-write surface. Every change is audit-logged; changes to governance-critical knobs (weights, cooldowns, alert caps) route through the review queue for a second pair of eyes.
 
 **ClientPulse configuration capabilities (for capability-aware routing):**

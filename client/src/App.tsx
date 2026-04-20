@@ -98,6 +98,7 @@ const OnboardingWizardPage = lazy(() => import('./pages/OnboardingWizardPage'));
 const GhlOAuthInterstitialPage = lazy(() => import('./pages/GhlOAuthInterstitialPage'));
 const OnboardingCelebrationPage = lazy(() => import('./pages/OnboardingCelebrationPage'));
 const ClientPulseDashboardPage = lazy(() => import('./pages/ClientPulseDashboardPage'));
+const ClientPulseDrilldownPage = lazy(() => import('./pages/ClientPulseDrilldownPage'));
 const ReportsListPage = lazy(() => import('./pages/ReportsListPage'));
 const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
 const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
@@ -350,6 +351,7 @@ export default function App() {
 
           {/* ClientPulse routes */}
           <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
+          <Route path="/clientpulse/clients/:subaccountId" element={<ClientPulseDrilldownPage user={user!} />} />
           <Route path="/reports" element={<ReportsListPage user={user!} />} />
           <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
 

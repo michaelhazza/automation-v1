@@ -2,7 +2,27 @@
 
 > **Status:** Draft
 > **Author:** AI-assisted (session 2026-04-14)
-> **Last updated:** 2026-04-14
+> **Last updated:** 2026-04-20 (Session 2 — dual-path UX copy contract + per-block deep-links)
+
+---
+
+## Session 2 addendum — dual-path UX copy contract
+
+Every `config_update_organisation_config` tool result returned by `applyOrganisationConfigUpdate` carries one of three discriminated shapes. The Configuration Assistant page now renders each shape with distinct operator-facing copy via `<ConfigUpdateToolResult>` (`client/src/components/config-assistant/toolResultRenderers/`):
+
+| Service response | Chat copy | Affordances |
+|---|---|---|
+| `{ committed: true, configHistoryVersion, classification: 'non_sensitive' }` | **"Applied."** — "`<path>` is now live and recorded as `config_history` version `<n>`." | Link: "View history →" to `/admin/config-history?entityType=organisation_operational_config&entityId=<orgId>`. |
+| `{ committed: false, actionId, classification: 'sensitive', requiresApproval: true }` | **"Sent to review queue."** — "This is a sensitive change — `<path>` requires operator approval before it takes effect. Your proposal is queued as action `<actionId-slice(0,8)>`." | Link: "Open review queue →" to `/admin/review-queue?focus=<actionId>`. |
+| `{ committed: false, errorCode: ... }` | **"Couldn't apply this change."** — followed by the service's error message + error code. | No action affordance; operators retry or escalate manually. |
+
+Pure parser `parseConfigUpdateToolResult()` is the public contract; unrecognised shapes fall through to a JSON-view fallback with `console.warn` so shape drift surfaces in dev. The renderer is mounted below the message list in `ConfigAssistantPage.tsx`; the `ConfigAssistantPopup` inherits it by embedding the same page surface.
+
+### Per-block deep-links (Session 2 §9)
+
+Every block card on `/clientpulse/settings` has an "Ask the assistant →" button that calls `openConfigAssistant(prompt)` with a consistent path-aware prompt shape built by `buildBlockContextPrompt()` (`client/src/lib/configAssistantPrompts.ts`). Prompt shape is locked across all 10 blocks so the agent can learn the pattern.
+
+---
 
 ---
 

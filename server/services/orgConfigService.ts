@@ -160,6 +160,8 @@ export interface InterventionDefaults {
   defaultGateLevel: 'auto' | 'review';
   maxProposalsPerDayPerSubaccount: number;
   maxProposalsPerDayPerOrg: number;
+  /** Session 2 §5.5 — outcome-weighted recommendation trial floor (default 5). */
+  minTrialsForOutcomeWeight?: number;
 }
 
 export interface OnboardingMilestoneDef {

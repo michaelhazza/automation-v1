@@ -120,6 +120,10 @@ export const interventionDefaultsSchema = z.object({
   defaultGateLevel: z.enum(['auto', 'review']),
   maxProposalsPerDayPerSubaccount: z.number().int().positive(),
   maxProposalsPerDayPerOrg: z.number().int().positive(),
+  // Session 2 §5.5 — outcome-weighted recommendation trial floor. Below this
+  // count, clientPulseInterventionContextService.buildInterventionContext
+  // falls back to priority. Non-sensitive leaf; operators tune freely.
+  minTrialsForOutcomeWeight: z.number().int().positive().optional(),
 });
 
 export const onboardingMilestoneDefSchema = z.object({

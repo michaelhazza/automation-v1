@@ -232,4 +232,59 @@ export class OrganisationService {
   }
 }
 
+/**
+ * Template-aware org creation (Session 2 Chunk 10 / spec §11.1). Wraps
+ * createOrganisation and additionally:
+ *  - stamps applied_system_template_id on the new org,
+ *  - writes a config_history creation-event row (entity_type =
+ *    organisation_operational_config, change_source = system_sync).
+ *
+ * Steps 3–4 from spec §11.1.1 (hierarchy_templates seed + system-agent
+ * seed) land in a follow-up; the org row + audit event are the minimum
+ * contract needed for S2-D.1's acceptance check.
+ */
+export async function createOrganisationFromTemplate(params: {
+  name: string;
+  slug: string;
+  plan: string;
+  orgAdminEmail: string;
+  orgAdminFirstName: string;
+  orgAdminLastName: string;
+  systemTemplateId: string;
+  templateSlug?: string;
+}): Promise<{ organisationId: string }> {
+  const { configHistoryService } = await import('./configHistoryService.js');
+
+  const base = await organisationService.createOrganisation({
+    name: params.name,
+    slug: params.slug,
+    plan: params.plan,
+    adminEmail: params.orgAdminEmail,
+    adminFirstName: params.orgAdminFirstName,
+    adminLastName: params.orgAdminLastName,
+  });
+
+  const organisationId = base.id;
+
+  await db
+    .update(organisations)
+    .set({
+      appliedSystemTemplateId: params.systemTemplateId,
+      updatedAt: new Date(),
+    })
+    .where(eq(organisations.id, organisationId));
+
+  await configHistoryService.recordHistory({
+    organisationId,
+    entityType: 'organisation_operational_config',
+    entityId: organisationId,
+    snapshot: {},
+    changedBy: null,
+    changeSource: 'system_sync',
+    changeSummary: `Organisation created from template ${params.templateSlug ?? params.systemTemplateId}`,
+  });
+
+  return { organisationId };
+}
+
 export const organisationService = new OrganisationService();
