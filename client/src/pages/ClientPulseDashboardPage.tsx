@@ -190,25 +190,31 @@ export default function ClientPulseDashboardPage({ user }: Props) {
           ) : (
             <div className="space-y-3">
               {highRisk.slice(0, 5).map((client) => (
-                <button
-                  key={client.id}
-                  onClick={() => setProposingFor({ id: client.id, name: client.name })}
-                  className="w-full flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition"
-                  aria-label={`Propose intervention for ${client.name}`}
-                >
+                <div key={client.id} className="flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition">
                   <div className={`shrink-0 mt-0.5 w-2 h-2 rounded-full mt-1.5 ${
                     client.score >= 80 ? 'bg-red-500' : client.score >= 60 ? 'bg-amber-500' : 'bg-yellow-400'
                   }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13.5px] font-medium text-slate-800 truncate">{client.name}</p>
+                  <Link
+                    to={`/clientpulse/clients/${client.id}`}
+                    className="flex-1 min-w-0"
+                    aria-label={`Open drilldown for ${client.name}`}
+                  >
+                    <p className="text-[13.5px] font-medium text-slate-800 truncate underline-offset-2 hover:underline">{client.name}</p>
                     {client.issues.length > 0 && (
                       <p className="text-[12px] text-slate-400 truncate">{client.issues.slice(0, 2).join(' · ')}</p>
                     )}
-                  </div>
+                  </Link>
                   <span className={`text-[12px] font-bold shrink-0 ${
                     client.score >= 80 ? 'text-red-500' : client.score >= 60 ? 'text-amber-500' : 'text-yellow-500'
                   }`}>{client.score}</span>
-                </button>
+                  <button
+                    onClick={() => setProposingFor({ id: client.id, name: client.name })}
+                    className="shrink-0 text-[11px] text-indigo-600 hover:underline"
+                    aria-label={`Propose intervention for ${client.name}`}
+                  >
+                    Propose
+                  </button>
+                </div>
               ))}
             </div>
           )}
