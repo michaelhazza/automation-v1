@@ -99,7 +99,7 @@ Override: none. If reviewer flags a directional finding against these defaults, 
 
 ### 1.1 What this spec delivers
 
-Four coordinated changes to turn the existing `llm_requests` ledger from an agent-centric audit trail into a **universal, P&L-grade record of every LLM call the platform makes**, no matter which consumer initiated it:
+Four coordinated changes to turn the existing `llm_requests` ledger from an agent-centric audit trail into a **router-enforced, P&L-grade record of every production LLM call the platform makes**, no matter which consumer initiated it:
 
 1. **Generalise the ledger's attribution model** so non-agent consumers (skill analyzer, workspace-memory compile, belief extraction, future background jobs) plug in with zero new FK columns per consumer. Polymorphic `sourceId` + extended `sourceType` enum + freeform `featureTag` column. See §5.1, §5.2, §6.
 2. **Harden the adapter layer** with an `AbortController`, explicit HTTP 499 detection, and a truncated parse-failure response excerpt. These close the three observability gaps that made the skill-analyzer incident that kicked off this spec impossible to diagnose from our own data. See §8.
@@ -388,6 +388,14 @@ Enforced by the same `CHECK` constraint as the attribution invariant (§5.1).
 ---
 
 ## 6. Data model changes
+
+### 6.0 Ledger contract — passive recorder, not a router primitive
+
+The ledger (`llm_requests`) is a **passive data-recording layer**, conceptually separable from the router. For the scope of this spec, `llmRouter.routeCall()` is the only caller that writes to it — but that is an *implementation* choice, not an architectural one. Future producers (experimental local-agent paths, externally-submitted events per §17, standalone recording scripts) may write directly as long as they satisfy the `llm_requests` contract — idempotency-key shape, CHECK constraint compliance, attribution invariant.
+
+**Load-bearing implication:** do not put routing-policy decisions inside the ledger schema. Margin, model resolution, and retry strategy are all upstream concerns. The ledger records what happened, not what should happen. Per §7.4, the margin mechanism from iter-1 R2 moves to the pricing layer for exactly this reason.
+
+This note is informational. No structural change follows from it today, but it constrains future extensions: adding a second producer must not require a schema change to `llm_requests`, only a new caller satisfying the same contract.
 
 ### 6.1 `llm_requests` schema additions (migration 0180)
 
@@ -701,24 +709,44 @@ See §19.10 for the updated contract.
 
 Update `generateIdempotencyKey()` at [llmRouter.ts:77-97](server/services/llmRouter.ts#L77) per §6.5. Order-sensitive change: the key format is new, so idempotency keys generated before and after this migration won't collide. Pre-production means no in-flight duplicate-detection concerns — but if they did exist, the right answer would be to include a schema version prefix (`v2:...`). We don't; the format just changes.
 
-### 7.4 Margin multiplier for system + analyzer rows
+### 7.4 Margin multiplier — resolved by the pricing layer, consumed by the router
 
-`llmRouter.routeCall()` currently resolves `marginMultiplier` from the pricing service (typically `1.30` for billable work). For `sourceType ∈ {'system', 'analyzer'}` the row is not billable — there is no revenue to attach margin to. The router therefore overrides the resolved multiplier to `1.0` on that path:
+Margin is **pricing policy**, not routing policy. The router must not own the "is this row billable?" decision — that decision is context-dependent (today: system vs billable; future: per-org overrides, per-agent experiments, promotional discounts, partner splits) and belongs in a dedicated resolver so future monetisation changes don't require a router refactor.
+
+**Contract:** extend `pricingService` (at [server/services/pricingService.ts](server/services/pricingService.ts)) with a new method:
 
 ```ts
-const resolved = await pricingService.resolve(provider, model);
-const marginMultiplier =
-  ctx.sourceType === 'system' || ctx.sourceType === 'analyzer'
-    ? 1.0
-    : resolved.marginMultiplier;
+// server/services/pricingService.ts
+export async function resolveMarginMultiplier(ctx: LLMCallContext): Promise<number> {
+  // System-level and analyzer work is internal cost, not a billable line.
+  if (ctx.sourceType === 'system' || ctx.sourceType === 'analyzer') {
+    return 1.0;
+  }
+  // Billable work uses the org-scoped margin.
+  return await getMargin(ctx.organisationId);
+}
 ```
 
-With `marginMultiplier = 1.0`, `costWithMargin === costRaw` for those rows. The P&L page's "no revenue for system" assertion (§11.5) and the `SourceTypeRow.revenueCents: null` rendering in §19.5.2 both depend on this. If this branch is omitted, analyzer rows carry the default `1.30` multiplier and the P&L page reports phantom revenue for analyzer work.
+**Router usage:** replaces the inline branch with a single call:
+
+```ts
+const marginMultiplier = await pricingService.resolveMarginMultiplier(ctx);
+// router proceeds to compute costWithMargin = costRaw * marginMultiplier
+```
+
+**Why this split matters:**
+
+- **Single source of truth for margin policy.** Anyone auditing "what drives margin?" reads one function.
+- **Future extension point.** Per-agent, per-feature, per-deal margin overrides slot into `resolveMarginMultiplier()` without router changes. An A/B pricing experiment is a local edit, not a cross-cutting refactor.
+- **Ledger-level invariant preserved.** `costWithMargin === costRaw` for system/analyzer rows is a direct consequence of the resolver's `1.0` return — the assertion behaves identically to the iter-1 R2 mechanism, just in the right layer.
+- **Respects §6.0.** Margin is a pricing concern; the ledger is a passive recorder. Routing orchestrates; it doesn't price.
+
+**Contract in §19.11** documents `resolveMarginMultiplier()` — add to appendix when contracts are updated.
 
 ### 7.5 What the router does NOT change
 
 - No changes to `resolveLLM()` — pure model-selection logic stays the same for agent callers.
-- No changes to `pricingService` — pricing is provider/model-keyed, not caller-keyed. The margin override in §7.4 is applied at the router level after pricing resolves, not inside `pricingService`.
+- No changes to pricing lookups — the margin *policy* lives in `pricingService.resolveMarginMultiplier()` per §7.4; the router consumes it.
 - No changes to the Anthropic request-id capture path — already working, reused verbatim.
 - No changes to fallback chain logic — provider fallback for analyzer calls works the same as for agent calls.
 
@@ -728,7 +756,7 @@ With `marginMultiplier = 1.0`, `costWithMargin === costRaw` for those rows. The 
 
 **Files:** every adapter registered in `server/services/providers/registry.ts` — [server/services/providers/anthropicAdapter.ts](server/services/providers/anthropicAdapter.ts), [server/services/providers/openaiAdapter.ts](server/services/providers/openaiAdapter.ts), [server/services/providers/geminiAdapter.ts](server/services/providers/geminiAdapter.ts), [server/services/providers/openrouterAdapter.ts](server/services/providers/openrouterAdapter.ts).
 
-All four adapters receive the same three changes (signal threading, 499 mapping, AbortError mapping) so A1's "universal observability" claim holds for every provider the registry exposes. §8.4 tracks adapter-by-adapter parity.
+All four adapters receive the same three changes (signal threading, 499 mapping, AbortError mapping) plus a **runtime caller-assert** (§8.5) so A1's router-enforced observability claim holds for every provider the registry exposes. §8.4 tracks adapter-by-adapter parity.
 
 ### 8.1 `AbortController` plumbing
 
@@ -856,9 +884,43 @@ The pattern is mechanical and identical across all four adapters. If any adapter
 
 All four adapters already produce `ProviderResponse` with the same shape (`content`, `tokensIn`, `tokensOut`, `stopReason`, `providerRequestId`) — no additions needed there.
 
-**Why all four, not just the two analyzer-relevant ones:** A1 in §1.2 makes a universal-observability claim gated by `verify-no-direct-adapter-calls.sh`. If the gate and the adapter changes only cover two providers, a future caller of `geminiAdapter` or `openrouterAdapter` could silently bypass the ledger and A1 would hold false. Universal means universal — §1.1 sets this expectation, so P1 delivers it for every provider currently in the registry.
+**Why all four, not just the two analyzer-relevant ones:** A1 in §1.2 makes a router-enforced observability claim gated by `verify-no-direct-adapter-calls.sh` + the runtime caller-assert (§8.5). If the gate and the adapter changes only cover two providers, a future caller of `geminiAdapter` or `openrouterAdapter` could silently bypass the ledger and A1 would hold false. §1.1 sets this expectation for every registered provider, so P1 delivers it for every provider currently in the registry.
 
-### 8.5 What the adapter layer does NOT change
+### 8.5 Runtime caller-assert — hardening the observability guarantee
+
+The static gate (`verify-no-direct-adapter-calls.sh`) prevents developer-time regressions. A matching **runtime assertion** inside every adapter's `call()` method closes the remaining gap — a caller that bypasses the static gate (imported via dynamic require, generated code, test harness used in production, etc.) fails closed at runtime instead of silently producing dark LLM calls.
+
+**Implementation (identical across all 4 adapters):**
+
+```ts
+// server/services/providers/anthropicAdapter.ts (and the other three)
+const anthropicAdapter: LLMProviderAdapter = {
+  provider: 'anthropic',
+  async call(params: ProviderCallParams): Promise<ProviderResponse> {
+    assertCalledFromRouter();   // NEW — throws if not invoked from llmRouter
+    // ...existing implementation...
+  },
+};
+```
+
+`assertCalledFromRouter()` lives in `server/services/providers/callerAssert.ts` (new) and:
+
+- Inspects the stack trace for a frame from `server/services/llmRouter.ts` or `server/services/providers/*.ts` (for intra-provider fallback).
+- Throws `{ statusCode: 500, code: 'ADAPTER_DIRECT_CALL', message: 'Provider adapters may only be called from llmRouter.routeCall()' }` if neither is present.
+- **Is skipped in test environments** (`process.env.NODE_ENV === 'test'`) because test files legitimately call adapters directly for mocking — the static gate's whitelist already permits `*.test.ts`.
+
+**Why runtime and not just static:**
+
+- Static gate relies on import-path grep — circumventable with dynamic imports or transpiled code.
+- Runtime assert closes that hole with ~20 lines of code.
+- Fails LOUD when violated — an `ADAPTER_DIRECT_CALL` error at runtime is easier to diagnose than a missing ledger row discovered weeks later.
+- Cost is negligible (one stack-trace inspection per LLM call, dwarfed by network latency).
+
+**Gate + assert together:** together they make the router-enforced observability claim in A1 and §1.1 a **hard guarantee** at both build-time (gate) and run-time (assert), not a best-effort convention.
+
+**File inventory addition:** see §14.3 for `server/services/providers/callerAssert.ts`.
+
+### 8.6 What the adapter layer does NOT change
 
 - No changes to the fetch URL, headers, or request body shape — wire format is identical.
 - No changes to cost math — `tokensIn/Out` capture stays as-is.
@@ -1212,7 +1274,11 @@ See §19 Contracts for the full TypeScript types. Column order matches the mocku
 | By Source Type | Source Type \| Orgs \| Requests \| Revenue \| Cost \| Profit \| Margin \| % of Cost | Cost desc |
 | By Provider / Model | Provider \| Model \| Requests \| Revenue \| Cost \| Profit \| Margin \| Avg Latency \| Share of Cost | Cost desc |
 
-**Overhead row treatment (applied wherever an overhead row renders):**
+**Overhead definition — structural, not classification-coupled.** A row is "overhead" **if and only if its `revenueCents` is `null`** (no revenue attribution). `sourceType` is a classification axis used for grouping / filtering / row labels, not the overhead predicate. This split matters because future hybrid workflows may produce `agent_run` rows with no revenue (subsidised work, free tier, promotional runs) or `system` rows with revenue (billed back to a specific org); `revenueCents === null` stays correct in every case. Accounting logic stays clean even as classification evolves.
+
+**Client-side rule:** `PnlMarginPill.tsx` and every row renderer derive the overhead flag from the presence of revenue, not from the source-type string. The pure functions in `systemPnlServicePure.ts` take the same rule.
+
+**Overhead row treatment (applied wherever a row satisfies `revenueCents === null`):**
 - Revenue: em-dash
 - Profit: negative cost, displayed in muted slate-500 with a minus sign
 - Margin: "overhead" badge instead of percentage
@@ -1462,7 +1528,9 @@ Note: pg-boss job registration is application code (wired in at startup via `que
 | `server/services/providers/geminiAdapter.ts` | Same as anthropic |
 | `server/services/providers/openrouterAdapter.ts` | Same as anthropic |
 | `server/services/providers/types.ts` | Extend `ProviderCallParams` with `signal` |
+| `server/services/providers/callerAssert.ts` (new) | Runtime caller assertion — `assertCalledFromRouter()` invoked at the top of every adapter's `call()` method; throws `ADAPTER_DIRECT_CALL` when bypassed outside tests (§8.5) |
 | `server/services/budgetService.ts` | Branch for `sourceType ∈ {'system', 'analyzer'}` (verify existing, extend if absent) |
+| `server/services/pricingService.ts` | Add `resolveMarginMultiplier(context: LLMCallContext): Promise<number>` (§7.4). Existing `getMargin(orgId)` stays; new method wraps it with system/analyzer overrides. Margin policy lives here, not in the router. |
 | `server/services/costAggregateService.ts` | Add `sourceType` + `featureTag` dimension writes in `upsertAggregates()` |
 | `server/services/skillAnalyzerService.ts` | Replace direct `anthropicAdapter.call()` at :2063 with `llmRouter.routeCall()`; thread `AbortController`; sourceType `'analyzer'` + stable `featureTag` (§10.4) |
 | `server/services/systemPnlService.ts` (new) | 8 methods per §11.2 |
@@ -1551,7 +1619,7 @@ Each phase is a single PR. Phases land in order; no phase depends on a column/ta
 
 ### 15.1 P1 — Ledger + router + adapter plumbing
 
-**Goal:** every future LLM call has a safe home to land in. Behavioural changes are scoped to the financial-attribution path for `sourceType ∈ {'system','analyzer'}` rows (see §7.4 — router overrides `marginMultiplier` to `1.0` at insert time so `costWithMargin == costRaw`). Every other attribution path is unchanged.
+**Goal:** every future LLM call has a safe home to land in. Behavioural changes are scoped to the financial-attribution path for `sourceType ∈ {'system','analyzer'}` rows (see §7.4 — `pricingService.resolveMarginMultiplier()` returns `1.0` for those source types so `costWithMargin == costRaw`; the router consumes that verdict). Every other attribution path is unchanged.
 
 **Schema changes introduced:**
 - `0180` — `llm_requests` column additions, CHECK constraints, indexes, nullable `execution_phase`
@@ -1775,6 +1843,8 @@ Per §7 of the spec-authoring checklist, every "deferred" / "later" / "future" r
 - **Real destinations for the System P&L page footer links (`Margin policies`, `Retention`, `Billing rules`).** P4 renders these as decorative `<span>` elements per §11.4.1. Candidates for real destinations: an admin `Margin policies` page (org-by-org override tables), an admin `Retention` page exposing `env.LLM_LEDGER_RETENTION_MONTHS`, and an admin `Billing rules` page (invoice generation, per-client billing periods). Reason: each destination is its own admin page that does not yet exist; wiring real hrefs into P4 would balloon scope from a single admin surface into a multi-page suite.
 - **User-initiated cancel wiring for analyzer LLM calls (`caller_cancel`).** §8.1's abort-reason mechanism supports both `caller_timeout` and `caller_cancel`, but this spec only wires the timeout path in §10.1. Threading a UI/job-level cancel into the analyzer's `AbortController` requires a new cancel-propagation hook (UI → pg-boss job cancel → analyzer worker → `AbortController.abort('caller_cancel')`) that does not exist today. Reason for deferral: the analyzer pg-boss job has no UI-cancel surface today; adding one is its own scope (cancellable long-running jobs) and out of this spec's ledger-generalisation work. The schema-level `abort_reason = 'caller_cancel'` value stays listed in the CHECK constraint so no future migration is needed when the wiring lands.
 - **`cost_aggregates` `provider_model` entity_type + `avg_latency_ms` column.** P4's `getByProviderModel()` reads `llm_requests` live with GROUP BY `(provider, model)` + `AVG(provider_latency_ms)` because `cost_aggregates` has no `provider+model` composite key and no latency column (§11.2). Deferred. Reason: the 30-day window is a bounded indexed scan (sub-500ms) at expected volumes; extending `cost_aggregates` adds schema + aggregation-job work that is only worth paying for if query latency becomes load-bearing. Commit-and-revert posture per `docs/spec-context.md` — ship against live reads, promote to aggregate dimension later if and when latency data says so.
+- **Cost-efficiency dimensions (cost-per-outcome, cost-per-success, cost-per-token-efficiency).** This spec's System P&L page answers "what cost the most?" — it does not answer "what was wasteful?" A $0.20 call can be excellent (high-value outcome) or wasteful (retry loop, truncated parse, low success). Ranking by outcome-normalised cost requires an **outcome-attribution primitive** that doesn't exist yet — no `run_outcomes` table, no agent-success signal on `agent_runs`, no per-call value signal for non-agent callers. Reason for deferral: prerequisite data model doesn't exist, and shimming "success = status=success" onto this spec would conflate HTTP success with business success. The P&L page is the financial dashboard; the efficiency dashboard is a separate spec gated on outcome attribution landing first.
+- **Externally-submitted ledger events for local/hybrid execution paths.** Today every row in `llm_requests` is written server-side by the router. Future agent-execution paths that run locally (e.g. a developer laptop) or client-side (browser extension, edge worker) have no way to produce ledger rows without an authenticated ingestion endpoint. Deferred. Reason: no local/hybrid execution path exists today in this codebase. Forward-compatibility note: the polymorphic `sourceId` + `sourceType` pattern from §5.1 is compatible with externally-submitted events without a schema change — a future spec adds a new `sourceType` value (e.g. `'local_agent'` or `'edge'`), a new route like `POST /api/internal/llm-events` with signed-token auth, and a passive writer that satisfies the same attribution + idempotency-key invariants. The ledger schema itself is already future-proof per §6.0.
 
 ---
 
@@ -1922,7 +1992,7 @@ Every data shape crossing a service boundary, per §3 of the spec-authoring chec
 
 Note: `status = 'aborted_by_caller'` here because our side fired `AbortController.abort()`. A `client_disconnected` row would result from a mid-body network RST where we did not initiate the abort — see §6.4 for the full mapping.
 
-Note: analyzer rows use `marginMultiplier: "1.0000"` because system-level work doesn't add margin — cost equals revenue for these (which is to say, there is no revenue; the row just records cost). The router enforces this override at insert time per §7.4.
+Note: analyzer rows carry `marginMultiplier: "1.0000"` because system-level work doesn't add margin — `costWithMargin === costRaw` for these rows (which is to say, there is no revenue; the row just records cost). The value is returned by `pricingService.resolveMarginMultiplier(ctx)` per §7.4; the router consumes it at insert time.
 
 **Producer:** `llmRouter.routeCall()` is the only writer.
 **Consumer:** `systemPnlService`, `llmUsageService`, `costAggregateService`.
@@ -2034,15 +2104,17 @@ Renders 5 rows on the `By Source Type` tab — one per distinct `sourceType` val
   sourceType: 'agent_run' | 'process_execution' | 'iee' | 'system' | 'analyzer';
   label: string;                   // display label (e.g. "Agent Run", "System Background")
   description: string;             // one-line description shown under the label
-  orgsCount: number;               // distinct organisation count contributing to this row (for billable rows); 0 for overhead rows
+  orgsCount: number;               // distinct organisation count contributing to this row (for billable rows); 0 when the row has no revenue
   requests: number;
-  revenueCents: number | null;     // null for sourceType ∈ {'system','analyzer'} (no revenue attribution)
+  revenueCents: number | null;     // null iff no revenue attribution for this row (overhead predicate)
   costCents: number;
-  profitCents: number;             // = revenueCents - costCents for billable rows; = -costCents for overhead rows
-  marginPct: number | null;        // null for overhead rows — rendered as "overhead" badge
+  profitCents: number;             // = revenueCents - costCents when revenueCents is non-null; = -costCents when null
+  marginPct: number | null;        // null iff revenueCents is null — rendered as "overhead" badge
   pctOfCost: number;               // percentage of this period's total platform cost
 }
 ```
+
+**Overhead rule.** A row is an "overhead row" if and only if `revenueCents === null` (per §11.5). The invariant is intentional: it holds for all current non-billable sourceTypes (`system`, `analyzer`) AND stays correct if future hybrid workflows produce a subsidised `agent_run` with null revenue or a billed-back `system` call with non-null revenue. Classification (`sourceType`) and accounting (revenue-presence) are kept independent here per feedback from the structural-fragility review.
 
 **Example — `system` row (platform overhead that is not analyzer work):**
 ```ts
@@ -2277,6 +2349,43 @@ async function checkAndReserve(
 **Consumer:** `llmRouter.routeCall()` — the only caller of the budget service, branches on whether the returned id is null vs string for release semantics.
 
 **Back-compat note:** the current signature returns `string` unconditionally (throws `BudgetExceededError` for failure). Widening to `string | null` is a non-breaking change for all existing typed callers because none of them narrow the return beyond `string`; `null` is only returned on a code path that does not exist today (system/analyzer).
+
+### 19.11 `pricingService.resolveMarginMultiplier()`
+
+**Type:** TypeScript, declared in `server/services/pricingService.ts`.
+
+**Signature:**
+
+```ts
+async function resolveMarginMultiplier(ctx: LLMCallContext): Promise<number>
+```
+
+**Semantics:**
+
+- Returns `1.0` when `ctx.sourceType ∈ {'system', 'analyzer'}` — non-billable paths.
+- Returns the org-scoped margin (today: typically `1.30`) for every other `sourceType` — billable paths.
+- Future extensions (per-agent overrides, promotional pricing, partner revenue splits) add branches here without changing any caller.
+
+**Example instances:**
+
+```ts
+// Billable: agent run for Summit Digital (1.40× tier)
+resolveMarginMultiplier({ sourceType: 'agent_run', organisationId: 'summit-org-uuid', ... })
+// → 1.40
+
+// Non-billable: skill analyzer classify
+resolveMarginMultiplier({ sourceType: 'analyzer', organisationId: '...', ... })
+// → 1.0
+
+// Non-billable: workspace memory compile
+resolveMarginMultiplier({ sourceType: 'system', organisationId: '...', ... })
+// → 1.0
+```
+
+**Producer:** `pricingService.resolveMarginMultiplier()`.
+**Consumer:** `llmRouter.routeCall()` — the only caller today. Future consumers (e.g. a reporting job that retrospectively recomputes margin) can reuse the same primitive.
+
+**Why this contract matters:** locking margin policy into a named, typed function makes future monetisation changes (per-agent, per-deal, promotional) a local edit with a well-defined surface rather than a cross-cutting refactor of the router.
 
 ---
 
