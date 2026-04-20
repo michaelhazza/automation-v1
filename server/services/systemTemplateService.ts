@@ -772,7 +772,7 @@ export const systemTemplateService = {
       await db
         .update(hierarchyTemplates)
         .set({
-          operationalConfig: operationalDefaults ?? null,
+          operationalConfigSeed: operationalDefaults ?? null,
           name: template.name,
           description: template.description,
           updatedAt: new Date(),
@@ -787,7 +787,7 @@ export const systemTemplateService = {
           name: template.name,
           description: template.description,
           systemTemplateId: template.id,
-          operationalConfig: operationalDefaults ?? null,
+          operationalConfigSeed: operationalDefaults ?? null,
           status: 'published' as const,
         } as typeof hierarchyTemplates.$inferInsert)
         .returning();

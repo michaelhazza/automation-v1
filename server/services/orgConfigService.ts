@@ -1,20 +1,23 @@
-import { eq, and, isNull, isNotNull } from 'drizzle-orm';
-// isNull used for deletedAt filter on hierarchyTemplates
+import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
-  hierarchyTemplates,
+  organisations,
   systemHierarchyTemplates,
-  orgAgentConfigs,
 } from '../db/schema/index.js';
+import { resolveEffectiveOperationalConfig } from './orgOperationalConfigMigrationPure.js';
 import crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
-// Org Config Service — loads and merges operational config from templates
+// Org Config Service — loads and merges operational config for an org.
 //
-// Chain: orgAgentConfigs.appliedTemplateId → hierarchyTemplates →
-//        hierarchyTemplates.operationalConfigSeed (legacy override source —
-//        retargeted to organisations.operational_config_override in Chunk A.2)
-//        merged with systemHierarchyTemplates.operationalDefaults.
+// Session 1 / contract (h): the chain is
+//   organisations.applied_system_template_id → system_hierarchy_templates
+//     .operational_defaults
+//   deep-merged with
+//   organisations.operational_config_override
+// The pre-Session-1 `hierarchy_templates.operational_config` source was
+// retired — `hierarchy_templates.operational_config_seed` is a one-time
+// informational snapshot, not a runtime source.
 // ---------------------------------------------------------------------------
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -303,39 +306,93 @@ const DEFAULT_INTERVENTION_DEFAULTS: InterventionDefaults = {
 
 export const orgConfigService = {
   /**
-   * Load merged operational config: template defaults + org overrides.
-   * Returns null if no template is applied to the org.
+   * Load the merged operational config for an org.
+   *
+   * Session 1 / contract (h): effective config = deep-merge of the adopted
+   * system template's `operational_defaults` with the org's
+   * `operational_config_override`. Returns null iff the org row is missing
+   * entirely; orgs with no `appliedSystemTemplateId` (legacy pre-Session-1)
+   * still return a (possibly-empty) OperationalConfig derived from whatever
+   * explicit override the org has written, per spec §4.5.
    */
   async getOperationalConfig(orgId: string): Promise<OperationalConfig | null> {
-    // Find the org's applied hierarchy template
-    const [orgTemplate] = await db
-      .select()
-      .from(hierarchyTemplates)
-      .where(and(
-        eq(hierarchyTemplates.organisationId, orgId),
-        isNotNull(hierarchyTemplates.systemTemplateId),
-        isNull(hierarchyTemplates.deletedAt),
-      ))
+    const [org] = await db
+      .select({
+        override: organisations.operationalConfigOverride,
+        appliedTemplateId: organisations.appliedSystemTemplateId,
+      })
+      .from(organisations)
+      .where(eq(organisations.id, orgId))
       .limit(1);
 
-    if (!orgTemplate) return null;
+    if (!org) return null;
 
-    // Load the system template defaults
-    let systemDefaults: Record<string, unknown> = {};
-    if (orgTemplate.systemTemplateId) {
-      const [sysTemplate] = await db
-        .select()
+    let systemDefaults: Record<string, unknown> | null = null;
+    if (org.appliedTemplateId) {
+      const [sys] = await db
+        .select({ defaults: systemHierarchyTemplates.operationalDefaults })
         .from(systemHierarchyTemplates)
-        .where(eq(systemHierarchyTemplates.id, orgTemplate.systemTemplateId));
-
-      if (sysTemplate?.operationalDefaults) {
-        systemDefaults = sysTemplate.operationalDefaults as Record<string, unknown>;
-      }
+        .where(eq(systemHierarchyTemplates.id, org.appliedTemplateId))
+        .limit(1);
+      systemDefaults = (sys?.defaults as Record<string, unknown> | undefined) ?? null;
     }
 
-    // Deep merge: org overrides take precedence, nested objects merged (not replaced)
-    const orgOverrides = (orgTemplate.operationalConfigSeed as Record<string, unknown>) ?? {};
-    return deepMerge(systemDefaults, orgOverrides) as OperationalConfig;
+    const overrides = (org.override as Record<string, unknown> | null) ?? null;
+    return resolveEffectiveOperationalConfig(systemDefaults, overrides) as OperationalConfig;
+  },
+
+  /**
+   * Session 1 — new read surface for the Settings page + legacy callers.
+   * Returns the raw override row + system defaults + adopted template
+   * metadata so the Settings UI can compute the `hasExplicitOverride` +
+   * `differsFromTemplate` states locally per spec §4.5.
+   */
+  async getEffectiveConfigWithProvenance(orgId: string): Promise<
+    | {
+        effective: Record<string, unknown>;
+        overrides: Record<string, unknown> | null;
+        systemDefaults: Record<string, unknown> | null;
+        appliedSystemTemplateId: string | null;
+        appliedSystemTemplateName: string | null;
+      }
+    | null
+  > {
+    const [org] = await db
+      .select({
+        override: organisations.operationalConfigOverride,
+        appliedTemplateId: organisations.appliedSystemTemplateId,
+      })
+      .from(organisations)
+      .where(eq(organisations.id, orgId))
+      .limit(1);
+
+    if (!org) return null;
+
+    let systemDefaults: Record<string, unknown> | null = null;
+    let appliedSystemTemplateName: string | null = null;
+    if (org.appliedTemplateId) {
+      const [sys] = await db
+        .select({
+          defaults: systemHierarchyTemplates.operationalDefaults,
+          name: systemHierarchyTemplates.name,
+        })
+        .from(systemHierarchyTemplates)
+        .where(eq(systemHierarchyTemplates.id, org.appliedTemplateId))
+        .limit(1);
+      systemDefaults = (sys?.defaults as Record<string, unknown> | undefined) ?? null;
+      appliedSystemTemplateName = sys?.name ?? null;
+    }
+
+    const overrides = (org.override as Record<string, unknown> | null) ?? null;
+    const effective = resolveEffectiveOperationalConfig(systemDefaults, overrides);
+
+    return {
+      effective,
+      overrides,
+      systemDefaults,
+      appliedSystemTemplateId: org.appliedTemplateId ?? null,
+      appliedSystemTemplateName,
+    };
   },
 
   async getHealthScoreFactors(orgId: string): Promise<HealthScoreFactor[]> {
@@ -429,22 +486,3 @@ export const orgConfigService = {
     return config?.interventionTemplates ?? config?.interventionTypes ?? [];
   },
 };
-
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    const sourceVal = source[key];
-    const targetVal = result[key];
-    if (
-      sourceVal && typeof sourceVal === 'object' && !Array.isArray(sourceVal) &&
-      targetVal && typeof targetVal === 'object' && !Array.isArray(targetVal)
-    ) {
-      result[key] = deepMerge(targetVal as Record<string, unknown>, sourceVal as Record<string, unknown>);
-    } else {
-      result[key] = sourceVal;
-    }
-  }
-  return result;
-}

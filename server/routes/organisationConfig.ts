@@ -11,19 +11,15 @@
  */
 
 import { Router } from 'express';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { organisations } from '../db/schema/organisations.js';
-import { systemHierarchyTemplates } from '../db/schema/systemHierarchyTemplates.js';
 import {
   applyOrganisationConfigUpdate,
   resolvePortfolioHealthAgentId,
 } from '../services/configUpdateOrganisationService.js';
-import { resolveEffectiveOperationalConfig } from '../services/orgOperationalConfigMigrationPure.js';
+import { orgConfigService } from '../services/orgConfigService.js';
 
 const router = Router();
 
@@ -74,44 +70,11 @@ router.get(
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
 
-    const [org] = await db
-      .select({
-        override: organisations.operationalConfigOverride,
-        appliedTemplateId: organisations.appliedSystemTemplateId,
-      })
-      .from(organisations)
-      .where(eq(organisations.id, orgId))
-      .limit(1);
-
-    if (!org) {
+    const result = await orgConfigService.getEffectiveConfigWithProvenance(orgId);
+    if (!result) {
       throw { statusCode: 404, message: 'Organisation not found', errorCode: 'ORG_NOT_FOUND' };
     }
-
-    let systemDefaults: Record<string, unknown> | null = null;
-    let appliedSystemTemplateName: string | null = null;
-    if (org.appliedTemplateId) {
-      const [sys] = await db
-        .select({
-          defaults: systemHierarchyTemplates.operationalDefaults,
-          name: systemHierarchyTemplates.name,
-        })
-        .from(systemHierarchyTemplates)
-        .where(eq(systemHierarchyTemplates.id, org.appliedTemplateId))
-        .limit(1);
-      systemDefaults = (sys?.defaults as Record<string, unknown> | undefined) ?? null;
-      appliedSystemTemplateName = sys?.name ?? null;
-    }
-
-    const overrides = (org.override as Record<string, unknown> | null) ?? null;
-    const effective = resolveEffectiveOperationalConfig(systemDefaults, overrides);
-
-    res.json({
-      effective,
-      overrides,
-      systemDefaults,
-      appliedSystemTemplateId: org.appliedTemplateId ?? null,
-      appliedSystemTemplateName,
-    });
+    res.json(result);
   }),
 );
 
