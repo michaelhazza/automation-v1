@@ -73,6 +73,60 @@ Per-phase ship gates (from the user's resume instructions):
 - `tasks/todo.md` is a closed 2026-04-01 audit list — do not touch. Phase tracking lives here.
 - Spec is `spec-reviewer`-clean (5/5 lifetime cap reached). Architect consumes as ground truth — do not re-invoke `spec-reviewer`.
 
+## Session 1 — platform foundation + settings + onboarding wizard (2026-04-20)
+
+Branch: `claude/clientpulse-session-1-foundation`. Spec: `tasks/builds/clientpulse/session-1-foundation-spec.md`. Plan: `tasks/builds/clientpulse/session-1-plan.md`.
+
+**Contract surface advanced (spec §1.3):**
+- **(h)** `organisations.operational_config_override` is now the single org-owned writable source of truth. Migrations 0180 + 0182 + schema updates + read chain in place.
+- **(i)** Platform primitives renamed: `clientpulse.operator_alert → notify_operator`; `config_update_hierarchy_template → config_update_organisation_config`; pseudo-integration `clientpulse-configuration → organisation-configuration`; capability taxonomy renames in `docs/integration-reference.md`.
+- **(j)** Settings page + Configuration Assistant popup are equal surfaces — both write via `configUpdateOrganisationService.applyOrganisationConfigUpdate` → same `config_history` audit trail → same sensitive-path split.
+- **(k)** Popup session lifecycle — 15-minute resume window wired via `updatedAfter` query param on `GET /api/agents/:agentId/conversations`; popup close does not kill the run.
+- **(l)** `resolveActionSlug` defensive normalisation added to the action registry; log-once warning per alias per process.
+- **(n)** Module-composable `sensitiveConfigPathsRegistry` replaces the hardcoded `SENSITIVE_CONFIG_PATHS`; ClientPulse registers 14 paths at boot.
+- **(t)** Config-history union (`organisation_config_all`) ships so operators see a single contiguous timeline across `clientpulse_operational_config` (legacy rows) + `organisation_operational_config` (new target).
+
+**Chunks landed (one commit each on the branch):**
+
+| # | Chunk | Commit summary |
+|---|-------|----------------|
+| 1 | Docs sync | Plan + spec fixes (5 regression-check drifts). |
+| 2 | **A.1** — data model + core renames | 3 forward migrations + rollback pairs; slug rewrite; alias resolver + 2 new pure tests; 83/83 affected pure tests green. |
+| 3 | **A.2** — config service refactor + sensitive-paths registry | Service rename `configUpdateHierarchyTemplate → configUpdateOrganisation{Service,ConfigPure}`; writer retargets `organisations.operational_config_override`; registry + ClientPulse module registration; `sensitiveConfigPathsRegistryPure.test.ts` new (8 cases). |
+| 4 | **A.3** — generic `/api/organisation/config` + UI renames | New route (POST apply + GET read); legacy `/api/clientpulse/config/apply` retired; `/system/config-templates → /system/organisation-templates`; capability taxonomy renames in 4 doc files. |
+| 5 | **A.4** — Configuration Assistant popup | `ConfigAssistantPopup` + `useConfigAssistantPopup` hook + context; legacy `ConfigAssistantChatPopup` deleted; nav trigger; dashboard rewire; `listConversations` params (`updatedAfter`/`order`/`limit`). |
+| 6 | **Chunk 5** — Settings page + Subaccount Blueprints rename | `/clientpulse/settings` page with 10 blocks, JSON editor + schema validation via server (typed editors deferred to Session 2); shared primitives (`ProvenanceStrip`, `OverrideBadge`, `ManuallySetIndicator`, `ResetToDefaultButton`, `differsFromTemplate`); `AdminAgentTemplatesPage → SubaccountBlueprintsPage`. |
+| 7 | **Chunk 6** — Onboarding wizard redirect + completion | `needsOnboarding` on `GET /api/onboarding/status` (derived from `organisations.onboarding_completed_at IS NULL`); `POST /api/onboarding/complete`; `useOnboardingRedirect` hook in `ProtectedLayout`. |
+
+**Ship-gate matrix:**
+
+| Gate | Status | Verification |
+|------|--------|--------------|
+| S1-A1 (data-model separation) | passed | `orgOperationalConfigMigrationPure.test.ts` (6/6), migration 0180 rollback-safe |
+| S1-A2 (slug rename) | passed | `actionSlugAliasesPure.test.ts` (6/6) — every alias resolves to registered slug |
+| S1-A3 (sensitive-paths registry) | passed | `sensitiveConfigPathsRegistryPure.test.ts` (8/8) |
+| S1-A4 (generic route) | passed | Route handler + zod schema + service pass-through in place; integration test deferred to Session 2 per scope fence |
+| S1-A5 (popup lifecycle) | partial | Popup + hook + deep-link shipped; manual browser test deferred to Session 2 verification doc |
+| S1-5.1 (Settings page) | passed | 10-block page + save flow + provenance strip + reset-to-default |
+| S1-5.2 (blueprint editor refactor) | passed | Page renamed + nav label updated |
+| S1-7.1 (new terminology) | passed | "Config Templates" → "Organisation Templates"; "Team Templates" → "Subaccount Blueprints" across client UI + docs |
+| S1-7.2 (OAuth soft-gate + completion) | passed | Wizard marks `onboarding_completed_at`; redirect hook skips wizard on subsequent sign-ins |
+
+**Sanity gate (final run):**
+- Server typecheck: 43 = baseline (zero new errors).
+- Client typecheck: 11 = baseline.
+- 151 pure tests across 11 files: all green.
+- `verify-integration-reference.mjs`: 0 blocking errors (26 pre-existing MCP-preset warnings unchanged).
+
+**Deferred to Session 2 (tracked, not silent):**
+- Full ConfigAssistantPanel extraction (Session 1 ships iframe-wrapped popup for MVP).
+- Typed form editors for each of the 10 Settings blocks (Session 1 ships schema-validated JSON editor per block).
+- Create Organisation modal rebuild (template picker + tier toggle + live preview per spec §7.1) + `organisationService.createFromTemplate` method.
+- Integration test `organisationConfig.test.ts` per spec §8.2 (S1-A4 automated).
+- Manual verification doc `session-1-verification.md` per spec §8.4.
+
+---
+
 ## Blocker (active — escalated to user 2026-04-18)
 
 **Feature-coordinator cannot invoke sibling subagents from within its own process.**
