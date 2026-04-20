@@ -17,11 +17,16 @@ import { callWithTimeout, ProviderTimeoutError } from '../llmRouterTimeoutPure.j
 //   4. Happy-path resolution never aborts the signal
 // ---------------------------------------------------------------------------
 
+// TS narrows a `let x: T | null = null` back to `null` after an async callback
+// assigns it, so we capture the inner signal in a holder object — the field
+// type survives through the callback boundary.
+interface SignalHolder { signal: AbortSignal | null }
+
 test('callWithTimeout — timer fires before promise resolves → aborts inner signal + throws ProviderTimeoutError', async () => {
-  let innerSignal: AbortSignal | null = null;
+  const holder: SignalHolder = { signal: null };
 
   const result = callWithTimeout('test/model', 20, undefined, async (signal) => {
-    innerSignal = signal;
+    holder.signal = signal;
     // Simulate a provider call that would take longer than the timeout.
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(resolve, 200);
@@ -43,17 +48,17 @@ test('callWithTimeout — timer fires before promise resolves → aborts inner s
   });
 
   // The inner signal must have been aborted — this is the whole point.
-  assert.ok(innerSignal);
-  assert.equal(innerSignal!.aborted, true);
-  assert.ok(innerSignal!.reason instanceof ProviderTimeoutError);
+  assert.ok(holder.signal);
+  assert.equal(holder.signal.aborted, true);
+  assert.ok(holder.signal.reason instanceof ProviderTimeoutError);
 });
 
 test('callWithTimeout — caller signal abort propagates to inner signal', async () => {
   const callerController = new AbortController();
-  let innerSignal: AbortSignal | null = null;
+  const holder: SignalHolder = { signal: null };
 
   const pending = callWithTimeout('test/model', 10_000, callerController.signal, async (signal) => {
-    innerSignal = signal;
+    holder.signal = signal;
     await new Promise<void>((resolve, reject) => {
       signal.addEventListener('abort', () => reject(signal.reason ?? new Error('aborted')));
       setTimeout(resolve, 5_000);
@@ -66,22 +71,22 @@ test('callWithTimeout — caller signal abort propagates to inner signal', async
   callerController.abort(new Error('caller cancelled'));
 
   await assert.rejects(pending);
-  assert.ok(innerSignal);
-  assert.equal(innerSignal!.aborted, true);
+  assert.ok(holder.signal);
+  assert.equal(holder.signal.aborted, true);
 });
 
 test('callWithTimeout — promise resolves before timer → returns value, no abort', async () => {
-  let innerSignal: AbortSignal | null = null;
+  const holder: SignalHolder = { signal: null };
 
   const value = await callWithTimeout('test/model', 500, undefined, async (signal) => {
-    innerSignal = signal;
+    holder.signal = signal;
     await new Promise((r) => setTimeout(r, 5));
     return 'ok';
   });
 
   assert.equal(value, 'ok');
-  assert.ok(innerSignal);
-  assert.equal(innerSignal!.aborted, false);
+  assert.ok(holder.signal);
+  assert.equal(holder.signal.aborted, false);
 });
 
 test('callWithTimeout — inner throw (non-timeout) propagates the original error', async () => {

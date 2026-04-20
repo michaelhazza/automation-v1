@@ -12,7 +12,8 @@ import { budgetService, BudgetExceededError, RateLimitError } from './budgetServ
 import { resolveLLM } from './llmResolver.js';
 import type { ProviderMessage, ProviderTool, ProviderResponse } from './providers/types.js';
 import { env } from '../lib/env.js';
-import { isParseFailureError, ParseFailureError } from '../lib/parseFailureError.js';
+import { isParseFailureError } from '../lib/parseFailureError.js';
+import { classifyRouterError } from './llmRouterErrorMappingPure.js';
 import {
   PROVIDER_CALL_TIMEOUT_MS,
   PROVIDER_MAX_RETRIES,
@@ -160,9 +161,12 @@ function getBillingPeriods(): { billingMonth: string; billingDay: string } {
 // ---------------------------------------------------------------------------
 // Provider timeout guard — pure implementation lives in llmRouterTimeoutPure
 // so tests can exercise it without booting the env-dependent router module.
+// Imported AND re-exported: the router uses it locally on every call and
+// callers of routeCall may need the typed error for their own classification.
 // ---------------------------------------------------------------------------
 
-export { ProviderTimeoutError, callWithTimeout } from './llmRouterTimeoutPure.js';
+import { ProviderTimeoutError, callWithTimeout } from './llmRouterTimeoutPure.js';
+export { ProviderTimeoutError, callWithTimeout };
 
 // ---------------------------------------------------------------------------
 // Provider cooldown map — skip recently-failed providers
@@ -599,10 +603,14 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         lastError = err;
         fallbackAttempts.push({ provider, model: mappedModel, error: (err as Error).message });
 
-        // Non-retryable errors propagate immediately (tolerates null reservation)
+        // Non-retryable errors break out to the ledger-write-on-failure path
+        // below so every terminal attempt produces a ledger row — without
+        // this, PROVIDER_TIMEOUT / PROVIDER_NOT_CONFIGURED / auth errors
+        // would skip the ledger entirely and become invisible to the P&L
+        // surface. The shared failure path at the bottom of this function
+        // calls releaseReservation() + writes the row + rethrows lastError.
         if (isNonRetryableError(err)) {
-          await budgetService.releaseReservation(reservationId);
-          throw err;
+          break providerLoop;
         }
 
         createEvent('llm.router.fallback', {
@@ -630,34 +638,18 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   }
 
   if (!providerResponse) {
-    const e = lastError as {
-      code?: string;
-      message?: string;
-      abortReason?: 'caller_timeout' | 'caller_cancel' | null;
-      rawExcerpt?: string;
-    };
+    const e = lastError as { message?: string } | null | undefined;
 
-    // Rev §6 — status + abort_reason + parse_failure excerpt mapping
-    let abortReasonValue: 'caller_timeout' | 'caller_cancel' | null = null;
-    let parseFailureExcerpt: string | null = null;
+    // Rev §6 / April 2026 timeout hardening — single source of truth for
+    // error → ledger-status classification lives in llmRouterErrorMappingPure.
+    // Every failure mode (parse_failure, client_disconnected, aborted_by_caller,
+    // provider_unavailable, provider_not_configured, timeout, generic error)
+    // produces a ledger row here — no skip paths.
+    const classification   = classifyRouterError(lastError);
+    callStatus             = classification.status;
+    const abortReasonValue = classification.abortReason;
+    const parseFailureExcerpt = classification.parseFailureExcerpt;
 
-    if (isParseFailureError(lastError)) {
-      callStatus = 'parse_failure';
-      parseFailureExcerpt = (lastError as ParseFailureError).rawExcerpt;
-    } else if (e?.code === 'CLIENT_DISCONNECTED') {
-      if (e.abortReason) {
-        callStatus = 'aborted_by_caller';
-        abortReasonValue = e.abortReason;
-      } else {
-        callStatus = 'client_disconnected';
-      }
-    } else if (e?.code === 'PROVIDER_UNAVAILABLE') {
-      callStatus = 'provider_unavailable';
-    } else if (e?.code === 'PROVIDER_NOT_CONFIGURED') {
-      callStatus = 'provider_not_configured';
-    } else {
-      callStatus = 'error';
-    }
     callError = (e?.message ?? 'All providers failed') + (lastError instanceof Error && lastError.message.includes('timed out') ? ' (timeout)' : '');
 
     // Release reservation — no cost incurred (tolerates null for system/analyzer)
