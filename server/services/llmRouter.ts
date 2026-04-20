@@ -81,7 +81,10 @@ const LLMCallContextSchema = z.object({
   systemCallerPolicy: z.enum(SYSTEM_CALLER_POLICIES).optional(),
 });
 
-export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
+// Use z.input not z.infer so Zod's `.default()` fields (routingMode) stay
+// optional for callers. `.parse()` fills the defaults in, so internal code
+// can still rely on them being present on the parsed `ctx` object.
+export type LLMCallContext = z.input<typeof LLMCallContextSchema>;
 
 export interface RouterCallParams {
   messages:     ProviderMessage[];

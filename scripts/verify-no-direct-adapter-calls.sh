@@ -37,13 +37,11 @@ cd "$ROOT_DIR"
 # server/services/providers/registry.ts. Keep in sync when adding a new provider.
 PROVIDER_NAMES=(anthropic openai gemini openrouter)
 
-# Temporary whitelist for P2 bootstrap. P3 removes every entry here as the
-# analyzer migration lands. An empty array at that point means the gate is
-# fully enforcing.
-WHITELIST_FILES=(
-  "server/jobs/skillAnalyzerJob.ts"
-  "server/services/skillAnalyzerService.ts"
-)
+# Whitelist for adapter callers that legitimately bypass the router.
+# Empty as of P3 — the analyzer subsystem migrated to llmRouter.routeCall.
+# A new entry must be paired with prose justification in the LLM observability
+# spec §17 "Deferred items" and a follow-up task to migrate.
+WHITELIST_FILES=()
 
 # Build the regex alternation dynamically so new providers only need an
 # entry in PROVIDER_NAMES.

@@ -4,8 +4,9 @@ import { db } from '../db/index.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
-import { withBackoff } from '../lib/withBackoff.js';
-import anthropicAdapter from './providers/anthropicAdapter.js';
+import { routeCall } from './llmRouter.js';
+import { ParseFailureError } from '../lib/parseFailureError.js';
+import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
 import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
@@ -2040,6 +2041,7 @@ async function classifySingleCandidate(
   matchedLib: LibrarySkillSummary,
   similarityScore: number,
   jobId: string,
+  organisationId: string,
 ): Promise<{
   result: ClassificationOutcome;
   classificationFailed: boolean;
@@ -2055,43 +2057,39 @@ async function classifySingleCandidate(
   let parsed: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
   let apiError: unknown = undefined;
 
-  const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
-
   try {
-    parsed = await withBackoff(
-      async () => {
-        const response = await anthropicAdapter.call({
-          model: 'claude-sonnet-4-6',
-          system,
-          messages: [{ role: 'user', content: userMessage }],
-          maxTokens: 8192,
-          temperature: 0.1,
-        });
-        const result = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-        if (result === null) throw PARSE_FAILURE;
-        return result;
+    // Route through llmRouter so this service-layer classify call shows up
+    // in llm_requests alongside the job-layer sites. The router handles
+    // retries on provider errors + parse failures (via postProcess) via
+    // its fallback loop; the outer withBackoff from before is retired.
+    const response = await routeCall({
+      system,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 8192,
+      temperature: 0.1,
+      context: {
+        organisationId,
+        sourceType:         'analyzer',
+        sourceId:           jobId,
+        featureTag:         'skill-analyzer-service-classify',
+        taskType:           'general',
+        systemCallerPolicy: 'bypass_routing',
+        provider:           'anthropic',
+        model:              'claude-sonnet-4-6',
       },
-      {
-        label: 'skill-classify-retry',
-        maxAttempts: 3,
-        correlationId: jobId,
-        runId: jobId,
-        isRetryable: (err: unknown) => {
-          if (err === PARSE_FAILURE) return true;
-          const e = err as { statusCode?: number; code?: string };
-          if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-          return (
-            e?.statusCode === 429 ||
-            e?.statusCode === 503 ||
-            e?.statusCode === 529 ||
-            e?.code === 'PROVIDER_UNAVAILABLE'
-          );
-        },
+      postProcess: (content: string) => {
+        const res = skillAnalyzerServicePure.parseClassificationResponseWithMerge(content);
+        if (res === null) {
+          throw new ParseFailureError({ rawExcerpt: truncateUtf8Safe(content, 2048) });
+        }
       },
-    );
+    });
+    parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
   } catch (err) {
     parsed = null;
-    apiError = err === PARSE_FAILURE ? undefined : err;
+    // Parse failures are not "API errors" for the failure-reason derivation;
+    // the router has already recorded the ledger row with status='parse_failure'.
+    apiError = (err as { code?: string })?.code === 'CLASSIFICATION_PARSE_FAILURE' ? undefined : err;
   }
 
   const classificationFailed = parsed === null;
@@ -2161,7 +2159,7 @@ export async function retryClassification(
   };
 
   const { result: classification, classificationFailed, classificationFailureReason } =
-    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId);
+    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId, organisationId);
 
   const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
