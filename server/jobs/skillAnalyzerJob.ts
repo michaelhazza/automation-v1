@@ -726,13 +726,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           });
           await markSkillInFlight(jobId, candidate.slug, startMs);
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
-              SKILL_CLASSIFY_TIMEOUT_MS,
-            )
-          );
-
           // Phase 3: use the merge-aware prompt + parser. The system prompt
           // is a superset of the base classifier — it adds instructions for
           // producing a proposedMerge object on PARTIAL_OVERLAP / IMPROVEMENT.
@@ -750,59 +743,90 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           // retryable so the model gets another attempt.
           const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
 
-          try {
-            classificationResult = await Promise.race([
-              withBackoff(
-                async () => {
-                  const response = await anthropicAdapter.call({
-                    model: 'claude-sonnet-4-6',
-                    system,
-                    messages: [{ role: 'user', content: userMessage }],
-                    // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
-                    // with long instructions can never be truncated.
-                    maxTokens: 8192,
-                    temperature: 0.1,
-                  });
-                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-                  if (parsed === null) {
-                    logger.warn('skill_classify_parse_failure', {
-                      jobId,
-                      slug: candidate.slug,
-                      rawLength: response.content.length,
-                      // Full raw response so we can see exactly what the LLM produced
-                      raw: response.content,
+          // One-shot retry on outer timeout. The timeout is Promise.race'd
+          // against withBackoff, so it never enters withBackoff's isRetryable
+          // — the retry loop has to live out here. A stuck generation often
+          // finishes fast on a second attempt; doubling the worst-case wall
+          // clock is worth trading for an LLM merge over a rule-based one.
+          const MAX_CLASSIFY_TIMEOUT_RETRIES = 1;
+          let timeoutRetries = 0;
+
+          while (true) {
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
+                SKILL_CLASSIFY_TIMEOUT_MS,
+              )
+            );
+
+            try {
+              classificationResult = await Promise.race([
+                withBackoff(
+                  async () => {
+                    const response = await anthropicAdapter.call({
+                      model: 'claude-sonnet-4-6',
+                      system,
+                      messages: [{ role: 'user', content: userMessage }],
+                      // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                      // with long instructions can never be truncated.
+                      maxTokens: 8192,
+                      temperature: 0.1,
                     });
-                    throw PARSE_FAILURE;
-                  }
-                  return parsed;
-                },
-                {
-                  label: `skill-classify-${match.candidateIndex}`,
-                  maxAttempts: 3,
-                  correlationId: jobId,
-                  runId: jobId,
-                  isRetryable: (err: unknown) => {
-                    // Parse failures: model produced unparseable output — worth retrying.
-                    if (err === PARSE_FAILURE) return true;
-                    // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                    // cannot change between attempts, so retrying just wastes time.
-                    const e = err as { statusCode?: number; code?: string };
-                    if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-                    if (e?.code === 'CLASSIFY_TIMEOUT') return false;
-                    return (
-                      e?.statusCode === 429 ||
-                      e?.statusCode === 503 ||
-                      e?.statusCode === 529 ||
-                      e?.code === 'PROVIDER_UNAVAILABLE'
-                    );
+                    const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+                    if (parsed === null) {
+                      logger.warn('skill_classify_parse_failure', {
+                        jobId,
+                        slug: candidate.slug,
+                        rawLength: response.content.length,
+                        // Full raw response so we can see exactly what the LLM produced
+                        raw: response.content,
+                      });
+                      throw PARSE_FAILURE;
+                    }
+                    return parsed;
                   },
-                }
-              ),
-              timeoutPromise,
-            ]);
-          } catch (err) {
-            classificationResult = null;
-            classificationApiError = err === PARSE_FAILURE ? undefined : err;
+                  {
+                    label: `skill-classify-${match.candidateIndex}`,
+                    maxAttempts: 3,
+                    correlationId: jobId,
+                    runId: jobId,
+                    isRetryable: (err: unknown) => {
+                      // Parse failures: model produced unparseable output — worth retrying.
+                      if (err === PARSE_FAILURE) return true;
+                      // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                      // cannot change between attempts, so retrying just wastes time.
+                      const e = err as { statusCode?: number; code?: string };
+                      if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+                      // CLASSIFY_TIMEOUT is handled by the outer retry loop, not here.
+                      if (e?.code === 'CLASSIFY_TIMEOUT') return false;
+                      return (
+                        e?.statusCode === 429 ||
+                        e?.statusCode === 503 ||
+                        e?.statusCode === 529 ||
+                        e?.code === 'PROVIDER_UNAVAILABLE'
+                      );
+                    },
+                  }
+                ),
+                timeoutPromise,
+              ]);
+              break;
+            } catch (err) {
+              const code = (err as { code?: string })?.code;
+              if (code === 'CLASSIFY_TIMEOUT' && timeoutRetries < MAX_CLASSIFY_TIMEOUT_RETRIES) {
+                timeoutRetries++;
+                logger.warn('skill_classify_timeout_retry', {
+                  jobId,
+                  slug: candidate.slug,
+                  attempt: timeoutRetries + 1,
+                  timeoutMs: SKILL_CLASSIFY_TIMEOUT_MS,
+                });
+                continue;
+              }
+              classificationResult = null;
+              classificationApiError = err === PARSE_FAILURE ? undefined : err;
+              break;
+            }
           }
 
           // null result = either API error (classificationApiError set) or parse failure

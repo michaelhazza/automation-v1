@@ -361,10 +361,12 @@ export const MAX_SKILLS_PER_SUBACCOUNT = 200;
 
 // ── Skill Analyzer ──────────────────────────────────────────────────────────
 
-/** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries.
- *  Set to 120s: PARTIAL_OVERLAP/IMPROVEMENT calls must generate a full proposedMerge object
- *  (merged skill instructions up to 2500 chars each side), which can take 40-90s at peak API load. */
-export const SKILL_CLASSIFY_TIMEOUT_MS = 120_000;
+/** Maximum ms budget for a single skill LLM classification attempt, including all withBackoff retries.
+ *  Set to 180s: PARTIAL_OVERLAP/IMPROVEMENT calls must generate a full proposedMerge object
+ *  (merged skill instructions up to 2500 chars each side), which can take 40-150s at peak API load.
+ *  The job wraps this timeout in a one-shot retry loop so a stuck generation gets a second chance
+ *  before falling back to the rule-based merge. */
+export const SKILL_CLASSIFY_TIMEOUT_MS = 180_000;
 
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
