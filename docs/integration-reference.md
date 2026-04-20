@@ -64,10 +64,10 @@ read_capabilities:
   - slug: subaccount_read
     aliases: [read_subaccount, location_read]
     description: Read subaccount/location metadata from a multi-tenant CRM
-  - slug: clientpulse.config.read
+  - slug: organisation.config.read
     aliases: [pulse_config_read, clientpulse_config_list]
     description: Read ClientPulse operational_config values (scoring factors, churn bands, intervention defaults, alert limits)
-  - slug: clientpulse.config.history
+  - slug: organisation.config.history
     aliases: [pulse_config_history, config_audit_trail]
     description: Browse the config_history audit trail for ClientPulse operational_config changes
 
@@ -102,10 +102,10 @@ write_capabilities:
   - slug: update_database_record
     aliases: [record_update, row_update, upsert_record]
     description: Create or update a record in a structured database
-  - slug: clientpulse.config.update
+  - slug: organisation.config.update
     aliases: [pulse_config_update, config_patch, operational_config_update]
     description: Apply a single dot-path patch to ClientPulse operational_config (sensitive paths route through the review queue)
-  - slug: clientpulse.config.reset
+  - slug: organisation.config.reset
     aliases: [pulse_config_reset, config_factory_reset]
     description: Revert ClientPulse operational_config (or a specific path) to hierarchy template defaults
 
@@ -125,7 +125,7 @@ skills:
   - slug: compute_health_score
     aliases: [health_score, account_health]
     description: Compute a health score for an account or workspace
-  - slug: config_update_hierarchy_template
+  - slug: config_update_organisation_config
     aliases: [pulse_config_update_skill, clientpulse_config_skill]
     description: Configuration Agent skill — apply a single dot-path patch to a hierarchy template's operational_config JSONB with sensitive-path gating (Phase 4.5)
 
@@ -597,19 +597,19 @@ owner: platform-team
 ### ClientPulse Configuration (pseudo-integration)
 
 ```yaml integration
-slug: clientpulse-configuration
+slug: organisation-configuration
 name: ClientPulse Configuration
 provider_type: native
 status: fully_supported
 visibility: public
 read_capabilities:
-  - clientpulse.config.read
-  - clientpulse.config.history
+  - organisation.config.read
+  - organisation.config.history
 write_capabilities:
-  - clientpulse.config.update
-  - clientpulse.config.reset
+  - organisation.config.update
+  - organisation.config.reset
 skills_enabled:
-  - config_update_hierarchy_template
+  - config_update_organisation_config
 primitives_required:
   - hierarchy_templates
   - config_history

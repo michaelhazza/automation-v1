@@ -1,4 +1,4 @@
-import { eq, and, desc, max, sql } from 'drizzle-orm';
+import { eq, and, desc, max, sql, inArray } from 'drizzle-orm';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { configHistory, agents } from '../db/schema/index.js';
 
@@ -10,6 +10,22 @@ export const CONFIG_HISTORY_ENTITY_TYPES = new Set([
   'agent_trigger', 'connector_config', 'integration_connection',
   // Phase D1 — Unified Knowledge page promote/demote flow (spec §7.3).
   'memory_block', 'reference_entry',
+  // Session 1 / spec §4.8 — org-scoped operational config audit trail.
+  // The legacy type stays whitelisted so pre-Session-1 rows remain queryable;
+  // the new type is the target for all new writes after A.2.
+  'clientpulse_operational_config', 'organisation_operational_config',
+]);
+
+/**
+ * Special query-value accepted by the config-history route so operators
+ * viewing an organisation's operational-config timeline see a single
+ * contiguous stream across the pre-Session-1 legacy entity type and the new
+ * entity type (spec §4.8).
+ */
+export const ORGANISATION_CONFIG_ALL_QUERY_VALUE = 'organisation_config_all';
+export const ORGANISATION_CONFIG_ENTITY_TYPE_UNION: readonly string[] = Object.freeze([
+  'clientpulse_operational_config',
+  'organisation_operational_config',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -260,6 +276,14 @@ export const configHistoryService = {
     const limit = options.limit ?? 50;
     const offset = options.offset ?? 0;
 
+    // Spec §4.8 — the `organisation_config_all` pseudo-type unions the legacy
+    // `clientpulse_operational_config` entity type with the new
+    // `organisation_operational_config` entity type so operators see a
+    // single contiguous timeline. Concrete types pass through unchanged.
+    const entityTypeCondition = entityType === ORGANISATION_CONFIG_ALL_QUERY_VALUE
+      ? inArray(configHistory.entityType, ORGANISATION_CONFIG_ENTITY_TYPE_UNION as unknown as string[])
+      : eq(configHistory.entityType, entityType);
+
     const rows = await db
       .select({
         id: configHistory.id,
@@ -269,11 +293,12 @@ export const configHistoryService = {
         changeSource: configHistory.changeSource,
         changeSummary: configHistory.changeSummary,
         sessionId: configHistory.sessionId,
+        entityType: configHistory.entityType,
       })
       .from(configHistory)
       .where(
         and(
-          eq(configHistory.entityType, entityType),
+          entityTypeCondition,
           eq(configHistory.entityId, entityId),
           eq(configHistory.organisationId, organisationId),
         )

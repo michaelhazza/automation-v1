@@ -77,7 +77,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const SubaccountSkillsPage = lazy(() => import('./pages/SubaccountSkillsPage'));
 
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
-const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
+const SystemOrganisationTemplatesPage = lazy(() => import('./pages/SystemOrganisationTemplatesPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
@@ -314,7 +314,7 @@ export default function App() {
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
-            <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
+            <Route path="/system/organisation-templates" element={<SystemOrganisationTemplatesPage user={user!} />} />
             {/* Activity — system scope */}
             <Route path="/system/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — system scope */}
