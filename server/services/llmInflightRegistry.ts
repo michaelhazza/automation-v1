@@ -107,20 +107,26 @@ export function add(input: RegistryAddInput): string {
     deadlineBufferMs: input.deadlineBufferMs ?? INFLIGHT_DEADLINE_BUFFER_MS,
   });
 
-  // Overflow check — evict oldest before adding the new entry.
-  if (slots.size >= MAX_INFLIGHT_ENTRIES) {
-    const victim = selectEvictionVictim(slots.values());
-    if (victim) {
-      evictVictim(victim);
-    }
-  }
-
+  // No-op check FIRST. If this runtimeKey already exists we must not touch
+  // the map — in particular, we must not run overflow eviction, which
+  // would otherwise evict an unrelated entry and emit a spurious
+  // `evicted_overflow` event when this add() is a no-op (see pr-review
+  // log §1 — double-add at capacity race).
   const outcome = applyAdd({ entry, existing: slots.get(entry.runtimeKey) });
   if (outcome.kind === 'noop_already_exists') {
     logger.debug('inflight.add_noop_already_exists', {
       runtimeKey: entry.runtimeKey,
     });
     return entry.runtimeKey;
+  }
+
+  // Overflow check — only runs on genuine new entries. Evict the oldest
+  // active slot to make room, emitting a real `evicted_overflow` event.
+  if (slots.size >= MAX_INFLIGHT_ENTRIES) {
+    const victim = selectEvictionVictim(slots.values());
+    if (victim) {
+      evictVictim(victim);
+    }
   }
 
   slots.set(entry.runtimeKey, outcome.slot);
@@ -265,6 +271,12 @@ function emitActiveCount(): void {
 }
 
 function evictVictim(victim: RegistrySlot): void {
+  // `activeCount` is counted BEFORE the remove() call, so the victim is
+  // still in the map. That is intentional: the operator signal in spec
+  // §4.4 is "we saw capacity-many active entries and had to evict to
+  // make room" — the victim being counted pins the fact that the map
+  // was at capacity at eviction time, which is what distinguishes real
+  // overload from a post-sweep leak.
   const evictionContext: InFlightEvictionContext = {
     activeCount: countActive(),
     capacity:    MAX_INFLIGHT_ENTRIES,

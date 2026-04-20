@@ -24,8 +24,22 @@ import type {
 // ---------------------------------------------------------------------------
 
 const SOCKET_BUFFER_MS = 100;
+// While the snapshot fetch is in flight we extend the buffer window —
+// once the fetch resolves it drops back to SOCKET_BUFFER_MS. Deliberately
+// more conservative than spec §5's 100 ms figure: if the snapshot fetch
+// takes longer than 100 ms (cold start, under load), events arriving
+// during the fetch would otherwise merge before the snapshot render and
+// cause the flicker this buffer exists to prevent.
+const FETCH_BUFFER_MS = 1_000;
 const ADDED_EVENT = 'llm-inflight:added';
 const REMOVED_EVENT = 'llm-inflight:removed';
+
+// Mirror the server's state-machine guard on the client: once a
+// runtimeKey has been removed, a subsequent late `added` event for the
+// same runtimeKey must not resurrect it, even after the socket-dedup
+// LRU (500 entries in useSocket.ts) has rotated that eventId out.
+// Bounded at 256 to keep memory predictable.
+const RECENTLY_REMOVED_MAX = 256;
 
 // The registry key is a global room — useSocketRoom needs a non-null
 // `roomId` to emit `join:system-llm-inflight`, so we pass a static token.
@@ -64,14 +78,34 @@ export default function PnlInFlightTable() {
   }, []);
 
   // Socket-event buffer. During the `bufferingUntil` window (snapshot GET
-  // in-flight + 100 ms after it lands), socket events are queued instead of
-  // merged — then drained once rendering is caught up.
+  // in-flight + SOCKET_BUFFER_MS after it lands), socket events are
+  // queued instead of merged — then drained once rendering is caught up.
   const bufferingUntilRef = useRef<number>(Date.now() + SOCKET_BUFFER_MS);
   const bufferedEventsRef = useRef<BufferedEvent[]>([]);
 
+  // Runtime keys we've already processed a `removed` event for. Prevents
+  // a late `added` arriving after its eventId has rotated out of the
+  // socket-dedup LRU from resurrecting a landed row.
+  const recentlyRemovedRef = useRef<Set<string>>(new Set());
+  const recentlyRemovedOrderRef = useRef<string[]>([]);
+  const markRecentlyRemoved = useCallback((runtimeKey: string) => {
+    const set = recentlyRemovedRef.current;
+    const order = recentlyRemovedOrderRef.current;
+    if (set.has(runtimeKey)) return;
+    set.add(runtimeKey);
+    order.push(runtimeKey);
+    while (order.length > RECENTLY_REMOVED_MAX) {
+      const oldest = order.shift();
+      if (oldest !== undefined) set.delete(oldest);
+    }
+  }, []);
+
   const applyAddEntry = useCallback((entry: InFlightEntry) => {
+    // Mirror the server's monotonic state-machine guard (spec §4.3): a
+    // removed runtimeKey can never be resurrected by a late add, even if
+    // it's dropped out of the entries array and the socket-dedup LRU.
+    if (recentlyRemovedRef.current.has(entry.runtimeKey)) return;
     setEntries((prev) => {
-      // Monotonic guard — mirror the server's state machine (spec §4.3).
       const existing = prev.find((r) => r.runtimeKey === entry.runtimeKey);
       if (existing) return prev;
       return [{ ...entry, _key: entry.runtimeKey }, ...prev];
@@ -79,6 +113,7 @@ export default function PnlInFlightTable() {
   }, []);
 
   const applyRemoveEntry = useCallback((removal: InFlightRemoval) => {
+    markRecentlyRemoved(removal.runtimeKey);
     setEntries((prev) => prev.filter((r) => r.runtimeKey !== removal.runtimeKey));
     setRecentlyLanded((prev) => {
       const next = new Map(prev);
@@ -98,7 +133,7 @@ export default function PnlInFlightTable() {
         return next;
       });
     }, 10_000);
-  }, []);
+  }, [markRecentlyRemoved]);
 
   const drainBuffer = useCallback(() => {
     const pending = bufferedEventsRef.current;
@@ -114,7 +149,7 @@ export default function PnlInFlightTable() {
     setError(null);
     // Re-arm the buffering window — socket events arriving during the fetch
     // and for 100 ms after are queued, then drained in-order.
-    bufferingUntilRef.current = Date.now() + 1_000; // extended while fetch pending
+    bufferingUntilRef.current = Date.now() + FETCH_BUFFER_MS;
     try {
       const res = await api.get<InFlightSnapshotResponse>(
         '/api/admin/llm-pnl/in-flight',

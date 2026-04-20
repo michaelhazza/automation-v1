@@ -567,6 +567,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       // In-flight registry — one entry per attempt. runtimeKey is unique
       // across crash-restarts (see spec §4.2). add() fires post-budget-
       // reservation, immediately before the adapter dispatch.
+      //
+      // NOTE — `attempt` is the per-provider retry counter; it resets to
+      // 1 on each fallback provider. The ledger's `attemptNumber` resets
+      // the same way (line `attemptNumber = attempt` below), so the two
+      // stay consistent, but the admin UI sees provider-B-attempt-1
+      // immediately after provider-A-attempt-2 with no visible indication
+      // that the earlier provider already failed. Distinct runtimeKeys
+      // (different startedAt) prevent collision; the UX gap is a
+      // documented follow-up, not a correctness bug.
       const attemptStartedAt = new Date().toISOString();
       const attemptRuntimeKey = buildRuntimeKey({
         idempotencyKey,
@@ -791,6 +800,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // Emit the terminal in-flight removal with ledger reconciliation. The
     // caller's UI uses `ledgerRowId` + `ledgerCommittedAt` to link the live
     // row to the ledger detail drawer (spec §5).
+    //
+    // `currentRuntimeKey` is null when every attempt was a retryable error
+    // and each intermediate catch already removed its own entry — in that
+    // path there is no live entry to reconcile, so the guard skips the
+    // removal cleanly.
     if (currentRuntimeKey) {
       const ledgerRowId = failureInsertedRows[0]?.id ?? null;
       inflightRegistry.remove({

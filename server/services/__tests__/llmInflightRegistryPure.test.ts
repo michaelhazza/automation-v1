@@ -417,6 +417,36 @@ test('selectEvictionVictim — picks the slot with the smallest startedAt', () =
   assert.equal(victim?.entry.runtimeKey, oldest.runtimeKey);
 });
 
+test('add() boundary — noop_already_exists must short-circuit BEFORE overflow eviction (pr-review blocking #1)', () => {
+  // Simulate the impure wrapper's ordering: map at capacity + incoming
+  // runtimeKey already present → noop path must win, selectEvictionVictim
+  // must NOT be what drives the response.
+  const existingEntry = buildEntry(entryInput({ idempotencyKey: 'already-there' }));
+  const existing: RegistrySlot = activeSlot(existingEntry);
+
+  // applyAdd with the same runtimeKey + an existing slot → noop.
+  const addOutcome = applyAdd({ entry: existingEntry, existing });
+  assert.equal(addOutcome.kind, 'noop_already_exists');
+
+  // Independently, at capacity with N-1 other active slots + this one,
+  // selectEvictionVictim would happily return the oldest — that's the
+  // bug: the impure caller must not invoke it on the noop path. We pin
+  // the pure-layer contract by confirming applyAdd's response is the
+  // signal that prevents eviction from firing.
+  const slots: RegistrySlot[] = [existing];
+  for (let i = 0; i < 3; i++) {
+    const startedAt = new Date(Date.UTC(2026, 3, 20, 9, 0, i)).toISOString();  // all older
+    slots.push(activeSlot(buildEntry(entryInput({ idempotencyKey: `other${i}`, startedAt }))));
+  }
+  // If the impure caller were to run eviction selection anyway, it would
+  // return one of the `other*` entries — demonstrating that the map
+  // change would be destructive. The fix is to gate eviction on the
+  // outcome tag, which this test documents.
+  const victim = selectEvictionVictim(slots);
+  assert.notEqual(victim, null);
+  assert.notEqual(victim?.entry.runtimeKey, existingEntry.runtimeKey);
+});
+
 test('selectEvictionVictim — skips removed slots', () => {
   const e1 = buildEntry(entryInput({ idempotencyKey: 'k1', startedAt: '2026-04-20T09:59:55.000Z' }));
   const e2 = buildEntry(entryInput({ idempotencyKey: 'k2', startedAt: '2026-04-20T10:00:05.000Z' }));

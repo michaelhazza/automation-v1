@@ -125,6 +125,12 @@ router.get(
 // First-paint + reconnect resync for the In-Flight tab. The socket room
 // `system:llm-inflight` carries live add/remove events; this endpoint is
 // the authoritative read used on mount and after a Redis partition.
+//
+// This endpoint deliberately does NOT use the `wrap()` helper that the
+// other /api/admin/llm-pnl/* routes use. Spec §5 pins the in-flight
+// response shape as its own envelope — `{ entries, generatedAt, capped }`
+// — with `generatedAt` inline rather than in a nested `meta` block. That
+// shape is what `InFlightSnapshotResponse` exports for the client.
 router.get(
   '/api/admin/llm-pnl/in-flight',
   authenticate,
