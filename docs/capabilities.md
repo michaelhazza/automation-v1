@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-20 (ClientPulse Session 2 — real CRM intervention dispatch, live-data pickers, per-client drilldown, outcome-weighted recommendation, multi-channel operator alerts)
+> **Last updated:** 2026-04-20 (LLM Spend Observability & Per-Client P&L — cross-client financial dashboard with attribution-per-call, platform-overhead surfacing, top-cost triage, structured parse-failure capture, and retention-safe historical access)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -592,6 +592,25 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Cohort queries filtered by subaccount tags for segment-level analysis
 - Org-level insight storage compounds pattern recognition across clients over time
 
+### LLM Spend Observability & Per-Client P&L
+
+| | |
+|---|---|
+| **Outcome** | Agency leadership sees, in near-real-time, exactly how LLM spend is tracking per client, per subaccount, per model, and per feature — and what margin is left after platform overhead |
+| **Trigger** | Live dashboard access, ad-hoc P&L review, or monthly billing reconciliation |
+| **Deliverable** | Cross-client financial dashboard with revenue, cost, gross profit, platform overhead, and net profit — sliced by organisation, subaccount, source of work, and provider/model — with a top-cost call inspector for runaway-cost triage |
+
+- **Every LLM call is attributed** — no "black box" usage. Each call carries the work that triggered it (agent run, scheduled process, automated workflow, platform background work) plus a feature tag so agencies can answer "how much did the weekly reporting agent actually cost this month?" without a log-scraping exercise.
+- **Platform overhead is surfaced, not hidden** — background work the platform performs on its own behalf (memory compilation, skill classification, orchestration hints) is cost-attributed separately and subtracted from gross profit to show true net margin. No surprise "platform tax" eating margin silently.
+- **Per-client P&L rolls up automatically** — revenue (what the client is billed after margin), cost (raw LLM spend), profit, and margin percentage for every organisation and every subaccount. 30-day trend sparkline per client. Exportable to CSV for invoicing workflows.
+- **Sort and total every view** — every column in every P&L table supports ascending/descending sort; each table footer shows live totals across the current view. Makes "who's eating my margin this month?" a one-click question.
+- **Per-source-type breakdown** — see which kinds of work drive spend (conversational agents vs scheduled processes vs automated workflows vs platform background) so agencies can price packaging decisions against real cost shapes.
+- **Per-provider + per-model breakdown** — with average latency — supports model-routing decisions on hard evidence, not vendor marketing.
+- **Cost-runaway triage** — top-cost calls list with one-click detail drawer surfaces the exact prompt context, token counts, provider response metadata, and abort reason for any call that looks anomalous. Continues to work for historical calls via a retention-safe archive.
+- **Structured parse-failure capture** — when an LLM returns output that fails schema validation, the failure is recorded with a safe truncated excerpt rather than silently retried or lost. Supports root-cause analysis and prompt-quality improvements.
+- **Cancellation-aware billing** — client disconnects and deadline timeouts are distinguished in the ledger, so cost attribution stays honest when a user navigates away mid-response.
+- **Retention-safe historical access** — ledger rows older than the configured retention window (default 12 months) move to a historical archive with the same structure and access controls. Detail lookups continue to work seamlessly; the archive is indexed for year-over-year trend analysis.
+
 ---
 
 ## Skills Reference
@@ -860,6 +879,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-20 | LLM Spend Observability & Per-Client P&L: add new Agency Capability section covering cross-client financial dashboard, attribution-per-call (source type + feature tag), platform overhead surfacing, per-org / per-subaccount / per-source-type / per-provider+model breakdowns with sort + totals, top-cost call triage with detail drawer, structured parse-failure capture, cancellation-aware billing, and retention-safe historical access (12-month default retention with on-demand archive lookup). | — |
 | 2026-04-19 | ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension. Adds 5 namespaced CRM-side action primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`), all review-gated; an event-driven scenario detector (`proposeClientPulseInterventionsJob`) that fires after every churn assessment and quotas proposals at the org + subaccount layer; an hourly outcome-measurement job that closes B2 with band-change attribution within 14 days; a strict V1 merge-field resolver (5 namespaces, no fallback / no conditionals) with editor live-preview; the Configuration Assistant tool #29 `config_update_organisation_config` that closes B3 (config_history audit on every write) + B5 (sensitive paths route through the action→review queue); and operator-facing UI for both the Propose Intervention modal (5 editors + wrapper) and the Configuration Assistant chat popup. Lifecycle event `clientpulse.intervention.enqueued` is the single observability anchor for both scenario-detector and operator-driven proposals. | — |
 | 2026-04-19 | Sandboxed Runtime (IEE): add live-progress-on-long-running-browser-tasks bullet (real-time step count + heartbeat surfacing during delegated browser execution) and connection-health-validation bullet (on-demand login test for stored credentials before depending on them in a workflow). Reflects the IEE Phase 0 delegation lifecycle and Web Login Connection "Test Connection" UI. | — |
 | 2026-04-17 | Capability-aware Orchestrator + Platform Feature Request Pipeline: add two new customer-facing Product Capabilities sections covering deterministic four-path task routing (A configured / B narrow-configurable / C broad-configurable / D unsupported), atomic capability matching (capability map + active connection + granted scopes), graceful reference-degradation, auditable decision records, per-run budget, post-handoff verification, and the structured feature-request pipeline with system-promotion detection, 30-day dedupe, multi-channel delivery, and dogfooded task-board triage. Add machine-readable-source callout on Integrations Reference pointing to `docs/integration-reference.md` as the structured YAML backing the runtime capability catalogue. | — |

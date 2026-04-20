@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import type { OrgScopedTx } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import type {
   PnlSummary,
   OrgRow,
@@ -20,6 +21,25 @@ import {
   buildAggregatedOverheadRow,
   computeNetProfit,
 } from './systemPnlServicePure.js';
+
+// Cross-tenant admin reads — llm_requests + llm_requests_archive have
+// FORCE ROW LEVEL SECURITY. The System P&L page is the one UI that is
+// intentionally cross-organisation; every query below must route through
+// `adminRead` so the transaction is admin-authorised and the session role
+// is switched to `admin_role` (which has BYPASSRLS). Routes already enforce
+// requireSystemAdmin at the HTTP layer.
+async function adminRead<T>(
+  reason: string,
+  fn: (tx: OrgScopedTx) => Promise<T>,
+): Promise<T> {
+  return withAdminConnection(
+    { source: 'systemPnlService', reason },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return fn(tx);
+    },
+  );
+}
 
 // ---------------------------------------------------------------------------
 // systemPnlService — cross-organisation P&L reads for the System P&L page
@@ -50,10 +70,11 @@ function previousMonth(month: string): string {
 }
 
 async function scalarByEntityType(
+  tx: OrgScopedTx,
   entityType: string,
   month: string,
 ): Promise<Array<{ entityId: string; costCents: number; requests: number }>> {
-  const rows = await db.execute<{ entity_id: string; cost_cents: number; request_count: number }>(sql`
+  const rows = await tx.execute<{ entity_id: string; cost_cents: number; request_count: number }>(sql`
     SELECT entity_id, total_cost_cents AS cost_cents, request_count
     FROM cost_aggregates
     WHERE entity_type = ${entityType}
@@ -67,13 +88,13 @@ async function scalarByEntityType(
   }));
 }
 
-async function platformTotals(month: string): Promise<{
+async function platformTotals(tx: OrgScopedTx, month: string): Promise<{
   revenueCents: number;
   costCents: number;
   overheadCents: number;
   requests: number;
 }> {
-  const rows = await db.execute<{
+  const rows = await tx.execute<{
     revenue_cents: number; cost_cents: number; overhead_cents: number; requests: number;
   }>(sql`
     SELECT
@@ -97,56 +118,58 @@ async function platformTotals(month: string): Promise<{
 // ── 1. getPnlSummary ──────────────────────────────────────────────────────
 
 export async function getPnlSummary(period: Period): Promise<PnlSummary> {
-  const prevMonth = previousMonth(period.month);
-  const [current, previous] = await Promise.all([
-    platformTotals(period.month),
-    platformTotals(prevMonth),
-  ]);
+  return adminRead('getPnlSummary', async (tx) => {
+    const prevMonth = previousMonth(period.month);
+    const [current, previous] = await Promise.all([
+      platformTotals(tx, period.month),
+      platformTotals(tx, prevMonth),
+    ]);
 
-  const grossProfitCents = current.revenueCents - current.costCents + current.overheadCents;
-  // Revenue minus billable-only cost → the gross margin line.
-  const grossMargin = current.revenueCents > 0
-    ? Math.round(((grossProfitCents) / current.revenueCents) * 10000) / 100
-    : 0;
+    const grossProfitCents = current.revenueCents - current.costCents + current.overheadCents;
+    // Revenue minus billable-only cost → the gross margin line.
+    const grossMargin = current.revenueCents > 0
+      ? Math.round(((grossProfitCents) / current.revenueCents) * 10000) / 100
+      : 0;
 
-  const prevGrossProfitCents = previous.revenueCents - previous.costCents + previous.overheadCents;
-  const prevGrossMargin = previous.revenueCents > 0
-    ? Math.round(((prevGrossProfitCents) / previous.revenueCents) * 10000) / 100
-    : 0;
+    const prevGrossProfitCents = previous.revenueCents - previous.costCents + previous.overheadCents;
+    const prevGrossMargin = previous.revenueCents > 0
+      ? Math.round(((prevGrossProfitCents) / previous.revenueCents) * 10000) / 100
+      : 0;
 
-  const netProfitCents = computeNetProfit(grossProfitCents, current.overheadCents);
-  const prevNetProfitCents = computeNetProfit(prevGrossProfitCents, previous.overheadCents);
-  const netMargin = current.revenueCents > 0
-    ? Math.round((netProfitCents / current.revenueCents) * 10000) / 100
-    : 0;
-  const prevNetMargin = previous.revenueCents > 0
-    ? Math.round((prevNetProfitCents / previous.revenueCents) * 10000) / 100
-    : null;
+    const netProfitCents = computeNetProfit(grossProfitCents, current.overheadCents);
+    const prevNetProfitCents = computeNetProfit(prevGrossProfitCents, previous.overheadCents);
+    const netMargin = current.revenueCents > 0
+      ? Math.round((netProfitCents / current.revenueCents) * 10000) / 100
+      : 0;
+    const prevNetMargin = previous.revenueCents > 0
+      ? Math.round((prevNetProfitCents / previous.revenueCents) * 10000) / 100
+      : null;
 
-  const hasPrevious = previous.revenueCents > 0 || previous.costCents > 0;
+    const hasPrevious = previous.revenueCents > 0 || previous.costCents > 0;
 
-  return {
-    period:         period.month,
-    previousPeriod: hasPrevious ? prevMonth : null,
-    revenue: {
-      cents:  current.revenueCents,
-      change: hasPrevious ? computeKpiChangePct(current.revenueCents, previous.revenueCents) : null,
-    },
-    grossProfit: {
-      cents:  grossProfitCents,
-      margin: grossMargin,
-      change: hasPrevious ? computeKpiChangePct(grossProfitCents, prevGrossProfitCents) : null,
-    },
-    platformOverhead: {
-      cents:        current.overheadCents,
-      pctOfRevenue: pctOfTotal(current.overheadCents, current.revenueCents),
-    },
-    netProfit: {
-      cents:  netProfitCents,
-      margin: netMargin,
-      change: hasPrevious ? computeKpiChangePp(netMargin, prevNetMargin) : null,
-    },
-  };
+    return {
+      period:         period.month,
+      previousPeriod: hasPrevious ? prevMonth : null,
+      revenue: {
+        cents:  current.revenueCents,
+        change: hasPrevious ? computeKpiChangePct(current.revenueCents, previous.revenueCents) : null,
+      },
+      grossProfit: {
+        cents:  grossProfitCents,
+        margin: grossMargin,
+        change: hasPrevious ? computeKpiChangePct(grossProfitCents, prevGrossProfitCents) : null,
+      },
+      platformOverhead: {
+        cents:        current.overheadCents,
+        pctOfRevenue: pctOfTotal(current.overheadCents, current.revenueCents),
+      },
+      netProfit: {
+        cents:  netProfitCents,
+        margin: netMargin,
+        change: hasPrevious ? computeKpiChangePp(netMargin, prevNetMargin) : null,
+      },
+    };
+  });
 }
 
 // ── 2. getByOrganisation ─────────────────────────────────────────────────
@@ -155,9 +178,10 @@ export async function getByOrganisation(
   period: Period,
   limit = 50,
 ): Promise<{ orgs: OrgRow[]; overhead: OverheadRow }> {
+  return adminRead('getByOrganisation', async (tx) => {
   // Per-org aggregates — the `organisation` dimension in cost_aggregates
   // already sums everything billable to that org. JOIN in org metadata.
-  const rows = await db.execute<{
+  const rows = await tx.execute<{
     org_id:           string;
     org_name:         string;
     slug:             string | null;
@@ -205,7 +229,7 @@ export async function getByOrganisation(
     LIMIT ${limit}
   `);
 
-  const platform = await platformTotals(period.month);
+  const platform = await platformTotals(tx, period.month);
 
   const orgs: OrgRow[] = [];
   for (const r of rows) {
@@ -227,22 +251,23 @@ export async function getByOrganisation(
       // Sparkline: 30 normalised daily cost values. Fetched lazily here —
       // if this turns out to dominate page-load time we promote into a
       // dedicated aggregate dimension per §17 deferred items.
-      trendSparkline:   await fetchOrgSparkline(r.org_id, period.month),
+      trendSparkline:   await fetchOrgSparkline(tx, r.org_id, period.month),
     });
   }
 
   // Aggregated overhead row — sum of system + analyzer cost across all orgs.
-  const overheadRows = await getBySourceType(period);
+  const overheadRows = await getBySourceTypeTx(tx, period);
   const overhead = buildAggregatedOverheadRow({
     overheadRows: overheadRows.filter((r) => OVERHEAD_SOURCE_TYPES.includes(r.sourceType as 'system' | 'analyzer')),
     platformRevenueCents: platform.revenueCents,
   });
 
   return { orgs, overhead };
+  });
 }
 
-async function fetchOrgSparkline(orgId: string, month: string): Promise<number[]> {
-  const rows = await db.execute<{ day: string; cost_cents: number }>(sql`
+async function fetchOrgSparkline(tx: OrgScopedTx, orgId: string, month: string): Promise<number[]> {
+  const rows = await tx.execute<{ day: string; cost_cents: number }>(sql`
     SELECT period_key AS day, total_cost_cents AS cost_cents
     FROM cost_aggregates
     WHERE entity_type = 'organisation'
@@ -259,7 +284,8 @@ async function fetchOrgSparkline(orgId: string, month: string): Promise<number[]
 // ── 3. getBySubaccount ────────────────────────────────────────────────────
 
 export async function getBySubaccount(period: Period, limit = 100): Promise<SubacctRow[]> {
-  const rows = await db.execute<{
+  return adminRead('getBySubaccount', async (tx) => {
+  const rows = await tx.execute<{
     subaccount_id:    string;
     subaccount_name:  string;
     org_id:           string;
@@ -305,7 +331,7 @@ export async function getBySubaccount(period: Period, limit = 100): Promise<Suba
     LIMIT ${limit}
   `);
 
-  const platform = await platformTotals(period.month);
+  const platform = await platformTotals(tx, period.month);
 
   return rows.map((r) => {
     const revenue = Number(r.revenue_cents);
@@ -325,6 +351,7 @@ export async function getBySubaccount(period: Period, limit = 100): Promise<Suba
       pctOfRevenue:     pctOfTotal(revenue, platform.revenueCents),
     };
   });
+  });
 }
 
 // ── 4. getBySourceType ───────────────────────────────────────────────────
@@ -337,8 +364,8 @@ const SOURCE_TYPE_LABELS: Record<string, { label: string; description: string }>
   analyzer:          { label: 'Skill Analyzer',     description: 'Classify · agent-match · cluster-recommend' },
 };
 
-export async function getBySourceType(period: Period): Promise<SourceTypeRow[]> {
-  const rows = await db.execute<{
+async function getBySourceTypeTx(tx: OrgScopedTx, period: Period): Promise<SourceTypeRow[]> {
+  const rows = await tx.execute<{
     source_type:   string;
     orgs_count:    number;
     requests:      number;
@@ -358,7 +385,7 @@ export async function getBySourceType(period: Period): Promise<SourceTypeRow[]> 
     ORDER BY cost_cents DESC
   `);
 
-  const platform = await platformTotals(period.month);
+  const platform = await platformTotals(tx, period.month);
 
   return rows.map((r) => {
     const isOverhead = OVERHEAD_SOURCE_TYPES.includes(r.source_type as 'system' | 'analyzer');
@@ -380,10 +407,15 @@ export async function getBySourceType(period: Period): Promise<SourceTypeRow[]> 
   });
 }
 
+export async function getBySourceType(period: Period): Promise<SourceTypeRow[]> {
+  return adminRead('getBySourceType', (tx) => getBySourceTypeTx(tx, period));
+}
+
 // ── 5. getByProviderModel ────────────────────────────────────────────────
 
 export async function getByProviderModel(period: Period): Promise<ProviderModelRow[]> {
-  const rows = await db.execute<{
+  return adminRead('getByProviderModel', async (tx) => {
+  const rows = await tx.execute<{
     provider:        string;
     model:           string;
     requests:        number;
@@ -405,7 +437,7 @@ export async function getByProviderModel(period: Period): Promise<ProviderModelR
     ORDER BY cost_cents DESC
   `);
 
-  const platform = await platformTotals(period.month);
+  const platform = await platformTotals(tx, period.month);
 
   return rows.map((r) => {
     const revenue = Number(r.revenue_cents);
@@ -423,41 +455,45 @@ export async function getByProviderModel(period: Period): Promise<ProviderModelR
       pctOfCost:    pctOfTotal(cost, platform.costCents + platform.overheadCents),
     };
   });
+  });
 }
 
 // ── 6. getDailyTrend ──────────────────────────────────────────────────────
 
 export async function getDailyTrend(days = 30): Promise<DailyTrendRow[]> {
-  const rows = await db.execute<{
-    day:            string;
-    revenue_cents:  number;
-    cost_cents:     number;
-    overhead_cents: number;
-  }>(sql`
-    SELECT
-      billing_day                                                                                 AS day,
-      COALESCE(SUM(cost_with_margin_cents), 0)                                                   AS revenue_cents,
-      COALESCE(ROUND(SUM(cost_raw * 100)), 0)                                                    AS cost_cents,
-      COALESCE(ROUND(SUM(cost_raw * 100)) FILTER (WHERE source_type IN ('system','analyzer')), 0) AS overhead_cents
-    FROM llm_requests
-    WHERE created_at >= NOW() - (${days} || ' days')::interval
-      AND status IN ('success', 'partial')
-    GROUP BY billing_day
-    ORDER BY billing_day ASC
-  `);
+  return adminRead('getDailyTrend', async (tx) => {
+    const rows = await tx.execute<{
+      day:            string;
+      revenue_cents:  number;
+      cost_cents:     number;
+      overhead_cents: number;
+    }>(sql`
+      SELECT
+        billing_day                                                                                 AS day,
+        COALESCE(SUM(cost_with_margin_cents), 0)                                                   AS revenue_cents,
+        COALESCE(ROUND(SUM(cost_raw * 100)), 0)                                                    AS cost_cents,
+        COALESCE(ROUND(SUM(cost_raw * 100)) FILTER (WHERE source_type IN ('system','analyzer')), 0) AS overhead_cents
+      FROM llm_requests
+      WHERE created_at >= NOW() - (${days} || ' days')::interval
+        AND status IN ('success', 'partial')
+      GROUP BY billing_day
+      ORDER BY billing_day ASC
+    `);
 
-  return rows.map((r) => ({
-    day:           r.day,
-    revenueCents:  Number(r.revenue_cents),
-    costCents:     Number(r.cost_cents),
-    overheadCents: Number(r.overhead_cents),
-  }));
+    return rows.map((r) => ({
+      day:           r.day,
+      revenueCents:  Number(r.revenue_cents),
+      costCents:     Number(r.cost_cents),
+      overheadCents: Number(r.overhead_cents),
+    }));
+  });
 }
 
 // ── 7. getTopCalls ────────────────────────────────────────────────────────
 
 export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRow[]> {
-  const rows = await db.execute<{
+  return adminRead('getTopCalls', async (tx) => {
+  const rows = await tx.execute<{
     id:             string;
     created_at:     Date;
     organisation_name: string | null;
@@ -526,16 +562,18 @@ export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRo
       status:           r.status,
     };
   });
+  });
 }
 
 // ── 8. getCallDetail ──────────────────────────────────────────────────────
 
 export async function getCallDetail(id: string): Promise<CallDetail | null> {
+  return adminRead('getCallDetail', async (tx) => {
   // UNION ALL against the archive so detail-drawer lookups keep working
   // for rows moved out of the live table by the nightly retention job
   // (spec §12.4 / §15.5). Live table is checked first; archive is a
   // second-chance lookup.
-  const rows = await db.execute<Record<string, unknown>>(sql`
+  const rows = await tx.execute<Record<string, unknown>>(sql`
     WITH combined AS (
       SELECT r.*
       FROM llm_requests r
@@ -617,6 +655,7 @@ export async function getCallDetail(id: string): Promise<CallDetail | null> {
     providerLatencyMs: r.provider_latency_ms === null ? null : Number(r.provider_latency_ms),
     routerOverheadMs:  r.router_overhead_ms === null ? null : Number(r.router_overhead_ms),
   };
+  });
 }
 
 export const systemPnlService = {

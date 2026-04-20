@@ -1158,7 +1158,7 @@ Sprint 2 introduces a defence-in-depth data isolation model. All three layers ar
 
 ### Layer 1 — Postgres RLS policies
 
-**Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
+**Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`. Migration `0188` extends this to `llm_requests_archive` with the same org-scoped policy + `FORCE ROW LEVEL SECURITY`; the nightly retention job routes through `withAdminConnection` + `SET LOCAL ROLE admin_role` to perform the cross-org move (see LLM router contract → LLM ledger retention).
 
 **Principal-scoped (migrations 0167–0169):** P3B extends org-level RLS with visibility predicates on canonical data and integration tables. Tables: `integration_connections`, `integration_ingestion_stats`, `canonical_fields`, `canonical_row_versions`, `canonical_metric_history`, `canonical_row_subaccount_scopes`, `service_principals`, `teams`, `team_members`, `delegation_grants`, `agent_runs` (extended). Policies enforce:
 
@@ -2415,14 +2415,104 @@ Denormalized cost columns on `ieeRuns`:
 
 ### LLM router contract
 
+`llmRouter.routeCall` is the **only** supported entry point to any LLM provider. Direct imports of `anthropicAdapter` / `openaiAdapter` / `geminiAdapter` / `openrouterAdapter` from anywhere outside `llmRouter.ts` are forbidden:
+
+- **Static gate** — `scripts/verify-no-direct-adapter-calls.sh` (registered in `run-all-gates.sh`) fails CI on any direct import of a provider adapter from outside the router. Audit log: `tasks/direct-adapter-audit-2026-04-20.md`.
+- **Runtime assertion** — every adapter entry point calls `assertCalledFromRouter()` (`server/services/providers/callerAssert.ts`), walking the V8 stack frame to confirm `llmRouter.ts` is an ancestor caller. Bypass attempts throw `RouterContractError` before a single byte of payload leaves the process.
+
 `llmRouter.routeCall` enforces, at runtime:
 
 ```typescript
-if (ctx.sourceType === 'iee' && !ctx.ieeRunId) throw new RouterContractError(...);
-if (ctx.callSite === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
+if (ctx.sourceType === 'iee' && !ctx.ieeRunId)  throw new RouterContractError(...);
+if (ctx.callSite   === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
 ```
 
 The database CHECK constraint on `llmRequests` is the belt-and-braces backstop.
+
+#### Ledger attribution contract (spec §5.1)
+
+Every LLM call is observable. The ledger row carries enough dimensions that cost-per-feature, cost-per-source-type, and cost-per-call-site rollups are a single `GROUP BY` away. Every callable surface — agent loop, analyzer, process execution, IEE worker, system background — contributes a row.
+
+**Required `LLMCallContext` fields** (Zod-enforced in `llmRouter.ts`):
+
+| Field | Purpose |
+|-------|---------|
+| `sourceType` | `agent_run` \| `process_execution` \| `iee` \| `analyzer` \| `system` |
+| `sourceId` | UUID of the originating entity (`agent_run.id`, `execution.id`, `iee_run.id`, analyzer invocation id, or a stable system caller id). `null` for `sourceType='system'` is legal only when `systemCallerPolicy='respect_routing'` is set. |
+| `featureTag` | Stable short string (`'memory_compile'`, `'skill_classify'`, `'orchestrator_pick'`). Becomes a grouping dimension in System P&L. |
+| `callSite` | `'web' \| 'worker' \| 'job'` — where the call runs, not who requested it. |
+| `executionPhase` | Optional: `'plan' \| 'act' \| 'reflect' \| 'postprocess'`. Now nullable at the DB level; system/analyzer callers leave it null. |
+| `systemCallerPolicy` | `'respect_routing' \| 'override_to'` — when `'override_to'` is set, the system caller bypasses capability-tier routing. Defaulted to `'respect_routing'` at runtime. |
+
+**Row-level attribution columns** added by migration `0185` (`migrations/0185_llm_requests_generalisation.sql`):
+
+- `source_type text NOT NULL` — same five enum values above.
+- `source_id uuid` — polymorphic pointer; no FK because the target table varies by `sourceType`.
+- `feature_tag text NOT NULL DEFAULT 'unknown'`.
+- `execution_phase text` — now nullable (was `NOT NULL`; relaxed for system/analyzer callers).
+- Composite indexes on `(source_type, billing_month)`, `(feature_tag, billing_month)`, `(source_type, organisation_id, billing_month)` for the P&L rollups.
+- CHECK constraints mirror the router guards: `iee` requires `iee_run_id`; `agent_run` requires `run_id`; `process_execution` requires `execution_id`.
+
+#### Margin + budget contract for system callers
+
+`system` and `analyzer` source types represent platform overhead — work Synthetos performs on its own behalf (memory compilation, skill classification, orchestrator hints). They have no customer to bill:
+
+- `pricingService.resolveMarginMultiplier()` returns **1.0×** for `sourceType ∈ {'system', 'analyzer'}` — no margin applied. The `cost_with_margin` column equals `cost_raw`, and `cost_with_margin_cents` equals the raw-cost rounding.
+- `budgetService.checkAndReserve` returns **`string | null`** — a reservation id for customer-billable calls, `null` for system/analyzer. The commit and release paths tolerate the null id and no-op.
+- The System P&L page surfaces these as the "Platform Overhead" row and subtracts them from gross profit to derive net profit.
+
+#### Structured parse failures
+
+Callers that need schema-validated output pass a `postProcess` hook:
+
+```typescript
+const result = await llmRouter.routeCall({
+  ...ctx,
+  postProcess: (raw) => schema.parse(JSON.parse(raw)),  // may throw ParseFailureError
+});
+```
+
+`ParseFailureError` (`server/lib/parseFailureError.ts`) is a distinct error class. The router catches it, writes `status='parse_failed'` to the ledger, and stores a UTF-8-safe ≤2 KB excerpt of the raw response in `parse_failure_raw_excerpt` — never the full payload. The truncation utility (`server/lib/utf8Truncate.ts`) backs up through multi-byte continuation bytes so the excerpt is always valid UTF-8.
+
+#### Cancellation + client-disconnect handling
+
+Every router call accepts an `AbortSignal`. Adapters thread the signal into `fetch`, and `adapterErrors.ts::mapAbortError` inspects `signal.reason` to distinguish:
+
+- `'caller_timeout'` — the caller imposed a deadline.
+- `'caller_cancel'` — the caller proactively aborted (e.g. client disconnected mid-stream).
+
+The ledger row records the distinction in `abort_reason`. `isNonRetryableError` treats `CLIENT_DISCONNECTED` as non-retryable — no point retrying a call whose consumer has gone away.
+
+### Cost aggregate dimensions (spec §6.2)
+
+`cost_aggregates` is the pre-rolled read model for every P&L dashboard. Entity types:
+
+`'organisation' \| 'subaccount' \| 'run' \| 'agent' \| 'task_type' \| 'provider' \| 'platform' \| 'execution_phase' \| 'source_type' \| 'feature_tag'`
+
+The last two — `source_type` and `feature_tag` — were added by spec §6.2 so platform-overhead, per-feature, and per-source-type rollups don't require live scans of `llm_requests`. `cost_aggregates` is NOT RLS-protected (it carries aggregated totals, not PII), which keeps the existing admin usage routes working without bypass wiring.
+
+### LLM ledger retention (spec §12.4 / §15.5)
+
+`llm_requests` rows older than `env.LLM_LEDGER_RETENTION_MONTHS` (default `12`) are moved to `llm_requests_archive` by the nightly `maintenance:llm-ledger-archive` pg-boss job (`server/jobs/llmLedgerArchiveJob.ts`, 03:45 UTC):
+
+- **10k-row chunks** — bounded transaction size keeps lock footprint small.
+- **Atomic move** — one CTE chain `SELECT FOR UPDATE SKIP LOCKED → INSERT ON CONFLICT DO NOTHING → DELETE RETURNING`. A row is either in the live table OR the archive, never both and never neither.
+- **Admin-bypass RLS** — both `llm_requests` and `llm_requests_archive` have `FORCE ROW LEVEL SECURITY`. The job runs under `withAdminConnection({ source: 'llmLedgerArchiveJob' }, …)` + `SET LOCAL ROLE admin_role` (BYPASSRLS). Direct `db.transaction` would fail closed.
+- **Cutoff math** is pure in `llmLedgerArchiveJobPure.ts::computeArchiveCutoff` so retention behaviour is test-pinned.
+
+`systemPnlService.getCallDetail()` UNIONs the archive so the detail drawer keeps working for rows moved out of the live table.
+
+### System P&L page (spec §11)
+
+`/system/llm-pnl` is the one UI that is intentionally cross-tenant. Routes (`server/routes/systemPnl.ts`) enforce `requireSystemAdmin`; the service (`server/services/systemPnlService.ts`) runs every read inside `adminRead(reason, fn)` — a thin wrapper over `withAdminConnection({source:'systemPnlService', reason}, tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); return fn(tx); })`. Cross-org reads without the role switch fail closed against the FORCE RLS policy on `llm_requests` + archive.
+
+Data split:
+
+- **Scalar KPIs + per-org / per-subaccount rollups** read `cost_aggregates` (sub-100 ms, no live scan).
+- **Source-type / provider+model rollups, top calls, call detail** read `llm_requests` live — bounded by the indexed `billing_month` scan.
+- **Daily trend** reads `cost_aggregates` (`entity_type='platform'`, `period_type='daily'`).
+
+Pure math — margin %, profit cents, KPI change % / pp, aggregated overhead row — lives in `systemPnlServicePure.ts` so every computation is test-pinned independently of SQL.
 
 ### Frontend
 

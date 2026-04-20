@@ -20,6 +20,15 @@ import PnlByProviderModelTable from '../components/system-pnl/PnlByProviderModel
 import PnlTrendChart from '../components/system-pnl/PnlTrendChart';
 import PnlTopCallsList from '../components/system-pnl/PnlTopCallsList';
 import PnlCallDetailDrawer from '../components/system-pnl/PnlCallDetailDrawer';
+import type { PnlSortDir, PnlSortState } from '../components/system-pnl/PnlColHeader';
+
+// Sort state is per-tab — each grouping tracks its own sort independently so
+// switching tabs preserves the active order. Keys are table-specific; page
+// only cares about the tuple, not the value.
+type OrgSortKey        = 'name' | 'subaccounts' | 'requests' | 'revenue' | 'cost' | 'profit' | 'margin' | 'pctOfRev';
+type SubSortKey        = 'subaccount' | 'organisation' | 'requests' | 'revenue' | 'cost' | 'profit' | 'margin' | 'pctOfRev';
+type SourceSortKey     = 'label' | 'orgs' | 'requests' | 'revenue' | 'cost' | 'profit' | 'margin' | 'pctOfCost';
+type ModelSortKey      = 'provider' | 'model' | 'requests' | 'revenue' | 'cost' | 'profit' | 'margin' | 'latency' | 'pctOfCost';
 
 // System P&L admin page (spec §11).
 // Cross-organisation financial dashboard, system-admin only.
@@ -47,6 +56,20 @@ export default function SystemPnlPage() {
   const [trend, setTrend]         = useState<DailyTrendRow[]>([]);
   const [topCalls, setTopCalls]   = useState<TopCallRow[]>([]);
   const [loading, setLoading]     = useState<boolean>(true);
+
+  // Per-tab sort state. Null = default (server-returned) order.
+  const [orgSort,    setOrgSort]    = useState<PnlSortState<OrgSortKey>    | null>(null);
+  const [subSort,    setSubSort]    = useState<PnlSortState<SubSortKey>    | null>(null);
+  const [sourceSort, setSourceSort] = useState<PnlSortState<SourceSortKey> | null>(null);
+  const [modelSort,  setModelSort]  = useState<PnlSortState<ModelSortKey>  | null>(null);
+  const anySortActive = orgSort !== null || subSort !== null || sourceSort !== null || modelSort !== null;
+  const clearAllSorts = () => {
+    setOrgSort(null); setSubSort(null); setSourceSort(null); setModelSort(null);
+  };
+  const handleOrgSort    = (key: OrgSortKey,    dir: PnlSortDir) => setOrgSort({ key, dir });
+  const handleSubSort    = (key: SubSortKey,    dir: PnlSortDir) => setSubSort({ key, dir });
+  const handleSourceSort = (key: SourceSortKey, dir: PnlSortDir) => setSourceSort({ key, dir });
+  const handleModelSort  = (key: ModelSortKey,  dir: PnlSortDir) => setModelSort({ key, dir });
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -115,6 +138,14 @@ export default function SystemPnlPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {anySortActive && (
+              <button
+                onClick={clearAllSorts}
+                className="text-sm px-3 py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+              >
+                Clear all
+              </button>
+            )}
             <input
               type="month"
               value={month}
@@ -176,10 +207,10 @@ export default function SystemPnlPage() {
 
         {/* Active table */}
         <div className="mb-6">
-          {grouping === 'organisation'   && <PnlByOrganisationTable orgs={orgs} overhead={orgOverhead} />}
-          {grouping === 'subaccount'     && <PnlBySubaccountTable rows={subs} />}
-          {grouping === 'source-type'    && <PnlBySourceTypeTable rows={sources} />}
-          {grouping === 'provider-model' && <PnlByProviderModelTable rows={models} />}
+          {grouping === 'organisation'   && <PnlByOrganisationTable orgs={orgs} overhead={orgOverhead} sort={orgSort}    onSort={handleOrgSort}    />}
+          {grouping === 'subaccount'     && <PnlBySubaccountTable   rows={subs}    sort={subSort}    onSort={handleSubSort}    />}
+          {grouping === 'source-type'    && <PnlBySourceTypeTable   rows={sources} sort={sourceSort} onSort={handleSourceSort} />}
+          {grouping === 'provider-model' && <PnlByProviderModelTable rows={models} sort={modelSort}  onSort={handleModelSort}  />}
         </div>
 
         {/* Trend chart */}

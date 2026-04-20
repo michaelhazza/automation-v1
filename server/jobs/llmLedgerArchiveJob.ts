@@ -16,7 +16,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 import { computeArchiveCutoff } from './llmLedgerArchiveJobPure.js';
@@ -36,7 +36,19 @@ export async function archiveOldLedgerRows(): Promise<ArchiveResult> {
   for (;;) {
     // Select + copy + delete in a single transaction. The CTE chain
     // guarantees atomicity — a failure aborts everything.
-    const moved = await db.transaction(async (tx) => {
+    //
+    // llm_requests + llm_requests_archive both have FORCE ROW LEVEL
+    // SECURITY. This nightly sweep is intentionally cross-tenant, so the
+    // transaction runs under withAdminConnection + `SET LOCAL ROLE
+    // admin_role` (BYPASSRLS) — the only legitimate cross-org caller for
+    // these tables.
+    const moved = await withAdminConnection(
+      {
+        source: 'llmLedgerArchiveJob',
+        reason: `retention sweep ≥ ${env.LLM_LEDGER_RETENTION_MONTHS} months`,
+      },
+      async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
       const result = await tx.execute(sql`
         WITH doomed AS (
           SELECT id
@@ -95,7 +107,8 @@ export async function archiveOldLedgerRows(): Promise<ArchiveResult> {
       // is the RETURNING row (`1`). Length is the count of deleted rows.
       const rowList = result as unknown as ArrayLike<unknown>;
       return rowList.length ?? 0;
-    });
+      },
+    );
 
     totalMoved += moved;
     if (moved < CHUNK_SIZE) break;
