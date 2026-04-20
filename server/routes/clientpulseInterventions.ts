@@ -9,6 +9,7 @@ import {
   createOperatorProposal,
   INTERVENTION_ACTION_TYPES,
 } from '../services/clientPulseInterventionContextService.js';
+import { crmLiveDataService } from '../services/crmLiveDataService.js';
 
 const router = Router();
 
@@ -84,6 +85,95 @@ router.post(
       templateSlug: parsed.data.templateSlug,
     });
     res.json(result);
+  }),
+);
+
+// ── Live-data pickers — spec §3.2 (Session 2 Chunk 3) ──────────────────────
+// Five read-only endpoints backing the intervention editor pickers. Each is
+// subaccount-scoped and authenticates via the standard middleware chain.
+
+function sendLiveDataResult<T>(
+  res: import('express').Response,
+  result:
+    | { ok: true; items: T[] }
+    | { ok: false; rateLimited: true; retryAfterSeconds: number }
+    | { ok: false; error: string },
+): void {
+  if (result.ok) {
+    res.json({ items: result.items });
+    return;
+  }
+  if ('rateLimited' in result) {
+    res.status(429).json({
+      errorCode: 'RATE_LIMITED',
+      retryAfterSeconds: result.retryAfterSeconds,
+      message: 'CRM rate-limited — retry after delay',
+    });
+    return;
+  }
+  res.status(502).json({ errorCode: 'CRM_UPSTREAM', message: result.error });
+}
+
+router.get(
+  '/api/clientpulse/subaccounts/:subaccountId/crm/automations',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    const sub = await resolveSubaccount(req.params.subaccountId, orgId);
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const result = await crmLiveDataService.listAutomations(sub.id, orgId, q);
+    sendLiveDataResult(res, result);
+  }),
+);
+
+router.get(
+  '/api/clientpulse/subaccounts/:subaccountId/crm/contacts',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    const sub = await resolveSubaccount(req.params.subaccountId, orgId);
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const result = await crmLiveDataService.listContacts(sub.id, orgId, q);
+    sendLiveDataResult(res, result);
+  }),
+);
+
+router.get(
+  '/api/clientpulse/subaccounts/:subaccountId/crm/users',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    const sub = await resolveSubaccount(req.params.subaccountId, orgId);
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const result = await crmLiveDataService.listUsers(sub.id, orgId, q);
+    sendLiveDataResult(res, result);
+  }),
+);
+
+router.get(
+  '/api/clientpulse/subaccounts/:subaccountId/crm/from-addresses',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    const sub = await resolveSubaccount(req.params.subaccountId, orgId);
+    const result = await crmLiveDataService.listFromAddresses(sub.id, orgId);
+    sendLiveDataResult(res, result);
+  }),
+);
+
+router.get(
+  '/api/clientpulse/subaccounts/:subaccountId/crm/from-numbers',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    const sub = await resolveSubaccount(req.params.subaccountId, orgId);
+    const result = await crmLiveDataService.listFromNumbers(sub.id, orgId);
+    sendLiveDataResult(res, result);
   }),
 );
 

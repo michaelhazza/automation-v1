@@ -86,10 +86,10 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
   };
 
   const renderRightPane = () => {
-    if (picked === 'crm.fire_automation' && context) return <FireAutomationEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.fire_automation', payload, rationale, extras)} />;
+    if (picked === 'crm.fire_automation' && context) return <FireAutomationEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.fire_automation', payload, rationale, extras)} />;
     if (picked === 'crm.send_email' && context) return <EmailAuthoringEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.send_email', payload, rationale, extras)} />;
     if (picked === 'crm.send_sms' && context) return <SendSmsEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.send_sms', payload, rationale, extras)} />;
-    if (picked === 'crm.create_task' && context) return <CreateTaskEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.create_task', payload, rationale, extras)} />;
+    if (picked === 'crm.create_task' && context) return <CreateTaskEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.create_task', payload, rationale, extras)} />;
     if (picked === 'notify_operator' && context) return <OperatorAlertEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale) => handleSubmit('notify_operator', payload, rationale)} />;
     return (
       <div className="space-y-3">
