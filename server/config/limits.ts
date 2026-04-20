@@ -650,3 +650,13 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  * keyed on userId. See spec §4.8 for Phase 2 Redis migration notes.
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
+
+// ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
+
+/**
+ * Default hard timeout (ms) on a single GHL dispatch from apiAdapter.execute().
+ * Consumed as a fallback when action.metadata_json.timeoutBudgetMs is missing.
+ * Spec §2.6 precondition 4 — timeout budget remaining. 30 s is comfortably
+ * above typical GHL p99 (sub-5 s) but below pg-boss's visibility timeout.
+ */
+export const DEFAULT_ADAPTER_TIMEOUT_MS = 30_000;

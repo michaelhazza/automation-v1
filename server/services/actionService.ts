@@ -27,6 +27,17 @@ export function hashActionArgs(args: Record<string, unknown>): string {
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
+/**
+ * Full SHA-256 digest of a canonicalised payload. Stored in
+ * metadata_json.validationDigest at propose-time; re-computed by the execution
+ * engine's precondition gate (ClientPulse Session 2 §2.6 precondition 2) and
+ * compared byte-for-byte — a drift triggers `blocked: drift_detected`.
+ */
+export function computeValidationDigest(payload: Record<string, unknown>): string {
+  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
 export function buildActionIdempotencyKey(params: {
   runId: string;
   toolCallId: string;
@@ -264,6 +275,48 @@ export const actionService = {
     }).where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
 
     await this.emitEvent(actionId, organisationId, 'execution_completed');
+  },
+
+  /**
+   * Mark action as blocked with a reason stored in metadata_json.blockedReason.
+   * Used by the execution engine's precondition gate (ClientPulse Session 2 §2.6).
+   * Blocked actions are terminal — no retry — but distinguishable from `failed`
+   * in audit because the precondition that failed is machine-readable.
+   */
+  async markBlocked(
+    actionId: string,
+    organisationId: string,
+    blockedReason:
+      | 'drift_detected'
+      | 'concurrent_execute'
+      | 'timeout_budget_exhausted'
+      | 'validation_digest_missing',
+    detail?: string,
+  ): Promise<void> {
+    const [action] = await db
+      .select({ metadataJson: actions.metadataJson })
+      .from(actions)
+      .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
+
+    const nextMetadata = {
+      ...((action?.metadataJson as Record<string, unknown> | null) ?? {}),
+      blockedReason,
+      blockedDetail: detail ?? null,
+      blockedAt: new Date().toISOString(),
+    };
+
+    await db
+      .update(actions)
+      .set({
+        status: 'blocked',
+        metadataJson: nextMetadata,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
+
+    await this.emitEvent(actionId, organisationId, 'execution_failed', undefined, {
+      blockedReason,
+    });
   },
 
   /**
