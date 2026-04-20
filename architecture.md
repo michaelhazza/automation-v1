@@ -2483,6 +2483,17 @@ Every router call accepts an `AbortSignal`. Adapters thread the signal into `fet
 
 The ledger row records the distinction in `abort_reason`. `isNonRetryableError` treats `CLIENT_DISCONNECTED` as non-retryable — no point retrying a call whose consumer has gone away.
 
+#### Provider-call timeout contract (April 2026 hardening)
+
+A separate internal timeout guards every provider call. `callWithTimeout` (`server/services/llmRouterTimeoutPure.ts`) owns the contract:
+
+- **Merged abort signal.** Creates an internal `AbortController`, merges it with the caller's signal via `AbortSignal.any([...])`, and passes the merged signal to the adapter factory. When the timer fires, the fetch is genuinely cancelled — the earlier `Promise.race` pattern left orphaned fetches running and caused provider-side double-billing when the retry loop fired a second concurrent call.
+- **Typed error.** On timer fire, the merged signal aborts with a `ProviderTimeoutError` (`code: 'PROVIDER_TIMEOUT'`, `statusCode: 504`). `callWithTimeout` re-throws that typed error rather than the generic `AbortError` so the router's classifier can distinguish internal timeouts from caller aborts.
+- **Non-retryable.** `isNonRetryableError` treats `PROVIDER_TIMEOUT` the same as `CLIENT_DISCONNECTED` — ambiguous state; the provider may have completed generation server-side, so a retry under the same idempotency key could double-bill at the provider. Propagate immediately; the caller decides whether to replay under a new idempotency key.
+- **Generous cap.** `PROVIDER_CALL_TIMEOUT_MS` is **600 s** (`server/config/limits.ts`) — above every documented provider ceiling including OpenAI reasoning models. The earlier 30 s cap routinely tripped on legitimate long generations inside the skill analyzer, which was the original trigger for the LLM observability work.
+
+See spec §17 for why this is the internal mitigation rather than a provider-header fix: no LLM provider currently documents an idempotency header on its generation endpoints (verified April 2026 — Anthropic, OpenAI, OpenRouter, Gemini). Test pins live in `server/services/__tests__/llmRouterTimeoutPure.test.ts`.
+
 ### Cost aggregate dimensions (spec §6.2)
 
 `cost_aggregates` is the pre-rolled read model for every P&L dashboard. Entity types:

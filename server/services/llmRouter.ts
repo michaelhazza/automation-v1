@@ -158,17 +158,11 @@ function getBillingPeriods(): { billingMonth: string; billingDay: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Provider timeout guard
+// Provider timeout guard — pure implementation lives in llmRouterTimeoutPure
+// so tests can exercise it without booting the env-dependent router module.
 // ---------------------------------------------------------------------------
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Provider call timed out after ${ms}ms (${label})`)), ms)
-    ),
-  ]);
-}
+export { ProviderTimeoutError, callWithTimeout } from './llmRouterTimeoutPure.js';
 
 // ---------------------------------------------------------------------------
 // Provider cooldown map — skip recently-failed providers
@@ -227,6 +221,13 @@ function isNonRetryableError(err: unknown): boolean {
   // stop; re-hitting the provider on their behalf wastes tokens and can
   // produce confusing duplicate calls in the Anthropic console.
   if (e.code === 'CLIENT_DISCONNECTED') return true;
+  // Provider timeouts are "ambiguous state" — the provider may have already
+  // completed generation server-side. A retry under the same idempotency key
+  // would issue a second concurrent call and double-bill at the provider
+  // layer (no LLM provider currently supports request-level dedup headers).
+  // Propagate immediately; the caller decides whether to replay under a new
+  // idempotency key. See spec §17 deferred items.
+  if (e.code === 'PROVIDER_TIMEOUT') return true;
   const code = (e.code ?? '').toLowerCase();
   return code.includes('auth') || code.includes('invalid') || code.includes('bad_request');
 }
@@ -544,18 +545,19 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     for (let attempt = 1; attempt <= PROVIDER_MAX_RETRIES + 1; attempt++) {
       try {
-        providerResponse = await withTimeout(
-          providerAdapter.call({
+        providerResponse = await callWithTimeout(
+          `${provider}/${mappedModel}`,
+          PROVIDER_CALL_TIMEOUT_MS,
+          params.abortSignal,
+          (signal) => providerAdapter.call({
             model:       mappedModel,
             messages:    params.messages,
             system:      params.system,
             tools:       params.tools,
             maxTokens:   params.maxTokens,
             temperature: params.temperature,
-            signal:      params.abortSignal,   // rev §6 — caller cancellation
+            signal,
           }),
-          PROVIDER_CALL_TIMEOUT_MS,
-          `${provider}/${mappedModel}`
         );
 
         // Rev §6 — post-process hook. Runs the caller's schema check with
