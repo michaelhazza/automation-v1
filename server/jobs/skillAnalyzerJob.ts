@@ -9,8 +9,13 @@
  *   Stage 5: Classify (60% → 90%)
  *   Stage 6: Write    (90% → 100%)
  *
- * Idempotent: deletes existing results before re-processing on retry.
- * Max 1 retry with 5-minute delay on crash.
+ * Crash-resume: on pg-boss retry (worker died mid-pipeline) this handler
+ * PRESERVES any rows already written to skill_analyzer_results and skips
+ * re-running their LLM classifications. Without this, a single dev-server
+ * restart mid-import costs 2× the LLM budget on every skill already done.
+ * See Stage 1 (preserves job.parsedCandidates to stabilise candidateIndex)
+ * and Stage 5 (skips slugs with existing rows). Max 1 retry with 5-minute
+ * delay on crash.
  */
 
 import { generateEmbeddings } from '../lib/embeddings.js';
@@ -26,9 +31,9 @@ import { systemSkillService } from '../services/systemSkillService.js';
 import {
   updateJobProgress,
   getJobById,
-  clearResultsForJob,
   insertResults,
   insertSingleResult,
+  listResultIndicesForJob,
   markSkillInFlight,
   unmarkSkillInFlight,
   updateResultAgentProposals,
@@ -88,8 +93,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     tierMap: effectiveTierMap(configSnapshot),
   };
 
-  // Idempotent: clear any prior results (support for retries)
-  await clearResultsForJob(jobId);
+  // Note: we do NOT clear skill_analyzer_results here. On pg-boss retry
+  // (e.g. worker died mid-classification) Stage 5 reads existing rows and
+  // skips their LLM calls — wiping would force every completed slug to be
+  // re-classified, doubling LLM spend on each restart.
 
   // -------------------------------------------------------------------------
   // Stage 1: Parse (0% → 10%)
@@ -103,9 +110,25 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   let candidates: ParsedSkill[];
 
   try {
-    if (job.sourceType === 'paste' || job.sourceType === 'upload') {
-      // Candidates were parsed at job creation and stored as JSONB
-      candidates = (job.parsedCandidates as ParsedSkill[]) || [];
+    const storedCandidates = Array.isArray(job.parsedCandidates)
+      ? (job.parsedCandidates as ParsedSkill[])
+      : [];
+    // On retry, prefer the candidate list persisted by a prior run: candidateIndex
+    // values in skill_analyzer_results are indices into this same array, and
+    // re-parsing a github/download source could drift (ordering or content)
+    // so the preserved result rows would no longer match the new parse.
+    if (storedCandidates.length > 0) {
+      candidates = storedCandidates;
+    } else if (job.sourceType === 'paste' || job.sourceType === 'upload') {
+      // Paste/upload candidates are parsed at job-creation time and written
+      // to parsedCandidates before the job is enqueued — reaching this branch
+      // means the job row is corrupt. Fail with a message that points at the
+      // cause rather than the downstream "no valid skills" message.
+      await updateJobProgress(jobId, {
+        status: 'failed',
+        errorMessage: 'parsedCandidates is missing on this job row — re-submit the analysis.',
+      });
+      return;
     } else if (job.sourceType === 'github') {
       const githubMeta = job.sourceMetadata as { url: string };
       candidates = await skillParserService.parseFromGitHub(githubMeta.url);
@@ -464,6 +487,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // embedding stage above.
   const classificationFallback = !env.ANTHROPIC_API_KEY;
 
+  // Crash-resume: read any result rows already written by a prior worker run.
+  // Each existing row represents a classification that has already been paid
+  // for at the provider and persisted locally — we must not re-call for it.
+  const existingResultRows = await listResultIndicesForJob(jobId);
+  const completedCandidateIndices = new Set<number>(
+    existingResultRows.map((r) => r.candidateIndex),
+  );
+  const resumedLlmQueue = llmQueue.filter(
+    (m) => !completedCandidateIndices.has(m.candidateIndex),
+  );
+  const resumedSkippedCount = llmQueue.length - resumedLlmQueue.length;
+  if (resumedSkippedCount > 0) {
+    logger.info('skill_analyzer.stage5_resume', {
+      jobId,
+      alreadyClassified: resumedSkippedCount,
+      remainingToClassify: resumedLlmQueue.length,
+      totalLlmQueue: llmQueue.length,
+    });
+  }
+
   await updateJobProgress(jobId, {
     status: 'classifying',
     progressPct: 60,
@@ -471,7 +514,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
     classifyState: {
-      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
+      // Only the remaining (un-classified) slugs belong in the live queue; the
+      // inFlight map is always reset — any entries from a prior crashed
+      // process refer to calls that are definitively dead.
+      queue: resumedLlmQueue.map((m) => candidates[m.candidateIndex].slug),
       inFlight: {},
     },
   });
@@ -500,6 +546,40 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   const classifiedResults: ClassifiedResult[] = [];
 
+  // On resume, seed classifiedResults with minimal entries for rows that
+  // were written by an earlier run — Stages 7, 7b, and 8 read classifiedResults
+  // to pick DISTINCT candidates for agent-propose / Haiku enrichment and to
+  // backfill agentProposals onto existing rows. Entries here only carry the
+  // fields those stages actually use (candidateIndex + classification); other
+  // fields are filled with neutral defaults.
+  if (completedCandidateIndices.size > 0) {
+    const llmQueueIndices = new Set(llmQueue.map((m) => m.candidateIndex));
+    for (const existing of existingResultRows) {
+      // Only replay rows that represent a Stage-5 LLM classification — i.e.
+      // rows whose candidateIndex was in the llmQueue this run. Rows for
+      // exactDuplicates (Stage 2) and Stage-4 distinctResults are written in
+      // Stage 8; they'll be re-added to resultRows below and deduped there.
+      if (!llmQueueIndices.has(existing.candidateIndex)) continue;
+      const candidate = candidates[existing.candidateIndex];
+      if (!candidate) continue;
+      classifiedResults.push({
+        candidateIndex:                existing.candidateIndex,
+        candidate,
+        classification:                existing.classification,
+        confidence:                    0,
+        similarityScore:               null,
+        classificationReasoning:       null,
+        libraryId:                     null,
+        librarySlug:                   null,
+        libraryName:                   null,
+        diffSummary:                   null,
+        proposedMerge:                 null,
+        classificationFailed:          false,
+        classificationFailureReason:   null,
+      });
+    }
+  }
+
   // Build a lookup for library skills by slug
   const libraryBySlug = new Map<string, LibrarySkillSummary>(
     librarySkills.map((lib) => [lib.slug, lib])
@@ -510,7 +590,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       '[SkillAnalyzerJob] ANTHROPIC_API_KEY not set - skipping LLM classification; all ambiguous pairs routed to PARTIAL_OVERLAP for human review'
     );
 
-    for (const match of llmQueue) {
+    for (const match of resumedLlmQueue) {
       const candidate = candidates[match.candidateIndex];
       const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
@@ -667,10 +747,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // meaningful parallelism while halving peak token draw; drop to 1 if
     // stalls still occur on marketing-heavy imports.
     const limit = await getPLimit(2);
-    let classifiedCount = 0;
+    // Resume-aware progress: start the counter at the number of candidates
+    // that were already classified by a prior run so the UI percentage doesn't
+    // regress after a worker restart.
+    let classifiedCount = resumedSkippedCount;
 
     await Promise.all(
-      llmQueue.map((match) =>
+      resumedLlmQueue.map((match) =>
         limit(async () => {
           const candidate = candidates[match.candidateIndex];
           const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
@@ -1249,8 +1332,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     });
   }
 
+  // On crash-resume, Stage 2 exactDuplicate rows and Stage 4 distinctResults
+  // rows that were already written by a prior run must not be re-inserted —
+  // skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint,
+  // so a plain insert would silently duplicate every such row. Filter against
+  // the indices we observed at the start of Stage 5. candidateIndex is a
+  // required field on $inferInsert, so no undefined guard is needed.
+  const resultRowsToWrite = resultRows.filter(
+    (row) => !completedCandidateIndices.has(row.candidateIndex!),
+  );
+
   // Insert via service (avoids direct db import in jobs)
-  await insertResults(resultRows);
+  await insertResults(resultRowsToWrite);
 
   // Backfill agentProposals onto classified-DISTINCT rows. These rows were
   // written incrementally in Stage 5 (before Stage 7 ran), so their
