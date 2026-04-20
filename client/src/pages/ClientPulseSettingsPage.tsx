@@ -28,6 +28,34 @@ import InterventionTemplatesEditor from '../components/clientpulse-settings/edit
 import type { InterventionTemplate } from '../components/clientpulse-settings/editors/interventionTemplateRoundTripPure';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { buildBlockContextPrompt } from '../lib/configAssistantPrompts';
+import HealthScoreFactorsEditor from '../components/clientpulse-settings/editors/HealthScoreFactorsEditor';
+import ChurnRiskSignalsEditor from '../components/clientpulse-settings/editors/ChurnRiskSignalsEditor';
+import ChurnBandsEditor from '../components/clientpulse-settings/editors/ChurnBandsEditor';
+import InterventionDefaultsEditor from '../components/clientpulse-settings/editors/InterventionDefaultsEditor';
+import AlertLimitsEditor from '../components/clientpulse-settings/editors/AlertLimitsEditor';
+import DataRetentionEditor from '../components/clientpulse-settings/editors/DataRetentionEditor';
+import OnboardingMilestonesEditor from '../components/clientpulse-settings/editors/OnboardingMilestonesEditor';
+import StaffActivityEditor from '../components/clientpulse-settings/editors/StaffActivityEditor';
+import IntegrationFingerprintsEditor from '../components/clientpulse-settings/editors/IntegrationFingerprintsEditor';
+
+function typedEditorFor(
+  blockPath: string,
+  value: unknown,
+  onSave: (next: unknown) => Promise<void>,
+): React.ReactNode | null {
+  switch (blockPath) {
+    case 'healthScoreFactors': return <HealthScoreFactorsEditor value={value} onSave={onSave} />;
+    case 'churnRiskSignals': return <ChurnRiskSignalsEditor value={value} onSave={onSave} />;
+    case 'churnBands': return <ChurnBandsEditor value={value} onSave={onSave} />;
+    case 'interventionDefaults': return <InterventionDefaultsEditor value={value} onSave={onSave} />;
+    case 'alertLimits': return <AlertLimitsEditor value={value} onSave={onSave} />;
+    case 'dataRetention': return <DataRetentionEditor value={value} onSave={onSave} />;
+    case 'onboardingMilestones': return <OnboardingMilestonesEditor value={value} onSave={onSave} />;
+    case 'staffActivity': return <StaffActivityEditor value={value} onSave={onSave} />;
+    case 'integrationFingerprints': return <IntegrationFingerprintsEditor value={value} onSave={onSave} />;
+    default: return null;
+  }
+}
 
 // Per spec §6.2 — the 10 blocks surfaced on the Settings page.
 const BLOCKS: Array<{ path: string; title: string; description: string }> = [
@@ -231,7 +259,7 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
         </div>
       </div>
       <div className="p-4">
-        {block.path === 'interventionTemplates' && editing && Array.isArray(effectiveValue) ? (
+        {editing && block.path === 'interventionTemplates' && Array.isArray(effectiveValue) ? (
           <InterventionTemplatesEditorWithFallback
             templates={effectiveValue as InterventionTemplate[]}
             onSave={async (next) => {
@@ -258,6 +286,52 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
               }
             }}
           />
+        ) : editing && typedEditorFor(block.path, effectiveValue, async (next) => {
+          setSaving(true);
+          try {
+            const res = await api.post('/api/organisation/config/apply', {
+              path: block.path,
+              value: next,
+              reason: `Update ${block.path} via typed editor`,
+            });
+            if (res.data?.errorCode) {
+              toast.error(res.data?.message ?? `Save rejected (${res.data.errorCode}).`);
+              return;
+            }
+            if (res.data?.committed) {
+              toast.success(`${block.title} saved · history v${res.data.configHistoryVersion}`);
+            } else if (res.data?.requiresApproval) {
+              toast.success(`${block.title} sent to review queue · action ${String(res.data.actionId).slice(0, 8)}`);
+            }
+            setEditing(false);
+            onSaved();
+          } finally {
+            setSaving(false);
+          }
+        }) ? (
+          typedEditorFor(block.path, effectiveValue, async (next) => {
+            setSaving(true);
+            try {
+              const res = await api.post('/api/organisation/config/apply', {
+                path: block.path,
+                value: next,
+                reason: `Update ${block.path} via typed editor`,
+              });
+              if (res.data?.errorCode) {
+                toast.error(res.data?.message ?? `Save rejected (${res.data.errorCode}).`);
+                return;
+              }
+              if (res.data?.committed) {
+                toast.success(`${block.title} saved · history v${res.data.configHistoryVersion}`);
+              } else if (res.data?.requiresApproval) {
+                toast.success(`${block.title} sent to review queue · action ${String(res.data.actionId).slice(0, 8)}`);
+              }
+              setEditing(false);
+              onSaved();
+            } finally {
+              setSaving(false);
+            }
+          })
         ) : editing ? (
           <div>
             <textarea
