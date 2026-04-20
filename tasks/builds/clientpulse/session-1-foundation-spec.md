@@ -68,6 +68,8 @@ Introduced this session:
 - (k) **Session lifecycle for the Configuration Assistant popup:** opening a popup resumes the most recent agent run < 15 minutes old, else creates a fresh one. Closing the popup does not kill the run. Background execution surfaces via the minimised pill.
 - (l) **All inbound action-slug surfaces MUST normalise via `resolveActionSlug`.** Routes, webhook handlers, queue consumers, anything that receives an `action_type` from an external caller. Legacy slugs are expected to appear for at least 2-3 releases; defensive normalisation is the contract, not the exception.
 - (m) **Intervention state machine is strictly linear.** The `actions` row progresses `proposed → (approved | rejected | blocked) → executing → (completed | failed | skipped)`. No branching states, no intermediate sub-states. Transitions validated at `actionService.transition()` against `LEGAL_TRANSITIONS` (server/config/actionRegistry.ts). Any new state that feels necessary is an architectural change + needs a separate spec round — not an implementation-time addition.
+  - **`blocked` state semantics.** `blocked` is a **terminal** state, not a transitional one — used when the policy engine, sensitive-path gate, or an external denial (missing credentials, expired scope, quota exceeded at the adapter layer) makes the action un-executable. `actions.errorJson.blockedReason` carries an enum explaining why (`policy_denial`, `missing_integration`, `scope_expired`, `quota_exceeded`, `sensitive_path_drift`, `other`). The operator does NOT re-enter approval for a blocked row — they re-propose (new action row with a new idempotency key). `blocked` does not auto-retry.
+  - **`skipped` state semantics.** Terminal. Used when a proposed action was rendered irrelevant before execution (cooldown hit between propose and approve, target entity deleted, operator bulk-rejected via the review queue, duplicate detected at the adapter layer). Every skipped row MUST carry `actions.errorJson.skippedReason` from the closed enum `{ 'cooldown_elapsed', 'target_missing', 'operator_dismissed', 'duplicate_external', 'quota_exceeded_retroactive', 'other' }`. Analytics queries filter on this enum; un-enumerated `'other'` is a bug to chase.
 - (n) **Config gating is pure; execution is deterministic.** Validation (`applyPathPatch` + `validateProposedConfig` + `classifyWritePath`) produces no side effects — same input → same output. The approval-execute phase never mutates config during execution; it re-validates for drift then applies the already-validated merge in a single transaction. Never interleave validation with execution.
 - (o) **Canonical intervention idempotency key pattern.** Every intervention surface derives its key from: `clientpulse:intervention:{source}:{subaccountId|orgId}:{templateSlug|actionType}:{correlation}`, where `source ∈ {scenario_detector, operator_manual, ...}` and `correlation` is the logical-identity anchor (e.g. churnAssessmentId for scenario_detector, payload-hash for operator_manual). Any new intervention trigger (polling, webhook, API) MUST follow this pattern. Implemented in `clientPulseInterventionIdempotencyPure.ts`; new triggers extend the existing pure module rather than inventing their own format.
 - (p) **Atomicity boundaries are explicit.** Each DB transaction is the unit of atomicity. Specifically:
@@ -81,6 +83,33 @@ Introduced this session:
   - `action_events` already carries action_id via FK — no change needed there.
   - The existing `clientpulse.intervention.enqueued` lifecycle event already complies; new events inherit the pattern.
 - (r) **Replayability is a first-class constraint.** Every intervention-decision function is pure-testable with deterministic inputs → deterministic outputs. `proposeClientPulseInterventionsPure()`, `decideOutcomeMeasurement()`, `validateInterventionActionMetadata()`, `applyPathPatch()`, `validateProposedConfig()`, `classifyWritePath()`, `resolveMergeFields()`, `canonicalStringify()`, `buildScenarioDetectorIdempotencyKey()`, `buildOperatorIdempotencyKey()` — all already pure. Any new intervention-decision logic added in Session 1 MUST live in a `*Pure.ts` module. I/O wrappers can exist around it but decision logic never lives inside them.
+- (s) **Retry vs replay — distinct concepts, distinct machinery.**
+  - **Automatic retry** (in-scope for Session 1): same `actions` row, `retry_count++` on each attempt, same `idempotency_key`, handler is expected to produce the same external effect (idempotent at the provider layer). Retry policy lives on `actionDefinition.retryPolicy` (maxRetries, strategy, retryOn, doNotRetryOn). The execution layer owns automatic retries; decision layer never triggers them.
+  - **Manual replay** (out-of-scope for Session 1 — documented for future): a deliberate NEW action row that re-runs a previously-completed or previously-failed intervention against a current-state target. When introduced, the schema adds `actions.replay_of_action_id` (nullable FK to the original). The new row's idempotency key derives from `(original_idempotency_key, 'replay', attempt_n, replaying_user_id)` so the two rows cannot collide on the canonical dedup guard. Operator audit trail links the replay back to the original via `replay_of_action_id`.
+  - **Never**: don't let automatic retry spawn a new action row. Never let manual replay reuse the original row's idempotency key.
+- (t) **Execution ordering priority** (for every atomic transaction boundary defined in (p)):
+  1. **Internal state writes first** — DB rows, status transitions, audit marker inserts. These are cheap + recoverable.
+  2. **External side effects last** — adapter calls, provider HTTP requests, email sends, SMS fires. These are expensive + often non-idempotent at the provider.
+  3. **Audit / logging NEVER skipped.** Every step emits its lifecycle log line before proceeding to the next step. If the audit write fails, the step aborts (no silent side effect).
+  Rationale: if the transaction aborts mid-flight, internal state rolls back + the external side effect never happened. If the external side effect succeeds but the post-step internal write fails, the next reconciliation sweep (per (p)) catches and rectifies the state drift via the existing execution timeout + orphan-detection paths.
+- (u) **External side effect preconditions.** No external side effect (adapter call, CRM API, email send, SMS fire, outbound webhook) executes unless ALL of the following are true:
+  1. Action is in `approved` state (per (m)).
+  2. Config validation is complete (per (n); for config-writing actions, drift digest matches).
+  3. Idempotency key is locked at the expected layer (DB unique index for the action row; provider-level Idempotency-Key header where the provider supports it).
+  4. Execution timeout + max-retry budget have capacity remaining.
+  The execution layer asserts all four before dispatching to the adapter; failed preconditions transition the action to `blocked` with an appropriate `errorJson.blockedReason`.
+- (v) **Deterministic ordering under concurrency.** When multiple interventions target the same subaccount or the same canonical entity:
+  - Scenario-detector proposals for the same `(subaccount, template, churnAssessmentId)` collapse to one (idempotency (o)).
+  - Approved actions for the same subaccount execute **serially**, ordered by `actions.created_at ASC` (secondary: `actions.id ASC` for tiebreaker). The execution layer acquires a PG advisory lock on `hashtext('intervention:' || subaccount_id)` for the duration of each action; concurrent executions against the same subaccount queue behind the lock. Cross-subaccount parallelism is unconstrained.
+  - Config writes against the same `organisations.operational_config_override` row serialise via `configHistoryService.recordHistory`'s existing advisory lock (`pg_advisory_xact_lock(hashtext('clientpulse_operational_config:' || entity_id))`).
+  - Any new intervention surface MUST declare its concurrency-lock scope up-front (which advisory key does it hold during execute?). Default to "same subaccount" unless there's an explicit cross-subaccount coordination requirement.
+
+### §1.6 Intervention lifecycle invariants
+
+Two invariants that bind everything above:
+
+1. **Every intervention produces exactly one terminal outcome.** `completed`, `failed`, `rejected`, `blocked`, or `skipped` — one row, one final state. The `intervention_outcomes` row (when applicable) records the measurement outcome separately from the action's terminal state; the action's terminal state is still one.
+2. **Every intervention is traceable via `action.id`.** Every log, event, audit row, and config_history row that touches the lifecycle carries the id. Cross-system queries for "what happened with intervention X" resolve from that single key. When manual replay lands (future), traces follow the replay chain via `replay_of_action_id`.
 
 ### §1.4 Layering — Decision vs Execution
 
@@ -103,6 +132,45 @@ The "intervention envelope" is the conceptual object `{ actions row + interventi
 - `config_history` rows (when the intervention triggered a config write) — audit trail
 
 Queries that need the "full envelope" join on `action.id` = `intervention_outcomes.intervention_id` = `config_history` where applicable. Do NOT introduce a materialised `interventions` view table — the envelope lives where the data is written.
+
+**`intervention_id` vs `action_id` — explicit naming rule.** In Session 1 the two are the same identifier (one action row = one intervention). The canonical contract:
+
+```typescript
+type InterventionEnvelope = {
+  // Identity — logical intervention id. Today: equal to actionId. When manual
+  // replay is introduced, this becomes the "chain id" that groups the original
+  // and its replays; `replay_of_action_id` walks the chain.
+  interventionId: string;  // = actionId in Session 1
+  actionId: string;        // FK → actions.id
+
+  // Decision
+  actionType: string;
+  payload: unknown;
+  decisionContext: InterventionActionMetadata;  // actions.metadataJson, validated
+
+  // Approval
+  approvalState: 'proposed' | 'approved' | 'rejected' | 'blocked';
+  approvedBy?: string;
+  approvedAt?: Date;
+
+  // Execution
+  executionState: 'executing' | 'completed' | 'failed' | 'skipped';
+  resultJson?: unknown;
+  executedAt?: Date;
+
+  // Outcome (Nullable — measurement lags execution)
+  outcome?: {
+    healthScoreBefore?: number;
+    healthScoreAfter?: number;
+    bandBefore?: string;
+    bandAfter?: string;
+    bandChanged: boolean;
+    outcome: 'improved' | 'unchanged' | 'worsened' | null;
+  };
+};
+```
+
+This type is **documentation-only** — it is not a persisted table or returned by any API directly today. Logs, event payloads, and cross-service correlation should use `actionId` as the first-class key (per (q)); `interventionId` as a logical grouping becomes a distinct concept only when manual replay lands. At that point the type-alias stays; `interventionId` starts differing from `actionId` for replay chains; all existing queries continue to work because they join on `action.id` which is always present.
 
 ## §2. Phase A — data-model separation for org-level operational config
 
