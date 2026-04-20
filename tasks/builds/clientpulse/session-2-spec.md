@@ -1170,9 +1170,11 @@ export default function ConfigAssistantPopup() {
 }
 ```
 
-#### §11.3.4 Apply the 15-minute resume window
+#### §11.3.4 Tighten the 15-minute resume window
 
-The `useConfigAssistantPopup` hook currently stores `CONFIG_ASSISTANT_RESUME_WINDOW_MIN` as a constant but never uses it. Wire it up:
+**Status update (Session 1 close-out, commit `35519cd`):** Session 1 already enforces the 15-minute window via URL-param plumbing — the popup stamps `updatedAfter=<now-15min>` into the iframe `src`; `ConfigAssistantPage` forwards it to `GET /api/agents/:id/conversations?updatedAfter=...&limit=1&order=updated_desc`. When no conversation is inside the window, the page's empty-list fallback creates a fresh conversation. Contract (k) is structurally honoured today.
+
+D.3 does NOT re-implement the window — it replaces the URL-param plumbing with direct hook-level enforcement now that the panel is a React component rather than an iframe target. The clean shape:
 
 On `openConfigAssistant(prompt?)`:
 
@@ -1181,7 +1183,9 @@ On `openConfigAssistant(prompt?)`:
 3. If the response includes the stored conversationId → resume it (set `activeConversationId` on context).
 4. Otherwise → create fresh (null `activeConversationId`; panel creates on first message).
 
-`<ConfigAssistantPanel>` consumes `conversationId` from props; the parent (page or popup) decides resume-vs-fresh.
+`<ConfigAssistantPanel>` consumes `conversationId` from props; the parent (page or popup) decides resume-vs-fresh. The Session 1 URL-param reader in `ConfigAssistantPage` is removed as part of the page's collapse to a thin wrapper (§11.3.2) — the full-page route doesn't need the popup-only `updatedAfter` param once the panel owns conversation selection.
+
+**Kickoff audit:** confirm the Session 1 URL-param reader still exists in `ConfigAssistantPage.tsx` — it's expected to go away cleanly when the panel extraction lands.
 
 #### §11.3.5 Files — D.3
 
@@ -1478,6 +1482,8 @@ These are documented as post-pilot deferrals. Spec does NOT promise them for Ses
 8. **Subaccount-scoped outcome aggregation for recommendations.** §5.7 — Session 2 aggregates at org level; per-subaccount aggregation post-pilot if signals noisy.
 9. **Picker "show more" affordance** (§3.8 Q2). 50-row cap; expand if pilot operators have >50 matches.
 10. **JSON editor fallback removal** (§8.6). Typed `InterventionTemplatesEditor` ships; JSON fallback stays until pilot validates the typed surface.
+11. **Global permission / auth context.** Session 1's `useOnboardingRedirect` fetches `/api/my-permissions` inline alongside `/api/onboarding/status`. `Layout.tsx` already fetches the same permission set for nav-gate decisions. Consolidating the fetch into a single app-level React context (e.g. `PermissionContext`) would eliminate the duplicate network round-trip and give every consumer a uniform `hasPermission(key)` helper. Flagged by the Session 1 third-round review as non-blocking; worth a small follow-up chunk post-pilot rather than mid-Session 2. Not in the current §12.1 chunk list — will shape into a D.5 if the user wants it folded in, otherwise ships as its own small PR after Session 2 merges.
+12. **Server-side 15-minute resume-window enforcement.** Session 1 + Session 2 both enforce the resume window on the client (spec contract (k)). A hardened posture would add a server-side guardrail on `GET /api/agents/:id/conversations` that caps `updatedAfter` to a minimum of `now - 15min` regardless of what the client sends, so a modified client can't resume a stale conversation outside the spec window. Low-priority; adds server complexity for a low-risk client-trust attack surface. Revisit if the Configuration Assistant ever holds sensitive state that a stale resume could compromise.
 
 ### §14.4 Items deliberately left as chunk-kickoff audits (non-blocking)
 
