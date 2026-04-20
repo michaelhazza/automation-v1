@@ -730,7 +730,9 @@ Two migrations exist on main with the same prefix:
 Drizzle's migration runner doesn't enforce numeric-prefix uniqueness strictly, but on a fresh DB run the ordering is non-deterministic. Renumber the skill-analyzer one (it landed second per the merge order).
 
 ```bash
-git mv migrations/0178_skill_analyzer_execution_lock_token.sql migrations/0180_skill_analyzer_execution_lock_token.sql
+# NNNN = Session 1's first migration slot (resolved at chunk A.1 kickoff).
+# With current main ending at 0179, NNNN=0180, so the rename target is 0184.
+git mv migrations/0178_skill_analyzer_execution_lock_token.sql migrations/0184_skill_analyzer_execution_lock_token.sql
 ```
 
 Verify nothing else references `0178_skill_analyzer_execution_lock_token.sql` by filename.
@@ -1136,8 +1138,8 @@ Screenshots of each screen go into the verification checklist (§8).
 ### §8.1 Chunk sequence (8 chunks, serialised)
 
 1. **Architect pass.** Produce `tasks/builds/clientpulse/session-1-plan.md` appended as §§1–8 with chunk-level file inventories, test lists, and pseudocode for the interesting bits. (Spec-reviewer optional; see §8.5.)
-2. **A.1 — Data model + core renames.** New migrations (org override column + seed rename + operator_alert slug rewrite + onboarding_completed_at). Schema + type updates. Pure tests for `getOperationalConfig` read chain + `resolveActionSlug` alias resolver. One commit.
-3. **A.2 — Config service refactor.** Rename `configUpdateHierarchyTemplate{Service,Pure}` → `configUpdateOrganisation{Service,Pure}`. Retarget the service at `organisations.operational_config_override`. Sensitive-paths registry + bootstrap registration. All 18 existing Pure tests + 10 existing idempotency-key tests + 9 metadata-contract tests migrated with updated literals. One commit.
+2. **A.1 — Data model + core renames.** New migrations (org override column + seed rename + operator_alert slug rewrite + onboarding_completed_at). Schema + type updates. Pure tests for `getOperationalConfig` read chain + `resolveActionSlug` alias resolver. Carry-over pure tests consuming slug literals (`clientPulseInterventionProposerPure`, `clientPulseInterventionPrimitivesPure`, `interventionActionMetadataPure`, `interventionIdempotencyKeysPure`, `measureInterventionOutcomeJobPure`) migrated with updated `notify_operator` literals in the same chunk so the A.1 pure-test sanity gate stays green. One commit.
+3. **A.2 — Config service refactor.** Rename `configUpdateHierarchyTemplate{Service,Pure}` → `configUpdateOrganisation{Service,Pure}`. Retarget the service at `organisations.operational_config_override`. Sensitive-paths registry + bootstrap registration. File rename `configUpdateHierarchyTemplatePure.test.ts → configUpdateOrganisationConfigPure.test.ts` (all 18 cases carry unchanged). One commit.
 4. **A.3 — Generic route + UI renames.** New `server/routes/organisationConfig.ts` + `GET /api/organisation/config`. Retire `clientpulseConfig.ts`. UI renames (route, nav labels, page titles) across `client/src/`. One commit.
 5. **A.4 — Configuration Assistant popup.** Extract `<ConfigAssistantPanel>`, build `<ConfigAssistantPopup>` + `useConfigAssistantPopup` hook, mount at App shell, retire the Phase-4.5 popup, wire global trigger + contextual triggers. Manual smoke test in browser per CLAUDE.md UI rule. One commit.
 6. **Phase 5 — ClientPulse Settings page + blueprint editor refactor.** 9 typed editors (healthScoreFactors, churnRiskSignals, churnBands, interventionDefaults, alertLimits, staffActivity, integrationFingerprints, dataRetention, onboardingMilestones) + `InterventionTemplatesJsonEditor` (Session 1 ships JSON; typed Intervention Templates editor deferred to Session 2 per §6.2 / §10.5), save flow, reset-to-default affordance, provenance strip. Subaccount Blueprint editor field removal. One commit.
@@ -1383,7 +1385,7 @@ All prior open questions have been resolved inline in their sections. Consolidat
 | Q | Decision | Location |
 |---|----------|----------|
 | Retire `/api/clientpulse/config/apply` with no redirect? | Yes — clean retirement. Single in-app caller is being rewritten anyway; no external callers. | §4.2 |
-| Migration 0178 collision fix? | `git mv migrations/0178_skill_analyzer_execution_lock_token.sql migrations/0180_skill_analyzer_execution_lock_token.sql`. If Drizzle meta also references the old name, add a meta-update migration in chunk 2. | §4.7 |
+| Migration 0178 collision fix? | `git mv migrations/0178_skill_analyzer_execution_lock_token.sql migrations/NNNN+3_skill_analyzer_execution_lock_token.sql`, where `NNNN` is Session 1's first migration slot (resolved at chunk A.1 kickoff against `ls migrations/`). With `NNNN = 0180` on current main, the target is `0184_skill_analyzer_execution_lock_token.sql`. The original `0180` target predates Session 1's own migration numbering and would collide. If Drizzle meta also references the old name, add a meta-update migration in chunk A.1. | §4.7 |
 | Dedicated `ORG_PERMISSIONS.CONFIG_EDIT`? | No — reuse `AGENTS_EDIT` for Session 1. Revisit when a concrete "edit config but not agents" need arises. | §4.10 |
 | Rename `clientpulseReports.ts` routes? | No — product-specific reads stay on `/clientpulse/` prefix. Only genuinely cross-module surfaces move to `/api/organisation/*`. | §4.10 |
 | `registerSensitivePaths` import ordering? | Top of route-wiring section in `server/index.ts`, before any route registration. | §4.10 |
