@@ -82,7 +82,7 @@ export function decideOutcomeMeasurement(params: {
   // it we can't compute a delta, so we wait. Operator alerts have no signal to
   // measure — we still write an outcome row with null delta so cooldown logic
   // respects the firing.
-  const isOperatorAlert = params.action.actionType === 'clientpulse.operator_alert';
+  const isOperatorAlert = params.action.actionType === 'notify_operator';
   if (!params.postSnapshot && !isOperatorAlert) {
     return { kind: 'no_post_snapshot', windowEnds };
   }

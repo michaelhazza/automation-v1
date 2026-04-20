@@ -14,7 +14,7 @@ export type InterventionActionTypeName =
   | 'crm.send_email'
   | 'crm.send_sms'
   | 'crm.create_task'
-  | 'clientpulse.operator_alert';
+  | 'notify_operator';
 
 /**
  * Deterministic idempotency key for scenario-detector proposals. Same

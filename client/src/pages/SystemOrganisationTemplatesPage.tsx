@@ -94,7 +94,7 @@ function SlotTreeRow({ slot, depth }: { slot: TemplateSlot; depth: number }) {
   );
 }
 
-export default function SystemCompanyTemplatesPage({ user: _user }: { user: User }) {
+export default function SystemOrganisationTemplatesPage({ user: _user }: { user: User }) {
   const [templates, setTemplates] = useState<SystemTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);

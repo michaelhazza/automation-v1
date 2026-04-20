@@ -355,16 +355,16 @@ Without explicit rules, the taxonomy grows inconsistently: `read_email` vs `inbo
 
 ### 3.7.1 ClientPulse configuration routing hints (Phase 4.5 extension)
 
-The ClientPulse operational_config block is a first-class capability surface — operator queries like "bump pipeline velocity weight to 0.35", "lower the alert notification threshold", "change churn band thresholds" all resolve to the same skill (`config_update_hierarchy_template`). Surface these via four capability slugs in the taxonomy:
+The ClientPulse operational_config block is a first-class capability surface — operator queries like "bump pipeline velocity weight to 0.35", "lower the alert notification threshold", "change churn band thresholds" all resolve to the same skill (`config_update_organisation_config`). Surface these via four capability slugs in the taxonomy:
 
-- `clientpulse.config.read` — return current values from `operational_config` (scoring factors, churn bands, intervention defaults, alert limits).
-- `clientpulse.config.update` — single dot-path patch via `config_update_hierarchy_template` skill.
-- `clientpulse.config.reset` — revert a path (or the whole config) to hierarchy template defaults. Factory-reset semantic.
-- `clientpulse.config.history` — browse `config_history` rows with `entity_type='clientpulse_operational_config'`.
+- `organisation.config.read` — return current values from `operational_config` (scoring factors, churn bands, intervention defaults, alert limits).
+- `organisation.config.update` — single dot-path patch via `config_update_organisation_config` skill.
+- `organisation.config.reset` — revert a path (or the whole config) to hierarchy template defaults. Factory-reset semantic.
+- `organisation.config.history` — browse `config_history` rows with `entity_type='clientpulse_operational_config'`.
 
 **Routing phrases that trigger the ClientPulse config surface:**
 
-- "weights" / "scoring weights" / "health score weights" → `clientpulse.config.read` or `.update`
+- "weights" / "scoring weights" / "health score weights" → `organisation.config.read` or `.update`
 - "cooldown" / "intervention cooldown" / "propose again" → `.update` (sensitive path, routes through review)
 - "churn band" / "at-risk threshold" / "band cutoff" → `.update` (sensitive path)
 - "alert limit" / "notification threshold" / "alert cap" → `.update` (typically non-sensitive except `maxAlertsPerRun`)

@@ -537,10 +537,10 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 **ClientPulse configuration capabilities (for capability-aware routing):**
 
-- `clientpulse.config.read` — inspect current operational_config values for the org.
-- `clientpulse.config.update` — propose a single dot-path change; routes through the sensitive-path gate when required.
-- `clientpulse.config.reset` — revert to the hierarchy template's defaults (factory reset semantic).
-- `clientpulse.config.history` — browse the audit trail of past changes with snapshot diffs.
+- `organisation.config.read` — inspect current operational_config values for the org.
+- `organisation.config.update` — propose a single dot-path change; routes through the sensitive-path gate when required.
+- `organisation.config.reset` — revert to the hierarchy template's defaults (factory reset semantic).
+- `organisation.config.history` — browse the audit trail of past changes with snapshot diffs.
 
 ### Customer Support Automation
 
@@ -856,7 +856,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
-| 2026-04-19 | ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension. Adds 5 namespaced CRM-side action primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`), all review-gated; an event-driven scenario detector (`proposeClientPulseInterventionsJob`) that fires after every churn assessment and quotas proposals at the org + subaccount layer; an hourly outcome-measurement job that closes B2 with band-change attribution within 14 days; a strict V1 merge-field resolver (5 namespaces, no fallback / no conditionals) with editor live-preview; the Configuration Assistant tool #29 `config_update_hierarchy_template` that closes B3 (config_history audit on every write) + B5 (sensitive paths route through the action→review queue); and operator-facing UI for both the Propose Intervention modal (5 editors + wrapper) and the Configuration Assistant chat popup. Lifecycle event `clientpulse.intervention.enqueued` is the single observability anchor for both scenario-detector and operator-driven proposals. | — |
+| 2026-04-19 | ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension. Adds 5 namespaced CRM-side action primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`), all review-gated; an event-driven scenario detector (`proposeClientPulseInterventionsJob`) that fires after every churn assessment and quotas proposals at the org + subaccount layer; an hourly outcome-measurement job that closes B2 with band-change attribution within 14 days; a strict V1 merge-field resolver (5 namespaces, no fallback / no conditionals) with editor live-preview; the Configuration Assistant tool #29 `config_update_organisation_config` that closes B3 (config_history audit on every write) + B5 (sensitive paths route through the action→review queue); and operator-facing UI for both the Propose Intervention modal (5 editors + wrapper) and the Configuration Assistant chat popup. Lifecycle event `clientpulse.intervention.enqueued` is the single observability anchor for both scenario-detector and operator-driven proposals. | — |
 | 2026-04-19 | Sandboxed Runtime (IEE): add live-progress-on-long-running-browser-tasks bullet (real-time step count + heartbeat surfacing during delegated browser execution) and connection-health-validation bullet (on-demand login test for stored credentials before depending on them in a workflow). Reflects the IEE Phase 0 delegation lifecycle and Web Login Connection "Test Connection" UI. | — |
 | 2026-04-17 | Capability-aware Orchestrator + Platform Feature Request Pipeline: add two new customer-facing Product Capabilities sections covering deterministic four-path task routing (A configured / B narrow-configurable / C broad-configurable / D unsupported), atomic capability matching (capability map + active connection + granted scopes), graceful reference-degradation, auditable decision records, per-run budget, post-handoff verification, and the structured feature-request pipeline with system-promotion detection, 30-day dedupe, multi-channel delivery, and dogfooded task-board triage. Add machine-readable-source callout on Integrations Reference pointing to `docs/integration-reference.md` as the structured YAML backing the runtime capability catalogue. | — |
 | 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |

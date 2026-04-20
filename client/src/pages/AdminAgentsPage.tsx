@@ -6,7 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
 import { useSocket } from '../hooks/useSocket';
 
-const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
+const SubaccountBlueprintsPage = lazy(() => import('./SubaccountBlueprintsPage'));
 const OrgAgentConfigsPage = lazy(() => import('./OrgAgentConfigsPage'));
 
 // Live run counts per agent (polled from subaccount live-status isn't per-agent,
@@ -351,7 +351,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
       {/* Team Templates Tab */}
       {pageTab === 'team-templates' && (
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
-          <AdminAgentTemplatesPage user={user} embedded />
+          <SubaccountBlueprintsPage user={user} embedded />
         </Suspense>
       )}
 

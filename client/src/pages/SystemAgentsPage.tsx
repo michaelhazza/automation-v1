@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
-import SystemCompanyTemplatesPage from './SystemCompanyTemplatesPage';
+import SystemOrganisationTemplatesPage from './SystemOrganisationTemplatesPage';
 
 interface SystemAgent {
   id: string;
@@ -225,7 +225,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
       </div>
 
       {/* Team Templates Tab */}
-      {activeTab === 'team-templates' && <SystemCompanyTemplatesPage user={user} />}
+      {activeTab === 'team-templates' && <SystemOrganisationTemplatesPage user={user} />}
 
       {/* List Tab */}
       {activeTab === 'list' && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

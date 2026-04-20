@@ -2,12 +2,22 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { configHistoryService, CONFIG_HISTORY_ENTITY_TYPES } from '../services/configHistoryService.js';
+import {
+  configHistoryService,
+  CONFIG_HISTORY_ENTITY_TYPES,
+  ORGANISATION_CONFIG_ALL_QUERY_VALUE,
+} from '../services/configHistoryService.js';
 
 const router = Router();
 
-// Use the canonical set from configHistoryService
-const VALID_ENTITY_TYPES = CONFIG_HISTORY_ENTITY_TYPES;
+// Spec §4.8 — accept the concrete entity types + the `organisation_config_all`
+// special value (which `listHistory` unions internally) so operators see a
+// single contiguous timeline across the pre-Session-1 legacy entity type
+// and the new org-scoped entity type.
+const VALID_ENTITY_TYPES = new Set<string>([
+  ...CONFIG_HISTORY_ENTITY_TYPES,
+  ORGANISATION_CONFIG_ALL_QUERY_VALUE,
+]);
 
 /**
  * GET /api/org/config-history/session/:sessionId

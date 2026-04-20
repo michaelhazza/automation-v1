@@ -112,13 +112,17 @@ import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 // ClientPulse module routes
+// Side-effect import — registers ClientPulse's sensitive operational_config
+// dot-paths with the module-composable registry before any route registers.
+// Per spec §3.6 / §4.10(3): top of the route-wiring section.
+import './modules/clientpulse/registerSensitivePaths.js';
 import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
 import configHistoryRouter from './routes/configHistory.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
 import clientpulseMergeFieldsRouter from './routes/clientpulseMergeFields.js';
 import clientpulseInterventionsRouter from './routes/clientpulseInterventions.js';
-import clientpulseConfigRouter from './routes/clientpulseConfig.js';
+import organisationConfigRouter from './routes/organisationConfig.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -321,7 +325,7 @@ app.use(configHistoryRouter);
 app.use(clientpulseReportsRouter);
 app.use(clientpulseMergeFieldsRouter);
 app.use(clientpulseInterventionsRouter);
-app.use(clientpulseConfigRouter);
+app.use(organisationConfigRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *

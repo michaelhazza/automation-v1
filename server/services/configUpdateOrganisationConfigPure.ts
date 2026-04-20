@@ -1,10 +1,16 @@
 /**
- * configUpdateHierarchyTemplatePure — pure helpers for the Configuration Agent's
- * hierarchy-template config write path (§11.A). No I/O.
+ * configUpdateOrganisationConfigPure — pure helpers for the Configuration
+ * Agent's organisation operational-config write path. No I/O.
+ *
+ * Session 1 renamed this module from `configUpdateHierarchyTemplatePure` as
+ * part of the data-model separation (contract (h)): the writer now targets
+ * `organisations.operational_config_override`, not
+ * `hierarchy_templates.operational_config`.
  *
  * Responsibilities:
  *   - applyPathPatch: deep-merge a dot-path/value into a config JSONB.
- *   - classifyWritePath: sensitive vs non-sensitive via SENSITIVE_CONFIG_PATHS.
+ *   - classifyWritePath: sensitive vs non-sensitive via the module-composable
+ *     sensitive-paths registry (spec §3.6 / contract (n)).
  *   - buildConfigHistorySnapshotShape: prep the snapshot + changeSource for
  *     config_history insertion (caller supplies version).
  *   - validationDigest: stable hash of the proposed config for drift detection
@@ -14,9 +20,9 @@
 import crypto from 'crypto';
 import {
   operationalConfigSchema,
-  isSensitiveConfigPath,
   type OperationalConfigValidated,
 } from './operationalConfigSchema.js';
+import { isSensitiveConfigPath } from '../config/sensitiveConfigPathsRegistry.js';
 
 export type WriteClassification = 'non_sensitive' | 'sensitive';
 

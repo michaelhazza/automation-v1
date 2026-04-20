@@ -193,7 +193,7 @@ export async function runProposeClientPulseInterventions(
       and(
         eq(actions.organisationId, organisationId),
         eq(actions.subaccountId, subaccountId),
-        sql`${actions.actionType} IN ('crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','clientpulse.operator_alert')`,
+        sql`${actions.actionType} IN ('crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','notify_operator')`,
         gte(actions.createdAt, since),
       ),
     );
@@ -204,7 +204,7 @@ export async function runProposeClientPulseInterventions(
     .where(
       and(
         eq(actions.organisationId, organisationId),
-        sql`${actions.actionType} IN ('crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','clientpulse.operator_alert')`,
+        sql`${actions.actionType} IN ('crm.fire_automation','crm.send_email','crm.send_sms','crm.create_task','notify_operator')`,
         gte(actions.createdAt, since),
       ),
     );

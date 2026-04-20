@@ -1,10 +1,12 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ConfigAssistantPopupProvider } from './hooks/useConfigAssistantPopup';
+import ConfigAssistantPopup from './components/config-assistant/ConfigAssistantPopup';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
@@ -30,7 +32,8 @@ const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
 const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
 const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
-const AdminAgentTemplatesPage = lazy(() => import('./pages/AdminAgentTemplatesPage'));
+const SubaccountBlueprintsPage = lazy(() => import('./pages/SubaccountBlueprintsPage'));
+const ClientPulseSettingsPage = lazy(() => import('./pages/ClientPulseSettingsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const McpServersPage = lazy(() => import('./pages/McpServersPage'));
@@ -77,7 +80,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const SubaccountSkillsPage = lazy(() => import('./pages/SubaccountSkillsPage'));
 
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
-const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
+const SystemOrganisationTemplatesPage = lazy(() => import('./pages/SystemOrganisationTemplatesPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
@@ -107,6 +110,10 @@ function PageLoader() {
 }
 
 function ProtectedLayout({ user, loading }: { user: User | null; loading: boolean }) {
+  // Session 1 (spec §7.4) — on first render of a protected surface, check
+  // whether the org's onboarding wizard should auto-open. `needsOnboarding`
+  // is derived server-side from organisations.onboarding_completed_at IS NULL.
+  useOnboardingRedirect(user);
   if (loading) return (
     <div className="flex justify-center items-center min-h-screen">
       <div className="w-9 h-9 border-[3px] border-slate-200 border-t-indigo-500 rounded-full [animation:spin_0.8s_linear_infinite]" />
@@ -122,6 +129,45 @@ function ProtectedLayout({ user, loading }: { user: User | null; loading: boolea
       </ErrorBoundary>
     </Layout>
   );
+}
+
+/**
+ * Redirect to /onboarding on first render of a protected surface when the
+ * server reports needsOnboarding=true AND the current user has permission
+ * to complete the wizard. Skips if already on /onboarding/* so the wizard
+ * itself doesn't self-redirect. System-admin surfaces without an org
+ * context receive { needsOnboarding: false } from the server.
+ *
+ * Permission gate rationale: POST /api/onboarding/complete requires
+ * ORG_PERMISSIONS.AGENTS_EDIT ('org.agents.edit'). Without this gate,
+ * read-only org members would be permanently trapped on /onboarding
+ * because they can see the wizard but cannot complete it. Users without
+ * the permission stay on their requested page; the dashboard's existing
+ * empty-state copy surfaces the "waiting for admin" message when GHL
+ * isn't connected.
+ */
+function useOnboardingRedirect(user: User | null) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (!user) return;
+    if (location.pathname.startsWith('/onboarding')) return;
+    let cancelled = false;
+    Promise.all([
+      api.get<{ needsOnboarding?: boolean }>('/api/onboarding/status'),
+      api.get<{ permissions: string[] }>('/api/my-permissions'),
+    ])
+      .then(([statusRes, permsRes]) => {
+        if (cancelled) return;
+        if (!statusRes.data?.needsOnboarding) return;
+        const canComplete = Array.isArray(permsRes.data?.permissions)
+          && permsRes.data.permissions.includes('org.agents.edit');
+        if (!canComplete) return;
+        navigate('/onboarding', { replace: true });
+      })
+      .catch(() => { /* non-fatal */ });
+    return () => { cancelled = true; };
+  }, [user, location.pathname, navigate]);
 }
 
 // Org admin routes — any authenticated user may attempt these; API enforces permission-set checks.
@@ -166,9 +212,12 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Toaster position="bottom-right" richColors />
-      {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
-      <div id="help-hint-portal" />
+      <ConfigAssistantPopupProvider>
+        <Toaster position="bottom-right" richColors />
+        {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
+        <div id="help-hint-portal" />
+        {/* Session 1 / spec §5 — single global mount point for the Configuration Assistant popup. */}
+        <ConfigAssistantPopup />
       <Routes>
         <Route path="/login" element={
           <Suspense fallback={<PageLoader />}>
@@ -239,7 +288,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
-            <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
+            <Route path="/agents/blueprints" element={<SubaccountBlueprintsPage user={user!} />} />
+            {/* Legacy path — kept for bookmarks; renders the renamed page. */}
+            <Route path="/admin/agent-templates" element={<SubaccountBlueprintsPage user={user!} />} />
+            <Route path="/clientpulse/settings" element={<ClientPulseSettingsPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
@@ -314,7 +366,7 @@ export default function App() {
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
-            <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
+            <Route path="/system/organisation-templates" element={<SystemOrganisationTemplatesPage user={user!} />} />
             {/* Activity — system scope */}
             <Route path="/system/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — system scope */}
@@ -360,6 +412,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      </ConfigAssistantPopupProvider>
     </BrowserRouter>
   );
 }

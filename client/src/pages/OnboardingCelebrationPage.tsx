@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 
@@ -14,6 +14,18 @@ export default function OnboardingCelebrationPage() {
   const [summary, setSummary] = useState<HealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Spec §7.3 / §7.4: mark onboarding_completed_at on mount so the
+  // needsOnboarding guard clears. Without this call operators land here once
+  // then get permanently redirected back to the wizard on the next load.
+  // Fire-and-forget: idempotent on the server side (no-op if already set).
+  useEffect(() => {
+    api.post('/api/onboarding/complete').catch(() => {
+      // Swallow — server is idempotent; a transient failure here should not
+      // block the celebration UI. Next session load will retry via the same
+      // mount effect if needsOnboarding is still true.
+    });
+  }, []);
+
   useEffect(() => {
     api.get('/api/reports/latest')
       .then(({ data }) => {
@@ -27,6 +39,10 @@ export default function OnboardingCelebrationPage() {
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleContinue = useCallback(() => {
+    navigate('/clientpulse');
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(160deg,#0f172a_0%,#1e1b4b_60%,#0f172a_100%)] flex items-center justify-center px-4 py-12 font-sans relative overflow-hidden">
@@ -80,7 +96,7 @@ export default function OnboardingCelebrationPage() {
 
         {/* CTA */}
         <button
-          onClick={() => navigate('/clientpulse')}
+          onClick={handleContinue}
           className="inline-flex items-center gap-2.5 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-[16px] font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-900/30 mb-4"
         >
           View your dashboard →

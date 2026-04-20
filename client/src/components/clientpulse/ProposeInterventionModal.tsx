@@ -13,7 +13,7 @@ export type InterventionActionType =
   | 'crm.send_email'
   | 'crm.send_sms'
   | 'crm.create_task'
-  | 'clientpulse.operator_alert';
+  | 'notify_operator';
 
 export interface InterventionContext {
   subaccount: { id: string; name: string };
@@ -44,7 +44,7 @@ const ACTION_OPTIONS: Array<{ type: InterventionActionType; label: string; descr
   { type: 'crm.send_email', label: 'Send email', description: "Author + send an email to a contact." },
   { type: 'crm.send_sms', label: 'Send SMS', description: "Send a direct SMS to a contact." },
   { type: 'crm.create_task', label: 'Create task', description: "Assign a task to a CRM user." },
-  { type: 'clientpulse.operator_alert', label: 'Operator alert', description: "Notify agency operators internally." },
+  { type: 'notify_operator', label: 'Operator alert', description: "Notify agency operators internally." },
 ];
 
 export default function ProposeInterventionModal({ subaccountId, subaccountName, onClose, onSubmitted }: Props) {
@@ -90,7 +90,7 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
     if (picked === 'crm.send_email' && context) return <EmailAuthoringEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.send_email', payload, rationale, extras)} />;
     if (picked === 'crm.send_sms' && context) return <SendSmsEditor subaccountId={subaccountId} context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.send_sms', payload, rationale, extras)} />;
     if (picked === 'crm.create_task' && context) return <CreateTaskEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale, extras) => handleSubmit('crm.create_task', payload, rationale, extras)} />;
-    if (picked === 'clientpulse.operator_alert' && context) return <OperatorAlertEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale) => handleSubmit('clientpulse.operator_alert', payload, rationale)} />;
+    if (picked === 'notify_operator' && context) return <OperatorAlertEditor context={context} onCancel={() => setPicked(null)} onSubmit={(payload, rationale) => handleSubmit('notify_operator', payload, rationale)} />;
     return (
       <div className="space-y-3">
         <p className="text-[13px] text-slate-500">Choose an intervention type for <strong>{subaccountName}</strong>.</p>

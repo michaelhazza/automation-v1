@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { systemHierarchyTemplates } from './systemHierarchyTemplates';
 
 export const organisations = pgTable(
   'organisations',
@@ -36,6 +37,20 @@ export const organisations = pgTable(
     // Caps how many bulk-mode playbook children can run in parallel against
     // GHL rate limits. NULL uses MAX_PARALLEL_STEPS_DEFAULT (8).
     ghlConcurrencyCap: integer('ghl_concurrency_cap').notNull().default(5),
+    // ── Session 1 (migration 0180) — org-level operational config ─────
+    // Single source of truth for runtime operational-config overrides. NULL
+    // until the org's first explicit edit; effective config is
+    // systemHierarchyTemplates.operationalDefaults deep-merged with this row
+    // at read time. Written by configUpdateOrganisationService.
+    operationalConfigOverride: jsonb('operational_config_override').$type<Record<string, unknown>>(),
+    // Explicit FK to the adopted system template. Nullable — backfilled by
+    // migration 0180 from the pre-existing implicit linkage via
+    // hierarchy_templates.system_template_id.
+    appliedSystemTemplateId: uuid('applied_system_template_id')
+      .references(() => systemHierarchyTemplates.id, { onDelete: 'set null' }),
+    // ── Session 1 (migration 0182) — onboarding wizard gate ────────────
+    // NULL → wizard auto-opens on first sign-in. Set → wizard skipped.
+    onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -49,6 +64,9 @@ export const organisations = pgTable(
       .where(sql`${table.deletedAt} IS NULL`),
     slugIdx: index('organisations_slug_idx').on(table.slug),
     statusIdx: index('organisations_status_idx').on(table.status),
+    appliedSystemTemplateIdIdx: index('organisations_applied_system_template_id_idx')
+      .on(table.appliedSystemTemplateId)
+      .where(sql`${table.appliedSystemTemplateId} IS NOT NULL`),
   })
 );
 

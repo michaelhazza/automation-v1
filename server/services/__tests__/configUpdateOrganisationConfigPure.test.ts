@@ -1,9 +1,18 @@
 /**
- * configUpdateHierarchyTemplatePure.test.ts — §11.A.4 coverage.
+ * configUpdateOrganisationConfigPure.test.ts — pure helpers for the config
+ * writer (Session 1 renamed from configUpdateHierarchyTemplatePure.test.ts).
+ *
+ * Covers contracts (n), (s), (t), (u) — sensitive-path classification +
+ * drift-digest + validation purity.
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/configUpdateHierarchyTemplatePure.test.ts
+ *   npx tsx server/services/__tests__/configUpdateOrganisationConfigPure.test.ts
  */
+
+// Populate the sensitive-paths registry before importing the pure module —
+// classifyWritePath reads the registry at call time. Mirrors what
+// server/index.ts does at boot via registerSensitivePaths.
+import '../../modules/clientpulse/registerSensitivePaths.js';
 
 import {
   applyPathPatch,
@@ -13,7 +22,7 @@ import {
   buildConfigHistorySnapshotShape,
   isValidConfigPath,
   ALLOWED_CONFIG_ROOT_KEYS,
-} from '../configUpdateHierarchyTemplatePure.js';
+} from '../configUpdateOrganisationConfigPure.js';
 
 let passed = 0;
 let failed = 0;

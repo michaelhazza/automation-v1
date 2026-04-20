@@ -59,7 +59,7 @@ const alertTemplate: InterventionType = {
   label: 'Operator alert',
   gateLevel: 'review',
   action: 'internal_notification',
-  actionType: 'clientpulse.operator_alert',
+  actionType: 'notify_operator',
   targets: ['atRisk'],
   priority: 5,
   defaultReason: 'scenario_detector:operator_ping',
