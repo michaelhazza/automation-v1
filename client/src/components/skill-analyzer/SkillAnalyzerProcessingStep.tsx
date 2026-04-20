@@ -32,7 +32,10 @@ function deriveRowStatus(
   if (result) return result.classificationFailed ? 'failed' : 'done';
   const startedAt = inFlight[slug];
   if (startedAt !== undefined) {
-    return nowMs - startedAt > 30_000 ? 'stale' : 'classifying';
+    // 120s threshold: per-call classify budget is 180s (SKILL_CLASSIFY_TIMEOUT_MS)
+    // with a one-shot retry, so anything under 2 min is still well inside the
+    // normal envelope — flagging earlier just creates false-alarm noise.
+    return nowMs - startedAt > 120_000 ? 'stale' : 'classifying';
   }
   return 'queued';
 }
@@ -194,7 +197,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
                       <span className="text-xs shrink-0">
                         {status === 'done'        ? (result?.classification ?? '') :
                          status === 'failed'      ? failureReasonLabel(result?.classificationFailureReason) :
-                         status === 'stale'       ? 'stalled >30s' :
+                         status === 'stale'       ? 'stalled >2m' :
                          status === 'classifying' ? 'classifying…' : 'queued'}
                       </span>
                     </div>
@@ -215,12 +218,13 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
             </div>
           )}
 
-          {currentJob.status === 'classifying' && nowMs - lastProgressAt > 45_000 && (
+          {currentJob.status === 'classifying' && nowMs - lastProgressAt > 120_000 && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               <span className="shrink-0">⚠</span>
               <span>
-                No progress for over 45s — one or more classification calls may be stalled.
-                The job will auto-recover via timeout within 2 minutes.
+                No progress for over 2 min — one or more classification calls may be stalled.
+                The job will auto-recover via timeout; each call has a 3 min budget with one retry,
+                then falls back to a rule-based merge.
               </span>
             </div>
           )}
