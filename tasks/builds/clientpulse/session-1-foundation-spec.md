@@ -66,6 +66,7 @@ Introduced this session:
 - (i) **Platform primitives are module-agnostic.** Any action slug, capability path, or route that is genuinely cross-module (e.g. operator alerts, config-apply) MUST be un-namespaced or generically-namespaced (`ops.*` / `system.*`). Module-branded slugs (`clientpulse.*`, `crm.*`) are reserved for genuinely module-specific concepts.
 - (j) **Settings page and Configuration Assistant are equal surfaces on the same mechanism.** Both call the same HTTP route; both produce the same audit trail; both respect the sensitive-path split. No surface has privileged access.
 - (k) **Session lifecycle for the Configuration Assistant popup:** opening a popup resumes the most recent agent run < 15 minutes old, else creates a fresh one. Closing the popup does not kill the run. Background execution surfaces via the minimised pill.
+- (l) **All inbound action-slug surfaces MUST normalise via `resolveActionSlug`.** Routes, webhook handlers, queue consumers, anything that receives an `action_type` from an external caller. Legacy slugs are expected to appear for at least 2-3 releases; defensive normalisation is the contract, not the exception.
 ## §2. Phase A — data-model separation for org-level operational config
 
 ### §2.1 The problem being solved
@@ -192,13 +193,11 @@ async getOperationalConfig(orgId: string): Promise<OperationalConfig | null> {
 }
 ```
 
-This introduces `organisations.applied_system_template_id` — a new nullable FK on the organisations table pointing at the adopted system template. Today the linkage is implicit (via hierarchy_template.systemTemplateId); moving it to the org makes the dependency explicit + avoids the join. Migration adds this FK and backfills from the current implicit linkage. If this is already present under a different name, use that instead — check at kickoff.
+This introduces `organisations.applied_system_template_id` — a new nullable FK on the organisations table pointing at the adopted system template. Today the linkage is implicit (via hierarchy_template.systemTemplateId); moving it to the org makes the dependency explicit + avoids the join. **Migration adds this FK and backfills from the current implicit linkage. Audit at chunk-2 kickoff whether the column already exists under a different name; if yes, reuse that name instead of adding a new one. Decision is "an explicit org-level FK to the adopted system template exists" — the column name is negotiable.**
 
 ### §2.7 Open questions for §2
 
-1. **Does `organisations.applied_system_template_id` already exist?** Check schema at kickoff. If yes, reuse; if no, add in the same migration.
-2. **What happens when an org's system template is changed?** Today that's not a supported flow (platform support only, per onboarding spec). If §7's onboarding doesn't expose a template-switch path, leave this as "one-time adopt only" and revisit later.
-3. **RLS on the new column.** `organisations` already has RLS policies; the new column inherits them. Confirm the existing policies allow the config-agent system principal to write. If not, adjust the policy.
+*(Resolved — see §10 for the decisions log.)*
 ## §3. Phase A — rename `clientpulse.operator_alert → notify_operator` + module-composable `SENSITIVE_CONFIG_PATHS`
 
 ### §3.1 Rename rationale
@@ -412,11 +411,11 @@ export function isValidConfigPath(path: string): boolean {
 
 ClientPulse's `registerSensitivePaths.ts` also registers its root keys. Future modules ship one file that declares both.
 
-### §3.9 Open questions for §3
+### §3.9 Resolutions
 
-1. **Should legacy-alias hits be logged?** Recommendation: yes, log-once per process via a `Set<string>` to avoid log spam. Aides the "safe to retire aliases" decision.
-2. **Should the alias map be tested via a pure test?** Recommendation: yes — short test that every key resolves to a valid registry entry. Prevents typos in the alias map itself.
-3. **Do webhook payloads carry the legacy slug?** Check `server/routes/`-wired webhook handlers. If any external integration emits the legacy `clientpulse.operator_alert` slug in an inbound webhook payload, the handler needs to normalise via `resolveActionSlug` on the way in. Audit at kickoff.
+1. **Legacy-alias hit logging:** yes — log-once per process via a `Set<string>` so we have signal for the eventual alias retirement. Lands in `resolveActionSlug` itself.
+2. **Alias-map pure test:** yes — short test asserts every key resolves to a valid registered slug. Prevents typos in the alias map itself. Covered by `actionSlugAliasesPure.test.ts`.
+3. **Webhook handler audit:** every inbound handler that carries an `action_type` (or equivalent) field MUST normalise via `resolveActionSlug` — this is now a locked rule in §1.3 (see (l) below in §10), not a per-caller check. Audit at chunk-2 kickoff confirms which handlers need the defensive normalisation added.
 ## §4. Phase A — generic `/api/organisation/config/apply` route + UI renames + housekeeping
 
 ### §4.1 The new canonical route
@@ -611,11 +610,11 @@ Alternatively, migrate the historical rows to the new entity_type + id. Trade-of
 
 The integration block in `integration-reference.md` renames from `clientpulse-configuration` (pseudo-integration) to `organisation-configuration`. Same YAML shape, new slug. Verifier gate re-run after edit.
 
-### §4.10 Open questions for §4
+### §4.10 Resolutions
 
-1. **New permission `ORG_PERMISSIONS.CONFIG_EDIT`?** Today the route reuses `AGENTS_EDIT` as a rough approximation. A dedicated permission would let orgs grant "edit operational config" without granting "edit agents." Low priority for Session 1 unless there's a known use case.
-2. **Do we rename `clientpulseReports.ts` route file + endpoint paths?** Those routes (`/api/clientpulse/health-summary`, `/api/clientpulse/high-risk`) are product-specific reads and staying on the `/clientpulse/` prefix is correct — the vertical module owns them. No action.
-3. **Where exactly does `server/index.ts` import the sensitive-paths registration?** Recommendation: at the very top of the route-wiring section (before routes register), alongside other boot-time module init.
+1. **Permission scope:** reuse `ORG_PERMISSIONS.AGENTS_EDIT` for Session 1. A dedicated `CONFIG_EDIT` permission is cleaner long-term but premature without a concrete "edit config but not agents" use case. Revisit when that use case appears.
+2. **`clientpulseReports.ts` route rename:** no action. Product-specific reads stay on the `/clientpulse/` prefix — the vertical module owns them. Only genuinely cross-module concerns (the config-apply surface) move to `/api/organisation/*`.
+3. **Registration ordering in `server/index.ts`:** `registerSensitivePaths` imports at the very top of the route-wiring section, before routes register. Co-located with other boot-time module init.
 ## §5. Phase A — Configuration Assistant popup (Option 2: embedded real agent loop)
 
 ### §5.1 What's wrong with today's popup
@@ -760,12 +759,12 @@ The "too big" threshold is empirical — size-check on render + flip to summary 
 - Approving a plan from either surface is idempotent at the server — `agentRun.approvePlan()` transitions `plan_pending` → `executing` once; second call returns the same result.
 - Closing the popup mid-plan-preview does NOT cancel the plan. The preview is server-persistent. The operator sees it again on re-open.
 
-### §5.13 Open questions for §5
+### §5.13 Resolutions
 
-1. **Does a ⌘K command palette exist?** If yes, register the entry; if no, skip for Session 1.
-2. **Does `useSocket` / the WebSocket subscription model already support re-entering a room on remount?** If the popup closes + reopens against the same session, the second mount should auto-resubscribe. Audit at build time.
-3. **Pending-plan state on popup open with no previous session:** should the popup show the agent's greeting / suggestion chips (per the mockup), or a fresh empty chat? Recommendation: chips on fresh; transcript on resume. Consistent with the mockup.
-4. **What's the session-dedup strategy if the operator has multiple browser tabs?** Each tab gets its own active-session pointer in `sessionStorage` today; if they collide, both tabs hit the same run and the UX is fine (real-time sync). No change needed unless audit finds a problem.
+1. **⌘K command palette:** audit at chunk-5 kickoff. If a palette exists, register the "Open Configuration Assistant" entry. If not, skip for Session 1 + file a follow-up ticket. Non-blocking; nav button + contextual triggers are sufficient.
+2. **WebSocket re-entry on remount:** audit at chunk-5 kickoff. If `useSocket` doesn't already support rejoin-after-remount, extend it. Popup open + close + reopen against the same session must re-subscribe cleanly.
+3. **Empty-state UX:** chips on fresh; transcript on resume. Matches the mockup; consistent with the full-page surface.
+4. **Multi-tab sessions:** each tab carries its own `sessionStorage` pointer. Two tabs with the same session id share the server-side run and receive real-time updates — no additional dedup needed. Locked.
 ## §6. Phase 5 — ClientPulse Settings page + Subaccount Blueprint editor refactor
 
 ### §6.1 ClientPulse Settings — route + page
@@ -792,7 +791,7 @@ Each card shows: block title + description, current values, per-field "overridde
 | `churnRiskSignals` | `ChurnRiskSignalsEditor` | Array of signal rows with weight, signal slug, type enum, condition, thresholds. |
 | `churnBands` | `ChurnBandsEditor` | 4 band range pickers (healthy / watch / atRisk / critical) with 0–100 sliders + overlap-check + gap-check. |
 | `interventionDefaults` | `InterventionDefaultsEditor` | Numeric inputs: cooldownHours, cooldownScope enum, defaultGateLevel enum, maxProposalsPerDayPerSubaccount, maxProposalsPerDayPerOrg. |
-| `interventionTemplates` | `InterventionTemplatesEditor` | Array of template rows with slug + label + gateLevel + actionType + targets multi-select (bands) + priority + measurementWindowHours + payloadDefaults (JSON) + defaultReason. |
+| `interventionTemplates` | `InterventionTemplatesJsonEditor` | **Session 1 ships a JSON editor with schema validation + side-by-side schema reference panel.** Typed per-field editor (slug / label / gateLevel / actionType / targets multi-select / priority / measurementWindowHours / payloadDefaults / defaultReason) is deferred to Session 2 (Phase 8 — "intervention template editor"). The JSON editor still writes through the same save flow + validation + audit. Reason: the typed editor is the most complex in the inventory; building it in Session 1 risks scope creep on the foundation sprint when the other 9 editors unblock the bulk of operator value already. |
 | `alertLimits` | `AlertLimitsEditor` | maxAlertsPerRun, maxAlertsPerAccountPerDay, batchLowPriority toggle. |
 | `staffActivity` | `StaffActivityEditor` | countedMutationTypes array, excludedUserKinds multi-select, automationUserResolution (strategy enum + threshold + cacheMonths), lookbackWindowsDays, churnFlagThresholds. |
 | `integrationFingerprints` | `IntegrationFingerprintsEditor` | seedLibrary read-only list + scanFingerprintTypes multi-select + unclassifiedSignalPromotion thresholds. |
@@ -853,12 +852,12 @@ Changes:
 
 Add the "Configuration" sidebar section group if it doesn't exist; both items live there.
 
-### §6.7 Open questions for §6
+### §6.7 Resolutions
 
-1. **Reset-to-default semantic.** Two options: (a) write the system-default value as an explicit override (idempotent, simple) — pro: always-writeable, clean history; con: override row grows. (b) add a `POST /api/organisation/config/unset` that removes the key from the override row — pro: override row stays minimal; con: new endpoint + audit shape. Recommendation: (a) for v1.
-2. **Editor-side validation vs server-side validation.** Client-side sum-check on weights prevents bad submits; server still enforces. Recommend both — fail fast on the client, trust the server. Don't skip server side.
-3. **Permission scope.** Does `ORG_PERMISSIONS.AGENTS_EDIT` grant access to this page? It should for v1 since that's the config-route permission. Flagged in §4.10 for potential future split.
-4. **Typed intervention template editor complexity.** The `InterventionTemplatesEditor` is the most complex — nested action-type picker + per-action payload defaults + merge-field guidance. If scoping shows this is blowing up the Phase 5 estimate, split: keep a JSON-raw editor for v1 of Session 1 + defer the typed editor to Session 2 (Phase 8's "intervention template editor" bullet already accounts for this).
+1. **Reset-to-default semantic:** option (a) — write the system-default value as an explicit override. Idempotent, always-writeable, clean history. Override row size is not a concern at steady-state. No new unset endpoint.
+2. **Validation posture:** client-side AND server-side. Client fails fast; server is the system-of-record. Never skip server-side validation.
+3. **Permission scope:** `ORG_PERMISSIONS.AGENTS_EDIT` is sufficient for Session 1 (same as the config-apply route). Future split flagged in §4.10.
+4. **Typed intervention template editor:** deferred to Session 2 Phase 8 per §6.2's `InterventionTemplatesJsonEditor` call-out. Session 1 ships the JSON editor with schema validation; operators can still author and edit templates, just via JSON.
 ## §7. Phase 7 — Operator onboarding wizard
 
 Two user journeys:
@@ -952,12 +951,12 @@ Every label in both flows uses the new terminology:
 
 Screenshots of each screen go into the verification checklist (§8).
 
-### §7.7 Open questions for §7
+### §7.7 Resolutions
 
-1. **Template-switch post-create.** Not exposed in the system-admin modal. If needed later, that's a separate operation (requires config-reset + agent hierarchy re-seed). Out of scope for Session 1.
-2. **GHL OAuth redirect flow.** Existing OAuth pattern used elsewhere in the app — reuse. Audit at kickoff.
-3. **Does a "welcome email template" need to be part of the system-admin flow?** Recommendation: reuse existing invite email infrastructure; add a one-line mention of the onboarding wizard in the email body.
-4. **Subscription tier gating in the wizard.** If the system admin picked "Monitor" tier, the org-admin wizard should show a different "what you can do" summary than "Operate." For Session 1, render the same content regardless — D6 tier gating happens later and will retrofit.
+1. **Template-switch post-create:** not exposed. Out of scope for Session 1. If needed later, it's a separate flow (config-reset + agent hierarchy re-seed).
+2. **GHL OAuth redirect flow:** reuse the existing OAuth pattern. Audit at chunk-7 kickoff to identify the canonical helper + callback path. Non-blocking; every route currently using OAuth follows the same pattern.
+3. **Welcome email:** reuse existing invite email infrastructure; add one sentence mentioning the onboarding wizard in the email body. No new template.
+4. **Subscription tier display:** same content regardless of tier. D6 retrofits tier-aware copy later. Locked.
 ## §8. Work sequence, chunks, ship-gate tests, and review gates
 
 ### §8.1 Chunk sequence (8 chunks, serialised)
@@ -1098,6 +1097,7 @@ No data loss risk. Downgrade window: 1 release cycle.
 | `client/src/components/clientpulse-settings/IntegrationFingerprintsEditor.tsx` | §6 per-block editor |
 | `client/src/components/clientpulse-settings/DataRetentionEditor.tsx` | §6 per-block editor |
 | `client/src/components/clientpulse-settings/OnboardingMilestonesEditor.tsx` | §6 per-block editor |
+| `client/src/components/clientpulse-settings/InterventionTemplatesJsonEditor.tsx` | §6 — JSON editor with schema-validation preview (Session 1). Typed editor lands in Session 2 Phase 8. |
 | `client/src/components/clientpulse-settings/shared/*` | §6 reset pill / override badge / save bar |
 | `client/src/pages/OnboardingWizardPage.tsx` | §7 4-screen org-admin wizard |
 | `client/src/components/onboarding/*` | §7 per-screen components |
@@ -1122,6 +1122,7 @@ No data loss risk. Downgrade window: 1 release cycle.
 | `server/index.ts` | Import `registerSensitivePaths` at boot; register new routes; retire old route |
 | `server/routes/onboarding.ts` (if existing) | Status + complete endpoints |
 | All ClientPulse pure tests (7 files) | Literal renames |
+| Any webhook handler that accepts an inbound `action_type` field | Normalise via `resolveActionSlug` on the way in (defensive, even if current audit shows no callers use the legacy slug) |
 
 ### §9.4 Files to modify (client)
 
@@ -1153,37 +1154,86 @@ No data loss risk. Downgrade window: 1 release cycle.
 
 ---
 
-## §10. Open questions (consolidated, for HITL before kickoff)
+## §10. Decisions log (consolidated)
 
-### §10.1 Must resolve before Chunk 2 starts
+All prior open questions have been resolved inline in their sections. Consolidated here for easy scan during implementation.
 
-1. **§2.7.1 — does `organisations.applied_system_template_id` already exist?** If yes, reuse; if no, add in the same migration.
-2. **§3.9.3 — do any webhook handlers emit/accept the legacy `clientpulse.operator_alert` slug in inbound payloads?** Audit server/routes/*.ts for webhook handlers. If yes, normalise inbound via `resolveActionSlug`.
-3. **§4.2 — confirm retiring `/api/clientpulse/config/apply` without a redirect is acceptable.** Deferred call in the spec; may want a 308 for one release cycle if any external monitoring hits it.
-4. **§4.7 — confirm migration 0178 rename is acceptable.** Double-number on main. Rename or leave?
-5. **§6.7.4 — drop `InterventionTemplatesEditor` from Session 1 if it blows up estimate?** Fall-back is a raw JSON editor with schema validation. Ship the typed version in Session 2 under Phase 8.
-6. **§7.7.4 — subscription tier display in the onboarding wizard — same content regardless, or branch on tier?** Default to same content.
+### §10.1 Data model + migrations
 
-### §10.2 Nice-to-resolve, not blocking
+| Q | Decision | Location |
+|---|----------|----------|
+| `organisations.applied_system_template_id` exists already? | Audit at chunk-2 kickoff; if yes reuse the existing column name, if no add it. **Intent is locked** — an explicit org-level FK to the adopted system template will exist by end of chunk 2. Column naming is implementation-flexible. | §2.6, §2 |
+| Template-switch post-create? | Out of scope for Session 1. One-time adopt only. Revisit when a concrete use case arises. | §7.7 |
+| RLS on new column? | `organisations` table policies inherit automatically. Confirm config-agent principal has write at kickoff; adjust policy if not. Non-blocking; trivial to fix at build time. | §2.7 |
 
-7. §4.10.1 — dedicated `ORG_PERMISSIONS.CONFIG_EDIT` permission.
-8. §5.13.1 — ⌘K command palette existence check.
-9. §5.13.3 — popup empty-state UX (chips on fresh, transcript on resume).
-10. §6.7.1 — reset-to-default as explicit override vs. new unset endpoint.
-11. §7.7.2 — GHL OAuth redirect pattern reuse (should be trivial; audit at kickoff).
+### §10.2 Slug rename + registry
 
-### §10.3 Out of scope — explicitly deferred
+| Q | Decision | Location |
+|---|----------|----------|
+| Legacy-alias hit logging? | Yes — log-once per process via a `Set<string>` in `resolveActionSlug`. Drives the "safe to retire aliases" call. | §3.9 |
+| Alias-map pure test? | Yes — `actionSlugAliasesPure.test.ts` asserts every alias key resolves to a registered slug. Locked. | §3.9 |
+| Webhook handler normalisation? | Locked contract (l) in §1.3: all inbound action-slug surfaces MUST normalise via `resolveActionSlug`. Chunk-2 audit confirms which handlers are affected; the rule stands regardless. | §1.3(l), §3.9 |
 
-- Subscription-tier runtime gating (D6) — Session 2 or later.
-- Drilldown page (Phase 6) — Session 2.
-- Real CRM execution via apiAdapter (Phase 6) — Session 2.
-- Live CRM data pickers in editor modals (Phase 6) — Session 2.
-- Outcome-weighted recommendation signal (Phase 8) — Session 2.
-- B6 UX copy polish (Phase 8) — Session 2.
-- Channel fan-out verification (Phase 8) — Session 2.
+### §10.3 Route + UI renames
+
+| Q | Decision | Location |
+|---|----------|----------|
+| Retire `/api/clientpulse/config/apply` with no redirect? | Yes — clean retirement. Single in-app caller is being rewritten anyway; no external callers. | §4.2 |
+| Migration 0178 collision fix? | `git mv migrations/0178_skill_analyzer_execution_lock_token.sql migrations/0180_skill_analyzer_execution_lock_token.sql`. If Drizzle meta also references the old name, add a meta-update migration in chunk 2. | §4.7 |
+| Dedicated `ORG_PERMISSIONS.CONFIG_EDIT`? | No — reuse `AGENTS_EDIT` for Session 1. Revisit when a concrete "edit config but not agents" need arises. | §4.10 |
+| Rename `clientpulseReports.ts` routes? | No — product-specific reads stay on `/clientpulse/` prefix. Only genuinely cross-module surfaces move to `/api/organisation/*`. | §4.10 |
+| `registerSensitivePaths` import ordering? | Top of route-wiring section in `server/index.ts`, before any route registration. | §4.10 |
+
+### §10.4 Configuration Assistant popup
+
+| Q | Decision | Location |
+|---|----------|----------|
+| ⌘K command palette registration? | Audit at chunk-5 kickoff. Register if exists; skip + file a follow-up if not. Nav button + contextual triggers are sufficient for Session 1. | §5.13 |
+| WebSocket re-entry on remount? | Audit at chunk-5 kickoff. If `useSocket` doesn't support rejoin-after-remount today, extend it as part of chunk 5. | §5.13 |
+| Empty-state UX on popup open? | Chips on fresh session; transcript on resume. Matches mockup + full-page surface. | §5.13 |
+| Multi-tab session dedup? | None needed. Each tab carries its own `sessionStorage` pointer; shared server-side run gets real-time updates via WebSocket. | §5.13 |
+
+### §10.5 Settings page + blueprint editor
+
+| Q | Decision | Location |
+|---|----------|----------|
+| Reset-to-default semantic? | Option (a) — explicit override write of the system default. Simple, always-writeable, clean history. No new unset endpoint. | §6.7 |
+| Client-side validation posture? | Both client-side (fail fast) AND server-side (system of record). Never skip server side. | §6.7 |
+| Typed `InterventionTemplatesEditor` or JSON? | JSON editor with schema validation for Session 1. Typed editor deferred to Session 2 Phase 8. Allows Session 1 to focus on the 9 other block editors without blowing up estimate. | §6.2, §6.7 |
+
+### §10.6 Onboarding wizard
+
+| Q | Decision | Location |
+|---|----------|----------|
+| GHL OAuth redirect pattern? | Reuse existing pattern. Audit at chunk-7 kickoff to identify the canonical helper + callback path. Non-blocking. | §7.7 |
+| Welcome email template? | Reuse existing invite infra; add one sentence about the onboarding wizard in the body. No new template. | §7.7 |
+| Tier-aware wizard content? | Same content regardless of tier for Session 1. D6 retrofits tier-aware copy later. | §7.7 |
+
+### §10.7 Out of scope (explicitly deferred — Session 2 or later)
+
+- Subscription-tier runtime gating (D6)
+- Drilldown page (Phase 6)
+- Real CRM execution via apiAdapter (Phase 6)
+- Live CRM data pickers in editor modals (Phase 6)
+- Outcome-weighted recommendation signal (Phase 8)
+- B6 UX copy polish (Phase 8)
+- Channel fan-out verification (Phase 8)
+- Typed `InterventionTemplatesEditor` (Phase 8 — pulled out of Session 1 scope per §10.5)
+- Template-switch flow for existing orgs
+- Dedicated `ORG_PERMISSIONS.CONFIG_EDIT` split
+
+### §10.8 Items deliberately left as chunk-kickoff audits (non-blocking)
+
+These are small discovery tasks the implementer does at the start of the relevant chunk — they can't be answered from this spec alone but don't block approval:
+
+- Does `organisations.applied_system_template_id` already exist under another name? (chunk 2)
+- Which webhook handlers carry inbound `action_type` fields needing `resolveActionSlug` defensive normalisation? (chunk 2)
+- Does a ⌘K command palette exist in the client? (chunk 5)
+- Does `useSocket` support rejoin-after-remount cleanly? (chunk 5)
+- What's the canonical OAuth helper + callback pattern to reuse for GHL in the wizard? (chunk 7)
 
 ---
 
 **End of Session 1 spec.**
 
-Ready for review. When approved, the next step is to kick off Chunk 1 (architect pass) to produce `tasks/builds/clientpulse/session-1-plan.md`.
+All directional decisions are locked. The remaining audits in §10.8 are implementation discovery — they refine the code, not the plan. Ready for `spec-reviewer` pass when the local Codex is available.
