@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { drilldownService } from '../services/drilldownService.js';
@@ -10,6 +11,7 @@ const router = Router();
 router.get(
   '/api/clientpulse/subaccounts/:subaccountId/drilldown-summary',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -26,6 +28,7 @@ router.get(
 router.get(
   '/api/clientpulse/subaccounts/:subaccountId/signals',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -42,6 +45,7 @@ router.get(
 router.get(
   '/api/clientpulse/subaccounts/:subaccountId/band-transitions',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -60,6 +64,7 @@ router.get(
 router.get(
   '/api/clientpulse/subaccounts/:subaccountId/interventions',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };

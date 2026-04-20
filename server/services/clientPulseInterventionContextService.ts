@@ -165,7 +165,9 @@ export async function buildInterventionContext(params: {
       );
     });
     const outcomes = await aggregateOutcomesByTemplate(params.organisationId, currentBand);
-    const minTrials = 5;
+    // Session 2 §5.5 — operators tune via interventionDefaults.minTrialsForOutcomeWeight.
+    const interventionDefaults = await orgConfigService.getInterventionDefaults(params.organisationId);
+    const minTrials = interventionDefaults?.minTrialsForOutcomeWeight ?? 5;
     const picked = pickRecommendedTemplate({
       candidates: eligibleTemplates.map((t) => ({
         slug: t.slug,
