@@ -413,6 +413,22 @@ export const queueService = {
   },
 
   /**
+   * Generic job enqueue — used by event-driven follow-on jobs (e.g. the
+   * ClientPulse intervention proposer that fires after compute_churn_risk).
+   * Thin wrapper over the backend's send method so callers don't need to
+   * reach into getQueueBackend() directly.
+   */
+  async sendJob(queueName: string, data: object): Promise<void> {
+    if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+      // In-memory backend used in tests / dev has no named-queue routing;
+      // silently no-op so calling code stays the same.
+      return;
+    }
+    const boss = await getPgBoss();
+    await boss.send(queueName, data);
+  },
+
+  /**
    * M-17: Delete expired execution_files rows.
    */
   async cleanupExpiredExecutionFiles(): Promise<number> {
@@ -776,6 +792,40 @@ export const queueService = {
         }
       });
 
+      // ClientPulse Phase 4 — scenario-detector proposer (event-driven, fires
+      // at the tail of compute_churn_risk per sub-account).
+      await (boss as any).work('clientpulse:propose-interventions', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runProposeClientPulseInterventions } = await import('../jobs/proposeClientPulseInterventionsJob.js');
+          await withTimeout(
+            runProposeClientPulseInterventions(job.data).then(() => undefined),
+            60_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:propose-interventions', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // ClientPulse Phase 4 — hourly outcome-measurement sweep (B2 ship gate).
+      await (boss as any).work('clientpulse:measure-outcomes', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMeasureInterventionOutcomes } = await import('../jobs/measureInterventionOutcomeJob.js');
+          await withTimeout(
+            runMeasureInterventionOutcomes().then(() => undefined),
+            300_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:measure-outcomes', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
       // ALS context pulled from job.data.organisationId.
@@ -906,6 +956,8 @@ export const queueService = {
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
       // Memory & Briefings Phase 5 — daily protected-block divergence sweep (4am)
       await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
+      // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
+      await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

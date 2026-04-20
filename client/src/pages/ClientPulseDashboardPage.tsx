@@ -6,6 +6,8 @@ import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
+import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
+import ConfigAssistantChatPopup from '../components/clientpulse/ConfigAssistantChatPopup';
 
 interface Props { user: User; }
 
@@ -45,6 +47,8 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [subscription, setSubscription] = useState<OrgSubscription | null>(null);
   const [ghlConnected, setGhlConnected] = useState<boolean | null>(null);
+  const [proposingFor, setProposingFor] = useState<{ id: string; name: string } | null>(null);
+  const [configAssistantOpen, setConfigAssistantOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -77,6 +81,18 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <GuidedTour />
+      <ConfigAssistantChatPopup open={configAssistantOpen} onClose={() => setConfigAssistantOpen(false)} />
+      {proposingFor && (
+        <ProposeInterventionModal
+          subaccountId={proposingFor.id}
+          subaccountName={proposingFor.name}
+          onClose={() => setProposingFor(null)}
+          onSubmitted={() => {
+            // Soft-refresh high-risk on successful submit.
+            api.get('/api/clientpulse/high-risk').then((r) => setHighRisk(r.data?.clients ?? [])).catch(() => undefined);
+          }}
+        />
+      )}
 
       {/* Trial expired banner */}
       {trialBanner && (
@@ -94,15 +110,23 @@ export default function ClientPulseDashboardPage({ user }: Props) {
       )}
 
       {/* Greeting */}
-      <div className="mb-6">
-        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
-          Portfolio Health
-        </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
-          {health
-            ? `${health.totalClients} clients monitored. Last updated just now.`
-            : 'Connect your Go High Level account to start monitoring.'}
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
+            Portfolio Health
+          </h1>
+          <p className="text-sm text-slate-500 mt-1.5">
+            {health
+              ? `${health.totalClients} clients monitored. Last updated just now.`
+              : 'Connect your Go High Level account to start monitoring.'}
+          </p>
+        </div>
+        <button
+          onClick={() => setConfigAssistantOpen(true)}
+          className="shrink-0 px-3 py-1.5 rounded-md text-[12.5px] font-semibold bg-white border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+        >
+          Config Assistant
+        </button>
       </div>
 
       {/* GHL not connected empty state */}
@@ -167,7 +191,12 @@ export default function ClientPulseDashboardPage({ user }: Props) {
           ) : (
             <div className="space-y-3">
               {highRisk.slice(0, 5).map((client) => (
-                <div key={client.id} className="flex items-start gap-3">
+                <button
+                  key={client.id}
+                  onClick={() => setProposingFor({ id: client.id, name: client.name })}
+                  className="w-full flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition"
+                  aria-label={`Propose intervention for ${client.name}`}
+                >
                   <div className={`shrink-0 mt-0.5 w-2 h-2 rounded-full mt-1.5 ${
                     client.score >= 80 ? 'bg-red-500' : client.score >= 60 ? 'bg-amber-500' : 'bg-yellow-400'
                   }`} />
@@ -180,7 +209,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
                   <span className={`text-[12px] font-bold shrink-0 ${
                     client.score >= 80 ? 'text-red-500' : client.score >= 60 ? 'text-amber-500' : 'text-yellow-500'
                   }`}>{client.score}</span>
-                </div>
+                </button>
               ))}
             </div>
           )}

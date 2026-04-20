@@ -309,7 +309,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 ## Current focus
 
 **In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 0 + 0.5 + 1 + 2 + 3 (server-only, single PR on `claude/commit-to-main-y5BoZ`). Phase 4+ deferred to follow-up PR.
+**Active items:** ClientPulse Phases 4 + 4.5 on branch `claude/clientpulse-phase-4-development-ED1D9`. Phase 4 (intervention pipeline: 5 action primitives + scenario-detector proposer + outcome-measurement job closing B2 + proposer UI) and Phase 4.5 (Configuration Agent extension closing B3 + B5) land in a single PR.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 

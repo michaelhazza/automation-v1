@@ -151,6 +151,28 @@ export const JOB_CONFIG = {
     deadLetter: 'maintenance:memory-decay__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
+  // Phase 4 — ClientPulse scenario-detector (event-driven after
+  // compute_churn_risk). Payload carries churnAssessmentId + subaccountId,
+  // which the proposer uses to build a deterministic idempotency key so a
+  // retry cannot double-propose the same intervention.
+  'clientpulse:propose-interventions': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 90,
+    deadLetter: 'clientpulse:propose-interventions__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+  },
+  // Phase 4 — hourly outcome-measurement cron. Each tick re-reads the DB
+  // for pending interventions; duplicate deliveries are safe.
+  'clientpulse:measure-outcomes': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'clientpulse:measure-outcomes__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
   // Sprint 2 P1.1 Layer 3 — prune tool_call_security_events per
   // organisations.security_event_retention_days. Admin-bypass job
   // (cross-org sweep), so no job-payload org context.
