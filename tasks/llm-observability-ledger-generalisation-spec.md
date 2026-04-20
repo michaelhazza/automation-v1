@@ -194,7 +194,7 @@ This matters more than "operator convenience" because:
 
 1. **Generalise `llm_requests` attribution** so any current or future consumer (agent run, process execution, IEE run, analyzer job, future background job, admin tool) produces ledger rows without a schema change per consumer.
 2. **Close the three adapter-level observability gaps** (499 discrimination, parse-failure excerpt, AbortController) uniformly across every registered provider adapter (`anthropicAdapter`, `openaiAdapter`, `geminiAdapter`, `openrouterAdapter`) — see §8.4 for parity matrix.
-3. **Migrate the skill-analyzer** to route through `llmRouter` end-to-end, retiring all three direct `anthropicAdapter.call()` sites in `skillAnalyzerJob.ts`.
+3. **Migrate the skill-analyzer** to route through `llmRouter` end-to-end, retiring all four direct `anthropicAdapter.call()` sites in the analyzer subsystem — three in `server/jobs/skillAnalyzerJob.ts` (§10.1–§10.3) and one in `server/services/skillAnalyzerService.ts` (§10.4).
 4. **Extend `cost_aggregates`** with a `sourceType` dimension so system-level spend can be rolled up and displayed separately from org-billable spend.
 5. **Ship a System P&L admin page** at `/system/llm-pnl` with four grouping tabs (organisation / subaccount / source type / provider-model), four KPI cards (Revenue / Gross profit / Platform overhead / Net profit), a 30-day trend chart, and a top-calls-by-cost list (ranked by cost desc, includes platform-overhead rows). UI contract: `prototypes/system-costs-page.html`.
 6. **Add a nightly retention job** that moves `llm_requests` rows older than `env.LLM_LEDGER_RETENTION_MONTHS` (default 12) into a `llm_requests_archive` table of identical shape, with lighter indexing.
@@ -713,7 +713,7 @@ const marginMultiplier =
     : resolved.marginMultiplier;
 ```
 
-With `marginMultiplier = 1.0`, `costWithMargin === costRaw` for those rows. The P&L page's "no revenue for system" assertion (§11.5) and the `SourceTypeRow.revenueCents: null` rendering in §19.5 both depend on this. If this branch is omitted, analyzer rows carry the default `1.30` multiplier and the P&L page reports phantom revenue for analyzer work.
+With `marginMultiplier = 1.0`, `costWithMargin === costRaw` for those rows. The P&L page's "no revenue for system" assertion (§11.5) and the `SourceTypeRow.revenueCents: null` rendering in §19.5.2 both depend on this. If this branch is omitted, analyzer rows carry the default `1.30` multiplier and the P&L page reports phantom revenue for analyzer work.
 
 ### 7.5 What the router does NOT change
 
@@ -775,7 +775,7 @@ if (err instanceof Error && err.name === 'AbortError') {
 
 The router catches this shape and records `status = 'aborted_by_caller'` with `abort_reason` set from `err.abortReason`.
 
-**Caller convention (enforced by code review, not a runtime check):** callers that support timeout cancellation pass `abortController.abort('caller_timeout')` from their timeout handler, and pass `abortController.abort('caller_cancel')` (or a bare `abort()` which defaults to `caller_cancel`) from user-initiated cancellation paths. The analyzer migration in §10 wires this exactly.
+**Caller convention (enforced by code review, not a runtime check):** callers that support timeout cancellation pass `abortController.abort('caller_timeout')` from their timeout handler, and pass `abortController.abort('caller_cancel')` (or a bare `abort()` which defaults to `caller_cancel`) from user-initiated cancellation paths. The analyzer migration in §10 wires the `caller_timeout` path exactly — it does not add a new UI-cancel hook. User-cancel (`caller_cancel`) remains a forward-looking abort-reason value in the CHECK constraint; wiring a UI/job-level cancel path into the analyzer's `AbortController` is deferred (§17).
 
 **Router-side usage:** `routeCall()` passes `ctx.abortSignal` through to the adapter as `params.signal`. The analyzer migration (§10) creates an `AbortController` per classify call and wires it up.
 
@@ -1050,7 +1050,7 @@ After the four migrations, run the analyzer end-to-end on a test import and veri
 1. `SELECT COUNT(*) FROM llm_requests WHERE feature_tag LIKE 'skill-analyzer-%' AND created_at > <before_test>` returns a non-zero count roughly equal to the number of candidates × number of LLM calls per candidate (summed across the three job-layer sites and the service-layer site from §10.4).
 2. Cross-check `providerRequestId` values against the Anthropic console — every row's provider_request_id should match an entry in Anthropic's log (within a tolerance for the specific request).
 3. `SELECT SUM(cost_with_margin) FROM llm_requests WHERE feature_tag LIKE 'skill-analyzer-%' AND billing_month = '2026-MM'` gives a non-zero total that appears in `cost_aggregates` rolled up under `entity_type = 'feature_tag'`.
-4. Kill a classify mid-flight (e.g. via the existing UI "cancel job" path) and verify the resulting ledger row carries `status = 'aborted_by_caller'` and `abort_reason = 'caller_cancel'`.
+4. Let a classify timeout via its existing `SKILL_CLASSIFY_TIMEOUT_MS` path and verify the resulting ledger row carries `status = 'aborted_by_caller'` and `abort_reason = 'caller_timeout'`.
 5. Simulate a parse failure by temporarily breaking the schema validator and verify `parseFailureRawExcerpt` is populated ≤2 KB.
 
 Verification is manual during Phase 3 rollout. `docs/spec-context.md` precludes automated runtime test suites for this kind of flow.
@@ -1129,9 +1129,11 @@ export const systemPnlService = {
 
 ### 11.3 API endpoints
 
-All routes live in `server/routes/systemPnl.ts` (new), mounted under `/api/admin/llm-pnl/*`:
+All routes live in `server/routes/systemPnl.ts` (new), mounted under `/api/admin/llm-pnl/*`.
 
-| Method | Path | Returns | Purpose |
+**Response envelope:** every endpoint returns the `{data, meta}` wrapper defined in §19.9. The "Returns" column below names the TypeScript type of the `data` payload only — `meta` is uniform across every route (`period`, `generatedAt`, `ledgerRowsScanned`).
+
+| Method | Path | `data` payload type | Purpose |
 |---|---|---|---|
 | GET | `/summary?month=YYYY-MM` | `PnlSummary` | 4 KPI cards data |
 | GET | `/by-organisation?month=YYYY-MM&limit=N` | `{ orgs: OrgRow[]; overhead: OverheadRow }` | Tab 1 |
@@ -1193,9 +1195,9 @@ The mockup shows several controls the operator can interact with. Each is either
 | **Refresh button** | Top-right of page header (mockup line 137) | **Real.** Manual `queryClient.invalidateQueries(['systemPnl'])` — forces immediate refetch of all P&L queries. |
 | **Export CSV button** | Top-right of page header (mockup line 156) | **Real, client-side only.** Clicking the button serialises the currently-visible tab's React Query cache to CSV and triggers a browser download. No new API endpoint. Implementation is a ~30-line client-side helper (`exportTabAsCsv(tab, rows)`); columns match the rendered table verbatim. Scope: the active tab's rows at the current filter/sort. |
 | **View all (in "Top calls by cost" header)** | Mockup line 994 | **Real, as an anchor scroll + limit bump.** Clicking sets the client-side `topCallsLimit` state from 10 to 50 and smooth-scrolls to the top of the Top-calls section. No new page, no new route. "All" means "up to 50 in the current period," not "every row ever." |
-| **Footer link — "Margin policies"** | Mockup line 1143 | **Decorative.** Rendered as a `<span>` styled like a link but with no `href` and no click handler. Real destination deferred — see §17. |
-| **Footer link — "Retention"** | Mockup line 1144 | **Decorative.** Same treatment as "Margin policies." Real destination deferred — see §17. |
-| **Footer link — "Billing rules"** | Mockup line 1145 | **Decorative.** Same treatment as "Margin policies." Real destination deferred — see §17. |
+| **Footer link — "Margin policies"** | Mockup line 1144 | **Decorative.** Rendered as a `<span>` styled like a link but with no `href` and no click handler. Real destination deferred — see §17. |
+| **Footer link — "Retention"** | Mockup line 1145 | **Decorative.** Same treatment as "Margin policies." Real destination deferred — see §17. |
+| **Footer link — "Billing rules"** | Mockup line 1146 | **Decorative.** Same treatment as "Margin policies." Real destination deferred — see §17. |
 
 Rationale: the mockup makes visible commitments to the operator. Refresh, Export CSV, View all, and the 60s auto-refresh are cheap to honour with client-side-only work and the mockup would feel broken without them. Admin-only footer destinations (`Margin policies`, `Retention`, `Billing rules`) would balloon P4 scope into a multi-page admin suite — decorative-for-now is the cheapest honouring of the mockup's visual intent without committing P4 to pages that don't yet exist.
 
@@ -1222,7 +1224,7 @@ See §19 Contracts for the full TypeScript types. Column order matches the mocku
 |---|---|
 | By Organisation | One synthetic aggregated overhead row (labelled `Overhead · Platform background work`) that sums `system` + `analyzer` cost across every org. The By Subaccount tab slices by a different dimension; see below. |
 | By Subaccount | No overhead row. Subaccount grouping has no natural home for platform-wide overhead (overhead has no subaccount), so the tab renders only subaccount rows. Aggregate overhead is visible via the Platform overhead KPI card and the `By Source Type` and `By Organisation` tabs. |
-| By Source Type | Two overhead rows — `system` and `analyzer` — rendered as separate rows per §19.5. |
+| By Source Type | Two overhead rows — `system` and `analyzer` — rendered as separate rows per §19.5.2. |
 | By Provider / Model | No overhead row. Platform overhead crosses provider/model lines; splitting it by provider would add noise without observability win. Aggregate overhead is visible elsewhere. |
 
 On `By Source Type`, both `system` and `analyzer` render as overhead rows per the treatment above. The schema-level split between `system` and `analyzer` (added in §6.1) is preserved here so operators can see analyzer spend at a glance instead of hiding it behind a single "System" line.
@@ -1244,7 +1246,7 @@ On `By Source Type`, both `system` and `analyzer` render as overhead rows per th
 - Fallback chain (JSON-decoded from the column)
 - Retry attempt number
 - `parseFailureRawExcerpt` rendered in a monospace block if non-null
-- Links back to: originating run (if `runId` present), job (if `sourceId` present), organisation, subaccount
+- Links back to: originating run (if `runId` is non-null — agent-run rows only), job (if `sourceId` is non-null — analyzer rows only today), organisation (if `organisationId` is non-null), subaccount (if `subaccountId` is non-null). Overhead rows (`sourceType ∈ {'system','analyzer'}`) render the organisation and subaccount link rows only when non-null, per the §19.6 nullability contract.
 - "Copy as support ticket" button — formats provider_request_id + model + error into a block suitable for pasting into an Anthropic support ticket
 
 **Scope note:** rich-state interactions on the drawer (filter-by-request-ID inline, keyboard nav) are **deferred** — see §17. Base drawer ships with Phase 4.
@@ -1290,16 +1292,37 @@ Indexes: only the ones needed for occasional lookup by support/compliance:
 
 ### 12.4 `llm-ledger-archive` job (new pg-boss job)
 
-**File:** `server/jobs/llmLedgerArchiveJob.ts` (new)
+**Files:**
+- `server/jobs/llmLedgerArchiveJob.ts` (new) — the job orchestration + DB transaction loop (impure).
+- `server/jobs/llmLedgerArchiveJobPure.ts` (new) — pure helpers extracted out of the job for testability. Exports `computeArchiveCutoff(retentionMonths, now)`.
 
 **Schedule:** nightly at 03:00 UTC (pg-boss cron).
 
-**Shape:**
+**Pure helper (`llmLedgerArchiveJobPure.ts`):**
+
+```ts
+/**
+ * Cutoff for archive-eligibility: rows strictly older than `retentionMonths`
+ * calendar months before `now` are moved to the archive table.
+ *
+ * `now` is injected for test determinism; the caller passes `new Date()` at
+ * runtime. Uses `setMonth(getMonth() - n)` rather than day arithmetic so the
+ * cutoff tracks month boundaries rather than a naive 30-day window.
+ */
+export function computeArchiveCutoff(retentionMonths: number, now: Date): Date {
+  const cutoff = new Date(now.getTime());
+  cutoff.setMonth(cutoff.getMonth() - retentionMonths);
+  return cutoff;
+}
+```
+
+The corresponding test at `server/jobs/__tests__/ledgerArchivePure.test.ts` (§14.8a) exercises this helper directly — no DB, no mocks.
+
+**Shape (`llmLedgerArchiveJob.ts`):**
 
 ```ts
 export async function archiveOldLedgerRows(): Promise<ArchiveResult> {
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - env.LLM_LEDGER_RETENTION_MONTHS);
+  const cutoff = computeArchiveCutoff(env.LLM_LEDGER_RETENTION_MONTHS, new Date());
 
   // Move rows in 10k-row chunks to bound transaction size.
   // Postgres does NOT support `DELETE ... ORDER BY ... LIMIT` directly, so we
@@ -1424,7 +1447,7 @@ Note: pg-boss job registration is application code (wired in at startup via `que
 
 | File | Change |
 |---|---|
-| `server/db/schema/llmRequests.ts` | Add 4 columns; extend `SOURCE_TYPES`, `LLM_REQUEST_STATUSES`, `TASK_TYPES` (via featureTag doc comment only — taxonomy stays on existing enum); type changes |
+| `server/db/schema/llmRequests.ts` | Add 4 columns (`source_id`, `feature_tag`, `parse_failure_raw_excerpt`, `abort_reason`); extend `SOURCE_TYPES` and `LLM_REQUEST_STATUSES` enums; drop `execution_phase` NOT NULL; add check constraints; type changes. **No `TASK_TYPES` change** — per §5.2 the existing closed enum stays as-is; feature identity lives on the new `feature_tag` column instead. |
 | `server/db/schema/llmRequestsArchive.ts` (new) | Archive table, mirrors shape |
 | `server/db/schema/index.ts` | Export new archive table |
 | `server/db/schema/costAggregates.ts` | Update doc comment for `entity_type` enum |
@@ -1459,7 +1482,8 @@ Note: pg-boss job registration is application code (wired in at startup via `que
 | File | Change |
 |---|---|
 | `server/jobs/skillAnalyzerJob.ts` | Replace 3 direct `anthropicAdapter.call()` sites (§10.1–§10.3) with `llmRouter.routeCall()`; wire `AbortController`. A 4th analyzer-subsystem site lives in `server/services/skillAnalyzerService.ts` — migrated per §14.3. |
-| `server/jobs/llmLedgerArchiveJob.ts` (new) | Nightly archive job per §12.4 |
+| `server/jobs/llmLedgerArchiveJob.ts` (new) | Nightly archive job orchestration + DB transaction loop per §12.4 |
+| `server/jobs/llmLedgerArchiveJobPure.ts` (new) | Pure helpers for the archive job — exports `computeArchiveCutoff(retentionMonths, now)` per §12.4 |
 | `server/services/queueService.ts` and/or `server/index.ts` | Register the new archive job with pg-boss at startup. (This repo has no `server/jobs/index.ts`; queue registration happens through `queueService` primitives invoked from `server/index.ts` and the per-job files.) |
 
 ### 14.6 Server libs / config
@@ -1503,7 +1527,7 @@ Note: pg-boss job registration is application code (wired in at startup via `que
 |---|---|
 | `server/services/__tests__/systemPnlServicePure.test.ts` (new) | Tests for P&L math — revenue/profit/margin derivation, totals row, % computations |
 | `server/lib/__tests__/utf8Truncate.test.ts` (new) | Truncation at UTF-8 code point boundaries — no invalid multi-byte residue |
-| `server/jobs/__tests__/ledgerArchivePure.test.ts` (new) | Cutoff date calculation from `LLM_LEDGER_RETENTION_MONTHS` |
+| `server/jobs/__tests__/ledgerArchivePure.test.ts` (new) | Tests `computeArchiveCutoff(retentionMonths, now)` from `server/jobs/llmLedgerArchiveJobPure.ts` — month-boundary arithmetic, injected `now` for determinism |
 
 ### 14.8b Working-session deliverables
 
@@ -1567,7 +1591,7 @@ Each phase is a single PR. Phases land in order; no phase depends on a column/ta
 
 **Columns referenced by code:** none new.
 
-**Verification:** gate runs and currently fails (analyzer still bypasses router); whitelist temporarily includes `skillAnalyzerJob.ts` until P3. Phase lands as red gate + temporary whitelist + `tasks/direct-adapter-audit-<date>.md` listing every caller found.
+**Verification:** gate runs green on P2 — the whitelist explicitly names both `server/jobs/skillAnalyzerJob.ts` and `server/services/skillAnalyzerService.ts` (the two known direct-adapter sites, per §9.2) so the gate passes with those two files exempted. P3 removes both from the whitelist (§15.3) — that is the moment the gate starts enforcing against the analyzer subsystem. P2 therefore lands as: green gate + explicit temporary whitelist of the two analyzer files + `tasks/direct-adapter-audit-<date>.md` listing every direct-adapter caller the sweep finds.
 
 **Deliverable:** one markdown file in `tasks/` enumerating direct-adapter callers with a one-line remediation plan for each.
 
@@ -1713,7 +1737,7 @@ Per phase, these manual checks run before merging to main:
 **P3:**
 - Import a skill-analyzer job; verify rows appear in `llm_requests` with correct `feature_tag`, `sourceType`, `sourceId`.
 - Cross-check `providerRequestId` against Anthropic console for one row.
-- Kill a classify mid-flight; verify `status = 'aborted_by_caller'`, `abort_reason = 'caller_cancel'`.
+- Let a classify timeout via `SKILL_CLASSIFY_TIMEOUT_MS`; verify `status = 'aborted_by_caller'`, `abort_reason = 'caller_timeout'`.
 - Temporarily break the parse schema; verify `parseFailureRawExcerpt` ≤2 KB and UTF-8-valid.
 - Confirm `verify-no-direct-adapter-calls.sh` passes without analyzer in whitelist.
 
@@ -1749,6 +1773,8 @@ Per §7 of the spec-authoring checklist, every "deferred" / "later" / "future" r
 - **Cross-org cost trend tuning** (smoothing, seasonality overlays, year-over-year comparison). Deferred. Reason: the 30-day line chart in P4 is sufficient for CEO-level reporting; advanced chart work is a follow-up.
 - **Direct-adapter caller audit of callers outside the analyzer subsystem.** P2 produces the audit document; P3 migrates the entire analyzer subsystem (both `server/jobs/skillAnalyzerJob.ts` and `server/services/skillAnalyzerService.ts`) as proof-of-concept. Callers outside the analyzer subsystem — e.g. workspace-memory, belief-extraction, and any other confirmed by P2 — are migrated in a follow-up spec. Reason: scope containment — this spec proves the pattern on one subsystem; the pattern, once proven, can be applied elsewhere without a new design.
 - **Real destinations for the System P&L page footer links (`Margin policies`, `Retention`, `Billing rules`).** P4 renders these as decorative `<span>` elements per §11.4.1. Candidates for real destinations: an admin `Margin policies` page (org-by-org override tables), an admin `Retention` page exposing `env.LLM_LEDGER_RETENTION_MONTHS`, and an admin `Billing rules` page (invoice generation, per-client billing periods). Reason: each destination is its own admin page that does not yet exist; wiring real hrefs into P4 would balloon scope from a single admin surface into a multi-page suite.
+- **User-initiated cancel wiring for analyzer LLM calls (`caller_cancel`).** §8.1's abort-reason mechanism supports both `caller_timeout` and `caller_cancel`, but this spec only wires the timeout path in §10.1. Threading a UI/job-level cancel into the analyzer's `AbortController` requires a new cancel-propagation hook (UI → pg-boss job cancel → analyzer worker → `AbortController.abort('caller_cancel')`) that does not exist today. Reason for deferral: the analyzer pg-boss job has no UI-cancel surface today; adding one is its own scope (cancellable long-running jobs) and out of this spec's ledger-generalisation work. The schema-level `abort_reason = 'caller_cancel'` value stays listed in the CHECK constraint so no future migration is needed when the wiring lands.
+- **`cost_aggregates` `provider_model` entity_type + `avg_latency_ms` column.** P4's `getByProviderModel()` reads `llm_requests` live with GROUP BY `(provider, model)` + `AVG(provider_latency_ms)` because `cost_aggregates` has no `provider+model` composite key and no latency column (§11.2). Deferred. Reason: the 30-day window is a bounded indexed scan (sub-500ms) at expected volumes; extending `cost_aggregates` adds schema + aggregation-job work that is only worth paying for if query latency becomes load-bearing. Commit-and-revert posture per `docs/spec-context.md` — ship against live reads, promote to aggregate dimension later if and when latency data says so.
 
 ---
 
@@ -1964,47 +1990,120 @@ Note: analyzer rows use `marginMultiplier: "1.0000"` because system-level work d
   pctOfRevenue: number;
 }
 ```
-Reused by every tab that renders an aggregated overhead row (today: `By Organisation` only). `By Source Type` uses a separate `SourceTypeRow` per §19.5 because the overhead there is split into two distinct rows.
+Reused by every tab that renders an aggregated overhead row (today: `By Organisation` only). `By Source Type` uses a separate `SourceTypeRow` per §19.5.2 because the overhead there is split into two distinct rows.
 
-### 19.5 `SubacctRow`, `SourceTypeRow`, `ProviderModelRow`
+### 19.5 Per-tab row contracts
 
-Same shape family as `OrgRow`. See component specs per §11.5 for column differences. Each has its own TypeScript type in `shared/types/systemPnl.ts`.
+Each tab's row type has its own explicit shape in `shared/types/systemPnl.ts`. The shape family is similar to `OrgRow` for the money columns, but the identity columns and the tab-specific columns differ per tab.
 
-`SourceTypeRow` renders 5 rows on the `By Source Type` tab — one per distinct `sourceType` value: `agent_run`, `process_execution`, `iee`, `system`, `analyzer`. The schema-level split between `system` and `analyzer` (added in §6.1) is preserved in the UI so operators can see analyzer spend at a glance instead of hiding it behind a single "System" line.
+#### 19.5.1 `SubacctRow`
 
-**Example — `SourceTypeRow` for the `system` row (platform overhead that is not analyzer work):**
+**Type:** TypeScript, declared in `shared/types/systemPnl.ts`.
+
+**Example:**
+```ts
+{
+  subaccountId: "a14f...",
+  subaccountName: "Creative Ops",
+  organisationId: "8b2e...",
+  organisationName: "Summit Digital",
+  marginTier: 1.40,
+  requests: 48213,
+  revenueCents: 121840,
+  costCents: 87029,
+  profitCents: 34811,
+  marginPct: 28.6,
+  pctOfRevenue: 4.5,
+}
+```
+
+**Nullability:** none — subaccount rows always belong to a concrete subaccount + org.
+
+**Producer:** `systemPnlService.getBySubaccount()`.
+**Consumer:** `PnlBySubaccountTable.tsx`.
+
+#### 19.5.2 `SourceTypeRow`
+
+**Type:** TypeScript, declared in `shared/types/systemPnl.ts`.
+
+Renders 5 rows on the `By Source Type` tab — one per distinct `sourceType` value: `agent_run`, `process_execution`, `iee`, `system`, `analyzer`. The schema-level split between `system` and `analyzer` (added in §6.1) is preserved in the UI so operators can see analyzer spend at a glance instead of hiding it behind a single "System" line.
+
+**Shape:**
+```ts
+{
+  sourceType: 'agent_run' | 'process_execution' | 'iee' | 'system' | 'analyzer';
+  label: string;                   // display label (e.g. "Agent Run", "System Background")
+  description: string;             // one-line description shown under the label
+  orgsCount: number;               // distinct organisation count contributing to this row (for billable rows); 0 for overhead rows
+  requests: number;
+  revenueCents: number | null;     // null for sourceType ∈ {'system','analyzer'} (no revenue attribution)
+  costCents: number;
+  profitCents: number;             // = revenueCents - costCents for billable rows; = -costCents for overhead rows
+  marginPct: number | null;        // null for overhead rows — rendered as "overhead" badge
+  pctOfCost: number;               // percentage of this period's total platform cost
+}
+```
+
+**Example — `system` row (platform overhead that is not analyzer work):**
 ```ts
 {
   sourceType: "system",
   label: "System Background",
   description: "Memory compile · orchestration · miscellaneous system work",
+  orgsCount: 0,
   requests: 187319,
-  revenueCents: null,            // no revenue attribution
+  revenueCents: null,
   costCents: 164283,
   profitCents: -164283,
-  marginPct: null,                // n/a — use "overhead" badge
+  marginPct: null,
   pctOfCost: 7.0,
 }
 ```
 
-**Example — `SourceTypeRow` for the `analyzer` row:**
+**Example — `analyzer` row:**
 ```ts
 {
   sourceType: "analyzer",
   label: "Skill Analyzer",
   description: "Classify · agent-match · cluster-recommend",
+  orgsCount: 0,
   requests: 25718,
-  revenueCents: null,            // no revenue attribution (analyzer is platform work, not client-billable)
+  revenueCents: null,
   costCents: 24459,
   profitCents: -24459,
-  marginPct: null,                // n/a — use "overhead" badge
+  marginPct: null,
   pctOfCost: 1.0,
 }
 ```
 
 Both `system` and `analyzer` rows carry the same "overhead" treatment (null revenue, null margin, rendered as em-dashes by `PnlBySourceTypeTable.tsx`). The `system` row's description drops the word "Analyzers" — analyzer work is now its own row.
 
+**Producer:** `systemPnlService.getBySourceType()`.
 **Consumer:** `PnlBySourceTypeTable.tsx` renders em-dashes for null `revenueCents` and `marginPct` across both overhead rows.
+
+#### 19.5.3 `ProviderModelRow`
+
+**Type:** TypeScript, declared in `shared/types/systemPnl.ts`.
+
+**Example:**
+```ts
+{
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
+  requests: 412918,
+  revenueCents: 1843219,
+  costCents: 1320442,
+  profitCents: 522777,
+  marginPct: 28.4,
+  avgLatencyMs: 2847,            // AVG(provider_latency_ms) across the period's rows
+  pctOfCost: 55.7,               // percentage of this period's total platform cost
+}
+```
+
+**Nullability:** none — every row has a concrete provider+model pair.
+
+**Producer:** `systemPnlService.getByProviderModel()`.
+**Consumer:** `PnlByProviderModelTable.tsx`.
 
 ### 19.5a `DailyTrendRow`
 
@@ -2016,7 +2115,6 @@ Both `system` and `analyzer` rows carry the same "overhead" treatment (null reve
   day: "2026-04-20",           // ISO date (YYYY-MM-DD), one row per calendar day in the requested window
   revenueCents: 93814,
   costCents: 76121,
-  profitCents: 17693,
   overheadCents: 6254,         // sum of sourceType ∈ {'system','analyzer'} cost for this day
 }
 ```
@@ -2025,7 +2123,7 @@ Both `system` and `analyzer` rows carry the same "overhead" treatment (null reve
 
 **Series meaning on the chart:**
 - `revenueCents` and `costCents` are the two primary series (stacked area + line).
-- `profitCents` is derived client-side as `revenueCents - costCents` and is NOT sent separately (consumer computes on render); it is included in the contract above for the top-calls-page summary math. **Net profit** on the chart is `revenueCents - costCents` (overhead is already included in `costCents`).
+- **Net profit** on the chart is derived client-side as `revenueCents - costCents` and is NOT sent as a separate field (overhead is already included in `costCents`, so this subtraction produces net profit directly). Keeping profit off the wire prevents drift between contract and display math.
 - `overheadCents` is rendered as a secondary line/area in muted indigo so operators can see platform overhead separately from the primary cost line. Including it as a field avoids a second round-trip for the chart.
 
 **Ordering:** rows are returned in ascending `day` order; consumer does not need to sort.
@@ -2085,8 +2183,10 @@ Both `system` and `analyzer` rows carry the same "overhead" treatment (null reve
   ...TopCallRow,
   idempotencyKey: "...",
   providerRequestId: "req_011CaEL8o...",
-  runId: "...",                   // if sourceType = 'agent_run'
-  sourceId: null,                 // or a uuid for analyzer
+  organisationId: "8b2e...",      // null for overhead rows (system / analyzer)
+  subaccountId: "a14f...",        // null for overhead rows and org-scoped work without a subaccount
+  runId: "...",                   // if sourceType = 'agent_run'; null otherwise
+  sourceId: null,                 // uuid for analyzer (= skill_analyzer_jobs.id per §6.3); null for other source types
   attemptNumber: 1,
   fallbackChain: null,            // parsed JSON or null
   errorMessage: null,
@@ -2097,6 +2197,11 @@ Both `system` and `analyzer` rows carry the same "overhead" treatment (null reve
   routerOverheadMs: 12,
 }
 ```
+
+**Link-target nullability (load-bearing for the §11.6 drawer links):**
+- `organisationId` / `subaccountId` — null when the corresponding `…Name` field is null (i.e. overhead rows where no org/subaccount applies). Drawer renders the link row only when both the name and the id are non-null.
+- `runId` — non-null iff `sourceType = 'agent_run'`; the drawer's "Originating run" link renders only for agent rows.
+- `sourceId` — non-null for `sourceType ∈ {'analyzer'}` (joins to `skill_analyzer_jobs.id`); `null` for other source types today. Drawer's "Originating job" link renders only when non-null.
 
 **Producer:** `systemPnlService.getTopCalls()` / `.getCallDetail()`.
 **Consumer:** `PnlTopCallsList.tsx` / `PnlCallDetailDrawer.tsx`.
