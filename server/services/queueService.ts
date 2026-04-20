@@ -595,6 +595,21 @@ export const queueService = {
           throw err;
         }
       });
+      // LLM observability spec §12 — nightly llm_requests retention sweep.
+      // Moves rows older than env.LLM_LEDGER_RETENTION_MONTHS (default 12)
+      // to llm_requests_archive in 10k-row chunks. Bounded transaction size;
+      // FOR UPDATE SKIP LOCKED makes concurrent runs safe.
+      await (boss as any).work('maintenance:llm-ledger-archive', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { archiveOldLedgerRows } = await import('../jobs/llmLedgerArchiveJob.js');
+          await withTimeout(archiveOldLedgerRows().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-ledger-archive', jobId: job.id });
+          }
+          throw err;
+        }
+      });
 
       // Sprint 3 P2.1 Sprint 3A — agent_runs retention pruner. Admin-bypass
       // sweep that opens its own tx via withAdminConnection. Cascade on
@@ -932,6 +947,10 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      // LLM observability spec §12 — retention archival at 03:45 UTC so it
+      // runs after the 03:00 memory-decay and 03:30 security-events sweeps
+      // without contending on the same connection pool.
+      await boss.schedule('maintenance:llm-ledger-archive', '45 3 * * *', {});
       // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
       // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
       // a clean shot at the same per-org row set without contending on

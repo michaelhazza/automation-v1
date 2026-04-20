@@ -62,6 +62,11 @@ const envSchema = z.object({
   PLATFORM_MAX_REQUESTS_PER_MINUTE: z.coerce.number().optional().default(60),
   // Platform default margin multiplier (e.g. 1.30 = 30% markup)
   PLATFORM_MARGIN_MULTIPLIER: z.coerce.number().optional().default(1.30),
+  // llm_requests retention (months). Rows older than this cutoff are moved
+  // to llm_requests_archive by the nightly llm-ledger-archive pg-boss job
+  // (see server/jobs/llmLedgerArchiveJob.ts). Infrastructure tunable, not
+  // a per-org business decision.
+  LLM_LEDGER_RETENTION_MONTHS: z.coerce.number().int().positive().optional().default(12),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill

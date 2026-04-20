@@ -531,23 +531,50 @@ export async function getTopCalls(period: Period, limit = 10): Promise<TopCallRo
 // ── 8. getCallDetail ──────────────────────────────────────────────────────
 
 export async function getCallDetail(id: string): Promise<CallDetail | null> {
+  // UNION ALL against the archive so detail-drawer lookups keep working
+  // for rows moved out of the live table by the nightly retention job
+  // (spec §12.4 / §15.5). Live table is checked first; archive is a
+  // second-chance lookup.
   const rows = await db.execute<Record<string, unknown>>(sql`
+    WITH combined AS (
+      SELECT r.*
+      FROM llm_requests r
+      WHERE r.id = ${id}
+      UNION ALL
+      SELECT
+        r.id, r.idempotency_key, r.organisation_id, r.subaccount_id, r.user_id,
+        r.source_type, r.run_id, r.execution_id, r.iee_run_id, r.source_id,
+        r.feature_tag, r.call_site, r.agent_name, r.task_type,
+        r.provider, r.model, r.provider_request_id,
+        r.tokens_in, r.tokens_out, r.provider_tokens_in, r.provider_tokens_out,
+        r.cost_raw, r.cost_with_margin, r.cost_with_margin_cents, r.margin_multiplier, r.fixed_fee_cents,
+        r.request_payload_hash, r.response_payload_hash,
+        r.provider_latency_ms, r.router_overhead_ms,
+        r.status, r.error_message, r.attempt_number,
+        r.parse_failure_raw_excerpt, r.abort_reason,
+        r.cached_prompt_tokens,
+        r.execution_phase, r.capability_tier, r.was_downgraded, r.routing_reason,
+        r.was_escalated, r.escalation_reason,
+        r.requested_provider, r.requested_model, r.fallback_chain,
+        r.billing_month, r.billing_day, r.created_at
+      FROM llm_requests_archive r
+      WHERE r.id = ${id}
+    )
     SELECT
-      r.*,
+      c.*,
       o.name AS organisation_name,
       s.name AS subaccount_name,
       omc.margin_multiplier AS margin_multiplier
-    FROM llm_requests r
-    LEFT JOIN organisations o ON o.id = r.organisation_id
-    LEFT JOIN subaccounts s   ON s.id = r.subaccount_id
+    FROM combined c
+    LEFT JOIN organisations o ON o.id = c.organisation_id
+    LEFT JOIN subaccounts s   ON s.id = c.subaccount_id
     LEFT JOIN LATERAL (
       SELECT margin_multiplier
       FROM org_margin_configs
-      WHERE organisation_id = r.organisation_id
+      WHERE organisation_id = c.organisation_id
       ORDER BY effective_from DESC
       LIMIT 1
     ) omc ON TRUE
-    WHERE r.id = ${id}
     LIMIT 1
   `);
 
