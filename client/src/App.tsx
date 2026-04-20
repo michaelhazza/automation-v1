@@ -133,9 +133,18 @@ function ProtectedLayout({ user, loading }: { user: User | null; loading: boolea
 
 /**
  * Redirect to /onboarding on first render of a protected surface when the
- * server reports needsOnboarding=true. Skips if already on /onboarding/* so
- * the wizard itself doesn't self-redirect. System-admin surfaces without an
- * org context receive { needsOnboarding: false } from the server.
+ * server reports needsOnboarding=true AND the current user has permission
+ * to complete the wizard. Skips if already on /onboarding/* so the wizard
+ * itself doesn't self-redirect. System-admin surfaces without an org
+ * context receive { needsOnboarding: false } from the server.
+ *
+ * Permission gate rationale: POST /api/onboarding/complete requires
+ * ORG_PERMISSIONS.AGENTS_EDIT ('org.agents.edit'). Without this gate,
+ * read-only org members would be permanently trapped on /onboarding
+ * because they can see the wizard but cannot complete it. Users without
+ * the permission stay on their requested page; the dashboard's existing
+ * empty-state copy surfaces the "waiting for admin" message when GHL
+ * isn't connected.
  */
 function useOnboardingRedirect(user: User | null) {
   const navigate = useNavigate();
@@ -144,10 +153,17 @@ function useOnboardingRedirect(user: User | null) {
     if (!user) return;
     if (location.pathname.startsWith('/onboarding')) return;
     let cancelled = false;
-    api.get('/api/onboarding/status')
-      .then(({ data }) => {
+    Promise.all([
+      api.get<{ needsOnboarding?: boolean }>('/api/onboarding/status'),
+      api.get<{ permissions: string[] }>('/api/my-permissions'),
+    ])
+      .then(([statusRes, permsRes]) => {
         if (cancelled) return;
-        if (data?.needsOnboarding) navigate('/onboarding', { replace: true });
+        if (!statusRes.data?.needsOnboarding) return;
+        const canComplete = Array.isArray(permsRes.data?.permissions)
+          && permsRes.data.permissions.includes('org.agents.edit');
+        if (!canComplete) return;
+        navigate('/onboarding', { replace: true });
       })
       .catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };

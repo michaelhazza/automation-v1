@@ -258,7 +258,17 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
 
         setAgent(configAgent);
 
-        const { data: convs } = await api.get<Conversation[]>(`/api/agents/${configAgent.id}/conversations`);
+        // Spec contract (k) — when the page loads inside the popup iframe,
+        // the popup appends `updatedAfter=<iso>` to enforce the 15-minute
+        // resume window. Forward it to the listing endpoint; the full-page
+        // route (no popup) omits it and sees all conversations as before.
+        const urlParams = new URLSearchParams(window.location.search);
+        const updatedAfter = urlParams.get('updatedAfter');
+        const listUrl = updatedAfter
+          ? `/api/agents/${configAgent.id}/conversations?updatedAfter=${encodeURIComponent(updatedAfter)}&order=updated_desc&limit=1`
+          : `/api/agents/${configAgent.id}/conversations`;
+
+        const { data: convs } = await api.get<Conversation[]>(listUrl);
         setConversations(convs);
         if (convs.length > 0) {
           setActiveConvId(convs[0].id);

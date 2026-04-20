@@ -18,18 +18,31 @@
  */
 
 import { useMemo } from 'react';
-import { useConfigAssistantPopup } from '../../hooks/useConfigAssistantPopup';
+import {
+  useConfigAssistantPopup,
+  CONFIG_ASSISTANT_RESUME_WINDOW_MIN,
+} from '../../hooks/useConfigAssistantPopup';
 
 export default function ConfigAssistantPopup() {
   const { open, initialPrompt, closeConfigAssistant } = useConfigAssistantPopup();
 
   // Build the iframe src with the deep-link prompt on fresh conversation
   // per spec §5.5. The full page parses the same query params.
+  //
+  // Spec contract (k) — 15-minute resume window. The popup stamps
+  // `updatedAfter = now - 15min` into the iframe src on every open; the
+  // embedded ConfigAssistantPage forwards it to
+  // GET /api/agents/:id/conversations so the listing is pre-filtered.
+  // When no conversation falls inside the window, the page's existing
+  // empty-list fallback creates a fresh conversation — contract honoured
+  // without panel-extraction plumbing (deferred to Session 2 D.3).
   const iframeSrc = useMemo(() => {
     const params = new URLSearchParams();
     params.set('config-assistant', 'open');
     params.set('popup', '1');
     if (initialPrompt) params.set('prompt', initialPrompt);
+    const updatedAfter = new Date(Date.now() - CONFIG_ASSISTANT_RESUME_WINDOW_MIN * 60 * 1000).toISOString();
+    params.set('updatedAfter', updatedAfter);
     return `/admin/config-assistant?${params.toString()}`;
   }, [initialPrompt]);
 
