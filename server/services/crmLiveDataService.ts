@@ -17,6 +17,10 @@ import {
 
 const CACHE_TTL_MS = 60_000;
 const MAX_RESULTS = 50;
+// Safety cap on in-memory cache. Pathological query patterns (distinct search
+// strings, never-re-read entries) would otherwise accumulate indefinitely.
+// Redis upgrade (§14.3) makes this unnecessary but is deferred.
+const MAX_CACHE_ENTRIES = 500;
 
 type CacheEntry<T> = { expiresAt: number; value: T };
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -36,6 +40,11 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCached<T>(key: string, value: T): void {
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    // Map iteration order is insertion order — delete the oldest entry.
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+  }
   cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
 }
 

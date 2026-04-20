@@ -179,6 +179,32 @@ Branch: `claude/clientpulse-session-2-arch-gzYlZ`. Spec: `tasks/builds/clientpul
 - Client typecheck: **11 = baseline** (zero new errors).
 - Pure tests: classifier (10), drilldownOutcomeBadge (11), recommendedIntervention (8), notifyOperatorFanout availability (8) — all green.
 
+**Post-ship pr-reviewer follow-ups (commit TBD, 2026-04-20):**
+
+pr-reviewer run against `170f560^..HEAD` (log at `tasks/pr-review-log-clientpulse-session-2-2026-04-20T072618Z.md`) raised 4 blockers + 5 high-priority items. All code-level findings resolved:
+
+- **B-1** — `drilldownService.getSignals` now filters `clientPulseSignalObservations` on `organisationId` + `subaccountId`.
+- **B-2** — `POST /interventions/propose` now requires `ORG_PERMISSIONS.AGENTS_EDIT`; `GET /intervention-context` now requires `ORG_PERMISSIONS.AGENTS_VIEW`; 400 response on propose now includes Zod `issues`.
+- **B-3** — `resolveGhlContext` now filters `integrationConnections` on `organisationId` (was silently ignoring the parameter).
+- **H-1** — dead `pickRecommendedActionType` removed from `clientPulseInterventionContextService.ts`.
+- **H-2** — `createOrganisationFromTemplate` now routes through `configHistoryService.recordHistory` instead of direct insert (sensitive-field stripping + graceful version derivation).
+- **H-3** — `deliverInApp` now returns `status: 'skipped_not_configured'` with honest errorMessage — was reporting `delivered` for zero-delivery calls, creating misleading audit rows.
+- **H-4** — `apiAdapter.execute` logs structured `apiAdapter.token_expired` / `apiAdapter.token_near_expiry` warnings when `tokenExpiresAt` is in the past or within 5 minutes (defensive trace pending full OAuth refresh-on-expire in Session 3).
+- **N-1** — priority inversion at `clientPulseInterventionContextService:174` now carries a comment explaining the config-priority ↔ sort-key bridge.
+- **N-3** — `crmLiveDataService` cache now enforces `MAX_CACHE_ENTRIES = 500` with oldest-insertion eviction.
+
+**B-4 and H-5** (test-layer acceptance gaps) are re-classified — see "Session 3 acceptance-test gates" below.
+
+**Session 3 acceptance-test gates (named targets, target session: Session 3):**
+
+| Gate | Target file | Reason deferred |
+|------|-------------|-----------------|
+| S2-D.4 test | `server/routes/__tests__/organisationConfig.integration.test.ts` (8-case matrix) | Pending first-class DB-fixture layer in server test infra; `recordHistory` version-return contract (the other half of S2-D.4) shipped |
+| S2-D.1 test | `server/services/__tests__/organisationServiceCreateFromTemplate.test.ts` (4-invariant) | Pending same DB-fixture layer; the service method itself shipped in Chunk 10 |
+| H-4 full close | `server/services/adapters/apiAdapter.ts` — `ghlOAuthService.getValidToken()` call before dispatch | Requires `ghlOAuthService` audit + refresh wiring; defensive log warning shipped in audit commit |
+| N-3 Redis upgrade | `server/services/crmLiveDataService.ts` — Redis backend | Per spec §14.3; max-size cap shipped as interim safety |
+| N-5 / Chunk 8 wire-up | `client/src/pages/ConfigAssistantPage.tsx` — tool_result message pipeline | Lands with D.3 panel extraction per spec §11.3.4 |
+
 ---
 
 ## Blocker (active — escalated to user 2026-04-18)

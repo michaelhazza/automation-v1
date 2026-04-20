@@ -1,12 +1,13 @@
 import type { FanoutChannelResult } from '../notifyOperatorFanoutService.js';
 
 // ---------------------------------------------------------------------------
-// In-app channel — spec §7.4 row 1. Session 1 ships notify_operator as an
-// action row in the review queue, which IS the in-app notification surface.
-// This channel is therefore a trivial "delivered" receipt — the action-row
-// insert already happened upstream in the propose → approve → execute chain.
-// A follow-up session may split out a dedicated notifications table; until
-// then the review queue is the surface operators actually check.
+// In-app channel — spec §7.4 row 1. notify_operator already wrote the
+// review-queue row upstream in the propose → approve → execute chain, which
+// is the actual in-app surface operators check. A dedicated per-user
+// notification record / WebSocket push is deferred to a follow-up session.
+// Until then, report `skipped_not_configured` so the audit trail honestly
+// reflects that this channel performs no additional delivery beyond the
+// already-existing review-queue row.
 // ---------------------------------------------------------------------------
 
 export async function deliverInApp(params: {
@@ -17,10 +18,10 @@ export async function deliverInApp(params: {
   title: string;
   message: string;
 }): Promise<FanoutChannelResult> {
-  // The action row is already the in-app surface. Record delivery for audit.
   return {
     channel: 'in_app',
-    status: 'delivered',
-    recipientCount: params.recipientUserIds.length,
+    status: 'skipped_not_configured',
+    recipientCount: 0,
+    errorMessage: 'in-app delivery currently maps to the review-queue row written upstream; no per-user notification record or push is emitted yet',
   };
 }

@@ -37,6 +37,7 @@ export async function resolveGhlContext(params: {
     .from(integrationConnections)
     .where(
       and(
+        eq(integrationConnections.organisationId, params.organisationId),
         eq(integrationConnections.subaccountId, params.subaccountId),
         eq(integrationConnections.providerType, 'ghl'),
         eq(integrationConnections.connectionStatus, 'active'),

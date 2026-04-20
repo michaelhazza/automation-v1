@@ -253,7 +253,7 @@ export async function createOrganisationFromTemplate(params: {
   systemTemplateId: string;
   templateSlug?: string;
 }): Promise<{ organisationId: string }> {
-  const { configHistory } = await import('../db/schema/configHistory.js');
+  const { configHistoryService } = await import('./configHistoryService.js');
 
   const base = await organisationService.createOrganisation({
     name: params.name,
@@ -274,12 +274,12 @@ export async function createOrganisationFromTemplate(params: {
     })
     .where(eq(organisations.id, organisationId));
 
-  await db.insert(configHistory).values({
+  await configHistoryService.recordHistory({
     organisationId,
     entityType: 'organisation_operational_config',
     entityId: organisationId,
-    version: 1,
     snapshot: {},
+    changedBy: null,
     changeSource: 'system_sync',
     changeSummary: `Organisation created from template ${params.templateSlug ?? params.systemTemplateId}`,
   });

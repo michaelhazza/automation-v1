@@ -171,6 +171,8 @@ export async function buildInterventionContext(params: {
     const picked = pickRecommendedTemplate({
       candidates: eligibleTemplates.map((t) => ({
         slug: t.slug,
+        // Config priority: higher = more important (operator intuition).
+        // Pure fn sort key: lower = first. Negate to bridge.
         priority: -(t.priority ?? 0),
         actionType: t.actionType ?? '',
       })),
@@ -255,27 +257,6 @@ async function aggregateOutcomesByTemplate(
     improvedCount: e.improved,
     avgScoreDelta: e.deltaCount > 0 ? e.deltaSum / e.deltaCount : 0,
   }));
-}
-
-function pickRecommendedActionType(
-  templates: Awaited<ReturnType<typeof orgConfigService.getInterventionTemplates>>,
-  band: string,
-): InterventionActionType | null {
-  const eligible = templates
-    .filter((t) => {
-      if (!t.actionType) return false;
-      if (!INTERVENTION_ACTION_TYPES.includes(t.actionType as InterventionActionType)) return false;
-      const targets = t.targets;
-      return !targets || targets.length === 0 || targets.includes(band as 'healthy' | 'watch' | 'atRisk' | 'critical');
-    })
-    .sort((a, b) => {
-      const pa = a.priority ?? 0;
-      const pb = b.priority ?? 0;
-      if (pa !== pb) return pb - pa;
-      return a.slug.localeCompare(b.slug);
-    });
-  const top = eligible[0];
-  return top?.actionType ? (top.actionType as InterventionActionType) : null;
 }
 
 export interface OperatorProposalInput {

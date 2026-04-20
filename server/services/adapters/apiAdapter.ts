@@ -259,6 +259,34 @@ export const apiAdapter: ExecutionAdapter = {
       };
     }
 
+    // Defensive pre-dispatch warning: OAuth refresh-on-expire is deferred to
+    // Session 3. If the stored token is near expiry, surface it in logs so the
+    // eventual AUTH terminal_failure is traceable to token staleness rather
+    // than misconfiguration.
+    if (typedConnection.tokenExpiresAt) {
+      const msToExpiry = typedConnection.tokenExpiresAt.getTime() - Date.now();
+      if (msToExpiry <= 0) {
+        console.warn(
+          JSON.stringify({
+            evt: 'apiAdapter.token_expired',
+            actionId: action.id,
+            actionType,
+            tokenExpiresAt: typedConnection.tokenExpiresAt.toISOString(),
+          }),
+        );
+      } else if (msToExpiry < 5 * 60 * 1000) {
+        console.warn(
+          JSON.stringify({
+            evt: 'apiAdapter.token_near_expiry',
+            actionId: action.id,
+            actionType,
+            tokenExpiresAt: typedConnection.tokenExpiresAt.toISOString(),
+            secondsRemaining: Math.floor(msToExpiry / 1000),
+          }),
+        );
+      }
+    }
+
     let url: string;
     try {
       url = resolveBaseUrl(typedConnection) + substituteUrlTemplate(endpoint.urlTemplate, payload);

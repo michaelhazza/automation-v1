@@ -127,6 +127,7 @@ export const drilldownService = {
           .from(clientPulseSignalObservations)
           .where(
             and(
+              eq(clientPulseSignalObservations.organisationId, params.organisationId),
               eq(clientPulseSignalObservations.subaccountId, params.subaccountId),
               inArray(clientPulseSignalObservations.signalSlug, signalSlugs),
             ),

@@ -18,6 +18,7 @@ const router = Router();
 router.get(
   '/api/clientpulse/subaccounts/:subaccountId/intervention-context',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -59,6 +60,7 @@ const proposeBodySchema = z
 router.post(
   '/api/clientpulse/subaccounts/:subaccountId/interventions/propose',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId;
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
@@ -73,7 +75,12 @@ router.post(
       : rawBody;
     const parsed = proposeBodySchema.safeParse(normalisedBody);
     if (!parsed.success) {
-      throw { statusCode: 400, message: 'Invalid request body', errorCode: 'INVALID_BODY' };
+      throw {
+        statusCode: 400,
+        message: 'Invalid request body',
+        errorCode: 'INVALID_BODY',
+        issues: parsed.error.issues,
+      };
     }
 
     const result = await createOperatorProposal({
