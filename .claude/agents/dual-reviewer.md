@@ -96,34 +96,42 @@ For each accepted recommendation:
 
 ## Output
 
-After the loop completes, produce a structured summary:
+After the loop completes, write a final report to `tasks/dual-review-log-<slug>-<timestamp>.md`, where `<slug>` is a kebab-case description of what was reviewed (derived from the caller's brief description of what was implemented) and `<timestamp>` is an ISO 8601 UTC timestamp with seconds. This persists the review trail on disk — same pattern as `spec-review-log-*` — so future pattern analysis can mine across many reviews.
+
+Report contents:
 
 ```
-## Dual Review Complete
+# Dual Review Log — <slug>
 
+**Files reviewed:** <list>
 **Iterations run:** N/3
+**Timestamp:** <ISO 8601 UTC>
 
-### Iteration 1
+---
+
+## Iteration 1
 [decision log]
 
-### Iteration 2 (if applicable)
+## Iteration 2 (if applicable)
 [decision log]
 
-### Iteration 3 (if applicable)
+## Iteration 3 (if applicable)
 [decision log]
 
 ---
 
-### Changes Made
+## Changes Made
 [list of files edited and what changed — one line each]
 
-### Rejected Recommendations
+## Rejected Recommendations
 [summary of what Codex raised that was not applied and why — so the caller can verify the reasoning]
 
 ---
 
-**PR ready.** All critical and important issues resolved. Remaining open items (if any) are documented above with rejection reasoning.
+**Verdict:** `PR ready. All critical and important issues resolved.` — or a list of unresolved items with rejection reasoning.
 ```
+
+After writing the file, return a short summary to the caller: the log path, the iteration count, and the verdict line. The caller reads the log path to locate the full report.
 
 ---
 

@@ -1,0 +1,75 @@
+You are an implementation-readiness reviewer for a software specification. This is iteration 4 of a review loop; iterations 1, 2, and 3 have already applied mechanical cleanups and had one directional decision each resolved. The spec is tightening. Your job is to find whatever mechanical problems remain.
+
+Read the attached spec carefully. Find MECHANICAL problems only:
+- Contradictions between sections (same concept described two different ways)
+- Stale language (approaches the spec retired still appearing in prose)
+- Load-bearing claims without contracts (assertions without mechanisms)
+- File inventory drift (prose references files not in "Files to change" tables, or inventory lists files that prose does not actually discuss)
+- Schema overlaps without a source-of-truth statement
+- Sequencing / ordering bugs (item A depends on B but B ships later)
+- Invariants stated in one place but not enforced in another
+- Missing per-item verdicts / acceptance criteria
+- Unnamed new primitives (type/function/table introduced without a concrete name)
+- Under-specified error handling in happy/sad paths
+- Migration numbering collisions, index rebuild omissions, rollback omissions
+- Permission / auth middleware gaps or mismatches
+- Missing file entries in §9 that are discussed in §§2–7 but not inventoried
+
+**Context for iteration 4 (locked-in prior decisions — do NOT re-raise):**
+- Org-level FK `organisations.applied_system_template_id` by end of chunk 2
+- Legacy slug normalisation via `resolveActionSlug`
+- `/api/clientpulse/config/apply` retired with no redirect
+- Migration numbering: 0178 renamed to 0180, Session 1 migrations start at an agreed number
+- Reuse `AGENTS_EDIT` permission for config writes in Session 1
+- **NEW as of iter-3:** Option A reset semantics → on org create, `operational_config_override` starts as NULL; orgs inherit future system-template default changes. First override write initialises the row. (§7.2 step 2, §7.1 preview + confirm button, §8.4 manual verification step 5, §10.1 decisions log row — just applied)
+- `InterventionTemplatesJsonEditor` in Session 1, typed editor is Session 2
+- Tier-aware onboarding uses the same copy
+- Popup surfaces chips on fresh session, transcript on resume
+- No multi-tab session dedup
+- Reuse existing OAuth + invite-email flows
+- Log-once-per-process alias logging for retired slugs
+- §10.8 preserves 5 chunk-kickoff audits (non-blocking)
+- Conversation-primitive for popup (not a new session-scoped thing)
+- Extend-not-replace onboarding service (existing derivation fields stay)
+
+**Focus especially on:**
+
+1. The iter-3 finding 3.1 edits just landed (Option A). Are §7.2 step 2, §7.1 preview text, §7.1 confirm-button text, §8.4 manual verification step 5, and §10.1 decisions row all internally consistent now, and consistent with §4.5's "hasExplicitOverride = path is present in overrides" and "differsFromTemplate = effective leaf differs from system default"? Are there any other sections that describe the override-row lifecycle that need updating to match Option A (e.g. §2.2, §2.6, §6.4 "Reset to template default", §10.5)?
+
+2. Check for any remaining stale language about "copying" or "seeding" `operational_defaults` into `organisations.operational_config_override` at create-time. Option A means the copy never happens at create-time — only the FK link + NULL override.
+
+3. §6.4 reset-to-template-default: given Option A (override starts NULL), does the reset button's behaviour need clarification for the path-by-path reset flow? ("reset this leaf" means delete-key-from-override-json — does that still work when the override is NULL? Yes, trivially, but is the spec clear?)
+
+4. The data-model separation in §2: is the read-chain in §2.6 self-consistent with the migration in §2.4 and the code-changes table in §2.5?
+
+5. The sensitive-paths registry in §3.6–§3.8: is the "registry is append-only within a process lifetime" invariant enforced? Does `ALLOWED_CONFIG_ROOT_KEYS` composability name a concrete registration site?
+
+6. The `/api/organisation/config/apply` route in §4: any contract gaps between §4.4 request body, §4.5 read shape, error handling?
+
+7. The Configuration Assistant popup in §5: component contract (§5.7) vs file inventory (§5.10), session lifecycle (§5.4), deep-link (§5.5), global triggers (§5.6) — any contradictions?
+
+8. The ClientPulse Settings page in §6: typed editors vs JSON editor matrix, reset affordance semantics, save flow.
+
+9. The onboarding wizard in §7: §7.3 writes config via `POST /api/organisation/config/apply` on Next — this is the first write that initialises the override column under Option A. Is that explicit in §7.3? Does the wizard's "Skip" path leave the override NULL (desired)?
+
+10. The work-sequence in §8 and file inventory in §9: any drift.
+
+Return a numbered list of findings. For each finding:
+- Cite the spec section or line range
+- State the problem in one sentence
+- Suggest a specific fix (verbatim text change if possible)
+- Mark severity: critical / important / minor / nit
+
+DO NOT suggest:
+- Adding feature flags, staged rollouts, canary deploys, multi-region.
+- Adding frontend tests, E2E tests, API-contract tests, composition tests, or performance baselines — pre-production, single-tenant dev, static-gate testing posture with pure-function unit tests only.
+- Adding monitoring, retention audits, rate limits, circuit breakers beyond what the spec has.
+- Introducing new service layers when existing primitives fit.
+- Anything contradicting §1.3 locked contracts or §10 decisions.
+- Re-litigating the locked-in iter-1/iter-2/iter-3 decisions above.
+
+Bias to finding REAL mechanical problems. The spec has been through 3 iterations — surface only genuine residual issues. If it's tight, say so.
+
+---
+SPEC CONTENT:
+

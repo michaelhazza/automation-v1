@@ -282,6 +282,23 @@ For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marki
 
 The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking findings are addressed. `dual-reviewer` is a power-user add-on for an extra pass when the local environment supports it — not a gate on the PR.
 
+### Review logs must be persisted
+
+Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/spec-review-log-*`). The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
+
+- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
+- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
+
+If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
+
+### Before you write a spec
+
+For any Significant or Major spec, read `docs/spec-authoring-checklist.md` before drafting. It is a pre-authoring checklist derived from patterns the `spec-reviewer` has caught across 15+ production specs — primitives-reuse search, file-inventory lock, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, and testing posture.
+
+The checklist points back at the deep references in `architecture.md` and `docs/spec-context.md`; it does not restate them. Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop — every unchecked box is a finding the reviewer will raise anyway.
+
+Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checklist — just write and move on.
+
 ### Spec review is the equivalent pipeline for spec documents
 
 When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:
@@ -309,7 +326,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 ## Current focus
 
 **In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 4 + 4.5 on branch `claude/clientpulse-phase-4-development-ED1D9`. Phase 4 (intervention pipeline: 5 action primitives + scenario-detector proposer + outcome-measurement job closing B2 + proposer UI) and Phase 4.5 (Configuration Agent extension closing B3 + B5) land in a single PR.
+**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. Ship-gates B2 (outcome attribution), B3 (config_history audit), B5 (sensitive-path gating) all closed. Next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors).
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -323,6 +340,10 @@ Quick reference for "where do I start when adding X". This is the index, not the
 |------|------------|
 | Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
 | Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
+| Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |
+| Modify the ClientPulse intervention proposer | `server/jobs/proposeClientPulseInterventionsJob.ts` (orchestration) + `server/services/clientPulseInterventionProposerPure.ts` (matcher logic) — never bypass `enqueueInterventionProposal()` |
+| Modify the outcome measurement job | `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` (decision pure fn) — band attribution + cooldown integrity hinge on the args passed to `interventionService.recordOutcome()` |
+| Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
 | Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
 | Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
 | Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |

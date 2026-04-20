@@ -153,10 +153,17 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Configuration Assistant chat popup · Site-wide assistant — opens from any settings page callout, the global nav, or a hotkey · Natural-language config changes for agents, schedules, skills, ClientPulse, integrations · <strong>Dual-path governance:</strong> low-risk changes commit instantly after preview; sensitive changes (band thresholds · saved templates · scan schedule · retention) route through the review queue · Every change logged to <code>config_changes</code> with full diff + reason</div>
+<div class="annot-banner">📐 MOCKUP v2 · Configuration Assistant — embedded popup (Phase A Option 2) · Generic platform-wide chat surface that mounts the full agent loop in a modal · Opens from global nav · ⌘K · contextual buttons on every settings page · Operator can <strong>minimise</strong> while plan executes server-side and re-open later — agent runs persist across modal close · <strong>Dual-path governance:</strong> low-risk changes commit instantly after preview; sensitive changes (band thresholds · saved templates · scan schedule · retention · weights) route through the review queue · Every change logged to <code>config_history</code> with full diff + reason</div>
 
 <div class="bg-context"></div>
-<div class="bg-hint">← invoked from: any settings page callout · global nav ("Ask the assistant") · keyboard shortcut (⌘K)</div>
+<div class="bg-hint">← global triggers: nav "Configuration Assistant" · ⌘K palette · "Open Config Assistant" links on any settings page · deep-link <code>?prompt=…</code></div>
+
+<!-- Minimised state pill (shown bottom-left for visual contrast — operator can collapse the popup while a multi-step plan executes server-side) -->
+<div style="position: fixed; bottom: 24px; left: 24px; z-index: 11; background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%); color: #fff; padding: 10px 14px; border-radius: 999px; box-shadow: 0 8px 20px rgba(67,56,202,0.35); display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; cursor: pointer;">
+  <span style="width: 8px; height: 8px; border-radius: 50%; background: #6ee7b7; box-shadow: 0 0 0 4px rgba(110,231,183,0.25);"></span>
+  <span>Plan executing — 3 of 5 steps</span>
+  <span style="opacity: 0.85; font-size: 11px;">click to expand</span>
+</div>
 
 <div class="chat-popup">
 
@@ -165,16 +172,16 @@
     <div class="avatar">🤖</div>
     <div class="title-row">
       <h3>Configuration Assistant</h3>
-      <div class="status"><span class="dot"></span>Live · workspace: Productivity Hub — SaaS</div>
+      <div class="status"><span class="dot"></span>Live · workspace: Productivity Hub — SaaS · session resumes if you reopen</div>
     </div>
-    <button class="header-btn" title="Minimise">_</button>
+    <button class="header-btn" title="Minimise to corner pill (agent keeps running)">_</button>
     <button class="header-btn" title="Close">×</button>
   </div>
 
   <!-- Context strip showing scope -->
   <div class="context-strip">
     <span class="label">Scope</span>
-    <span>Productivity Hub — SaaS · any agent · any schedule · any skill · any ClientPulse setting · any integration. I'll route to the right place and confirm before writing.</span>
+    <span>Generic platform assistant. I can configure agents, subaccount blueprints, organisation templates, schedules, skills, integrations, scan cadences, alert limits, ClientPulse runtime settings, and more. I always show a diff and confirm before writing.</span>
   </div>
 
   <!-- Conversation -->
@@ -190,13 +197,13 @@
       </div>
     </div>
 
-    <!-- Suggestion chips -->
+    <!-- Suggestion chips — span every domain, not just ClientPulse -->
     <div class="suggested-chips">
-      <div class="s-label">Try one of these</div>
-      <button class="chip">Bump pipeline velocity weight to 0.35</button>
+      <div class="s-label">Try one of these — I work across the whole platform</div>
+      <button class="chip">Create a new Sales Analyst agent linked to Smith Dental</button>
+      <button class="chip">Bump pipeline velocity weight to 0.35 (ClientPulse)</button>
+      <button class="chip">Set the Acme subaccount blueprint as the default</button>
       <button class="chip">Pause the Monday 7am briefing for two weeks</button>
-      <button class="chip">Give the Sales Analyst agent access to the CRM skill</button>
-      <button class="chip">Disable the tier-downgrade retention alert</button>
       <button class="chip">Reconnect the GoHighLevel integration</button>
       <button class="chip">Lower the Critical band ceiling from 19 to 15</button>
     </div>

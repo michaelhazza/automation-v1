@@ -1469,13 +1469,14 @@ A system-managed org-tier agent (`slug: configuration-assistant`, seeded by migr
 - **Heartbeat:** disabled — invoked on demand from the Configuration Assistant page
 - **Master prompt:** not editable by org admins (`isSystemManaged: true`); only `additionalPrompt` overrides allowed
 
-### Tool surface (28 skills, all file-backed in `server/skills/config_*.md`)
+### Tool surface (29 skills, all file-backed in `server/skills/config_*.md`)
 
 | Group | Count | Skills |
 |-------|-------|--------|
 | Mutation — agents & links | 9 | `config_create_agent`, `config_update_agent`, `config_activate_agent`, `config_link_agent`, `config_update_link`, `config_set_link_skills`, `config_set_link_instructions`, `config_set_link_schedule`, `config_set_link_limits` |
 | Mutation — subaccounts & tasks | 3 | `config_create_subaccount`, `config_create_scheduled_task`, `config_update_scheduled_task` |
 | Mutation — data sources | 3 | `config_attach_data_source`, `config_update_data_source`, `config_remove_data_source` |
+| Mutation — ClientPulse operational_config | 1 | `config_update_hierarchy_template` (Phase 4.5; sensitive paths route through review queue per `SENSITIVE_CONFIG_PATHS`) |
 | Read | 9 | `config_list_agents`, `config_list_subaccounts`, `config_list_links`, `config_list_scheduled_tasks`, `config_list_data_sources`, `config_list_system_skills`, `config_list_org_skills`, `config_get_agent_detail`, `config_get_link_detail` |
 | Plan / validation | 2 | `config_preview_plan`, `config_run_health_check` |
 | History | 2 | `config_view_history`, `config_restore_version` |
@@ -1590,6 +1591,129 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 | `server/services/configHistoryService.ts` | `record()`, `restore()`, `list()`, change-summary generator, redaction |
 | `server/services/configBackupService.ts` | Bulk snapshot + restore used by Skill Analyzer and Configuration Assistant |
 | `client/src/pages/ConfigSessionHistoryPage.tsx` | Admin history browser grouped by session |
+
+---
+
+## ClientPulse Intervention Pipeline (Phases 4 + 4.5)
+
+The end-to-end loop that turns a churn assessment into an operator-approved CRM action and measures the outcome 24h later. Closes ship-gates **B2** (outcome attribution), **B3** (config_history audit), **B5** (sensitive-path gating).
+
+### Architectural commitments (locked, do not violate)
+
+- **No parallel intervention table.** Interventions are `actions` rows + `intervention_outcomes` rows. Anything that looks like it needs a `client_pulse_interventions` table is wrong.
+- **All 5 primitives are review-gated.** Operators are the only execution path in V1. The scenario detector proposes; it never auto-fires.
+- **Single lifecycle entry point.** Every intervention proposal — operator-driven OR scenario-detector — flows through `enqueueInterventionProposal()` in `server/services/clientPulseInterventionContextService.ts`. Drift between the two paths is structurally impossible.
+- **Deterministic idempotency keys.** No timestamps in the key. Same logical intervention → same key, regardless of caller / retry / concurrent worker. See `clientPulseInterventionIdempotencyPure.ts`.
+- **Typed metadata contract.** `validateInterventionActionMetadata()` runs on every metadata write; the JSONB column has a schema even though Postgres doesn't enforce it.
+
+### The 5 namespaced action primitives
+
+Registered in `server/config/actionRegistry.ts`. All `defaultGateLevel='review'`, `idempotencyStrategy='keyed_write'`. Namespaced to avoid collision with the existing unprefixed `send_email` / `create_task`.
+
+| Action type | Category | Handler shape |
+|-------------|----------|---------------|
+| `crm.fire_automation` | api | Fires a CRM workflow on a contact. Payload: `{ automationId, contactId, scheduleHint, scheduledFor? }` |
+| `crm.send_email` | api | Sends an email via the client's CRM. Resolves merge-fields server-side before provider call. |
+| `crm.send_sms` | api | Sends an SMS via the client's CRM. Resolves merge-fields + segment-counts. |
+| `crm.create_task` | api | Creates a task on the client's CRM (distinct from the internal board `create_task`). |
+| `clientpulse.operator_alert` | worker | Internal operator-facing notification. Channel fan-out (in-app, email, slack) deferred to the existing notifications worker. |
+
+Each handler ships a Pure module (`server/skills/<slug>ServicePure.ts`) covering payload validation, idempotency-key shape, and provider-call construction.
+
+### Merge-field resolver (V1 grammar)
+
+`server/services/mergeFieldResolverPure.ts`. Strict — no fallback syntax, no conditionals. Five namespaces: `contact`, `subaccount`, `signals`, `org`, `agency`. Unknown tokens stay as literals AND surface in `unresolved: string[]` for the editor to highlight. Malformed grammar (unmatched `{{`, empty `{{}}`) throws.
+
+The I/O wrapper (`mergeFieldResolver.ts`) loads namespace inputs from canonical tables + the latest snapshot. HTTP preview at `POST /api/clientpulse/merge-fields/preview`.
+
+### Scenario detector — `proposeClientPulseInterventionsJob`
+
+Event-driven. Enqueued from the tail of `executeComputeChurnRisk` per sub-account on queue `clientpulse:propose-interventions`. Per tick:
+
+1. Load latest churn assessment + health snapshot for `(orgId, subaccountId)`.
+2. Load intervention templates from `operational_config.interventionTemplates[]` (cached per org across the loop).
+3. Build cooldown state by scope (deterministic — separate query per `executed` / `proposed` / `any_outcome` semantic; no shared `.limit(1)` ambiguity).
+4. Build quota state — count Phase-4 actions in the rolling 24h window per subaccount + per org.
+5. Delegate to `proposeClientPulseInterventionsPure()` for the matcher (band-targeting → cooldown → priority → quota).
+6. For each returned proposal: `enqueueInterventionProposal()` writes the `actions` row + creates the matching `review_items` row.
+
+### Outcome measurement — `measureInterventionOutcomeJob` (B2)
+
+Hourly cron (`7 * * * *`) on queue `clientpulse:measure-outcomes`. Selects Phase-4 intervention actions with `status IN ('completed','failed')`, `executed_at` between 1h and 14d ago, no existing `intervention_outcomes` row. Honours per-template `measurementWindowHours` (default 24).
+
+Pure decision logic in `measureInterventionOutcomeJobPure.ts` — `decideOutcomeMeasurement()` returns `'measure' | 'too_early' | 'no_post_snapshot'`. The B2 ship-gate fixture exercises the synthetic `atRisk → watch` band-change path end-to-end.
+
+`interventionService.recordOutcome()` writes the row including `bandBefore` / `bandAfter` / `bandChanged` / `executionFailed` (failed executions still get an outcome row so cooldown logic respects them).
+
+### Idempotency — three layers, aligned
+
+| Layer | Mechanism | Catches |
+|-------|-----------|---------|
+| App | Deterministic key derivation (scenario / operator) | Caller-side dedup: same logical intent → same key |
+| Service | `actionService.proposeAction` SELECT-then-INSERT | Read-side dedup against existing rows |
+| DB | `actions_idempotency_idx` UNIQUE(subaccount_id, idempotency_key) + `actions_org_idempotency_idx` partial unique for org-scoped + `actions_intervention_cooldown_day_idx` partial unique on (org, sub, templateSlug, day) | Write-side race protection — concurrent workers can't both succeed |
+
+Sensitive-path config writes additionally catch Postgres 23505 from `actionService.proposeAction` and re-look-up the existing row (because `actionService` itself doesn't yet wrap its insert in ON CONFLICT for the org-scope path).
+
+### Lifecycle event
+
+Every proposal — created or deduped — emits one structured log:
+
+```
+clientpulse.intervention.enqueued
+  { orgId, subaccountId, actionType, source, idempotencyKey,
+    outcome: 'created' | 'deduped', actionId, churnAssessmentId, templateSlug }
+```
+
+Single debugging anchor + analytics base. All previous per-path `*_deduped` events were collapsed into this.
+
+### Configuration Assistant extension (Phase 4.5 — closes B3 + B5)
+
+Adds tool #29: `config_update_hierarchy_template`. The skill applies a single dot-path patch to a hierarchy template's `operational_config`. Validation order:
+
+1. **Path allow-list** — `isValidConfigPath()` rejects unknown root keys (typo guard; `operationalConfigSchema` uses `passthrough()` so unknown roots would otherwise validate).
+2. **Schema-validate the merged proposed config** — catches sum-constraint violations (e.g. `healthScoreFactors` weights ≠ 1.00).
+3. **Classify the path** via `isSensitiveConfigPath()`:
+   - **Non-sensitive** → direct merge into `hierarchy_templates.operational_config` + `config_history` row written in the same transaction (B3).
+   - **Sensitive** → insert `actions` row with `gateLevel='review'`, status `proposed`, `metadataJson.validationDigest` snapshot (B5). Approval-execute handler re-validates against current config (drift check) before committing.
+
+The `validationDigest` is a stable hash of the proposed full config; if the live config drifts between proposal and approval, the action transitions to `failed` with `errorCode='DRIFT_DETECTED'` and the operator must re-propose.
+
+### Routes
+
+| Route | Owner | Purpose |
+|-------|-------|---------|
+| `GET /api/clientpulse/subaccounts/:id/intervention-context` | `clientPulseInterventionContextService.buildInterventionContext` | Modal context payload (band, score, top-signals, recent interventions, cooldown, recommendedActionType) |
+| `POST /api/clientpulse/subaccounts/:id/interventions/propose` | `clientPulseInterventionContextService.createOperatorProposal` | Operator submit from §10.D editors |
+| `POST /api/clientpulse/merge-fields/preview` | `mergeFieldResolver.previewMergeFields` | Editor live preview |
+| `POST /api/clientpulse/config/apply` | `configUpdateHierarchyTemplateService.applyHierarchyTemplateConfigUpdate` | Configuration Assistant chat popup confirm path |
+
+All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (config route additionally) `requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT)`.
+
+### Migrations
+
+| # | Purpose |
+|---|---------|
+| 0178 | Indexes on `actions.metadata_json->>'triggerTemplateSlug'` for proposer queries; partial composite index for the outcome-measurement query; partial unique index on `(organisation_id, idempotency_key)` for org-scoped actions; `intervention_outcomes` extended with `band_before` / `band_after` / `band_changed` / `execution_failed` |
+| 0179 | Defensive partial unique index on `(org, subaccount, triggerTemplateSlug, date_trunc('day', created_at))` — DB-level safety net so future code paths can't bypass the daily cooldown invariant |
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `server/skills/crm{Fire,SendEmail,SendSms,CreateTask}*ServicePure.ts` + `clientPulseOperatorAlertServicePure.ts` | 5 primitive payload-shapers |
+| `server/services/mergeFieldResolverPure.ts` + `mergeFieldResolver.ts` | V1 grammar + I/O wrapper |
+| `server/services/clientPulseInterventionProposerPure.ts` | Pure scenario-detector matcher |
+| `server/jobs/proposeClientPulseInterventionsJob.ts` | Event-driven proposer worker |
+| `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` | Hourly outcome-measurement (B2) |
+| `server/services/clientPulseInterventionContextService.ts` | Single lifecycle entry point — `enqueueInterventionProposal`, `buildInterventionContext`, `createOperatorProposal` |
+| `server/services/clientPulseInterventionIdempotencyPure.ts` | Deterministic key derivers + `canonicalStringify` |
+| `server/services/interventionActionMetadata.ts` | Typed metadata contract (zod) + `validateInterventionActionMetadata` |
+| `server/services/configUpdateHierarchyTemplate{,Pure}.ts` | Configuration Assistant write path (B3 + B5) |
+| `server/skills/config_update_hierarchy_template.md` | Skill definition (tool #29) |
+| `server/routes/clientpulse{Interventions,MergeFields,Config}.ts` | HTTP boundaries (thin — service layer owns the work) |
+| `client/src/components/clientpulse/{ProposeInterventionModal,FireAutomation,EmailAuthoring,SendSms,CreateTask,OperatorAlert}Editor.tsx` | Operator submit UI |
+| `client/src/components/clientpulse/ConfigAssistantChatPopup.tsx` | Configuration Assistant chat surface |
 
 ---
 

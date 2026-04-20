@@ -1,0 +1,42 @@
+You are reviewing a draft implementation specification for a pre-production agency-operations platform. The spec is at `tasks/builds/clientpulse/session-1-foundation-spec.md`.
+
+This is iteration 3 of a 5-iteration cap. Iteration 1 applied 7 mechanical findings and resolved 2 directional findings via HITL. Iteration 2 applied 11 mechanical findings. The spec is already mechanically tight — this pass is a final correctness check before the review loop exits.
+
+Please perform a focused, implementation-readiness review and return a numbered list of concrete mechanical findings (if any). Each finding should identify:
+
+- Which section of the spec the issue is in (section heading or §-reference).
+- The specific problem (contradiction, missing contract, under-specified primitive, file-inventory drift, sequencing bug, stale language, invariant stated but not enforced, schema overlap without source-of-truth, unnamed new primitive).
+- The suggested fix (concrete — name files, sections, or edit).
+
+Focus exclusively on **mechanical / correctness** issues — consistency between sections, file-inventory completeness, primitive/API references that are accurate and complete, migrations that do what the prose says. Do NOT suggest:
+
+- adding feature flags (pre-production — rollout is commit-and-revert)
+- adding staged rollouts or canaries
+- adding E2E tests, frontend unit tests, API contract tests (testing posture is static-gates + pure-function unit tests only)
+- adding new abstractions when existing primitives already fit
+- changing scope (defer/bring-forward items across sessions)
+- changing the phase/sprint assignment of work
+- replacing the Configuration Assistant's conversation API (resolved in iteration 1 HITL)
+- changing onboarding service reconciliation (resolved in iteration 1 HITL)
+
+The spec's framing context (locked — do not flag these as problems):
+- Pre-production, no live users.
+- Testing posture: static gates + pure-function unit tests only. No frontend unit tests, no E2E tests, no API contract tests.
+- Rollout: commit-and-revert. No feature flags, no staged rollouts.
+- Prefer existing primitives over new abstractions.
+- Terminology: "ClientPulse Settings", "Organisation Template", "Subaccount Blueprint".
+- Session 1 ships 9 typed editors + InterventionTemplatesJsonEditor; typed Intervention Templates editor deferred to Session 2.
+- Configuration Assistant popup uses existing `/api/agents/:agentId/conversations` (NOT `/api/agent-runs`).
+- `onboardingService.getOnboardingStatus` is extended (not replaced); `onboarding_completed_at` is the sole wizard gate; derivation fields remain orthogonal.
+- Migration numbering: NNNN (org override), NNNN+1 (operator_alert rename), NNNN+2 (onboarding), NNNN+3 (conditional skill-analyzer-meta).
+- Full-page Configuration Assistant route is `/admin/config-assistant`.
+- `conversationService.listConversations` is the implementation owner of the extended filter/order/limit contract.
+- User-scoping on conversation-list endpoint is implicit via `req.user.id`; no `userId` query param.
+- `CONFIG_HISTORY_ENTITY_TYPES` gets both `clientpulse_operational_config` + `organisation_operational_config`; history route accepts `organisation_config_all` special value.
+
+Please return findings in numbered format:
+
+1. **§X.Y — <title>**. <problem statement>. <suggested fix>.
+2. ...
+
+If the spec is mechanically tight and you find nothing, say so explicitly. Do not reach for "nice-to-have" or "consider also" findings — only flag genuine mechanical issues that would trip up an implementer or a future reviewer.
