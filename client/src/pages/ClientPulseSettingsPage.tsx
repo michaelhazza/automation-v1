@@ -24,6 +24,8 @@ import {
   hasExplicitOverride,
   readPath,
 } from '../components/clientpulse-settings/shared/differsFromTemplate';
+import InterventionTemplatesEditor from '../components/clientpulse-settings/editors/InterventionTemplatesEditor';
+import type { InterventionTemplate } from '../components/clientpulse-settings/editors/interventionTemplateRoundTripPure';
 
 // Per spec §6.2 — the 10 blocks surfaced on the Settings page.
 const BLOCKS: Array<{ path: string; title: string; description: string }> = [
@@ -31,7 +33,7 @@ const BLOCKS: Array<{ path: string; title: string; description: string }> = [
   { path: 'churnRiskSignals', title: 'Churn risk signals', description: 'Weighted signals that inform churn risk scoring.' },
   { path: 'churnBands', title: 'Churn bands', description: 'Healthy / Watch / At-risk / Critical 0-100 ranges.' },
   { path: 'interventionDefaults', title: 'Intervention defaults', description: 'Cooldowns, gate level, per-day quotas.' },
-  { path: 'interventionTemplates', title: 'Intervention templates (JSON)', description: 'Typed editor deferred to Session 2; Session 1 ships JSON + schema validation.' },
+  { path: 'interventionTemplates', title: 'Intervention templates', description: 'Typed form editor with per-actionType payload defaults. Toggle JSON editor below for advanced edits.' },
   { path: 'alertLimits', title: 'Alert limits', description: 'Max alerts per run, per account per day, batching.' },
   { path: 'staffActivity', title: 'Staff activity', description: 'Counted mutation types, excluded kinds, automation resolution.' },
   { path: 'integrationFingerprints', title: 'Integration fingerprints', description: 'Seed library + scan types + unclassified promotion thresholds.' },
@@ -214,7 +216,34 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
         </div>
       </div>
       <div className="p-4">
-        {editing ? (
+        {block.path === 'interventionTemplates' && editing && Array.isArray(effectiveValue) ? (
+          <InterventionTemplatesEditorWithFallback
+            templates={effectiveValue as InterventionTemplate[]}
+            onSave={async (next) => {
+              setSaving(true);
+              try {
+                const res = await api.post('/api/organisation/config/apply', {
+                  path: 'interventionTemplates',
+                  value: next,
+                  reason: 'Update interventionTemplates via typed editor',
+                });
+                if (res.data?.errorCode) {
+                  toast.error(res.data?.message ?? `Save rejected (${res.data.errorCode}).`);
+                  return;
+                }
+                if (res.data?.committed) {
+                  toast.success(`Intervention templates saved · history v${res.data.configHistoryVersion}`);
+                } else if (res.data?.requiresApproval) {
+                  toast.success(`Templates sent to review queue · action ${String(res.data.actionId).slice(0, 8)}`);
+                }
+                setEditing(false);
+                onSaved();
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+        ) : editing ? (
           <div>
             <textarea
               value={jsonText}
@@ -239,6 +268,57 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
           </pre>
         )}
       </div>
+    </div>
+  );
+}
+
+interface InterventionTemplatesEditorWithFallbackProps {
+  templates: InterventionTemplate[];
+  onSave: (next: InterventionTemplate[]) => Promise<void>;
+}
+
+function InterventionTemplatesEditorWithFallback({ templates, onSave }: InterventionTemplatesEditorWithFallbackProps) {
+  const [useJson, setUseJson] = useState(false);
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(templates, null, 2));
+
+  if (useJson) {
+    return (
+      <div>
+        <div className="mb-2 flex justify-between items-center">
+          <div className="text-[11px] text-slate-500">Advanced JSON editor — typed editor is the default surface.</div>
+          <button onClick={() => setUseJson(false)} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300">Use typed editor</button>
+        </div>
+        <textarea
+          value={jsonText}
+          onChange={(e) => setJsonText(e.target.value)}
+          rows={Math.min(Math.max(8, jsonText.split('\n').length + 1), 30)}
+          className="w-full px-3 py-2 rounded-md border border-slate-300 font-mono text-[12px] text-slate-800"
+        />
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={async () => {
+              try {
+                const parsed = JSON.parse(jsonText) as InterventionTemplate[];
+                await onSave(parsed);
+              } catch {
+                toast.error('Invalid JSON — fix syntax before saving.');
+              }
+            }}
+            className="px-3 py-1.5 rounded-md text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            Save JSON
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex justify-end">
+        <button onClick={() => { setJsonText(JSON.stringify(templates, null, 2)); setUseJson(true); }} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300">Use JSON editor</button>
+      </div>
+      <InterventionTemplatesEditor templates={templates} onSave={onSave} />
     </div>
   );
 }
