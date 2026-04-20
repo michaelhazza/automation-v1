@@ -1,3 +1,57 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019da884-6797-7340-9d3b-65fe1fec97b9
+--------
+user
+You are reviewing a draft implementation specification for a pre-production agency-operations platform. The spec is at `tasks/builds/clientpulse/session-1-foundation-spec.md`.
+
+This is iteration 3 of a 5-iteration cap. Iteration 1 applied 7 mechanical findings and resolved 2 directional findings via HITL. Iteration 2 applied 11 mechanical findings. The spec is already mechanically tight — this pass is a final correctness check before the review loop exits.
+
+Please perform a focused, implementation-readiness review and return a numbered list of concrete mechanical findings (if any). Each finding should identify:
+
+- Which section of the spec the issue is in (section heading or §-reference).
+- The specific problem (contradiction, missing contract, under-specified primitive, file-inventory drift, sequencing bug, stale language, invariant stated but not enforced, schema overlap without source-of-truth, unnamed new primitive).
+- The suggested fix (concrete — name files, sections, or edit).
+
+Focus exclusively on **mechanical / correctness** issues — consistency between sections, file-inventory completeness, primitive/API references that are accurate and complete, migrations that do what the prose says. Do NOT suggest:
+
+- adding feature flags (pre-production — rollout is commit-and-revert)
+- adding staged rollouts or canaries
+- adding E2E tests, frontend unit tests, API contract tests (testing posture is static-gates + pure-function unit tests only)
+- adding new abstractions when existing primitives already fit
+- changing scope (defer/bring-forward items across sessions)
+- changing the phase/sprint assignment of work
+- replacing the Configuration Assistant's conversation API (resolved in iteration 1 HITL)
+- changing onboarding service reconciliation (resolved in iteration 1 HITL)
+
+The spec's framing context (locked — do not flag these as problems):
+- Pre-production, no live users.
+- Testing posture: static gates + pure-function unit tests only. No frontend unit tests, no E2E tests, no API contract tests.
+- Rollout: commit-and-revert. No feature flags, no staged rollouts.
+- Prefer existing primitives over new abstractions.
+- Terminology: "ClientPulse Settings", "Organisation Template", "Subaccount Blueprint".
+- Session 1 ships 9 typed editors + InterventionTemplatesJsonEditor; typed Intervention Templates editor deferred to Session 2.
+- Configuration Assistant popup uses existing `/api/agents/:agentId/conversations` (NOT `/api/agent-runs`).
+- `onboardingService.getOnboardingStatus` is extended (not replaced); `onboarding_completed_at` is the sole wizard gate; derivation fields remain orthogonal.
+- Migration numbering: NNNN (org override), NNNN+1 (operator_alert rename), NNNN+2 (onboarding), NNNN+3 (conditional skill-analyzer-meta).
+- Full-page Configuration Assistant route is `/admin/config-assistant`.
+- `conversationService.listConversations` is the implementation owner of the extended filter/order/limit contract.
+- User-scoping on conversation-list endpoint is implicit via `req.user.id`; no `userId` query param.
+- `CONFIG_HISTORY_ENTITY_TYPES` gets both `clientpulse_operational_config` + `organisation_operational_config`; history route accepts `organisation_config_all` special value.
+
+Please return findings in numbered format:
+
+1. **§X.Y — <title>**. <problem statement>. <suggested fix>.
+2. ...
+
+If the spec is mechanically tight and you find nothing, say so explicitly. Do not reach for "nice-to-have" or "consider also" findings — only flag genuine mechanical issues that would trip up an implementer or a future reviewer.
 # Session 1 Spec — Foundation + Operator Config UX
 
 **Scope:** Phase A (platform cleanup) + Phase 5 (Settings UIs) + Phase 7 (Operator onboarding wizard)
@@ -28,7 +82,7 @@
 
 After merge:
 
-- Org-level operational config overrides live in a dedicated column on `organisations` (not on `hierarchy_templates`). Every platform write path targets this single row; effective config is `system_hierarchy_templates.operational_defaults` deep-merged with that row (which may be `NULL` until the first explicit edit).
+- Org-level operational config lives in its own dedicated column on `organisations` (not on `hierarchy_templates`). Every platform read + write path targets this single row.
 - Every platform-level concern (action slugs, route paths, capability registries, UI labels) is **generic-named**. Anything still carrying a product brand (e.g. `clientpulse.*`) is a deliberate vertical-module concept, not an accidental platform coupling.
 - Operators have two equal surfaces for editing their org's operational config: a typed Settings page (point-and-click) and the Configuration Assistant popup (conversational). Both write through the same underlying config-update service + audit trail — the Settings page via `POST /api/organisation/config/apply` directly, the Configuration Assistant via the `config_update_organisation_config` skill reached through the existing agent-conversations API (see §1.3(j) for the full contract).
 - New orgs can be created + onboarded end-to-end via UI using the new terminology (Organisation Templates, Subaccount Blueprints, ClientPulse Settings).
@@ -41,10 +95,10 @@ After merge:
 | S1-A1 | Every Phase-4.5 config write targets `organisations.operational_config_override` instead of `hierarchy_templates.operational_config`. `orgConfigService.getOperationalConfig` reads from the new column. Existing data backfilled idempotently by the migration. | A | Unit test: seed an org with template overrides → run migration → assert `organisations.operational_config_override` carries the overrides and the chat write-path hits the new column. |
 | S1-A2 | Action type `clientpulse.operator_alert` renamed to `notify_operator` across registry, skill executor, proposer job, metadata schema, UI, and existing action rows. Legacy alias resolves to the new slug so in-flight review-queue items stay intact. | A | Pure test: registry lookup on both slugs via `resolveActionSlug`; migration assertion that all historical `actions.action_type` values are rewritten; pure-test assertion on `proposeClientPulseInterventionsJob` / `clientPulseInterventionProposerPure` output emits the new slug. |
 | S1-A3 | `SENSITIVE_CONFIG_PATHS` is composable. Modules declare their sensitive paths via a registry; the core merges them. Adding a new module does not touch core code. | A | Unit test: register a synthetic module's paths + assert `isSensitiveConfigPath` covers them. |
-| S1-A4 | Generic route `POST /api/organisation/config/apply` is the platform-wide config-write surface. `POST /api/clientpulse/config/apply` is retired entirely (no redirect) per §4.2 / §10.3. | A | Integration test: POST to the generic route, receive the same response shape as the legacy route. |
+| S1-A4 | Generic route `POST /api/organisation/config/apply` is the platform-wide config-write surface. `POST /api/clientpulse/config/apply` either redirects (301/308) or is retired entirely (see §4 for the call). | A | Integration test: POST to the generic route, receive the same response shape as the legacy route. |
 | S1-A5 | Configuration Assistant popup mounts the real agent loop (not the Phase-4.5 direct-patch form). Session persists across modal close + reopen. Minimised pill shows background execution. The Phase-4.5 `ConfigAssistantChatPopup` file is either rewritten or deleted. | A | Manual: open the popup, submit a multi-step plan, close the popup while executing, re-open, verify the same session resumes. |
 | S1-5.1 | ClientPulse Settings page at `/clientpulse/settings` has an editor surface for every `operational_config` block exposed in the schema today: typed editors for the 9 blocks healthScoreFactors, churnRiskSignals, churnBands, interventionDefaults, alertLimits, staffActivity, integrationFingerprints, dataRetention, onboardingMilestones; and a schema-validated JSON editor (`InterventionTemplatesJsonEditor`) for interventionTemplates per §6.2 + §10.5 (typed editor deferred to Session 2 Phase 8). Every write goes through the generic route. | 5 | Manual: open page, edit each block, verify `config_history` row lands, verify `organisations.operational_config_override` reflects the change. |
-| S1-5.2 | Subaccount Blueprint editor (refactored `AdminAgentTemplatesPage`) no longer exposes **editable** `operationalConfig` fields. The seed block is rendered read-only (per §6.5) as an informational preview with a "change live config in ClientPulse Settings" callout. Editor only controls blueprint metadata + agent hierarchy; the `operational_config_seed` block is rendered read-only as informational preview only. | 5 | Manual: open the blueprint editor, verify no editable operational-config fields are visible (the read-only seed preview is expected); verify creating a new subaccount from the default blueprint inherits the org's effective operational config via `orgConfigService.getOperationalConfig(orgId)` correctly. |
+| S1-5.2 | Subaccount Blueprint editor (refactored `AdminAgentTemplatesPage`) no longer exposes **editable** `operationalConfig` fields. The seed block is rendered read-only (per §6.5) as an informational preview with a "change live config in ClientPulse Settings" callout. Editor only controls the agent hierarchy + which operational defaults to seed on apply. | 5 | Manual: open the blueprint editor, verify no editable operational-config fields are visible (the read-only seed preview is expected); verify creating a new subaccount from the default blueprint still seeds the org's current operational config override correctly. |
 | S1-7.1 | New orgs go through the create-org + first-run flows using the new terminology ("Organisation Template" picker + "ClientPulse Settings" reference + "Subaccount Blueprints" in nav). No legacy labels appear in either flow. | 7 | Manual: run the happy-path onboarding for a fresh org, screenshot each screen, verify all labels match the post-Phase-A naming. |
 | S1-7.2 | Onboarding wizard soft-gates GHL OAuth (workspace is usable at first sign-in, ClientPulse data appears only after the connection lands). No broken-state pages. | 7 | Manual: complete onboarding without connecting GHL → verify dashboard renders empty states cleanly; connect GHL → verify data lights up within one scan cycle. |
 
@@ -62,7 +116,7 @@ Carried forward from the Phase 4 pickup prompt (no change):
 
 Introduced this session:
 
-- (h) **`organisations.operational_config_override` is the single organisation-owned writable source of truth for operational-config overrides.** Every writer targets this one row. Effective runtime config is `system_hierarchy_templates.operational_defaults` deep-merged with that row (which may be `NULL` on newly-created orgs until the first explicit edit). No runtime path reads `hierarchy_templates.operational_config_seed`. Any code path that writes elsewhere — or reads the seed column at runtime — is a bug.
+- (h) **`organisations.operational_config_override` is the single runtime source-of-truth for org-level operational config.** Every reader and writer targets this one row. Any code path that reads / writes elsewhere is a bug.
 - (i) **Platform primitives are module-agnostic.** Any action slug, capability path, or route that is genuinely cross-module (e.g. operator alerts, config-apply) MUST be un-namespaced or generically-namespaced (`ops.*` / `system.*`). Module-branded slugs (`clientpulse.*`, `crm.*`) are reserved for genuinely module-specific concepts.
 - (j) **Settings page and Configuration Assistant are equal surfaces on the same mechanism.** Both write through the same config-update service layer (`configUpdateOrganisationService.applyOrganisationConfigUpdate`), produce the same `config_history` audit trail, and respect the same sensitive-path split. The Settings page reaches this layer directly via `POST /api/organisation/config/apply` (§4); the Configuration Assistant reaches it via the `config_update_organisation_config` skill invoked through the existing `/api/agents/:agentId/conversations/...` agent loop (§5). No surface has privileged access.
 - (k) **Session lifecycle for the Configuration Assistant popup:** opening a popup resumes the most recent agent run < 15 minutes old, else creates a fresh one. Closing the popup does not kill the run. Background execution surfaces via the minimised pill.
@@ -92,7 +146,7 @@ system_hierarchy_templates.operational_defaults   (platform seed, system admin o
 
 Deep-merge order stays the same (template defaults → org overrides). `orgConfigService.getOperationalConfig` swaps its read source from the hierarchy_template row to the organisation row.
 
-Hierarchy templates keep their `operational_config` field (**renamed to** `operational_config_seed`) purely as an informational breadcrumb of what was seeded when the template was adopted. It is NOT read by any runtime path after initial adoption: all runtime reads go through the org column, and new subaccounts created under a blueprint inherit the org's **effective** operational config via `orgConfigService.getOperationalConfig(orgId)` (the deep-merge of `system_hierarchy_templates.operational_defaults` with `organisations.operational_config_override`) — not the blueprint's `operational_config_seed` and not the raw override row. Per §6.5 the Subaccount Blueprint editor renders the seed block read-only as a reference display, not as an input to any live code path.
+Hierarchy templates keep their `operational_config` field (**renamed to** `operational_config_seed`) so blueprints can still carry seed defaults when adopted / created from a system template. The field is read-only after org creation — it is NOT a runtime source; it is a one-time seed. Further, we will stop reading it after the initial adopt; all runtime reads go through the org column.
 
 ### §2.3 Why a column, not a table
 
@@ -178,7 +232,7 @@ ALTER TABLE hierarchy_templates
 COMMENT ON COLUMN organisations.operational_config_override IS
   'Org-level runtime operational config. Single source of truth. Written by config_update_organisation_config skill + ClientPulse Settings page. Deep-merged with system_hierarchy_templates.operational_defaults at read time.';
 COMMENT ON COLUMN hierarchy_templates.operational_config_seed IS
-  'One-time informational snapshot copied from system_hierarchy_templates.operational_defaults when this blueprint is adopted. NOT a runtime source; organisations.operational_config_override remains NULL on newly-created orgs until the first explicit edit, and effective config is derived by deep-merging system_hierarchy_templates.operational_defaults with organisations.operational_config_override at read time.';
+  'One-time seed copied into organisations.operational_config_override when this template is adopted. NOT a runtime source — readers must use organisations.operational_config_override.';
 
 COMMIT;
 ```
@@ -189,7 +243,7 @@ Rollback (in reverse order): rename `hierarchy_templates.operational_config_seed
 
 | Path | Change |
 |------|--------|
-| `server/db/schema/organisations.ts` | Add `operationalConfigOverride: jsonb('operational_config_override').$type<Record<string, unknown> \| null>()` AND `appliedSystemTemplateId: uuid('applied_system_template_id').references(() => systemHierarchyTemplates.id, { onDelete: 'set null' })`. Both columns are added by the §2.4 migration; the schema file must surface both. |
+| `server/db/schema/organisations.ts` | Add `operationalConfigOverride: jsonb('operational_config_override').$type<Record<string, unknown> \| null>()` |
 | `server/db/schema/hierarchyTemplates.ts` | Rename field `operationalConfig` → `operationalConfigSeed`. Type stays the same. |
 | `server/services/orgConfigService.ts` | `getOperationalConfig` reads from `organisations.operational_config_override` (+ system template defaults). Deep-merge logic unchanged. |
 | `server/services/configUpdateHierarchyTemplateService.ts` | Rewrite to target `organisations.operational_config_override`. Rename to `configUpdateOrganisationService.ts`. `resolveDefaultHierarchyTemplateId` is retired (replaced by: always target the caller's org). `resolvePortfolioHealthAgentId` stays (still needed for sensitive-path action enqueue). |
@@ -315,8 +369,9 @@ Every registry lookup + executor dispatch goes through `resolveActionSlug`. Lega
 |------|--------|
 | `server/config/actionRegistry.ts` | Rename entry `clientpulse.operator_alert` → `notify_operator`. Add `ACTION_SLUG_ALIASES` + `resolveActionSlug`. |
 | `server/services/skillExecutor.ts` | Case statement renamed. Dispatch via `resolveActionSlug`. |
-| `server/services/interventionActionMetadata.ts` | Rename the `clientpulse.operator_alert` entry in the `INTERVENTION_ACTION_TYPES` tuple to `notify_operator`. This is the single authoritative rename location; downstream imports (context service, proposer, jobs, UI) pick up the new literal via this module's exported tuple + type. |
-| `server/services/clientPulseInterventionContextService.ts` | Rename the zod enum literal for `createOperatorProposal`. The `INTERVENTION_ACTION_TYPES` tuple is imported from `interventionActionMetadata.ts` (above), so the tuple source edit lives there. |
+| `server/services/interventionActionMetadata.ts` | No change (metadata schema is slug-agnostic). |
+| `server/services/clientPulseInterventionContextService.ts` | Rename `INTERVENTION_ACTION_TYPES` tuple entry; rename in zod enum for `createOperatorProposal`. |
+| `server/services/clientPulseInterventionProposerPure.ts` | No change (consumes the template's `actionType` field, which is data not code). |
 | `server/services/clientPulseInterventionIdempotencyPure.ts` | Rename `clientpulse.operator_alert` → `notify_operator` in the `InterventionActionTypeName` hard-coded union (consumed by both `buildScenarioDetectorIdempotencyKey` and `buildOperatorIdempotencyKey`). |
 | `server/skills/clientPulseOperatorAlertServicePure.ts` | Rename `clientpulse.operator_alert` → `notify_operator` in the hard-coded slug literal (used in the idempotency-key builder + JSDoc header). |
 | `server/jobs/proposeClientPulseInterventionsJob.ts` | Rename the literal in the `actionType === 'clientpulse.operator_alert'` branch → `notify_operator`. |
@@ -325,6 +380,7 @@ Every registry lookup + executor dispatch goes through `resolveActionSlug`. Lega
 | `server/routes/clientpulseInterventions.ts` + `clientPulseInterventionContextService.ts` | Rename in zod enums; alias accepted on input + normalised via `resolveActionSlug`. |
 | `client/src/components/clientpulse/ProposeInterventionModal.tsx` + `OperatorAlertEditor.tsx` | Rename in `InterventionActionType` union + submit payload. |
 | Pure tests | Update literals: `clientPulseInterventionProposerPure.test.ts`, `clientPulseInterventionPrimitivesPure.test.ts`, `interventionActionMetadataPure.test.ts`, `interventionIdempotencyKeysPure.test.ts`, `measureInterventionOutcomeJobPure.test.ts`. |
+| `server/services/interventionActionMetadata.ts` | No schema change; just confirm `INTERVENTION_ACTION_TYPES` import downstream uses the new slug. |
 | Docs | `architecture.md` §intervention-pipeline · `docs/capabilities.md` · `docs/integration-reference.md` (taxonomy entry). |
 | `tasks/builds/clientpulse/progress.md` | Log the rename. |
 
@@ -403,15 +459,13 @@ registerSensitiveConfigPaths('clientpulse', [
 `operationalConfigSchema.ts`:
 
 ```typescript
-// @deprecated — use sensitiveConfigPathsRegistry.getAllSensitiveConfigPaths() directly.
-// Kept as a function-backed alias (not an empty frozen array) so any remaining
-// direct consumer receives the live registry contents, not a permanently-empty
-// snapshot. Eligible for deletion after Session 1 grep confirms zero imports.
-export const getSensitiveConfigPaths = (): readonly string[] =>
-  getAllSensitiveConfigPaths();
+// @deprecated — use sensitiveConfigPathsRegistry.getAllSensitiveConfigPaths()
+export const SENSITIVE_CONFIG_PATHS: readonly string[] = Object.freeze([]);
 ```
 
-The Session 1 touch list (§3.7) moves every known in-repo import off `SENSITIVE_CONFIG_PATHS` before the array export is deleted; the `getSensitiveConfigPaths()` function alias stays for one release cycle to catch any external-to-module consumer that grep missed. `isSensitiveConfigPath` in the same file also delegates to the registry. All callers automatically pick up the new list. There is exactly one source of truth: the registry.
+Keep the export to avoid breaking external-to-module consumers during the transition; emptying the array + delegating to the registry means there's exactly one source of truth.
+
+`isSensitiveConfigPath` in the same file delegates to the registry. All callers automatically pick up the new list.
 
 #### Boot-time registration
 
@@ -421,8 +475,8 @@ The module's `registerSensitivePaths.ts` is imported by `server/index.ts` alongs
 
 | Path | Change |
 |------|--------|
-| `server/config/sensitiveConfigPathsRegistry.ts` | **NEW** — registry primitive. Exports BOTH the sensitive-paths API (`registerSensitiveConfigPaths`, `getAllSensitiveConfigPaths`) AND the root-keys API per §3.8 (`registerOperationalConfigRoots`, `isValidConfigPath`). Single file so modules have one composability surface. |
-| `server/services/operationalConfigSchema.ts` | `SENSITIVE_CONFIG_PATHS` array export replaced with a `getSensitiveConfigPaths()` function-backed alias that delegates to the registry (no empty frozen array); `isSensitiveConfigPath` delegates to the registry. All in-repo imports migrated off the array export in the same chunk. |
+| `server/config/sensitiveConfigPathsRegistry.ts` | **NEW** — registry primitive |
+| `server/services/operationalConfigSchema.ts` | `SENSITIVE_CONFIG_PATHS` array emptied (kept as deprecated alias); `isSensitiveConfigPath` delegates to the registry |
 | `server/modules/clientpulse/registerSensitivePaths.ts` | **NEW** — ClientPulse's sensitive paths declaration |
 | `server/index.ts` | Import the registration module at boot |
 | `server/services/configUpdateHierarchyTemplatePure.ts` (→ renamed per §2) | Use the registry helpers + the `isValidConfigPath` allow-list. The allow-list also becomes composable — see §3.8. |
@@ -430,10 +484,10 @@ The module's `registerSensitivePaths.ts` is imported by `server/index.ts` alongs
 
 ### §3.8 Bonus: also make `ALLOWED_CONFIG_ROOT_KEYS` composable
 
-The typo-guard allow-list I added during the last review loop has the same problem — it's a hardcoded array inside a pure module. Fold it into the **same file** as the sensitive-paths registry — `server/config/sensitiveConfigPathsRegistry.ts` becomes the single config-composability primitive that modules touch. Rename the file header but not the filename (to avoid a second file rename in §9.1). Add these exports alongside the existing sensitive-paths registrations:
+The typo-guard allow-list I added during the last review loop has the same problem — it's a hardcoded array inside a pure module. Refactor it into the same registry pattern:
 
 ```typescript
-// server/config/sensitiveConfigPathsRegistry.ts — adds:
+// server/config/operationalConfigRegistry.ts (same file OR sibling)
 const registeredRootKeys = new Set<string>();
 
 export function registerOperationalConfigRoots(moduleSlug: string, roots: readonly string[]): void {
@@ -447,7 +501,7 @@ export function isValidConfigPath(path: string): boolean {
 }
 ```
 
-ClientPulse's `registerSensitivePaths.ts` calls both `registerSensitiveConfigPaths(...)` AND `registerOperationalConfigRoots(...)` at boot. Future modules ship one file that declares both sets. The file is already listed in §3.7 and §9.1 (as `server/config/sensitiveConfigPathsRegistry.ts`) — no additional file inventory changes are required; the §3.7 row's "Change" column picks up the `registerOperationalConfigRoots` + `isValidConfigPath` exports.
+ClientPulse's `registerSensitivePaths.ts` also registers its root keys. Future modules ship one file that declares both.
 
 ### §3.9 Resolutions
 
@@ -476,7 +530,7 @@ Response shape is the same as the existing config-apply returns:
 ```typescript
 | { committed: true; configHistoryVersion: number; path: string; classification: 'non_sensitive' }
 | { committed: false; actionId: string; classification: 'sensitive'; requiresApproval: true }
-| { committed: false; errorCode: 'INVALID_BODY' | 'SCHEMA_INVALID' | 'SUM_CONSTRAINT_VIOLATED' | 'INVALID_PATH' | 'AGENT_REQUIRED_FOR_SENSITIVE'; message: string }
+| { committed: false; errorCode: 'SCHEMA_INVALID' | 'SUM_CONSTRAINT_VIOLATED' | 'INVALID_PATH' | 'AGENT_REQUIRED_FOR_SENSITIVE'; message: string }
 ```
 
 No `templateId` input — the target is always the caller's organisation. `resolveDefaultHierarchyTemplateId` is removed.
@@ -574,24 +628,15 @@ Response:
 
 ```typescript
 {
-  effective: OperationalConfig;                 // merged deep-merge result
-  overrides: OperationalConfig | null;          // just the org override row (nullable)
-  systemDefaults: OperationalConfig | null;     // the underlying system template defaults (null iff appliedSystemTemplateId is null)
+  effective: OperationalConfig;          // merged deep-merge result
+  overrides: OperationalConfig | null;   // just the org override row (nullable)
+  systemDefaults: OperationalConfig;     // the underlying system template defaults
   appliedSystemTemplateId: string | null;
   appliedSystemTemplateName: string | null;
 }
 ```
 
-`systemDefaults` is `null` iff the org has no adopted system template (`appliedSystemTemplateId IS NULL`). Under Option A this is only possible for legacy pre-Session-1 orgs that never ran through `createFromTemplate` — new orgs always have `appliedSystemTemplateId` set (§7.2 step 1). When `systemDefaults` is `null`, the Settings UI disables the "reset to template default" button across the board (no baseline to reset to) and the provenance strip shows "Adopted template: none (legacy org)." `effective` is still a valid `OperationalConfig` in this case — it is the raw `overrides` value deep-merged with `{}`, i.e. whatever the org has explicitly written, falling back to the code-level schema defaults for any unwritten leaf.
-
-**Override-detection contract (consistent with §6.7's option-a reset semantic):** the Settings UI derives **two** per-leaf states from the response:
-
-- `hasExplicitOverride(path)` — `true` iff the path is **present** in `overrides` at that leaf. Presence is the audit-trail signal ("this leaf was explicitly written by someone, regardless of current value"). Used for audit displays and "this field was manually set" indicators.
-- `differsFromTemplate(path)` — `true` iff the effective leaf value is not deep-equal (after schema normalisation) to the value produced by the system defaults alone (i.e. if we stripped the override row, the effective value would change). Deep-equality is required because leaves include arrays (e.g. `healthScoreFactors`) and nested objects — JS `!==` is reference equality and would mis-enable the override badge / reset button on every array or object leaf regardless of content. Implementation note: the Settings UI uses a stable deep-equal helper (`fast-deep-equal` or an equivalent already in the client bundle — audit at chunk-6 kickoff). Used for badge display ("overridden" pill) and for "reset-to-template-default" button enablement.
-
-These are orthogonal. After a reset-to-default (option a per §10.5), `hasExplicitOverride = true` AND `differsFromTemplate = false` — the leaf has been written-through but the effective value now matches the system default, so the reset button correctly disables itself ("Already at template default") while the audit trail continues to show the explicit write. A leaf that has never been touched shows `hasExplicitOverride = false` AND `differsFromTemplate = false`.
-
-`effective` is still a full deep-merge; it is the source-of-truth value to display in the editors. The UI computes both derived states locally from `(overrides, systemDefaults, effective)` — no additional endpoints or response fields are required.
+**Override-detection contract (consistent with §6.7's option-a reset semantic):** a leaf path is "overridden" iff it is **present** in `overrides` at that path — the value at the leaf is irrelevant. Reset-to-default writes the system default as an explicit override (option a per §10.5), so the raw value at a leaf does not distinguish "reverted to default" from "coincidentally equal to default"; only presence in the override row does. The Settings page derives badges and reset-button enablement from this presence check. `effective` is still a full deep-merge; it is the source-of-truth value to display in the editors.
 
 Same auth middleware. Lives in the same route file.
 
@@ -641,7 +686,7 @@ At kickoff, count the highest numbered migration. Plan:
 
 `config_history` rows written by Phase-4.5 use `entity_type='clientpulse_operational_config'` and `entity_id=hierarchy_template.id`. Post-§2, the target is the organisation, so:
 
-- **Entity type change:** `clientpulse_operational_config` → `organisation_operational_config`. New rows use the new type. Creation-event rows written by §7.2 step 6 carry `snapshot_after=NULL` — history readers must treat `snapshot_after=NULL` as a creation marker meaning "no explicit overrides yet"; they must not reconstruct a point-in-time JSON snapshot unless a historical defaults snapshot is explicitly available. (The current adopted-template defaults are mutable over time, so the NULL row is a semantic marker, not a reconstruction anchor.)
+- **Entity type change:** `clientpulse_operational_config` → `organisation_operational_config`. New rows use the new type.
 - **Existing rows:** leave as-is. The entity_id still points at the (renamed) hierarchy_template row, which now stores the one-time seed. Readers that grep `clientpulse_operational_config` in history continue to find historical entries.
 - **History viewer** (`docs/capabilities.md` capability `clientpulse.config.history` → generic rename `organisation.config.history`) queries both entity types for continuity.
 
@@ -867,11 +912,10 @@ Each editor is a self-contained component in `client/src/components/clientpulse-
 
 ### §6.4 "Reset to template default" affordance
 
-Per-field button. Enablement + behaviour are driven by the §4.5 derived states:
+Per-field button. When clicked:
 
-- **Button enabled when `differsFromTemplate(path) === true`** (effective value differs from system default). On click: POST a save with `value: <the-system-default-value>`. The save is option (a) from §10.5 — it writes the system default as an explicit override. After the save, `hasExplicitOverride` stays `true` (the write is audited), but `differsFromTemplate` flips to `false`, which disables the button with the tooltip "Already at template default."
-- **Button disabled when `differsFromTemplate(path) === false`**, regardless of `hasExplicitOverride`. Tooltip: "Already at template default." This is the terminal state whether the field was never touched or was reset via this button.
-- The "overridden" badge next to the indicator shows when `differsFromTemplate === true`. A separate "manually set" micro-indicator (optional UX polish — ship in Session 1 if trivial, defer otherwise) shows `hasExplicitOverride === true && differsFromTemplate === false` for audit transparency.
+- If the field is currently overridden: POST a save with `value: <the-system-default-value>` OR a dedicated delete-override path (see open question §6.7.1). Recommendation: the POST shape is "set to the system default," which deep-merges to no-op at the effective layer but keeps the override-row shape deterministic.
+- If the field is not overridden: button is disabled with tooltip "Already at template default."
 
 UX: small "reset" icon button next to the override indicator (matches existing settings mockup).
 
@@ -884,7 +928,7 @@ The existing `AdminAgentTemplatesPage` (exact label TBD — audit at kickoff) ha
 
 Changes:
 
-- **Read-only display of the "seed" block** as an informational preview: "This is the operational-config snapshot captured when this blueprint was adopted from the system template. It is informational only — new subaccounts created under this blueprint inherit the org's effective operational config (via `orgConfigService.getOperationalConfig(orgId)`), not this snapshot. Change the live config in ClientPulse Settings."
+- **Read-only display of the "seed" block** as an informational preview: "This blueprint will seed new subaccounts with these operational defaults. Change the live config in ClientPulse Settings."
 - **Remove the edit controls** for operational defaults. The blueprint editor controls only:
   - Blueprint name + description
   - Agent hierarchy (which agents get linked, what roles, what skills, what schedules)
@@ -936,8 +980,8 @@ Key behaviour:
 
 - **Template picker cards:** each card shows template name, short description, included agents count, operational defaults summary, required integrations. Populated from `GET /api/system/organisation-templates` (existing endpoint — maps to what was `system_hierarchy_templates`).
 - **Tier toggle:** radio group. Determines which module access the new org gets. Consumed by subscription logic (out of scope for Session 1; just set the value, D6 wires it to billing later).
-- **Live preview:** right-hand pane updates as the template is selected. Shows: "You'll create <Org Name> with <Template Name> · <N> agents will be seeded · <M> subaccount blueprints available · Operational defaults: inherited from the template (no org-specific overrides until the operator edits settings)."
-- **Confirm button** creates the organisation, seeds the default subaccount blueprint from the template, links the new org to the template via `applied_system_template_id` (the override column stays `NULL` until first edit), creates the org-admin user + invite email.
+- **Live preview:** right-hand pane updates as the template is selected. Shows: "You'll create <Org Name> with <Template Name> · <N> agents will be seeded · <M> subaccount blueprints available · Operational defaults: <summary bullets>."
+- **Confirm button** creates the organisation, seeds the default subaccount blueprint from the template, copies the template's `operational_defaults` into the new `organisations.operational_config_override`, creates the org-admin user + invite email.
 
 ### §7.2 System-admin — what the "create" action does server-side
 
@@ -946,11 +990,11 @@ Key behaviour:
 Steps (all in one transaction):
 
 1. INSERT the `organisations` row with `applied_system_template_id = systemTemplateId`.
-2. Leave `organisations.operational_config_override` as `NULL`. The effective config for the new org is provided by `systemHierarchyTemplates.operational_defaults` deep-merged with `NULL`, which resolves to the platform's current defaults. Any subsequent edit via the Settings page or Configuration Assistant writes the first entry into the override column, initialising the row; before that the org inherits every platform-level default change automatically.
-3. Create a `hierarchy_templates` row (the default Subaccount Blueprint) sourced from the system template — sets `isDefaultForSubaccount=true` and copies the agent hierarchy structure. The `operational_config_seed` field is populated from `systemHierarchyTemplates.operational_defaults` as a one-time informational snapshot (not read by any runtime path — subaccounts under this blueprint inherit the org's effective operational config via `orgConfigService.getOperationalConfig(orgId)`, which resolves to the live deep-merge and respects future platform-default changes per §2.2).
+2. Copy `systemHierarchyTemplates.operational_defaults` → `organisations.operational_config_override` (fresh copy, operator can diverge from the template from day one).
+3. Create a `hierarchy_templates` row (the default Subaccount Blueprint) sourced from the system template — sets `isDefaultForSubaccount=true` and copies the agent hierarchy structure. The `operational_config_seed` field is populated for reference only.
 4. Seed any system agents declared by the template (e.g. `portfolio-health-agent` linked to the new org).
 5. Create the org-admin user row + invite email.
-6. Write a `config_history` row marking the creation event: `entity_type='organisation_operational_config'`, `entity_id=<new organisation id>`, `change_source='system_sync'`, `change_summary='Organisation created from template <template-slug>'`, `snapshot_after=NULL` (representing "no explicit overrides yet — effective config is the adopted template's current defaults"). This is an audit-trail marker for the creation event, not a config-change record; the `snapshot_after=NULL` value is the signal that no override write has happened.
+6. Write a `config_history` row with `change_source='system_sync'` and `change_summary='Organisation created from template <template-slug>'`.
 
 Return the new `organisationId` for the modal to display success + a link.
 
@@ -972,7 +1016,7 @@ Gate logic: a new `organisations.onboarding_completed_at: timestamp nullable` co
 - Alert cadence: daily / weekly / monthly / off
 - Churn-band cutoffs: collapsed summary view showing "Healthy 75–100 · Watch 51–74 · At-risk 26–50 · Critical 0–25" with a "Adjust thresholds" link that opens the ClientPulse Settings page inline (or defers).
 
-On Next, **only fields the operator actually changed on screen 3 are POSTed** via `POST /api/organisation/config/apply` — one POST per dirty leaf path. Advancing without editing anything performs no config write and leaves `organisations.operational_config_override` `NULL`, preserving the Option A "override row is initialised by the first explicit edit" contract (§7.2 step 2, §10.1). Non-sensitive paths commit immediately; sensitive paths queue but the wizard continues — user re-visits the review queue later. Each successful or queued Screen-3 POST produces the normal `config_history` row via the standard `/api/organisation/config/apply` write path (entity_type `organisation_operational_config`, non-NULL `snapshot_after`); if the operator changes nothing, the only history entry remains the §7.2 step-6 creation marker with `snapshot_after=NULL`.
+Each value written via `POST /api/organisation/config/apply` on Next. Non-sensitive paths commit immediately; sensitive paths queue but the wizard continues — user re-visits the review queue later.
 
 **Screen 4 — You're ready.** Summary card showing: org name, adopted template, GHL connection status, next scan ETA. Link to dashboard. Marks `onboarding_completed_at`.
 
@@ -985,8 +1029,6 @@ On Next, **only fields the operator actually changed on screen 3 are POSTed** vi
 | `GET /api/onboarding/status` (server) | Same | Returns `{ needsOnboarding: boolean, ghlConnected: boolean, agentsProvisioned: boolean, firstRunComplete: boolean }` — `needsOnboarding = (organisations.onboarding_completed_at IS NULL)` is the new field consumed by the wizard redirect; the remaining three fields carry through from the existing `onboardingService.getOnboardingStatus` derivation unchanged and continue to drive the sync-progress screen + dashboard empty states |
 
 The redirect logic sits in `App.tsx` / a top-level effect: on first render, fetch `GET /api/onboarding/status`; if `needsOnboarding=true`, `navigate('/onboarding')` unless already there. The other three fields in the response are ignored by the redirect but consumed by other surfaces (sync-progress screen, dashboard empty states) against the same endpoint.
-
-**Auth contract.** Both endpoints use the existing authenticated onboarding middleware chain (`authenticate` first, then the org-scoped resolver that sets `req.orgId`). `POST /api/onboarding/complete` requires the same org-admin eligibility as the wizard entry path — it mutates `organisations.onboarding_completed_at` so it must not be callable anonymously or from cross-org contexts. `GET /api/onboarding/status` is org-scoped read-only; same auth chain.
 
 ### §7.5 Migration
 
@@ -1075,7 +1117,7 @@ New integration tests introduced by Session 1 (DB-fixture-backed, not pure):
 
 - `configUpdateOrganisationService.test.ts` — S1-A1 ship-gate integration test; hits a DB fixture to assert the migration + service targets `organisations.operational_config_override`.
 - `organisationConfig.test.ts` — S1-A4 route integration test; POST valid/invalid paths, verify classification + response shape.
-- `organisationServiceCreateFromTemplate.test.ts` — §7.2 sysadmin service test; asserts `createFromTemplate` leaves `operational_config_override` `NULL` while seeding `appliedSystemTemplateId` + default blueprint correctly (Option A lifecycle per §7.2 / §10.1).
+- `organisationServiceCreateFromTemplate.test.ts` — §7.2 sysadmin service test; asserts `createFromTemplate` seeds the override + applied-template FK + default blueprint correctly.
 
 **Target post-Session-1:** 137 pure tests across ClientPulse (113 today + 24 new / carried). Zero regressions on the 43-error server typecheck baseline.
 
@@ -1087,7 +1129,7 @@ New file: `tasks/builds/clientpulse/session-1-verification.md`. Per CLAUDE.md UI
 2. **Popup lifecycle.** Open popup from nav → send a prompt → get plan preview → minimise → pill shows → reopen → plan still there → approve → execution progresses → close popup mid-execute → reopen → see completed transcript.
 3. **Settings page CRUD.** Per block: edit, save, verify `config_history` row, refresh page, verify value persisted. Test both non-sensitive (direct commit) and sensitive (review-queue routing) paths. Test reset-to-default.
 4. **Subaccount Blueprint editor.** Open the page, verify no **editable** operational-config fields visible (the §6.5 read-only seed preview is expected). Verify creating a new subaccount from the default blueprint still works end-to-end (agent hierarchy seeded correctly).
-5. **Onboarding — sysadmin.** Create a test org via the modal. Verify: org created, default blueprint seeded, operational config override stays NULL (org inherits the template's defaults via the applied-system-template FK), invite email queued.
+5. **Onboarding — sysadmin.** Create a test org via the modal. Verify: org created, default blueprint seeded, operational config override populated, invite email queued.
 6. **Onboarding — org-admin.** Sign in as the new org-admin. Verify: wizard auto-opens, 4 screens navigable, GHL skip path works, completion marks `onboarding_completed_at`, subsequent sign-ins skip the wizard.
 7. **Config Assistant vs Settings parity.** Change `alertLimits.maxAlertsPerRun` via the Settings page + via the chat popup. Verify both land in `organisations.operational_config_override`. Verify both appear in `config_history` with correct `change_source`.
 
@@ -1120,12 +1162,12 @@ Run after every chunk:
 
 If Session 1 needs to be rolled back post-deploy:
 
-- Migrations are reversible (`_down/` pairs written for the new migrations; the pre-migration snapshot of `operational_config_override` is restore-able from the renamed `operational_config_seed` column).
+- Migrations are reversible (`_down/` pairs written for the new migrations; the backfill is restore-able from the renamed seed column).
 - Route retirement of `/api/clientpulse/config/apply` is reversible by re-exporting the old file (kept in git history).
 - UI renames are cosmetic — reversible via `git revert`.
 - Popup refactor: reverting restores the old `ConfigAssistantChatPopup` from git.
 
-**Data-loss caveat (pre-production framing).** Any writes that land in `organisations.operational_config_override` **after** the forward migration completes are not mirrored back into `hierarchy_templates.operational_config_seed`; a straight `_down` that drops the override column would drop those writes. This is acceptable under the current framing (`live_users: no`, `rollout_model: commit_and_revert` per `docs/spec-context.md`) — dev-environment data is disposable during the rollback window. If Session 1 ships past the first live-user milestone, add a `_down` step that copies each org's `operational_config_override` back into the resolved `hierarchy_templates` row before dropping the column. Until then: **no data-loss risk within the pre-production envelope. Downgrade window: 1 release cycle.**
+No data loss risk. Downgrade window: 1 release cycle.
 ## §9. File inventory
 
 ### §9.1 Files to create (server)
@@ -1177,11 +1219,12 @@ If Session 1 needs to be rolled back post-deploy:
 | `server/db/schema/organisations.ts` | Add `operationalConfigOverride` + `onboardingCompletedAt` + `appliedSystemTemplateId` fields |
 | `server/db/schema/hierarchyTemplates.ts` | Rename `operationalConfig` → `operationalConfigSeed` |
 | `server/services/orgConfigService.ts` | Read chain swap (§2.6) |
-| `server/services/operationalConfigSchema.ts` | `SENSITIVE_CONFIG_PATHS` replaced with `getSensitiveConfigPaths()` function-backed alias delegating to the registry; `isSensitiveConfigPath` delegates to registry; every in-repo import migrated off the array export in the same chunk |
+| `server/services/operationalConfigSchema.ts` | `SENSITIVE_CONFIG_PATHS` becomes deprecated alias; `isSensitiveConfigPath` delegates to registry |
 | `server/config/actionRegistry.ts` | Slug rename + `ACTION_SLUG_ALIASES` + `resolveActionSlug` |
 | `server/services/skillExecutor.ts` | Case rename + alias-aware dispatch |
 | `server/services/interventionActionMetadata.ts` | `INTERVENTION_ACTION_TYPES` tuple entry renamed |
 | `server/services/clientPulseInterventionContextService.ts` | Zod enum + literal renames; remove `resolveDefaultHierarchyTemplateId` |
+| `server/services/clientPulseInterventionProposerPure.ts` | No change (data-driven) |
 | `server/jobs/proposeClientPulseInterventionsJob.ts` | Literal rename |
 | `server/jobs/measureInterventionOutcomeJob.ts` | SQL literal rename |
 | `server/jobs/measureInterventionOutcomeJobPure.ts` | Operator-alert branch literal rename |
@@ -1228,23 +1271,6 @@ If Session 1 needs to be rolled back post-deploy:
 | `tasks/builds/clientpulse/session-1-plan.md` | NEW — architect output (chunk 1) |
 | `tasks/builds/clientpulse/session-1-verification.md` | NEW — manual verification checklist (chunk 7) |
 
-### §9.6 Files to rename or delete (explicit)
-
-The "replaces X" notation in §9.1 / §9.2 is normative, but the retired paths are listed here in one place so reviewers can check nothing was left behind.
-
-| Path | Action | Landing chunk |
-|------|--------|---------------|
-| `server/services/configUpdateHierarchyTemplateService.ts` | **Rename** → `configUpdateOrganisationService.ts` per §2.5 / §9.1 | A.2 |
-| `server/services/configUpdateHierarchyTemplatePure.ts` | **Rename** → `configUpdateOrganisationConfigPure.ts` per §2.5 / §9.1 | A.2 |
-| `server/services/__tests__/configUpdateHierarchyTemplatePure.test.ts` | **Rename** → `configUpdateOrganisationConfigPure.test.ts` per §8.3 / §9.1 (all 18 cases carry over) | A.2 |
-| `server/skills/config_update_hierarchy_template.md` | **Rename** → `config_update_organisation_config.md` per §2.5 / §9.1 (action slug rename in the same edit) | A.2 |
-| `server/routes/clientpulseConfig.ts` | **Delete** — retired per §4.2 (no redirect; generic route at `server/routes/organisationConfig.ts` replaces it) | A.3 |
-| `client/src/components/clientpulse/ConfigAssistantChatPopup.tsx` | **Delete** — retired per §5.8 / §9.4 (Phase-4.5 direct-patch form replaced by the real Configuration Assistant popup at `client/src/components/config-assistant/ConfigAssistantPopup.tsx`) | A.4 |
-| `client/src/pages/SystemCompanyTemplatesPage.tsx` | **Rename** → `client/src/pages/SystemOrganisationTemplatesPage.tsx` per §4.6 / §9.4 (class name + copy updated in same edit) | A.3 |
-| `client/src/pages/AdminAgentTemplatesPage.tsx` (exact filename TBD per audit) | **Rename** → `client/src/pages/SubaccountBlueprintsPage.tsx` per §4.6 / §9.4 (operational-config fields removed in same edit per §6.5) | 6 (Phase 5 chunk) |
-
-Audit-deferred items (per §10.8) are intentionally not listed here; their inventory delta is `no touch unless the kickoff audit finds a real caller`. The known-retired paths above are locked.
-
 ---
 
 ## §10. Decisions log (consolidated)
@@ -1256,8 +1282,6 @@ All prior open questions have been resolved inline in their sections. Consolidat
 | Q | Decision | Location |
 |---|----------|----------|
 | `organisations.applied_system_template_id` exists already? | Audit at chunk-2 kickoff. §2.4's migration is the sole owner of the ADD COLUMN + FK + index + backfill under the default name; if a pre-existing column under a different name is found, replace the ADD COLUMN in step 2 with reuse-in-place. **Intent is locked** — an explicit org-level FK to the adopted system template exists post-§2.4. Column naming is the only implementation-flexible lever. | §2.4, §2.6 |
-| Create-org override-row posture | NULL (orgs inherit future system-template default changes; first override write initialises the row) | §7.2 |
-| Org-creation config_history row | Keep as audit-trail marker with `snapshot_after=NULL` (represents no-override-yet state) | §7.2 step 6, §4.8 |
 | Template-switch post-create? | Out of scope for Session 1. One-time adopt only. Revisit when a concrete use case arises. | §7.7 |
 | RLS on new column? | `organisations` table policies inherit automatically. Confirm config-agent principal has write at kickoff; adjust policy if not. Non-blocking; trivial to fix at build time. | §2.7 |
 
@@ -1323,14 +1347,42 @@ These are small discovery tasks the implementer does at the start of the relevan
 
 - Does `organisations.applied_system_template_id` already exist under another name? (chunk 2)
 - Which webhook handlers carry inbound `action_type` fields needing `resolveActionSlug` defensive normalisation? (chunk 2)
-- Does the subaccount-create path already read the org's effective operational config via `orgConfigService.getOperationalConfig(orgId)`, or does it read `hierarchy_templates.operational_config_seed` / a raw override row today? If it reads the seed / raw override, retarget it and add the touched file(s) (likely `server/services/subaccountService.ts` or equivalent — confirm at audit) to §9.3. If it already reads `getOperationalConfig(orgId)` the contract holds without a code touch. (chunk 6 kickoff, before the Phase 5 blueprint-editor refactor lands)
 - Does a ⌘K command palette exist in the client? (chunk 5)
 - Does `useSocket` support rejoin-after-remount cleanly? (chunk 5)
 - What's the canonical OAuth helper + callback pattern to reuse for GHL in the wizard? (chunk 7)
-- Which deep-equal helper is already in the client bundle for `differsFromTemplate` (§4.5) — `fast-deep-equal`, a local utility, or does one need to be added? (chunk 6 kickoff)
 
 ---
 
 **End of Session 1 spec.**
 
 All directional decisions are locked. The remaining audits in §10.8 are implementation discovery — they refine the code, not the plan. Ready for `spec-reviewer` pass when the local Codex is available.
+
+codex
+1. **§7.2 — `createFromTemplate` seeds the override row with full defaults**. Step 2 says `systemHierarchyTemplates.operational_defaults` is copied wholesale into `organisations.operational_config_override`, but §2/§4/§6 treat that column as sparse org overrides whose path presence drives override badges and reset affordances. A full copy would mark every field as overridden on day one and shadow future system-template default changes. Suggested fix: edit §7.2 step 2 so create-org sets `applied_system_template_id` and leaves `operational_config_override` `NULL` (or writes only true org-specific deltas), then update §7.1/§8.4 verification text to match.
+
+2. **§4.5 / §6.4 / §10.5 — reset-to-default contract is self-contradictory**. §4.5 says a field is “overridden” iff the path is present in `overrides`, and §10.5 locks reset semantics to “write the system default as an explicit override.” After a reset, the path is still present, so by the spec’s own rule the field remains overridden and the §6.4 “Already at template default” disabled state is unreachable. Suggested fix: amend §4.5 and §6.4 to define two derived states: `hasExplicitOverride` (presence) and `differsFromTemplate` (effective value vs system default), and drive the badge/reset enablement off `differsFromTemplate` while keeping option (a) writes unchanged.
+
+3. **§2.4 / §8.8 — rollback does not preserve post-migration config writes**. The rollback text says the backfilled data is recoverable from `hierarchy_templates.operational_config_seed`, but that only covers the pre-migration snapshot. Any post-deploy writes land only in `organisations.operational_config_override` and are lost when that column is dropped. Suggested fix: make the `_down` for `NNNN_org_operational_config_override.sql` copy each org’s current `operational_config_override` back into the resolved `hierarchy_templates` row before renaming/dropping columns, and update §8.8’s “No data loss risk” wording accordingly.
+
+4. **§2.2 / §6.5 / S1-5.2 / §7.2 — subaccount-seeding source-of-truth is inconsistent**. §2.2 says blueprints keep `operational_config_seed` so they can still carry seed defaults; S1-5.2 says new subaccounts should seed from the org’s current override; §7.2 step 3 says `operational_config_seed` is populated “for reference only.” Those are different contracts. Suggested fix: pick one source explicitly and align all sections. If the intended source is the live org config, update §2.2, §6.5, §7.2 step 3, and S1-5.2 to say subaccount creation reads `organisations.operational_config_override` plus system defaults, and `operational_config_seed` is informational only.
+
+5. **§3.8 / §3.7 / §9 — composable root-key registry is introduced but not owned by a concrete file**. §3.8 adds a second registry primitive for `ALLOWED_CONFIG_ROOT_KEYS` but leaves it as “same file OR sibling,” and §9 never names the owning file. That is an unnamed new primitive plus file-inventory drift. Suggested fix: lock the implementation now, e.g. `server/config/operationalConfigRegistry.ts` or fold it into `server/config/sensitiveConfigPathsRegistry.ts`, then add that file to §3.7 and §9 and state that `server/modules/clientpulse/registerSensitivePaths.ts` registers both sensitive paths and allowed root keys.
+
+6. **§3.5 / §9.3 — touch-list drift around intervention metadata files**. `server/services/interventionActionMetadata.ts` is listed twice in §3.5 with conflicting guidance (“No change” vs downstream rename confirmation), while §9.3 says its tuple entry is renamed; `server/services/clientPulseInterventionProposerPure.ts` is also listed under “Files to modify” while explicitly marked “No change.” Suggested fix: collapse §3.5 to one authoritative entry and align §9.3 so only files with actual edits remain in the modify inventory; if `INTERVENTION_ACTION_TYPES` lives in `interventionActionMetadata.ts`, state that once and remove the “No change” wording elsewhere.
+
+Beyond those, the spec reads mechanically tight.
+tokens used
+50,045
+1. **§7.2 — `createFromTemplate` seeds the override row with full defaults**. Step 2 says `systemHierarchyTemplates.operational_defaults` is copied wholesale into `organisations.operational_config_override`, but §2/§4/§6 treat that column as sparse org overrides whose path presence drives override badges and reset affordances. A full copy would mark every field as overridden on day one and shadow future system-template default changes. Suggested fix: edit §7.2 step 2 so create-org sets `applied_system_template_id` and leaves `operational_config_override` `NULL` (or writes only true org-specific deltas), then update §7.1/§8.4 verification text to match.
+
+2. **§4.5 / §6.4 / §10.5 — reset-to-default contract is self-contradictory**. §4.5 says a field is “overridden” iff the path is present in `overrides`, and §10.5 locks reset semantics to “write the system default as an explicit override.” After a reset, the path is still present, so by the spec’s own rule the field remains overridden and the §6.4 “Already at template default” disabled state is unreachable. Suggested fix: amend §4.5 and §6.4 to define two derived states: `hasExplicitOverride` (presence) and `differsFromTemplate` (effective value vs system default), and drive the badge/reset enablement off `differsFromTemplate` while keeping option (a) writes unchanged.
+
+3. **§2.4 / §8.8 — rollback does not preserve post-migration config writes**. The rollback text says the backfilled data is recoverable from `hierarchy_templates.operational_config_seed`, but that only covers the pre-migration snapshot. Any post-deploy writes land only in `organisations.operational_config_override` and are lost when that column is dropped. Suggested fix: make the `_down` for `NNNN_org_operational_config_override.sql` copy each org’s current `operational_config_override` back into the resolved `hierarchy_templates` row before renaming/dropping columns, and update §8.8’s “No data loss risk” wording accordingly.
+
+4. **§2.2 / §6.5 / S1-5.2 / §7.2 — subaccount-seeding source-of-truth is inconsistent**. §2.2 says blueprints keep `operational_config_seed` so they can still carry seed defaults; S1-5.2 says new subaccounts should seed from the org’s current override; §7.2 step 3 says `operational_config_seed` is populated “for reference only.” Those are different contracts. Suggested fix: pick one source explicitly and align all sections. If the intended source is the live org config, update §2.2, §6.5, §7.2 step 3, and S1-5.2 to say subaccount creation reads `organisations.operational_config_override` plus system defaults, and `operational_config_seed` is informational only.
+
+5. **§3.8 / §3.7 / §9 — composable root-key registry is introduced but not owned by a concrete file**. §3.8 adds a second registry primitive for `ALLOWED_CONFIG_ROOT_KEYS` but leaves it as “same file OR sibling,” and §9 never names the owning file. That is an unnamed new primitive plus file-inventory drift. Suggested fix: lock the implementation now, e.g. `server/config/operationalConfigRegistry.ts` or fold it into `server/config/sensitiveConfigPathsRegistry.ts`, then add that file to §3.7 and §9 and state that `server/modules/clientpulse/registerSensitivePaths.ts` registers both sensitive paths and allowed root keys.
+
+6. **§3.5 / §9.3 — touch-list drift around intervention metadata files**. `server/services/interventionActionMetadata.ts` is listed twice in §3.5 with conflicting guidance (“No change” vs downstream rename confirmation), while §9.3 says its tuple entry is renamed; `server/services/clientPulseInterventionProposerPure.ts` is also listed under “Files to modify” while explicitly marked “No change.” Suggested fix: collapse §3.5 to one authoritative entry and align §9.3 so only files with actual edits remain in the modify inventory; if `INTERVENTION_ACTION_TYPES` lives in `interventionActionMetadata.ts`, state that once and remove the “No change” wording elsewhere.
+
+Beyond those, the spec reads mechanically tight.
