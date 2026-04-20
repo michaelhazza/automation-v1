@@ -77,7 +77,7 @@ const SEG: Record<string, string | null> = {
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
   'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
-  'agent-templates': 'Team Templates',
+  'agent-templates': 'Subaccount Blueprints',
   'admin-settings': 'Settings',
   usage: 'Usage & Costs',
   'mcp-servers': 'Integrations',
@@ -786,6 +786,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="ClientPulse" />
               <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
               {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
+              <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
             </>
           )}
 

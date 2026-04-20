@@ -32,7 +32,8 @@ const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
 const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
 const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
-const AdminAgentTemplatesPage = lazy(() => import('./pages/AdminAgentTemplatesPage'));
+const SubaccountBlueprintsPage = lazy(() => import('./pages/SubaccountBlueprintsPage'));
+const ClientPulseSettingsPage = lazy(() => import('./pages/ClientPulseSettingsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const McpServersPage = lazy(() => import('./pages/McpServersPage'));
@@ -244,7 +245,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
-            <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
+            <Route path="/agents/blueprints" element={<SubaccountBlueprintsPage user={user!} />} />
+            {/* Legacy path — kept for bookmarks; renders the renamed page. */}
+            <Route path="/admin/agent-templates" element={<SubaccountBlueprintsPage user={user!} />} />
+            <Route path="/clientpulse/settings" element={<ClientPulseSettingsPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />

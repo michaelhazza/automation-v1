@@ -107,7 +107,7 @@ function SlotTreeRow({ slot, depth }: { slot: SlotNode; depth: number }) {
   );
 }
 
-export default function AdminAgentTemplatesPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
+export default function SubaccountBlueprintsPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
