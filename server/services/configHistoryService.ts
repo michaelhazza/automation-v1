@@ -280,9 +280,17 @@ export const configHistoryService = {
     // `clientpulse_operational_config` entity type with the new
     // `organisation_operational_config` entity type so operators see a
     // single contiguous timeline. Concrete types pass through unchanged.
-    const entityTypeCondition = entityType === ORGANISATION_CONFIG_ALL_QUERY_VALUE
+    const isUnionQuery = entityType === ORGANISATION_CONFIG_ALL_QUERY_VALUE;
+    const entityTypeCondition = isUnionQuery
       ? inArray(configHistory.entityType, ORGANISATION_CONFIG_ENTITY_TYPE_UNION as unknown as string[])
       : eq(configHistory.entityType, entityType);
+
+    // Legacy `clientpulse_operational_config` rows stored entityId as the
+    // hierarchy_templates.id (template UUID), not the organisation UUID.
+    // Applying an entityId filter here would silently drop all pre-Session-1
+    // rows from the union result — organisation scoping alone is sufficient
+    // because both union entity types are already org-owned.
+    const entityIdCondition = isUnionQuery ? undefined : eq(configHistory.entityId, entityId);
 
     const rows = await db
       .select({
@@ -299,7 +307,7 @@ export const configHistoryService = {
       .where(
         and(
           entityTypeCondition,
-          eq(configHistory.entityId, entityId),
+          entityIdCondition,
           eq(configHistory.organisationId, organisationId),
         )
       )

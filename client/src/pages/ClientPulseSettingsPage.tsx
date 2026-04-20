@@ -162,6 +162,14 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
         value: parsed,
         reason: `Update ${block.path} via Settings page`,
       });
+      // Server returns HTTP 200 for schema/sum-constraint rejections with
+      // { committed: false, errorCode } — surface the failure and keep the
+      // editor open so operators can fix the payload instead of silently
+      // closing as if the save succeeded.
+      if (res.data?.errorCode) {
+        toast.error(res.data?.message ?? `Save rejected (${res.data.errorCode}).`);
+        return;
+      }
       if (res.data?.committed) {
         toast.success(`${block.title} saved · history v${res.data.configHistoryVersion}`);
       } else if (res.data?.requiresApproval) {

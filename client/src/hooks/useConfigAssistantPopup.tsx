@@ -57,6 +57,11 @@ export function ConfigAssistantPopupProvider({ children }: { children: ReactNode
   // params so back-navigation doesn't re-open indefinitely.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    // Spec §5.5: the popup renders itself in an iframe with `?popup=1` appended.
+    // Skip the deep-link effect inside the iframe instance — otherwise the
+    // `config-assistant=open` param re-triggers this effect and the iframe
+    // mounts a nested popup indefinitely.
+    if (params.get('popup') === '1') return;
     if (params.get('config-assistant') !== 'open') return;
     const prompt = params.get('prompt') ?? undefined;
     openConfigAssistant(prompt);

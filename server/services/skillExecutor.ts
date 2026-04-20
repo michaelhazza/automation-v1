@@ -18,7 +18,7 @@ import { actionService, buildActionIdempotencyKey } from './actionService.js';
 import { executionLayerService, registerAdapter } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
-import { getActionDefinition } from '../config/actionRegistry.js';
+import { getActionDefinition, resolveActionSlug } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
@@ -48,8 +48,14 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 
-registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) => {
+registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
+  // actionRegistry §1.3: every inbound action-slug surface MUST normalise via
+  // resolveActionSlug so legacy slugs (e.g. config_update_hierarchy_template,
+  // clientpulse.operator_alert) route to the current canonical handler. Without
+  // this call, any review-gated action queued before the Session 1 renames is
+  // silently dropped at the worker dispatch switch.
+  const actionType = resolveActionSlug(rawActionType);
   switch (actionType) {
     case 'create_page': return executeCreatePage(payload, context);
     case 'update_page': return executeUpdatePage(payload, context);
