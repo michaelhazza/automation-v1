@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { InterventionContext } from './ProposeInterventionModal';
+import LiveDataPicker from './pickers/LiveDataPicker';
 
 interface Props {
+  subaccountId: string;
   context: InterventionContext;
   onCancel: () => void;
   onSubmit: (
@@ -11,9 +13,14 @@ interface Props {
   ) => void;
 }
 
-export default function FireAutomationEditor({ onCancel, onSubmit }: Props) {
+type Automation = { id: string; name: string; status: string };
+type Contact = { id: string; firstName: string; lastName: string; email: string | null };
+
+export default function FireAutomationEditor({ subaccountId, onCancel, onSubmit }: Props) {
   const [automationId, setAutomationId] = useState('');
+  const [automationLabel, setAutomationLabel] = useState('');
   const [contactId, setContactId] = useState('');
+  const [contactLabel, setContactLabel] = useState('');
   const [rationale, setRationale] = useState('');
   const [schedule, setSchedule] = useState<'immediate' | 'delay_24h' | 'scheduled'>('immediate');
   const [submitting, setSubmitting] = useState(false);
@@ -23,22 +30,43 @@ export default function FireAutomationEditor({ onCancel, onSubmit }: Props) {
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Automation ID</label>
-        <input
-          value={automationId}
-          onChange={(e) => setAutomationId(e.target.value)}
-          placeholder="e.g. a1b2c3…"
-          className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-indigo-400"
+        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Automation</label>
+        <LiveDataPicker<Automation>
+          endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/automations`}
+          renderItem={(a) => (
+            <div>
+              <div className="font-semibold text-slate-900">{a.name}</div>
+              <div className="text-[11px] text-slate-500">{a.id} · {a.status}</div>
+            </div>
+          )}
+          itemKey={(a) => a.id}
+          itemLabel={(a) => a.name}
+          onSelect={(a) => {
+            setAutomationId(a.id);
+            setAutomationLabel(a.name);
+          }}
+          placeholder="Search automations…"
+          selectedLabel={automationLabel}
         />
-        <p className="text-[11px] text-slate-400 mt-1">Paste the CRM automation / workflow ID.</p>
       </div>
       <div>
-        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Contact ID</label>
-        <input
-          value={contactId}
-          onChange={(e) => setContactId(e.target.value)}
-          placeholder="e.g. ct_marcia…"
-          className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-indigo-400"
+        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Contact</label>
+        <LiveDataPicker<Contact>
+          endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/contacts`}
+          renderItem={(c) => (
+            <div>
+              <div className="font-semibold text-slate-900">{c.firstName} {c.lastName}</div>
+              <div className="text-[11px] text-slate-500">{c.email ?? c.id}</div>
+            </div>
+          )}
+          itemKey={(c) => c.id}
+          itemLabel={(c) => `${c.firstName} ${c.lastName}`.trim()}
+          onSelect={(c) => {
+            setContactId(c.id);
+            setContactLabel(`${c.firstName} ${c.lastName}`.trim());
+          }}
+          placeholder="Search contacts…"
+          selectedLabel={contactLabel}
         />
       </div>
       <div>

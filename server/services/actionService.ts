@@ -21,12 +21,71 @@ import { policyEngineService } from './policyEngineService.js';
 // pass a stable synthetic key — e.g. actionType + a stable business key.
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonical JSON stringification with recursive key sorting. Unlike
+ * `JSON.stringify(value, Object.keys(value).sort())` — whose 2nd arg is an
+ * allowlist applied at every depth (thus silently dropping nested keys) —
+ * this walks the value and sorts object keys at every level before emitting.
+ * Arrays retain order (positional semantics). Used by both the idempotency-key
+ * hash and the validationDigest drift check so two logically-identical
+ * payloads always produce the same string regardless of key insertion order.
+ *
+ * Object properties with `undefined` values are omitted — matching
+ * `JSON.stringify`'s default behaviour. This closes the "present-vs-absent"
+ * trap where one caller writes `{ x: undefined }` and another omits `x`
+ * entirely; both now canonicalise the same way. Explicit `null` stays
+ * distinct from omitted — null is semantically meaningful ("explicitly
+ * unset"), whereas `undefined` vs absent is a JS surface accident.
+ */
+function canonicaliseJson(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicaliseJson).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicaliseJson(v)}`).join(',')}}`;
+  }
+  if (value === undefined) return 'null';
+  // primitives — strings, numbers, booleans — JSON.stringify handles encoding.
+  return JSON.stringify(value);
+}
+
 export function hashActionArgs(args: Record<string, unknown>): string {
-  // Canonicalise: sort keys alphabetically to make the hash order-independent.
-  const canonical = JSON.stringify(args, Object.keys(args).sort());
+  const canonical = canonicaliseJson(args);
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
+/**
+ * Full SHA-256 digest of a canonicalised payload. Stored in
+ * metadata_json.validationDigest at propose-time; re-computed by the execution
+ * engine's precondition gate (ClientPulse Session 2 §2.6 precondition 2) and
+ * compared byte-for-byte — a drift triggers `blocked: drift_detected`.
+ */
+export function computeValidationDigest(payload: Record<string, unknown>): string {
+  const canonical = canonicaliseJson(payload);
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * Deterministic idempotency key for an action.
+ *
+ * **Retry vs replay boundary (non-negotiable contract):**
+ * - **Retry** (same logical attempt) → same `runId` + `toolCallId` + `args` →
+ *   same key. The existing `actions` row is re-used; `actionService.markFailed`
+ *   bumps `retry_count`. No new row written.
+ * - **Replay** (explicitly new attempt after a terminal failure) → NEW `runId`
+ *   or NEW `toolCallId` → new key. A new `actions` row is inserted with
+ *   `replay_of_action_id` set to the original (the column ships in migration
+ *   0185, the replay runtime lands in a future session).
+ *
+ * Anyone touching this function later MUST preserve that distinction.
+ * Collapsing them (e.g. derive key from payload only, ignoring runId) would
+ * break both retry-idempotency (re-runs would bypass the dedup row) and
+ * replay auditability (a replay would silently clobber the original row).
+ */
 export function buildActionIdempotencyKey(params: {
   runId: string;
   toolCallId: string;
@@ -264,6 +323,48 @@ export const actionService = {
     }).where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
 
     await this.emitEvent(actionId, organisationId, 'execution_completed');
+  },
+
+  /**
+   * Mark action as blocked with a reason stored in metadata_json.blockedReason.
+   * Used by the execution engine's precondition gate (ClientPulse Session 2 §2.6).
+   * Blocked actions are terminal — no retry — but distinguishable from `failed`
+   * in audit because the precondition that failed is machine-readable.
+   */
+  async markBlocked(
+    actionId: string,
+    organisationId: string,
+    blockedReason:
+      | 'drift_detected'
+      | 'concurrent_execute'
+      | 'timeout_budget_exhausted'
+      | 'validation_digest_missing',
+    detail?: string,
+  ): Promise<void> {
+    const [action] = await db
+      .select({ metadataJson: actions.metadataJson })
+      .from(actions)
+      .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
+
+    const nextMetadata = {
+      ...((action?.metadataJson as Record<string, unknown> | null) ?? {}),
+      blockedReason,
+      blockedDetail: detail ?? null,
+      blockedAt: new Date().toISOString(),
+    };
+
+    await db
+      .update(actions)
+      .set({
+        status: 'blocked',
+        metadataJson: nextMetadata,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
+
+    await this.emitEvent(actionId, organisationId, 'execution_failed', undefined, {
+      blockedReason,
+    });
   },
 
   /**

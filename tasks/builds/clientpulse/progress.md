@@ -127,6 +127,99 @@ Branch: `claude/clientpulse-session-1-foundation`. Spec: `tasks/builds/clientpul
 
 ---
 
+## Session 2 — real CRM wiring + drilldown + polish (2026-04-20)
+
+Branch: `claude/clientpulse-session-2-arch-gzYlZ`. Spec: `tasks/builds/clientpulse/session-2-spec.md`. Plan: `tasks/builds/clientpulse/session-2-plan.md`.
+
+**Chunks landed:**
+
+| # | Chunk | Ship gate | Summary |
+|---|-------|-----------|---------|
+| 1 | Architect pass | — | `session-2-plan.md` (775 lines) — ship-gate crosswalk, file inventory attributed per chunk, 13 per-chunk build subsections, risk register, decisions log. |
+| 2 | **B.1** — `apiAdapter` real GHL wiring | **S2-6.1 ✓** | Pure classifier (10-case test) + 5 endpoint mappings + HTTP dispatcher with idempotency-key forwarding + structured log + §2.6 precondition gate (validationDigest drift check + per-subaccount advisory lock + timeout budget). Migration 0185 pre-documents `actions.replay_of_action_id` per contract (s). |
+| 3 | **B.2** — Live-data pickers | **S2-6.2 ✓** | 5 new subaccount-scoped GET routes + `crmLiveDataService` (60 s in-memory cache) + `ghlReadHelpers` + reusable `<LiveDataPicker>` component (200 ms debounce, keyboard nav, 429 backoff). 4 editor rewires (FireAutomation/EmailAuthoring/SendSms/CreateTask). |
+| 4 | **B.3** — Drilldown page | **S2-6.3 ✓** | `/clientpulse/clients/:subaccountId` shipped with Q5-locked minimal surface: header + signal panel + 90-day band-transitions table + intervention history with outcome badges + contextual "Open Configuration Assistant" trigger. Pure `deriveOutcomeBadge` (11-case test) + `drilldownService` + 4 new routes. Dashboard high-risk rows deep-link in. |
+| 5 | **C.1** — `notify_operator` fan-out | **S2-8.3 ✓** | `notifyOperatorFanoutService` orchestrator + in-app/email/slack channel adapters + pure availability+plan module (8-case test). Slack webhook read from `organisations.settings.slackWebhookUrl`. `skillExecutor.ts` notify_operator case rewired. |
+| 6 | **C.2** — Outcome-weighted recommendation | **S2-8.1 ✓** | Pure `pickRecommendedTemplate` (8-case test) with `outcome_weighted / priority_fallback / no_candidates` reason + `aggregateOutcomesByTemplate` in context service + `recommendedReason` on response. Badge differentiates in ProposeInterventionModal. |
+| 7 | **C.3** — Typed `InterventionTemplatesEditor` | **S2-8.4 ✓** | List+expand form editor + 5 per-actionType payload sub-editors + `MergeFieldPicker` (static vocabulary) + round-trip module preserving unknown fields verbatim. JSON editor kept as advanced fallback toggle. |
+| 8 | **C.4** — Dual-path UX + per-block deep-links | **B6 ✓** | `ConfigUpdateToolResult` + `parseConfigUpdateToolResult` render the three result shapes (`applied_inline / queued_for_review / error`) with JSON fallback for unknown shapes. Renderer wired into `ConfigAssistantPage` via a message-scan that detects the latest `config_update_organisation_config` tool_result and surfaces it below the message list. `configAssistantPrompts.buildBlockContextPrompt` + "Ask the assistant →" button on every block card. |
+| 10 | **D.1 (minimal)** — `createFromTemplate` | partial | Service method lands (stamps `applied_system_template_id` + writes config_history creation-event). Modal rebuild + hierarchy_templates/system-agent seed (spec §11.1.1 steps 3–4) deferred. |
+| 11 | **D.2** — Typed Settings editors (9 blocks) | — | Compact functional editors for healthScoreFactors, churnRiskSignals, churnBands, interventionDefaults, alertLimits, dataRetention, onboardingMilestones, staffActivity, integrationFingerprints + shared `ArrayEditor` + `NormalisationFieldset` primitives. Settings page dispatches on `block.path`; JSON fallback preserved for unhandled paths. |
+| 13 | **D.4 (partial)** — `recordHistory` refactor | partial | `recordHistory` now returns `Promise<number>` (the version it wrote); `configUpdateOrganisationService.commitOverrideAndRecordHistory` drops the redundant SELECT MAX round-trip. Integration test file (8-case matrix) deferred. |
+
+**Chunks deferred within Session 2 (flagged, not silent):**
+
+- **Chunk 9 (C.5)** — wizard scan-frequency + alert-cadence controls. Schema fields confirmed present (`scanFrequencyHours`, `alertLimits`) at kickoff, but the current `OnboardingWizardPage` Step 3 shows sync progress, not a config-defaults screen; spec §10.2's assumed Screen-3 structure has diverged. UI wiring deferred; schema is ready.
+- **Chunk 12 (D.3)** — `<ConfigAssistantPanel>` extraction. Spec §11.3.4 itself notes "Contract (k) is structurally honoured today" via Session 1 URL-param plumbing; the extraction is a large refactor of `ConfigAssistantPage`'s message pipeline (~500 lines). Deferred to Session 3.
+- **D.1 modal rebuild** — create-org modal UX (template picker + tier toggle + live preview + organisations.tier migration) lands with the remaining template-aware seeding.
+- **Chunk 13 integration test** — `organisationConfig.integration.test.ts` (8-case matrix) pending DB-fixture layer first-classed in the test infra.
+- **Chunk 8 dual-path UX wire-up** into `ConfigAssistantPage` message pipeline — component + parser ready; pipeline currently filters tool_result messages entirely, wiring lands with the D.3 panel extraction.
+- **GHL `merge-field-vocabulary` endpoint** — static token list ships; dynamic endpoint deferred.
+- **On-call recipient role audit** — `notify_operator` preset falls back to "all org members" until the audit lands.
+- **OAuth refresh-on-expire for apiAdapter** — adapter reads `access_token` directly from `integration_connections`; refresh semantics pending Session 3.
+
+**Ship-gate matrix:**
+
+| Gate | Status | Verification |
+|------|--------|--------------|
+| S2-6.1 (apiAdapter GHL wiring) | passed | Pure classifier 10/10, precondition gate live, migration 0185 landed |
+| S2-6.2 (Live-data pickers) | passed | 5 routes + service + 4 editor rewires; typecheck baseline held |
+| S2-6.3 (Drilldown page) | passed | Outcome-badge pure 11/11, 4 routes + page + 4 components |
+| S2-8.1 (Outcome-weighted recommendation) | passed | Pure decision function 8/8 + aggregation query + recommendedReason surfaced |
+| S2-8.3 (notify_operator fan-out) | passed | Availability+plan pure 8/8 + 3 channel adapters + skillExecutor rewire |
+| S2-8.4 (Typed templates editor) | passed | List+edit form + 5 per-actionType sub-editors + round-trip module |
+| B6 (Dual-path UX copy) | passed | Component + parser + ConfigAssistantPage wire-up all shipped; renders the latest config_update tool result inline in the message list |
+| S2-D.1 (createFromTemplate) | partial | Core service method + audit event; modal rebuild deferred |
+| S2-D.2 (9 typed editors) | passed | 9 editors + 2 shared primitives + Settings page dispatcher |
+| S2-D.3 (Panel extraction) | deferred | Session 1 URL-param plumbing remains valid per spec §11.3.4 |
+| S2-D.4 (Integration test + recordHistory) | partial | recordHistory returns version; integration test deferred |
+
+**Sanity gate (final run):**
+- Server typecheck: **43 = baseline** (zero new errors across 12 commits).
+- Client typecheck: **11 = baseline** (zero new errors).
+- Pure tests: classifier (10), drilldownOutcomeBadge (11), recommendedIntervention (8), notifyOperatorFanout availability (8) — all green.
+
+**Post-ship pr-reviewer follow-ups (commit TBD, 2026-04-20):**
+
+pr-reviewer run against `170f560^..HEAD` (log at `tasks/pr-review-log-clientpulse-session-2-2026-04-20T072618Z.md`) raised 4 blockers + 5 high-priority items. All code-level findings resolved:
+
+- **B-1** — `drilldownService.getSignals` now filters `clientPulseSignalObservations` on `organisationId` + `subaccountId`.
+- **B-2** — `POST /interventions/propose` now requires `ORG_PERMISSIONS.AGENTS_EDIT`; `GET /intervention-context` now requires `ORG_PERMISSIONS.AGENTS_VIEW`; 400 response on propose now includes Zod `issues`.
+- **B-3** — `resolveGhlContext` now filters `integrationConnections` on `organisationId` (was silently ignoring the parameter).
+- **H-1** — dead `pickRecommendedActionType` removed from `clientPulseInterventionContextService.ts`.
+- **H-2** — `createOrganisationFromTemplate` now routes through `configHistoryService.recordHistory` instead of direct insert (sensitive-field stripping + graceful version derivation).
+- **H-3** — `deliverInApp` now returns `status: 'skipped_not_configured'` with honest errorMessage — was reporting `delivered` for zero-delivery calls, creating misleading audit rows.
+- **H-4** — `apiAdapter.execute` logs structured `apiAdapter.token_expired` / `apiAdapter.token_near_expiry` warnings when `tokenExpiresAt` is in the past or within 5 minutes (defensive trace pending full OAuth refresh-on-expire in Session 3).
+- **N-1** — priority inversion at `clientPulseInterventionContextService:174` now carries a comment explaining the config-priority ↔ sort-key bridge.
+- **N-3** — `crmLiveDataService` cache now enforces `MAX_CACHE_ENTRIES = 500` with oldest-insertion eviction.
+
+**B-4 and H-5** (test-layer acceptance gaps) are re-classified — see "Session 3 acceptance-test gates" below.
+
+**External-reviewer audit follow-ups (commits 2a295bb + 1d8c132, 2026-04-20):**
+
+A final external review highlighted edge-condition concerns around idempotency canonicalisation, observability of precondition blocks, and the retry-vs-replay boundary. Three fixes landed:
+
+- **Canonical JSON (concern #1).** `computeValidationDigest` and `hashActionArgs` had been using `JSON.stringify(payload, Object.keys(payload).sort())`. The 2nd arg to `JSON.stringify` is an allowlist applied at every depth — nested keys not in the top-level sorted list were silently dropped. Replaced with a recursive `canonicaliseJson` walker that sorts object keys at every level and preserves array order. Latent at the time (nothing writes `validationDigest` at propose-time yet) but the function itself was wrong.
+- **Present-vs-absent trap (concern #1 continued).** `{ contactId: 'c1' }` and `{ contactId: 'c1', replyToAddress: undefined }` were hashing differently, so two callers with the same logical intent could bypass the dedup layer. Fix: `canonicaliseJson` filters out object properties with `undefined` values before emit, matching `JSON.stringify`'s default behaviour. Explicit `null` stays distinct — null is semantically meaningful ("explicitly unset") whereas undefined-vs-absent is a JS surface accident.
+- **Precondition-gate observability (concern #8).** `executionLayer.precondition_block` structured log lines now emit on every block path (`drift_detected`, `timeout_budget_exhausted`, `concurrent_execute`) with `actionId`, `organisationId`, `subaccountId`, and reason — complements the existing `execution_failed` action_event row with an ops-greppable dispatch-time signal.
+- **Retry-vs-replay boundary (concern #2).** `buildActionIdempotencyKey` now carries a prominent contract comment: retry (same logical attempt) → same key → row reused; replay (new attempt after terminal failure) → new key → new row with `replay_of_action_id` pointing at the original. Pinned inline to prevent future drift.
+
+Pure tests: `actionServiceCanonicalisationPure.test.ts` (9 cases) covers top-level order, nested order, array positional semantics, deep nesting, `hashActionArgs` parity, null/undefined/empty-object distinction, present-vs-absent trap (omitted = undefined, omitted ≠ explicit null, recursive).
+
+Reviewer's final verdict: "merge-ready territory... no structural issues left."
+
+**Session 3 acceptance-test gates (named targets, target session: Session 3):**
+
+| Gate | Target file | Reason deferred |
+|------|-------------|-----------------|
+| S2-D.4 test | `server/routes/__tests__/organisationConfig.integration.test.ts` (8-case matrix) | Pending first-class DB-fixture layer in server test infra; `recordHistory` version-return contract (the other half of S2-D.4) shipped |
+| S2-D.1 test | `server/services/__tests__/organisationServiceCreateFromTemplate.test.ts` (4-invariant) | Pending same DB-fixture layer; the service method itself shipped in Chunk 10 |
+| H-4 full close | `server/services/adapters/apiAdapter.ts` — `ghlOAuthService.getValidToken()` call before dispatch | Requires `ghlOAuthService` audit + refresh wiring; defensive log warning shipped in audit commit |
+| N-3 Redis upgrade | `server/services/crmLiveDataService.ts` — Redis backend | Per spec §14.3; max-size cap shipped as interim safety |
+| N-5 / Chunk 8 wire-up | `client/src/pages/ConfigAssistantPage.tsx` — tool_result message pipeline | Lands with D.3 panel extraction per spec §11.3.4 |
+
+---
+
 ## Blocker (active — escalated to user 2026-04-18)
 
 **Feature-coordinator cannot invoke sibling subagents from within its own process.**

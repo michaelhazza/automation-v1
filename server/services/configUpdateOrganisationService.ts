@@ -24,12 +24,11 @@
  *                      config_history.
  */
 
-import { eq, and, max } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations } from '../db/schema/organisations.js';
 import { systemHierarchyTemplates } from '../db/schema/systemHierarchyTemplates.js';
 import { actions } from '../db/schema/actions.js';
-import { configHistory } from '../db/schema/configHistory.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -375,7 +374,9 @@ async function commitOverrideAndRecordHistory(p: {
       reason: p.reason,
       sourceSession: p.sourceSession,
     });
-    await configHistoryService.recordHistory(
+    // recordHistory returns the version it wrote — eliminates the redundant
+    // SELECT MAX(version) round-trip (Session 2 §11.4.2).
+    createdVersion = await configHistoryService.recordHistory(
       {
         entityType: 'organisation_operational_config',
         entityId: p.organisationId,
@@ -388,17 +389,6 @@ async function commitOverrideAndRecordHistory(p: {
       },
       tx as unknown as Parameters<typeof configHistoryService.recordHistory>[1],
     );
-    const [versionRow] = await tx
-      .select({ v: max(configHistory.version) })
-      .from(configHistory)
-      .where(
-        and(
-          eq(configHistory.entityType, 'organisation_operational_config'),
-          eq(configHistory.entityId, p.organisationId),
-          eq(configHistory.organisationId, p.organisationId),
-        ),
-      );
-    createdVersion = Number(versionRow?.v ?? 0);
   });
   return createdVersion;
 }

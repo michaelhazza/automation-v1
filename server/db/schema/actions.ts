@@ -75,6 +75,11 @@ export const actions = pgTable(
       .default('single')
       .$type<'single' | 'multiple'>(),
 
+    // Replay reference — pre-documents the column the replay runtime will populate
+    // in a future session. ClientPulse Session 2 (migration 0185, spec contract (s)).
+    // Stays NULL for all Session 2 rows.
+    replayOfActionId: uuid('replay_of_action_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

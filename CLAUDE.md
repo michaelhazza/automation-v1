@@ -325,8 +325,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. Ship-gates B2 (outcome attribution), B3 (config_history audit), B5 (sensitive-path gating) all closed. Next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors).
+**In-flight spec:** `tasks/builds/clientpulse/session-2-spec.md` — ClientPulse Session 2 (real CRM wiring + drilldown + polish). Plan at `tasks/builds/clientpulse/session-2-plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
+**Active items:** Session 2 merge-ready on branch `claude/clientpulse-session-2-arch-gzYlZ` (2026-04-20) after pr-reviewer + external-reviewer audit loops. **8 ship gates passed in full** (S2-6.1, S2-6.2, S2-6.3, S2-8.1, S2-8.3, S2-8.4, S2-D.2, B6); S2-D.1 + S2-D.4 partial (core service paths shipped; modal rebuild + integration tests deferred). Chunks 9 (wizard cadence) and 12 (panel extraction) deferred to Session 3; see `progress.md` for the full deferred list. Typecheck baseline (43 server / 11 client) held across all commits. New durable primitives: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -360,6 +360,11 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a canonical data table | `server/db/schema/`, migration with `UNIQUE(organisation_id, provider_type, external_id)`, add to `rlsProtectedTables.ts`, add RLS policy, update `server/config/canonicalDictionary.ts` |
 | Add a connector adapter | `server/services/connectorPollingService.ts` (adapter wiring), `server/config/connectorPollingConfig.ts` (intervals) |
 | Modify principal/RLS context | `server/db/withPrincipalContext.ts`, `server/config/rlsProtectedTables.ts`, migration for new policies |
+| Modify a ClientPulse adapter dispatch path | `server/services/adapters/apiAdapter.ts` (dispatch) + `apiAdapterClassifierPure.ts` (retry classifier) + `ghlEndpoints.ts` (5 endpoint mappings) + `executionLayerService.ts` (precondition gate + per-subaccount advisory lock) |
+| Modify canonical-JSON or idempotency-key derivation | `server/services/actionService.ts` — `canonicaliseJson`, `hashActionArgs`, `buildActionIdempotencyKey`, `computeValidationDigest`. Pinned by `actionServiceCanonicalisationPure.test.ts` — nested-key sort + present-vs-absent collapse + null-distinction + array-positional semantics. Retry-vs-replay contract is non-negotiable (see `buildActionIdempotencyKey` header comment) |
+| Modify the ClientPulse drilldown | `server/routes/clientpulseDrilldown.ts` (4 routes) + `server/services/drilldownService.ts` + `server/services/drilldownOutcomeBadgePure.ts` (badge rules) + `client/src/pages/ClientPulseDrilldownPage.tsx` + `client/src/components/clientpulse/drilldown/` — always scope reads by `organisationId` + `subaccountId` |
+| Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
+| Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
 
 ---
 

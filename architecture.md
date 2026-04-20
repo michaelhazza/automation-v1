@@ -1594,9 +1594,9 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 
 ---
 
-## ClientPulse Intervention Pipeline (Phases 4 + 4.5)
+## ClientPulse Intervention Pipeline (Phases 4 + 4.5 + Session 2)
 
-The end-to-end loop that turns a churn assessment into an operator-approved CRM action and measures the outcome 24h later. Closes ship-gates **B2** (outcome attribution), **B3** (config_history audit), **B5** (sensitive-path gating).
+The end-to-end loop that turns a churn assessment into an operator-approved CRM action and measures the outcome 24h later. Closes ship-gates **B2** (outcome attribution), **B3** (config_history audit), **B5** (sensitive-path gating); Session 2 closes **S2-6.1** (real adapter dispatch), **S2-6.3** (drilldown), **S2-8.1** (outcome-weighted recommendation), **S2-8.3** (notify_operator fan-out).
 
 ### Architectural commitments (locked, do not violate)
 
@@ -1616,9 +1616,54 @@ Registered in `server/config/actionRegistry.ts`. All `defaultGateLevel='review'`
 | `crm.send_email` | api | Sends an email via the client's CRM. Resolves merge-fields server-side before provider call. |
 | `crm.send_sms` | api | Sends an SMS via the client's CRM. Resolves merge-fields + segment-counts. |
 | `crm.create_task` | api | Creates a task on the client's CRM (distinct from the internal board `create_task`). |
-| `clientpulse.operator_alert` | worker | Internal operator-facing notification. Channel fan-out (in-app, email, slack) deferred to the existing notifications worker. |
+| `notify_operator` | worker | Internal operator-facing notification. Session 2 ships real channel fan-out across in-app (review queue), email (`emailService.sendGenericEmail`), and Slack (org-configured webhook on `organisations.settings.slackWebhookUrl`) via `notifyOperatorFanoutService`. Per-channel delivery results land on `actions.metadata_json.fanoutResults` for audit. |
 
 Each handler ships a Pure module (`server/skills/<slug>ServicePure.ts`) covering payload validation, idempotency-key shape, and provider-call construction.
+
+### apiAdapter dispatch (Session 2 §2)
+
+Approved `crm.*` actions flow through `executionLayerService.executeAction()` → precondition gate → `apiAdapter.execute()` → GHL REST API. The Phase-1A stub is gone.
+
+**Precondition gate (spec §2.6, contract (u)):** four checks run before dispatch:
+
+1. `actions.status === 'approved'` — enforced by `actionService.lockForExecution()` which atomically transitions to `executing`.
+2. Validation-digest re-check — if `metadata_json.validationDigest` was captured at propose-time (via `computeValidationDigest(payload)` SHA-256), it's recomputed and compared; drift → `blocked` with `blockedReason: 'drift_detected'`.
+3. PG advisory lock per `(organisation_id, subaccount_id)` — serialises dispatch within a subaccount; contention → `blocked: 'concurrent_execute'`.
+4. Timeout budget — if `metadata_json.timeoutBudgetMs` is already depleted, → `blocked: 'timeout_budget_exhausted'`.
+
+Fail-cases write to `actions.status='blocked'` with the reason on `metadata_json.blockedReason` via `actionService.markBlocked()`. No retry. Every block emits a structured `executionLayer.precondition_block` log line keyed on `actionId` + `organisationId` + `subaccountId` + `blockedReason` so ops can distinguish engine-side blocks (never reached the adapter) from provider-side failures (via the separate `apiAdapter.dispatch` log).
+
+**Dispatcher:** `apiAdapter.execute()` resolves the GHL endpoint via `GHL_ENDPOINTS[actionType]` (`server/services/adapters/ghlEndpoints.ts`), substitutes `{contactId}` / `{workflowId}` placeholders, forwards the caller's `idempotencyKey` as the `Idempotency-Key` header, and dispatches. GHL's OAuth access token is read directly from `integration_connections.accessToken` (scoped by `organisationId` + `subaccountId` + `providerType='ghl'` + `connectionStatus='active'`); the subaccount's location is `configJson.locationId`. Token expiry is monitored via `tokenExpiresAt` — a past or near-expiry (<5 min) token logs `apiAdapter.token_expired` / `apiAdapter.token_near_expiry` before dispatch. Full OAuth refresh-on-expire deferred to the upcoming `ghlOAuthService.getValidToken()` wiring (Session 3).
+
+**Retry classifier:** `classifyAdapterOutcome()` (`apiAdapterClassifierPure.ts`) is a pure function mapping `{ status }` | `{ networkError, timedOut }` to `terminal_success | retryable | terminal_failure`. Rules: 2xx → success; 429 → retryable (rate_limit); 502/503 → retryable (gateway); network timeout / error → retryable; 401/403 → terminal (auth); 404 → terminal (not_found); 422 → terminal (validation); other 5xx → retryable (outer loop's `maxRetries` caps); other 4xx → terminal. 10 pure-test cases pin every branch.
+
+**Return shape:** adapter returns `{ success, resultStatus, error?, errorCode?, retryable? }` where `retryable` drives the engine's retry decision. `executionLayerService` passes `retryable` into `actionService.markFailed()` which bumps `retry_count` and emits `retry_scheduled` when under `max_retries`.
+
+**notify_operator short-circuit:** `notify_operator` has `internal: true` in `GHL_ENDPOINTS` — the adapter does not cross the wire; `skillExecutor.ts`'s `notify_operator` case invokes `fanoutOperatorAlert()` directly on approve.
+
+**Migration 0185 — `actions.replay_of_action_id`:** pre-documented per contract (s) to support a future replay runtime. Nullable, indexed, stays NULL through Session 2.
+
+### Outcome-weighted recommendation (Session 2 §5)
+
+`clientPulseInterventionContextService.buildInterventionContext()` now derives `recommendedActionType` + `recommendedReason` from aggregated `intervention_outcomes` rows:
+
+- `aggregateOutcomesByTemplate(orgId, currentBand)` groups by `(templateSlug, bandBefore)` and computes `trials`, `improvedCount` (`bandChanged AND NOT executionFailed`), `avgScoreDelta` (`deltaHealthScore`).
+- Pure `pickRecommendedTemplate()` (`recommendedInterventionPure.ts`) returns `{ pickedSlug, reason: 'outcome_weighted' | 'priority_fallback' | 'no_candidates' }`. Rules: if ≥ N trials, score = `(improvedCount / trials) * 100 + avgScoreDelta`, sorted by score desc, trials desc, priority, slug; otherwise highest-priority wins.
+- Threshold N is tunable via `operationalConfig.interventionDefaults.minTrialsForOutcomeWeight` (default 5, non-sensitive leaf).
+
+`recommendedReason` surfaces to the client so `ProposeInterventionModal` can badge "Recommended · outcome-weighted" vs "Recommended · priority fallback".
+
+### Per-client drilldown (Session 2 §4)
+
+Route: `GET /clientpulse/clients/:subaccountId`. Minimal surface per Q5 scope lock — header (band + health score + 7d delta), signal panel (top drivers from latest churn assessment), band-transitions table (90d window derived from consecutive `clientPulseChurnAssessments` rows), intervention history table with outcome badges, contextual "Open Configuration Assistant" trigger seeded with subaccount-aware prompt, "Propose intervention" launcher.
+
+Backed by four GETs on `server/routes/clientpulseDrilldown.ts` (all `requireOrgPermission(AGENTS_VIEW)`): `/drilldown-summary`, `/signals`, `/band-transitions`, `/interventions`. Orchestration in `drilldownService.ts`; outcome-badge derivation in `drilldownOutcomeBadgePure.ts` (11 test cases).
+
+### Live-data pickers (Session 2 §3)
+
+Five subaccount-scoped GHL read endpoints back the intervention editors, replacing Session 1's free-text ID inputs: `/crm/automations`, `/crm/contacts`, `/crm/users`, `/crm/from-addresses`, `/crm/from-numbers`. All require `AGENTS_VIEW` + `resolveSubaccount`. Responses canonicalised in `crmLiveDataService.ts` (60 s in-memory cache, Redis upgrade deferred). On GHL 429 the service returns `{ rateLimited: true, retryAfterSeconds }` which the `<LiveDataPicker>` surfaces as a "retry in N seconds" banner + disabled input.
+
+`<LiveDataPicker>` (`client/src/components/clientpulse/pickers/`) is a reusable debounced-search dropdown (200 ms debounce, keyboard nav ↑/↓/Enter/Esc, preloadOnFocus variant for from-addresses / from-numbers).
 
 ### Merge-field resolver (V1 grammar)
 
@@ -1654,6 +1699,27 @@ Pure decision logic in `measureInterventionOutcomeJobPure.ts` — `decideOutcome
 | DB | `actions_idempotency_idx` UNIQUE(subaccount_id, idempotency_key) + `actions_org_idempotency_idx` partial unique for org-scoped + `actions_intervention_cooldown_day_idx` partial unique on (org, sub, templateSlug, day) | Write-side race protection — concurrent workers can't both succeed |
 
 Sensitive-path config writes additionally catch Postgres 23505 from `actionService.proposeAction` and re-look-up the existing row (because `actionService` itself doesn't yet wrap its insert in ON CONFLICT for the org-scope path).
+
+### Canonical JSON (idempotency + drift)
+
+Both the action-idempotency hash (`hashActionArgs`) and the Session-2 validation digest (`computeValidationDigest`) feed a single `canonicaliseJson` walker in `actionService.ts` so two logically-identical payloads always produce the same bytes regardless of JS surface accidents.
+
+Rules:
+
+1. **Recursive key sort.** Object keys are sorted alphabetically at every depth, not just the top level. This closed a latent bug where `JSON.stringify(x, Object.keys(x).sort())` — whose 2nd arg is an allowlist applied at every depth — was silently dropping nested keys.
+2. **Array order preserved.** Arrays are positional; order matters (e.g. `channels: ['in_app', 'email']` vs `['email', 'in_app']` are distinct by design).
+3. **`undefined` omitted; `null` distinct.** Object properties with `undefined` are filtered out before emit, matching `JSON.stringify`'s default behaviour. This closes the present-vs-absent trap where `{ x: 1 }` and `{ x: 1, y: undefined }` would otherwise hash differently for the same logical intent. Explicit `null` stays distinct because null is semantically meaningful ("explicitly unset"), whereas undefined-vs-absent is a JS surface accident.
+
+Pinned by `actionServiceCanonicalisationPure.test.ts` (9 cases). Any future changes to the canonicaliser must keep the present-vs-absent collapse + null-distinction + array-positional semantics.
+
+### Retry vs replay boundary
+
+Pinned contract (documented inline on `buildActionIdempotencyKey`):
+
+- **Retry** (same logical attempt) → same `runId` + `toolCallId` + `args` → **same key**. Existing `actions` row reused; `markFailed` bumps `retry_count`; no new row inserted.
+- **Replay** (new attempt after a terminal failure) → new `runId` or new `toolCallId` → **new key**. New `actions` row inserted with `replay_of_action_id` set to the original row. Migration 0185 (ClientPulse Session 2) added the column; the runtime that writes it lands in a future session.
+
+Anyone touching the key derivation later must preserve this distinction. Collapsing them (e.g. deriving from payload only, ignoring `runId`) would break both retry-idempotency (re-runs would bypass the dedup row) and replay auditability (a replay would silently clobber the original row).
 
 ### Lifecycle event
 

@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../lib/api';
 import type { InterventionContext } from './ProposeInterventionModal';
+import LiveDataPicker from './pickers/LiveDataPicker';
+
+type Contact = { id: string; firstName: string; lastName: string; email: string | null };
+type FromAddress = { address: string; displayName: string | null; verified: boolean };
 
 interface Props {
   subaccountId: string;
@@ -23,7 +27,9 @@ const MERGE_PALETTE = [
 
 export default function EmailAuthoringEditor({ subaccountId, onCancel, onSubmit }: Props) {
   const [from, setFrom] = useState('');
+  const [fromLabel, setFromLabel] = useState('');
   const [toContactId, setToContactId] = useState('');
+  const [contactLabel, setContactLabel] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [rationale, setRationale] = useState('');
@@ -54,11 +60,41 @@ export default function EmailAuthoringEditor({ subaccountId, onCancel, onSubmit 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">From</label>
-          <input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="sender@agency.com" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-indigo-400" />
+          <LiveDataPicker<FromAddress>
+            endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/from-addresses`}
+            preloadOnFocus
+            renderItem={(f) => (
+              <div>
+                <div className="font-semibold text-slate-900">{f.address}</div>
+                <div className="text-[11px] text-slate-500">{f.displayName ?? (f.verified ? 'verified' : 'unverified')}</div>
+              </div>
+            )}
+            itemKey={(f) => f.address}
+            itemLabel={(f) => f.address}
+            onSelect={(f) => { setFrom(f.address); setFromLabel(f.address); }}
+            placeholder="Pick a from-address…"
+            selectedLabel={fromLabel}
+          />
         </div>
         <div>
-          <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">To (contact ID)</label>
-          <input value={toContactId} onChange={(e) => setToContactId(e.target.value)} placeholder="ct_…" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-indigo-400" />
+          <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">To (contact)</label>
+          <LiveDataPicker<Contact>
+            endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/contacts`}
+            renderItem={(c) => (
+              <div>
+                <div className="font-semibold text-slate-900">{c.firstName} {c.lastName}</div>
+                <div className="text-[11px] text-slate-500">{c.email ?? c.id}</div>
+              </div>
+            )}
+            itemKey={(c) => c.id}
+            itemLabel={(c) => `${c.firstName} ${c.lastName}`.trim()}
+            onSelect={(c) => {
+              setToContactId(c.id);
+              setContactLabel(`${c.firstName} ${c.lastName}`.trim());
+            }}
+            placeholder="Search contacts…"
+            selectedLabel={contactLabel}
+          />
         </div>
       </div>
       <div>

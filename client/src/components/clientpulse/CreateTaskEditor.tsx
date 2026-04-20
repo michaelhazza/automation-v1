@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { InterventionContext } from './ProposeInterventionModal';
+import LiveDataPicker from './pickers/LiveDataPicker';
 
 interface Props {
+  subaccountId: string;
   context: InterventionContext;
   onCancel: () => void;
   onSubmit: (
@@ -18,6 +20,9 @@ interface Props {
   ) => void;
 }
 
+type User = { id: string; firstName: string; lastName: string; email: string; role: string | null };
+type Contact = { id: string; firstName: string; lastName: string; email: string | null };
+
 function tomorrowISO(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -25,9 +30,11 @@ function tomorrowISO(): string {
   return d.toISOString().slice(0, 16);
 }
 
-export default function CreateTaskEditor({ onCancel, onSubmit }: Props) {
+export default function CreateTaskEditor({ subaccountId, onCancel, onSubmit }: Props) {
   const [assigneeUserId, setAssigneeUserId] = useState('');
+  const [assigneeLabel, setAssigneeLabel] = useState('');
   const [relatedContactId, setRelatedContactId] = useState('');
+  const [contactLabel, setContactLabel] = useState('');
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueAtLocal, setDueAtLocal] = useState<string>(tomorrowISO());
@@ -39,12 +46,44 @@ export default function CreateTaskEditor({ onCancel, onSubmit }: Props) {
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Assignee user ID</label>
-        <input value={assigneeUserId} onChange={(e) => setAssigneeUserId(e.target.value)} placeholder="u_…" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px]" />
+        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Assignee</label>
+        <LiveDataPicker<User>
+          endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/users`}
+          renderItem={(u) => (
+            <div>
+              <div className="font-semibold text-slate-900">{u.firstName} {u.lastName}</div>
+              <div className="text-[11px] text-slate-500">{u.email}{u.role ? ` · ${u.role}` : ''}</div>
+            </div>
+          )}
+          itemKey={(u) => u.id}
+          itemLabel={(u) => `${u.firstName} ${u.lastName}`.trim()}
+          onSelect={(u) => {
+            setAssigneeUserId(u.id);
+            setAssigneeLabel(`${u.firstName} ${u.lastName}`.trim());
+          }}
+          placeholder="Search users…"
+          selectedLabel={assigneeLabel}
+        />
       </div>
       <div>
         <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Related contact (optional)</label>
-        <input value={relatedContactId} onChange={(e) => setRelatedContactId(e.target.value)} placeholder="ct_…" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px]" />
+        <LiveDataPicker<Contact>
+          endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/contacts`}
+          renderItem={(c) => (
+            <div>
+              <div className="font-semibold text-slate-900">{c.firstName} {c.lastName}</div>
+              <div className="text-[11px] text-slate-500">{c.email ?? c.id}</div>
+            </div>
+          )}
+          itemKey={(c) => c.id}
+          itemLabel={(c) => `${c.firstName} ${c.lastName}`.trim()}
+          onSelect={(c) => {
+            setRelatedContactId(c.id);
+            setContactLabel(`${c.firstName} ${c.lastName}`.trim());
+          }}
+          placeholder="Search contacts…"
+          selectedLabel={contactLabel}
+        />
       </div>
       <div>
         <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Title</label>

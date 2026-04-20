@@ -108,6 +108,15 @@ write_capabilities:
   - slug: organisation.config.reset
     aliases: [pulse_config_reset, config_factory_reset]
     description: Revert ClientPulse operational_config (or a specific path) to hierarchy template defaults
+  - slug: fire_automation
+    aliases: [trigger_workflow, run_automation, start_workflow]
+    description: Fire a CRM workflow / automation on a contact (ClientPulse Session 2 intervention primitive)
+  - slug: send_sms
+    aliases: [text_message, sms_send, compose_sms]
+    description: Send an SMS message via a CRM's messaging surface (ClientPulse Session 2 intervention primitive)
+  - slug: create_task
+    aliases: [task_create, add_task, assign_task]
+    description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
 
 skills:
   - slug: classify_email
@@ -128,6 +137,18 @@ skills:
   - slug: config_update_organisation_config
     aliases: [pulse_config_update_skill, clientpulse_config_skill]
     description: Configuration Agent skill — apply a single dot-path patch to a hierarchy template's operational_config JSONB with sensitive-path gating (Phase 4.5)
+  - slug: crm.fire_automation
+    aliases: [fire_automation_skill, trigger_workflow_skill]
+    description: ClientPulse intervention primitive — fire a CRM workflow on a contact (Session 2; review-gated; idempotent)
+  - slug: crm.send_email
+    aliases: [crm_send_email_skill, client_email_skill]
+    description: ClientPulse intervention primitive — send an email via the client's CRM with merge-field resolution (Session 2; review-gated; idempotent)
+  - slug: crm.send_sms
+    aliases: [crm_send_sms_skill, client_sms_skill]
+    description: ClientPulse intervention primitive — send an SMS via the client's CRM with merge-field resolution + segment counting (Session 2; review-gated; idempotent)
+  - slug: crm.create_task
+    aliases: [crm_create_task_skill, client_task_skill]
+    description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
 
 primitives:
   - slug: scheduled_run
@@ -424,7 +445,15 @@ read_capabilities:
 write_capabilities:
   - create_contact
   - update_contact
-skills_enabled: []
+  - fire_automation
+  - send_email
+  - send_sms
+  - create_task
+skills_enabled:
+  - crm.fire_automation
+  - crm.send_email
+  - crm.send_sms
+  - crm.create_task
 primitives_required:
   - oauth_connection
   - webhook_receiver
