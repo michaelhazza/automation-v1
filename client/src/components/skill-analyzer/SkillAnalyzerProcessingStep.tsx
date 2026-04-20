@@ -197,7 +197,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
                       <span className="text-xs shrink-0">
                         {status === 'done'        ? (result?.classification ?? '') :
                          status === 'failed'      ? failureReasonLabel(result?.classificationFailureReason) :
-                         status === 'stale'       ? 'stalled >2m' :
+                         status === 'stale'       ? 'stalled' :
                          status === 'classifying' ? 'classifying…' : 'queued'}
                       </span>
                     </div>
@@ -223,8 +223,8 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
               <span className="shrink-0">⚠</span>
               <span>
                 No progress for over 2 min — one or more classification calls may be stalled.
-                The job will auto-recover via timeout; each call has a 3 min budget with one retry,
-                then falls back to a rule-based merge.
+                The job will recover automatically; any calls that don&apos;t complete fall back
+                to a rule-based merge for reviewer triage.
               </span>
             </div>
           )}

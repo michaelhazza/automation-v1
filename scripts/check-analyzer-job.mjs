@@ -25,30 +25,40 @@ const res = await client.query(
 );
 console.log('RESULTS:', JSON.stringify(res.rows[0], null, 2));
 
-// Check llm_logs for this job (Anthropic adapter writes here)
+// Analyzer LLM calls land in llm_requests once the spec's P3 migration
+// (tasks/llm-observability-ledger-generalisation-spec.md) ships the
+// analyzer onto llmRouter.routeCall(). Before P3, this query returns zero
+// rows because the analyzer bypasses the router — that's expected and is
+// exactly the gap the spec closes. After P3, expect one row per classify
+// / agent-match / cluster-recommend call, tagged by feature_tag.
 try {
   const llm = await client.query(
-    `SELECT COUNT(*)::int AS calls,
-            SUM((response->>'input_tokens')::int) AS input_tokens,
-            SUM((response->>'output_tokens')::int) AS output_tokens,
-            MIN(created_at) AS first_call,
-            MAX(created_at) AS last_call
-     FROM llm_logs WHERE correlation_id=$1 OR run_id=$1`,
+    `SELECT COUNT(*)::int          AS calls,
+            SUM(tokens_in)::int    AS tokens_in,
+            SUM(tokens_out)::int   AS tokens_out,
+            MIN(created_at)        AS first_call,
+            MAX(created_at)        AS last_call
+     FROM llm_requests
+     WHERE source_id = $1 AND source_type = 'analyzer'`,
     [jobId]
   );
-  console.log('LLM_LOGS:', JSON.stringify(llm.rows[0], null, 2));
+  console.log('LLM_REQUESTS:', JSON.stringify(llm.rows[0], null, 2));
 
   const recent = await client.query(
-    `SELECT created_at, model, status, latency_ms, error_message
-     FROM llm_logs
-     WHERE correlation_id=$1 OR run_id=$1
+    `SELECT created_at, feature_tag, model, status,
+            provider_latency_ms, attempt_number, error_message
+     FROM llm_requests
+     WHERE source_id = $1 AND source_type = 'analyzer'
      ORDER BY created_at DESC LIMIT 10`,
     [jobId]
   );
   console.log('RECENT LLM CALLS:');
   for (const r of recent.rows) console.log(' ', JSON.stringify(r));
 } catch (e) {
-  console.log('llm_logs query failed:', e.message);
+  // llm_requests always exists; if the query fails it's a column-drift issue
+  // (e.g. source_id not yet migrated per spec §6.1). Surface the error rather
+  // than swallowing it so the caller knows the schema is behind the spec.
+  console.log('llm_requests query failed:', e.message);
 }
 
 // Check pg-boss
