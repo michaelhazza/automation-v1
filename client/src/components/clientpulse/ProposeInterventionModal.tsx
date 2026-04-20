@@ -30,6 +30,7 @@ export interface InterventionContext {
   }>;
   cooldownState: { blocked: boolean; reason?: string };
   recommendedActionType: InterventionActionType | null;
+  recommendedReason: 'outcome_weighted' | 'priority_fallback' | 'no_candidates' | null;
 }
 
 interface Props {
@@ -107,7 +108,24 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[13.5px] font-semibold text-slate-900">{opt.label}</span>
-                  {recommended && <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold uppercase">Recommended</span>}
+                  {recommended && (
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold uppercase"
+                      title={
+                        context?.recommendedReason === 'outcome_weighted'
+                          ? 'Picked because it produced the best outcomes on similar at-risk clients.'
+                          : context?.recommendedReason === 'priority_fallback'
+                          ? 'Not enough outcome data yet — falling back to configured priority.'
+                          : 'Recommended'
+                      }
+                    >
+                      {context?.recommendedReason === 'outcome_weighted'
+                        ? 'Recommended · outcome-weighted'
+                        : context?.recommendedReason === 'priority_fallback'
+                        ? 'Recommended · priority fallback'
+                        : 'Recommended'}
+                    </span>
+                  )}
                 </div>
                 <p className="text-[12px] text-slate-500 mt-0.5">{opt.description}</p>
               </button>
