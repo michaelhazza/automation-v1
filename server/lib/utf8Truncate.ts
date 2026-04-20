@@ -9,12 +9,16 @@
 // produces the U+FFFD replacement character at the cut point if we sliced
 // through a multi-byte sequence.
 //
-// Strategy: encode once, check the last byte. If it's the start of a
-// multi-byte sequence that wasn't completed, back up to the last valid
-// boundary. UTF-8 byte classification:
-//   0xxxxxxx  — ASCII / final byte of a sequence (always a valid boundary)
-//   10xxxxxx  — continuation byte (never a valid boundary as byte-0)
-//   11xxxxxx  — start of a 2/3/4-byte sequence
+// Strategy: encode once, then find the largest `end <= maxBytes` such that
+// `bytes[end]` is NOT a continuation byte (0b10xxxxxx). That boundary is
+// always safe because the byte at `end-1` either completed a sequence or
+// was pure ASCII. The loop runs at most 3 iterations (max UTF-8 sequence
+// length is 4 bytes, so at most 3 continuation bytes precede any start).
+//
+// UTF-8 byte classification:
+//   0xxxxxxx  — ASCII / final byte of a sequence (valid boundary AFTER it)
+//   10xxxxxx  — continuation byte (NOT a valid byte to land on)
+//   11xxxxxx  — start of a 2/3/4-byte sequence (valid boundary BEFORE it)
 // ---------------------------------------------------------------------------
 
 const encoder = new TextEncoder();
@@ -25,27 +29,13 @@ export function truncateUtf8Safe(input: string, maxBytes: number): string {
   const bytes = encoder.encode(input);
   if (bytes.length <= maxBytes) return input;
 
-  // Back up while the byte at `end` is a continuation byte (10xxxxxx),
-  // or while the byte at `end - 1` started a multi-byte sequence that
-  // would not fit. The loop runs at most 3 iterations (max UTF-8
-  // sequence length is 4 bytes).
+  // Start at the hard budget, then back up until we land on a position
+  // that is NOT a continuation byte. That position is always a valid
+  // boundary — either ASCII / end-of-sequence (preceded by start byte
+  // and its continuations, all complete) or the start of a new sequence
+  // (in which case slicing before it leaves the previous sequence intact).
   let end = maxBytes;
-  while (end > 0) {
-    const b = bytes[end];
-    // If byte[end] is a continuation byte, we're mid-sequence — back up.
-    if ((b & 0xc0) === 0x80) {
-      end--;
-      continue;
-    }
-    // byte[end] is now either ASCII or the start of a new sequence.
-    // Check that byte[end-1] isn't the start of a multi-byte sequence that
-    // extends past our cut point.
-    const prev = bytes[end - 1];
-    if ((prev & 0x80) === 0) break;                // prev is ASCII — safe
-    if ((prev & 0xe0) === 0xc0) { end -= 1; break; }  // prev started a 2-byte seq
-    if ((prev & 0xf0) === 0xe0) { end -= 1; break; }  // prev started a 3-byte seq
-    if ((prev & 0xf8) === 0xf0) { end -= 1; break; }  // prev started a 4-byte seq
-    // prev is a continuation byte — keep backing up
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) {
     end--;
   }
 
