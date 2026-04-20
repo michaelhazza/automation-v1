@@ -149,7 +149,7 @@ export const configHistoryService = {
    * Call this BEFORE applying mutations (pre-mutation snapshot) for updates/deletes,
    * or AFTER insert for creates (initial state snapshot).
    */
-  async recordHistory(params: RecordHistoryParams, tx?: OrgScopedTx): Promise<void> {
+  async recordHistory(params: RecordHistoryParams, tx?: OrgScopedTx): Promise<number> {
     const snapshot = stripSensitiveFields(params.snapshot);
 
     if (tx) {
@@ -200,7 +200,7 @@ export const configHistoryService = {
         sessionId: params.sessionId ?? null,
         changeSummary,
       });
-      return;
+      return nextVersion;
     }
 
     // Non-transactional path: existing retry loop (unchanged)
@@ -255,13 +255,14 @@ export const configHistoryService = {
           sessionId: params.sessionId ?? null,
           changeSummary,
         });
-        return; // Success — exit retry loop
+        return nextVersion; // Success — exit retry loop
       } catch (err) {
         const isUniqueViolation = (err as { code?: string }).code === '23505';
         if (!isUniqueViolation || attempt === MAX_RETRIES - 1) throw err;
         // Unique constraint violation on (entity_type, entity_id, version) — retry with new version
       }
     }
+    throw new Error('recordHistory: exhausted retries without inserting');
   },
 
   /**
