@@ -26,6 +26,8 @@ import {
 } from '../components/clientpulse-settings/shared/differsFromTemplate';
 import InterventionTemplatesEditor from '../components/clientpulse-settings/editors/InterventionTemplatesEditor';
 import type { InterventionTemplate } from '../components/clientpulse-settings/editors/interventionTemplateRoundTripPure';
+import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
+import { buildBlockContextPrompt } from '../lib/configAssistantPrompts';
 
 // Per spec §6.2 — the 10 blocks surfaced on the Settings page.
 const BLOCKS: Array<{ path: string; title: string; description: string }> = [
@@ -129,6 +131,11 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
   const [editing, setEditing] = useState(false);
   const [jsonText, setJsonText] = useState(() => JSON.stringify(effectiveValue ?? null, null, 2));
   const [saving, setSaving] = useState(false);
+  const { openConfigAssistant } = useConfigAssistantPopup();
+
+  const askAssistant = () => {
+    openConfigAssistant(buildBlockContextPrompt({ block, effectiveValue }));
+  };
 
   const reset = async () => {
     if (!window.confirm(`Reset ${block.title} to the adopted template default?`)) return;
@@ -212,6 +219,14 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
             className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300"
           >
             {editing ? 'Cancel' : 'Edit'}
+          </button>
+          <button
+            type="button"
+            onClick={askAssistant}
+            title="Open the Configuration Assistant seeded with this block's context"
+            className="px-2 py-0.5 rounded text-[11px] font-medium bg-violet-50 border border-indigo-200 text-indigo-700 hover:bg-violet-100"
+          >
+            Ask the assistant →
           </button>
         </div>
       </div>
