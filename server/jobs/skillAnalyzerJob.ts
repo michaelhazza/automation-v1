@@ -660,10 +660,12 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
     });
   } else {
-    // Concurrency 3: reduces Anthropic API rate-limit pressure. Each call
-    // may generate a large proposedMerge response; 5 concurrent requests
-    // was causing sustained rate limiting and cascading timeouts.
-    const limit = await getPLimit(3);
+    // Concurrency 2: even 3 concurrent PARTIAL_OVERLAP/IMPROVEMENT calls
+    // can exhaust the rolling TPM budget on the current Anthropic tier,
+    // causing all in-flight calls to stall together on 429 backoff. 2 keeps
+    // meaningful parallelism while halving peak token draw; drop to 1 if
+    // stalls still occur on marketing-heavy imports.
+    const limit = await getPLimit(2);
     let classifiedCount = 0;
 
     await Promise.all(
