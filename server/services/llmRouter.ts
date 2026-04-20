@@ -12,6 +12,7 @@ import { budgetService, BudgetExceededError, RateLimitError } from './budgetServ
 import { resolveLLM } from './llmResolver.js';
 import type { ProviderMessage, ProviderTool, ProviderResponse } from './providers/types.js';
 import { env } from '../lib/env.js';
+import { isParseFailureError, ParseFailureError } from '../lib/parseFailureError.js';
 import {
   PROVIDER_CALL_TIMEOUT_MS,
   PROVIDER_MAX_RETRIES,
@@ -31,6 +32,13 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
+// Rev §6 — caller policy for system-scoped consumers. Defaults to
+// 'respect_routing' so existing callers keep their auto-routed behaviour.
+// 'bypass_routing' is the escape hatch for callers that pin a specific
+// model (e.g. skill analyzer Sonnet classifier). See spec §5.4 + §7.2.
+const SYSTEM_CALLER_POLICIES = ['respect_routing', 'bypass_routing'] as const;
+type SystemCallerPolicy = typeof SYSTEM_CALLER_POLICIES[number];
+
 const LLMCallContextSchema = z.object({
   organisationId:     z.string().uuid(),
   subaccountId:       z.string().uuid().optional(),
@@ -41,7 +49,9 @@ const LLMCallContextSchema = z.object({
   sourceType:         z.enum(SOURCE_TYPES),
   agentName:          z.string().optional(),
   taskType:           z.enum(TASK_TYPES),
-  executionPhase:     z.enum(EXECUTION_PHASES),
+  // Rev §6 — nullable for system/analyzer. Required for agent_run /
+  // process_execution / iee (enforced by DB CHECK + runtime guard below).
+  executionPhase:     z.enum(EXECUTION_PHASES).optional(),
   provider:           z.string().min(1).optional(),
   model:              z.string().min(1).optional(),
   routingMode:        z.enum(ROUTING_MODES).default('ceiling'),
@@ -55,6 +65,20 @@ const LLMCallContextSchema = z.object({
   // `ieeRunId` MUST be set when sourceType='iee' or callSite='worker'.
   // Enforced by the runtime guard below AND a database CHECK constraint.
   ieeRunId:           z.string().uuid().optional(),
+  // ── Rev §6 polymorphic attribution (spec §5.1 / §6.1) ────────────────────
+  // `sourceId` is the polymorphic FK for non-agent consumers. Required when
+  // sourceType='analyzer'; optional when sourceType='system'; must be NULL
+  // otherwise (CHECK constraint + runtime guard below).
+  sourceId:           z.string().uuid().optional(),
+  // `featureTag` identifies the feature end-to-end for dashboards. Kebab-case
+  // string, e.g. 'skill-analyzer-classify'. Defaults to 'unknown' with a
+  // router-side warning to nudge callers toward explicit tagging.
+  featureTag:         z.string().min(1).optional(),
+  // System-caller routing opt-out. Only meaningful when sourceType='system'
+  // or 'analyzer'; ignored for billable callers (they always route normally).
+  // Defaulted to 'respect_routing' at the usage site below so existing
+  // callers don't have to touch every LLMCallContext literal.
+  systemCallerPolicy: z.enum(SYSTEM_CALLER_POLICIES).optional(),
 });
 
 export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
@@ -67,6 +91,22 @@ export interface RouterCallParams {
   temperature?: number;
   estimatedContextTokens?: number;
   context:      LLMCallContext;
+  /**
+   * Caller's AbortSignal — threaded through the adapter's fetch so mid-flight
+   * cancellation actually kills the HTTP request. When the signal fires, the
+   * adapter throws a CLIENT_DISCONNECTED error and the router writes a row
+   * with status='aborted_by_caller' and abortReason from AbortSignal.reason
+   * (convention: 'caller_timeout' or 'caller_cancel'). See spec §8.1.
+   */
+  abortSignal?: AbortSignal;
+  /**
+   * Post-processing hook — invoked after the adapter returns a 200 OK
+   * response, before the ledger row is written. Throw `ParseFailureError`
+   * to signal the response failed the caller's schema check; the router
+   * records status='parse_failure' + parseFailureRawExcerpt and re-throws
+   * for caller control flow. See spec §8.3 / §19.7.
+   */
+  postProcess?: (content: string) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +125,16 @@ function generateIdempotencyKey(
     .digest('hex')
     .slice(0, 32);
 
+  // Rev §6 — extend the attribution position to include ieeRunId and the
+  // polymorphic sourceId so analyzer/system callers dedupe meaningfully
+  // within the same job. Without sourceId in the key, every analyzer call
+  // for the same org would collide on 'system'. Similarly, the agent slot
+  // falls back to featureTag so non-agent callers dedupe by feature rather
+  // than colliding on 'no-agent'. See spec §6.5.
   return [
     ctx.organisationId,
-    ctx.runId ?? ctx.executionId ?? 'system',
-    ctx.agentName ?? 'no-agent',
+    ctx.runId ?? ctx.executionId ?? ctx.ieeRunId ?? ctx.sourceId ?? 'system',
+    ctx.agentName ?? ctx.featureTag ?? 'no-agent',
     ctx.taskType,
     provider,
     model,
@@ -174,6 +220,10 @@ function isNonRetryableError(err: unknown): boolean {
   const e = err as { statusCode?: number; code?: string; message?: string };
   if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403) return true;
   if (e.code === 'PROVIDER_NOT_CONFIGURED') return true;
+  // Rev §6 — caller-initiated aborts must not retry. The caller decided to
+  // stop; re-hitting the provider on their behalf wastes tokens and can
+  // produce confusing duplicate calls in the Anthropic console.
+  if (e.code === 'CLIENT_DISCONNECTED') return true;
   const code = (e.code ?? '').toLowerCase();
   return code.includes('auth') || code.includes('invalid') || code.includes('bad_request');
 }
@@ -200,6 +250,50 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     throw new RouterContractError('llmRouter: ieeRunId is required when callSite="worker"');
   }
 
+  // ── 1a'. Rev §6 — polymorphic attribution + feature-tag guards ───────────
+  //
+  // Mirrors the DB CHECK constraint llm_requests_attribution_ck from
+  // migration 0185. Fails closed at the router so callers get an immediate
+  // contract error rather than a cryptic 23514 from Postgres.
+  if (ctx.sourceType === 'analyzer') {
+    if (!ctx.sourceId) {
+      throw new RouterContractError('llmRouter: sourceId is required when sourceType="analyzer"');
+    }
+    if (ctx.runId || ctx.executionId || ctx.ieeRunId) {
+      throw new RouterContractError(
+        'llmRouter: analyzer rows must not set runId/executionId/ieeRunId — use sourceId instead',
+      );
+    }
+  }
+  if (ctx.sourceType === 'agent_run' && !ctx.runId) {
+    throw new RouterContractError('llmRouter: runId is required when sourceType="agent_run"');
+  }
+  if (ctx.sourceType === 'process_execution' && !ctx.executionId) {
+    throw new RouterContractError('llmRouter: executionId is required when sourceType="process_execution"');
+  }
+  // executionPhase must be set for billable (agent-execution) rows and NULL
+  // for system/analyzer — mirrors DB CHECK llm_requests_execution_phase_ck.
+  const isSystemScoped = ctx.sourceType === 'system' || ctx.sourceType === 'analyzer';
+  if (!isSystemScoped && !ctx.executionPhase) {
+    throw new RouterContractError(
+      `llmRouter: executionPhase is required when sourceType="${ctx.sourceType}"`,
+    );
+  }
+  if (isSystemScoped && ctx.executionPhase) {
+    throw new RouterContractError(
+      `llmRouter: executionPhase must be null when sourceType="${ctx.sourceType}"`,
+    );
+  }
+  // Feature-tag hygiene — warn (don't throw) when a caller forgets to tag.
+  // In tests, the default 'unknown' is expected; in production code paths
+  // it signals a missed wiring opportunity for the System P&L page.
+  if (!ctx.featureTag && process.env.NODE_ENV !== 'test') {
+    console.warn('[llmRouter] missing feature_tag', {
+      sourceType: ctx.sourceType,
+      organisationId: ctx.organisationId,
+    });
+  }
+
   // ── 1b. Resolve provider + model from execution phase ─────────────────
   let effectiveProvider: string;
   let effectiveModel: string;
@@ -207,14 +301,27 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let wasDowngraded = false;
   let routingReason: string = 'ceiling';
 
-  if (env.ROUTER_FORCE_FRONTIER) {
+  const systemCallerPolicy = ctx.systemCallerPolicy ?? 'respect_routing';
+  if (systemCallerPolicy === 'bypass_routing') {
+    // Rev §6 — caller has pinned provider+model (typical for non-agent
+    // consumers whose prompts are model-specific). Skip resolveLLM() but
+    // still go through the router so the call lands in llm_requests.
+    effectiveProvider = ctx.provider ?? 'anthropic';
+    effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
+    routingReason = 'forced';
+  } else if (env.ROUTER_FORCE_FRONTIER) {
     // Kill switch: skip all routing, use ceiling model.
     effectiveProvider = ctx.provider ?? 'anthropic';
     effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
     routingReason = 'forced';
   } else {
+    // Fall through to the resolver. resolveLLM requires a concrete phase;
+    // system-scoped callers should always use bypass_routing so this branch
+    // is never reached without an executionPhase. If a caller misconfigures
+    // themselves, fall back to 'execution' rather than throwing — the
+    // runtime guard above already rejects the inconsistent combination.
     const resolved = resolveLLM({
-      phase:    ctx.executionPhase,
+      phase:    ctx.executionPhase ?? 'execution',
       taskType: ctx.taskType,
       ceiling:  (ctx.provider && ctx.model) ? { provider: ctx.provider, model: ctx.model } : undefined,
       mode:     ctx.routingMode ?? 'ceiling',
@@ -313,10 +420,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   try {
     reservationId = await budgetService.checkAndReserve(
       {
-        organisationId:   ctx.organisationId,
-        subaccountId:     ctx.subaccountId,
-        runId:            ctx.runId,
+        organisationId:    ctx.organisationId,
+        subaccountId:      ctx.subaccountId,
+        runId:             ctx.runId,
         subaccountAgentId: ctx.subaccountAgentId,
+        sourceType:        ctx.sourceType,
         billingDay,
         billingMonth,
       },
@@ -352,9 +460,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId:               ctx.runId,
         executionId:         ctx.executionId,
         ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        sourceId:            ctx.sourceId,        // rev §6
+        featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
         callSite:            ctx.callSite ?? 'app',
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
+        executionPhase:      ctx.executionPhase,  // nullable for system/analyzer
         provider:            effectiveProvider,
         model:               effectiveModel,
         tokensIn:            0,
@@ -438,10 +549,30 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
             tools:       params.tools,
             maxTokens:   params.maxTokens,
             temperature: params.temperature,
+            signal:      params.abortSignal,   // rev §6 — caller cancellation
           }),
           PROVIDER_CALL_TIMEOUT_MS,
           `${provider}/${mappedModel}`
         );
+
+        // Rev §6 — post-process hook. Runs the caller's schema check with
+        // the raw content. If it throws ParseFailureError, treat like a
+        // retryable provider error so the fallback loop can try again.
+        if (params.postProcess) {
+          try {
+            await params.postProcess(providerResponse.content);
+          } catch (postErr) {
+            if (isParseFailureError(postErr)) {
+              // Treat parse failure as a retryable error — the fallback loop
+              // will retry up to PROVIDER_MAX_RETRIES, then the outer catch
+              // writes the ledger row with status='parse_failure' and the
+              // excerpt from the final attempt.
+              providerResponse = null;
+              throw postErr;
+            }
+            throw postErr;
+          }
+        }
 
         // Success — record actual provider/model used
         actualProvider = provider;
@@ -463,9 +594,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         lastError = err;
         fallbackAttempts.push({ provider, model: mappedModel, error: (err as Error).message });
 
-        // Non-retryable errors propagate immediately
+        // Non-retryable errors propagate immediately (tolerates null reservation)
         if (isNonRetryableError(err)) {
-          if (reservationId) await budgetService.releaseReservation(reservationId);
+          await budgetService.releaseReservation(reservationId);
           throw err;
         }
 
@@ -494,9 +625,28 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   }
 
   if (!providerResponse) {
-    const e = lastError as { code?: string; message?: string };
+    const e = lastError as {
+      code?: string;
+      message?: string;
+      abortReason?: 'caller_timeout' | 'caller_cancel' | null;
+      rawExcerpt?: string;
+    };
 
-    if (e?.code === 'PROVIDER_UNAVAILABLE') {
+    // Rev §6 — status + abort_reason + parse_failure excerpt mapping
+    let abortReasonValue: 'caller_timeout' | 'caller_cancel' | null = null;
+    let parseFailureExcerpt: string | null = null;
+
+    if (isParseFailureError(lastError)) {
+      callStatus = 'parse_failure';
+      parseFailureExcerpt = (lastError as ParseFailureError).rawExcerpt;
+    } else if (e?.code === 'CLIENT_DISCONNECTED') {
+      if (e.abortReason) {
+        callStatus = 'aborted_by_caller';
+        abortReasonValue = e.abortReason;
+      } else {
+        callStatus = 'client_disconnected';
+      }
+    } else if (e?.code === 'PROVIDER_UNAVAILABLE') {
       callStatus = 'provider_unavailable';
     } else if (e?.code === 'PROVIDER_NOT_CONFIGURED') {
       callStatus = 'provider_not_configured';
@@ -505,8 +655,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
     callError = (e?.message ?? 'All providers failed') + (lastError instanceof Error && lastError.message.includes('timed out') ? ' (timeout)' : '');
 
-    // Release reservation — no cost incurred
-    if (reservationId) await budgetService.releaseReservation(reservationId);
+    // Release reservation — no cost incurred (tolerates null for system/analyzer)
+    await budgetService.releaseReservation(reservationId);
 
     const providerLatencyMs = Date.now() - providerStart;
     const routerOverheadMs  = Date.now() - routerStart - providerLatencyMs;
@@ -529,10 +679,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId:               ctx.runId,
         executionId:         ctx.executionId,
         ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        sourceId:            ctx.sourceId,        // rev §6
+        featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
         callSite:            ctx.callSite ?? 'app',
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
-        executionPhase:      ctx.executionPhase,
+        executionPhase:      ctx.executionPhase,  // nullable for system/analyzer
         capabilityTier:      routingTier,
         wasDowngraded,
         routingReason,
@@ -551,6 +703,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         status:              callStatus,
         errorMessage:        callError,
         attemptNumber,
+        parseFailureRawExcerpt: parseFailureExcerpt,  // rev §6
+        abortReason:         abortReasonValue,       // rev §6
         requestedProvider:   effectiveProvider,
         requestedModel:      effectiveModel,
         fallbackChain:       hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
@@ -567,6 +721,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const providerLatencyMs = Date.now() - providerStart;
 
   // ── 9. Calculate actual cost ─────────────────────────────────────────────
+  //
+  // Rev §6 — sourceType threaded through so pricingService's resolveMargin
+  // can collapse margin to 1.0× for sourceType ∈ {'system','analyzer'}.
+  // Downstream effect: costWithMargin === costRaw for overhead rows, so the
+  // System P&L page's net-profit math stays honest.
   const costResult = await pricingService.calculateCost(
     actualProvider,
     actualModel,
@@ -574,6 +733,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     providerResponse.tokensOut,
     ctx.organisationId,
     providerResponse.cachedPromptTokens ?? 0,
+    ctx.sourceType,
   );
 
   // ── 10. Compute response payload hash ───────────────────────────────────
@@ -627,10 +787,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       runId:               ctx.runId,
       executionId:         ctx.executionId,
       ieeRunId:            ctx.ieeRunId,        // §11.7.1
+      sourceId:            ctx.sourceId,        // rev §6
+      featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
       callSite:            ctx.callSite ?? 'app',
       agentName:           ctx.agentName,
       taskType:            ctx.taskType,
-      executionPhase:      ctx.executionPhase,
+      executionPhase:      ctx.executionPhase,  // nullable for system/analyzer
       capabilityTier:      routingTier,
       wasDowngraded,
       routingReason,
@@ -710,9 +872,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   });
 
   // ── 14. Commit reservation with actual cost (releases delta) ─────────────
-  if (reservationId) {
-    await budgetService.commitReservation(reservationId, costResult.costWithMarginCents);
-  }
+  // commitReservation tolerates null (system/analyzer paths never reserve).
+  await budgetService.commitReservation(reservationId, costResult.costWithMarginCents);
 
   // ── 15. Enqueue aggregate update (async — do not await) ──────────────────
   enqueueAggregateUpdate(idempotencyKey).catch((err) => {

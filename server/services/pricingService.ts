@@ -3,6 +3,7 @@ import { llmPricing, orgMarginConfigs } from '../db/schema/index.js';
 import { and, gte, isNull, lte, or } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+import type { SourceType } from '../db/schema/llmRequests.js';
 
 // ---------------------------------------------------------------------------
 // Failsafe pricing — used when DB is unavailable on cache miss.
@@ -171,10 +172,11 @@ export async function calculateCost(
   tokensOut: number,
   orgId:    string,
   cachedPromptTokens: number = 0,
+  sourceType: SourceType | undefined = undefined,
 ): Promise<CostResult> {
   const [pricing, margin] = await Promise.all([
     getPricing(provider, model),
-    getMargin(orgId),
+    resolveMargin(orgId, sourceType),
   ]);
 
   const cacheMultiplier = CACHE_READ_MULTIPLIERS[provider] ?? 1.0;
@@ -194,6 +196,40 @@ export async function calculateCost(
     marginMultiplier:    margin.multiplier,
     fixedFeeCents:       margin.fixedFeeCents,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Margin resolver — spec §7.4
+//
+// Returns { multiplier, fixedFeeCents } for a call context. System-level and
+// analyzer work is internal cost (not a billable line), so margin collapses
+// to 1.0× with no fixed fee. Billable sourceTypes fall through to the
+// org-scoped `getMargin()` lookup.
+//
+// This is the single source of truth for margin policy. Future extensions
+// (per-agent overrides, promotional pricing, partner splits) add branches
+// here rather than in the router — the router consumes the verdict.
+//
+// `resolveMarginMultiplier()` is the narrower public contract per spec
+// §19.11 — it returns the multiplier alone. `resolveMargin()` is the
+// internal wrapper used by `calculateCost()` which needs both fields.
+// ---------------------------------------------------------------------------
+
+async function resolveMargin(
+  orgId: string,
+  sourceType: SourceType | undefined,
+): Promise<{ multiplier: number; fixedFeeCents: number }> {
+  if (sourceType === 'system' || sourceType === 'analyzer') {
+    return { multiplier: 1.0, fixedFeeCents: 0 };
+  }
+  return await getMargin(orgId);
+}
+
+export async function resolveMarginMultiplier(
+  ctx: { organisationId: string; sourceType?: SourceType },
+): Promise<number> {
+  const margin = await resolveMargin(ctx.organisationId, ctx.sourceType);
+  return margin.multiplier;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +273,7 @@ export function invalidateMarginCache(orgId?: string): void {
 export const pricingService = {
   getPricing,
   getMargin,
+  resolveMarginMultiplier,
   calculateCost,
   estimateCost,
   invalidatePricingCache,
