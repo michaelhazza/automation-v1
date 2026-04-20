@@ -409,6 +409,14 @@ router.post(
       throw { statusCode: 404, message: 'No backup found for this job' };
     }
 
+    if (req.query.dryRun === 'true') {
+      const preview = await configBackupService.describeRestore({
+        backupId: backup.id,
+        organisationId: req.orgId!,
+      });
+      return res.json(preview);
+    }
+
     const result = await configBackupService.restoreBackup({
       backupId: backup.id,
       organisationId: req.orgId!,

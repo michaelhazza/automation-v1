@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS actions_intervention_cooldown_day_idx
     organisation_id,
     subaccount_id,
     (metadata_json->>'triggerTemplateSlug'),
-    (date_trunc('day', created_at))
+    (date_trunc('day', created_at AT TIME ZONE 'UTC'))
   )
   WHERE subaccount_id IS NOT NULL
     AND metadata_json ? 'triggerTemplateSlug';
