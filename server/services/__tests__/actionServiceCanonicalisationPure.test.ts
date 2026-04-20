@@ -62,11 +62,34 @@ test('hashActionArgs — same canonical contract as validation digest', () => {
   assert.equal(a, b);
 });
 
-test('hashActionArgs — null / undefined / empty object all distinct from each other', () => {
-  const hNull = hashActionArgs({ v: null });
-  const hUndef = hashActionArgs({ v: undefined });
-  const hEmpty = hashActionArgs({ v: {} });
-  // null and undefined both serialise to 'null' — accept that; key what matters.
-  assert.equal(hNull, hUndef);
-  assert.notEqual(hNull, hEmpty);
+test('present-vs-absent trap — undefined field and omitted field hash the same', () => {
+  // The reviewer-flagged case: caller A builds { contactId: 'c1' }, caller B
+  // builds { contactId: 'c1', replyToAddress: undefined }. Same logical intent;
+  // same key must emerge so the dedup layer doesn't let both slip through.
+  const omitted = computeValidationDigest({ contactId: 'c1' });
+  const explicitUndef = computeValidationDigest({ contactId: 'c1', replyToAddress: undefined });
+  assert.equal(omitted, explicitUndef);
+});
+
+test('present-vs-absent trap — explicit null STAYS DISTINCT from omitted', () => {
+  // null is semantically "explicitly unset"; undefined vs absent is a JS
+  // surface accident. Keep null meaningful so APIs that distinguish
+  // unset-to-null from unset-implicit are respected.
+  const omitted = computeValidationDigest({ contactId: 'c1' });
+  const explicitNull = computeValidationDigest({ contactId: 'c1', replyToAddress: null });
+  assert.notEqual(omitted, explicitNull);
+});
+
+test('present-vs-absent trap — applies recursively (nested undefined)', () => {
+  const a = computeValidationDigest({ payload: { a: 1 } });
+  const b = computeValidationDigest({ payload: { a: 1, b: undefined } });
+  assert.equal(a, b);
+});
+
+test('hashActionArgs — mirrors present-vs-absent behaviour', () => {
+  const h1 = hashActionArgs({ args: { x: 1 } });
+  const h2 = hashActionArgs({ args: { x: 1, opt: undefined } });
+  const h3 = hashActionArgs({ args: { x: 1, opt: null } });
+  assert.equal(h1, h2);
+  assert.notEqual(h1, h3);
 });

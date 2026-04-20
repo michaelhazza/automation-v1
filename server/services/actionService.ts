@@ -29,6 +29,13 @@ import { policyEngineService } from './policyEngineService.js';
  * Arrays retain order (positional semantics). Used by both the idempotency-key
  * hash and the validationDigest drift check so two logically-identical
  * payloads always produce the same string regardless of key insertion order.
+ *
+ * Object properties with `undefined` values are omitted — matching
+ * `JSON.stringify`'s default behaviour. This closes the "present-vs-absent"
+ * trap where one caller writes `{ x: undefined }` and another omits `x`
+ * entirely; both now canonicalise the same way. Explicit `null` stays
+ * distinct from omitted — null is semantically meaningful ("explicitly
+ * unset"), whereas `undefined` vs absent is a JS surface accident.
  */
 function canonicaliseJson(value: unknown): string {
   if (value === null) return 'null';
@@ -36,9 +43,9 @@ function canonicaliseJson(value: unknown): string {
     return `[${value.map(canonicaliseJson).join(',')}]`;
   }
   if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    );
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicaliseJson(v)}`).join(',')}}`;
   }
   if (value === undefined) return 'null';
@@ -62,6 +69,23 @@ export function computeValidationDigest(payload: Record<string, unknown>): strin
   return createHash('sha256').update(canonical).digest('hex');
 }
 
+/**
+ * Deterministic idempotency key for an action.
+ *
+ * **Retry vs replay boundary (non-negotiable contract):**
+ * - **Retry** (same logical attempt) → same `runId` + `toolCallId` + `args` →
+ *   same key. The existing `actions` row is re-used; `actionService.markFailed`
+ *   bumps `retry_count`. No new row written.
+ * - **Replay** (explicitly new attempt after a terminal failure) → NEW `runId`
+ *   or NEW `toolCallId` → new key. A new `actions` row is inserted with
+ *   `replay_of_action_id` set to the original (the column ships in migration
+ *   0185, the replay runtime lands in a future session).
+ *
+ * Anyone touching this function later MUST preserve that distinction.
+ * Collapsing them (e.g. derive key from payload only, ignoring runId) would
+ * break both retry-idempotency (re-runs would bypass the dedup row) and
+ * replay auditability (a replay would silently clobber the original row).
+ */
 export function buildActionIdempotencyKey(params: {
   runId: string;
   toolCallId: string;
