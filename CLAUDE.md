@@ -325,8 +325,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `tasks/clientpulse-ghl-gap-analysis.md` — ClientPulse V1 design spec. `spec-reviewer` complete (5/5 lifetime cap reached, all HITL findings resolved). Implementation plan at `tasks/builds/clientpulse/plan.md`; progress tracker at `tasks/builds/clientpulse/progress.md`.
-**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. Ship-gates B2 (outcome attribution), B3 (config_history audit), B5 (sensitive-path gating) all closed. Next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors).
+**In-flight spec:** `tasks/llm-observability-ledger-generalisation-spec.md` — LLM observability & ledger generalisation. All five phases (P1 schema+router+adapters, P2 static gate, P3 analyzer migration, P4 System P&L page, P5 retention) built on branch `claude/build-llm-observability-ledger-iiTcC`.
+**Active items:** ClientPulse Phases 4 + 4.5 merged to main 2026-04-19. ClientPulse next up: Phase 5 (settings UI + template editor), Phase 5.5 (operator onboarding), Phase 6 (pilot polish), B6 (Configuration Assistant UX copy), and the deferred items in `tasks/builds/clientpulse/progress.md` (real CRM execution wiring, drilldown page, live CRM data fetching in editors). LLM observability deferred items in spec §17 (cancel wiring, provider_model aggregate dimension, cost-efficiency dashboards, externally-submitted ledger events).
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
@@ -346,6 +346,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
 | Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
 | Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
+| Add an LLM consumer (non-agent) | `llmRouter.routeCall({ context: { sourceType: 'system' \| 'analyzer', sourceId, featureTag, systemCallerPolicy, ... } })` — NEVER import a provider adapter directly (the `verify-no-direct-adapter-calls.sh` gate + runtime `assertCalledFromRouter()` block this). Use `postProcess` + `ParseFailureError` for schema-validation failures; AbortController for cancellation. |
+| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
+| Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
 | Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
 | Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
 | Add a new permission key | `server/lib/permissions.ts` |
