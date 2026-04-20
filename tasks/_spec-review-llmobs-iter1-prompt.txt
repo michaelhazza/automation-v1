@@ -1,0 +1,42 @@
+You are performing an implementation-readiness review of the following Markdown specification.
+
+Scope: this is a DOCUMENT review, not a code review. Your job is to find issues in the spec that would trip implementers or that indicate the spec's internal state is inconsistent. Point at section headings and line numbers when possible.
+
+Context you should treat as ground truth for framing:
+
+- The codebase is PRE-PRODUCTION. No live users. No staged rollouts. No feature flags for new migrations.
+- Testing posture: static gates primary, runtime tests pure-function only. No vitest / jest / playwright / supertest / frontend unit / E2E tests of the app itself.
+- Rollout model: commit_and_revert. No canaries. No percentage rollouts.
+- Prefer existing primitives over new abstractions.
+- Do NOT propose feature flags, staged rollouts, canary deploys, kill switches, per-tenant rollout, frontend tests, composition tests, API contract tests, E2E tests, performance baselines, or monitoring beyond what the spec already has. Those are directional changes that belong to the product owner, not the review.
+
+What to look for:
+
+1. CONTRADICTIONS — the same concept described two different ways in different sections.
+2. STALE / RETIRED LANGUAGE — approaches the spec explicitly rejected still appearing in prose.
+3. LOAD-BEARING CLAIMS WITHOUT CONTRACTS — "X must be idempotent" without a mechanism named.
+4. FILE-INVENTORY DRIFT — prose mentions a file/column/migration that is not in the §14 Files table (or vice versa).
+5. SCHEMA OVERLAPS — two columns or tables with adjacent purposes without a source-of-truth statement.
+6. SEQUENCING BUGS — Phase N depends on something created in Phase N+k.
+7. INVARIANTS stated in one section but not enforced in another.
+8. MISSING PER-PHASE VERDICTS — items without an explicit phase assignment.
+9. UNNAMED new primitives — "a new service that does X" without naming the file/function/type.
+10. MISSING CONTRACTS — a data shape crossing a service boundary with no §19 Contracts entry.
+11. PATH REFERENCES that don't match the actual repo layout.
+12. CHECK-constraint / invariant WEAKNESSES — does the CHECK in §6.1 enforce what §5.1 prose claims?
+13. DEFERRED ITEMS drift — is every "deferred" / "later" / "future" reference in prose listed in §17?
+
+Output format: a numbered list of findings. For each finding, include:
+- A short label
+- The section(s) affected
+- A one-to-three sentence description of the issue
+- Your suggested fix (concrete, implementable — not "consider reviewing")
+- Severity: critical / important / minor / nit
+
+Be direct. Do not hedge. Do not pad. If you see no issue in a given area, say nothing about it.
+
+Here is the spec. Review it end-to-end.
+
+================================
+SPEC BEGINS
+================================
