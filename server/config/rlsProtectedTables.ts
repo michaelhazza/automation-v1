@@ -87,6 +87,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'LLM request/response records — includes full prompts and completions.',
   },
   {
+    tableName: 'llm_requests_archive',
+    schemaFile: 'llmRequestsArchive.ts',
+    policyMigration: '0188_llm_requests_archive.sql',
+    rationale: 'Retention archive for llm_requests — same tenant-isolation policy; rows move in from the nightly llm-ledger-archive job.',
+  },
+  {
     tableName: 'audit_events',
     schemaFile: 'auditEvents.ts',
     policyMigration: '0081_rls_llm_requests_audit.sql',

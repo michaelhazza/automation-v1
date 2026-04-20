@@ -13,7 +13,9 @@ export const costAggregates = pgTable(
   {
     id:                      uuid('id').defaultRandom().primaryKey(),
     entityType:              text('entity_type').notNull(),
-    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider' | 'platform' | 'execution_phase'
+    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider' |
+    // 'platform' | 'execution_phase' | 'source_type' | 'feature_tag'
+    // (source_type + feature_tag added rev §6 — LLM observability spec §6.2.)
     entityId:                text('entity_id').notNull(),
     periodType:              text('period_type').notNull(),
     // 'daily' | 'monthly' | 'run' | 'minute' | 'hour'

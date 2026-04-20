@@ -55,6 +55,7 @@ export * from './llmPricing';
 export * from './orgMarginConfigs';
 export * from './orgBudgets';
 export * from './llmRequests';
+export * from './llmRequestsArchive';
 export * from './costAggregates';
 export * from './budgetReservations';
 export * from './hierarchyTemplates';

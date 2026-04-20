@@ -218,7 +218,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
             messages: [{ role: 'user', content: `Given this short task context, generate a hypothetical memory entry (2-3 sentences) that would be relevant and useful. Include specific details and terminology.\n\nTask context: "${sanitizedQuery}"\n\nRespond with only the hypothetical memory entry.` }],
             temperature: 0.5,
             maxTokens: HYDE_MAX_TOKENS,
-            context: { organisationId: orgId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution', routingMode: 'ceiling' },
+            context: { organisationId: orgId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', routingMode: 'ceiling' },
           });
           const hydeText = hydeResponse?.content ?? null;
           if (hydeText) {
@@ -943,7 +943,6 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
         subaccountId,
         sourceType: 'system',
         taskType: 'memory_compile',
-        executionPhase: 'execution',
         routingMode: 'ceiling',
       },
     });
@@ -1842,7 +1841,6 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
         subaccountId: data.subaccountId,
         sourceType: 'system',
         taskType: 'context_enrichment',
-        executionPhase: 'execution',
         routingMode: 'ceiling',
       },
     });

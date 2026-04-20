@@ -108,7 +108,6 @@ Respond with only the lesson — no preamble, no quotes.`;
         sourceType: 'system',
         agentName: 'outcome-learning',
         taskType: 'memory_compile',
-        executionPhase: 'execution',
         routingMode: 'ceiling',
       },
     });

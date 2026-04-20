@@ -30,6 +30,12 @@ export interface ProviderCallParams {
   tools?:       ProviderTool[];
   maxTokens?:   number;
   temperature?: number;
+  // Optional AbortSignal — threaded through fetch so the caller can cancel
+  // a mid-flight provider call. When the signal fires, the adapter maps
+  // the AbortError → { statusCode: 499, code: 'CLIENT_DISCONNECTED',
+  // abortReason } using AbortSignal.reason to distinguish timeout vs cancel.
+  // See spec §8.1.
+  signal?:      AbortSignal;
 }
 
 export interface ProviderResponse {

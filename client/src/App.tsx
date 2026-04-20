@@ -45,6 +45,7 @@ const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
 const SystemSkillsPage = lazy(() => import('./pages/SystemSkillsPage'));
 const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
+const SystemPnlPage = lazy(() => import('./pages/SystemPnlPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
@@ -363,6 +364,7 @@ export default function App() {
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/llm-pnl" element={<SystemPnlPage />} />
             <Route path="/system/skill-analyser" element={<SkillAnalyzerPage user={user!} />} />
             <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />

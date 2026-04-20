@@ -1,15 +1,20 @@
 import { env } from '../../lib/env.js';
 import type { LLMProviderAdapter, ProviderCallParams, ProviderResponse, ProviderContentBlock } from './types.js';
+import { assertCalledFromRouter } from './callerAssert.js';
+import { mapAbortError, mapHttp499, isAbortError } from './adapterErrors.js';
 
 // ---------------------------------------------------------------------------
 // Gemini provider adapter
 // Maps our provider interface to Google's Gemini generateContent API.
+// See anthropicAdapter.ts for the observability contract (signal + 499 + abort).
 // ---------------------------------------------------------------------------
 
 const geminiAdapter: LLMProviderAdapter = {
   provider: 'gemini',
 
   async call(params: ProviderCallParams): Promise<ProviderResponse> {
+    assertCalledFromRouter();
+
     const apiKey = env.GEMINI_API_KEY;
     if (!apiKey) {
       throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'gemini', message: 'Gemini adapter not configured. Set GEMINI_API_KEY.' };
@@ -42,11 +47,18 @@ const geminiAdapter: LLMProviderAdapter = {
       }];
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: params.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) throw mapAbortError('gemini', params.signal);
+      throw err;
+    }
 
     if (!response.ok) {
       let errorDetail = '';
@@ -55,6 +67,10 @@ const geminiAdapter: LLMProviderAdapter = {
         errorDetail = err?.error?.message ?? response.statusText;
       } catch {
         errorDetail = response.statusText;
+      }
+
+      if (response.status === 499) {
+        throw mapHttp499('gemini', errorDetail);
       }
 
       if (response.status === 503 || response.status === 529) {

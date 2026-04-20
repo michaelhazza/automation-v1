@@ -14,7 +14,6 @@
  */
 
 import { generateEmbeddings } from '../lib/embeddings.js';
-import { withBackoff } from '../lib/withBackoff.js';
 import { env } from '../lib/env.js';
 import { skillParserService } from '../services/skillParserService.js';
 import { skillEmbeddingService } from '../services/skillEmbeddingService.js';
@@ -55,7 +54,9 @@ import {
   skillParserServicePure,
   ParsedSkill,
 } from '../services/skillParserServicePure.js';
-import anthropicAdapter from '../services/providers/anthropicAdapter.js';
+import { routeCall } from '../services/llmRouter.js';
+import { ParseFailureError } from '../lib/parseFailureError.js';
+import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { logger } from '../lib/logger.js';
 
 // p-limit is ESM; import dynamically to avoid CommonJS issues
@@ -740,82 +741,68 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
           let classificationApiError: unknown = undefined;
 
-          // Sentinel thrown inside withBackoff when the LLM response is
-          // structurally valid JSON but fails our schema check. Marked
-          // retryable so the model gets another attempt.
-          const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
-
-          // One-shot retry on outer timeout. The timeout is Promise.race'd
-          // against withBackoff, so it never enters withBackoff's isRetryable
-          // — the retry loop has to live out here. A stuck generation often
-          // finishes fast on a second attempt; doubling the worst-case wall
-          // clock is worth trading for an LLM merge over a rule-based one.
+          // One-shot retry on outer timeout. The timeout fires an
+          // AbortController that actually terminates the underlying fetch —
+          // unlike the previous Promise.race pattern which abandoned the
+          // fetch and eventually surfaced as an unexplained 499 on the
+          // provider side. A stuck generation often finishes fast on a
+          // second attempt; doubling the worst-case wall clock is worth
+          // trading for an LLM merge over a rule-based one.
           const MAX_CLASSIFY_TIMEOUT_RETRIES = 1;
           let timeoutRetries = 0;
 
           while (true) {
-            const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(
-                () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
-                SKILL_CLASSIFY_TIMEOUT_MS,
-              )
+            const abortController = new AbortController();
+            // Pass 'caller_timeout' as the reason so the adapter can
+            // distinguish analyzer-side timeout from user-initiated cancel
+            // (see spec §8.1).
+            const timeoutId = setTimeout(
+              () => abortController.abort('caller_timeout'),
+              SKILL_CLASSIFY_TIMEOUT_MS,
             );
 
             try {
-              classificationResult = await Promise.race([
-                withBackoff(
-                  async () => {
-                    const response = await anthropicAdapter.call({
-                      model: 'claude-sonnet-4-6',
-                      system,
-                      messages: [{ role: 'user', content: userMessage }],
-                      // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
-                      // with long instructions can never be truncated.
-                      maxTokens: 8192,
-                      temperature: 0.1,
+              const response = await routeCall({
+                system,
+                messages: [{ role: 'user', content: userMessage }],
+                // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                // with long instructions can never be truncated.
+                maxTokens: 8192,
+                temperature: 0.1,
+                context: {
+                  organisationId:     job.organisationId,
+                  sourceType:         'analyzer',
+                  sourceId:           jobId,
+                  featureTag:         'skill-analyzer-classify',
+                  taskType:           'general',
+                  systemCallerPolicy: 'bypass_routing',
+                  provider:           'anthropic',
+                  model:              'claude-sonnet-4-6',
+                },
+                abortSignal: abortController.signal,
+                postProcess: (content: string) => {
+                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(content);
+                  if (parsed === null) {
+                    logger.warn('skill_classify_parse_failure', {
+                      jobId,
+                      slug: candidate.slug,
+                      rawLength: content.length,
+                      // Full raw response so we can see exactly what the LLM produced
+                      raw: content,
                     });
-                    const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-                    if (parsed === null) {
-                      logger.warn('skill_classify_parse_failure', {
-                        jobId,
-                        slug: candidate.slug,
-                        rawLength: response.content.length,
-                        // Full raw response so we can see exactly what the LLM produced
-                        raw: response.content,
-                      });
-                      throw PARSE_FAILURE;
-                    }
-                    return parsed;
-                  },
-                  {
-                    label: `skill-classify-${match.candidateIndex}`,
-                    maxAttempts: 3,
-                    correlationId: jobId,
-                    runId: jobId,
-                    isRetryable: (err: unknown) => {
-                      // Parse failures: model produced unparseable output — worth retrying.
-                      if (err === PARSE_FAILURE) return true;
-                      // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                      // cannot change between attempts, so retrying just wastes time.
-                      const e = err as { statusCode?: number; code?: string };
-                      if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-                      // CLASSIFY_TIMEOUT is handled by the outer retry loop, not here.
-                      if (e?.code === 'CLASSIFY_TIMEOUT') return false;
-                      return (
-                        e?.statusCode === 429 ||
-                        e?.statusCode === 503 ||
-                        e?.statusCode === 529 ||
-                        e?.code === 'PROVIDER_UNAVAILABLE'
-                      );
-                    },
+                    throw new ParseFailureError({ rawExcerpt: truncateUtf8Safe(content, 2048) });
                   }
-                ),
-                timeoutPromise,
-              ]);
+                },
+              });
+              // Parse once more to get the typed result. `postProcess` already
+              // validated; this call is cheap (plain JSON.parse + schema map).
+              classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
               break;
             } catch (err) {
               const code = (err as { code?: string })?.code;
-              if (code === 'CLASSIFY_TIMEOUT' && timeoutRetries < MAX_CLASSIFY_TIMEOUT_RETRIES) {
+              const abortReason = (err as { abortReason?: string })?.abortReason;
+              const wasTimeout = code === 'CLIENT_DISCONNECTED' && abortReason === 'caller_timeout';
+              if (wasTimeout && timeoutRetries < MAX_CLASSIFY_TIMEOUT_RETRIES) {
                 timeoutRetries++;
                 logger.warn('skill_classify_timeout_retry', {
                   jobId,
@@ -826,8 +813,14 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 continue;
               }
               classificationResult = null;
-              classificationApiError = err === PARSE_FAILURE ? undefined : err;
+              // Parse failures are not "API errors" from the analyzer's
+              // perspective — the rule-based fallback should fire, not the
+              // API-error branch. The router has already recorded the row
+              // with status='parse_failure' + rawExcerpt.
+              classificationApiError = code === 'CLASSIFICATION_PARSE_FAILURE' ? undefined : err;
               break;
+            } finally {
+              clearTimeout(timeoutId);
             }
           }
 
@@ -1318,13 +1311,22 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
             );
 
-            const response = await anthropicAdapter.call({
+            const response = await routeCall({
               system,
               messages: [{ role: 'user', content: userMessage }],
-              // Haiku: cheaper model for simple routing task
-              model: 'claude-haiku-4-5-20251001',
               maxTokens: 256,
               temperature: 0.1,
+              context: {
+                organisationId:     job.organisationId,
+                sourceType:         'analyzer',
+                sourceId:           jobId,
+                featureTag:         'skill-analyzer-agent-match',
+                taskType:           'general',
+                systemCallerPolicy: 'bypass_routing',
+                provider:           'anthropic',
+                // Haiku: cheaper model for simple routing task
+                model:              'claude-haiku-4-5-20251001',
+              },
             });
 
             const suggestion = skillAnalyzerServicePure.parseAgentSuggestionResponse(response.content);
@@ -1456,12 +1458,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
         );
 
-        const response = await anthropicAdapter.call({
+        const response = await routeCall({
           system,
           messages: [{ role: 'user', content: userMessage }],
-          model: 'claude-sonnet-4-6',
           maxTokens: 512,
           temperature: 0.2,
+          context: {
+            organisationId:     job.organisationId,
+            sourceType:         'analyzer',
+            sourceId:           jobId,
+            featureTag:         'skill-analyzer-cluster-recommend',
+            taskType:           'general',
+            systemCallerPolicy: 'bypass_routing',
+            provider:           'anthropic',
+            model:              'claude-sonnet-4-6',
+          },
         });
 
         const recommendation = skillAnalyzerServicePure.parseAgentClusterRecommendationResponse(response.content);

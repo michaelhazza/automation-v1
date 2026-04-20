@@ -85,6 +85,9 @@ run_gate "$SCRIPT_DIR/verify-handoff-shape-versioned.sh"
 # ── Code quality gates ──
 run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
 
+# ── LLM observability spec (tasks/llm-observability-ledger-generalisation-spec.md) ──
+run_gate "$SCRIPT_DIR/verify-no-direct-adapter-calls.sh"
+
 # ── Configuration Agent guidelines protection gates ──
 run_gate "$SCRIPT_DIR/verify-protected-block-names.sh"
 

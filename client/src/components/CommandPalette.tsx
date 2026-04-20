@@ -19,6 +19,7 @@ const NAV_ITEMS: NavEntry[] = [
   { label: 'AI Team', to: '/admin/agents', keywords: 'agents' },
   { label: 'Organisations', to: '/system/organisations' },
   { label: 'System Activity', to: '/system/activity' },
+  { label: 'LLM P&L', to: '/system/llm-pnl', keywords: 'cost spend revenue ledger observability' },
 ];
 
 interface Props {

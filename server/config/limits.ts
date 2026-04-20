@@ -272,8 +272,28 @@ export const PROVIDER_BACKOFF_MS = [1000, 3000] as const;
 /** Ordered fallback chain of provider names */
 export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini', 'openrouter'] as const;
 
-/** Timeout (ms) for a single provider call before it's treated as a failure */
-export const PROVIDER_CALL_TIMEOUT_MS = 30000;
+/**
+ * Timeout (ms) for a single provider call before it's treated as a failure.
+ *
+ * Set to 600s (10 min) — safely above every documented provider generation
+ * ceiling, including OpenAI reasoning models (o1/o3) which can legitimately
+ * take 5-10 minutes per call. The earlier 30s cap routinely tripped on
+ * legitimate long generations inside the skill analyzer, triggering retries
+ * that double-billed at the provider layer (no LLM provider currently
+ * supports request-level dedup headers).
+ *
+ * Because callWithTimeout now actually aborts the underlying fetch via a
+ * merged AbortSignal, a timeout here is a genuine "something is wrong"
+ * event — not a silent provider billing leak. When this fires the error is
+ * classified non-retryable (see llmRouter.isNonRetryableError) so the
+ * provider can't be double-billed under the same idempotency key.
+ *
+ * Note: this is the cap on a single HTTP request, not on an agent task.
+ * Agent tasks loop many short requests; 600s is well above the longest
+ * single generation we expect. Adjust downward if a lower cap turns out
+ * to be safe for our provider mix.
+ */
+export const PROVIDER_CALL_TIMEOUT_MS = 600000;
 
 /** How long (ms) a provider stays in cooldown after exhausting retries */
 export const PROVIDER_COOLDOWN_MS = 60000;

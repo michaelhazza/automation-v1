@@ -3847,7 +3847,6 @@ ${htmlForLlm}`;
       sourceType: 'system',
       agentName: 'scrape_structured',
       taskType: 'general',
-      executionPhase: 'execution',
       routingMode: 'ceiling',
     },
   });
