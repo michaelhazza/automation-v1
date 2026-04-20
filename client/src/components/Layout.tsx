@@ -9,6 +9,7 @@ import {
   getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
 } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
+import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
 
 interface LayoutProps {
@@ -110,6 +111,24 @@ function buildBreadcrumbs(pathname: string, clientName: string | null) {
 }
 
 // ── NavItem ────────────────────────────────────────────────────────────────
+/**
+ * Button-style nav entry — visually identical to NavItem but invokes a
+ * callback instead of navigating. Used by the global Configuration Assistant
+ * trigger (Session 1 / spec §5.6).
+ */
+function NavButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex items-center gap-[9px] w-full px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent border-0 cursor-pointer transition-[color,background] duration-100"
+    >
+      <span>{icon}</span>
+      <span className="flex-1 text-left truncate">{label}</span>
+    </button>
+  );
+}
+
 function NavItem({
   to, icon, label, badge, badgeLabel, exact = false, manageTo,
 }: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string }) {
@@ -228,6 +247,7 @@ function TrialCountdown() {
 export default function Layout({ user, children }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { openConfigAssistant } = useConfigAssistantPopup();
   const isSystemAdmin = user.role === 'system_admin';
 
   // Org context
@@ -774,7 +794,13 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Organisation" />
               {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
-              {hasSidebarItem('config_assistant') && <NavItem to="/admin/config-assistant" icon={<Icons.settings />} label="Config Assistant" />}
+              {hasSidebarItem('config_assistant') && (
+                <NavButton
+                  icon={<Icons.settings />}
+                  label="Configuration Assistant"
+                  onClick={() => openConfigAssistant()}
+                />
+              )}
               {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/schedule-calendar" icon={<Icons.scheduled />} label="Calendar" />}

@@ -113,7 +113,28 @@ router.post('/api/agents/:id/data-sources/:sourceId/test', authenticate, require
 // ── Conversations ──────────────────────────────────────────────────────────
 
 router.get('/api/agents/:id/conversations', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT), asyncHandler(async (req, res) => {
-  const result = await conversationService.listConversations(req.params.id, req.user!.id, req.orgId!);
+  // Session 1 / spec §5.10 — optional query params for the Configuration
+  // Assistant popup's 15-minute resume window.
+  const updatedAfterRaw = typeof req.query.updatedAfter === 'string' ? req.query.updatedAfter : undefined;
+  const updatedAfter = updatedAfterRaw ? new Date(updatedAfterRaw) : undefined;
+  if (updatedAfter && Number.isNaN(updatedAfter.getTime())) {
+    throw { statusCode: 400, message: 'updatedAfter must be ISO-8601', errorCode: 'INVALID_UPDATED_AFTER' };
+  }
+  const orderRaw = typeof req.query.order === 'string' ? req.query.order : undefined;
+  const order: 'updated_desc' | 'updated_asc' | 'created_desc' | 'created_asc' | undefined =
+    orderRaw === 'updated_desc' || orderRaw === 'updated_asc' || orderRaw === 'created_desc' || orderRaw === 'created_asc'
+      ? orderRaw
+      : undefined;
+  const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+  const limit = limitRaw && !Number.isNaN(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+
+  const result = await conversationService.listConversations(
+    req.params.id,
+    req.user!.id,
+    req.orgId!,
+    undefined,
+    { updatedAfter, order, limit },
+  );
   res.json(result);
 }));
 

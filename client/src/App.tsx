@@ -5,6 +5,8 @@ import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ConfigAssistantPopupProvider } from './hooks/useConfigAssistantPopup';
+import ConfigAssistantPopup from './components/config-assistant/ConfigAssistantPopup';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
@@ -166,9 +168,12 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Toaster position="bottom-right" richColors />
-      {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
-      <div id="help-hint-portal" />
+      <ConfigAssistantPopupProvider>
+        <Toaster position="bottom-right" richColors />
+        {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
+        <div id="help-hint-portal" />
+        {/* Session 1 / spec §5 — single global mount point for the Configuration Assistant popup. */}
+        <ConfigAssistantPopup />
       <Routes>
         <Route path="/login" element={
           <Suspense fallback={<PageLoader />}>
@@ -360,6 +365,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      </ConfigAssistantPopupProvider>
     </BrowserRouter>
   );
 }
