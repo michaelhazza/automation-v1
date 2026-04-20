@@ -282,6 +282,23 @@ For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marki
 
 The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking findings are addressed. `dual-reviewer` is a power-user add-on for an extra pass when the local environment supports it — not a gate on the PR.
 
+### Review logs must be persisted
+
+Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/spec-review-log-*`). The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
+
+- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
+- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
+
+If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
+
+### Before you write a spec
+
+For any Significant or Major spec, read `docs/spec-authoring-checklist.md` before drafting. It is a pre-authoring checklist derived from patterns the `spec-reviewer` has caught across 15+ production specs — primitives-reuse search, file-inventory lock, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, and testing posture.
+
+The checklist points back at the deep references in `architecture.md` and `docs/spec-context.md`; it does not restate them. Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop — every unchecked box is a finding the reviewer will raise anyway.
+
+Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checklist — just write and move on.
+
 ### Spec review is the equivalent pipeline for spec documents
 
 When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:

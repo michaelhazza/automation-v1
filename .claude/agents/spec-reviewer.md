@@ -44,6 +44,7 @@ Before starting, read:
 2. `architecture.md` — patterns and constraints specific to this codebase
 3. The spec file under review (provided by the caller, or detected from the task)
 4. The spec-context file (default: `docs/spec-context.md`, unless caller provides a different path)
+5. `docs/spec-authoring-checklist.md` — the pre-authoring checklist authors are expected to have worked through. Use it as a secondary rubric: any section of the checklist the spec fails to satisfy is a rubric finding.
 
 Locate the Codex binary:
 ```bash
@@ -164,6 +165,7 @@ In addition to adjudicating Codex's findings, run your own pass against the rubr
 - **Invariants stated in one place but not enforced elsewhere.** The spec protects invariant X in section S1 but S2 does something that could violate X. Classic example: topic filter preserves universal skills, but resume path could rebuild `activeTools` from a stale checkpoint without preserving them.
 - **Missing per-item verdicts.** Every roadmap item should have an explicit verdict (BUILD IN SPRINT N, BUILD WHEN DEPENDENCY SHIPS, DEFER, etc.). Items without a verdict are ambiguous.
 - **Unnamed new primitives.** The spec introduces a new type / function / table / column without naming it concretely. "A new service that handles X" is under-specified; "a new service `server/services/xService.ts` exporting `doX(args): Result`" is specified.
+- **Checklist compliance.** For every section of `docs/spec-authoring-checklist.md`, verify the spec satisfies it. If a section isn't satisfied, raise a rubric finding and classify per the usual rules (most will be mechanical — missing Deferred Items section, missing Contracts entry, missing file-inventory entries; some will be directional — missing execution-model choice when one is required).
 
 Add any rubric findings to your working list alongside Codex's findings. Both feed into the classification step.
 

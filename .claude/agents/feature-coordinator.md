@@ -36,8 +36,9 @@ Build artifacts live in `tasks/builds/{slug}/`:
 tasks/builds/{slug}/
   progress.md        — pipeline status (you maintain this)
   plan.md            — implementation plan (architect produces)
-  review.md          — PR review output (you capture from pr-reviewer)
 ```
+
+PR review logs for each chunk live in the flat `tasks/` directory as `tasks/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` (same convention as `spec-review-log-*`), not nested under the build. This keeps all review logs discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
 
 The feature description or card lives wherever the user keeps it — reference it in place, don't copy it.
 
@@ -79,7 +80,7 @@ Process chunks from the plan **one at a time**. For each chunk:
 **C2. Review** — Delegate to `pr-reviewer`:
 > "Review the changes just implemented for chunk '{chunk name}'. Read the plan at `tasks/builds/{slug}/plan.md` for context. Review the following files: [list changed files]."
 
-Capture the review output and write it yourself to `tasks/builds/{slug}/review.md` (pr-reviewer has no write tools).
+`pr-reviewer` emits its review inside a fenced markdown block tagged `pr-review-log`. **Before asking the main session to fix any issues**, extract the block verbatim and write it to `tasks/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` (where `<chunk-slug>` is a kebab-case version of the chunk name and `<timestamp>` is ISO 8601 UTC with seconds). Add the log path to `progress.md` under the chunk's Notes column. This persists the raw reviewer voice before code changes overwrite context — same convention as `spec-review-log-*`.
 
 **C3. Fix** — If blocking issues exist, ask the main session to fix them. Re-review. **Max 3 fix-review rounds.** On the fourth, stop and escalate with the unresolved issues.
 
