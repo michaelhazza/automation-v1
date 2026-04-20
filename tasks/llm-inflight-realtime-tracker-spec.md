@@ -1,9 +1,9 @@
 # LLM In-Flight Real-Time Tracker — Spec
 
-**Status:** Draft — spec-review round 2 complete (2026-04-20). Ready for build.
+**Status:** Approved for build — spec-review round 3 sign-off (2026-04-20).
 **Author:** Main session.
 **Date:** 2026-04-20.
-**Last revised:** 2026-04-20 — round 2 pass folded in (§12 round 2 table): memory cap + LRU overflow, runtimeKey strengthening with `startedAt`, structured no-op logs, sweep jitter, active-count gauge, Redis partition semantics, stable snapshot secondary sort, router-side pre-add assert, crash-orphan nuance via `sweepReason` field. §9 partial-success upgraded from "deferred" to "committed follow-up spec" with minimal-viable design pinned.
+**Last revised:** 2026-04-20 — round 3 polish folded in (§12 round 3 table): `stateVersion` monotonic guard, `evictionContext` on overflow emissions, active-count gauge tagged by `callSite` + `provider`, client-side 100 ms snapshot-consistency buffer, `deadlineBufferMs` exposed on entries for UI clarity.
 **Branch when built:** new branch — do not bundle with `claude/build-llm-observability-ledger-iiTcC`.
 **Predecessor:** `tasks/llm-observability-ledger-generalisation-spec.md` — completed 2026-04-20. That spec generalised the completed-call ledger (`llm_requests`) for all consumers. This spec extends observability to **in-flight calls** — the gap between dispatch and completion.
 
@@ -82,15 +82,20 @@ A single `idempotencyKey` can produce multiple concurrent in-flight entries when
 
 ### 4.3 Entry state machine — monotonic, tolerant of reordered events
 
-Each registry slot carries `state: 'active' | 'removed'` plus the original `startedAt`. The registry enforces monotonic transitions:
+Each registry slot carries `state: 'active' | 'removed'`, the original `startedAt`, and a `stateVersion: 1 | 2` — `1` for `active`, `2` for `removed`. Every socket and Redis event carries its `stateVersion`. The registry enforces monotonic transitions keyed by `(startedAt, stateVersion)`:
 
-- `add()` — no-op if a slot for this `runtimeKey` already exists (local dispatch beat Redis fanout of its own event, or vice versa). Emits `inflight.add_noop_already_exists` structured log at `debug` level.
-- `remove()` — no-op if the slot is already `'removed'` or missing; otherwise `'active' → 'removed'`. Emits `inflight.remove_noop_already_removed` or `inflight.remove_noop_missing_key` at `debug` level with `{ runtimeKey, source: 'local' | 'redis' }`.
-- Incoming Redis event — ignored if `incoming.startedAt < existing.startedAt` (late event for a stale runtimeKey we've already rotated through). Emits `inflight.event_stale_ignored` at `debug` level with both timestamps.
+- `add()` — no-op if a slot for this `runtimeKey` already exists. Emits `inflight.add_noop_already_exists` at `debug` level.
+- `remove()` — no-op if the slot is already `'removed'` or missing; otherwise `'active' → 'removed'` and `stateVersion: 1 → 2`. Emits `inflight.remove_noop_already_removed` or `inflight.remove_noop_missing_key` at `debug` level with `{ runtimeKey, source: 'local' | 'redis' }`.
+- Incoming Redis event — ignored if **either**:
+  - `incoming.startedAt < existing.startedAt` (stale runtimeKey we've already rotated through), or
+  - `incoming.startedAt === existing.startedAt && incoming.stateVersion < existing.stateVersion` (same-timestamp reorder: a late `add` arriving after `remove` has already won).
+  Emits `inflight.event_stale_ignored` at `debug` level with both timestamps + both versions.
+
+The same-timestamp reorder case closes a subtle race surfaced in spec-review round 3: under Redis fanout + coarse clock granularity an `add → remove → delayed add` sequence with identical `startedAt` could otherwise allow the delayed add to resurrect a removed entry. The `stateVersion` ladder (monotonic-only transitions: `0 → 1 → 2`) makes that resurrection impossible — a lower version never wins against a higher one regardless of arrival order.
 
 The no-op logs are normal during steady-state (local + Redis double-delivery) — they only become actionable when their rate spikes, which is the exact signal you want for diagnosing fanout loops.
 
-This eliminates the out-of-order flicker class from spec-review round 1 feedback item 1, and covers the "no-op removal guard reason" ask from round 2 feedback item 6.
+This eliminates the out-of-order flicker class from spec-review round 1 feedback item 1, covers the "no-op removal guard reason" ask from round 2 feedback item 6, and closes the same-`startedAt` reorder hole from round 3 feedback item 1.
 
 ### 4.4 Broadcast + multi-instance fanout
 
@@ -104,12 +109,18 @@ When `REDIS_URL` is set (production default), the registry publishes add/remove 
 
 **Hard memory cap with LRU overflow eviction.** The per-process map is capped at `MAX_INFLIGHT_ENTRIES = 5_000`. On add, if the map is at cap, the oldest entry (by `startedAt`) is force-evicted:
 
-- Local eviction emits `InFlightRemoval` with `terminalStatus: 'evicted_overflow'` to the socket room and to Redis, so every instance and every client reconciles consistently.
-- Evictions are logged at `warn` level with the evicted `runtimeKey` — in steady state the cap is 100× headroom over expected concurrency, so any eviction is a real signal (registry leak, Redis-down + sweep-delayed combo, or a dispatch storm).
+- Local eviction emits `InFlightRemoval` with `terminalStatus: 'evicted_overflow'` and an `evictionContext: { activeCount, capacity }` field to the socket room and to Redis. The context lets an operator immediately distinguish real overload (`activeCount === capacity && steady growth`) from a Redis-down + sweep-delayed leak (`activeCount === capacity && no corresponding dispatch spike`) without digging logs.
+- Evictions are logged at `warn` level with the evicted `runtimeKey` + `evictionContext` — in steady state the cap is 100× headroom over expected concurrency, so any eviction is a real signal.
 
 Without this cap, a pathological Redis-down + sweep-delayed combo could accumulate entries unbounded. With it, the worst case is a bounded memory footprint + a visible overflow signal.
 
-**Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via the existing `createEvent` pattern, carrying the current local map size. Downstream alerting (e.g. "active count > 1000 sustained for 5 minutes") is an ops concern layered on top of the gauge, not built in this spec.
+**Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via the existing `createEvent` pattern, carrying:
+
+- `activeCount: number` — current local map size.
+- `byCallSite: { app: number; worker: number }` — per-`callSite` breakdown.
+- `byProvider: Record<string, number>` — per-provider breakdown (e.g. `{ anthropic: 3, openai: 7 }`).
+
+The breakdowns make it trivial to spot stuck workers (`byCallSite.worker` climbs while `byCallSite.app` stays flat) or provider-specific hangs (one provider's count climbs while others drain). Downstream alerting is an ops concern layered on top of the gauge, not built in this spec.
 
 ### 4.5 Stale-entry sweep — deadline-based, not elapsed-based
 
@@ -129,7 +140,9 @@ interface InFlightEntry {
   idempotencyKey: string;          // same key the ledger will use on completion
   attempt: number;                 // 1-indexed, matches ledger.attemptNumber
   startedAt: string;               // ISO 8601 UTC — monotonicity anchor for reorder-safety + runtimeKey component
-  deadlineAt: string;              // ISO 8601 UTC — startedAt + timeoutMs + 30s sweep buffer
+  stateVersion: 1;                 // 1=active on add; removal emissions carry 2 (see InFlightRemoval)
+  deadlineAt: string;              // ISO 8601 UTC — startedAt + timeoutMs + deadlineBufferMs
+  deadlineBufferMs: number;        // the buffer past timeoutMs before sweep fires (default 30_000)
   label: string;                   // `${provider}/${model}` — for at-a-glance UI
   provider: string;
   model: string;
@@ -148,6 +161,8 @@ interface InFlightEntry {
 
 `callSite` is display-only — a tag for UI filtering. No server-side code branches on it. If we later need finer taxonomy we can enrich freely without a contract migration.
 
+`deadlineBufferMs` is explicit on the entry (round-3 feedback item 5) so the UI can surface "this call is 30s past its provider timeout but still in-flight — sweep pending" without needing to hardcode the buffer value. Keeps debugging self-contained in the UI payload.
+
 Producer: `llmRouter.routeCall()` via `llmInflightRegistry.add()`.
 Consumer: (a) socket room `system:llm-inflight` event `llm-inflight:added`, (b) admin API `GET /api/admin/llm-pnl/in-flight` (snapshot endpoint for first paint).
 
@@ -158,11 +173,13 @@ interface InFlightRemoval {
   runtimeKey: string;              // matches the InFlightEntry being removed
   idempotencyKey: string;          // for UI grouping across attempts
   attempt: number;
+  stateVersion: 2;                 // always 2 — removal is the terminal transition from active(1)
   terminalStatus: 'success' | 'error' | 'timeout' | 'aborted_by_caller'
                 | 'client_disconnected' | 'parse_failure'
                 | 'provider_unavailable' | 'provider_not_configured'
                 | 'partial' | 'swept_stale' | 'evicted_overflow';
   sweepReason: 'deadline_exceeded' | null;  // non-null only when terminalStatus='swept_stale'
+  evictionContext: { activeCount: number; capacity: number } | null;  // non-null only when terminalStatus='evicted_overflow'
   completedAt: string;             // ISO 8601 UTC
   durationMs: number;
   ledgerRowId: string | null;      // null when terminalStatus causes no ledger insert
@@ -173,7 +190,9 @@ interface InFlightRemoval {
 `terminalStatus` omits `budget_blocked` and `rate_limited` — those are pre-dispatch, so no registry entry ever existed to be removed. It adds:
 
 - `swept_stale` — entry exceeded `deadlineAt` and was reaped by the §4.5 sweep. `sweepReason='deadline_exceeded'` is the one reason shipped in v1 — the field leaves room for future sweep causes without a status-enum migration.
-- `evicted_overflow` — entry was force-evicted under the §4.4 `MAX_INFLIGHT_ENTRIES=5_000` cap. Signals a registry leak or a Redis-down + sweep-delayed combo, not a normal call termination.
+- `evicted_overflow` — entry was force-evicted under the §4.4 `MAX_INFLIGHT_ENTRIES=5_000` cap. `evictionContext: { activeCount, capacity }` is populated so an operator can distinguish real overload from a Redis-partition + sweep-lag leak at a glance.
+
+`stateVersion` on the wire (round-3 feedback item 1) makes every event self-describing for the client's monotonic guard: a reorder can't resurrect a removed entry because the `stateVersion: 2` payload beats any delayed `stateVersion: 1` for the same `(runtimeKey, startedAt)`.
 
 `ledgerCommittedAt` addresses spec-review feedback item 7: the UI now has a positive signal that the ledger row is queryable. When `ledgerRowId != null && ledgerCommittedAt != null`, the row is readable. When `ledgerRowId != null && ledgerCommittedAt == null` (should be rare — the router usually awaits the insert before emitting), the client falls back to a 1–2 second retry loop before giving up.
 
@@ -192,6 +211,8 @@ Every emitted socket event carries `eventId = ${runtimeKey}:${type}` where `type
 
 `limit` is accepted as a query param (1–500) so an admin can intentionally narrow the snapshot during a reconnect storm; values above the hard cap are clamped silently.
 
+**Client-side consistency window.** On first paint / reconnect the client fetches the snapshot and subscribes to the socket room, but incoming socket events are **buffered** for 100 ms before merge. This closes a tiny UX flicker: a `remove` event arriving between "snapshot GET returned" and "React rendered the snapshot" could make a row appear and instantly disappear. The 100 ms buffer lets the snapshot render first, then drains the buffer through the same state machine as live events. No server change — the buffer lives in `PnlInFlightTable.tsx` (§6).
+
 ---
 
 ## 6. Files to change
@@ -206,7 +227,7 @@ Every emitted socket event carries `eventId = ${runtimeKey}:${type}` where `type
 | `server/websocket/rooms.ts` | **Modify** — new handler `join:system-llm-inflight` that rejects non-system-admin sockets and joins the `system:llm-inflight` room. |
 | `server/services/__tests__/llmInflightRegistryPure.test.ts` | **New** — pure tests: runtimeKey derivation, state-machine transitions (add→active, add-while-active = no-op, remove→removed, remove-while-removed = no-op, stale-startedAt event ignored), deadline calc, snapshot cap + sort. |
 | `client/src/pages/SystemPnlPage.tsx` | **Modify** — new first tab **In-Flight**, renders live table from socket events + snapshot fetch. Local `eventId` LRU for dedup. Client-side 1–2s retry on ledger-row fetch when `ledgerCommittedAt == null`. |
-| `client/src/components/system-pnl/PnlInFlightTable.tsx` | **New** — live table component. Client-local elapsed-time ticking (setInterval 1s, not socket spam). |
+| `client/src/components/system-pnl/PnlInFlightTable.tsx` | **New** — live table component. Client-local elapsed-time ticking (setInterval 1s, not socket spam). 100 ms socket-event buffer on mount / reconnect before merging with the snapshot (§5 consistency window). UI surfaces `deadlineBufferMs` so entries past `startedAt + timeoutMs` but before `deadlineAt` are visibly labelled "past timeout — sweep pending" rather than looking like a stuck happy-path call. |
 | `shared/types/systemPnl.ts` | **Modify** — export `InFlightEntry`, `InFlightRemoval`, `EntryState`, the socket event envelope type. |
 | `architecture.md` | **Modify** — add "LLM in-flight registry" subsection under the LLM router contract. |
 | `docs/capabilities.md` | **Modify** — add bullet under "LLM Spend Observability": real-time in-flight tracker for system admins. |
@@ -272,9 +293,11 @@ Per `docs/spec-context.md`:
   - Stale-event filter: incoming event with `startedAt < existing.startedAt` is ignored (logs `event_stale_ignored`).
   - Terminal-status → `ledgerRowId`-expected mapping: `success`/`error`/`timeout`/`aborted_by_caller`/`client_disconnected`/`parse_failure`/`provider_unavailable`/`provider_not_configured`/`partial` all expect a ledger row; `swept_stale` and `evicted_overflow` do not.
   - Snapshot cap + stable sort: capping at 500 preserves the newest-first window; `capped` flag set correctly when > 500 live; secondary sort by `runtimeKey DESC` keeps identical-`startedAt` entries in stable order across repeated snapshots.
-  - LRU overflow selection: when the map is at `MAX_INFLIGHT_ENTRIES` and add is called, the entry with the smallest `startedAt` is selected for eviction; the evicted entry produces an `InFlightRemoval` with `terminalStatus: 'evicted_overflow'`.
+  - LRU overflow selection: when the map is at `MAX_INFLIGHT_ENTRIES` and add is called, the entry with the smallest `startedAt` is selected for eviction; the evicted entry produces an `InFlightRemoval` with `terminalStatus: 'evicted_overflow'` and `evictionContext: { activeCount, capacity }` populated.
   - `eventId` shape: `${runtimeKey}:${type}` — unique across (runtimeKey, type) pairs.
-  - Sweep emission carries `sweepReason: 'deadline_exceeded'` when `terminalStatus='swept_stale'`, `null` otherwise.
+  - Sweep emission carries `sweepReason: 'deadline_exceeded'` when `terminalStatus='swept_stale'`, `null` otherwise; `evictionContext` is non-null iff `terminalStatus='evicted_overflow'`.
+  - `stateVersion` monotonic guard: same-`startedAt` reorder cases — a delayed `stateVersion: 1` add event arriving after a `stateVersion: 2` remove has already won is ignored; the guard accepts `(startedAt ↑)` OR `(startedAt ==, stateVersion ↑)` and rejects everything else.
+  - Active-count gauge payload shape: `{ activeCount, byCallSite: { app, worker }, byProvider: Record<string, number> }` — sums match `activeCount`; provider keys match entries' `provider` field.
 - **Static gates**: the existing `verify-no-direct-adapter-calls.sh` already guarantees the router is the only interception point — no new gate needed.
 - **No frontend tests, no API contract tests, no E2E** — per `testing_posture: static_gates_primary` / `frontend_tests: none_for_now`.
 
@@ -293,10 +316,13 @@ Smoke-test posture for reviewer (manual, not a CI gate): run a long skill-analyz
   - Concurrent retries + crash-restarts don't collide → registry keyed by `runtimeKey = idempotencyKey:attempt:startedAt`.
   - UI reconciliation against the ledger → `ledgerCommittedAt` on removal events + a bounded client-side retry fallback.
   - Snapshot doesn't blow the wire → hard cap 500, sorted `startedAt DESC, runtimeKey DESC`, `capped` flag for UI honesty.
-  - Registry can't grow unbounded under degraded conditions → `MAX_INFLIGHT_ENTRIES=5_000` hard cap + LRU overflow eviction with `evicted_overflow` terminal status as a visible signal.
+  - Registry can't grow unbounded under degraded conditions → `MAX_INFLIGHT_ENTRIES=5_000` hard cap + LRU overflow eviction with `evicted_overflow` terminal status + `evictionContext` payload as a visible ops signal (distinguishes overload from leak).
   - Programmer-bug double-add caught at source → router-layer `assert(!registry.has(runtimeKey))` pre-add invariant (dev assert + prod error log).
   - Redis partition is survivable → no event replay on reconnect; clients recover via authoritative snapshot fetch.
-  - Operational visibility into steady-state anomalies → structured no-op logs (`add_noop_already_exists`, `remove_noop_already_removed`, `remove_noop_missing_key`, `event_stale_ignored`) + `llm.inflight.active_count` gauge.
+  - Same-timestamp reorder can't resurrect a removed entry → `stateVersion` ladder (`active=1 → removed=2`) on every event; monotonic acceptance rule `(startedAt ↑)` OR `(startedAt ==, stateVersion ↑)`.
+  - UI doesn't flicker on snapshot + live-event race → client buffers socket events 100 ms on mount/reconnect before merging with snapshot.
+  - UI can explain "why is this still in-flight after timeout?" → `deadlineBufferMs` explicit on the entry, labelled "past timeout — sweep pending" by the client between `startedAt+timeoutMs` and `deadlineAt`.
+  - Operational visibility into steady-state anomalies → structured no-op logs (`add_noop_already_exists`, `remove_noop_already_removed`, `remove_noop_missing_key`, `event_stale_ignored`) + `llm.inflight.active_count` gauge tagged by `callSite` and `provider` (spots stuck workers + provider-specific hangs without digging).
 - Non-functional claims consistent with execution model: real-time push = socket, not polling; multi-instance consistency = Redis pub/sub + state-machine-guarded merge, not DB reads; bounded memory = hard cap + LRU eviction, not hope.
 
 ---
@@ -344,3 +370,20 @@ Reviewer ran a second pass flagging edge-case hardening + observability complete
 | 10 | Redis partition behaviour | §4.4 explicit: no event replay on reconnect; snapshot is the authoritative recovery read |
 
 **Partial-external-success protection — pushback accepted with scope separation.** Reviewer argued this is direct financial risk, not ergonomics, and "logs + in-flight tracker" is insufficient. §9 upgraded from "deferred" to "committed follow-up spec" with the minimal-viable design pinned (provisional `status='started'` row + existing `onConflictDoUpdate` upsert path). Kept out of this spec's scope because it's a ledger-write contract change + schema migration + retry-contract change — an independent concern that deserves independent review. Tracked in `tasks/llm-observability-ledger-generalisation-spec.md §17` so it won't be forgotten.
+
+### Round 3 (2026-04-20) — approved for build
+
+Reviewer signed off ("Ready for build") after round 2 and flagged 5 final polish items worth applying. All 5 accepted — each closes a genuine operational/UX gap with a small contract addition:
+
+| # | Reviewer concern | Resolution |
+|---|---|---|
+| 1 | Same-`startedAt` reorder could resurrect a removed entry | §4.3 `stateVersion` ladder (1=active, 2=removed) on entries + every event; monotonic acceptance rule `(startedAt ↑) OR (startedAt ==, stateVersion ↑)` |
+| 2 | `evicted_overflow` couldn't distinguish overload from leak | §4.4 + §5 `evictionContext: { activeCount, capacity }` on every eviction emission |
+| 3 | Active-count gauge too coarse to spot stuck workers / provider hangs | §4.4 gauge tagged with `byCallSite: { app, worker }` + `byProvider: Record<string, number>` |
+| 4 | Snapshot + live-event race could flicker on mount/reconnect | §5 + §6 client-side 100 ms socket-event buffer before merging with snapshot |
+| 5 | `deadlineBufferMs` invisible to UI made "past timeout but not swept" confusing | §5 entry carries `deadlineBufferMs` explicitly; §6 UI labels the pre-sweep window |
+
+**Reviewer's closing framing** (kept for posterity):
+> This spec shows a clear shift from feature design → to failure-mode engineering.
+
+The round-3 additions preserve that framing — each one is specifically about making degraded-state behaviour legible to an operator under pressure, not about adding happy-path features.
