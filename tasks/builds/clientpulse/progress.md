@@ -142,7 +142,7 @@ Branch: `claude/clientpulse-session-2-arch-gzYlZ`. Spec: `tasks/builds/clientpul
 | 5 | **C.1** — `notify_operator` fan-out | **S2-8.3 ✓** | `notifyOperatorFanoutService` orchestrator + in-app/email/slack channel adapters + pure availability+plan module (8-case test). Slack webhook read from `organisations.settings.slackWebhookUrl`. `skillExecutor.ts` notify_operator case rewired. |
 | 6 | **C.2** — Outcome-weighted recommendation | **S2-8.1 ✓** | Pure `pickRecommendedTemplate` (8-case test) with `outcome_weighted / priority_fallback / no_candidates` reason + `aggregateOutcomesByTemplate` in context service + `recommendedReason` on response. Badge differentiates in ProposeInterventionModal. |
 | 7 | **C.3** — Typed `InterventionTemplatesEditor` | **S2-8.4 ✓** | List+expand form editor + 5 per-actionType payload sub-editors + `MergeFieldPicker` (static vocabulary) + round-trip module preserving unknown fields verbatim. JSON editor kept as advanced fallback toggle. |
-| 8 | **C.4** — Dual-path UX + per-block deep-links | **B6 ✓ (component)** | `ConfigUpdateToolResult` + `parseConfigUpdateToolResult` ship three distinct result shapes (`applied_inline / queued_for_review / error`) with unknown-shape JSON fallback. `configAssistantPrompts.buildBlockContextPrompt` + "Ask the assistant →" button on every block card. |
+| 8 | **C.4** — Dual-path UX + per-block deep-links | **B6 ✓** | `ConfigUpdateToolResult` + `parseConfigUpdateToolResult` render the three result shapes (`applied_inline / queued_for_review / error`) with JSON fallback for unknown shapes. Renderer wired into `ConfigAssistantPage` via a message-scan that detects the latest `config_update_organisation_config` tool_result and surfaces it below the message list. `configAssistantPrompts.buildBlockContextPrompt` + "Ask the assistant →" button on every block card. |
 | 10 | **D.1 (minimal)** — `createFromTemplate` | partial | Service method lands (stamps `applied_system_template_id` + writes config_history creation-event). Modal rebuild + hierarchy_templates/system-agent seed (spec §11.1.1 steps 3–4) deferred. |
 | 11 | **D.2** — Typed Settings editors (9 blocks) | — | Compact functional editors for healthScoreFactors, churnRiskSignals, churnBands, interventionDefaults, alertLimits, dataRetention, onboardingMilestones, staffActivity, integrationFingerprints + shared `ArrayEditor` + `NormalisationFieldset` primitives. Settings page dispatches on `block.path`; JSON fallback preserved for unhandled paths. |
 | 13 | **D.4 (partial)** — `recordHistory` refactor | partial | `recordHistory` now returns `Promise<number>` (the version it wrote); `configUpdateOrganisationService.commitOverrideAndRecordHistory` drops the redundant SELECT MAX round-trip. Integration test file (8-case matrix) deferred. |
@@ -168,7 +168,7 @@ Branch: `claude/clientpulse-session-2-arch-gzYlZ`. Spec: `tasks/builds/clientpul
 | S2-8.1 (Outcome-weighted recommendation) | passed | Pure decision function 8/8 + aggregation query + recommendedReason surfaced |
 | S2-8.3 (notify_operator fan-out) | passed | Availability+plan pure 8/8 + 3 channel adapters + skillExecutor rewire |
 | S2-8.4 (Typed templates editor) | passed | List+edit form + 5 per-actionType sub-editors + round-trip module |
-| B6 (Dual-path UX copy) | partial | Component + parser ship; page wire-up deferred with D.3 |
+| B6 (Dual-path UX copy) | passed | Component + parser + ConfigAssistantPage wire-up all shipped; renders the latest config_update tool result inline in the message list |
 | S2-D.1 (createFromTemplate) | partial | Core service method + audit event; modal rebuild deferred |
 | S2-D.2 (9 typed editors) | passed | 9 editors + 2 shared primitives + Settings page dispatcher |
 | S2-D.3 (Panel extraction) | deferred | Session 1 URL-param plumbing remains valid per spec §11.3.4 |
@@ -194,6 +194,19 @@ pr-reviewer run against `170f560^..HEAD` (log at `tasks/pr-review-log-clientpuls
 - **N-3** — `crmLiveDataService` cache now enforces `MAX_CACHE_ENTRIES = 500` with oldest-insertion eviction.
 
 **B-4 and H-5** (test-layer acceptance gaps) are re-classified — see "Session 3 acceptance-test gates" below.
+
+**External-reviewer audit follow-ups (commits 2a295bb + 1d8c132, 2026-04-20):**
+
+A final external review highlighted edge-condition concerns around idempotency canonicalisation, observability of precondition blocks, and the retry-vs-replay boundary. Three fixes landed:
+
+- **Canonical JSON (concern #1).** `computeValidationDigest` and `hashActionArgs` had been using `JSON.stringify(payload, Object.keys(payload).sort())`. The 2nd arg to `JSON.stringify` is an allowlist applied at every depth — nested keys not in the top-level sorted list were silently dropped. Replaced with a recursive `canonicaliseJson` walker that sorts object keys at every level and preserves array order. Latent at the time (nothing writes `validationDigest` at propose-time yet) but the function itself was wrong.
+- **Present-vs-absent trap (concern #1 continued).** `{ contactId: 'c1' }` and `{ contactId: 'c1', replyToAddress: undefined }` were hashing differently, so two callers with the same logical intent could bypass the dedup layer. Fix: `canonicaliseJson` filters out object properties with `undefined` values before emit, matching `JSON.stringify`'s default behaviour. Explicit `null` stays distinct — null is semantically meaningful ("explicitly unset") whereas undefined-vs-absent is a JS surface accident.
+- **Precondition-gate observability (concern #8).** `executionLayer.precondition_block` structured log lines now emit on every block path (`drift_detected`, `timeout_budget_exhausted`, `concurrent_execute`) with `actionId`, `organisationId`, `subaccountId`, and reason — complements the existing `execution_failed` action_event row with an ops-greppable dispatch-time signal.
+- **Retry-vs-replay boundary (concern #2).** `buildActionIdempotencyKey` now carries a prominent contract comment: retry (same logical attempt) → same key → row reused; replay (new attempt after terminal failure) → new key → new row with `replay_of_action_id` pointing at the original. Pinned inline to prevent future drift.
+
+Pure tests: `actionServiceCanonicalisationPure.test.ts` (9 cases) covers top-level order, nested order, array positional semantics, deep nesting, `hashActionArgs` parity, null/undefined/empty-object distinction, present-vs-absent trap (omitted = undefined, omitted ≠ explicit null, recursive).
+
+Reviewer's final verdict: "merge-ready territory... no structural issues left."
 
 **Session 3 acceptance-test gates (named targets, target session: Session 3):**
 
