@@ -191,3 +191,104 @@ export interface PnlResponse<TData> {
   data: TData;
   meta: PnlResponseMeta;
 }
+
+// ── LLM in-flight tracker (spec tasks/llm-inflight-realtime-tracker-spec.md) ──
+//
+// Real-time admin-only view of LLM calls currently dispatched but not yet
+// resolved. Read by `client/src/components/system-pnl/PnlInFlightTable.tsx`
+// and `client/src/pages/SystemPnlPage.tsx`; produced by
+// `server/services/llmInflightRegistry.ts`. The registry is keyed by
+// `runtimeKey = ${idempotencyKey}:${attempt}:${startedAt}` so multi-attempt
+// retries and crash-restarts never collide.
+
+export type InFlightSourceType =
+  | 'agent_run'
+  | 'process_execution'
+  | 'system'
+  | 'iee'
+  | 'analyzer';
+
+export type InFlightTerminalStatus =
+  | 'success'
+  | 'error'
+  | 'timeout'
+  | 'aborted_by_caller'
+  | 'client_disconnected'
+  | 'parse_failure'
+  | 'provider_unavailable'
+  | 'provider_not_configured'
+  | 'partial'
+  | 'swept_stale'
+  | 'evicted_overflow';
+
+// `sweepReason` exists only when `terminalStatus === 'swept_stale'`. v1
+// ships the single reason — the field leaves room for future sweep causes
+// without a status-enum migration (spec §4.5).
+export type InFlightSweepReason = 'deadline_exceeded';
+
+export interface InFlightEvictionContext {
+  activeCount: number;
+  capacity:    number;
+}
+
+export interface InFlightEntry {
+  runtimeKey:       string;                  // `${idempotencyKey}:${attempt}:${startedAt}`
+  idempotencyKey:   string;
+  attempt:          number;                  // 1-indexed
+  startedAt:        string;                  // ISO 8601 UTC — monotonicity anchor
+  stateVersion:     1;                       // 1 = active on add
+  deadlineAt:       string;                  // startedAt + timeoutMs + deadlineBufferMs
+  deadlineBufferMs: number;                  // buffer past timeoutMs before sweep fires
+  label:            string;                  // `${provider}/${model}`
+  provider:         string;
+  model:            string;
+  sourceType:       InFlightSourceType;
+  sourceId:         string | null;
+  featureTag:       string;                  // kebab-case
+  organisationId:   string | null;
+  subaccountId:     string | null;
+  runId:            string | null;
+  executionId:      string | null;
+  ieeRunId:         string | null;
+  callSite:         'app' | 'worker';        // display-only; no server branches on it
+  timeoutMs:        number;                  // the cap this call is running under
+}
+
+export interface InFlightRemoval {
+  runtimeKey:        string;
+  idempotencyKey:    string;
+  attempt:           number;
+  stateVersion:      2;                      // terminal transition — always 2
+  terminalStatus:    InFlightTerminalStatus;
+  sweepReason:       InFlightSweepReason | null;  // non-null iff terminalStatus==='swept_stale'
+  evictionContext:   InFlightEvictionContext | null;  // non-null iff terminalStatus==='evicted_overflow'
+  completedAt:       string;
+  durationMs:        number;
+  ledgerRowId:       string | null;          // null when terminalStatus produces no ledger insert
+  ledgerCommittedAt: string | null;          // ISO 8601 — filled iff ledger upsert committed
+}
+
+// Socket / Redis event envelope. Carries `eventId = ${runtimeKey}:${type}`
+// for client-side dedup (spec §4.4).
+export interface InFlightEventEnvelope<TPayload> {
+  eventId:   string;
+  type:      'added' | 'removed';
+  entityId:  string;                         // runtimeKey
+  timestamp: string;                         // ISO 8601
+  payload:   TPayload;
+}
+
+export interface InFlightSnapshotResponse {
+  entries:     InFlightEntry[];
+  generatedAt: string;
+  capped:      boolean;
+}
+
+// Active-count gauge payload (spec §4.4). Emitted on every add/remove via
+// `createEvent('llm.inflight.active_count', ...)` so alerting can pick up
+// stuck workers or provider-specific hangs without digging logs.
+export interface InFlightActiveCountPayload {
+  activeCount: number;
+  byCallSite:  { app: number; worker: number };
+  byProvider:  Record<string, number>;
+}

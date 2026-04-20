@@ -680,3 +680,39 @@ export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
  * above typical GHL p99 (sub-5 s) but below pg-boss's visibility timeout.
  */
 export const DEFAULT_ADAPTER_TIMEOUT_MS = 30_000;
+
+// ── LLM in-flight registry (tasks/llm-inflight-realtime-tracker-spec.md) ──
+
+/**
+ * Hard cap on the per-process in-flight registry map. On add, if the map
+ * is at this cap, the oldest entry (by startedAt) is force-evicted and
+ * emits `terminalStatus: 'evicted_overflow'`. Sized at ~100× headroom
+ * over expected steady-state concurrency — any eviction is a real signal.
+ * Spec §4.4.
+ */
+export const MAX_INFLIGHT_ENTRIES = 5_000;
+
+/**
+ * Base period (ms) between stale-entry sweeps. Spec §4.5. Actual fire-time
+ * is `INFLIGHT_SWEEP_INTERVAL_MS ± INFLIGHT_SWEEP_JITTER_MS` to prevent
+ * multi-instance sweep-storm synchronisation.
+ */
+export const INFLIGHT_SWEEP_INTERVAL_MS = 60_000;
+
+/** Jitter applied to each sweep interval. Spec §4.5. */
+export const INFLIGHT_SWEEP_JITTER_MS = 5_000;
+
+/**
+ * Buffer past a call's `timeoutMs` before the sweep reaps its registry
+ * entry as `swept_stale` / `deadline_exceeded`. The router's own
+ * `callWithTimeout` would have aborted the provider call at `timeoutMs`;
+ * the extra buffer is precisely the window where only a crash can leave
+ * the entry alive. Spec §4.5.
+ */
+export const INFLIGHT_DEADLINE_BUFFER_MS = 30_000;
+
+/**
+ * Hard cap on the in-flight snapshot endpoint `GET /api/admin/llm-pnl/in-flight`.
+ * Values above this are silently clamped. Spec §5.
+ */
+export const INFLIGHT_SNAPSHOT_HARD_CAP = 500;

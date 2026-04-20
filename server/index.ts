@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
 import { initWebSocket } from './websocket/index.js';
+import * as llmInflightRegistry from './services/llmInflightRegistry.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
 import { agentService } from './services/agentService.js';
 import { boardService } from './services/boardService.js';
@@ -497,6 +498,11 @@ async function start() {
   }
 
   initWebSocket(httpServer);
+
+  // Start the LLM in-flight registry's deadline-based sweep + (optional)
+  // Redis pub/sub subscription. Spec tasks/llm-inflight-realtime-tracker-spec.md.
+  llmInflightRegistry.init();
+
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
@@ -541,6 +547,14 @@ async function gracefulShutdown(signal: string) {
         io.close(() => resolve());
       });
       console.log('[SHUTDOWN] Socket.IO server closed');
+    }
+
+    // 2a. Stop the LLM in-flight registry (sweep timer + Redis clients)
+    try {
+      await llmInflightRegistry.shutdown();
+      console.log('[SHUTDOWN] LLM in-flight registry stopped');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error stopping LLM in-flight registry', err);
     }
 
     // 3. Stop shared pg-boss instance (covers all queue workers)

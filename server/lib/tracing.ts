@@ -79,6 +79,8 @@ export const EVENT_NAMES = [
   'iee.reservation.released.reconciliation',
   // Reviewer round 4 #5 — periodic queue depth + age signal for SREs
   'iee.queue.depth',
+  // LLM in-flight registry (tasks/llm-inflight-realtime-tracker-spec.md §4.4)
+  'llm.inflight.active_count',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
