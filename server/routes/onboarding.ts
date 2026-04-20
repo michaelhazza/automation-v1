@@ -10,11 +10,21 @@ const router = Router();
 router.get('/api/onboarding/status', authenticate, asyncHandler(async (req, res) => {
   const orgId = req.orgId;
   if (!orgId) {
-    res.json({ ghlConnected: false, agentsProvisioned: false, firstRunComplete: false });
+    // Absent org context — treat as already-onboarded so the wizard redirect
+    // doesn't fire for system-admin surfaces.
+    res.json({ needsOnboarding: false, ghlConnected: false, agentsProvisioned: false, firstRunComplete: false });
     return;
   }
   const status = await onboardingService.getOnboardingStatus(orgId);
   res.json(status);
+}));
+
+/** POST /api/onboarding/complete — mark organisations.onboarding_completed_at (spec §7.3 / §7.4) */
+router.post('/api/onboarding/complete', authenticate, asyncHandler(async (req, res) => {
+  const orgId = req.orgId;
+  if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+  await onboardingService.markOnboardingComplete(orgId);
+  res.json({ ok: true });
 }));
 
 /** GET /api/onboarding/sync-status — poll sync progress */

@@ -7,6 +7,9 @@ import { useSocket } from '../hooks/useSocket';
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface OnboardingStatus {
+  // Session 1 (spec §7.4): sole gate for "should the wizard auto-open?".
+  // Orthogonal to the three derivation fields below.
+  needsOnboarding: boolean;
   ghlConnected: boolean;
   agentsProvisioned: boolean;
   firstRunComplete: boolean;
@@ -456,7 +459,7 @@ export default function OnboardingWizardPage() {
   useEffect(() => {
     api.get('/api/onboarding/status')
       .then(({ data }) => setStatus(data))
-      .catch(() => setStatus({ ghlConnected: false, agentsProvisioned: false, firstRunComplete: false }))
+      .catch(() => setStatus({ needsOnboarding: true, ghlConnected: false, agentsProvisioned: false, firstRunComplete: false }))
       .finally(() => setLoading(false));
   }, []);
 
@@ -526,7 +529,16 @@ export default function OnboardingWizardPage() {
             <div className="text-center">
               <p className="text-slate-600 text-[14px] mb-4">Setup complete. Redirecting to your dashboard...</p>
               <button
-                onClick={() => navigate('/')}
+                onClick={async () => {
+                  // Spec §7.3 / §7.4 — mark the wizard dismissed so the redirect
+                  // doesn't auto-open again on subsequent sign-ins.
+                  try {
+                    await api.post('/api/onboarding/complete');
+                  } catch {
+                    // Non-fatal: the user still proceeds to the dashboard.
+                  }
+                  navigate('/');
+                }}
                 className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[14px] font-semibold rounded-xl transition-colors"
               >
                 View dashboard →

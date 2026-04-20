@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
@@ -110,6 +110,10 @@ function PageLoader() {
 }
 
 function ProtectedLayout({ user, loading }: { user: User | null; loading: boolean }) {
+  // Session 1 (spec §7.4) — on first render of a protected surface, check
+  // whether the org's onboarding wizard should auto-open. `needsOnboarding`
+  // is derived server-side from organisations.onboarding_completed_at IS NULL.
+  useOnboardingRedirect(user);
   if (loading) return (
     <div className="flex justify-center items-center min-h-screen">
       <div className="w-9 h-9 border-[3px] border-slate-200 border-t-indigo-500 rounded-full [animation:spin_0.8s_linear_infinite]" />
@@ -125,6 +129,29 @@ function ProtectedLayout({ user, loading }: { user: User | null; loading: boolea
       </ErrorBoundary>
     </Layout>
   );
+}
+
+/**
+ * Redirect to /onboarding on first render of a protected surface when the
+ * server reports needsOnboarding=true. Skips if already on /onboarding/* so
+ * the wizard itself doesn't self-redirect. System-admin surfaces without an
+ * org context receive { needsOnboarding: false } from the server.
+ */
+function useOnboardingRedirect(user: User | null) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (!user) return;
+    if (location.pathname.startsWith('/onboarding')) return;
+    let cancelled = false;
+    api.get('/api/onboarding/status')
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data?.needsOnboarding) navigate('/onboarding', { replace: true });
+      })
+      .catch(() => { /* non-fatal */ });
+    return () => { cancelled = true; };
+  }, [user, location.pathname, navigate]);
 }
 
 // Org admin routes — any authenticated user may attempt these; API enforces permission-set checks.
