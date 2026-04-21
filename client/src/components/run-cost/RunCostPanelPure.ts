@@ -62,7 +62,17 @@ export function formatCost(cents: number): string {
   const sign = dollars < 0 ? '-' : '';
   const abs = Math.abs(dollars);
   if (abs < 0.01) {
-    return `${sign}$${abs.toPrecision(2)}`;
+    // `Number.prototype.toPrecision(2)` emits scientific notation (e.g.
+    // `"3.8e-5"`) when the magnitude is below ~1e-6. Fall back to a
+    // decimal-form render for those values so the UI never shows `$1.2e-7`.
+    const precision = abs.toPrecision(2);
+    if (!precision.includes('e') && !precision.includes('E')) {
+      return `${sign}$${precision}`;
+    }
+    // Re-render in fixed notation with enough decimals to preserve the two
+    // significant figures, then trim trailing zeros and a dangling `.`.
+    const decimal = abs.toFixed(12).replace(/0+$/, '').replace(/\.$/, '');
+    return `${sign}$${decimal}`;
   }
   if (abs < 1) {
     return `${sign}$${abs.toFixed(4)}`;
