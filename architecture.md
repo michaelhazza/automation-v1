@@ -908,6 +908,21 @@ Workspace memory entries can be mutated in-place by the dedup UPDATE path. Witho
 
 Treat `reembedEntry` as the only sanctioned write path for the embedding column outside of the initial insert. New callers must not write `embedding` directly without also writing `embedding_content_hash` to the matching content hash.
 
+### Outcome-Gated Entry-Type Promotion (Hermes Tier 1 Phase B)
+
+`workspaceMemoryService.extractRunInsights` takes a `RunOutcome` ({ `runResultStatus`, `trajectoryPassed`, `errorMessage` }) and uses it to gate how insights enter the memory store. The decision matrix lives in `server/services/workspaceMemoryServicePure.ts`:
+
+- **`selectPromotedEntryType(rawType, outcome)`** — on `success + trajectoryPassed=true`, observations may be promoted to patterns; on `failed`, observations/decisions/patterns get demoted to `issue` (preferences demote to `observation`). `success + trajectoryPassed=false` is pass-through (no modifier).
+- **`scoreForOutcome(baseScore, entryType, outcome)`** — applies an outcome-dependent score modifier per type (e.g. `success+true` bumps `pattern` / `decision` / `preference` scores; `failed` demotes everything). The +0.00 / 0.00 cases for `success+false` are pinned by tests.
+- **`computeProvenanceConfidence(outcome)`** — outcome-derived confidence floor for `isUnverified` classification. Anything sourced from a non-success run is unverified by default; `outcomeLearningService` passes explicit `overrides` to mark human-curated lessons verified regardless of outcome.
+- **`applyOutcomeDefaults(outcome, options, runId)`** — single pure helper that returns `{ provenanceConfidence, isUnverified, provenanceSourceType, provenanceSourceId }`. The service calls it in one place so the override chain (`overrides?.x ?? default`) is testable and cannot drift between the success and failure branches.
+
+**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
+
+**Per-entryType half-life decay** — `memoryEntryQualityServicePure.ts::computeDecayFactor` now switches on entry type. Known types use an exponential `0.5^(days/halfLife)` decay (observation 7d, issue 14d, preference 30d, pattern/decision 60d). Unknown types fall back to the pre-existing linear `DECAY_WINDOW_DAYS` path.
+
+Deferred: `runResultStatus='partial'` currently demotes a `completed` run whenever `hasSummary=false`, which couples outcome classification to summary-generation reliability. Tracked as H3 in `tasks/todo.md`; revisit before Tier 2 memory promotion work.
+
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
 `workspaceMemoryService._hybridRetrieve()` is the canonical path for injecting memory into agent prompts. It replaces the former single-CTE vector search with a multi-stage Reciprocal Rank Fusion pipeline:
@@ -1419,6 +1434,23 @@ Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (def
 | `assertWithinRunBudgetFromLedger(ctx)` | `llm_requests` via `getRunCostCentsFromLedger` | `llmRouter.routeCall` |
 
 The direct-ledger pair exists because `cost_aggregates` is updated asynchronously by `routerJobService.enqueueAggregateUpdate`, so a rollup-based read lags by up to one aggregation interval. The LLM router is the dominant cost surface; it cannot tolerate that lag. Slack and Whisper stay on the rollup path because their per-call magnitudes dwarf the lag and their concurrency profiles are low. The ledger helper takes `insertedLedgerRowId` as a REQUIRED parameter and fails closed on null or row-not-visible — a structural guarantee that a future refactor cannot re-order the call above the ledger insert. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 / §7.4.1.
+
+**Atomic visibility + SUM (ledger helper).** `assertWithinRunBudgetFromLedger` merges the row-visibility check and the cost aggregate into a single scan: one query returns both `SUM(cost_with_margin_cents)` and a `COALESCE(MAX(CASE WHEN id = $insertedId THEN 1 ELSE 0 END), 0)` flag under the same `WHERE run_id = $runId AND status IN ('success','partial')` predicate. This makes the decision atomic (no race window between visibility and aggregation), catches cross-run contamination (wrong-run insert fails visibility), and catches caller misuse (non-counted-status row fails visibility). Future refactors must keep these merged — splitting them re-opens the race window. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 "Implementation note — atomic aggregate".
+
+**Hard-ceiling `>=` semantics.** Both sibling helpers trip at `spent >= limit` (not `>`). The breaker runs **after** each cost is recorded; `>=` means the call that first hits the ceiling is the last one allowed, and the next call is refused. `>` would allow spend to equal the ceiling and only trip on the *following* call — a one-call overshoot window. Hard-ceiling semantics are the contract callers expect.
+
+### Per-run cost visibility — `client/src/components/run-cost/`
+
+The `RunCostPanel` component renders per-run LLM spend on every run-detail surface (`SessionLogCardList` compact row, `RunTraceView` full panel, `AdminAgentEditPage` compact row). Branch decisions + formatted strings live in `RunCostPanelPure.ts` so the full §9.1 rendering matrix (loading / error / zero / in-progress / data with compact + full breakdowns) is pinned by pure tests — the project does not ship React Testing Library, so the component is a thin shell around the pure module.
+
+The shared response type `RunCostResponse` (`shared/types/runCost.ts`) and the `/api/runs/:runId/cost` handler (`server/routes/llmUsage.ts`) return:
+
+- `totalCostCents` — from `cost_aggregates` (includes failed-call cost for accounting completeness).
+- `llmCallCount`, `totalTokensIn`, `totalTokensOut`, `callSiteBreakdown: { app, worker }` — from the archive-safe `llm_requests_all` view under a success/partial filter.
+
+The asymmetry between `totalCostCents` (rollup, includes failures) and the new fields (ledger, success/partial only) is intentional; the H1 deferred follow-up in `tasks/todo.md` proposes adding an explicit `successfulCostCents` field to remove the UI-interpretation trap.
+
+`formatCost` in the pure module handles the full range from zero to thousands-of-dollars, including a scientific-notation fallback for sub-penny values (`toPrecision(2)` emits `"1.2e-7"` below ~1e-6 — the fallback re-renders via `toFixed(12)` with trailing-zero trim so the UI never shows scientific notation).
 
 ### Failure helper — `shared/iee/failure.ts`
 
