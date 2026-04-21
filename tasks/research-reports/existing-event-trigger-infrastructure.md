@@ -295,12 +295,6 @@ Low. The evaluator is pure. Reusing it for event-rules matching requires either 
 
 ---
 
-## Area 4 — `policy_rules`
-
-*(section appended below)*
-
----
-
 ## Area 5 — Webhook event normalisation
 
 ### What exists
@@ -481,12 +475,6 @@ Usable as the execution side of an event-rules engine, with these additions:
 | `start_agent_run` | No action type. Agent runs started via `agentExecutionService`, outside the action-dispatch layer | — | — |
 
 **None of the five requested types exist today as auto-gated programmatically-callable actions.** `start_playbook` and `start_agent_run` are not action types at all — they are internal service calls. A generic event-rules engine needs either: (a) add new action types with `defaultGateLevel: 'auto'` for notification/update cases, and (b) register `start_playbook` / `start_agent_run` as new `worker`-category action types OR direct-call from the rules engine with an action-row written for audit only.
-
----
-
-## Area 6 — Action dispatch layer
-
-*(section appended below)*
 
 ---
 
