@@ -110,20 +110,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   let candidates: ParsedSkill[];
 
   try {
-    const storedCandidates = Array.isArray(job.parsedCandidates)
-      ? (job.parsedCandidates as ParsedSkill[])
-      : [];
-    // On retry, prefer the candidate list persisted by a prior run: candidateIndex
-    // values in skill_analyzer_results are indices into this same array, and
-    // re-parsing a github/download source could drift (ordering or content)
-    // so the preserved result rows would no longer match the new parse.
-    if (storedCandidates.length > 0) {
-      candidates = storedCandidates;
+    // Two distinct signals that collapse into "use stored / re-parse / fail":
+    //   • Array.isArray(parsedCandidates) === true  → authoritative list from
+    //     a prior run (possibly empty, e.g. valid paste that yielded zero
+    //     skills). Use it as-is; the "no valid skill definitions" check
+    //     below handles the empty case with a user-friendly error.
+    //   • Array.isArray(parsedCandidates) === false → null / undefined / a
+    //     non-array JSONB value. For paste/upload this signals a corrupt
+    //     row (the create path always writes an array before enqueueing);
+    //     for github/download it's the expected first-run state, so we
+    //     re-parse from the remote URL.
+    // Collapsing "empty array" and "not-an-array" into the same check was
+    // a real regression — it misreported a zero-skill paste as DB corruption.
+    if (Array.isArray(job.parsedCandidates)) {
+      candidates = job.parsedCandidates as ParsedSkill[];
     } else if (job.sourceType === 'paste' || job.sourceType === 'upload') {
-      // Paste/upload candidates are parsed at job-creation time and written
-      // to parsedCandidates before the job is enqueued — reaching this branch
-      // means the job row is corrupt. Fail with a message that points at the
-      // cause rather than the downstream "no valid skills" message.
       await updateJobProgress(jobId, {
         status: 'failed',
         errorMessage: 'parsedCandidates is missing on this job row — re-submit the analysis.',
