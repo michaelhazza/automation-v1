@@ -192,7 +192,112 @@ Low for code; high for schema cleanliness. `nextRunAt` display consumers (`sched
 
 ## Area 3 — `onboarding_bundle_configs` + `subaccountOnboardingService`
 
-*(section appended below)*
+### What exists
+
+**Schema** (`server/db/schema/onboardingBundleConfigs.ts:14-30`):
+
+| Column | Type |
+|---|---|
+| `id` | uuid PK |
+| `organisationId` | uuid NOT NULL FK, **UNIQUE** (one row per org) |
+| `playbookSlugs` | jsonb NOT NULL default `['intelligence-briefing', 'weekly-digest']` — `string[]` |
+| `ordering` | jsonb NOT NULL default `{}` — `Record<string, number>` |
+| `updatedAt` | timestamp |
+| `updatedByUserId` | uuid nullable (no FK) |
+
+Indexes: `onboarding_bundle_configs_org_uq` unique on `organisationId`.
+
+**Important finding: `onboarding_bundle_configs` is defined in the schema but is NOT imported or used anywhere in `subaccountOnboardingService.ts`.** The service does not query this table. It appears to be a superseded design replaced by module-driven slug resolution.
+
+**Actual runtime source** — two composed sources:
+
+1. **`modules.onboardingPlaybookSlugs`** — `text[]` column on `modules` table (`server/db/schema/modules.ts:18`). Each module row lists the playbook slugs it contributes to onboarding.
+2. **Org's active subscription's `moduleIds`** — resolved via `orgSubscriptions → subscriptions.moduleIds → modules` in `resolveOwedSlugsForOrg()` (`subaccountOnboardingService.ts:51-94`).
+
+**`autoStartOwedOnboardingPlaybooks()` logic** (`:286-335`):
+1. `listOwedOnboardingPlaybooks()` → union of `modules.onboardingPlaybookSlugs` across active modules.
+2. For each owed slug without an existing run, `templateAutoStartsOnOnboarding()` (`:341-374`) — raw SQL against `playbook_template_versions.definition_json` for `autoStartOnOnboarding: true`.
+3. If true → `startOwedOnboardingPlaybook()` resolves org or system template, then calls `playbookRunService.startRun(startInput)` (`:246`) with `{ organisationId, subaccountId, templateId (or systemTemplateSlug), initialInput: params.initialInput ?? {}, startedByUserId, runMode: 'supervised', isOnboardingRun: true }`.
+
+**Sole caller of `autoStartOwedOnboardingPlaybooks()`:** `server/routes/subaccounts.ts:123` — after subaccount creation, fire-and-forget.
+
+**Is the event coupling tight?** No. The service accepts `{ organisationId, subaccountId, startedByUserId }` — no event reference. The only call site passes `subaccount_created` context implicitly, but the service's core logic ("resolve owed playbooks, check for existing runs, start missing ones") is fully decoupled from the triggering event.
+
+### Extensibility
+
+Generic `event_rules` could call `startOwedOnboardingPlaybook()` directly for any event. Duplicate-run guard (partial unique index `playbook_runs_active_per_subaccount_slug`) prevents double-starts regardless of caller.
+
+### Coupling risk
+
+Zero at the service API level — the function is already event-agnostic. The `onboarding_bundle_configs` table is dead schema; retiring or repurposing it risks nothing (no reads, no writes from the service).
+
+---
+
+## Area 4 — `policy_rules`
+
+### What exists
+
+**Schema** (`server/db/schema/policyRules.ts:11-56`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id`, `organisationId` (FK), `subaccountId` (nullable FK) | | |
+| `toolSlug` | text NOT NULL | exact match or `'*'` wildcard |
+| `priority` | integer NOT NULL default 100 | lower = first; 9999 = wildcard fallback |
+| `conditions` | jsonb NOT NULL default `{}` | "extensible condition bag" |
+| `decision` | text NOT NULL | `'auto' \| 'review' \| 'block'` |
+| `evaluationMode` | text NOT NULL default `'first_match'` | |
+| `interruptConfig` | jsonb nullable | reviewer UI options |
+| `allowedDecisions` | jsonb nullable | `['approve','edit','reject']` |
+| `descriptionTemplate` | text nullable | markdown with `{{tool_slug}}`, `{{subaccount_id}}` |
+| `timeoutSeconds` | integer nullable | |
+| `timeoutPolicy` | text | `'auto_reject' \| 'auto_approve' \| 'escalate'` |
+| `confidenceThreshold` | real nullable | per-rule override |
+| `guidanceText` | text nullable | injected `<system-reminder>` at tool-call time |
+| `isActive`, `createdAt`, `updatedAt` | | |
+
+Indexes: `policy_rules_org_priority_idx` on `(orgId, isActive, priority)`, `policy_rules_tool_idx` on `(orgId, toolSlug)`.
+
+**What it does:** HITL gate configuration — controls whether a tool call goes `auto | review | block`. Scoped per-org, optionally per-subaccount. **Decision surface is only these three values — no other output actions.**
+
+**Conditions evaluator — `matchesRule()` at `server/services/policyEngineService.ts:96-116`:**
+
+```ts
+export function matchesRule(rule: PolicyRule, ctx: PolicyContext): boolean {
+  if (rule.toolSlug !== '*' && rule.toolSlug !== ctx.toolSlug) return false;
+  if (rule.subaccountId && rule.subaccountId !== ctx.subaccountId) return false;
+
+  const conditions = (rule.conditions ?? {}) as Record<string, unknown>;
+  if (Object.keys(conditions).length === 0) return true;
+  if (!ctx.input || typeof ctx.input !== 'object') return false;
+  const inputObj = ctx.input as Record<string, unknown>;
+
+  for (const [key, expected] of Object.entries(conditions)) {
+    if (inputObj[key] !== expected) return false;           // strict ===
+  }
+  return true;
+}
+```
+
+**Predicate language: flat exact-match key-value on `ctx.input` fields. No JSON-path, no boolean operators, no ranges, no regex.** Despite the column comment suggesting `amount_usd`, `user_role` style conditions, the evaluator only does `!==` comparisons.
+
+**Evaluation order:** `priority ASC`, first match wins. In-memory cache 60s TTL per org (`:58-85`). Invalidated on create/update/delete via `invalidateCache()` (`:203`).
+
+**Callers of `evaluatePolicy()`:** `server/services/actionService.ts`, `middleware/proposeAction.ts`, `middleware/decisionTimeGuidanceMiddleware.ts`, `organisationService.ts` (via `seedFallbackRule` at org creation).
+
+**Decision outputs:** `'auto' | 'review' | 'block'` + metadata (`timeoutSeconds`, `timeoutPolicy`, `interruptConfig`, `allowedDecisions`, `description`, `upgradedByConfidence`). The confidence-upgrade path in `applyConfidenceUpgrade()` (`policyEngineServicePure.ts:76-97`) can upgrade `auto → review` based on `toolIntentConfidence` — but cannot produce new action types.
+
+### Extensibility
+
+`matchesRule` is a pure exported function with no tool-call dependencies, but its context type (`PolicyContext`) is HITL-coupled (`toolSlug`, `subaccountId`, `organisationId`, `input`, `toolIntentConfidence`).
+
+**Notable finding: `triggerService.matchesFilter()` (`:44-52`) and `policyEngineService.matchesRule()` (`:96-116`) implement THE SAME flat exact-match evaluator independently.** Both are already consistent. Either could be the canonical implementation for a new `event_rules` table — extracting into a shared utility is a low-risk refactor.
+
+**Cannot be reused as-is for:** range checks, presence checks, regex, wildcard-beyond-toolSlug, or any predicate beyond strict equality.
+
+### Coupling risk
+
+Low. The evaluator is pure. Reusing it for event-rules matching requires either abstracting `PolicyContext` (accept `eventData` as `input`) or copying the 12-line evaluator. Either path introduces no coupling risk — the existing HITL surface stays untouched.
 
 ---
 
