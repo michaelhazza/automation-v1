@@ -21,6 +21,8 @@ import {
   PROVIDER_FALLBACK_CHAIN,
   PROVIDER_COOLDOWN_MS,
 } from '../config/limits.js';
+import * as inflightRegistry from './llmInflightRegistry.js';
+import { buildRuntimeKey } from './llmInflightRegistryPure.js';
 
 // ---------------------------------------------------------------------------
 // LLM Router — the financial chokepoint for every LLM call in the platform.
@@ -513,6 +515,35 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let actualModel = effectiveModel;
   const fallbackAttempts: FallbackAttempt[] = [];
 
+  // ── In-flight registry wiring (spec tasks/llm-inflight-realtime-tracker-spec.md) ──
+  //
+  // `currentRuntimeKey` tracks the attempt currently represented in the
+  // in-flight registry. It is set immediately before each provider
+  // dispatch and cleared after `inflightRegistry.remove()`. The final
+  // attempt's removal fires AFTER the ledger upsert so the removal event
+  // carries `ledgerRowId` + `ledgerCommittedAt` for UI reconciliation.
+  //
+  // An unhandled throw between add() and remove() (e.g. a DB error during
+  // the ledger upsert) leaves the entry alive until the deadline-based
+  // sweep reaps it — the 30s buffer past `timeoutMs` captures exactly that
+  // window. See `llmInflightRegistry.ts` sweep loop for the safety net.
+  let currentRuntimeKey: string | null = null;
+  // When every attempt is a retryable error, each inner-catch removal
+  // clears `currentRuntimeKey` before the outer failure-path ledger
+  // write fires — which means the final failure's ledger row never gets
+  // linked into the registry's removal event. We record the final
+  // removed attempt here so the failure path can call
+  // `inflightRegistry.updateLedgerLink()` with the now-known row id,
+  // closing the UX gap flagged in pr-review — "[ledger] button missing
+  // for retryable-error-only failures".
+  let lastRemovedAttempt: {
+    runtimeKey:     string;
+    idempotencyKey: string;
+    attempt:        number;
+    startedAt:      string;
+    terminalStatus: 'error';
+  } | null = null;
+
   // Build fallback chain: primary provider first, then others in order
   const fallbackChain = [
     effectiveProvider,
@@ -548,6 +579,55 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
 
     for (let attempt = 1; attempt <= PROVIDER_MAX_RETRIES + 1; attempt++) {
+      // In-flight registry — one entry per attempt. runtimeKey is unique
+      // across crash-restarts (see spec §4.2). add() fires post-budget-
+      // reservation, immediately before the adapter dispatch.
+      //
+      // NOTE — `attempt` is the per-provider retry counter; it resets to
+      // 1 on each fallback provider. The ledger's `attemptNumber` resets
+      // the same way (line `attemptNumber = attempt` below), so the two
+      // stay consistent, but the admin UI sees provider-B-attempt-1
+      // immediately after provider-A-attempt-2 with no visible indication
+      // that the earlier provider already failed. Distinct runtimeKeys
+      // (different startedAt) prevent collision; the UX gap is a
+      // documented follow-up, not a correctness bug.
+      const attemptStartedAt = new Date().toISOString();
+      const attemptRuntimeKey = buildRuntimeKey({
+        idempotencyKey,
+        attempt,
+        startedAt: attemptStartedAt,
+      });
+      // Pre-add invariant (spec §6 llmRouter.ts row). Fail fast in dev so
+      // an accidental double-add from a future refactor is caught at the
+      // call site rather than silently becoming a registry-layer no-op.
+      if (inflightRegistry.has(attemptRuntimeKey)) {
+        const invariantMsg =
+          `[llmRouter] inflight double-add invariant violated runtimeKey=${attemptRuntimeKey}`;
+        if (process.env.NODE_ENV !== 'production') {
+          throw new Error(invariantMsg);
+        }
+        console.error(invariantMsg);
+      }
+      inflightRegistry.add({
+        idempotencyKey,
+        attempt,
+        startedAt:      attemptStartedAt,
+        label:          `${provider}/${mappedModel}`,
+        provider,
+        model:          mappedModel,
+        sourceType:     ctx.sourceType,
+        sourceId:       ctx.sourceId ?? null,
+        featureTag:     ctx.featureTag ?? 'unknown',
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        runId:          ctx.runId ?? null,
+        executionId:    ctx.executionId ?? null,
+        ieeRunId:       ctx.ieeRunId ?? null,
+        callSite:       ctx.callSite ?? 'app',
+        timeoutMs:      PROVIDER_CALL_TIMEOUT_MS,
+      });
+      currentRuntimeKey = attemptRuntimeKey;
+
       try {
         providerResponse = await callWithTimeout(
           `${provider}/${mappedModel}`,
@@ -610,6 +690,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         // surface. The shared failure path at the bottom of this function
         // calls releaseReservation() + writes the row + rethrows lastError.
         if (isNonRetryableError(err)) {
+          // Keep `currentRuntimeKey` — the terminal-failure ledger-write
+          // path below will remove the entry once `ledgerRowId` is known.
           break providerLoop;
         }
 
@@ -619,6 +701,33 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           error: String(err).slice(0, 200),
           attemptIndex: attempt,
         });
+
+        // Retryable error — remove this attempt's entry from the registry
+        // before the backoff sleep / next attempt. The next attempt's
+        // runtimeKey will be distinct (new startedAt) so the pre-add
+        // invariant above is honoured. Capture the attempt's identity in
+        // `lastRemovedAttempt` so the failure path can re-emit a
+        // ledger-linked removal event if all attempts exhaust without
+        // entering the `currentRuntimeKey != null` path below.
+        if (currentRuntimeKey) {
+          inflightRegistry.remove({
+            runtimeKey:      currentRuntimeKey,
+            terminalStatus:  'error',
+            completedAt:     new Date().toISOString(),
+            ledgerRowId:     null,
+            ledgerCommittedAt: null,
+            sweepReason:     null,
+            evictionContext: null,
+          });
+          lastRemovedAttempt = {
+            runtimeKey:     currentRuntimeKey,
+            idempotencyKey,
+            attempt,
+            startedAt:      attemptStartedAt,
+            terminalStatus: 'error',
+          };
+          currentRuntimeKey = null;
+        }
 
         if (attempt <= PROVIDER_MAX_RETRIES) {
           const backoff = PROVIDER_BACKOFF_MS[attempt - 1] ?? PROVIDER_BACKOFF_MS[PROVIDER_BACKOFF_MS.length - 1];
@@ -665,7 +774,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
-    await db
+    const failureInsertedRows = await db
       .insert(llmRequests)
       .values({
         idempotencyKey,
@@ -710,7 +819,56 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         billingMonth,
         billingDay,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: llmRequests.id });
+
+    // Emit the terminal in-flight removal with ledger reconciliation. The
+    // caller's UI uses `ledgerRowId` + `ledgerCommittedAt` to link the live
+    // row to the ledger detail drawer (spec §5).
+    //
+    // Two branches:
+    //   (a) `currentRuntimeKey` is set — the last attempt was a non-
+    //       retryable break (PROVIDER_TIMEOUT, CLIENT_DISCONNECTED,
+    //       PROVIDER_NOT_CONFIGURED, auth). The entry is still alive in
+    //       the registry; remove it with the now-known ledger row id.
+    //   (b) `currentRuntimeKey` is null but `lastRemovedAttempt` is set —
+    //       every attempt was a retryable error, and each inner catch
+    //       already removed its own entry with `ledgerRowId: null`. The
+    //       ledger row has now been written, so we re-emit a ledger-
+    //       linked removal for the last attempt's runtimeKey via
+    //       `updateLedgerLink`. The client merges the populated
+    //       ledgerRowId over the earlier null in `recentlyLanded`, so
+    //       the [ledger] button appears on the "Recently landed" row.
+    const ledgerRowId = failureInsertedRows[0]?.id ?? null;
+    const ledgerCommittedAtISO = ledgerRowId ? new Date().toISOString() : null;
+    if (currentRuntimeKey) {
+      inflightRegistry.remove({
+        runtimeKey:        currentRuntimeKey,
+        terminalStatus:    callStatus as
+          | 'error' | 'timeout' | 'aborted_by_caller' | 'client_disconnected'
+          | 'parse_failure' | 'provider_unavailable' | 'provider_not_configured',
+        completedAt:       new Date().toISOString(),
+        ledgerRowId,
+        ledgerCommittedAt: ledgerCommittedAtISO,
+        sweepReason:       null,
+        evictionContext:   null,
+      });
+      currentRuntimeKey = null;
+    } else if (lastRemovedAttempt && ledgerRowId && ledgerCommittedAtISO) {
+      inflightRegistry.updateLedgerLink({
+        runtimeKey:        lastRemovedAttempt.runtimeKey,
+        idempotencyKey:    lastRemovedAttempt.idempotencyKey,
+        attempt:           lastRemovedAttempt.attempt,
+        terminalStatus:    lastRemovedAttempt.terminalStatus,
+        completedAt:       new Date().toISOString(),
+        durationMs:        Math.max(
+          0,
+          Date.now() - Date.parse(lastRemovedAttempt.startedAt),
+        ),
+        ledgerRowId,
+        ledgerCommittedAt: ledgerCommittedAtISO,
+      });
+    }
 
     throw lastError ?? new Error('All providers exhausted');
   }
@@ -773,7 +931,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // ── 12. Write ledger — upsert so a successful retry overwrites a prior error row ──
   const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
-  await db
+  const successInsertedRows = await db
     .insert(llmRequests)
     .values({
       idempotencyKey,
@@ -841,7 +999,28 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       },
       // Drizzle where clause: only update if current row is not already a success
       where: sql`${llmRequests.status} != 'success'`,
+    })
+    .returning({ id: llmRequests.id });
+
+  // ── 12a. Remove the in-flight registry entry for the successful attempt ──
+  // Emitted AFTER the ledger upsert so `ledgerRowId` + `ledgerCommittedAt`
+  // are populated on the removal payload (spec §5). When the upsert hits
+  // the `where: status != 'success'` guard on an already-success row,
+  // `.returning()` comes back empty — we fall back to `null` and the UI
+  // retries via idempotencyKey.
+  if (currentRuntimeKey) {
+    const ledgerRowId = successInsertedRows[0]?.id ?? null;
+    inflightRegistry.remove({
+      runtimeKey:        currentRuntimeKey,
+      terminalStatus:    'success',
+      completedAt:       new Date().toISOString(),
+      ledgerRowId,
+      ledgerCommittedAt: ledgerRowId ? new Date().toISOString() : null,
+      sweepReason:       null,
+      evictionContext:   null,
     });
+    currentRuntimeKey = null;
+  }
 
   // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
   createGeneration('llm.router.call', {

@@ -19,9 +19,16 @@
 
 // skillExecutor transitively imports server/db/index.ts which validates env
 // vars via zod. Load .env first so the import does not throw on DATABASE_URL.
-import 'dotenv/config';
+// In environments without a .env file (CI, ephemeral sandboxes), fall back
+// to placeholder values — this test is purely structural, it never hits the
+// DB or signs a JWT. ESM imports are hoisted, so we seed process.env *before*
+// a dynamic import pulls skillExecutor through the env-validated db module.
+await import('dotenv/config');
+process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
+process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
+process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
-import { SKILL_HANDLERS } from '../skillExecutor.js';
+const { SKILL_HANDLERS } = await import('../skillExecutor.js');
 
 let passed = 0;
 let failed = 0;
@@ -39,7 +46,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (149 entries)
+// Canonical handler key set (163 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -198,6 +205,21 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'weekly_digest_gather',
   'config_weekly_digest_gather',
   'config_deliver_playbook_output',
+  // ClientPulse session-1/2 additions (14 handlers folded in over multiple merges)
+  'compute_staff_activity_pulse',
+  'scan_integration_fingerprints',
+  'crm.fire_automation',
+  'crm.send_email',
+  'crm.send_sms',
+  'crm.create_task',
+  'notify_operator',
+  'config_update_organisation_config',
+  'list_platform_capabilities',
+  'list_connections',
+  'check_capability_gap',
+  'request_feature',
+  'smart_skip_from_website',
+  'canonical_dictionary',
 ];
 
 // ---------------------------------------------------------------------------
@@ -233,11 +255,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 149 keys', () => {
+test('SKILL_HANDLERS has exactly 163 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 149) {
+  if (count !== 163) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 149. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 163. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }
@@ -258,3 +280,7 @@ test('Every SKILL_HANDLERS entry is a function', () => {
 console.log('');
 console.log(`skillHandlerRegistryEquivalence: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
+
+// Make this file a module so the top-level `await import()` used above
+// satisfies TS1375 (top-level await requires ESM module semantics).
+export {};

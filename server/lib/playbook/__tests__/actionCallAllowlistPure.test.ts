@@ -36,12 +36,15 @@ function assert(condition: boolean, label: string) {
 
 // ── Shape ──────────────────────────────────────────────────────────────────
 
-test('allowlist covers the full 30-slug set (28 existing + 2 Phase G)', () => {
+test('allowlist covers the full 32-slug set (28 base + 2 Phase G + 2 Memory & Briefings Phase 3)', () => {
   // Spec §4.3 — the closed set for v1. 28 pre-existing config_* slugs plus
-  // the two Phase G additions shipped with intelligence-briefing.
+  // two Phase G additions (portal + email digest) plus two Memory &
+  // Briefings Phase 3 additions (`config_weekly_digest_gather` and
+  // `config_deliver_playbook_output`). Every expansion requires editing
+  // actionCallAllowlist.ts AND bumping this number — that's the friction.
   assert(
-    ACTION_CALL_ALLOWED_SLUGS.size === 30,
-    `expected exactly 30 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`,
+    ACTION_CALL_ALLOWED_SLUGS.size === 32,
+    `expected exactly 32 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`,
   );
 });
 
