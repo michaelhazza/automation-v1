@@ -5,7 +5,7 @@
 //
 // Spec: tasks/live-agent-execution-log-spec.md §4.1a + §5.9 + §7.2.
 
-import { inArray } from 'drizzle-orm';
+import { and, inArray, isNull } from 'drizzle-orm';
 import { actions } from '../db/schema/actions.js';
 import { agentDataSources } from '../db/schema/agentDataSources.js';
 import { agentRunPrompts } from '../db/schema/agentRunPrompts.js';
@@ -53,13 +53,20 @@ export async function resolveLinkedEntityLabels(
     const uniqueIds = Array.from(new Set(ids));
     switch (type) {
       case 'memory_entry': {
+        // Soft-delete filter — a deleted memory row's label may still
+        // carry PII the operator intended to remove. Suppress.
         const rows = await db
           .select({
             id: workspaceMemoryEntries.id,
             content: workspaceMemoryEntries.content,
           })
           .from(workspaceMemoryEntries)
-          .where(inArray(workspaceMemoryEntries.id, uniqueIds));
+          .where(
+            and(
+              inArray(workspaceMemoryEntries.id, uniqueIds),
+              isNull(workspaceMemoryEntries.deletedAt),
+            ),
+          );
         for (const r of rows) {
           out[`${type}:${r.id}`] = `Memory: ${truncateLabel(r.content ?? '')}`;
         }
@@ -91,11 +98,12 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'skill': {
+        // systemSkills has no soft-delete column; only filter org skills.
         const [subRows, sysRows] = await Promise.all([
           db
             .select({ id: skills.id, name: skills.name, slug: skills.slug })
             .from(skills)
-            .where(inArray(skills.id, uniqueIds)),
+            .where(and(inArray(skills.id, uniqueIds), isNull(skills.deletedAt))),
           db
             .select({ id: systemSkills.id, name: systemSkills.name, slug: systemSkills.slug })
             .from(systemSkills)
@@ -114,11 +122,12 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'agent': {
+        // systemAgents has no soft-delete column; only filter org agents.
         const [orgRows, sysRows] = await Promise.all([
           db
             .select({ id: agents.id, name: agents.name })
             .from(agents)
-            .where(inArray(agents.id, uniqueIds)),
+            .where(and(inArray(agents.id, uniqueIds), isNull(agents.deletedAt))),
           db
             .select({ id: systemAgents.id, name: systemAgents.name })
             .from(systemAgents)

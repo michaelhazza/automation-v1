@@ -22,7 +22,6 @@ function mkUser(overrides: Partial<AgentRunVisibilityUser> = {}): AgentRunVisibi
     role: 'user',
     organisationId: 'org-1',
     orgPermissions: new Set<string>(),
-    subaccountPermissionsFor: () => new Set<string>(),
     ...overrides,
   };
 }

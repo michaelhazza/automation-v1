@@ -30,7 +30,13 @@ export interface AgentRunVisibilityUser {
   role: 'system_admin' | 'org_admin' | 'user' | string;
   organisationId: string;
   orgPermissions: ReadonlySet<string>;
-  subaccountPermissionsFor: (subaccountId: string) => ReadonlySet<string>;
+  // NOTE: a `subaccountPermissionsFor` resolver was on this interface in
+  // an earlier revision. Removed — no caller reads it. Subaccount-level
+  // permission checks are done via the `resolveSubaccount` middleware on
+  // the HTTP side and the precomputed `canManage*` booleans on the
+  // socket side. Re-introduce only when a real caller needs the full
+  // per-subaccount permission set (and supply an implementation, not a
+  // stub — see review log §5).
 }
 
 export interface AgentRunVisibility {

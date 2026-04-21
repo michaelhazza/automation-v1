@@ -93,7 +93,7 @@ async function requireVisibility(
   res: Response,
   next: NextFunction,
   need: 'view' | 'payload',
-): Promise<ResolvedRunContext | null> {
+): Promise<(ResolvedRunContext & { userCtx: Awaited<ReturnType<typeof buildUserContextForRun>> }) | null> {
   const runId = req.params.runId;
   if (!runId) {
     res.status(400).json({ error: 'runId required' });
@@ -106,8 +106,14 @@ async function requireVisibility(
     return null;
   }
 
-  const user: AgentRunVisibilityUser = await buildUserContextForRun(req, ctx.run);
-  const visibility = resolveAgentRunVisibility(ctx.visibilityRun, user);
+  const userCtx = await buildUserContextForRun(req, ctx.run);
+  const visibilityUser: AgentRunVisibilityUser = {
+    id: userCtx.id,
+    role: userCtx.role,
+    organisationId: userCtx.organisationId,
+    orgPermissions: userCtx.orgPermissions,
+  };
+  const visibility = resolveAgentRunVisibility(ctx.visibilityRun, visibilityUser);
 
   if (!visibility.canView) {
     res.status(403).json({ error: 'Forbidden' });
@@ -120,7 +126,7 @@ async function requireVisibility(
     return null;
   }
 
-  return ctx;
+  return { ...ctx, userCtx };
 }
 
 // ---------------------------------------------------------------------------
@@ -137,18 +143,17 @@ router.get(
     const fromSeq = Number(req.query.fromSeq ?? 1);
     const limit = Math.min(Number(req.query.limit ?? 1000) || 1000, 1000);
 
-    const userCtx = await buildUserContextForRun(req, ctx.run);
     const page = await streamEvents(ctx.run.id, {
       fromSeq: Number.isFinite(fromSeq) ? fromSeq : 1,
       limit,
       forUser: {
-        id: userCtx.id,
-        role: userCtx.role,
-        organisationId: userCtx.organisationId,
-        orgPermissions: userCtx.orgPermissions,
-        canManageWorkspace: userCtx.canManageWorkspace,
-        canManageSkills: userCtx.canManageSkills,
-        canEditAgents: userCtx.canEditAgents,
+        id: ctx.userCtx.id,
+        role: ctx.userCtx.role,
+        organisationId: ctx.userCtx.organisationId,
+        orgPermissions: ctx.userCtx.orgPermissions,
+        canManageWorkspace: ctx.userCtx.canManageWorkspace,
+        canManageSkills: ctx.userCtx.canManageSkills,
+        canEditAgents: ctx.userCtx.canEditAgents,
       },
     });
 

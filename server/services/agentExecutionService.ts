@@ -1318,7 +1318,7 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       })
         .where(and(eq(agentRuns.id, run.id), isNull(agentRuns.runResultStatus)))
-        .returning({ id: agentRuns.id });
+        .returning({ id: agentRuns.id, nextEventSeq: agentRuns.nextEventSeq });
       if (terminalUpdate.length === 0) {
         logger.warn('runResultStatus.write_skipped', {
           runId: run.id,
@@ -1328,6 +1328,20 @@ export const agentExecutionService = {
       }
 
       // Live Agent Execution Log — critical terminal bookend (spec §5.3).
+      // totalCostCents is read from the ledger; eventCount from the
+      // just-returned nextEventSeq (number of events emitted so far this
+      // run, which bounds the event count at this terminal).
+      let totalCostCents = 0;
+      try {
+        const { getRunCostCentsFromLedger } = await import('../lib/runCostBreaker.js');
+        totalCostCents = await getRunCostCentsFromLedger(run.id);
+      } catch (err) {
+        logger.warn('agentExecutionService.run_completed_cost_lookup_failed', {
+          runId: run.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const eventCount = terminalUpdate[0]?.nextEventSeq ?? 0;
       tryEmitAgentEvent({
         runId: run.id,
         organisationId: request.organisationId,
@@ -1338,9 +1352,9 @@ export const agentExecutionService = {
           critical: true,
           finalStatus,
           totalTokens: loopResult.totalTokens,
-          totalCostCents: 0,
+          totalCostCents,
           totalDurationMs: durationMs,
-          eventCount: 0,
+          eventCount,
         },
       });
 

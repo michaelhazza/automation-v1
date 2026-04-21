@@ -291,62 +291,72 @@ async function emitEventLimitReachedIfFirst(
   subaccountId: string | null,
   cap: number,
 ): Promise<void> {
+  // The atomic-claim UPDATE and the signal-event INSERT must commit or
+  // rollback together. If the UPDATE committed but the INSERT rolled
+  // back, the `event_limit_reached_emitted` flag would be set with no
+  // corresponding event row — losing the signal permanently (no retry,
+  // because the flag now blocks re-entry).
   const db = getOrgScopedDb('agentExecutionEventService.eventLimitReached');
-  const rows = await db
-    .update(agentRuns)
-    .set({
-      eventLimitReachedEmitted: true,
-      nextEventSeq: sql`${agentRuns.nextEventSeq} + 1`,
-    })
-    .where(
-      and(
-        eq(agentRuns.id, runId),
-        eq(agentRuns.eventLimitReachedEmitted, false),
-      ),
-    )
-    .returning({
-      nextEventSeq: agentRuns.nextEventSeq,
-      startedAt: agentRuns.startedAt,
-    });
+  const result = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(agentRuns)
+      .set({
+        eventLimitReachedEmitted: true,
+        nextEventSeq: sql`${agentRuns.nextEventSeq} + 1`,
+      })
+      .where(
+        and(
+          eq(agentRuns.id, runId),
+          eq(agentRuns.eventLimitReachedEmitted, false),
+        ),
+      )
+      .returning({
+        nextEventSeq: agentRuns.nextEventSeq,
+        startedAt: agentRuns.startedAt,
+      });
 
-  if (rows.length === 0) {
-    // Another caller already claimed the emission — nothing to do.
-    return;
-  }
+    if (rows.length === 0) {
+      // Another caller already claimed the emission — nothing to do.
+      return null;
+    }
 
-  const nextSeq = rows[0].nextEventSeq;
-  const startedAt = rows[0].startedAt ?? new Date();
-  const eventTimestamp = new Date();
-  const durationMs = computeDurationSinceRunStartMs(
-    startedAt.getTime(),
-    eventTimestamp.getTime(),
-  );
-  const payload: AgentExecutionEventPayload = {
-    eventType: 'run.event_limit_reached',
-    critical: true,
-    eventCountAtLimit: nextSeq - 1,
-    cap,
-  };
-
-  const [row] = await db
-    .insert(agentExecutionEvents)
-    .values({
-      id: randomUUID(),
-      runId,
-      organisationId,
-      subaccountId,
-      sequenceNumber: nextSeq,
+    const nextSeq = rows[0].nextEventSeq;
+    const startedAt = rows[0].startedAt ?? new Date();
+    const eventTimestamp = new Date();
+    const durationMs = computeDurationSinceRunStartMs(
+      startedAt.getTime(),
+      eventTimestamp.getTime(),
+    );
+    const payload: AgentExecutionEventPayload = {
       eventType: 'run.event_limit_reached',
-      eventTimestamp,
-      durationSinceRunStartMs: durationMs,
-      sourceService: 'agentExecutionService',
-      payload: payload as unknown as Record<string, unknown>,
-      linkedEntityType: null,
-      linkedEntityId: null,
-    })
-    .returning({
-      id: agentExecutionEvents.id,
-    });
+      critical: true,
+      eventCountAtLimit: nextSeq - 1,
+      cap,
+    };
+
+    const [row] = await tx
+      .insert(agentExecutionEvents)
+      .values({
+        id: randomUUID(),
+        runId,
+        organisationId,
+        subaccountId,
+        sequenceNumber: nextSeq,
+        eventType: 'run.event_limit_reached',
+        eventTimestamp,
+        durationSinceRunStartMs: durationMs,
+        sourceService: 'agentExecutionService',
+        payload: payload as unknown as Record<string, unknown>,
+        linkedEntityType: null,
+        linkedEntityId: null,
+      })
+      .returning({ id: agentExecutionEvents.id });
+
+    return { row, nextSeq, eventTimestamp, durationMs, payload };
+  });
+
+  if (!result) return;
+  const { row, nextSeq, eventTimestamp, durationMs, payload } = result;
 
   const event: AgentExecutionEvent = {
     id: row.id,

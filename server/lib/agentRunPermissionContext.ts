@@ -20,8 +20,6 @@ export interface AgentRunUserContext {
   role: 'system_admin' | 'org_admin' | 'user' | string;
   organisationId: string;
   orgPermissions: ReadonlySet<string>;
-  /** `subaccountId → permission set` resolver — only called if needed. */
-  subaccountPermissionsFor: (subaccountId: string) => ReadonlySet<string>;
   canManageWorkspace: boolean;
   canManageSkills: boolean;
   canEditAgents: boolean;
@@ -72,7 +70,6 @@ export async function buildUserContextForRun(
     role: user.role,
     organisationId: req.orgId ?? user.organisationId,
     orgPermissions,
-    subaccountPermissionsFor: (_sub: string) => new Set<string>(),
     canManageWorkspace,
     canManageSkills,
     canEditAgents,
