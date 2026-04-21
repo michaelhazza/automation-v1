@@ -88,9 +88,16 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    ```json
    {"timestamp":"...","agent":"chatgpt-pr-review","finding_type":"null_check","decision":"accept","severity":"high","file":"agentExecutionService.ts","category":"bug"}
    ```
-5. **Deferred backlog:** appends deferred items to `tasks/review-logs/_deferred.md` (append, never overwrite). Before appending each item, scan the file for a similar existing entry — **similar** means same `finding_type` OR same leading phrase (first ~5 words). Skip if already present:
-   ```
-   - [ ] <finding> — <reason> — from PR #N (<branch>)
+5. **Deferred backlog:** appends deferred items to `tasks/todo.md` — the single-source-of-truth deferred-items file that existing feature backlogs (Hermes Tier 1, Live Agent Execution Log) already use. Do **not** write to `tasks/review-logs/_deferred.md`; that file is superseded by this convention. Create a new dated section (or append to an existing same-PR section) rather than mixing entries into an existing feature's section — future sessions reading `tasks/todo.md` should find one contiguous block per review session. Before appending each item, scan the file for a similar existing entry — **similar** means same `finding_type` OR same leading phrase (first ~5 words). Skip if already present. Entry format:
+
+   ```markdown
+   ## Deferred from ChatGPT PR review — PR #<N> / <branch>
+
+   **Captured**: <ISO date>
+   **Source log**: `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md`
+
+   - [ ] <finding> — <reason>
+   - [ ] <finding> — <reason>
    ```
 6. Checks if `architecture.md` or `capabilities.md` needs updating based on structural changes — updates if yes
 7. PR handling:
@@ -133,9 +140,15 @@ After applying accepted items, prints the changed sections only (not the full sp
    Each failure logged as a warning. If **2 or more** items fail, also log: `⚠ Spec not implementation-ready — resolve checklist failures before starting build`
 3. Writes final summary to the session log
 4. **Pattern extraction + `_index.jsonl`:** same as PR agent — extracts patterns to `KNOWLEDGE.md` (with deduplication check before appending), force-updates `CLAUDE.md` if >2 `[missing-doc]` rejections, appends JSONL records to `tasks/review-logs/_index.jsonl` (with fingerprint dedup)
-5. **Deferred backlog:** appends deferred items to `tasks/review-logs/_deferred.md`. Before appending each item, scan for a similar existing entry — skip if already present:
-   ```
-   - [ ] <finding> — <reason> — from spec <file>
+5. **Deferred backlog:** appends deferred items to `tasks/todo.md` (same single-source-of-truth file the PR agent uses — see §Agent: `chatgpt-pr-review` Finalization step 5). Same scan-before-append dedup rule. Same section shape, with a spec-review heading:
+
+   ```markdown
+   ## Deferred from ChatGPT spec review — <spec-file>
+
+   **Captured**: <ISO date>
+   **Source log**: `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md`
+
+   - [ ] <finding> — <reason>
    ```
 6. Prints: "Spec review complete. PR #<N>: <url>. Hand off to architect or invoke writing-plans when ready to implement."
 
@@ -187,7 +200,7 @@ Both agents write to the same structure:
 ## Final Summary
 - Rounds: 3
 - Accepted: 9 | Rejected: 4 | Deferred: 2
-- Deferred items:
+- Deferred items → `tasks/todo.md` § Deferred from ChatGPT PR review — PR #167 / <branch>
   - Extract renderer component (defer to follow-up)
   - Add pagination to timeline (out of scope for this PR)
 - KNOWLEDGE.md updated: yes (1 entry added)

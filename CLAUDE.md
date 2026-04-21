@@ -291,6 +291,20 @@ Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on dis
 
 If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
 
+### Deferred actions route to `tasks/todo.md` — single source of truth
+
+Every review loop — `pr-reviewer`, `dual-reviewer`, `spec-reviewer`, the upcoming `chatgpt-pr-review` / `chatgpt-spec-review` — that produces deferred action items writes them to **`tasks/todo.md`**, not to per-session side files. The review log in `tasks/review-logs/` keeps the raw finding-by-finding record; `tasks/todo.md` carries the curated backlog.
+
+Why one file: a future session picking up deferred work needs to grep one place, not scan a directory of session logs. Existing sections (Hermes Tier 1, Live Agent Execution Log) already use this pattern.
+
+Append rules:
+- **New dated section per review session** — heading shape `## Deferred from <agent> review — <PR-or-spec-ref>` with `**Captured**`, `**Source log**`, and a checkbox list. Never mix a new review's items into an existing feature's section.
+- **Append-only** — never rewrite or delete existing sections. Future triage sessions close items by checking the box, not by deleting the line.
+- **Dedup before append** — scan for a similar existing entry (same `finding_type` OR same leading ~5 words); skip if already present so re-runs don't duplicate.
+- **Docs-cleanup trigger.** The ChatGPT review agents call this step automatically at finalization (see `docs/superpowers/specs/2026-04-22-chatgpt-review-agents-design.md` §Agent: `chatgpt-pr-review` Finalization step 5, and the mirror step in the spec-review agent). Manual reviewers (humans, or sessions running `pr-reviewer` / `spec-reviewer`) follow the same convention when promoting a review finding to a backlog item.
+
+The superseded file `tasks/review-logs/_deferred.md` was never created — the convention is `tasks/todo.md` from day one.
+
 ### Before you write a spec
 
 For any Significant or Major spec, read `docs/spec-authoring-checklist.md` before drafting. It is a pre-authoring checklist derived from patterns the `spec-reviewer` has caught across 15+ production specs — primitives-reuse search, file-inventory lock, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, and testing posture.

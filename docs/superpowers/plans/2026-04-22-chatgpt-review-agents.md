@@ -159,10 +159,21 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    Dedup: skip write if same fingerprint already exists in this session.
    Silent failure: if write fails or JSON is invalid, log one-line warning in
    session log and continue — do NOT block finalization.
-5. Deferred backlog: append deferred items to tasks/review-logs/_deferred.md
-   (append, never overwrite). Before each item, scan for similar existing entry
-   (same finding_type OR same leading phrase, first ~5 words) — skip if present:
-   - [ ] <finding> — <reason> — from PR #N (<branch>)
+5. Deferred backlog: append deferred items to tasks/todo.md — the single-
+   source-of-truth file existing feature backlogs (Hermes Tier 1, Live Agent
+   Execution Log) already use. Do NOT write to tasks/review-logs/_deferred.md
+   (superseded by this convention). Before each item, scan the file for a
+   similar existing entry (same finding_type OR same leading phrase, first ~5
+   words) — skip if present. Create a new dated section for this PR review
+   session, append-only, never overwrite:
+
+     ## Deferred from ChatGPT PR review — PR #<N> / <branch>
+
+     **Captured**: <ISO date>
+     **Source log**: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
+
+     - [ ] <finding> — <reason>
+     - [ ] <finding> — <reason>
 6. Check whether structural changes should update architecture.md or
    capabilities.md — update if yes, skip if no
 7. Print: "Ready to merge — PR #<N>: <url>"
@@ -214,7 +225,7 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
   ## Final Summary
   - Rounds: <N>
   - Accepted: <X> | Rejected: <Y> | Deferred: <Z>
-  - Deferred items:
+  - Deferred items → tasks/todo.md § Deferred from ChatGPT PR review — PR #<N> / <branch>
     - <item> — <reason>
   - KNOWLEDGE.md updated: yes (<N> entries) | no
   - architecture.md updated: yes | no
@@ -384,10 +395,19 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - Append JSONL records to tasks/review-logs/_index.jsonl with fingerprint
      dedup and silent-failure handling (same rules as PR agent)
    - Enum enforcement: finding_type / category / severity must use predefined values
-5. Deferred backlog: append deferred items to tasks/review-logs/_deferred.md
-   (append, never overwrite). Before each, scan for similar existing entry
-   (same finding_type OR same leading phrase, first ~5 words) — skip if present:
-   - [ ] <finding> — <reason> — from spec <file>
+5. Deferred backlog: append deferred items to tasks/todo.md — same single-
+   source-of-truth file the PR agent uses (see Task 1 finalization step 5 for
+   the full rule). Do NOT write to tasks/review-logs/_deferred.md. Same scan-
+   before-append dedup rule. Create a new dated section for this spec review
+   session, append-only:
+
+     ## Deferred from ChatGPT spec review — <spec-file>
+
+     **Captured**: <ISO date>
+     **Source log**: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
+
+     - [ ] <finding> — <reason>
+     - [ ] <finding> — <reason>
 6. Print: "Spec review complete. PR #<N>: <url>. Hand off to architect or
    invoke writing-plans when ready to implement."
 
