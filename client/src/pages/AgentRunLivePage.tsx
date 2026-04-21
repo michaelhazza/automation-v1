@@ -21,6 +21,23 @@ const BACKFILL_LIMIT = 1000;
 // it; the snapshot endpoint remains the authoritative historical record.
 const TIMELINE_WINDOW_SIZE = 2000;
 
+// Process-local client metrics for the live log. Complements the per-drop
+// console.warn lines with aggregate counters so an operator can eyeball
+// "how often are we seeing gaps / collisions right now?" without
+// tail-following the console. Exposed via `getAgentRunLiveClientMetrics()`
+// for a future admin page or manual inspection via window.* hook.
+const clientMetrics = {
+  sequenceGapsTotal: 0,
+  sequenceCollisionsTotal: 0,
+};
+
+export function getAgentRunLiveClientMetrics(): {
+  sequenceGapsTotal: number;
+  sequenceCollisionsTotal: number;
+} {
+  return { ...clientMetrics };
+}
+
 export default function AgentRunLivePage({ user: _user }: { user: User }) {
   const { runId } = useParams<{ runId: string }>();
   const [events, setEvents] = useState<AgentExecutionEvent[]>([]);
@@ -118,6 +135,7 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
           lastSeenSeqRef.current > 0 &&
           event.sequenceNumber > lastSeenSeqRef.current + 1
         ) {
+          clientMetrics.sequenceGapsTotal += 1;
           // eslint-disable-next-line no-console
           console.warn('AgentRunLivePage: sequence gap', {
             lastSeen: lastSeenSeqRef.current,
@@ -166,13 +184,21 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
       {capDetails && (
         <div
           role="status"
-          className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex items-start gap-3"
         >
-          <strong>Event cap reached.</strong>{' '}
-          This run exceeded {capDetails.cap ?? 'the configured'} events at sequence #
-          {capDetails.eventCountAtLimit ?? '?'}. Critical lifecycle + LLM events continued
-          to emit; non-critical events after this point were dropped to preserve
-          observability headroom. See the run trace for the full LLM ledger.
+          <div className="flex-1">
+            <strong>Event cap reached.</strong>{' '}
+            This run exceeded {capDetails.cap ?? 'the configured'} events at sequence #
+            {capDetails.eventCountAtLimit ?? '?'}. Critical lifecycle + LLM events continued
+            to emit; non-critical events after this point were dropped to preserve
+            observability headroom.
+          </div>
+          <Link
+            to={`/admin/runs/${runId}`}
+            className="text-amber-900 underline whitespace-nowrap hover:text-amber-700"
+          >
+            View run trace →
+          </Link>
         </div>
       )}
 
@@ -218,11 +244,13 @@ function mergeEvents(
     (a, b) => a.sequenceNumber - b.sequenceNumber,
   );
 
-  // Sequence-collision warning — distinct ids sharing a sequenceNumber
-  // indicate an upstream invariant break. Scan after sort so adjacent
-  // collisions are cheap to detect.
+  // Sequence-collision warning + metric — distinct ids sharing a
+  // sequenceNumber indicate an upstream invariant break. Scan after sort
+  // so adjacent collisions are cheap to detect. The counter complements
+  // the console.warn so operators can check aggregate health.
   for (let i = 1; i < merged.length; i++) {
     if (merged[i - 1].sequenceNumber === merged[i].sequenceNumber) {
+      clientMetrics.sequenceCollisionsTotal += 1;
       // eslint-disable-next-line no-console
       console.warn('AgentRunLivePage.mergeEvents: sequence collision', {
         sequenceNumber: merged[i].sequenceNumber,
