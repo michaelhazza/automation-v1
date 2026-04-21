@@ -611,6 +611,37 @@ export const queueService = {
         }
       });
 
+      // Deferred-items brief §1 — reap aged-out provisional `'started'` rows
+      // so a crashed mid-write doesn't permanently block retries under the
+      // same idempotencyKey. Cadence: every 2 minutes. Telescopes with the
+      // in-memory registry sweep (30s past timeoutMs) — this is the
+      // durable-layer backstop (providerTimeoutMs + 60s).
+      await (boss as any).work('maintenance:llm-started-row-sweep', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { sweepExpiredStartedRows } = await import('../jobs/llmStartedRowSweepJob.js');
+          await withTimeout(sweepExpiredStartedRows().then(() => undefined), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-started-row-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Deferred-items brief §6 — purge llm_inflight_history rows older
+      // than env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS (default 7).
+      await (boss as any).work('maintenance:llm-inflight-history-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { cleanOldInflightHistoryRows } = await import('../jobs/llmInflightHistoryCleanupJob.js');
+          await withTimeout(cleanOldInflightHistoryRows().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-inflight-history-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Sprint 3 P2.1 Sprint 3A — agent_runs retention pruner. Admin-bypass
       // sweep that opens its own tx via withAdminConnection. Cascade on
       // agent_run_snapshots + agent_run_messages removes child rows.
@@ -951,6 +982,12 @@ export const queueService = {
       // runs after the 03:00 memory-decay and 03:30 security-events sweeps
       // without contending on the same connection pool.
       await boss.schedule('maintenance:llm-ledger-archive', '45 3 * * *', {});
+      // Deferred-items brief §1 — reap aged-out provisional 'started' rows
+      // every 2 minutes. Cadence matches the in-flight clarification sweep.
+      await boss.schedule('maintenance:llm-started-row-sweep', '*/2 * * * *', {});
+      // Deferred-items brief §6 — daily 04:15 UTC cleanup of
+      // llm_inflight_history rows older than the retention window.
+      await boss.schedule('maintenance:llm-inflight-history-cleanup', '15 4 * * *', {});
       // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
       // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
       // a clean shot at the same per-org row set without contending on

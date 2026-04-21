@@ -234,8 +234,24 @@ export interface InFlightEvictionContext {
 export interface InFlightEntry {
   runtimeKey:       string;                  // `${idempotencyKey}:${attempt}:${startedAt}`
   idempotencyKey:   string;
-  attempt:          number;                  // 1-indexed
+  attempt:          number;                  // 1-indexed per-provider
+  // Monotonically incrementing across the entire routeCall, starting at 1
+  // for the first provider's first attempt and continuing across provider
+  // fallbacks. Distinguishes the "this is actually the 3rd attempt of the
+  // logical call" case from the "this is provider-B-attempt-1 after
+  // provider-A-attempt-2". See deferred-items brief §4.
+  attemptSequence:  number;
+  // Zero-indexed position in the provider fallback chain — 0 for the
+  // primary provider, 1 for the first fallback, etc. Orthogonal to
+  // `attemptSequence`. See deferred-items brief §4.
+  fallbackIndex:    number;
   startedAt:        string;                  // ISO 8601 UTC — monotonicity anchor
+  // Captured at the top of routeCall(), BEFORE budget reservation and
+  // provider-cooldown bounce. The gap `startedAt - queuedAt` covers the
+  // pre-dispatch work (budget lock wait, cooldown chain, model resolver,
+  // pricing lookup). See deferred-items brief §3.
+  queuedAt:         string;                  // ISO 8601 UTC — routeCall entry time
+  dispatchDelayMs:  number;                  // startedAt - queuedAt in ms
   stateVersion:     1;                       // 1 = active on add
   deadlineAt:       string;                  // startedAt + timeoutMs + deadlineBufferMs
   deadlineBufferMs: number;                  // buffer past timeoutMs before sweep fires
@@ -291,4 +307,18 @@ export interface InFlightActiveCountPayload {
   activeCount: number;
   byCallSite:  { app: number; worker: number };
   byProvider:  Record<string, number>;
+}
+
+// ── Token-level streaming progress (deferred-items brief §5) ──────────────
+//
+// Emitted on the socket room `system:llm-inflight` via the event
+// `llm-inflight:progress`. Fires at most 1 Hz per runtimeKey so the client
+// doesn't get flooded. The final authoritative `tokensOut` still comes
+// from the removal event's payload — progress events are purely advisory,
+// not a source of truth.
+export interface InFlightProgress {
+  runtimeKey:   string;
+  idempotencyKey: string;
+  tokensSoFar:  number;
+  lastTokenAt:  string;      // ISO 8601 UTC — when the most recent token arrived
 }
