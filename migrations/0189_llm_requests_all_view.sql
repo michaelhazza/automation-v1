@@ -18,6 +18,17 @@
 -- SET LOCAL ROLE admin_role (BYPASSRLS), so for that caller the view
 -- is effectively a plain union. For any future non-admin caller, the
 -- underlying RLS policies enforce tenant isolation naturally.
+--
+-- GRANTs at the end of the file: admin_role was declared BYPASSRLS in
+-- 0079 but never given table-level privileges. Once a caller does
+-- `SET LOCAL ROLE admin_role`, Postgres evaluates SELECT against
+-- admin_role itself — which has none by default — and the query fails
+-- with "permission denied". Migration 0169 established the precedent:
+-- before switching role, grant the minimum SELECT admin-bypass needs.
+-- The System P&L service (server/services/systemPnlService.ts) reads
+-- seven relations — the view added here + the six it joins against —
+-- so every one needs an explicit grant. Without these the entire
+-- `/api/admin/llm-pnl/*` surface returns 500.
 
 BEGIN;
 
@@ -58,5 +69,16 @@ SELECT
   requested_provider, requested_model, fallback_chain,
   billing_month, billing_day, created_at
 FROM llm_requests_archive;
+
+-- SELECT grants for the admin-bypass path. Every relation below is read
+-- by `systemPnlService` under `SET LOCAL ROLE admin_role` (adminRead).
+-- Kept together so the P&L read-path contract lives in one place.
+GRANT SELECT ON llm_requests_all     TO admin_role;
+GRANT SELECT ON llm_requests         TO admin_role;
+GRANT SELECT ON llm_requests_archive TO admin_role;
+GRANT SELECT ON cost_aggregates      TO admin_role;
+GRANT SELECT ON organisations        TO admin_role;
+GRANT SELECT ON subaccounts          TO admin_role;
+GRANT SELECT ON org_margin_configs   TO admin_role;
 
 COMMIT;
