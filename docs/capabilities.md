@@ -194,6 +194,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Real-time chat** — Conversational interface with tool result cards, typing indicators, and session history
 - **Flexible scheduling:** Recurring intervals (minute-level precision), cron expressions with timezone, or event triggers (task created, task moved, agent completed)
 - **Execution control:** Per-run token budgets, cost ceilings, tool call limits, concurrency policies, and catch-up policies
+- **Per-run cost transparency:** Every run-detail surface (history card, trace viewer, agent admin page) shows the exact LLM spend for that run — total cost, call count, input/output token totals, and an app-vs-worker call-site breakdown. Operators see the bill, not just the ceiling
 - **Knowledge sources:** Per-agent data files from cloud storage, HTTP, Google Docs, Dropbox, or direct uploads — with token budgets and caching
 - Agent templates for rapid team deployment; full run history with execution traces; exactly-once deduplication on all run paths
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
