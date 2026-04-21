@@ -46,7 +46,141 @@ The report does **not** propose a schema. That decision is held until the extend
 
 ## Area 1 — `agent_triggers` + `triggerService`
 
-*(section appended below)*
+### What exists
+
+**Schema** (`server/db/schema/agentTriggers.ts`, columns at `:15-40`, indexes at `:43-47`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `organisationId` | uuid NOT NULL FK | |
+| `subaccountId` | uuid nullable FK | |
+| `subaccountAgentId` | uuid nullable FK → `subaccountAgents` | |
+| `eventType` | text NOT NULL, TS-typed | `'task_created' \| 'task_moved' \| 'agent_completed' \| 'org_task_created' \| 'org_task_moved' \| 'org_agent_completed'` (`:24-25`) |
+| `eventFilter` | jsonb nullable, default `{}` | `:28` |
+| `cooldownSeconds` | integer NOT NULL default 60 | `:31` |
+| `isActive` | boolean default true | `:33` |
+| `lastTriggeredAt` | timestamptz nullable | `:35` |
+| `triggerCount` | integer NOT NULL default 0 | `:36` |
+| `createdAt`, `updatedAt`, `deletedAt` | timestamps | |
+
+Indexes: `agent_triggers_subaccount_idx`, `agent_triggers_org_idx`, partial `agent_triggers_event_type_idx` on `(subaccountId, eventType) WHERE deletedAt IS NULL`.
+
+**Enum declared vs actually handled — `org_*` variants are schema-only stubs.** The `checkAndFire()` signature (`server/services/triggerService.ts:64-68`):
+
+```ts
+async checkAndFire(
+  subaccountId: string,
+  organisationId: string,
+  eventType: 'task_created' | 'task_moved' | 'agent_completed',   // ← only 3 of 6
+  eventData: Record<string, unknown>
+)
+```
+
+No firing site exists for `org_task_created`, `org_task_moved`, `org_agent_completed`. The route-layer whitelist at `server/routes/agentTriggers.ts:13` also excludes them:
+
+```ts
+const VALID_EVENT_TYPES = ['task_created', 'task_moved', 'agent_completed'] as const;
+```
+
+**Can triggers fire PLAYBOOKS? No — agent runs only.** The single dispatch path in `checkAndFire()` (`:130-137`) enqueues to `'agent-triggered-run'` pg-boss queue:
+
+```ts
+await triggerJobSender(TRIGGER_RUN_QUEUE, {
+  subaccountAgentId: trigger.subaccountAgentId,
+  subaccountId,
+  organisationId,
+  triggerContext: { source: 'trigger', eventType, eventData, triggerId: trigger.id },
+});
+```
+
+The consumer (`agentScheduleService.ts:139-185`) calls `agentExecutionService.executeRun(...)`. **No branching on `trigger.actionType` — the table has no action-type column.**
+
+**`eventFilter` evaluation — strict exact-match key-value, no expression language** (`triggerService.ts:44-52`):
+
+```ts
+function matchesFilter(filter, eventData): boolean {
+  for (const [key, value] of Object.entries(filter)) {
+    if (eventData[key] !== value) return false;   // strict !==, no paths/wildcards
+  }
+  return true;
+}
+```
+
+Empty filter `{}` always passes. No JSON-path, boolean expression, range or wildcard support.
+
+**Cooldown** (`checkAndFire()` `:107-111`): `lastTriggeredAt` + `cooldownSeconds * 1000` compared to `Date.now()`. Default 60s. Atomically updated at `:141` after successful fire.
+
+**Callers of `checkAndFire()`:**
+
+| Call site | File:line | Event |
+|---|---|---|
+| `taskService.createTask()` | `server/services/taskService.ts:179` | `task_created` |
+| `taskService.updateTask()` (status path) | `server/services/taskService.ts:346` | `task_moved` |
+| `agentExecutionService.executeRun()` (post-complete) | `server/services/agentExecutionService.ts:1359` | `agent_completed` |
+
+CRUD callers go through `agentTriggers.ts` route handlers (`:24, 68, 91, 114, 134`). `setTriggerJobSender()` is called from `agentScheduleService.ts:39`.
+
+### Extensibility
+
+**Adding new event types** (e.g. `email_received`, `webhook_received`, `conversion_event`): the `$type<>` annotation is TypeScript-only; the Postgres column is plain `text`. Concrete call-site count to change = **4**: (1) the `$type<>` union (`agentTriggers.ts:25`), (2) `checkAndFire()` param type (`triggerService.ts:66-67`), (3) `VALID_EVENT_TYPES` route whitelist (`agentTriggers.ts:13`), (4) a new firing site wired into the relevant domain service. Existing callers are unaffected — they pass a literal string; `checkAndFire` silently no-ops if no row matches.
+
+**Adding new action types** (e.g. `start_playbook`, `create_subaccount`, `send_notification`): **zero existing callers handle action types** — the table has no `action_type` column. Adding one requires: (1) new column + enum, (2) dispatch branch in `checkAndFire()` after the current `triggerJobSender`, (3) potentially new pg-boss workers per action type. Callers of `checkAndFire()` don't read trigger rows — unaffected.
+
+### Coupling risk
+
+Adding a `target_type` column (`agent_run | playbook_run | notification | subaccount_create`) would not break any caller that fires events. Only callers reading from the table:
+
+- `triggerService.checkAndFire()` — reads `trigger.subaccountAgentId` (`:132`). Needs branching on `target_type`; agent dispatch becomes one branch.
+- `triggerService.dryRun()` — reads `trigger.id`, `saLink.agentId` (`:187`, `:213`). Response shape needs updating.
+- `listTriggers` / `createTrigger` / `updateTrigger` / `deleteTrigger` — CRUD; input validation on create/update needs extending.
+- `routes/agentTriggers.ts` — returns full rows via Drizzle `select()` — auto-includes new columns.
+
+Total: **2 service files** (`triggerService.ts`, `agentScheduleService.ts` for new worker registration) and **1 route file** (`agentTriggers.ts`). **No callers of `checkAndFire()` break.**
+
+---
+
+## Area 2 — `scheduled_tasks` + `scheduledTaskService`
+
+### What exists
+
+**Two tables** (`server/db/schema/scheduledTasks.ts`):
+
+`scheduled_tasks` (`:14-76`): `id`, `organisationId`, `subaccountId`, `title`, `description`, `brief`, `priority` (`low|normal|high|urgent`), `assignedAgentId` (FK `agents.id` NOT NULL), `createdByUserId`, **`rrule` text NOT NULL**, `timezone`, `scheduleTime` (HH:MM wall-clock), `taskSlug`, `createdByPlaybookSlug`, `firstRunAt`, `firstRunAtTz`, `isActive`, `retryPolicy` jsonb, `tokenBudgetPerRun`, `nextRunAt`, `lastRunAt`, `totalRuns`, `totalFailures`, `consecutiveFailures`, `endsAt`, `endsAfterRuns`, `deliveryChannels` jsonb.
+
+Indexes: `org_idx`, `subaccount_active_idx`, `next_run_idx` on `(nextRunAt, isActive)`, partial unique `subaccount_slug_active_uniq`, `playbook_slug_idx`.
+
+`scheduled_task_runs`: `id`, `scheduledTaskId`, `taskId`, `agentRunId`, `occurrence`, `status` (`pending|running|completed|failed|retrying|skipped`), `attempt`, `errorMessage`, `scheduledFor`, `startedAt`, `completedAt`.
+
+**Purely time-driven.** No `trigger_type`, `event_source` column. Entire service is RRULE-based. `fireOccurrence()` takes `(scheduledTaskId, organisationId)` — no event context.
+
+**Fire path (surprising finding — no background RRULE sweeper):**
+
+```
+RRULE string → computeNextOccurrence() → nextRunAt stored
+Manual API call / runNow flag → enqueueRunNow() → setImmediate → fireOccurrence()
+fireOccurrence():
+  1. Load scheduledTask, check isActive + end conditions
+  2. INSERT scheduled_task_runs row (status=pending)
+  3. taskService.createTask() → board card
+  4. agentExecutionService.executeRun({runType:'scheduled', runSource:'scheduler', ...})
+  5. handleRunCompletion() → retry or complete
+  6. computeNextOccurrence() → update nextRunAt
+```
+
+**`nextRunAt` is stored for display (calendar service) but is NOT polled.** `scheduledTaskService.ts:243` comment: *"The current RRULE-based scheduler is in-process"*. Firing happens via the REST run-now endpoint (`routes/scheduledTasks.ts:142`), `enqueueRunNow()` at create time when `runNow: true`, or `retryOccurrence()`. Agent-level recurring scheduling (separate concept) uses pg-boss cron via `agentScheduleService.registerSchedule()`.
+
+The playbook engine is not involved. Dispatch is agent-only (`agentExecutionService.executeRun`).
+
+### Extensibility
+
+A `trigger_type = 'event'` variant could be added without tearing the service apart — RRULE fields are only read in `computeNextOccurrence()`, `computeUpcomingOccurrences()`, `create()`, `update()`. All could short-circuit for event rows. `fireOccurrence()` is already callable from any path.
+
+However the schema is deeply optimised for RRULE (`rrule` is NOT NULL, unique-slug index, retry/counter columns). Adding event-triggering means leaving RRULE columns empty for event rows — awkward. Coupling is structural, not code-level. The NOT NULL constraint on `rrule` would need relaxing or a discriminated-union design.
+
+### Coupling risk
+
+Low for code; high for schema cleanliness. `nextRunAt` display consumers (`scheduleCalendarService`) would need branching to skip event-typed rows. The retry model (`retryPolicy`, `consecutiveFailures`, `retryOccurrence`) is RRULE-aware — event-triggered occurrences would not have a "next occurrence" to compute on failure.
 
 ---
 
