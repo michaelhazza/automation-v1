@@ -3,7 +3,7 @@
 **Status:** Draft — awaiting human review. Major task per CLAUDE.md §"Task Classification" (new subsystem, new tables, new permission keys, new WebSocket contract, new client surface).
 **Author:** Main session.
 **Date:** 2026-04-21.
-**Last revised:** 2026-04-21 — main merged in; migration numbers bumped to 0192/0193/0194 (0190/0191 taken by provisional-row + in-flight history landing on main); `AGENT_EXECUTION_LOG_ENABLED` kill-switch removed per `feature_flags: only_for_behaviour_modes` convention; primitives-search updated to reference `softBreakerPure` + `runCostBreaker` + `llm_inflight_history` from the in-flight-tracker deferred-items merge; payload-write timing clarified to acknowledge migration 0190's `'started'` provisional ledger status.
+**Last revised:** 2026-04-21 — external-review pass 2 applied on top of the main-merge refresh. Changes: sequence allocation moved to `agent_runs.next_event_seq` (kills the `MAX + 1` scan + lock); graded failure handling (critical events retry once inline + emit drop metric; non-critical stay fire-and-forget); hard per-run event cap + `run.event_limit_reached` signal event; per-row payload size cap + truncation metadata; `permissionMask` moved to read-time computation (closes a privilege-drift security bug — stored events no longer carry stale authorisation state); payload-table gains `modifications` column separating truncation from redaction; tool-level `payloadPersistencePolicy` for secret-handling skills; batched linked-entity label resolution on snapshot read; minimum restore-contract sketch for cold archive; emission-ordering semantics clarified; every event now carries `sourceService` + `durationSinceRunStartMs`. Prior revision note: main merge; migration numbers bumped to 0192/0193/0194 (0190/0191 taken by provisional-row + in-flight history landing on main); `AGENT_EXECUTION_LOG_ENABLED` kill-switch removed per `feature_flags: only_for_behaviour_modes` convention; primitives-search updated to reference `softBreakerPure` + `runCostBreaker` + `llm_inflight_history` from the in-flight-tracker deferred-items merge; payload-write timing clarified to acknowledge migration 0190's `'started'` provisional ledger status.
 **Branch when built:** `claude/agent-task-live-logs-MbN8R` (already cut).
 **Predecessor / sibling:** `tasks/llm-inflight-realtime-tracker-spec.md` — the system-admin in-flight LLM tracker at `/system/llm-pnl` In-Flight tab — plus `tasks/llm-inflight-deferred-items-brief.md`, which added the provisional-row partial-external-success protection (migration 0190) + `llm_inflight_history` durable forensic log (migration 0191) + `softBreakerPure` for fire-and-forget persistence paths. This spec is the **per-run** companion surface: it attaches a live execution log to every agent run, not every LLM call in the system. The two surfaces share the LLM ledger as a data source but never render in the same page.
 
@@ -65,12 +65,16 @@ A per-run live execution log surface that:
 
 **Load-bearing guarantees** (every one of these has a named mechanism in §4–§7):
 
-- Exactly one event per decision, ordered deterministically per run (`sequenceNumber` unique per `runId`).
+- Exactly one event per decision, ordered deterministically per run (`sequenceNumber` allocated atomically per run via `agent_runs.next_event_seq`, unique per `runId`).
 - No dropped events on WebSocket dropout (client resumes via `GET /api/agent-runs/:id/events?fromSeq=N` after the existing `useSocketRoom` reconnect hook fires — same pattern as `agentRunMessageService.streamMessages`).
 - No double-rendered events on reconnect (client LRU of 500 `eventId`s — same pattern as the in-flight tracker and existing `useSocket` dedup).
 - No cross-tenant leakage — all three new tables are in `RLS_PROTECTED_TABLES`, all reads go through `withOrgTx` / `getOrgScopedDb`, and the WebSocket room join handler validates tier access before admitting the socket.
 - No mid-run edit hot-swap — the edit-link surface writes to the same service the non-log edit pages already use; the in-flight run continues with the state it already loaded.
 - No unbounded storage growth — retention job at 03:30 UTC (offset from the LLM ledger archive's 03:45 UTC slot) moves events to warm + cold tiers, configurable via env vars matching the ledger's existing pattern.
+- **No unbounded per-run event volume.** Hard cap via `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` (default 10 000); above cap, non-critical events drop + one `run.event_limit_reached` event emitted. Critical events still emit (§4.1). Protects against runaway-loop + recursive-agent failure modes.
+- **No unbounded per-row payload size.** Hard cap via `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB) enforced by the `agent_run_llm_payloads` writer; oversized fields truncated with structured `modifications` record. TOAST compression handles the rest transparently.
+- **No stale authorisation on historical events.** `permissionMask` is computed at **read time** (both live socket emit + snapshot endpoint), never persisted. Closes the privilege-drift class where a revoked user would still see `canEdit: true` on events they accessed before revocation.
+- **No dropped critical events on transient DB failure.** Critical events (`run.started` / `run.completed` / `llm.requested` / `llm.completed` / `handoff.decided`) retry once inline with 50 ms backoff. Persistent failure degrades to structured error log + `agent_exec_log.critical_drops_total` counter metric — the agent run itself never fails on log-table liveness.
 
 ---
 
@@ -131,25 +135,60 @@ The following primitives shipped with the in-flight tracker deferred-items merge
 
 **Inline emission, synchronous persistence, WebSocket push after commit.** Retention archival is queued via pg-boss.
 
-### 4.1 Emission model — persist-then-emit, inline
+### 4.1 Emission model — persist-then-emit, inline, with graded failure
 
-Every event is written through a single service: `server/services/agentExecutionEventService.ts → appendEvent()`. The caller passes the run, event type, payload, and optional linked entity. The service does three things in order:
+Every event is written through a single service: `server/services/agentExecutionEventService.ts → appendEvent()`. The caller passes the run, event type, payload, optional linked entity, and always an auto-filled `sourceService` tag (e.g. `'agentExecutionService'`, `'workspaceMemoryService'`) derived at compile time via a typed helper so debugging can trace an event back to the emission site without stack reconstruction. The service does four things in order:
 
-1. **Assigns a sequence number** using a per-run atomic increment backed by the DB. Pattern: `INSERT ... RETURNING sequence_number` with a trigger OR a Drizzle-side `SELECT COALESCE(MAX(sequence_number), 0) + 1 ... FOR UPDATE` inside `withOrgTx`. The in-flight tracker used an in-memory map for sequencing — that's wrong here because events must survive process crashes with stable ordering. DB-side sequencing is the right primitive.
-2. **Persists the row to `agent_execution_events`** in the same transaction as the sequence allocation.
-3. **Emits a WebSocket event** to the `agent-run:${runId}` room *after* commit. The socket event mirrors the row exactly — same `sequenceNumber`, same `payload`, same `linkedEntity`. If the emit fails (socket server disconnected, etc.), the event is still durable — clients resync via the paginated read endpoint on reconnect.
+1. **Allocates a sequence number via `agent_runs.next_event_seq`.** Pattern inside `withOrgTx`:
+   ```sql
+   UPDATE agent_runs
+      SET next_event_seq = next_event_seq + 1,
+          last_activity_at = now()
+    WHERE id = $runId
+      AND next_event_seq < $maxEventsPerRun
+   RETURNING next_event_seq
+   ```
+   If the `RETURNING` clause is empty, the run has hit `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` (default 10 000). Non-critical events short-circuit silently (increment `agent_exec_log.cap_drops_total{event_type}`); critical events go through a separate path that bypasses the `< $maxEventsPerRun` guard and allocates anyway (we never drop `run.completed` on cap — see critical-tier handling below). On the first cap hit for a run, the service emits exactly one `run.event_limit_reached` event (itself critical) with `{ eventCountAtLimit, cap }` so the client timeline shows the cap.
+2. **Computes `durationSinceRunStartMs`** using the run's `started_at` timestamp + wall-clock now. Baked into the event payload so the client never recomputes.
+3. **Persists the row to `agent_execution_events`** in the same transaction as the sequence allocation. Persisted row carries `source_service` + `duration_since_run_start_ms` as columns and event-specific fields in the `payload` JSONB. **`permissionMask` is NOT persisted** (see §4.1a below).
+4. **Emits a WebSocket event** to the `agent-run:${runId}` room *after* commit. The socket envelope's `payload.permissionMask` is **computed from the socket user's context at emit time**, not stored anywhere. If the emit fails, the event is still durable — clients resync via the paginated read endpoint on reconnect and the endpoint re-computes the mask for the requesting user.
 
 **Why persist-then-emit and not emit-then-persist.** Losing an event on a crash between emit and persist would leave the client seeing an event that doesn't exist in the durable log — a forensic black hole. The other way around (persist then emit) can drop the socket event on a race, but the client recovery path already handles that (see §4.3 resync protocol). We always choose the failure mode where the durable log is authoritative.
 
 **Why inline and not queued.** A pg-boss job between the agent loop and the event write introduces end-to-end latency that the feature's "live" requirement can't tolerate (the user explicitly rejected polling-style latency). Inline writes are ~2–5 ms on the happy path and fire on top of transactions the loop already runs. The retention archive is queued (§4.6) because that work is genuinely decoupled; emission is not.
 
-**Hot-path cost control.** Every emission site in `agentExecutionService.ts`, `workspaceMemoryService.ts`, `memoryBlockService.ts`, `skillExecutor.ts`, `llmRouter.ts`, `runContextLoader.ts`, `decisionTimeGuidanceMiddleware.ts`, and `orchestratorFromTaskJob.ts` is an `await appendEvent(...)` call that the caller awaits. Errors from `appendEvent` are caught at the call site and logged at `error` level via `logger.error('agentExecutionEventService.append_failed', { runId, eventType, err })` — **they never fail the agent run**. The log is observability, not load-bearing for execution. A downed event table must not take down the agent.
+**Graded failure handling — critical vs non-critical.** Every event type in §5.3 carries a `critical: boolean` bit in the typed union. Behaviour diverges at the service layer on `appendEvent` failure:
+
+| Tier | Event types | Retry posture | On persistent failure |
+|---|---|---|---|
+| **Critical** | `run.started`, `run.completed`, `llm.requested`, `llm.completed`, `handoff.decided`, `run.event_limit_reached` | **One inline retry with 50 ms backoff.** Retries the full persist-then-emit sequence. Total worst-case latency on the hot path: ~100 ms. | `logger.error('agentExecutionEventService.critical_event_dropped', { runId, eventType, err })` + increment `agent_exec_log.critical_drops_total{event_type}`. Agent run continues. Metric + log are the operational signal. |
+| **Non-critical** | everything else (`prompt.assembled`, `memory.retrieved`, `rule.evaluated`, `skill.invoked`, `skill.completed`, `context.source_loaded`, `clarification.requested`, `orchestrator.routing_decided`) | No retry. Log-and-continue. | `logger.warn('agentExecutionEventService.append_failed', { ... })` + increment `agent_exec_log.noncritical_drops_total{event_type}`. |
+
+The log table is observability; it must never block execution. A total log-table outage produces a steady metric signal and a complete log of drops — operators can reconstruct the timeline from the message-stream + ledger joins until the outage clears. This is a deliberate trade-off: we accept lossy observability under degraded conditions rather than brittle execution under the same conditions.
+
+**Why not more retry / outbox / async queue.** Considered and rejected. More inline retries push hot-path latency into the tens of milliseconds per event and compound across a 30-event run. A durable outbox-pattern (write locally first, drain to the real table via a worker) adds a new table + worker for a failure class that happens rarely on a well-operated Postgres. The one-retry + metric posture catches transient blips (the 99%+ of real-world DB errors) without new infrastructure.
+
+### 4.1a permissionMask is wire-only — never persisted
+
+Reviewer-caught bug in the initial draft: the original design baked `permissionMask` into the stored event row, which creates a **privilege-drift hazard**. If a user had `WORKSPACE_MANAGE` when an event was written but loses it tomorrow, a stored mask would still say `canEdit: true` — bypassing the revocation for historical views.
+
+Resolved:
+
+- The `agent_execution_events.payload` column stores **only** event-specific data + `linkedEntity`. No mask bits.
+- `permissionMask` is a **wire-only** field on `AgentExecutionEvent`, computed at read time by `agentRunEditPermissionMask.buildPermissionMask({ entity, user, run })` for:
+  - the live socket emit (against the socket-user's context at that moment), and
+  - every snapshot-endpoint response (against the HTTP-caller's current permissions).
+- Read-path cost is negligible: `buildPermissionMask` is O(1) per linked entity (a single dictionary lookup in the caller's permission snapshot already loaded by `authenticate`). Batched label resolution (§5.9) composes with it cleanly — per-entity permission bit is a constant-time merge on the batched rows.
+
+Net: permissions stay correct over time without operator intervention. Revocations take effect immediately on the next read, not after a cache-invalidation dance.
 
 ### 4.2 Sequence-number guarantees
 
-- **Monotonic per run.** `(run_id, sequence_number)` is UNIQUE. The first event for a run is `sequenceNumber = 1`.
-- **No gaps assumed.** The client must tolerate gaps (a persist that fails mid-flight leaves no row; the next event gets the next number via `MAX + 1`, not via a reserved-then-rolled-back slot). Gaps are rare and benign — the client's "events I've seen" set is keyed on `eventId`, not on continuity.
+- **Monotonic per run.** `(run_id, sequence_number)` is UNIQUE. The first event for a run is `sequenceNumber = 1`. Allocation is atomic via the `UPDATE agent_runs ... RETURNING next_event_seq` pattern in §4.1 — no MAX scan, no `FOR UPDATE` on the event table.
+- **No gaps assumed.** The client must tolerate gaps (a persist that fails after the sequence was allocated but before the insert committed would leave a gap; the next allocation still advances `next_event_seq`, so the run skips a number). Gaps are rare and benign — the client's "events I've seen" set is keyed on `eventId`, not on continuity.
 - **No cross-run ordering.** Sequences do not carry time-ordering guarantees across runs; use `eventTimestamp` for that.
+- **Within-run ordering reflects emission-site call order, not wall-clock.** The agent loop is single-threaded per run today (Node event loop, `await`-ed emissions), so the `UPDATE agent_runs` sequence allocation order is the call order. No interleaving across subsystems. If a future change introduces a parallel writer for the same run (currently deferred — see §9), the `next_event_seq` column still guarantees unique + monotonic numbers, but the observed order becomes "whichever allocation committed first" — defined but not causally meaningful. Document this explicitly in operator-facing UI copy if the parallel-writer path ever lands.
+- **Per-run event cap is a sequence-allocation boundary.** When `next_event_seq` hits `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN`, the `UPDATE agent_runs ... WHERE next_event_seq < $cap` clause returns an empty set. The allocation fails fast — no wasted sequence numbers. Critical events have a separate allocation path that bypasses the cap (see §4.1), so `run.completed` always gets a number even on a pathological run.
 
 ### 4.3 Live streaming + reconnect resync protocol
 
@@ -164,13 +203,38 @@ The client follows the same pattern `useSocketRoom` already implements for other
 
 `agent_run_prompts` is keyed by `(run_id, assembly_number)`. Every time `buildSystemPrompt` runs as part of a run (typically once at run start, plus once per handoff target, plus once per execution phase that re-assembles with new context), one row is written. The row holds the fully-assembled system prompt, the user prompt / task context, the serialised tool definitions passed to the LLM, and a `layerAttributions` JSONB describing how the prompt was composed (which layer contributed which substring — for the "what layer did this come from" click-through in the UI). The `prompt.assembled` event carries `{ assemblyNumber, promptRowId, totalTokens }` — the client fetches the full row on drill-down via `GET /api/agent-runs/:runId/prompts/:assemblyNumber`.
 
-### 4.5 LLM payload persistence — one row per ledger row
+### 4.5 LLM payload persistence — one row per ledger row, size-capped, policy-aware
 
-`agent_run_llm_payloads` is keyed by `llm_request_id` (PK, FK to `llm_requests.id`). Written inside the existing `llmRouter` ledger-insert transaction so the payload row and the ledger row commit together. Rows hold `systemPrompt text`, `messages jsonb`, `toolDefinitions jsonb`, `response jsonb`, `redactedFields jsonb` (structured record of which fields were redacted — see §7 on redaction).
+`agent_run_llm_payloads` is keyed by `llm_request_id` (PK, FK to `llm_requests.id`). Written inside the existing `llmRouter` ledger-insert transaction so the payload row and the ledger row commit together. Rows hold `systemPrompt text`, `messages jsonb`, `toolDefinitions jsonb`, `response jsonb`, `redactedFields jsonb` (records of redaction — see §7.4), and `modifications jsonb` (records of non-redaction modifications: truncation, tool-policy suppression — see below).
 
 **Why keyed by `llm_request_id` not `run_id`.** One run has many LLM calls; the ledger already has the attribution (run, execution, iee, etc.). Keying the payload table by ledger ID keeps the join cheap and preserves the ledger's source-of-truth role. Non-agent LLM callers (skill-analyzer, config assistant) also produce payloads that this table can hold — but the client UI only joins from `agent_execution_events.linkedEntity` of type `llm_request`, so non-agent rows are dormant until a caller links to them.
 
-**Storage trade-off, explicit.** A typical run produces 5–10 LLM calls averaging 50–500 KB of payload each (full system prompt + messages + response + tool defs). Budget: ~1 MB/run on average, up to 5 MB for heavy runs. At 100K runs/month that's 100 GB hot + 100 GB warm on rotation. Postgres TOAST compresses this ~3–4× in practice. Cold archive drops to S3 at month 18.
+**Hard size cap per row.** `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default **1 048 576** = 1 MB) is enforced at write time. The writer sums `len(systemPrompt) + byteLength(messages JSON) + byteLength(response JSON) + byteLength(toolDefinitions JSON)`; if total exceeds cap, fields are truncated greatest-first (usually `messages` or `response` is the offender) to fit the cap with a 128-byte headroom, and each truncation is recorded in `modifications` as:
+
+```json
+{ "kind": "truncated", "field": "messages.3.content", "originalSizeBytes": 2457123, "truncatedToBytes": 524288 }
+```
+
+The client renders truncated fields with a visible badge + the original size, so operators know the payload was clipped. 1 MB covers >95% of observed payloads; heavier runs lose fidelity on the tail, but the loss is visible.
+
+**No app-level gzip.** Postgres TOAST already applies `pglz` compression transparently on oversized JSONB columns. Layering gzip on top fights TOAST (TOAST can't stream-decompress gzip per-field), breaks selective column reads in psql, and makes debugging painful. Cap + TOAST is the correct composition.
+
+**Tool-level payload-persistence policy.** Tool definitions (`server/skills/*.md` front matter + `server/config/actionRegistry.ts`) get an optional field:
+
+```ts
+payloadPersistencePolicy: 'full' | 'args-redacted' | 'args-never-persisted'
+// default: 'full'
+```
+
+When a `messages` entry contains a tool-call to a tool whose definition declares `args-redacted` or `args-never-persisted`, the writer replaces the arguments in the persisted row with `[POLICY:args-redacted]` or `[POLICY:args-never-persisted]` respectively and records the substitution in `modifications`:
+
+```json
+{ "kind": "tool_policy", "field": "messages.2.content.0.input", "policy": "args-never-persisted", "toolSlug": "oauth-exchange" }
+```
+
+Most tools stay on `full`. Tools that always handle secrets (credential-fetchers, OAuth exchange, vault accessors) opt in to a stricter mode. Defence-in-depth alongside pattern-based redaction (§7.4) — policy is the explicit declaration; redaction is the best-effort catch-all.
+
+**Storage trade-off, explicit.** A typical run produces 5–10 LLM calls averaging 50–500 KB of payload each (full system prompt + messages + response + tool defs). Budget: ~1 MB/run on average, up to 5 MB for heavy runs (absent truncation). With the 1 MB per-row cap, worst-case per run is ~10 MB (10 calls × 1 MB). At 100K runs/month that's 100 GB hot + 100 GB warm on rotation. Postgres TOAST compresses this ~3–4× in practice. Cold archive drops to S3 at month 18.
 
 **Interaction with migration 0190 (`llm_requests.status = 'started'`).** The in-flight-tracker deferred-items merge added a provisional-row write path: `llmRouter` now writes a `status='started'` ledger row **before** `providerAdapter.call()`, then upserts the terminal row (`success` / `error` / `timeout` / …) in a second transaction after the provider returns. The payload write for this spec sits on the **terminal** write — the same transaction that resolves `status` to its final value. This means:
 
@@ -208,12 +272,16 @@ When an operator clicks an Edit link in an event (e.g. "edit memory entry X"), t
 
 | Failure | Behaviour |
 |---|---|
-| `appendEvent` DB write fails | Error logged; agent run continues. Event is lost for this run. Client reconciliation surfaces this only as a gap, not an error banner. |
-| WebSocket emission fails | Event is persisted; client picks it up on next snapshot/backfill fetch. |
+| `appendEvent` DB write fails (critical event) | One inline retry, 50 ms backoff. On persistent failure: `logger.error` + `agent_exec_log.critical_drops_total{event_type}` metric. Agent run continues. |
+| `appendEvent` DB write fails (non-critical event) | `logger.warn` + `agent_exec_log.noncritical_drops_total{event_type}` metric. No retry. Agent run continues. |
+| WebSocket emission fails | Event is persisted; client picks it up on next snapshot/backfill fetch. No retry on the emit side. |
 | Socket disconnect mid-run | Client reconnects via existing `useSocketRoom` hook, backfills via snapshot endpoint from `lastSeenSeq + 1`. |
 | Agent run crashes mid-loop | Events already written are durable. No `run.completed` event; client renders the last known event and falls back on `agent_runs.status` after the run's crash-resume path fires. |
+| Run hits `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` | `run.event_limit_reached` event emitted once (critical tier, bypasses cap). Subsequent non-critical events drop with `agent_exec_log.cap_drops_total{event_type}` metric. Critical events continue to emit via the bypass allocation path (§4.1). |
+| Payload row exceeds `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` | Fields truncated greatest-first to fit; truncations recorded in `modifications`. No row is ever rejected. |
 | Retention job misses a window | Next tick catches up — same guarantee as the ledger archive job. |
-| Payload redaction mis-fires (leaves a secret in) | Operational risk, not correctness. Mitigation: redaction uses the same patterns library as logger redaction (`server/lib/redaction.ts` if it exists; otherwise build one in this spec and extend the logger to share it). See §7. |
+| Payload redaction mis-fires (leaves a secret in) | Operational risk, not correctness. Mitigation: defence-in-depth via `AGENTS_EDIT` payload-read gate (§7.3) + tool-level `payloadPersistencePolicy` (§4.5) + pattern library in `server/lib/redaction.ts`. See §7. |
+| User loses `AGENTS_VIEW` / `WORKSPACE_MANAGE` mid-session | Next read recomputes `permissionMask` — revocation is immediate. No stale authorisation carried on persisted rows. |
 
 ---
 
@@ -227,12 +295,14 @@ CREATE TABLE agent_execution_events (
   run_id          uuid NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
   organisation_id uuid NOT NULL REFERENCES organisations(id),
   subaccount_id   uuid     REFERENCES subaccounts(id),  -- nullable for org- and system-tier runs
-  sequence_number integer NOT NULL,
-  event_type      text NOT NULL,              -- enum-like, see §5.3
+  sequence_number integer NOT NULL,            -- allocated from agent_runs.next_event_seq — see §4.1
+  event_type      text NOT NULL,               -- enum-like, see §5.3
   event_timestamp timestamptz NOT NULL DEFAULT now(),
-  payload         jsonb NOT NULL,             -- event-type-specific shape, see §5.4
-  linked_entity_type text,                    -- 'memory_entry' | 'memory_block' | 'policy_rule' | 'skill' | 'data_source' | 'prompt' | 'agent' | 'llm_request' | 'action' | null
-  linked_entity_id   uuid,                    -- FK-like reference, validated at write time by the service
+  duration_since_run_start_ms integer NOT NULL, -- computed at emission from agent_runs.started_at
+  source_service  text NOT NULL,               -- debug tag for emission origin (e.g. 'agentExecutionService', 'workspaceMemoryService')
+  payload         jsonb NOT NULL,              -- event-type-specific shape, see §5.4. Does NOT contain permissionMask — see §4.1a
+  linked_entity_type text,                     -- 'memory_entry' | 'memory_block' | 'policy_rule' | 'skill' | 'data_source' | 'prompt' | 'agent' | 'llm_request' | 'action' | null
+  linked_entity_id   uuid,                     -- FK-like reference, validated at write time by the service
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (run_id, sequence_number)
 );
@@ -242,10 +312,16 @@ CREATE INDEX agent_execution_events_linked_entity_idx ON agent_execution_events 
 
 ALTER TABLE agent_execution_events ENABLE ROW LEVEL SECURITY;
 -- RLS policy: organisation_id = current_setting('app.organisation_id')::uuid (pattern from architecture.md §1155)
+
+-- Companion column on agent_runs — atomic per-run sequence allocation.
+-- Doubles as the authoritative "events emitted for this run" counter (subsumes the polish
+-- suggestion to add event_count). Hits AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN = event cap.
+ALTER TABLE agent_runs
+  ADD COLUMN next_event_seq integer NOT NULL DEFAULT 0;
 ```
 
 Producer: `agentExecutionEventService.appendEvent()` (new service).
-Consumer: (a) socket room `agent-run:${runId}` event `agent-run:execution-event`, (b) `GET /api/agent-runs/:runId/events` paginated read.
+Consumer: (a) socket room `agent-run:${runId}` event `agent-run:execution-event` (envelope carries wire-only `permissionMask` computed for the socket user at emit time), (b) `GET /api/agent-runs/:runId/events` paginated read (response rows carry wire-only `permissionMask` computed for the HTTP caller at read time).
 
 ### 5.2 Event TypeScript contract (wire + service)
 
@@ -256,23 +332,37 @@ export interface AgentExecutionEvent {
   runId: string;
   organisationId: string;
   subaccountId: string | null;
-  sequenceNumber: number;          // 1-indexed, unique per run
+  sequenceNumber: number;          // 1-indexed, unique per run — allocated via agent_runs.next_event_seq
   eventType: AgentExecutionEventType;
-  eventTimestamp: string;          // ISO 8601 UTC
+  eventTimestamp: string;          // ISO 8601 UTC (wall clock)
+  durationSinceRunStartMs: number; // computed at emission from agent_runs.started_at — UI uses this directly
+  sourceService: AgentExecutionSourceService; // debug tag — emission origin, see §5.3
   payload: AgentExecutionEventPayload;  // discriminated union by eventType — see §5.3
-  linkedEntity: LinkedEntity | null;
-  permissionMask: PermissionMask;  // server-computed, see §7
+  linkedEntity: LinkedEntity | null;   // id + type persisted; label is attached at read time (batch-resolved per §5.9)
+  permissionMask: PermissionMask;      // WIRE-ONLY — computed at read time from the caller's current permissions; NEVER persisted (see §4.1a)
 }
+
+export type AgentExecutionSourceService =
+  | 'agentExecutionService'
+  | 'workspaceMemoryService'
+  | 'memoryBlockService'
+  | 'decisionTimeGuidanceMiddleware'
+  | 'skillExecutor'
+  | 'llmRouter'
+  | 'runContextLoader'
+  | 'orchestratorFromTaskJob'
+  | 'requestClarificationMiddleware';
 
 export interface LinkedEntity {
   type: LinkedEntityType;          // see §5.5
-  id: string;                      // uuid
-  label: string;                   // human-readable, e.g. "Memory: pricing tiers"
+  id: string;                      // uuid (persisted on the event row as linked_entity_id)
+  label: string;                   // human-readable, e.g. "Memory: pricing tiers" — RESOLVED at read time; not persisted
 }
 
 export interface PermissionMask {
   canView: boolean;
   canEdit: boolean;
+  canViewPayload: boolean;         // payload-read bit (§7.3) — stricter than canView
   viewHref: string | null;         // null when canView=false
   editHref: string | null;         // null when canEdit=false
 }
@@ -283,44 +373,63 @@ export interface AgentExecutionEventEnvelope {
   type: 'agent-run:execution-event';
   entityId: string;                // runId
   timestamp: string;
-  payload: AgentExecutionEvent;
+  payload: AgentExecutionEvent;    // permissionMask inside this is the emit-time snapshot for the socket user
 }
 ```
 
 ### 5.3 Event type taxonomy — v1
 
-Curated, not exhaustive. Each entry: what fires it, what payload shape, what entity gets linked.
+Curated, not exhaustive. Each entry: what fires it, what payload shape, what entity gets linked, and whether it's **critical** (one inline retry on append failure — see §4.1).
 
-| `eventType` | Fires when | `payload` shape (discriminated union) | `linkedEntity` |
-|---|---|---|---|
-| `orchestrator.routing_decided` | `orchestratorFromTaskJob` dispatches a run | `{ taskId, chosenAgentId, idempotencyKey, routingSource: 'rule' \| 'llm' \| 'fallback' }` | `{ type: 'agent', id: chosenAgentId }` |
-| `run.started` | First event of every run | `{ agentId, runType, triggeredBy }` | `{ type: 'agent', id: agentId }` |
-| `prompt.assembled` | `buildSystemPrompt` completes | `{ assemblyNumber, promptRowId, totalTokens, layerTokens: { master, orgAdditional, memoryBlocks, skillInstructions, taskContext } }` | `{ type: 'prompt', id: promptRowId }` |
-| `context.source_loaded` | `runContextLoader` finishes a source | `{ sourceId, sourceName, scope, contentType, tokenCount, includedInPrompt, exclusionReason? }` | `{ type: 'data_source', id: sourceId }` |
-| `memory.retrieved` | `workspaceMemoryService._hybridRetrieve` returns | `{ queryText, retrievalMs, topEntries: Array<{ id, score, excerpt }>, totalRetrieved }` | `{ type: 'memory_block' \| 'memory_entry', id: topEntries[0].id }` when non-empty; null otherwise |
-| `rule.evaluated` | `decisionTimeGuidanceMiddleware` processes tool-call | `{ toolSlug, matchedRuleId?, decision: 'auto' \| 'review' \| 'block', guidanceInjected: boolean }` | `{ type: 'policy_rule', id: matchedRuleId }` when a rule matched; null otherwise |
-| `skill.invoked` | Tool call dispatched | `{ skillSlug, skillName, input, reviewed: boolean, actionId? }` | `{ type: 'skill', id: skillId }` |
-| `skill.completed` | Tool call returns | `{ skillSlug, durationMs, status: 'ok' \| 'error', resultSummary, actionId? }` | `{ type: 'skill', id: skillId }` |
-| `llm.requested` | `llmRouter.routeCall` dispatches adapter call | `{ llmRequestId, provider, model, attempt, featureTag, payloadPreviewTokens }` | `{ type: 'llm_request', id: llmRequestId }` |
-| `llm.completed` | `llmRouter` resolves the call | `{ llmRequestId, status, tokensIn, tokensOut, costWithMarginCents, durationMs }` | `{ type: 'llm_request', id: llmRequestId }` |
-| `handoff.decided` | Agent hands off to another | `{ targetAgentId, reasonText, depth, parentRunId }` | `{ type: 'agent', id: targetAgentId }` |
-| `clarification.requested` | `requestClarification` middleware fires | `{ question, awaitingSince }` | null |
-| `run.completed` | Run transitions to terminal | `{ finalStatus, totalTokens, totalCostCents, totalDurationMs, eventCount }` | null |
+| `eventType` | Fires when | `critical?` | `payload` shape (discriminated union) | `linkedEntity` |
+|---|---|---|---|---|
+| `orchestrator.routing_decided` | `orchestratorFromTaskJob` dispatches a run | no | `{ taskId, chosenAgentId, idempotencyKey, routingSource: 'rule' \| 'llm' \| 'fallback' }` | `{ type: 'agent', id: chosenAgentId }` |
+| `run.started` | First event of every run | **yes** | `{ agentId, runType, triggeredBy }` | `{ type: 'agent', id: agentId }` |
+| `prompt.assembled` | `buildSystemPrompt` completes | no | `{ assemblyNumber, promptRowId, totalTokens, layerTokens: { master, orgAdditional, memoryBlocks, skillInstructions, taskContext } }` | `{ type: 'prompt', id: promptRowId }` |
+| `context.source_loaded` | `runContextLoader` finishes a source | no | `{ sourceId, sourceName, scope, contentType, tokenCount, includedInPrompt, exclusionReason? }` | `{ type: 'data_source', id: sourceId }` |
+| `memory.retrieved` | `workspaceMemoryService._hybridRetrieve` returns | no | `{ queryText, retrievalMs, topEntries: Array<{ id, score, excerpt }>, totalRetrieved }` | `{ type: 'memory_block' \| 'memory_entry', id: topEntries[0].id }` when non-empty; null otherwise |
+| `rule.evaluated` | `decisionTimeGuidanceMiddleware` processes tool-call | no | `{ toolSlug, matchedRuleId?, decision: 'auto' \| 'review' \| 'block', guidanceInjected: boolean }` | `{ type: 'policy_rule', id: matchedRuleId }` when a rule matched; null otherwise |
+| `skill.invoked` | Tool call dispatched | no | `{ skillSlug, skillName, input, reviewed: boolean, actionId? }` | `{ type: 'skill', id: skillId }` |
+| `skill.completed` | Tool call returns | no | `{ skillSlug, durationMs, status: 'ok' \| 'error', resultSummary, actionId? }` | `{ type: 'skill', id: skillId }` |
+| `llm.requested` | `llmRouter.routeCall` dispatches adapter call | **yes** | `{ llmRequestId, provider, model, attempt, featureTag, payloadPreviewTokens }` | `{ type: 'llm_request', id: llmRequestId }` |
+| `llm.completed` | `llmRouter` resolves the call | **yes** | `{ llmRequestId, status, tokensIn, tokensOut, costWithMarginCents, durationMs }` | `{ type: 'llm_request', id: llmRequestId }` |
+| `handoff.decided` | Agent hands off to another | **yes** | `{ targetAgentId, reasonText, depth, parentRunId }` | `{ type: 'agent', id: targetAgentId }` |
+| `clarification.requested` | `requestClarification` middleware fires | no | `{ question, awaitingSince }` | null |
+| `run.event_limit_reached` | Run hits `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` | **yes** | `{ eventCountAtLimit, cap }` | null |
+| `run.completed` | Run transitions to terminal | **yes** | `{ finalStatus, totalTokens, totalCostCents, totalDurationMs, eventCount }` | null |
+
+**Critical tier rationale.** These are the events without which the log loses forensic integrity: lifecycle bookends (`run.started` / `run.completed`), cost + provider audit (`llm.requested` / `llm.completed`), control-flow transitions (`handoff.decided`), and the cap-hit signal (`run.event_limit_reached` — if this drops silently, an operator can't distinguish "run ended quietly" from "run hit cap and emitted only 10k of its real events"). Non-critical events are informative but re-derivable — a missing `memory.retrieved` is recoverable from the next `prompt.assembled` event; a missing `run.started` isn't recoverable from anywhere.
 
 **Discriminated union shape** — every payload is typed per eventType. Example:
 
 ```ts
 export type AgentExecutionEventPayload =
-  | { eventType: 'orchestrator.routing_decided'; taskId: string; chosenAgentId: string; idempotencyKey: string; routingSource: 'rule' | 'llm' | 'fallback' }
-  | { eventType: 'run.started'; agentId: string; runType: string; triggeredBy: string }
-  | { eventType: 'prompt.assembled'; assemblyNumber: number; promptRowId: string; totalTokens: number; layerTokens: { master: number; orgAdditional: number; memoryBlocks: number; skillInstructions: number; taskContext: number } }
+  | { eventType: 'orchestrator.routing_decided'; critical: false; taskId: string; chosenAgentId: string; idempotencyKey: string; routingSource: 'rule' | 'llm' | 'fallback' }
+  | { eventType: 'run.started'; critical: true; agentId: string; runType: string; triggeredBy: string }
+  | { eventType: 'prompt.assembled'; critical: false; assemblyNumber: number; promptRowId: string; totalTokens: number; layerTokens: { master: number; orgAdditional: number; memoryBlocks: number; skillInstructions: number; taskContext: number } }
+  | { eventType: 'run.event_limit_reached'; critical: true; eventCountAtLimit: number; cap: number }
   // ... one variant per eventType row above
   ;
 ```
 
 `eventType` is a `text` column not a Postgres enum — matches the pattern from `llm_requests.status` (migration `0187_llm_requests_new_status_values.sql`) where adding a new value required a migration vs. a simple text check. Text + a TypeScript union + a service-layer validator is easier to extend. The service validates every event at write-time against the union.
 
+### 5.3a Adding a new event type — checklist
+
+The TS discriminated union in `shared/types/agentExecutionLog.ts` is the central registry. Adding a new event type:
+
+1. Extend `AgentExecutionEventType` (string literal union) and `AgentExecutionEventPayload` (discriminated union member) in `shared/types/agentExecutionLog.ts`. Include the `critical: boolean` bit.
+2. Extend the per-eventType validator in `agentExecutionEventServicePure.ts` (one case per type). The validator runs in `appendEvent` before persist.
+3. Extend the §5.3 table above (prose + examples). The spec-table is the human-readable registry; the union is the machine-checked registry. Drift between them is a spec-reviewer finding.
+4. Add the emission site to §6.2 "Files to change" (prose + the actual code).
+5. If the new type links to a new entity kind, extend `LinkedEntityType` (§5.5) AND the permission matrix (§7.2) AND `buildPermissionMask` (`server/lib/agentRunEditPermissionMask.ts`) in the same change — no orphan types.
+6. Add a fixture to the pure-test file in `server/services/__tests__/agentExecutionEventServicePure.test.ts` (§10.1). One passing + one failing fixture per new type is the minimum bar.
+
+TS type-checking + the pure validator together catch drift at CI time. No separate lint rule needed.
+
 ### 5.4 Example event payload (worked, concrete — not pseudocode)
+
+Wire shape as emitted on the socket room + returned by the snapshot endpoint. `permissionMask` + `linkedEntity.label` are computed fresh on every read against the caller's current permissions — they are NOT what's persisted in the DB row.
 
 ```json
 {
@@ -331,8 +440,11 @@ export type AgentExecutionEventPayload =
   "sequenceNumber": 7,
   "eventType": "memory.retrieved",
   "eventTimestamp": "2026-04-21T14:23:11.482Z",
+  "durationSinceRunStartMs": 1847,
+  "sourceService": "workspaceMemoryService",
   "payload": {
     "eventType": "memory.retrieved",
+    "critical": false,
     "queryText": "what did the client say about pricing last month",
     "retrievalMs": 214,
     "topEntries": [
@@ -349,13 +461,19 @@ export type AgentExecutionEventPayload =
   "permissionMask": {
     "canView": true,
     "canEdit": true,
+    "canViewPayload": true,
     "viewHref": "/subaccounts/c987.../memory/m-001",
     "editHref": "/subaccounts/c987.../memory/m-001/edit"
   }
 }
 ```
 
-Nullability rules: `subaccountId` is null for org-tier or system-tier runs. `linkedEntity` is null for events that reference no entity (e.g. `clarification.requested`, `run.completed`). `permissionMask.viewHref` is null when `canView=false`; `permissionMask.editHref` is null when `canEdit=false`. Clients must handle all three nullables.
+**What's persisted** vs **what's computed on read**:
+
+- **Persisted** (`agent_execution_events` row): `id`, `runId`, `organisationId`, `subaccountId`, `sequenceNumber`, `eventType`, `eventTimestamp`, `durationSinceRunStartMs`, `sourceService`, `payload` (with `critical` bit baked in — that's a type property), `linkedEntity.type` + `linkedEntity.id`.
+- **Computed on read** (attached by the service for every socket emit + every endpoint response): `linkedEntity.label` (batch-resolved per §5.9), `permissionMask.{canView,canEdit,canViewPayload,viewHref,editHref}` (per caller's current permissions — never stored; §4.1a).
+
+Nullability rules: `subaccountId` is null for org-tier or system-tier runs. `linkedEntity` is null for events that reference no entity (e.g. `clarification.requested`, `run.completed`, `run.event_limit_reached`). `permissionMask.viewHref` is null when `canView=false`; `permissionMask.editHref` is null when `canEdit=false`. Clients must handle all three nullables.
 
 ### 5.5 `LinkedEntityType` enumeration
 
@@ -404,10 +522,16 @@ CREATE TABLE agent_run_llm_payloads (
   organisation_id   uuid NOT NULL REFERENCES organisations(id),
   subaccount_id     uuid REFERENCES subaccounts(id),
   system_prompt     text NOT NULL,
-  messages          jsonb NOT NULL,             -- provider-neutral message array sent to the adapter
+  messages          jsonb NOT NULL,             -- provider-neutral message array sent to the adapter, post-redaction + post-policy substitutions
   tool_definitions  jsonb NOT NULL,
-  response          jsonb NOT NULL,             -- full response body from adapter
-  redacted_fields   jsonb NOT NULL DEFAULT '[]'::jsonb,  -- [{ path: 'messages.0.content', pattern: 'bearer_token', replacedWith: '[REDACTED]' }, ...]
+  response          jsonb NOT NULL,             -- full response body from adapter, post-redaction
+  redacted_fields   jsonb NOT NULL DEFAULT '[]'::jsonb,
+    -- pattern-based redaction (§7.4): [{ path: 'messages.0.content', pattern: 'bearer_token', replacedWith: '[REDACTED:bearer]', count: 3 }, ...]
+  modifications     jsonb NOT NULL DEFAULT '[]'::jsonb,
+    -- non-redaction modifications (§4.5):
+    --   truncation:  { kind: 'truncated', field: 'messages.3.content', originalSizeBytes: N, truncatedToBytes: M }
+    --   tool policy: { kind: 'tool_policy', field: 'messages.2.content.0.input', policy: 'args-never-persisted', toolSlug: 'oauth-exchange' }
+  total_size_bytes  integer NOT NULL,           -- sum of stored field byte-lengths after truncation — sampled by storage-cost dashboards
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX agent_run_llm_payloads_org_created_idx ON agent_run_llm_payloads (organisation_id, created_at DESC);
@@ -415,6 +539,10 @@ CREATE INDEX agent_run_llm_payloads_org_created_idx ON agent_run_llm_payloads (o
 ALTER TABLE agent_run_llm_payloads ENABLE ROW LEVEL SECURITY;
 -- RLS same shape as agent_execution_events; additional permission check (§7) for raw-payload read vs. summary read
 ```
+
+**`redacted_fields` vs `modifications` split.** Redaction catches secrets; modifications records every other write-time change. Keeping them separate means an operator asking "did we scrub anything sensitive?" has one column to check, and "did we truncate or policy-suppress?" has the other — no ambiguous overloading. Both columns are append-only per row (written once at persistence time).
+
+**Tool-policy interaction.** When a `messages` entry contains a tool-call whose tool declares `payloadPersistencePolicy: 'args-redacted' | 'args-never-persisted'` (see §4.5), the writer applies the substitution BEFORE the size-cap check. So `args-never-persisted` tools have near-zero payload footprint regardless of their real argument size — appropriate for credential-handling tools.
 
 ### 5.8 `agent_execution_log_edits` — edit audit trail (new table, Phase 2)
 
@@ -449,11 +577,18 @@ Consumer: the log page's "this entity was edited after run X" annotation (Phase 
 - `limit` defaults to `1000`, capped at `1000`.
 - Sort: `sequence_number ASC`.
 - Permission: `authenticate` + tier-appropriate `AGENTS_VIEW` against the run's agent + `resolveSubaccount` when the run is subaccount-tier. See §7.
-- Per-event `permissionMask` computed server-side before emission (no client-side permission logic).
+- Per-event `permissionMask` + `linkedEntity.label` computed server-side at read time (no client-side permission logic; no stale authorisation on historical rows — §4.1a).
+
+**Batch label + permission resolution.** The read path fetches the raw rows once, then runs two batched passes before returning:
+
+1. **Group by `linked_entity_type`, fetch labels in bulk.** One `SELECT id, <label_expr> FROM {entity_table} WHERE id = ANY($1)` per entity type present in the page — at most 9 queries regardless of page size (one per `LinkedEntityType` variant). The label expression is entity-specific (`memory_entries.title`, `policy_rules.name`, `agents.name`, etc.) and lives in `agentRunEditPermissionMask.ts` alongside the permission resolver. Labels are merged back onto the rows in memory.
+2. **Permission-mask pass** — single call into `buildPermissionMask` per row against the caller's permission snapshot (already loaded by `authenticate`). O(1) per row; no additional queries.
+
+Avoids the N+1 class the reviewer flagged. A 1000-event page does at most 9 label-resolution queries + 0 extra permission queries.
 
 `GET /api/agent-runs/:runId/prompts/:assemblyNumber` → `AgentRunPrompt` full row. Same permission gate as the events endpoint.
 
-`GET /api/agent-runs/:runId/llm-payloads/:llmRequestId` → `AgentRunLlmPayload` full row. **Stricter** permission gate than the events endpoint — see §7 on "payload visibility inherits agent-edit permission."
+`GET /api/agent-runs/:runId/llm-payloads/:llmRequestId` → `AgentRunLlmPayload` full row — including `redacted_fields` + `modifications` so the client can render truncation + policy badges accurately. **Stricter** permission gate than the events endpoint — see §7 on "payload visibility inherits agent-edit permission."
 
 ### 5.10 Socket event envelope — dedup + ordering
 
@@ -469,7 +604,7 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 | File | Change | Phase |
 |---|---|---|
-| `migrations/0192_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`; enables RLS + policies on all three; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. Migration numbers 0190 + 0191 already taken on main (LLM `'started'` provisional status + `llm_inflight_history`). | P1 |
+| `migrations/0192_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`; **adds `next_event_seq integer NOT NULL DEFAULT 0` column to existing `agent_runs` table** (drives the atomic per-run sequence allocation in §4.1); enables RLS + policies on all three new tables; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. Backfill for `agent_runs.next_event_seq` is zero-cost because no events exist yet (default `0` matches the empty-table invariant). Migration numbers 0190 + 0191 already taken on main (LLM `'started'` provisional status + `llm_inflight_history`). | P1 |
 | `migrations/0193_agent_execution_log_retention.sql` | **New** — creates `agent_execution_events_warm` + `agent_run_prompts_warm` + `agent_execution_events_archive` (Parquet BYTEA) tables, all with RLS enabled. | P3 |
 | `migrations/0194_agent_execution_log_edits.sql` | **New** — creates `agent_execution_log_edits` audit table with RLS. | P2 |
 | `server/db/schema/agentExecutionEvents.ts` | **New** — Drizzle schema for `agent_execution_events` + event-type TS union re-exported from `shared/types/agentExecutionLog.ts`. | P1 |
@@ -483,20 +618,22 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 | File | Change | Phase |
 |---|---|---|
-| `server/services/agentExecutionEventService.ts` | **New** — exports `appendEvent({ runId, eventType, payload, linkedEntity? })`, `streamEvents(runId, fromSeq?, limit?)`, `getPrompt(runId, assemblyNumber)`, `getLlmPayload(llmRequestId)`. `appendEvent` runs inside `withOrgTx`, assigns `sequenceNumber` via `SELECT COALESCE(MAX(sequence_number), 0) + 1 ... FOR UPDATE`, writes the row, then emits the socket envelope after commit. Validates payload shape against the discriminated union. Emission errors never fail the caller. | P1 |
-| `server/services/agentExecutionEventServicePure.ts` | **New** — pure: event-payload validators (per-eventType), `buildPermissionMask(entityType, entityId, userContext)`, `buildLinkedEntityLabel(entityType, entityId, row)`, sequence-number contract helper. | P1 |
+| `server/services/agentExecutionEventService.ts` | **New** — exports `appendEvent({ runId, eventType, payload, linkedEntity?, sourceService })`, `streamEvents(runId, fromSeq?, limit?, { forUser })`, `getPrompt(runId, assemblyNumber, { forUser })`, `getLlmPayload(llmRequestId, { forUser })`. `appendEvent` runs inside `withOrgTx`, allocates `sequenceNumber` via `UPDATE agent_runs SET next_event_seq = next_event_seq + 1 WHERE id = ? AND next_event_seq < ? RETURNING next_event_seq` (non-critical path) or bypass-cap path (critical path — see §4.1), computes `durationSinceRunStartMs` from `agent_runs.started_at`, writes the row (with `sourceService`, without `permissionMask`), then emits the socket envelope after commit with `permissionMask` computed fresh for the socket user. Validates payload shape against the discriminated union. Critical events retry once inline with 50 ms backoff on failure; non-critical log-and-continue. `streamEvents` + `getPrompt` + `getLlmPayload` take a `forUser` context and attach `permissionMask` + batch-resolved `linkedEntity.label` per §5.9 before returning. | P1 |
+| `server/services/agentExecutionEventServicePure.ts` | **New** — pure: event-payload validators (per-eventType — one case per §5.3 type, including `critical: boolean` bit check), truncation helper (cap-aware field-size budgeting for payload writes per §4.5), modification-record builders (truncation + tool-policy shapes per §5.7), sequence-number contract helper, event-cap predicate (`isNonCriticalCapHit(currentSeq, cap)`). | P1 |
 | `server/services/agentExecutionService.ts` | **Modify** — emit `run.started` after line 383; `prompt.assembled` after line 699 (and every subsequent re-assembly); `handoff.decided` at the handoff site; `run.completed` on terminal transitions. All emissions wrapped in try/catch-log per §4.1. | P1 |
 | `server/services/workspaceMemoryService.ts` | **Modify** — emit `memory.retrieved` at the `_hybridRetrieve()` return boundary (not inside the ranking loop — see §3 reuse note). Payload includes `queryText`, `retrievalMs`, top-N entries with scores, total retrieved. | P1 |
 | `server/services/memoryBlockService.ts` | **Modify** — emit `memory.retrieved` at the `getBlocksForInjection()` return boundary for the block-level retrieval (entity type `memory_block`). | P1 |
 | `server/services/middleware/decisionTimeGuidanceMiddleware.ts` | **Modify** — emit `rule.evaluated` after rule match evaluation, whether or not a rule matched. Payload carries `{ toolSlug, matchedRuleId?, decision, guidanceInjected }`. | P1 |
 | `server/services/skillExecutor.ts` | **Modify** — emit `skill.invoked` at `execute()` top and `skill.completed` at result return (inside the existing try/finally). Carries `actionId` when the invocation produced an action row. | P1 |
-| `server/services/llmRouter.ts` | **Modify** — emit `llm.requested` immediately before `providerAdapter.call()` (same hook point the in-flight tracker uses via `llmInflightRegistry.add`). Emit `llm.completed` in the same `finally` block that writes the ledger row. Also write the `agent_run_llm_payloads` row in the same transaction as the ledger write when `sourceType='agent_run'` (other source types skip the payload write in P1 — revisit in P3 if needed). Emissions guarded by `runId != null` since non-agent LLM callers produce ledger rows but not agent-run events. | P1 |
+| `server/services/llmRouter.ts` | **Modify** — emit `llm.requested` (critical) immediately before `providerAdapter.call()` (same hook point the in-flight tracker uses via `llmInflightRegistry.add`). Emit `llm.completed` (critical) in the same `finally` block that writes the **terminal** ledger row (per §4.5 interaction with migration 0190's provisional `'started'` row — payload writes sit on the terminal transaction, never the provisional one). Also write the `agent_run_llm_payloads` row in the same transaction as the terminal ledger write when `sourceType='agent_run'`: apply redaction (§7.4) + tool-policy substitutions + size-cap truncation in that order, record any modifications in `modifications` column (§5.7), compute `total_size_bytes`, insert. Emissions guarded by `runId != null` since non-agent LLM callers produce ledger rows but not agent-run events. | P1 |
 | `server/services/runContextLoader.ts` | **Modify** — emit `context.source_loaded` per source at the loader's return boundary (one event per source). Payload is a slice of the existing `contextSourcesSnapshot` struct — no new capture logic. | P1 |
 | `server/services/llmService.ts` | **Modify** — `buildSystemPrompt` returns an additional `layerAttributions` struct alongside the assembled prompt, computed from the same inputs it already uses. The caller persists the assembled prompt + attributions via `agentRunPromptService.persistAssembly()`. | P1 |
 | `server/services/agentRunPromptService.ts` | **New** — thin service wrapping inserts into `agent_run_prompts`. Exposes `persistAssembly({ runId, systemPrompt, userPrompt, toolDefinitions, layerAttributions })` which returns the assigned `assemblyNumber` + row ID. Inserts inside `withOrgTx`. | P1 |
 | `server/jobs/orchestratorFromTaskJob.ts` | **Modify** — emit `orchestrator.routing_decided` at the dispatch point (line ~233 where `logger.info('orchestratorFromTask.dispatched')` fires today). Payload carries `{ taskId, chosenAgentId, idempotencyKey, routingSource }` — `routingSource` in v1 is always `'rule'` or `'fallback'` per the current Orchestrator logic; `'llm'` lands when structured reasoning extraction ships (§9 deferred). | P1 |
 | `server/services/middleware/requestClarification.ts` | **Modify** — emit `clarification.requested` alongside the existing `emitAwaitingClarification` call. | P1 |
-| `server/lib/redaction.ts` | **New** — shared redaction patterns (Bearer tokens, API keys, common secret shapes). Used by `agent_run_llm_payloads` writer to redact fields in `messages` and `response` before persistence. Records redactions in the `redacted_fields` column. Extensible — callers pass a pattern bundle; a default bundle ships with this spec. | P1 |
+| `server/lib/redaction.ts` | **New** — shared redaction patterns (Bearer tokens, API keys, common secret shapes). Used by `agent_run_llm_payloads` writer to redact fields in `messages` and `response` before persistence. Records redactions in the `redacted_fields` column (separate from `modifications` — §5.7). Extensible — callers pass a pattern bundle; a default bundle ships with this spec. | P1 |
+| `server/config/actionRegistry.ts` + `server/skills/**/*.md` front matter | **Modify** — add optional `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'` field on tool/skill definitions (default `'full'`). Read by `llmRouter` payload writer at persistence time — tool-calls to declared stricter-mode tools have their arguments substituted before write. Audit P1 skill catalogue for credential-handling skills that should opt in (`oauth-*`, anything calling vault/secrets APIs) in the same change. | P1 |
+| `server/services/agentRunPayloadWriter.ts` | **New** — pure-ish writer extracted from `llmRouter` so the redaction → tool-policy → truncation → size-cap pipeline is one unit-testable function. Exports `buildPayloadRow({ runId, llmRequestId, systemPrompt, messages, toolDefinitions, response, toolDefs, maxBytes })` returning `{ row, modifications, redactedFields, totalSizeBytes }`. Router inserts the result in the terminal-ledger transaction. | P1 |
 | `server/lib/logger.ts` | **Modify** — optional: adopt the same `server/lib/redaction.ts` patterns so logger redaction and payload redaction stay in sync. Opt-in — not a hard dependency of this spec. | P1 |
 
 ### 6.3 Server — routes + websocket
@@ -517,7 +654,7 @@ Single source of truth for everything this spec touches. Every prose reference t
 |---|---|---|
 | `server/lib/permissions.ts` | **Read-only this phase.** No new permission key — view inherits from `AGENTS_VIEW` (tier-appropriate); edit inherits from the entity's existing edit permission. Payload-body read inherits from `AGENTS_EDIT`. | P1 / P2 |
 | `server/lib/agentRunVisibility.ts` | **New** — exports `resolveAgentRunVisibility({ run, user })` returning `{ canView, canViewPayloads }` based on the run's tier (subaccount / org / system) and the user's permissions. Single source of truth for both the route guard and the WebSocket room join handler. | P1 |
-| `server/lib/agentRunEditPermissionMask.ts` | **New** — exports `buildPermissionMask({ entityType, entityId, user, run })` returning `{ canView, canEdit, viewHref, editHref }` for every `LinkedEntityType`. One switch over entity type; each branch calls the existing per-entity permission check. | P1 |
+| `server/lib/agentRunEditPermissionMask.ts` | **New** — exports `buildPermissionMask({ entityType, entityId, user, run })` returning `{ canView, canEdit, canViewPayload, viewHref, editHref }` for every `LinkedEntityType`. One switch over entity type; each branch calls the existing per-entity permission check. Called at **read time** — once per socket emit for the socket user, once per row per snapshot-endpoint response for the HTTP caller. Never baked into persisted event rows (see §4.1a). Also exports `resolveLinkedEntityLabels(entityType, ids)` used by the snapshot endpoint for the batched label-resolution pass (§5.9) — groups by type + issues one `SELECT id, label-expr FROM {table} WHERE id = ANY($1)` per type. | P1 |
 
 ### 6.5 Client — pages + components
 
@@ -544,7 +681,7 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 ### 6.7 Environment variables
 
-Only operational retention tunables. No feature-flag env var — per `docs/spec-context.md` `feature_flags: only_for_behaviour_modes` + `rollout_model: commit_and_revert`, an emergency disable uses `git revert`, not a toggle.
+Operational tunables only — retention, cost-control, and per-run safety caps. No feature-flag env var — per `docs/spec-context.md` `feature_flags: only_for_behaviour_modes` + `rollout_model: commit_and_revert`, an emergency disable uses `git revert`, not a toggle.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -552,6 +689,8 @@ Only operational retention tunables. No feature-flag env var — per `docs/spec-
 | `AGENT_EXECUTION_LOG_WARM_MONTHS` | `12` | Warm tier retention. Payload bodies stripped; events + prompt metadata retained. |
 | `AGENT_EXECUTION_LOG_COLD_YEARS` | `7` | Cold archive retention. Parquet blobs in `agent_execution_events_archive`. |
 | `AGENT_EXECUTION_LOG_ARCHIVE_BATCH_SIZE` | `500` | Rotation job batch size per tick. |
+| `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` | `1048576` (1 MB) | Hard per-row cap on `agent_run_llm_payloads`. Fields truncated greatest-first with `modifications` record when exceeded. TOAST compresses in-place below this ceiling. |
+| `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` | `10000` | Per-run event cap. Above cap: non-critical events drop with metric; critical events bypass; `run.event_limit_reached` emitted once at the boundary. Guards against runaway loops. |
 
 ---
 
@@ -592,7 +731,9 @@ No new permission key. The per-entity permission check already exists for every 
 | `llm_request` | Not editable — immutable ledger row. `canEdit` always false. |
 | `action` | Already has its own review/approval permission; not re-gated here. `canEdit` always false — review flows go through the existing actions surface. |
 
-The resolver for all of the above: `server/lib/agentRunEditPermissionMask.ts → buildPermissionMask()`. Called once per event at emission time, so the permission mask is baked into the event payload and the client does no permission logic.
+The resolver for all of the above: `server/lib/agentRunEditPermissionMask.ts → buildPermissionMask()`. Called at **read time** — once per event on each socket emit (against the socket user's current permissions) and once per row on each snapshot-endpoint response (against the HTTP caller's current permissions). **Never persisted.** Revocations take effect on the next read. See §4.1a for why this matters — the original draft baked the mask into the stored row and was corrected during review to close the privilege-drift hazard.
+
+The client does no permission logic: it consumes `permissionMask` from the wire and renders accordingly. Trade-off accepted: every read recomputes masks for every row on the page. At O(1) per row + 1000-row page ceiling, this is ~sub-millisecond overhead per snapshot response — well inside budget.
 
 **Edits never affect the in-flight run.** The linked edit surface writes through the existing edit service for the entity — which does not mutate any state the in-flight run has already loaded. Runs re-read fresh state on the next handoff or the next run dispatch; nothing reaches back into an executing loop.
 
@@ -664,7 +805,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 ### Phase 1 — MVP live log (persistence + emission + read paths + basic UI)
 
-**Schema changes introduced:** migration `0192_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads` with RLS policies. Adds all three to `rlsProtectedTables.ts` in the same migration.
+**Schema changes introduced:** migration `0192_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads` with RLS policies; **also adds `next_event_seq integer NOT NULL DEFAULT 0` column to the existing `agent_runs` table** for atomic per-run sequence allocation (§4.1). Adds all three new tables to `rlsProtectedTables.ts` in the same migration.
 
 **Services introduced:** `agentExecutionEventService`, `agentExecutionEventServicePure`, `agentRunPromptService`, `agentRunVisibility`, `agentRunEditPermissionMask`, `redaction` (in `server/lib/`).
 
@@ -716,6 +857,16 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 **Ship criterion:** job runs nightly and moves rows between tiers; read endpoints transparently fall through hot → warm → cold on lookup (cold returns a job handle + retrieval ETA rather than the row directly, matching the ledger archive pattern).
 
+### Phase 3.1 — Cold-archive restore contract (minimal sketch)
+
+Shipped alongside P3. Minimum restore path so cold archives are not write-only storage:
+
+- **Trigger endpoint:** `POST /api/admin/agent-runs/:runId/restore-archive` (system admin only). Returns `{ jobId: string, estimatedAvailableAtMs: number }`.
+- **Job:** new pg-boss handler `maintenance:agent-execution-log-restore` that reads the Parquet blob from `agent_execution_events_archive`, unpacks it into the hot tables (`agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`), and marks the run as `archive_restored_at` (new column, `timestamptz` nullable, part of migration 0193). Rehydrated rows retain original sequence numbers; insertion uses `ON CONFLICT DO NOTHING` so a repeat-restore is a no-op.
+- **SLA target:** best-effort <60 s per run. No hard guarantee — the job runs on the existing pg-boss worker pool.
+- **Visibility window:** restored rows are visible through the standard read endpoints until a future rotation cycle pushes them back to warm / cold. `archive_restored_at` is used by the rotation job to skip restored rows for a configurable grace window (`AGENT_EXECUTION_LOG_RESTORE_GRACE_DAYS`, default 30) so an operator debugging an old run isn't ambushed by an overnight re-rotation.
+- **Implementation when:** ship P3's archive-only first; this restore path lands as a follow-up when the first real operator request for a cold run arrives. Tracked here so the contract is not a blank check when that request lands.
+
 ### Dependency verification (phase-boundary contradiction check)
 
 Per `docs/spec-authoring-checklist.md §6`, explicit per-phase ledger:
@@ -764,7 +915,7 @@ Every item below has been surfaced either in prose in this spec or in the surrou
 
 - **Historical replay restore-on-demand UX.** Phase 3 writes cold archives; restoring a run's archived events for re-view requires an admin-triggered restore job that materialises rows back into the hot tables (or a streaming read that thaws Parquet blobs on request). Deferred within P3 — v1 of the archive is "archive only, no restore path"; a restore UX ships when the first operator request lands against a cold-archived run. Tracked as P3.1.
 
-- **Cross-instance sequence-number uniqueness under high concurrency.** The `MAX + 1` sequence allocation serialises event writes per run via `FOR UPDATE`. On a single run this is fine — an agent loop is single-threaded per run. If a future change introduces parallel event writers for the same run (e.g. a shadow evaluator running alongside the real loop), sequence-number collisions become possible. Deferred — revisit when a parallel-writer feature is proposed.
+- **Parallel writers for the same run.** With the `agent_runs.next_event_seq` column (§4.1), sequence-number uniqueness + monotonicity under parallel writers is already guaranteed — the `UPDATE ... RETURNING` is atomic per row at the Postgres level, so the old `MAX + 1` contention class is gone. What remains is the **semantic** question: if a future change introduces multiple writers per run (shadow evaluator, parallel tool execution), within-run event ordering reflects allocation-commit order rather than causal program order. Operator-facing UI would need to indicate that interleaved events from different subsystems are not causally ordered. Deferred — revisit when a parallel-writer feature is actually proposed, so the UI language can be written against a concrete use case.
 
 - **Payload-diff view between retries.** When a retry re-dispatches the same call with a slightly different prompt (e.g. after tool-result insertion), a diff view on the payload drawer would let operators see exactly what changed. Compelling; non-trivial UI (text-diff + JSON-structural-diff hybrid). Deferred.
 
@@ -790,10 +941,30 @@ This spec respects every line. No frontend tests, no supertest / API contract te
 
 `server/services/__tests__/agentExecutionEventServicePure.test.ts`:
 
-- **Event payload validators per event type.** Every valid variant validates; every invalid variant (missing required field, wrong type, unknown event type) rejects. At least one passing + one failing fixture per event type in §5.3.
-- **Linked-entity label builder.** Given `(entityType, entityId, row)`, produces the expected human-readable label for each `LinkedEntityType`.
-- **Sequence-number contract.** `sequenceNumber` is 1-indexed, monotonic. Gaps tolerated (client-side rendering unaffected). The test asserts the rule; the DB integration side isn't unit-testable.
+- **Event payload validators per event type.** Every valid variant validates; every invalid variant (missing required field, wrong type, unknown event type, missing `critical` bit) rejects. At least one passing + one failing fixture per event type in §5.3 — including `run.event_limit_reached`.
+- **Critical-bit enforcement.** Each event type's `critical` value matches the §5.3 table exactly. Test iterates over every `eventType` string literal in the union and asserts `critical` equals the expected value. Prevents silent drift between the TS union + the §5.3 registry table.
+- **Event-cap predicate.** `isNonCriticalCapHit(currentSeq, cap)` returns `true` iff `currentSeq >= cap`. Boundary cases: `cap - 1` → false, `cap` → true, `cap + 1` → true.
+- **Sequence-number contract.** `sequenceNumber` is 1-indexed, monotonic. Gaps tolerated (client-side rendering unaffected). The DB-side atomicity of `UPDATE agent_runs ... RETURNING next_event_seq` isn't unit-testable here but asserted by the pattern shape.
 - **Event envelope builder.** `eventId = ${runId}:${sequenceNumber}:${eventType}` shape is unique across the cartesian product of the three components.
+- **Duration-since-run-start math.** Given `startedAt + now`, produces non-negative integer milliseconds; clock-skew case (now < startedAt) returns `0`, not a negative value.
+
+`server/services/__tests__/agentRunPayloadWriterPure.test.ts` (the redaction → tool-policy → truncation pipeline from §6.2):
+
+- **Pipeline order.** Input containing a redaction-pattern hit AND a tool-policy-gated tool call AND an oversized message is processed in the documented order (redact → policy → truncate); the resulting row is below the cap, `redacted_fields` has the redaction entry, `modifications` has both the `tool_policy` and `truncated` entries with correct paths.
+- **Truncation greatest-first.** Given a 2 MB payload with 1.5 MB in `messages[3].content` and 500 KB in `response.content`, the writer truncates `messages[3].content` first; if still over cap, truncates `response.content`. Never truncates `toolDefinitions` (small + structurally significant).
+- **Tool-policy `args-never-persisted`.** Tool-call arguments replaced with `[POLICY:args-never-persisted]` regardless of size; modification record includes the tool slug.
+- **Under-cap no-op.** Input well under the cap produces `modifications = []` and `totalSizeBytes` matches the actual written size.
+- **Redaction vs truncation separation.** A message containing both a Bearer token and oversized length gets the Bearer redaction in `redacted_fields`, and the remaining truncation (if any) in `modifications`. No overlap or double-counting.
+
+`server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts` (the resolver from §6.4):
+
+- **One fixture per `LinkedEntityType` × tier × (has-permission, lacks-permission)** — confirms the mask's `canView` / `canEdit` / `canViewPayload` / `viewHref` / `editHref` match the expected matrix from §7.2.
+- **System-managed agent masterPrompt** → `canEdit: false` regardless of caller permission (enforced by the `isSystemManaged` guard).
+- **Immutable entity types** (`prompt`, `llm_request`, `action`) → `canEdit: false` under every caller.
+- **Read-time recomputation.** Same input row evaluated against two different user contexts (caller-A with edit, caller-B without) produces different masks. Pinning test — the mask function is pure of user context; persisted state never affects output.
+- **`canViewPayload` is strictly tighter than `canView`.** Every fixture where `canViewPayload=true` also has `canView=true`; the reverse is not required.
+
+`server/lib/__tests__/agentRunVisibilityPure.test.ts`:
 
 `server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts` (the resolver from §6.4):
 
@@ -859,16 +1030,21 @@ Every load-bearing guarantee from §2 has a named mechanism:
 
 | §2 Guarantee | §4–§7 mechanism |
 |---|---|
-| Exactly one event per decision, deterministic per-run ordering | `agent_execution_events UNIQUE (run_id, sequence_number)` + `FOR UPDATE` sequence allocation in `appendEvent` (§4.1, §4.2) |
+| Exactly one event per decision, deterministic per-run ordering | `agent_execution_events UNIQUE (run_id, sequence_number)` + atomic allocation via `agent_runs.next_event_seq` `UPDATE ... RETURNING` (§4.1, §4.2) |
 | No dropped events on WebSocket dropout | Durable write before emit + `GET /api/agent-runs/:runId/events?fromSeq=N` backfill on reconnect (§4.3) |
 | No double-rendered events on reconnect | `eventId` LRU in `useSocket.ts` (existing 500-entry cache) — §5.10 |
 | No cross-tenant leakage | RLS policy on all four new tables + `RLS_PROTECTED_TABLES` manifest + `verify-rls-coverage.sh` gate + route guards + socket handler mirroring route permissions (§7.1, §7.5) |
 | No mid-run edit hot-swap | Edit link writes through existing entity edit services; run keeps loaded state; audit row in `agent_execution_log_edits` (§4.8, §7.2) |
 | No unbounded storage growth | Retention job at 03:30 UTC + tier cutoffs + env var configuration (§4.6) |
+| No unbounded per-run event volume | `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` enforced in the `UPDATE ... WHERE next_event_seq < $cap` clause; non-critical drop + critical bypass + `run.event_limit_reached` signal (§4.1, §4.9) |
+| No unbounded per-row payload size | `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` enforced by `agentRunPayloadWriter`; greatest-first truncation recorded in `modifications` (§4.5, §5.7) |
+| No stale authorisation on historical events | `permissionMask` computed at read time only — never persisted (§4.1a, §7.2); pinning test at §10.1 guards the invariant |
+| No dropped critical events on transient DB failure | One inline retry with 50 ms backoff; persistent failure → `agent_exec_log.critical_drops_total` metric + structured log; agent run never fails (§4.1, §4.9) |
 | Persisted full assembled prompt | `agent_run_prompts` with `(run_id, assembly_number)` PK (§5.6) + `agentRunPromptService.persistAssembly()` (§6.2) |
-| Persisted full LLM payload | `agent_run_llm_payloads` keyed by `llm_request_id`, written inside the ledger insert transaction (§4.5, §5.7) |
-| Permission-gated entity links | Per-entity `permissionMask` baked into event payload at emission; resolver in `agentRunEditPermissionMask` (§6.4, §7.2) |
-| Tiered retention hot / warm / cold | Three-table pair + rotation job (§4.6, §8 P3) |
+| Persisted full LLM payload | `agent_run_llm_payloads` keyed by `llm_request_id`, written inside the ledger insert transaction, post-redaction + post-policy + post-truncation (§4.5, §5.7) |
+| Permission-gated entity links at read time | Per-entity `permissionMask` computed by `agentRunEditPermissionMask` at every socket emit + snapshot response (§6.4, §7.2) |
+| Tiered retention hot / warm / cold | Three-table pair + rotation job + minimal restore contract (§4.6, §8 P3, §8 P3.1) |
+| N+1 free label resolution on snapshot read | Batched `SELECT id, label FROM {table} WHERE id = ANY($1)` per entity type — at most 9 queries per page regardless of size (§5.9) |
 
 No guarantee is load-bearing without a named mechanism.
 
@@ -932,7 +1108,7 @@ Every load-bearing word in the spec has a named mechanism (listed in §11.1). No
 
 - **Storage cost at scale.** 100 GB hot + 100 GB warm per 100K runs/month is a real number. Postgres TOAST compression mitigates ~3–4×. Worst case: payload write becomes the hot-path dominating cost for high-frequency agents. Mitigation if triggered: move `agent_run_llm_payloads` to a separate tablespace or switch to S3-backed blobs for hot tier; documented in §9 "Historical replay restore-on-demand UX" and adjacent. Not solved pre-emptively — measured in P1, mitigated in a follow-up.
 - **Redaction false negatives.** Patterns catch obvious tokens; novel secret shapes slip through. Defence-in-depth via the `AGENTS_EDIT` payload gate, documented explicitly in §7.4. Recovery posture: expand patterns + reprocess affected rows.
-- **Sequence-number `FOR UPDATE` contention under parallel writers.** Not an issue for single-run emission, becomes one if a future feature introduces parallel writers. Deferred in §9.
+- **Parallel writers for the same run — ordering semantics, not correctness.** With `agent_runs.next_event_seq` the correctness question (uniqueness + monotonicity) is settled. What remains is UI clarity: if two subsystems write to the same run concurrently, interleaved sequence numbers don't reflect causal ordering. Not an issue today — agent loop is single-threaded per run. Revisit the UI copy when parallel-writer lands. Deferred in §9.
 - **Orchestrator decision reasoning is a single-line text field.** Structured reasoning extraction is deferred; operators see the Orchestrator's own LLM output via the nested agent-run log (Orchestrator is itself an agent run, generating its own events), which is a partial compensation. Good enough for v1; revisited when the deferred spec lands.
 
 ---
