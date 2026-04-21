@@ -908,7 +908,231 @@ Mirrors `agent_triggers` (per-org, `eventType`, `eventFilter` jsonb, `priority`,
 
 ## Q5 — External API credential storage & HTTP patterns
 
-*(section appended below)*
+### Q5 Finding
+
+**Credential storage.** The authoritative table is `integration_connections` (`server/db/schema/integrationConnections.ts:13-78`):
+
+- `organisationId` (NOT NULL) + `subaccountId` (nullable) — dual-scope. `subaccountId IS NULL` = org-level shared; when set, subaccount-scoped and overrides the org-level row. Resolution order: subaccount first, org fallback (`integrationConnectionService.ts:10-25`).
+- `providerType` typed enum: `'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'teamwork' | 'web_login' | 'custom'`. **No `'places'` or `'hunter'` entry.**
+- `authType`: `'oauth2' | 'api_key' | 'service_account' | 'github_app' | 'web_login'`.
+- `accessToken`, `refreshToken` — AES-256-GCM encrypted at rest (`:32`).
+- `secretsRef` — AES-256-GCM encrypted; used as the API key column for `authType: 'api_key'` (`connectionTokenService.getAccessToken`, `:110-115`).
+- Unique indexes: `(subaccountId, providerType, label)` or `(organisationId, providerType, label)` when subaccount null (`:67-73`).
+
+`organisation_secrets` (`server/db/schema/organisationSecrets.ts`) stores a per-org master key (`encryptionKeyEnc`) encrypted by a server-level KEK — but the running code in `connectionTokenService.ts` reads `TOKEN_ENCRYPTION_KEY` from env directly, not from this table. **This is aspirational schema, not wired.**
+
+`connectorConfigs` is parallel polling metadata, not secrets.
+
+**Secret handling.** `server/services/connectionTokenService.ts`:
+- Algorithm: `AES-256-GCM` (`ALGORITHM = 'aes-256-gcm'`, `:15`).
+- Key source: `TOKEN_ENCRYPTION_KEY` env var (64-char hex = 32 bytes), loaded at module init (`:31-35`).
+- Key rotation: `TOKEN_ENCRYPTION_KEY_V0` legacy; versioned ciphertext format `k1:iv:authTag:ciphertext` (`:20-24`, `:55-61`).
+- No external KMS — pure Node `crypto`.
+- Env declared at `server/lib/env.ts:74-80`: `TOKEN_ENCRYPTION_KEY: z.string().length(64).optional()`.
+
+**Shared HTTP client — there isn't one.** Three distinct fetch patterns:
+
+1. **`apiAdapter`** (`server/services/adapters/apiAdapter.ts`) is GHL-specific via `GHL_ENDPOINTS`. Provides `AbortController` timeout (`dispatchHttp` at `:132-162`), structured outcome classification (`classifyAdapterOutcome` → `terminal_success | retryable | terminal_failure`), error codes (`AUTH | NOT_FOUND | VALIDATION | RATE_LIMITED | GATEWAY | NETWORK_TIMEOUT | OTHER`), token expiry warnings (`:266-288`), JSON structured logging (`:170-190`). **No retry loop — the caller drives retries.**
+2. **`ghlAdapter`** (`server/adapters/ghlAdapter.ts`) uses `axios` with `getProviderRateLimiter('ghl').acquire(locationKey)` before every call (`:48-50`). Token-bucket per location, 100 req / 10 sec.
+3. **Bare `fetch` in `skillExecutor.ts`** — e.g. `executeWebSearch` (`:2052`) and `executeFetchUrl` (`:3608`) call `fetch` directly with `AbortSignal.timeout(15_000)`. No retry, no rate limiting.
+
+Rate-limiter infrastructure: `server/lib/rateLimiter.ts` — token-bucket, in-memory, **not shared across instances**. `getProviderRateLimiter(provider)` registers `ghl` (100/10s), `teamwork` (150/60s), `slack` (50/60s); unknown providers fall back to 60/60s.
+
+**SKILL.md frontmatter convention** — all 152 SKILL.md files use the same minimal 4-field YAML. Examples:
+
+```yaml
+# server/skills/web_search.md:1-6
+---
+name: Web Search
+description: Search the web for current information using Tavily AI search.
+isActive: true
+visibility: basic
+---
+```
+
+```yaml
+# server/skills/enrich_contact.md:1-6
+---
+name: Enrich Contact
+description: Retrieves enrichment data for a contact ... Auto-gated stub — executes with audit trail.
+isActive: true
+visibility: basic
+---
+```
+
+Fields: `name`, `description`, `isActive`, `visibility` (only `basic` observed). **No `requires:`, `integrations:`, or `credentials:` frontmatter field exists in any of the 152 files.**
+
+**External-API declaration in frontmatter** — none. The closest thing is `isExternal: true` + `readPath: 'liveFetch'` + `liveFetchRationale: '...'` in the TypeScript `actionRegistry.ts` (`enrich_contact` at `:1584-1586`). There is no runtime permission check gating a skill if its API key is absent — the pattern is to check the key at skill-execution time and return `{ success: false, error: '... not configured' }` (see `executeWebSearch`, `:2043-2045`).
+
+**Rate-limiting patterns.** GHL has the completest example (token bucket via `getProviderRateLimiter`). Other external skills (`web_search`, `fetch_url`) have no limiter — timeout only. `send_email` declares `retryPolicy: { maxRetries: 3, strategy: 'exponential_backoff', retryOn: ['timeout', 'network_error', 'rate_limit'] }` (`actionRegistry.ts:291-296`), but the actual retry loop lives in the execution layer, not in the skill.
+
+**Env var pattern.** Skills access env through the Zod-validated `env` object (`server/lib/env.ts:116`). At skill-execution time:
+```ts
+// skillExecutor.ts:2043
+const apiKey = env.TAVILY_API_KEY;
+if (!apiKey) {
+  return { success: false, error: 'Web search is not configured (TAVILY_API_KEY not set)' };
+}
+```
+
+`TAVILY_API_KEY` (`env.ts:73`) is the only third-party search API key declared today. **No `GOOGLE_PLACES_API_KEY` or `HUNTER_API_KEY`** in `env.ts` or `.env.example`.
+
+**Skill registration — three steps.**
+
+1. **`actionRegistry.ts`** — add a key to `ACTION_REGISTRY`. Pattern from `enrich_contact:1579-1605`:
+```ts
+enrich_contact: {
+  actionType: 'enrich_contact',
+  description: '...',
+  actionCategory: 'api',
+  topics: ['outreach'],
+  isExternal: true,
+  readPath: 'liveFetch',
+  liveFetchRationale: 'Provider API — contact enrichment requires real-time external lookup',
+  defaultGateLevel: 'auto',
+  createsBoardTask: false,
+  payloadFields: [...],
+  parameterSchema: z.object({ ... }),
+  retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], ... },
+  mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  idempotencyStrategy: 'keyed_write',
+},
+```
+
+2. **`SKILL_HANDLERS` in `skillExecutor.ts`** (`:388`) — add a handler. Auto-gated external pattern (from `fetch_url:539`):
+```ts
+fetch_url: async (input, context) => {
+  return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
+},
+```
+
+3. **`server/skills/<name>.md`** — frontmatter + `## Parameters` / `## Instructions` body. No DB registration; built-in skills are pure code.
+
+### Q5 Gap
+
+- `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY` not in env schema or `.env.example`.
+- `providerType` enum has no `'google_places'` / `'hunter'` — only needed if using DB credential path.
+- No shared rate-limited HTTP client for non-GHL providers. `ghlAdapter` pattern exists but no generic wrapper.
+- No frontmatter mechanism for API dependencies — minor, but skills fail at runtime rather than load time.
+- `enrich_contact` is a stub (`skillExecutor.ts:884-893`) — if `lead_score` depends on Hunter.io enrichment it cannot reuse this skill until the stub is wired.
+- In-memory rate limiter is not multi-instance-coordinated; at 500/month it is irrelevant.
+
+### Q5 Recommended approach
+
+**Credentials — use env vars**, following the `TAVILY_API_KEY` pattern:
+- `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY` are platform-level keys (operator pays for usage across all agencies). Declare in `server/lib/env.ts`: `z.string().optional()`. Add entries in `.env.example`.
+- Do **not** use `integration_connections` — that path is for per-org OAuth credentials.
+- Future-proofing: if a white-label deployment needs per-org Places keys, they go in `integration_connections` with `providerType: 'custom'`, `authType: 'api_key'`, `secretsRef` holding the encrypted key.
+
+**HTTP calls — thin inline `fetch`**, following `executeWebSearch`:
+- 500 calls/month = 0.7/hour — essentially zero rate-limit risk.
+- `apiAdapter` is GHL-specific; reuse is not worth the coupling.
+- Concrete skeleton:
+
+```ts
+async function executePlacesNearbySearch(input, _context) {
+  const apiKey = env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) {
+    return { success: false, error: 'lead_discover requires GOOGLE_PLACES_API_KEY — not configured' };
+  }
+  const url = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
+  url.searchParams.set('location', String(input.location));
+  url.searchParams.set('radius',   String(input.radius ?? 5000));
+  url.searchParams.set('type',     String(input.place_type ?? 'establishment'));
+  url.searchParams.set('key', apiKey);
+  const response = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) return { success: false, error: `Places API error: ${response.status}` };
+  const data = await response.json();
+  return { success: true, results: data.results, next_page_token: data.next_page_token ?? null };
+}
+```
+
+**Proposed SKILL.md frontmatter:**
+
+```yaml
+# server/skills/lead_discover.md
+---
+name: Lead Discover
+description: Discovers nearby business prospects using the Google Places API. Returns a list of businesses matching a location, radius, and category. Auto-gated — read-only external lookup with no CRM side effects.
+isActive: true
+visibility: basic
+---
+```
+
+```yaml
+# server/skills/lead_score.md
+---
+name: Lead Score
+description: Scores a discovered prospect using Hunter.io domain-search enrichment and a configurable heuristic model. Returns a 0-100 score with a ranked explanation. Auto-gated stub — Hunter.io integration must be configured.
+isActive: true
+visibility: basic
+---
+```
+
+**Registration diff for `actionRegistry.ts` (after `enrich_contact`):**
+
+```ts
+lead_discover: {
+  actionType: 'lead_discover',
+  description: 'Discover nearby business prospects via the Google Places Nearby Search API.',
+  actionCategory: 'api',
+  topics: ['outreach'],
+  isExternal: true,
+  readPath: 'liveFetch',
+  liveFetchRationale: 'Google Places API — real-time geospatial business data, not canonical',
+  defaultGateLevel: 'auto',
+  createsBoardTask: false,
+  payloadFields: ['location', 'radius', 'place_type', 'max_results'],
+  parameterSchema: z.object({
+    location: z.string().describe('lat,lng string e.g. "-33.8688,151.2093"'),
+    radius: z.number().optional(),
+    place_type: z.string().optional(),
+    max_results: z.number().optional(),
+  }),
+  retryPolicy: { maxRetries: 2, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
+  mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  idempotencyStrategy: 'read_only',
+},
+lead_score: {
+  actionType: 'lead_score',
+  description: 'Score a prospect via Hunter.io domain-search enrichment + heuristic model.',
+  actionCategory: 'api',
+  topics: ['outreach'],
+  isExternal: true,
+  readPath: 'liveFetch',
+  liveFetchRationale: 'Hunter.io API — real-time enrichment, not canonical',
+  defaultGateLevel: 'auto',
+  createsBoardTask: false,
+  payloadFields: ['domain', 'company_name', 'place_id'],
+  parameterSchema: z.object({
+    domain: z.string(),
+    company_name: z.string().optional(),
+    place_id: z.string().optional(),
+  }),
+  retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error', 'domain_not_found'] },
+  mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  idempotencyStrategy: 'keyed_write',
+},
+```
+
+**`skillExecutor.ts` SKILL_HANDLERS additions (near `enrich_contact:883`):**
+
+```ts
+lead_discover: async (input, context) =>
+  executeWithActionAudit('lead_discover', input, context, () => executeLeadDiscover(input, context)),
+lead_score: async (input, context) =>
+  executeWithActionAudit('lead_score', input, context, () => executeLeadScore(input, context)),
+```
+
+Implement `executeLeadDiscover` and `executeLeadScore` as private async fns in the file body (mirror `executeFetchUrl:3575`).
+
+### Q5 Risk / uncertainty
+
+- **Rate limits at 500/month** — Places: free $200 credit covers ~6,000 calls/month at $0.032/call. Hunter free tier caps at 25 searches/month; 500/month needs Starter ($49/month for 1,000). Budget decision, not a technical blocker.
+- **Places ToS** — 30-day cache limit on `place_id`/cached place data; photos must not be stored or displayed outside a Google Maps context. `lead_discover` should not persist `photos[]`.
+- **Hunter free vs paid** — plan $49/mo or pick a different enricher. Fail gracefully on `402`/`429`.
+- **Missing-key UX** — current pattern returns `{ success: false, error: '... not configured' }` at runtime. No pre-flight check at agent startup. Flag in skill description (as `enrich_contact.md` does: *"MVP stub: The data enrichment integration is not yet connected"*).
+- **Multi-instance rate coordination** — in-memory limiter breaks on multi-pod deploys. At 500/month this is irrelevant; at 50,000/month it isn't.
 
 ---
 
