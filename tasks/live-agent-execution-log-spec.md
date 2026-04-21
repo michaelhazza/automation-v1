@@ -3,7 +3,7 @@
 **Status:** Draft — awaiting human review. Major task per CLAUDE.md §"Task Classification" (new subsystem, new tables, new permission keys, new WebSocket contract, new client surface).
 **Author:** Main session.
 **Date:** 2026-04-21.
-**Last revised:** 2026-04-21 — external-review pass 2 applied on top of the main-merge refresh. Changes: sequence allocation moved to `agent_runs.next_event_seq` (kills the `MAX + 1` scan + lock); graded failure handling (critical events retry once inline + emit drop metric; non-critical stay fire-and-forget); hard per-run event cap + `run.event_limit_reached` signal event; per-row payload size cap + truncation metadata; `permissionMask` moved to read-time computation (closes a privilege-drift security bug — stored events no longer carry stale authorisation state); payload-table gains `modifications` column separating truncation from redaction; tool-level `payloadPersistencePolicy` for secret-handling skills; batched linked-entity label resolution on snapshot read; minimum restore-contract sketch for cold archive; emission-ordering semantics clarified; every event now carries `sourceService` + `durationSinceRunStartMs`. Prior revision note: main merge; migration numbers bumped to 0192/0193/0194 (0190/0191 taken by provisional-row + in-flight history landing on main); `AGENT_EXECUTION_LOG_ENABLED` kill-switch removed per `feature_flags: only_for_behaviour_modes` convention; primitives-search updated to reference `softBreakerPure` + `runCostBreaker` + `llm_inflight_history` from the in-flight-tracker deferred-items merge; payload-write timing clarified to acknowledge migration 0190's `'started'` provisional ledger status.
+**Last revised:** 2026-04-21 — external-review **pass 3** applied (merge-ready cleanup). Changes: `agent_run_prompts` gains surrogate `id uuid PK` so `linked_entity_id uuid` on events can reference prompts like every other entity (composite `(run_id, assembly_number)` stays as UNIQUE for the drilldown endpoint); `run.event_limit_reached` gets an exactly-once atomic-claim mechanism via new `agent_runs.event_limit_reached_emitted` column (closes the race where multiple non-critical events arrive at the cap boundary concurrently); `resolveAgentRunVisibility` returns `canViewPayload` (singular) to align with `PermissionMask.canViewPayload`; P3.1 restore contract split explicitly into P3-ships (schema support: `archive_restored_at` column + grace-window logic) vs P3.1-ships (trigger endpoint + worker, deferred until real request); duplicated test block in §10.1 removed. No architectural changes — all four items were tightenings on the pass-2 revision. **Pass 2 summary:** external-review pass 2 applied on top of the main-merge refresh. Changes: sequence allocation moved to `agent_runs.next_event_seq` (kills the `MAX + 1` scan + lock); graded failure handling (critical events retry once inline + emit drop metric; non-critical stay fire-and-forget); hard per-run event cap + `run.event_limit_reached` signal event; per-row payload size cap + truncation metadata; `permissionMask` moved to read-time computation (closes a privilege-drift security bug — stored events no longer carry stale authorisation state); payload-table gains `modifications` column separating truncation from redaction; tool-level `payloadPersistencePolicy` for secret-handling skills; batched linked-entity label resolution on snapshot read; minimum restore-contract sketch for cold archive; emission-ordering semantics clarified; every event now carries `sourceService` + `durationSinceRunStartMs`. Prior revision note: main merge; migration numbers bumped to 0192/0193/0194 (0190/0191 taken by provisional-row + in-flight history landing on main); `AGENT_EXECUTION_LOG_ENABLED` kill-switch removed per `feature_flags: only_for_behaviour_modes` convention; primitives-search updated to reference `softBreakerPure` + `runCostBreaker` + `llm_inflight_history` from the in-flight-tracker deferred-items merge; payload-write timing clarified to acknowledge migration 0190's `'started'` provisional ledger status.
 **Branch when built:** `claude/agent-task-live-logs-MbN8R` (already cut).
 **Predecessor / sibling:** `tasks/llm-inflight-realtime-tracker-spec.md` — the system-admin in-flight LLM tracker at `/system/llm-pnl` In-Flight tab — plus `tasks/llm-inflight-deferred-items-brief.md`, which added the provisional-row partial-external-success protection (migration 0190) + `llm_inflight_history` durable forensic log (migration 0191) + `softBreakerPure` for fire-and-forget persistence paths. This spec is the **per-run** companion surface: it attaches a live execution log to every agent run, not every LLM call in the system. The two surfaces share the LLM ledger as a data source but never render in the same page.
 
@@ -148,7 +148,18 @@ Every event is written through a single service: `server/services/agentExecution
       AND next_event_seq < $maxEventsPerRun
    RETURNING next_event_seq
    ```
-   If the `RETURNING` clause is empty, the run has hit `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` (default 10 000). Non-critical events short-circuit silently (increment `agent_exec_log.cap_drops_total{event_type}`); critical events go through a separate path that bypasses the `< $maxEventsPerRun` guard and allocates anyway (we never drop `run.completed` on cap — see critical-tier handling below). On the first cap hit for a run, the service emits exactly one `run.event_limit_reached` event (itself critical) with `{ eventCountAtLimit, cap }` so the client timeline shows the cap.
+   If the `RETURNING` clause is empty, the run has hit `AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` (default 10 000). Non-critical events short-circuit silently (increment `agent_exec_log.cap_drops_total{event_type}`); critical events go through a separate path that bypasses the `< $maxEventsPerRun` guard and allocates anyway (we never drop `run.completed` on cap — see critical-tier handling below).
+
+   **Exactly-once `run.event_limit_reached` emission.** The companion column `agent_runs.event_limit_reached_emitted boolean NOT NULL DEFAULT false` gates the signal event. On any cap-hit path, the service runs an atomic claim:
+   ```sql
+   UPDATE agent_runs
+      SET event_limit_reached_emitted = true,
+          next_event_seq = next_event_seq + 1
+    WHERE id = $runId
+      AND event_limit_reached_emitted = false
+   RETURNING next_event_seq
+   ```
+   Exactly one caller sees a non-empty `RETURNING`; that caller allocates the sequence number and emits the critical `run.event_limit_reached` event with `{ eventCountAtLimit, cap }`. Every other caller (concurrent non-critical attempts that raced into the cap boundary, or a critical-retry path re-entering the flow) sees empty and proceeds silently. This is the same pattern used elsewhere in the codebase for one-shot signals and guarantees exactly-once even under Node event-loop interleaving and the critical-event one-retry path. Allocation for this specific event is not gated by the `< $cap` guard — it's a cap-boundary signal, not subject to the cap it signals.
 2. **Computes `durationSinceRunStartMs`** using the run's `started_at` timestamp + wall-clock now. Baked into the event payload so the client never recomputes.
 3. **Persists the row to `agent_execution_events`** in the same transaction as the sequence allocation. Persisted row carries `source_service` + `duration_since_run_start_ms` as columns and event-specific fields in the `payload` JSONB. **`permissionMask` is NOT persisted** (see §4.1a below).
 4. **Emits a WebSocket event** to the `agent-run:${runId}` room *after* commit. The socket envelope's `payload.permissionMask` is **computed from the socket user's context at emit time**, not stored anywhere. If the emit fails, the event is still durable — clients resync via the paginated read endpoint on reconnect and the endpoint re-computes the mask for the requesting user.
@@ -313,11 +324,15 @@ CREATE INDEX agent_execution_events_linked_entity_idx ON agent_execution_events 
 ALTER TABLE agent_execution_events ENABLE ROW LEVEL SECURITY;
 -- RLS policy: organisation_id = current_setting('app.organisation_id')::uuid (pattern from architecture.md §1155)
 
--- Companion column on agent_runs — atomic per-run sequence allocation.
--- Doubles as the authoritative "events emitted for this run" counter (subsumes the polish
--- suggestion to add event_count). Hits AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN = event cap.
+-- Companion columns on agent_runs —
+--   next_event_seq: atomic per-run sequence allocation. Doubles as the authoritative
+--                   "events emitted for this run" counter (subsumes the polish suggestion
+--                   to add event_count). Hits AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN = event cap.
+--   event_limit_reached_emitted: one-shot flag that gates the single `run.event_limit_reached`
+--                                signal event per run. Atomic-claim UPDATE pattern in §4.1.
 ALTER TABLE agent_runs
-  ADD COLUMN next_event_seq integer NOT NULL DEFAULT 0;
+  ADD COLUMN next_event_seq              integer NOT NULL DEFAULT 0,
+  ADD COLUMN event_limit_reached_emitted boolean NOT NULL DEFAULT false;
 ```
 
 Producer: `agentExecutionEventService.appendEvent()` (new service).
@@ -484,7 +499,7 @@ export type LinkedEntityType =
   | 'policy_rule'    // policy_rules.id
   | 'skill'          // resolved slug -> skills.id OR system_skills.id
   | 'data_source'    // agent_data_sources.id
-  | 'prompt'         // agent_run_prompts: composite (runId, assemblyNumber) encoded as string
+  | 'prompt'         // agent_run_prompts.id (uuid). The (runId, assemblyNumber) composite remains unique but is not the linked-entity reference.
   | 'agent'          // agents.id OR system_agents.id
   | 'llm_request'    // llm_requests.id
   | 'action';        // actions.id (for reviewed skill invocations)
@@ -494,6 +509,8 @@ export type LinkedEntityType =
 
 ```sql
 CREATE TABLE agent_run_prompts (
+  id                uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    -- Surrogate UUID so `linked_entity_id uuid` on agent_execution_events can reference this table like every other entity.
   run_id            uuid NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
   assembly_number   integer NOT NULL,           -- 1-indexed per run
   organisation_id   uuid NOT NULL REFERENCES organisations(id),
@@ -504,15 +521,16 @@ CREATE TABLE agent_run_prompts (
   tool_definitions  jsonb NOT NULL,             -- array of { name, description, input_schema }
   layer_attributions jsonb NOT NULL,            -- { master: { startOffset, length }, orgAdditional: { ... }, memoryBlocks: [ { blockId, startOffset, length } ], skillInstructions: [...], taskContext: {...} }
   total_tokens      integer NOT NULL,
-  PRIMARY KEY (run_id, assembly_number)
+  UNIQUE (run_id, assembly_number)              -- natural key stays; just no longer the PK
 );
+CREATE INDEX agent_run_prompts_run_assembly_idx ON agent_run_prompts (run_id, assembly_number);
 CREATE INDEX agent_run_prompts_org_assembled_idx ON agent_run_prompts (organisation_id, assembled_at DESC);
 
 ALTER TABLE agent_run_prompts ENABLE ROW LEVEL SECURITY;
 -- RLS same shape as agent_execution_events
 ```
 
-`layer_attributions` enables the UI's "click this block of the prompt to see which memory/rule/instruction contributed it" feature.
+`layer_attributions` enables the UI's "click this block of the prompt to see which memory/rule/instruction contributed it" feature. Drilldown endpoint `GET /api/agent-runs/:runId/prompts/:assemblyNumber` still uses the composite `(run_id, assembly_number)` key from the URL — the surrogate UUID is the internal foreign-key target for `agent_execution_events.linked_entity_id`, not an external API shape. `prompt.assembled` event payload still carries `promptRowId` which is now this UUID.
 
 ### 5.7 `agent_run_llm_payloads` — full LLM payload persistence (new table)
 
@@ -604,7 +622,7 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 | File | Change | Phase |
 |---|---|---|
-| `migrations/0192_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`; **adds `next_event_seq integer NOT NULL DEFAULT 0` column to existing `agent_runs` table** (drives the atomic per-run sequence allocation in §4.1); enables RLS + policies on all three new tables; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. Backfill for `agent_runs.next_event_seq` is zero-cost because no events exist yet (default `0` matches the empty-table invariant). Migration numbers 0190 + 0191 already taken on main (LLM `'started'` provisional status + `llm_inflight_history`). | P1 |
+| `migrations/0192_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` (with surrogate `id uuid PK` + unique `(run_id, assembly_number)`) + `agent_run_llm_payloads`; **adds two columns to existing `agent_runs` table**: `next_event_seq integer NOT NULL DEFAULT 0` (drives atomic per-run sequence allocation — §4.1) and `event_limit_reached_emitted boolean NOT NULL DEFAULT false` (gates the exactly-once `run.event_limit_reached` signal — §4.1); enables RLS + policies on all three new tables; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. Backfill for both new `agent_runs` columns is zero-cost because no events exist yet (defaults match the empty-table invariant). Migration numbers 0190 + 0191 already taken on main (LLM `'started'` provisional status + `llm_inflight_history`). | P1 |
 | `migrations/0193_agent_execution_log_retention.sql` | **New** — creates `agent_execution_events_warm` + `agent_run_prompts_warm` + `agent_execution_events_archive` (Parquet BYTEA) tables, all with RLS enabled. | P3 |
 | `migrations/0194_agent_execution_log_edits.sql` | **New** — creates `agent_execution_log_edits` audit table with RLS. | P2 |
 | `server/db/schema/agentExecutionEvents.ts` | **New** — Drizzle schema for `agent_execution_events` + event-type TS union re-exported from `shared/types/agentExecutionLog.ts`. | P1 |
@@ -653,7 +671,7 @@ Single source of truth for everything this spec touches. Every prose reference t
 | File | Change | Phase |
 |---|---|---|
 | `server/lib/permissions.ts` | **Read-only this phase.** No new permission key — view inherits from `AGENTS_VIEW` (tier-appropriate); edit inherits from the entity's existing edit permission. Payload-body read inherits from `AGENTS_EDIT`. | P1 / P2 |
-| `server/lib/agentRunVisibility.ts` | **New** — exports `resolveAgentRunVisibility({ run, user })` returning `{ canView, canViewPayloads }` based on the run's tier (subaccount / org / system) and the user's permissions. Single source of truth for both the route guard and the WebSocket room join handler. | P1 |
+| `server/lib/agentRunVisibility.ts` | **New** — exports `resolveAgentRunVisibility({ run, user })` returning `{ canView, canViewPayload }` based on the run's tier (subaccount / org / system) and the user's permissions. Same bit name as `PermissionMask.canViewPayload` (§5.2) — run-level visibility and per-event mask share the underlying permission check; naming stays singular across both for reader clarity. Single source of truth for both the route guard and the WebSocket room join handler. | P1 |
 | `server/lib/agentRunEditPermissionMask.ts` | **New** — exports `buildPermissionMask({ entityType, entityId, user, run })` returning `{ canView, canEdit, canViewPayload, viewHref, editHref }` for every `LinkedEntityType`. One switch over entity type; each branch calls the existing per-entity permission check. Called at **read time** — once per socket emit for the socket user, once per row per snapshot-endpoint response for the HTTP caller. Never baked into persisted event rows (see §4.1a). Also exports `resolveLinkedEntityLabels(entityType, ids)` used by the snapshot endpoint for the batched label-resolution pass (§5.9) — groups by type + issues one `SELECT id, label-expr FROM {table} WHERE id = ANY($1)` per type. | P1 |
 
 ### 6.5 Client — pages + components
@@ -805,7 +823,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 ### Phase 1 — MVP live log (persistence + emission + read paths + basic UI)
 
-**Schema changes introduced:** migration `0192_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads` with RLS policies; **also adds `next_event_seq integer NOT NULL DEFAULT 0` column to the existing `agent_runs` table** for atomic per-run sequence allocation (§4.1). Adds all three new tables to `rlsProtectedTables.ts` in the same migration.
+**Schema changes introduced:** migration `0192_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts` (with surrogate UUID PK), `agent_run_llm_payloads` with RLS policies; **also adds two columns to the existing `agent_runs` table**: `next_event_seq integer NOT NULL DEFAULT 0` (atomic per-run sequence allocation — §4.1) and `event_limit_reached_emitted boolean NOT NULL DEFAULT false` (exactly-once `run.event_limit_reached` gate — §4.1). Adds all three new tables to `rlsProtectedTables.ts` in the same migration.
 
 **Services introduced:** `agentExecutionEventService`, `agentExecutionEventServicePure`, `agentRunPromptService`, `agentRunVisibility`, `agentRunEditPermissionMask`, `redaction` (in `server/lib/`).
 
@@ -857,15 +875,22 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 **Ship criterion:** job runs nightly and moves rows between tiers; read endpoints transparently fall through hot → warm → cold on lookup (cold returns a job handle + retrieval ETA rather than the row directly, matching the ledger archive pattern).
 
-### Phase 3.1 — Cold-archive restore contract (minimal sketch)
+### Phase 3.1 — Cold-archive restore (specified in P3, implementation deferred)
 
-Shipped alongside P3. Minimum restore path so cold archives are not write-only storage:
+This section pins the restore contract so cold archives are not an implicitly-sealed format. The **schema support** ships in Phase 3 (as part of migration 0193); the **trigger endpoint + worker handler are deferred to P3.1** and land when the first real operator request for a cold-archived run arrives.
+
+**Ships in P3 (alongside the archive write path):**
+
+- Migration 0193 adds `archive_restored_at timestamptz` column on `agent_runs` (nullable). Used by the rotation job to skip restored rows for a configurable grace window (`AGENT_EXECUTION_LOG_RESTORE_GRACE_DAYS`, default 30) so an operator debugging an old run isn't ambushed by an overnight re-rotation. This column lands in P3 so the rotation-job logic can be written correctly on day one — even though nothing writes to the column until P3.1.
+- Archive rows in `agent_execution_events_archive` carry enough metadata (original run_id, full blob) that restoration is mechanically possible without a schema change later.
+
+**Deferred to P3.1 (lands when the first operator request arrives):**
 
 - **Trigger endpoint:** `POST /api/admin/agent-runs/:runId/restore-archive` (system admin only). Returns `{ jobId: string, estimatedAvailableAtMs: number }`.
-- **Job:** new pg-boss handler `maintenance:agent-execution-log-restore` that reads the Parquet blob from `agent_execution_events_archive`, unpacks it into the hot tables (`agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`), and marks the run as `archive_restored_at` (new column, `timestamptz` nullable, part of migration 0193). Rehydrated rows retain original sequence numbers; insertion uses `ON CONFLICT DO NOTHING` so a repeat-restore is a no-op.
-- **SLA target:** best-effort <60 s per run. No hard guarantee — the job runs on the existing pg-boss worker pool.
-- **Visibility window:** restored rows are visible through the standard read endpoints until a future rotation cycle pushes them back to warm / cold. `archive_restored_at` is used by the rotation job to skip restored rows for a configurable grace window (`AGENT_EXECUTION_LOG_RESTORE_GRACE_DAYS`, default 30) so an operator debugging an old run isn't ambushed by an overnight re-rotation.
-- **Implementation when:** ship P3's archive-only first; this restore path lands as a follow-up when the first real operator request for a cold run arrives. Tracked here so the contract is not a blank check when that request lands.
+- **Worker:** new pg-boss handler `maintenance:agent-execution-log-restore` reads the Parquet blob from `agent_execution_events_archive`, unpacks into the hot tables (`agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`), stamps `agent_runs.archive_restored_at = now()`. Insertion uses `ON CONFLICT DO NOTHING` so a repeat-restore is a no-op. Rehydrated rows retain original sequence numbers.
+- **SLA target:** best-effort <60 s per run. No hard guarantee — runs on the existing pg-boss worker pool.
+
+Why this split: the schema-support side of the restore contract is cheap and prevents forward-compat bugs; the active implementation has no known requester and may benefit from waiting until a concrete use case shapes the UX. Tracked here so the contract is not a blank check when the trigger arrives.
 
 ### Dependency verification (phase-boundary contradiction check)
 
@@ -963,14 +988,6 @@ This spec respects every line. No frontend tests, no supertest / API contract te
 - **Immutable entity types** (`prompt`, `llm_request`, `action`) → `canEdit: false` under every caller.
 - **Read-time recomputation.** Same input row evaluated against two different user contexts (caller-A with edit, caller-B without) produces different masks. Pinning test — the mask function is pure of user context; persisted state never affects output.
 - **`canViewPayload` is strictly tighter than `canView`.** Every fixture where `canViewPayload=true` also has `canView=true`; the reverse is not required.
-
-`server/lib/__tests__/agentRunVisibilityPure.test.ts`:
-
-`server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts` (the resolver from §6.4):
-
-- **One fixture per `LinkedEntityType` × tier × (has-permission, lacks-permission)** — confirms the mask's `canView` / `canEdit` / `viewHref` / `editHref` match the expected matrix from §7.2.
-- **System-managed agent masterPrompt** → `canEdit: false` regardless of caller permission (enforced by the `isSystemManaged` guard).
-- **Immutable entity types** (`prompt`, `llm_request`, `action`) → `canEdit: false` under every caller.
 
 `server/lib/__tests__/agentRunVisibilityPure.test.ts`:
 
