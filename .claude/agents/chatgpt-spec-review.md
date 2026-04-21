@@ -64,6 +64,16 @@ For each round:
 2. For each finding assign accept / reject / defer + severity (critical/high/
    medium/low) + a one-line rationale
 3. Apply all accepted items as edits to the spec document using the Edit tool
+3a. Post-edit integrity check — after applying all edits this round, scan the
+    spec for:
+    - Forward references: sections that reference headings, tables, or items
+      that no longer exist or were renamed by this round's edits
+    - Contradictions: the same concept described differently in two sections
+    - Missing inputs/outputs: any new or modified item that lacks defined
+      inputs and outputs
+    For each issue found, add it as a new finding in this round's Decisions
+    table (Source: integrity-check). Apply if mechanical, defer if directional.
+    Log: "Integrity check: <N> issues found this round."
 4. Append the round to the session log including a Top themes line
 5. Print the round summary and the changed sections only (not the full spec):
 
@@ -117,22 +127,33 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
      update instead of duplicating if found. Include (seen N times) on add/update.
    - [missing-doc] >2 → force-update CLAUDE.md/architecture.md
    - Append JSONL records to tasks/review-logs/_index.jsonl with fingerprint
-     dedup and silent-failure handling (same rules as PR agent)
+     dedup and silent-failure handling (same rules as PR agent — increment
+     session-level `index_write_failures` counter on each failed write)
    - Enum enforcement: finding_type / category / severity must use predefined values
-5. Deferred backlog: append deferred items to tasks/todo.md — same single-
-   source-of-truth file the PR agent uses (see Task 1 finalization step 5 for
-   the full rule). Do NOT write to tasks/review-logs/_deferred.md. Same scan-
-   before-append dedup rule. Create a new dated section for this spec review
-   session, append-only:
+5. Deferred backlog: append all deferred items to tasks/todo.md under this
+   structure — create the top-level heading if it does not exist, create the
+   subheading if it does not exist, append items only (never overwrite):
 
-     ## Deferred from ChatGPT spec review — <spec-file>
+     ## Spec Review deferred items
 
-     **Captured**: <ISO date>
-     **Source log**: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
+     ### <spec-slug> (<YYYY-MM-DD>)
 
-     - [ ] <finding> — <reason>
-     - [ ] <finding> — <reason>
-6. Print: "Spec review complete. PR #<N>: <url>. Hand off to architect or
+     - [ ] <finding> — <one-sentence reason for deferral>
+
+   Before each item scan for a similar existing entry (same finding_type OR
+   same leading ~5 words) — skip if already present.
+   Do NOT write to tasks/review-logs/_deferred.md.
+
+6. Print the deferred items summary so the user can review what was held back
+   and why:
+
+     Deferred to tasks/todo.md § Spec Review deferred items / <spec-slug>:
+     - <item> — <reason>
+
+   If index_write_failures > 0, print:
+     ⚠ Index write failures: <N> — pattern tracking may be incomplete for this session.
+
+7. Print: "Spec review complete. PR #<N>: <url>. Hand off to architect or
    invoke writing-plans when ready to implement."
 
 ## Future Hook
@@ -182,7 +203,8 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   ## Final Summary
   - Rounds: <N>
   - Accepted: <X> | Rejected: <Y> | Deferred: <Z>
-  - Deferred items:
+  - Index write failures: <N> (0 = clean)
+  - Deferred to tasks/todo.md § Spec Review deferred items / <spec-slug>:
     - <item> — <reason>
   - KNOWLEDGE.md updated: yes (<N> entries) | no
   - PR: #<N> — spec changes ready at <url>
