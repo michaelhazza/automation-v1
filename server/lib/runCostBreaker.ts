@@ -126,7 +126,10 @@ export async function assertWithinRunBudget(
 ): Promise<void> {
   const limit = await resolveRunCostCeiling(ctx);
   const spent = await getRunCostCents(ctx.runId);
-  if (spent > limit) {
+  // Hard-ceiling semantics: trip at spent === limit so the next cost-incurring
+  // call is prevented. `>` would allow spend to equal the limit, then the
+  // subsequent call would push over before tripping — a one-call overshoot.
+  if (spent >= limit) {
     logger.error('costBreaker.exceeded', {
       runId: ctx.runId,
       correlationId: ctx.correlationId,
@@ -202,7 +205,8 @@ export interface RunCostBreakerFromLedgerContext extends RunCostBreakerContext {
 
 /**
  * Direct-ledger sibling of `assertWithinRunBudget`. Throws via failure()
- * when `SUM(llm_requests.cost_with_margin_cents) > ceiling`.
+ * when `SUM(llm_requests.cost_with_margin_cents) >= ceiling` (hard-ceiling
+ * semantics — see inline comment at the comparison below).
  *
  * Canonical caller: `llmRouter.routeCall`. Called immediately after the
  * ledger insert, using the inserted row's id as a visibility check. Slack
@@ -244,7 +248,9 @@ export async function assertWithinRunBudgetFromLedger(
 
   const limit = await resolveRunCostCeiling(ctx);
   const spent = await getRunCostCentsFromLedger(ctx.runId);
-  if (spent > limit) {
+  // Hard-ceiling semantics: trip at spent === limit. See the sibling comment
+  // in `assertWithinRunBudget` above for the one-call-overshoot reasoning.
+  if (spent >= limit) {
     logger.error('costBreaker.exceeded', {
       runId: ctx.runId,
       correlationId: ctx.correlationId,
