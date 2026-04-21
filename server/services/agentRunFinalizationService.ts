@@ -30,6 +30,7 @@ import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
 } from './agentRunFinalizationServicePure.js';
+import { computeRunResultStatus } from './agentExecutionServicePure.js';
 
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths. The DB-touching entry points below are the only
@@ -211,16 +212,31 @@ export async function finaliseAgentRunFromIeeRun(
       // See aggregateTokensForIeeRun JSDoc for the race this avoids.
       const tokens = await aggregateTokensForIeeRun(tx, ieeRun.id);
 
+      // Hermes Tier 1 Phase B §6.3 / §6.3.1 — derive runResultStatus for
+      // the IEE-delegated terminal transition using the same pure helper
+      // as the main path so identical inputs yield identical derivations.
+      // `hadUncertainty` is not tracked on the IEE path; pass `false`.
+      const ieeDerivedRunResultStatus = computeRunResultStatus(
+        terminalStatus,
+        /* hasError */ isFailureStatus,
+        /* hadUncertainty */ false,
+        /* hasSummary */ !!(summary && summary.trim().length > 0),
+      );
+
       // Defence-in-depth: gate the terminal transition on the parent's
       // current status being non-terminal. FOR UPDATE + the
       // parentAlreadyTerminal check above already serialise writers, but
       // this WHERE adds a DB-level guarantee that a future refactor
       // losing the application check cannot accidentally overwrite a
       // terminal parent row. (External review finding: Blocker 2.)
+      // Phase B: also gate on `runResultStatus IS NULL` so a retry that
+      // somehow re-enters this branch cannot overwrite a prior writer's
+      // classification (§6.3.1 write-once invariant).
       const updated = await tx
         .update(agentRuns)
         .set({
           status: terminalStatus,
+          runResultStatus: ieeDerivedRunResultStatus,
           summary,
           errorMessage,
           errorDetail,
@@ -240,9 +256,18 @@ export async function finaliseAgentRunFromIeeRun(
           eq(agentRuns.id, parent.id),
           inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
           isNull(agentRuns.completedAt),
+          isNull(agentRuns.runResultStatus),
         ))
         .returning({ id: agentRuns.id });
       performedTransition = updated.length > 0;
+      if (!performedTransition) {
+        logger.warn('runResultStatus.write_skipped', {
+          runId: parent.id,
+          ieeRunId: ieeRun.id,
+          attemptedStatus: ieeDerivedRunResultStatus,
+          writeSite: 'finaliseAgentRunFromIeeRun',
+        });
+      }
     }
 
     if (!ieeRun.eventEmittedAt) {

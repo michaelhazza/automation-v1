@@ -184,6 +184,209 @@ test('empty results array returns empty', () => {
   assertEqual(result.length, 0, 'empty → empty');
 });
 
+// ---------------------------------------------------------------------------
+// Hermes Tier 1 Phase B — §6.5 decision matrix + §6.7 provenance.
+// ---------------------------------------------------------------------------
+//
+// These tests pin the pure decision logic that `extractRunInsights`
+// applies on top of the LLM's raw classification. The impure write path
+// in `workspaceMemoryService.ts` calls these pure helpers directly; the
+// `options.overrides` row-write concern is covered by the integration
+// test in `workspaceMemoryService.test.ts`.
+
+import {
+  computeProvenanceConfidence,
+  scoreForOutcome,
+  selectPromotedEntryType,
+  type RunOutcome,
+} from '../workspaceMemoryServicePure.js';
+import type { EntryType } from '../../config/limits.js';
+
+function outcome(
+  runResultStatus: RunOutcome['runResultStatus'],
+  trajectoryPassed: RunOutcome['trajectoryPassed'] = null,
+  errorMessage: RunOutcome['errorMessage'] = null,
+): RunOutcome {
+  return { runResultStatus, trajectoryPassed, errorMessage };
+}
+
+const ALL_ENTRY_TYPES: EntryType[] = ['observation', 'decision', 'preference', 'issue', 'pattern'];
+
+// ─── selectPromotedEntryType — §6.5 matrix ───────────────────────────────
+
+console.log('');
+console.log('Phase B §6.5 — selectPromotedEntryType:');
+
+// success × trajectoryPassed=true — trajectory-verified success.
+test('success+pass: observation → pattern (promoted)', () => {
+  assertEqual(selectPromotedEntryType('observation', outcome('success', true)), 'pattern', 'kind');
+});
+test('success+pass: decision stays decision', () => {
+  assertEqual(selectPromotedEntryType('decision', outcome('success', true)), 'decision', 'kind');
+});
+test('success+pass: pattern stays pattern', () => {
+  assertEqual(selectPromotedEntryType('pattern', outcome('success', true)), 'pattern', 'kind');
+});
+test('success+pass: preference stays preference', () => {
+  assertEqual(selectPromotedEntryType('preference', outcome('success', true)), 'preference', 'kind');
+});
+test('success+pass: issue stays issue', () => {
+  assertEqual(selectPromotedEntryType('issue', outcome('success', true)), 'issue', 'kind');
+});
+
+// success × trajectoryPassed=null — Phase B's live path.
+test('success+null: observation → pattern', () => {
+  assertEqual(selectPromotedEntryType('observation', outcome('success', null)), 'pattern', 'kind');
+});
+test('success+null: decision stays decision', () => {
+  assertEqual(selectPromotedEntryType('decision', outcome('success', null)), 'decision', 'kind');
+});
+test('success+null: pattern stays pattern', () => {
+  assertEqual(selectPromotedEntryType('pattern', outcome('success', null)), 'pattern', 'kind');
+});
+test('success+null: preference stays preference', () => {
+  assertEqual(selectPromotedEntryType('preference', outcome('success', null)), 'preference', 'kind');
+});
+test('success+null: issue stays issue', () => {
+  assertEqual(selectPromotedEntryType('issue', outcome('success', null)), 'issue', 'kind');
+});
+
+// success × trajectoryPassed=false — trajectory disagreement, demote durable types.
+test('success+fail: observation stays observation (no promotion)', () => {
+  assertEqual(selectPromotedEntryType('observation', outcome('success', false)), 'observation', 'kind');
+});
+test('success+fail: decision → observation (demoted)', () => {
+  assertEqual(selectPromotedEntryType('decision', outcome('success', false)), 'observation', 'kind');
+});
+test('success+fail: pattern → observation (demoted)', () => {
+  assertEqual(selectPromotedEntryType('pattern', outcome('success', false)), 'observation', 'kind');
+});
+test('success+fail: preference stays preference (user preference is path-independent)', () => {
+  assertEqual(selectPromotedEntryType('preference', outcome('success', false)), 'preference', 'kind');
+});
+test('success+fail: issue stays issue', () => {
+  assertEqual(selectPromotedEntryType('issue', outcome('success', false)), 'issue', 'kind');
+});
+
+// partial × any — neutral.
+for (const t of ['true', 'false', 'null'] as const) {
+  for (const e of ALL_ENTRY_TYPES) {
+    test(`partial+${t}: ${e} kept as-is (neutral)`, () => {
+      const tp = t === 'true' ? true : t === 'false' ? false : null;
+      assertEqual(selectPromotedEntryType(e, outcome('partial', tp)), e, 'kind');
+    });
+  }
+}
+
+// failed × any — §6.5 failure rules.
+test('failed: observation → issue (force-demoted)', () => {
+  assertEqual(selectPromotedEntryType('observation', outcome('failed')), 'issue', 'kind');
+});
+test('failed: pattern → issue (force-demoted)', () => {
+  assertEqual(selectPromotedEntryType('pattern', outcome('failed')), 'issue', 'kind');
+});
+test('failed: decision → issue (force-demoted)', () => {
+  assertEqual(selectPromotedEntryType('decision', outcome('failed')), 'issue', 'kind');
+});
+test('failed: issue stays issue (reinforced)', () => {
+  assertEqual(selectPromotedEntryType('issue', outcome('failed')), 'issue', 'kind');
+});
+test('failed: preference → observation (preserves signal, no durable tier)', () => {
+  assertEqual(selectPromotedEntryType('preference', outcome('failed')), 'observation', 'kind');
+});
+
+// ─── scoreForOutcome — §6.5 right-hand modifier column ─────────────────
+
+console.log('');
+console.log('Phase B §6.5 — scoreForOutcome:');
+
+function near(a: number, b: number): boolean {
+  return Math.abs(a - b) < 1e-9;
+}
+
+test('success+pass: observation score → base +0.20', () => {
+  const out = scoreForOutcome(0.5, 'observation', outcome('success', true));
+  if (!near(out, 0.70)) throw new Error(`expected 0.70, got ${out}`);
+});
+test('success+pass: decision → +0.20', () => {
+  const out = scoreForOutcome(0.5, 'decision', outcome('success', true));
+  if (!near(out, 0.70)) throw new Error(`expected 0.70, got ${out}`);
+});
+test('success+pass: preference → +0.15', () => {
+  const out = scoreForOutcome(0.5, 'preference', outcome('success', true));
+  if (!near(out, 0.65)) throw new Error(`expected 0.65, got ${out}`);
+});
+test('success+pass: issue → +0.00 (reinforced but no boost)', () => {
+  const out = scoreForOutcome(0.5, 'issue', outcome('success', true));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('success+null: +0.10 bump on non-issue', () => {
+  const out = scoreForOutcome(0.5, 'pattern', outcome('success', null));
+  if (!near(out, 0.60)) throw new Error(`expected 0.60, got ${out}`);
+});
+test('success+fail: +0.00 (no bump despite success)', () => {
+  const out = scoreForOutcome(0.5, 'preference', outcome('success', false));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('partial: +0.00 on any entry type', () => {
+  for (const e of ALL_ENTRY_TYPES) {
+    const out = scoreForOutcome(0.5, e, outcome('partial'));
+    if (!near(out, 0.50)) throw new Error(`expected 0.50 for ${e}, got ${out}`);
+  }
+});
+test('failed: −0.10 for non-issue', () => {
+  const out = scoreForOutcome(0.5, 'pattern', outcome('failed'));
+  if (!near(out, 0.40)) throw new Error(`expected 0.40, got ${out}`);
+});
+test('failed: +0.00 for issue (reinforced)', () => {
+  const out = scoreForOutcome(0.5, 'issue', outcome('failed'));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+
+// Clamp behaviour.
+test('clamp upper: 0.9 + 0.20 = 1.0 (cap)', () => {
+  const out = scoreForOutcome(0.9, 'pattern', outcome('success', true));
+  if (!near(out, 1.0)) throw new Error(`expected 1.0, got ${out}`);
+});
+test('clamp lower: 0.05 − 0.10 = 0.0 (floor)', () => {
+  const out = scoreForOutcome(0.05, 'pattern', outcome('failed'));
+  if (!near(out, 0.0)) throw new Error(`expected 0.0, got ${out}`);
+});
+test('clamp at 1.0 exactly stays 1.0', () => {
+  const out = scoreForOutcome(1.0, 'pattern', outcome('success', true));
+  if (!near(out, 1.0)) throw new Error(`expected 1.0, got ${out}`);
+});
+test('clamp at 0.0 exactly stays 0.0', () => {
+  const out = scoreForOutcome(0.0, 'pattern', outcome('failed'));
+  if (!near(out, 0.0)) throw new Error(`expected 0.0, got ${out}`);
+});
+
+// ─── computeProvenanceConfidence — §6.7 ────────────────────────────────
+
+console.log('');
+console.log('Phase B §6.7 — computeProvenanceConfidence:');
+
+test('success + trajectoryPassed=true → 0.9', () => {
+  const c = computeProvenanceConfidence(outcome('success', true));
+  if (!near(c, 0.9)) throw new Error(`expected 0.9, got ${c}`);
+});
+test('success + trajectoryPassed=null → 0.7 (Phase B live path)', () => {
+  const c = computeProvenanceConfidence(outcome('success', null));
+  if (!near(c, 0.7)) throw new Error(`expected 0.7, got ${c}`);
+});
+test('success + trajectoryPassed=false → 0.7 (no verdict boost)', () => {
+  const c = computeProvenanceConfidence(outcome('success', false));
+  if (!near(c, 0.7)) throw new Error(`expected 0.7, got ${c}`);
+});
+test('partial → 0.5', () => {
+  const c = computeProvenanceConfidence(outcome('partial'));
+  if (!near(c, 0.5)) throw new Error(`expected 0.5, got ${c}`);
+});
+test('failed → 0.3', () => {
+  const c = computeProvenanceConfidence(outcome('failed'));
+  if (!near(c, 0.3)) throw new Error(`expected 0.3, got ${c}`);
+});
+
 console.log('');
 console.log(`${passed} passed, ${failed} failed`);
 console.log('');

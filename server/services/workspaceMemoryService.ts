@@ -49,6 +49,25 @@ import { createHash } from 'crypto';
 import { sanitizeSearchQuery } from '../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../lib/queryIntent.js';
+import {
+  computeProvenanceConfidence,
+  scoreForOutcome,
+  selectPromotedEntryType,
+  type RunOutcome,
+} from './workspaceMemoryServicePure.js';
+
+// Phase B §8.3 — extended options bag for `extractRunInsights`. `taskSlug`
+// moves inside `options` alongside `overrides` so the tail argument has a
+// single consistent shape. Overrides are caller-specific (today only
+// `outcomeLearningService` uses them to preserve "run-sourced, verified"
+// semantics for human-curated lessons — §6.7.1).
+export interface ExtractRunInsightsOptions {
+  taskSlug?: string;
+  overrides?: {
+    isUnverified?: boolean;
+    provenanceConfidence?: number;
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Workspace Memory Service — shared memory across agents in a workspace
@@ -699,9 +718,25 @@ export const workspaceMemoryService = {
     organisationId: string,
     subaccountId: string,
     runSummary: string,
-    taskSlug?: string,
+    outcome: RunOutcome,
+    options?: ExtractRunInsightsOptions,
   ): Promise<void> {
+    const taskSlug = options?.taskSlug;
+    const overrides = options?.overrides;
     if (!runSummary || runSummary.trim().length < 20) return;
+
+    // Hermes Tier 1 Phase B §6.8 — short-summary guard on failed runs.
+    // Skip extraction when a failed run carries no meaningful signal
+    // (both structured error absent AND summary below 100 chars).
+    const hasStructuredError = Boolean(outcome.errorMessage && outcome.errorMessage.length > 0);
+    const hasMeaningfulSummary = runSummary.trim().length >= 100;
+    if (
+      outcome.runResultStatus === 'failed'
+      && !hasStructuredError
+      && !hasMeaningfulSummary
+    ) {
+      return;
+    }
 
     const insightsSpan = createSpan('memory.insights.extract', { runId, criticalPath: false });
 
@@ -762,9 +797,21 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
         runId,
       );
 
+      // Hermes Tier 1 Phase B §6.5 / §6.7 — apply outcome-driven
+      // promotion/demotion + quality modifier + provenance confidence
+      // via the pure helpers. Overrides from the caller (see §6.7.1)
+      // replace defaults field-by-field; omitted fields fall through.
+      const defaultProvenance = computeProvenanceConfidence(outcome);
+      const defaultIsUnverified = outcome.runResultStatus !== 'success';
+      let promotedCount = 0;
       const baseValues = dedupedEntries
         .filter(e => e.op === 'ADD')
         .map(e => {
+          const rawEntryType = e.entryType as EntryType;
+          const finalEntryType = selectPromotedEntryType(rawEntryType, outcome);
+          if (finalEntryType !== rawEntryType) promotedCount += 1;
+          const baseline = scoreMemoryEntry({ content: e.content, entryType: finalEntryType });
+          const finalScore = scoreForOutcome(baseline, finalEntryType, outcome);
           // Phase 2C: auto-classify domain + topic at write time
           const { domain, topic } = classifyDomainTopic(e.content);
           return {
@@ -773,8 +820,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             agentRunId: runId,
             agentId,
             content: e.content,
-            entryType: e.entryType as EntryType,
-            qualityScore: scoreMemoryEntry(e),
+            entryType: finalEntryType,
+            qualityScore: finalScore,
             taskSlug: taskSlug ?? null,
             domain,
             topic,
@@ -782,10 +829,13 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             // Citation provenance — PR Review Hardening Item 2
             provenanceSourceType: runId ? ('agent_run' as const) : null,
             provenanceSourceId: runId ?? null,
-            provenanceConfidence: null,
-            // runId is always a string here; !runId guards future call sites
-            // (e.g. manual/drop-zone inserts) where runId may be null.
-            isUnverified: !runId,
+            provenanceConfidence:
+              overrides?.provenanceConfidence ?? defaultProvenance,
+            // §6.7 default: isUnverified = runResultStatus !== 'success'.
+            // §6.7.1 override path: caller passes explicit value (today
+            // only outcomeLearningService passes false for human-curated
+            // lessons so retrieval filters keep including them).
+            isUnverified: overrides?.isUnverified ?? defaultIsUnverified,
             qualityScoreUpdater: 'initial_score' as const,
           };
         });
@@ -857,6 +907,17 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       }
 
       console.info(`[WorkspaceMemory] Extracted ${values.length} entries (${values.filter(v => (v.qualityScore ?? 0) >= threshold).length} above threshold) for subaccount ${subaccountId}`);
+
+      // Hermes Tier 1 Phase B §8.5 — structured log for post-hoc audit of
+      // outcome-driven promotion. Written once per extraction call.
+      console.info('[WorkspaceMemory] memory.insights.outcome_applied', {
+        runId,
+        runResultStatus:  outcome.runResultStatus,
+        trajectoryPassed: outcome.trajectoryPassed,
+        entriesWritten:   values.length,
+        entriesDropped:   Math.max(0, entries.length - values.length),
+        promotedCount,
+      });
 
       insightsSpan.end({ output: { insightsExtracted: values.length } });
 
