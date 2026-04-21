@@ -325,8 +325,17 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `tasks/llm-inflight-realtime-tracker-spec.md` — LLM in-flight real-time tracker (sits on top of the merged LLM observability ledger). Built on branch `claude/build-llm-inflight-tracker-m3l2x`; pr-reviewer passed, awaiting dual-reviewer + merge.
-**Active items:** PR #159 on `bugfixes-april26` — skill-analyzer crash-resume + Windows dev-restart hardening — merged to main 2026-04-21. Every analyzer LLM call now routes through `llmRouter.routeCall()` so analyzer dispatches will surface on the in-flight tracker's `/system/llm-pnl` In-Flight tab with `sourceType='analyzer'` + `featureTag='skill-analyzer-classify'` / `'skill-analyzer-agent-match'`. ClientPulse Session 2 merged to main 2026-04-20 (real CRM wiring + drilldown + polish, 8 ship gates passed, S2-D.1/D.4 core paths shipped). Durable primitives landed from that session: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log. ClientPulse next up: Session 3 (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). In-flight tracker deferred items live in spec §9 (token-level streaming, historical archive, per-caller detail drawer mid-flight, queueing-delay visibility, partial-external-success provisional row, idempotency-key versioning).
+**In-flight spec:** none. LLM in-flight real-time tracker merged to main via PR #161 on 2026-04-21 (`tasks/llm-inflight-realtime-tracker-spec.md`). All analyzer LLM calls now surface on `/system/llm-pnl` → In-Flight tab with `sourceType='analyzer'` + `featureTag='skill-analyzer-classify'` / `'skill-analyzer-agent-match'` (PR #159's skill-analyzer migration onto `llmRouter.routeCall()` made this automatic).
+**Pick-next queue:** Eight follow-up items briefed in `tasks/llm-inflight-deferred-items-brief.md` with per-item problem statements, minimal viable shapes, key files, and tripwires — read that doc before starting any of them. Priority order (top = ship first):
+  1. **Partial-external-success protection** — provisional `'started'` ledger row. Financial risk (provider double-bill under DB-blip + retry). Committed follow-up.
+  2. **Idempotency-key versioning** (`v1:` prefix on both `llmRouter`'s `generateIdempotencyKey` and `actionService`'s `buildActionIdempotencyKey`). Cheap insurance against canonicalisation drift. Do before any refactor of either function.
+  3. **Queueing-delay visibility** (`queuedAt` / `dispatchDelayMs` on the in-flight entry).
+  4. **Provider fallback visibility** (`globalAttemptSequence` across fallback chain).
+  5. **Token-level streaming progress** (adapter-contract change; coordinates with #1).
+  6. **Historical in-flight archive** (defer until after #1 — overlap with `'started'` row coverage).
+  7. **Per-caller detail drawer mid-flight** (payload capture at dispatch; coordinates with #5).
+  8. **Mobile/responsive In-Flight tab layout** (pure UI, lowest urgency).
+**Also live:** ClientPulse Session 3 (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). ClientPulse Session 2 shipped to main 2026-04-20 with durable primitives: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
