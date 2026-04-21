@@ -8,6 +8,7 @@ import {
   type ActionStatus,
 } from '../config/actionRegistry.js';
 import { policyEngineService } from './policyEngineService.js';
+import { IDEMPOTENCY_KEY_VERSION } from '../lib/idempotencyVersion.js';
 
 // ---------------------------------------------------------------------------
 // Deterministic idempotency keys — P1.1 Layer 3 contract
@@ -92,7 +93,10 @@ export function buildActionIdempotencyKey(params: {
   args: Record<string, unknown>;
 }): string {
   const argsHash = hashActionArgs(params.args);
-  return `${params.runId}:${params.toolCallId}:${argsHash}`;
+  // Prefixed with `IDEMPOTENCY_KEY_VERSION` so a canonicalisation contract
+  // change forces a deliberate version bump rather than silent dedup drift.
+  // See `tasks/llm-inflight-deferred-items-brief.md` §2.
+  return `${IDEMPOTENCY_KEY_VERSION}:${params.runId}:${params.toolCallId}:${argsHash}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,28 +1,28 @@
 # LLM In-Flight Tracker — Deferred Items Brief
 
-**Parent spec:** `tasks/llm-inflight-realtime-tracker-spec.md` (merged via PR #161, 2026-04-21).
-**Purpose:** Single-session-readable context for the eight follow-up items the in-flight tracker spec parked in §9. Each brief pins *problem → minimal shape → key files → tripwires* so a future session can jump straight into a draft spec without re-loading the parent's context.
+**Status:** **All eight items implemented** on branch `claude/llm-inflight-tracker-cs4n7` (2026-04-21). Shipped together as the partial-external-success safety bundle + observability follow-ups. Three review rounds ran against the branch before merge (pr-reviewer, dual-reviewer, final reviewer) — logs under `tasks/review-logs/pr-review-log-llm-inflight-deferred-items-*.md` + `dual-review-log-llm-inflight-deferred-items-*.md`. This brief remains the authoritative problem-and-shape record; future amendments to any of the eight areas should land as new specs rather than rewriting this document.
 
-This is not a development specification. It's a primer. Pick any item, start a new session, and the content below plus the file pointers are enough to write a proper spec.
+**Parent spec:** `tasks/llm-inflight-realtime-tracker-spec.md` (merged via PR #161, 2026-04-21).
+**Purpose:** Single-session-readable context for the eight follow-up items the in-flight tracker spec parked in §9. Each brief pins *problem → minimal shape → key files → tripwires* so future sessions can reconstruct why a given mechanism exists without re-loading the parent's context.
 
 **Related parent:** `tasks/llm-observability-ledger-generalisation-spec.md` §17 tracks a separate set of deferred items on the ledger side (cancel wiring, `provider_model` aggregate dimension, cost-efficiency dashboards, externally-submitted ledger events). Out of scope for this doc except where a tracker item crosses into ledger territory (specifically #1 partial-external-success).
 
 ---
 
-## Priority summary
+## Implementation summary (as-shipped)
 
-| # | Item | Risk if ignored | Effort | Priority |
-|---|---|---|---|---|
-| 1 | Partial-external-success protection — provisional ledger row | Provider double-bill under DB-blip + retry | Medium | **High** |
-| 2 | Idempotency-key versioning (`v1:` prefix) | Silent dedup break on canonicalisation refactor | Low | **High** |
-| 3 | Queueing-delay visibility (`queuedAt`) | Ops blindness to pre-dispatch contention | Low | Medium |
-| 4 | Provider fallback visibility (`attemptSequence`) | Admin UX gap in In-Flight tab | Low | Medium |
-| 5 | Token-level streaming progress | UX polish on long calls; adapter contract change | High | Low-Medium |
-| 6 | Historical in-flight archive | No current trigger; incident-driven | Medium | Low |
-| 7 | Per-caller detail drawer mid-flight | UX polish; needs payload capture | Medium | Low |
-| 8 | Mobile/responsive In-Flight tab layout | Pure UI | Low | Low |
+| # | Item | Risk if ignored | Effort | Priority | Status |
+|---|---|---|---|---|---|
+| 1 | Partial-external-success protection — provisional ledger row | Provider double-bill under DB-blip + retry | Medium | **High** | **Shipped** — `'started'` status, `ReconciliationRequiredError`, atomic idempotency-tx INSERT, single-terminal-transition guard (`WHERE status = 'started'`), 2-min DB sweep, migration 0190 |
+| 2 | Idempotency-key versioning (`v1:` prefix) | Silent dedup break on canonicalisation refactor | Low | **High** | **Shipped** — `server/lib/idempotencyVersion.ts` with load-time `/^v\d+$/` assert; both `llmRouter` and `actionService` prefix every key |
+| 3 | Queueing-delay visibility (`queuedAt`) | Ops blindness to pre-dispatch contention | Low | Medium | **Shipped** — `queuedAt` + `dispatchDelayMs` on `InFlightEntry`; colour-coded UI column |
+| 4 | Provider fallback visibility (`attemptSequence`) | Admin UX gap in In-Flight tab | Low | Medium | **Shipped** — `attemptSequence` + `fallbackIndex` on `InFlightEntry`; UI shows logical sequence when it diverges from per-provider `attempt` |
+| 5 | Token-level streaming progress | UX polish on long calls; adapter contract change | High | Low-Medium | **Infrastructure shipped** — optional `stream?()` adapter hook, 1 Hz `emitProgress()` throttle, `llm-inflight:progress` socket event, client renders inline. **Provider-adapter wiring is the hand-off from this branch** |
+| 6 | Historical in-flight archive | No current trigger; incident-driven | Medium | Low | **Shipped** — `llm_inflight_history` (migration 0191), fire-and-forget writes gated by `softBreakerPure.ts`, 7-day retention sweep, admin read route |
+| 7 | Per-caller detail drawer mid-flight | UX polish; needs payload capture | Medium | Low | **Shipped** — LRU payload store (100 / 200 KB cap, `originalSizeBytes` on truncation), `GET /api/admin/llm-pnl/in-flight/:runtimeKey/payload`, `PnlInFlightPayloadDrawer` opens on row-click |
+| 8 | Mobile/responsive In-Flight tab layout | Pure UI | Low | Low | **Shipped** — card layout below `md:` breakpoint with feature parity including streaming tokens |
 
-Pick top-to-bottom when the next slot opens. #1 is real money. #2 is cheap insurance that gets expensive if we forget it before the first canonicalisation change lands.
+**Post-merge forward-work captured by final-reviewer round:** extract the `intent-record → external-side-effect → single-terminal-transition → ghost-arrival-detection → caller-owned-retry → observable-in-flight → best-effort-history` pattern from `llmRouter.ts` into a reusable "External Call Safety Contract" platform primitive so payments, webhook dispatch, integration adapters, and long-running agent tasks can inherit the same guarantees. Not scoped as a spec yet.
 
 ---
 

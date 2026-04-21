@@ -2553,9 +2553,78 @@ The ledger is append-only and only observable after a call completes. The in-fli
   - `GET /api/admin/llm-pnl/in-flight?limit=500` — authoritative snapshot for first paint + reconnect resync. Hard cap 500; sort `startedAt DESC, runtimeKey DESC` for stable repeat reads.
   - Socket room `system:llm-inflight` — events `llm-inflight:added` / `llm-inflight:removed`. Join handler in `server/websocket/rooms.ts` silently rejects non-`system_admin` sockets.
   - `/system/llm-pnl` → In-Flight tab (`client/src/components/system-pnl/PnlInFlightTable.tsx`). Physically first, default-selected view stays on P&L.
-- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When the success-path upsert hits the `where: status != 'success'` guard on an already-success row, `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
+- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When a terminal upsert hits its `where: status = 'started'` guard and finds a non-started row (idempotency replay / sweep pre-empted), `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
 - **Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via `createEvent` with `byCallSite` + `byProvider` breakdowns — stuck workers or provider-specific hangs are spottable without digging logs.
 - **Pure tests pin every state-machine invariant:** `server/services/__tests__/llmInflightRegistryPure.test.ts`.
+
+#### Partial-external-success protection (provisional `'started'` row)
+
+The gap the tracker couldn't close on its own: `providerAdapter.call()` succeeds (provider has billed and generated tokens) → `db.insert(llmRequests)` fails for any reason (DB blip, constraint violation, crash) → caller retries under the same `idempotencyKey` → the pre-dispatch idempotency check finds no row → router dispatches a second concurrent call → **double-bill at the provider with no ledger trace of the first success**. No LLM provider currently ships a request-level dedup header.
+
+The `llm_requests.status` enum has a provisional value `'started'` (migration `0190_llm_requests_started_status.sql` — partial index on `created_at WHERE status = 'started'`). Flow:
+
+1. **Atomic idempotency check + provisional INSERT.** `llmRouter.routeCall` step 4+7 runs a single `db.transaction`. It does `SELECT … FOR UPDATE` on `idempotencyKey`; if a `'success'` row exists it returns the cached response; if a `'started'` row exists it returns an `inflight` marker; otherwise it INSERTs a fresh `'started'` row inside the same transaction (with `onConflictDoUpdate` on any non-success state so a retry after terminal-error resets `createdAt` to `now()` — preventing the revived row from being immediately sweep-eligible). A concurrent second caller blocks on the unique-constraint conflict; when the first tx commits, the second's own `FOR UPDATE` returns the `'started'` row and correctly takes the reconciliation branch.
+2. **`ReconciliationRequiredError` thrown on `inflight`.** `server/lib/reconciliationRequiredError.ts` — typed error class, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`, carries `idempotencyKey`. **The router never auto-retries this.** The caller decides (surface banner, poll, fail) — auto-retry inside the router would re-open the exact double-dispatch window this mechanism exists to prevent.
+3. **Single-terminal-transition invariant.** All three terminal writes in `llmRouter.routeCall` — success upsert, failure upsert, budget-blocked upsert — use `where: status = 'started'` (not `!= 'success'`). A mismatch means another transition already happened (sweep fired and claimed as `provisional_row_expired`, or sibling raced). The tightened guard preserves the earlier terminal signal; a ghost log (`llm_router.{budget_block,failure,success}_upsert_ghost` at warn level) surfaces the case so operators can reconcile rather than silently losing the audit trail.
+4. **DB-level sweep backstop.** `server/jobs/llmStartedRowSweepJob.ts` (+ pure cutoff math in `llmStartedRowSweepJobPure.ts`) runs every 2 minutes under `maintenance:llm-started-row-sweep`. It reaps `'started'` rows older than `PROVIDER_CALL_TIMEOUT_MS + STARTED_ROW_SWEEP_BUFFER_MS` (60 s) via a `UPDATE … SET status = 'error', error_message = 'provisional_row_expired'` with `FOR UPDATE SKIP LOCKED`. Admin-bypass (`withAdminConnection` + `SET LOCAL ROLE admin_role`). Telescopes with the in-memory sweep (30 s past timeout) — registry reaps first, DB reaps second.
+5. **Aggregation exclusion.** `systemPnlServicePure.ts::COUNTABLE_COST_STATUSES = ['success', 'partial']`. `contributesToCostAggregate()` is the predicate every P&L query uses in spirit (`status IN ('success','partial')`). Pure test pins the set; any future status-enum expansion trips the test if `'started'` (or another non-success status) accidentally lands inside the countable set.
+
+#### Idempotency-key versioning
+
+`server/lib/idempotencyVersion.ts` ships `IDEMPOTENCY_KEY_VERSION = 'v1'` prepended to every idempotency key produced by `llmRouter.generateIdempotencyKey` (extracted to `server/services/llmRouterIdempotencyPure.ts`) and `actionService.buildActionIdempotencyKey`. Any change to hash inputs, input ordering, or canonicalisation must bump the version in the same commit — without the bump, retries issued before the change don't match their originating rows (provider double-bill, duplicate action execution).
+
+- **Load-time assert** — `/^v\d+$/` check on the constant at module load. Catches the "still a string, but empty/null/unprefixed" failure mode that the type-level `as const` can't express.
+- **Deploy-boundary tradeoff** is explicit and documented: a request in-flight at the moment of a prefix bump will, on retry, hash to the new prefix and not match its prior attempt's row. Narrow window; acceptable risk given the rarity.
+- **Pure test pins** — both `llmRouterIdempotencyPure.test.ts` and `actionServiceCanonicalisationPure.test.ts` pin the `v1:`-prefixed output against a known-good fixture. Accidental prefix removal trips both suites.
+
+#### Queueing-delay + fallback visibility
+
+`InFlightEntry` carries four additional observability fields beyond the base registry contract:
+
+| Field | Populated at | Surface |
+|-------|--------------|---------|
+| `queuedAt` | Top of `routeCall()`, before budget/cooldown/resolver | Paired with `dispatchDelayMs` on the entry |
+| `dispatchDelayMs` | `startedAt - queuedAt`, clamped ≥0 | "Queued" column on the In-Flight tab (>1 s amber, >5 s red) |
+| `attemptSequence` | Monotonic across the entire `routeCall`, ticks once per attempt | Attempt column shows `#${attemptSequence}` when it diverges from the per-provider `attempt` |
+| `fallbackIndex` | 0 for primary provider, 1+ for each fallback | Small `↳fb#N` badge next to the attempt label |
+
+These close the "why is this call slow?" and "which attempt of the logical call is this?" gaps the base tracker left open.
+
+#### Historical archive + soft circuit breaker
+
+`llm_inflight_history` (migration `0191_llm_inflight_history.sql`) captures every add/remove event with its full payload. Retention: `env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS` days (default 7). Daily sweep via `maintenance:llm-inflight-history-cleanup` at 04:15 UTC.
+
+Writes are **fire-and-forget** — a DB hiccup must not delay the sub-second socket emit. Gated by a soft circuit breaker from `server/lib/softBreakerPure.ts`:
+
+- **Sliding-window** — 50 samples, 50% failure threshold, 5-minute open state. Below threshold: debug log per failure. On trip: single `inflight.history_breaker_opened` warn log. While open: silent drop. At expiry: half-open probe on next event.
+- **Pure state machine** — `createBreakerState` / `shouldAttempt(state, nowMs)` / `recordOutcome(state, success, nowMs, config)` returning `{ trippedNow }`. No clock/logger injection — the calling code owns those. **Reusable**: any future fire-and-forget persistence path (payment webhooks, outbound integration events) can adopt the same primitive.
+- **Env kill-switch** — `LLM_INFLIGHT_HISTORY_ENABLED=false` disables writes without a code deploy.
+
+Admin read: `GET /api/admin/llm-pnl/in-flight/history?from=…&to=…&runtimeKey=…&idempotencyKey=…&limit=…` — system-admin-only, 1 000-row hard cap.
+
+#### Per-caller live payload drawer
+
+`server/services/llmInflightPayloadStore.ts` — in-memory LRU keyed by `runtimeKey`. Cap 100 entries / 200 KB per payload (measured against the full stored object, not just `messages`). On truncation the snapshot carries `originalSizeBytes: number` so the admin can distinguish a 201 KB payload from a 50 MB one. Captured at dispatch in `routeCall` right after `inflightRegistry.add()`; cleared on every `remove()` / `updateLedgerLink()` path.
+
+Admin route: `GET /api/admin/llm-pnl/in-flight/:runtimeKey/payload` — 410 Gone when the entry has already completed or been evicted (with a user-friendly message directing to the ledger link). `PnlInFlightPayloadDrawer.tsx` opens on row-click, uses `AbortController` + a `currentRuntimeKey` closure check so a fast row-switch doesn't allow stale responses to overwrite the drawer.
+
+Process-local by design — multi-instance deployments see 410 for calls on sibling nodes. Extending to Redis is out of scope; the ledger detail is the authoritative post-completion surface.
+
+#### Token-level streaming progress (infrastructure only)
+
+The adapter contract (`server/services/providers/types.ts::LLMProviderAdapter`) has an optional streaming hook:
+
+```typescript
+stream?(params: ProviderCallParams): AsyncIterable<StreamTokenChunk> & {
+  done: Promise<ProviderResponse>;
+};
+```
+
+Router wiring in `llmRouter.ts`: when `params.stream === true` AND the adapter implements `stream()`, the router iterates tokens, throttles progress emissions at 1 Hz per runtimeKey via `llmInflightRegistry.emitProgress()`, and returns `await iterable.done` (with a pre-installed `.catch(() => {})` to silence the dangling rejection if the `for-await` exits via exception). Adapters without `stream()` transparently fall through to `call()`.
+
+Socket event: `llm-inflight:progress` carrying `InFlightProgress = { runtimeKey, idempotencyKey, tokensSoFar, lastTokenAt }`. Client merges into a per-runtimeKey `Map<string, InFlightProgress>`; token count renders inline with the Elapsed cell on both desktop table and mobile card.
+
+**No provider adapter implements `stream()` yet.** The infrastructure ships; the adapter wiring is the next-session handoff. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution, postProcess semantics on partial streams. The §1 partial-external-success protection is a **hard prerequisite** — streaming exposes a new partial-success window (tokens billed but stream aborted), and the `'started'` row is the durable reconciliation layer for that case too.
 
 ### Cost aggregate dimensions (spec §6.2)
 

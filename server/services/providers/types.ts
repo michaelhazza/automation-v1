@@ -56,7 +56,36 @@ export interface ProviderResponse {
   };
 }
 
+// Token-level streaming chunk emitted by adapters that support SSE
+// (Anthropic Messages API, OpenAI Responses API, OpenRouter upstream).
+// Deferred-items brief §5: kept deliberately minimal — the router uses
+// this to drive the in-flight progress event, not to accumulate the
+// full response (the adapter still returns the complete ProviderResponse
+// on stream exhaustion). Adapters that don't implement streaming fall
+// back to `call()` as today.
+export interface StreamTokenChunk {
+  /** Incremental token text, if any. May be empty on tool-start / tool-end chunks. */
+  deltaText?:   string;
+  /** Total tokens generated so far, if the provider surfaces this mid-stream. */
+  tokensSoFar?: number;
+}
+
 export interface LLMProviderAdapter {
   readonly provider: string;
   call(params: ProviderCallParams): Promise<ProviderResponse>;
+  /**
+   * Optional streaming hook. Adapters that implement this emit
+   * `StreamTokenChunk`s as tokens arrive; the router listens, throttles,
+   * and forwards progress events to the in-flight registry. On stream
+   * exhaustion, adapters MUST return the same complete `ProviderResponse`
+   * shape as `call()` — the ledger write path doesn't branch on stream
+   * vs non-stream.
+   *
+   * The adapter is responsible for bounding its own buffers — see the
+   * brief §5 tripwires for per-stream and per-process caps.
+   */
+  stream?(params: ProviderCallParams): AsyncIterable<StreamTokenChunk> & {
+    /** Awaitable handle for the final response, resolved when the stream ends. */
+    done: Promise<ProviderResponse>;
+  };
 }

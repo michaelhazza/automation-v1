@@ -40,7 +40,10 @@ function entryInput(overrides: Partial<BuildEntryInput> = {}): BuildEntryInput {
   return {
     idempotencyKey:   'org:run:agent:task:provider:model:msghash',
     attempt:          1,
+    attemptSequence:  1,
+    fallbackIndex:    0,
     startedAt:        '2026-04-20T10:00:00.000Z',
+    queuedAt:         '2026-04-20T10:00:00.000Z',
     label:            'anthropic/claude-sonnet-4-6',
     provider:         'anthropic',
     model:            'claude-sonnet-4-6',
@@ -84,6 +87,64 @@ test('buildEventId — `${runtimeKey}:${type}` shape', () => {
   const rk = 'key:1:2026-04-20T10:00:00.000Z';
   assert.equal(buildEventId(rk, 'added'),   `${rk}:added`);
   assert.equal(buildEventId(rk, 'removed'), `${rk}:removed`);
+});
+
+// ── Queueing delay (deferred-items brief §3) ──────────────────────────────
+
+test('buildEntry — queuedAt and dispatchDelayMs carried through', () => {
+  const entry = buildEntry(entryInput({
+    queuedAt:  '2026-04-20T10:00:00.000Z',
+    startedAt: '2026-04-20T10:00:02.500Z',
+  }));
+  assert.equal(entry.queuedAt, '2026-04-20T10:00:00.000Z');
+  assert.equal(entry.startedAt, '2026-04-20T10:00:02.500Z');
+  assert.equal(entry.dispatchDelayMs, 2500, 'delay = startedAt - queuedAt in ms');
+});
+
+test('buildEntry — dispatchDelayMs of 0 when queuedAt === startedAt', () => {
+  const entry = buildEntry(entryInput({
+    queuedAt:  '2026-04-20T10:00:00.000Z',
+    startedAt: '2026-04-20T10:00:00.000Z',
+  }));
+  assert.equal(entry.dispatchDelayMs, 0);
+});
+
+test('buildEntry — dispatchDelayMs clamped to 0 on negative (clock drift)', () => {
+  // startedAt < queuedAt shouldn't normally happen but must never produce a
+  // negative delay — the UI would render a nonsensical "-2s" badge.
+  const entry = buildEntry(entryInput({
+    queuedAt:  '2026-04-20T10:00:05.000Z',
+    startedAt: '2026-04-20T10:00:00.000Z',
+  }));
+  assert.equal(entry.dispatchDelayMs, 0);
+});
+
+// ── Provider fallback visibility (deferred-items brief §4) ────────────────
+
+test('buildEntry — attemptSequence and fallbackIndex carried through', () => {
+  const entry = buildEntry(entryInput({
+    attempt:         2,
+    attemptSequence: 5,
+    fallbackIndex:   1,
+  }));
+  assert.equal(entry.attempt, 2, 'per-provider retry counter');
+  assert.equal(entry.attemptSequence, 5, 'monotonic across the whole routeCall');
+  assert.equal(entry.fallbackIndex, 1, '0 for primary, 1+ for each fallback');
+});
+
+test('buildEntry — attemptSequence and attempt can diverge when fallback happens', () => {
+  // After provider A attempts 1+2 fail, provider B's first attempt starts
+  // the per-provider `attempt` counter back at 1 but continues the logical
+  // `attemptSequence` at 3.
+  const entry = buildEntry(entryInput({
+    provider:        'openai',
+    attempt:         1,
+    attemptSequence: 3,
+    fallbackIndex:   1,
+  }));
+  assert.equal(entry.attempt, 1);
+  assert.equal(entry.attemptSequence, 3);
+  assert.equal(entry.fallbackIndex, 1);
 });
 
 // ── Deadline ──────────────────────────────────────────────────────────────

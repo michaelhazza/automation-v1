@@ -25,6 +25,8 @@ import { createEvent } from '../lib/tracing.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
 import { getIO } from '../websocket/index.js';
+import { db } from '../db/index.js';
+import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import {
   MAX_INFLIGHT_ENTRIES,
   INFLIGHT_SWEEP_INTERVAL_MS,
@@ -47,6 +49,7 @@ import {
 import type {
   InFlightEntry,
   InFlightEventEnvelope,
+  InFlightProgress,
   InFlightRemoval,
   InFlightSnapshotResponse,
   InFlightTerminalStatus,
@@ -60,10 +63,22 @@ const ROOM = 'system:llm-inflight';
 const REDIS_CHANNEL = 'llm-inflight';
 const EVENT_ADDED = 'llm-inflight:added';
 const EVENT_REMOVED = 'llm-inflight:removed';
+const EVENT_PROGRESS = 'llm-inflight:progress';
+
+// Minimum ms between progress emissions for the same runtimeKey. Spec §5
+// caps the client stream at ~1 Hz; the server enforces the throttle here
+// so a bursty adapter (early tokens fast, then paused, then a flood) can't
+// hammer the socket.
+const PROGRESS_THROTTLE_MS = 1_000;
 
 // ── Internal state ────────────────────────────────────────────────────────
 
 const slots = new Map<string, RegistrySlot>();
+
+// Last-emit timestamp per runtimeKey for progress throttling. Bounded by
+// entry lifetimes — cleared when the entry is swept/removed so the map
+// doesn't leak.
+const lastProgressEmitMs = new Map<string, number>();
 
 // Instance ID stamped on every outbound Redis message so this process
 // ignores its own fanout (double-delivery avoidance).
@@ -137,6 +152,15 @@ export function add(input: RegistryAddInput): string {
   broadcast(EVENT_ADDED, outcome.envelope);
   publishToRedis({ kind: 'added', envelope: outcome.envelope });
   emitActiveCount();
+  persistHistoryEvent({
+    runtimeKey:     entry.runtimeKey,
+    idempotencyKey: entry.idempotencyKey,
+    organisationId: entry.organisationId,
+    subaccountId:   entry.subaccountId,
+    eventKind:      'added',
+    eventPayload:   entry,
+    terminalStatus: null,
+  });
   return entry.runtimeKey;
 }
 
@@ -191,6 +215,15 @@ export function remove(input: RegistryRemoveInput): void {
   broadcast(EVENT_REMOVED, outcome.envelope);
   publishToRedis({ kind: 'removed', envelope: outcome.envelope });
   emitActiveCount();
+  persistHistoryEvent({
+    runtimeKey:     existing?.entry.runtimeKey ?? input.runtimeKey,
+    idempotencyKey: existing?.entry.idempotencyKey ?? outcome.envelope.payload.idempotencyKey,
+    organisationId: existing?.entry.organisationId ?? null,
+    subaccountId:   existing?.entry.subaccountId ?? null,
+    eventKind:      'removed',
+    eventPayload:   outcome.envelope.payload,
+    terminalStatus: outcome.envelope.payload.terminalStatus,
+  });
 }
 
 /**
@@ -200,6 +233,49 @@ export function remove(input: RegistryRemoveInput): void {
 export function has(runtimeKey: string): boolean {
   const slot = slots.get(runtimeKey);
   return slot !== undefined && slot.state === 'active';
+}
+
+/**
+ * Advisory token-level progress event (deferred-items brief §5).
+ *
+ * Broadcast-only — does NOT mutate the registry map, does NOT write to
+ * the historical archive (progress events are transient by design), and
+ * is rate-limited to 1 Hz per runtimeKey to protect the socket from
+ * flooded emissions.
+ *
+ * The final authoritative `tokensOut` still comes from the removal
+ * event's payload; progress is purely a UX signal for long-running
+ * reasoning calls. Silent no-op when the runtimeKey is not active —
+ * emits for already-removed runtimeKeys must not resurrect them on the
+ * wire (the client's state-version guard would reject the event anyway).
+ */
+export function emitProgress(input: {
+  runtimeKey:     string;
+  idempotencyKey: string;
+  tokensSoFar:    number;
+  lastTokenAt?:   string;
+}): void {
+  const slot = slots.get(input.runtimeKey);
+  if (!slot || slot.state !== 'active') return;
+  const now = Date.now();
+  const lastEmit = lastProgressEmitMs.get(input.runtimeKey) ?? 0;
+  if (now - lastEmit < PROGRESS_THROTTLE_MS) return;
+  lastProgressEmitMs.set(input.runtimeKey, now);
+
+  const payload: InFlightProgress = {
+    runtimeKey:     input.runtimeKey,
+    idempotencyKey: input.idempotencyKey,
+    tokensSoFar:    input.tokensSoFar,
+    lastTokenAt:    input.lastTokenAt ?? new Date(now).toISOString(),
+  };
+  const envelope: InFlightEventEnvelope<InFlightProgress> = {
+    eventId:   `${input.runtimeKey}:progress:${now}`,
+    type:      'added',   // reuse 'added'; progress isn't a terminal event
+    entityId:  input.runtimeKey,
+    timestamp: new Date(now).toISOString(),
+    payload,
+  };
+  broadcast(EVENT_PROGRESS, envelope);
 }
 
 /**
@@ -401,7 +477,107 @@ function scheduleSlotPrune(runtimeKey: string): void {
     if (slot && slot.state === 'removed') {
       slots.delete(runtimeKey);
     }
+    // Always clear the progress throttle entry — if the slot was already
+    // gone we still want the map to shrink.
+    lastProgressEmitMs.delete(runtimeKey);
   }, REMOVED_SLOT_RETENTION_MS).unref?.();
+}
+
+// ── Historical archive (deferred-items brief §6) ──────────────────────────
+//
+// Fire-and-forget persistence of every add/remove event to
+// llm_inflight_history. MUST NOT block the live broadcast path — the
+// registry's sub-second contract is non-negotiable. A DB hiccup is
+// logged at `warn` and the event is silently dropped from history.
+//
+// Route reads (`/api/admin/llm-pnl/in-flight/history`) go via this
+// table; writes are best-effort only.
+//
+// Reviewer follow-up (2026-04-21): a soft circuit breaker wraps the
+// persist path so that a degraded DB doesn't produce one failed INSERT
+// + one warn-log per inflight event. When the failure rate over a 50-
+// sample window exceeds 50% the breaker opens for 5 minutes, suppresses
+// new INSERTs, logs once, and half-opens on expiry. The live broadcast
+// is never affected — the breaker only gates the `.insert()` call.
+
+import {
+  DEFAULT_SOFT_BREAKER_CONFIG,
+  createBreakerState,
+  isOpen,
+  recordOutcome as recordBreakerOutcome,
+  shouldAttempt as shouldBreakerAttempt,
+} from '../lib/softBreakerPure.js';
+
+interface PersistHistoryInput {
+  runtimeKey:     string;
+  idempotencyKey: string;
+  organisationId: string | null;
+  subaccountId:   string | null;
+  eventKind:      'added' | 'removed';
+  eventPayload:   unknown;
+  terminalStatus: string | null;
+}
+
+const historyBreakerState = createBreakerState();
+
+/** Test-only. Lets the pure tests assert the breaker's open/closed state. */
+export function _historyBreakerIsOpenForTests(nowMs: number = Date.now()): boolean {
+  return isOpen(historyBreakerState, nowMs);
+}
+
+/** Test-only. Resets breaker to pristine state between tests. */
+export function _resetHistoryBreakerForTests(): void {
+  historyBreakerState.outcomes = [];
+  historyBreakerState.openedUntilMs = null;
+  historyBreakerState.lastOpenedLogMs = 0;
+}
+
+function persistHistoryEvent(input: PersistHistoryInput): void {
+  // Feature flag — default on. The env var lets an operator disable the
+  // write if the history table is temporarily unhealthy, without a code
+  // deploy.
+  if (env.LLM_INFLIGHT_HISTORY_ENABLED === false) return;
+  // Soft breaker — if open, drop the event silently. The authoritative
+  // ledger still captures everything that matters; the history table is
+  // purely a forensic convenience. Logging is already rate-limited to
+  // once per trip by `recordBreakerOutcome`'s `trippedNow` flag below.
+  if (!shouldBreakerAttempt(historyBreakerState, Date.now())) return;
+  Promise.resolve().then(async () => {
+    try {
+      await db.insert(llmInflightHistory).values({
+        runtimeKey:     input.runtimeKey,
+        idempotencyKey: input.idempotencyKey,
+        organisationId: input.organisationId,
+        subaccountId:   input.subaccountId,
+        eventKind:      input.eventKind,
+        eventPayload:   input.eventPayload as Record<string, unknown>,
+        terminalStatus: input.terminalStatus,
+      });
+      recordBreakerOutcome(historyBreakerState, true, Date.now());
+    } catch (err) {
+      const { trippedNow } = recordBreakerOutcome(historyBreakerState, false, Date.now());
+      if (trippedNow) {
+        // Emit exactly one "breaker opened" log per trip so operators see
+        // the signal without the firehose of per-event warnings that
+        // would otherwise drown it out.
+        logger.warn('inflight.history_breaker_opened', {
+          openDurationMs: DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs,
+          failThreshold:  DEFAULT_SOFT_BREAKER_CONFIG.failThreshold,
+          lastError:      err instanceof Error ? err.message : String(err),
+        });
+      } else if (isOpen(historyBreakerState, Date.now())) {
+        // Breaker is open from a prior trip — stay silent.
+      } else {
+        // Transient failure, below threshold — log at debug so it still
+        // surfaces during targeted investigation but doesn't flood logs.
+        logger.debug('inflight.history_persist_failed', {
+          runtimeKey: input.runtimeKey,
+          eventKind:  input.eventKind,
+          error:      err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }).catch(() => { /* exhaustive — never let this reach the event loop */ });
 }
 
 // ── Stale-entry sweep ─────────────────────────────────────────────────────
