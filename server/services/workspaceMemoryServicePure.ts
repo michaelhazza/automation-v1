@@ -54,11 +54,9 @@ export function selectPromotedEntryType(
   outcome: RunOutcome,
 ): EntryType {
   if (outcome.runResultStatus === 'failed') {
-    // Failed runs: observation / pattern / decision → issue.
+    // Failed runs: observation / pattern / decision / issue → issue.
     // preference → observation (preserves signal, no durable tier).
-    // issue → issue (kept, reinforced).
     if (raw === 'preference') return 'observation';
-    if (raw === 'issue') return 'issue';
     return 'issue';
   }
 
@@ -83,6 +81,30 @@ export function selectPromotedEntryType(
   // types when warranted).
   if (raw === 'observation') return 'pattern';
   return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Override defaults resolution (§6.7 / §6.7.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the final `isUnverified` and `provenanceConfidence` values for a
+ * new memory entry. Applies caller overrides over the §6.7 outcome-derived
+ * defaults field-by-field; omitted override fields fall through to defaults.
+ *
+ * Extracted as a pure helper so the override chain can be tested independently
+ * of the DB write path in `extractRunInsights`.
+ */
+export function applyOutcomeDefaults(
+  outcome: RunOutcome,
+  overrides?: { isUnverified?: boolean; provenanceConfidence?: number },
+): { isUnverified: boolean; provenanceConfidence: number } {
+  const defaultProvenance = computeProvenanceConfidence(outcome);
+  const defaultIsUnverified = outcome.runResultStatus !== 'success';
+  return {
+    isUnverified:         overrides?.isUnverified ?? defaultIsUnverified,
+    provenanceConfidence: overrides?.provenanceConfidence ?? defaultProvenance,
+  };
 }
 
 // ---------------------------------------------------------------------------

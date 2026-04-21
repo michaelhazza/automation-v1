@@ -6,11 +6,12 @@
  * The pure decision logic lives in `workspaceMemoryServicePure.ts` and
  * is covered by the parameterised matrix in
  * `workspaceMemoryServicePure.test.ts`. This file covers the
- * `options.overrides` row-write concern that can only be verified
- * against a real DB — the default provenance/isUnverified values come
- * from the outcome enum, but callers like `outcomeLearningService`
- * override them at the insert boundary so retrieval filters keep
- * including human-curated lessons.
+ * `options.overrides` row-write concern at the DB boundary — verifying
+ * that the `overrides?.isUnverified ?? defaultIsUnverified` chain in
+ * `extractRunInsights` propagates correctly into the persisted row.
+ *
+ * The LLM call inside `extractRunInsights` is replaced with a test-double
+ * via the `_routeCall` injection point so no provider config is required.
  *
  * Skips gracefully without DATABASE_URL; integration cases require a
  * seeded organisation + subaccount + agent.
@@ -41,7 +42,8 @@ console.log('\n--- workspaceMemoryService overrides ---');
 if (!process.env.DATABASE_URL) {
   console.log('  SKIPPED — no DATABASE_URL');
   console.log('');
-  process.exit(0);
+  process.exitCode = 0;
+  process.exit();
 }
 
 // ─── Test harness (real DB) ──────────────────────────────────────────
@@ -72,7 +74,8 @@ const [anchor] = await db
 if (!anchor) {
   console.log('  SKIPPED — no organisation + subaccount seed');
   await client.end();
-  process.exit(0);
+  process.exitCode = 0;
+  process.exit();
 }
 
 const [anchorAgent] = await db
@@ -84,18 +87,31 @@ const [anchorAgent] = await db
 if (!anchorAgent) {
   console.log('  SKIPPED — no agent seed');
   await client.end();
-  process.exit(0);
+  process.exitCode = 0;
+  process.exit();
 }
 
-// The integration test runs `extractRunInsights` end-to-end. The method
-// performs an LLM call via `routeCall` which requires provider config.
-// To keep the test self-contained, we stub at a lower level — we insert
-// memory entries directly with the same shape `extractRunInsights`
-// writes, and assert the override fields take precedence over defaults.
-// The default-vs-override logic itself lives in the service at the
-// baseValues mapping (grep for `overrides?.isUnverified ?? defaultIsUnverified`).
-// This test pins the schema columns they land in. Full extraction-loop
-// coverage lives in the manual sanity walk (§10).
+const { workspaceMemoryService } = await import('../workspaceMemoryService.js');
+
+// ─── Test double for the LLM call ─────────────────────────────────────
+// Returns a single 'observation' entry so the short-summary guard passes
+// and `baseValues` has exactly one ADD row to assert against.
+function mockRouteCall(_params: unknown): Promise<{ content: string }> {
+  return Promise.resolve({
+    content: JSON.stringify({
+      entries: [
+        {
+          content: 'Test insight — Hermes Tier 1 Phase B §6.7.1 override chain validation fixture',
+          entryType: 'observation',
+        },
+      ],
+    }),
+  });
+}
+
+// runSummary long enough to pass the §6.8 short-summary guard (≥ 100 chars).
+const LONG_SUMMARY = 'Agent completed the requested task successfully without errors. ' +
+  'All configured steps executed in sequence. Client preferences were respected throughout.';
 
 async function seedRun(): Promise<string> {
   const [run] = await db
@@ -113,48 +129,7 @@ async function seedRun(): Promise<string> {
   return run.id;
 }
 
-async function insertMemoryEntry(opts: {
-  runId:                string;
-  isUnverified:         boolean;
-  provenanceConfidence: number | null;
-  entryType:            'observation' | 'decision' | 'preference' | 'issue' | 'pattern';
-}): Promise<string> {
-  const [row] = await db
-    .insert(workspaceMemoryEntries)
-    .values({
-      organisationId:       anchor!.orgId,
-      subaccountId:         anchor!.subaccountId,
-      agentRunId:           opts.runId,
-      agentId:              anchorAgent!.id,
-      content:              'Test override entry — Hermes Tier 1 Phase B § 6.7.1 compat smoke',
-      entryType:            opts.entryType,
-      qualityScore:         0.6,
-      provenanceSourceType: 'agent_run',
-      provenanceSourceId:   opts.runId,
-      provenanceConfidence: opts.provenanceConfidence,
-      isUnverified:         opts.isUnverified,
-      qualityScoreUpdater:  'initial_score',
-      createdAt:            new Date(),
-    })
-    .returning({ id: workspaceMemoryEntries.id });
-  return row.id;
-}
-
-// Default §6.7 for partial outcome would be isUnverified=true + provenanceConfidence=0.5.
-// outcomeLearningService passes overrides {isUnverified:false, provenanceConfidence:0.7}.
-// These tests assert the override-value-carrying row lands in the column with the
-// override semantics, not the default §6.7 values — which is what retrieval filters
-// at `memoryBlockSynthesisService.ts:126` and `memoryEntryQualityService.ts:252`
-// depend on.
-
-await test('override row: isUnverified=false honoured even on partial outcome', async () => {
-  const runId = await seedRun();
-  await insertMemoryEntry({
-    runId,
-    isUnverified:         false,   // override value
-    provenanceConfidence: 0.7,     // override value
-    entryType:            'observation',
-  });
+async function getWrittenRow(runId: string) {
   const [row] = await db
     .select({
       isUnverified:         workspaceMemoryEntries.isUnverified,
@@ -168,7 +143,29 @@ await test('override row: isUnverified=false honoured even on partial outcome', 
       ),
     )
     .limit(1);
-  if (!row) throw new Error('row not found');
+  return row ?? null;
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────
+
+// §6.7.1 override path: outcomeLearningService passes isUnverified=false so
+// retrieval filters keep including human-curated lessons.
+await test('override isUnverified=false honoured even on partial outcome', async () => {
+  const runId = await seedRun();
+  await workspaceMemoryService.extractRunInsights(
+    runId,
+    anchorAgent!.id,
+    anchor!.orgId,
+    anchor!.subaccountId,
+    LONG_SUMMARY,
+    { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+    {
+      overrides: { isUnverified: false, provenanceConfidence: 0.7 },
+      _routeCall: mockRouteCall as any,
+    },
+  );
+  const row = await getWrittenRow(runId);
+  if (!row) throw new Error('row not found — extractRunInsights wrote nothing');
   if (row.isUnverified !== false) {
     throw new Error(`expected isUnverified=false, got ${row.isUnverified}`);
   }
@@ -177,29 +174,22 @@ await test('override row: isUnverified=false honoured even on partial outcome', 
   }
 });
 
+// §6.7 defaults: partial run with no overrides → isUnverified=true, confidence=0.5.
 await test('omitted overrides fall back to §6.7 defaults (partial → isUnverified=true, 0.5)', async () => {
   const runId = await seedRun();
-  await insertMemoryEntry({
+  await workspaceMemoryService.extractRunInsights(
     runId,
-    // Match §6.7 defaults for a 'partial' outcome (no overrides).
-    isUnverified:         true,
-    provenanceConfidence: 0.5,
-    entryType:            'observation',
-  });
-  const [row] = await db
-    .select({
-      isUnverified:         workspaceMemoryEntries.isUnverified,
-      provenanceConfidence: workspaceMemoryEntries.provenanceConfidence,
-    })
-    .from(workspaceMemoryEntries)
-    .where(
-      and(
-        eq(workspaceMemoryEntries.agentRunId, runId),
-        eq(workspaceMemoryEntries.subaccountId, anchor!.subaccountId),
-      ),
-    )
-    .limit(1);
-  if (!row) throw new Error('row not found');
+    anchorAgent!.id,
+    anchor!.orgId,
+    anchor!.subaccountId,
+    LONG_SUMMARY,
+    { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+    {
+      _routeCall: mockRouteCall as any,
+    },
+  );
+  const row = await getWrittenRow(runId);
+  if (!row) throw new Error('row not found — extractRunInsights wrote nothing');
   if (row.isUnverified !== true) {
     throw new Error(`expected isUnverified=true (§6.7 default), got ${row.isUnverified}`);
   }
@@ -208,10 +198,31 @@ await test('omitted overrides fall back to §6.7 defaults (partial → isUnverif
   }
 });
 
-// Type-check pin: the RunOutcome type must accept all three enum values
-// and null/boolean trajectoryPassed. A compile failure here would surface
-// as a TypeScript error, not a test failure, but the literal construction
-// serves as a documentation-level invariant.
+// §6.7: success run default → isUnverified=false, confidence=0.7.
+await test('success outcome default: isUnverified=false, confidence=0.7', async () => {
+  const runId = await seedRun();
+  await workspaceMemoryService.extractRunInsights(
+    runId,
+    anchorAgent!.id,
+    anchor!.orgId,
+    anchor!.subaccountId,
+    LONG_SUMMARY,
+    { runResultStatus: 'success', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+    {
+      _routeCall: mockRouteCall as any,
+    },
+  );
+  const row = await getWrittenRow(runId);
+  if (!row) throw new Error('row not found');
+  if (row.isUnverified !== false) {
+    throw new Error(`expected isUnverified=false (success default), got ${row.isUnverified}`);
+  }
+  if (row.provenanceConfidence !== 0.7) {
+    throw new Error(`expected provenanceConfidence=0.7 (success default), got ${row.provenanceConfidence}`);
+  }
+});
+
+// Type-check pin: RunOutcome must accept all three enum values.
 await test('RunOutcome literal type-check — all runResultStatus values', () => {
   const _variants: RunOutcome[] = [
     { runResultStatus: 'success', trajectoryPassed: true,  errorMessage: null },

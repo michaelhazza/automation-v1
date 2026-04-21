@@ -50,7 +50,7 @@ import { sanitizeSearchQuery } from '../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../lib/queryIntent.js';
 import {
-  computeProvenanceConfidence,
+  applyOutcomeDefaults,
   scoreForOutcome,
   selectPromotedEntryType,
   type RunOutcome,
@@ -67,6 +67,9 @@ export interface ExtractRunInsightsOptions {
     isUnverified?: boolean;
     provenanceConfidence?: number;
   };
+  // Test injection point — allows unit tests to supply a mock without a real
+  // provider config. Production code always falls back to `routeCall`.
+  _routeCall?: typeof routeCall;
 }
 
 // ---------------------------------------------------------------------------
@@ -741,7 +744,8 @@ export const workspaceMemoryService = {
     const insightsSpan = createSpan('memory.insights.extract', { runId, criticalPath: false });
 
     try {
-      const response = await routeCall({
+      const callFn = options?._routeCall ?? routeCall;
+      const response = await callFn({
         messages: [{ role: 'user', content: `Agent run summary:\n\n${runSummary}` }],
         system: `You are an insight extractor. Given an agent run summary, extract key insights as a JSON array.
 Each entry has "content" (string) and "entryType" (one of: "observation", "decision", "preference", "issue", "pattern").
@@ -801,8 +805,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       // promotion/demotion + quality modifier + provenance confidence
       // via the pure helpers. Overrides from the caller (see §6.7.1)
       // replace defaults field-by-field; omitted fields fall through.
-      const defaultProvenance = computeProvenanceConfidence(outcome);
-      const defaultIsUnverified = outcome.runResultStatus !== 'success';
+      const resolvedDefaults = applyOutcomeDefaults(outcome, overrides);
       let promotedCount = 0;
       const baseValues = dedupedEntries
         .filter(e => e.op === 'ADD')
@@ -829,13 +832,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             // Citation provenance — PR Review Hardening Item 2
             provenanceSourceType: runId ? ('agent_run' as const) : null,
             provenanceSourceId: runId ?? null,
-            provenanceConfidence:
-              overrides?.provenanceConfidence ?? defaultProvenance,
-            // §6.7 default: isUnverified = runResultStatus !== 'success'.
-            // §6.7.1 override path: caller passes explicit value (today
-            // only outcomeLearningService passes false for human-curated
-            // lessons so retrieval filters keep including them).
-            isUnverified: overrides?.isUnverified ?? defaultIsUnverified,
+            provenanceConfidence: resolvedDefaults.provenanceConfidence,
+            isUnverified:         resolvedDefaults.isUnverified,
             qualityScoreUpdater: 'initial_score' as const,
           };
         });

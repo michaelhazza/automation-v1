@@ -195,6 +195,7 @@ test('empty results array returns empty', () => {
 // test in `workspaceMemoryService.test.ts`.
 
 import {
+  applyOutcomeDefaults,
   computeProvenanceConfidence,
   scoreForOutcome,
   selectPromotedEntryType,
@@ -324,8 +325,24 @@ test('success+null: +0.10 bump on non-issue', () => {
   const out = scoreForOutcome(0.5, 'pattern', outcome('success', null));
   if (!near(out, 0.60)) throw new Error(`expected 0.60, got ${out}`);
 });
-test('success+fail: +0.00 (no bump despite success)', () => {
+test('success+fail: +0.00 (no bump despite success) — preference', () => {
   const out = scoreForOutcome(0.5, 'preference', outcome('success', false));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('success+fail: +0.00 — observation', () => {
+  const out = scoreForOutcome(0.5, 'observation', outcome('success', false));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('success+fail: +0.00 — decision', () => {
+  const out = scoreForOutcome(0.5, 'decision', outcome('success', false));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('success+fail: +0.00 — pattern', () => {
+  const out = scoreForOutcome(0.5, 'pattern', outcome('success', false));
+  if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
+});
+test('success+fail: +0.00 — issue', () => {
+  const out = scoreForOutcome(0.5, 'issue', outcome('success', false));
   if (!near(out, 0.50)) throw new Error(`expected 0.50, got ${out}`);
 });
 test('partial: +0.00 on any entry type', () => {
@@ -385,6 +402,42 @@ test('partial → 0.5', () => {
 test('failed → 0.3', () => {
   const c = computeProvenanceConfidence(outcome('failed'));
   if (!near(c, 0.3)) throw new Error(`expected 0.3, got ${c}`);
+});
+
+// ─── applyOutcomeDefaults — §6.7 / §6.7.1 override chain ──────────────
+
+console.log('');
+console.log('Phase B §6.7 — applyOutcomeDefaults:');
+
+test('no overrides: success → isUnverified=false, confidence=0.7', () => {
+  const r = applyOutcomeDefaults(outcome('success', null));
+  if (r.isUnverified !== false) throw new Error(`expected isUnverified=false, got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.7)) throw new Error(`expected 0.7, got ${r.provenanceConfidence}`);
+});
+test('no overrides: partial → isUnverified=true, confidence=0.5', () => {
+  const r = applyOutcomeDefaults(outcome('partial'));
+  if (r.isUnverified !== true) throw new Error(`expected isUnverified=true, got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.5)) throw new Error(`expected 0.5, got ${r.provenanceConfidence}`);
+});
+test('no overrides: failed → isUnverified=true, confidence=0.3', () => {
+  const r = applyOutcomeDefaults(outcome('failed'));
+  if (r.isUnverified !== true) throw new Error(`expected isUnverified=true, got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.3)) throw new Error(`expected 0.3, got ${r.provenanceConfidence}`);
+});
+test('override isUnverified=false on partial → overrides default', () => {
+  const r = applyOutcomeDefaults(outcome('partial'), { isUnverified: false });
+  if (r.isUnverified !== false) throw new Error(`expected false, got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.5)) throw new Error(`expected 0.5 (default), got ${r.provenanceConfidence}`);
+});
+test('override provenanceConfidence=0.7 on partial → overrides default 0.5', () => {
+  const r = applyOutcomeDefaults(outcome('partial'), { provenanceConfidence: 0.7 });
+  if (r.isUnverified !== true) throw new Error(`expected true (default), got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.7)) throw new Error(`expected 0.7, got ${r.provenanceConfidence}`);
+});
+test('both overrides on partial: isUnverified=false, confidence=0.7', () => {
+  const r = applyOutcomeDefaults(outcome('partial'), { isUnverified: false, provenanceConfidence: 0.7 });
+  if (r.isUnverified !== false) throw new Error(`expected false, got ${r.isUnverified}`);
+  if (!near(r.provenanceConfidence, 0.7)) throw new Error(`expected 0.7, got ${r.provenanceConfidence}`);
 });
 
 console.log('');

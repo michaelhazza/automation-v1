@@ -799,6 +799,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
+    // Phase C breaker is NOT called on the failure path — failure rows record
+    // costWithMarginCents=0 and do not contribute to per-run spend. If partial-
+    // cost-on-failure is ever introduced, the breaker would need wiring here too.
     const failureInsertedRows = await db
       .insert(llmRequests)
       .values({
@@ -1062,35 +1065,41 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // three-branch cleanup pattern above predates Phase C.
   const breakerRunId = ctx.runId ?? (await resolveRunIdFromIee(ctx.ieeRunId));
   if (breakerRunId) {
-    try {
-      const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');
-      await assertWithinRunBudgetFromLedger({
-        runId:               breakerRunId,
-        insertedLedgerRowId: successLedgerRowId,
-        subaccountAgentId:   ctx.subaccountAgentId ?? null,
-        organisationId:      ctx.organisationId,
-        // The router ctx does not carry a distinct correlationId; the LLM
-        // idempotencyKey is the stable per-call identifier we thread
-        // through downstream logs and the breaker's trip payload.
-        correlationId:       idempotencyKey,
-      });
-      console.debug('[llmRouter] costBreaker.checked', {
-        runId:         breakerRunId,
-        correlationId: idempotencyKey,
-      });
-    } catch (err) {
-      const isExpectedBreakerTrip =
-        err instanceof FailureError &&
-        err.failure.failureReason === 'internal_error' &&
-        err.failure.failureDetail === 'cost_limit_exceeded';
-      if (isExpectedBreakerTrip) {
-        throw err;
+    if (!successLedgerRowId) {
+      // Upsert hit the `where status != 'success'` guard — the row already exists as a success
+      // (idempotency replay). The cost was already counted on the first insert; skip the breaker.
+      console.debug('[llmRouter] costBreaker.skip_idempotency_replay', { correlationId: idempotencyKey });
+    } else {
+      try {
+        const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');
+        await assertWithinRunBudgetFromLedger({
+          runId:               breakerRunId,
+          insertedLedgerRowId: successLedgerRowId,
+          subaccountAgentId:   ctx.subaccountAgentId ?? null,
+          organisationId:      ctx.organisationId,
+          // The router ctx does not carry a distinct correlationId; the LLM
+          // idempotencyKey is the stable per-call identifier we thread
+          // through downstream logs and the breaker's trip payload.
+          correlationId:       idempotencyKey,
+        });
+        console.debug('[llmRouter] costBreaker.checked', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+        });
+      } catch (err) {
+        const isExpectedBreakerTrip =
+          err instanceof FailureError &&
+          err.failure.failureReason === 'internal_error' &&
+          err.failure.failureDetail === 'cost_limit_exceeded';
+        if (isExpectedBreakerTrip) {
+          throw err;
+        }
+        console.error('[llmRouter] costBreaker.infra_failure', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+          error:         err instanceof Error ? err.message : String(err),
+        });
       }
-      console.error('[llmRouter] costBreaker.infra_failure', {
-        runId:         breakerRunId,
-        correlationId: idempotencyKey,
-        error:         err instanceof Error ? err.message : String(err),
-      });
     }
   }
 
