@@ -181,7 +181,7 @@ Subaccount Agent (subaccountAgents table)
 |--------|--------------------|
 | `skillSlugs` | Per-link skill list. `null` means "inherit the agent's `defaultSkillSlugs`"; an array replaces it entirely. The skill picker (`SkillPickerSection`) shows org skills and system skills side by side. |
 | `customInstructions` | Appended to the agent's `additionalPrompt` at run time. Scoped per subaccount — lets an org agent speak the subaccount's language without org-wide edits. Max 10 000 chars. |
-| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). |
+| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). Callers: Slack + Whisper via `assertWithinRunBudget` (cost_aggregates rollup); the LLM router via the direct-ledger sibling `assertWithinRunBudgetFromLedger` (reads `llm_requests` to avoid aggregation lag — Hermes Tier 1 Phase C, `tasks/hermes-audit-tier-1-spec.md` §7.4.1). |
 | `heartbeatEnabled` / `heartbeatIntervalHours` / `heartbeatOffsetMinutes` | Per-subaccount schedule. Overrides the org agent's heartbeat so different clients can run at different cadences / offsets. |
 | `scheduleCron` / `scheduleEnabled` / `scheduleTimezone` | Cron-based schedule (alternative to heartbeat interval). Schedule changes go through `agentScheduleService.updateSchedule` — **never mutate these columns directly**, or the pg-boss cron registration drifts from the DB. |
 | `concurrencyPolicy` / `catchUpPolicy` / `catchUpCap` / `maxConcurrentRuns` | Concurrency and missed-run behaviour for the scheduler. |
@@ -549,7 +549,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 
-`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
 ### Skill visibility cascade (migration 0074)
 
@@ -907,6 +907,21 @@ Workspace memory entries can be mutated in-place by the dedup UPDATE path. Witho
 - **Ops helpers** — `getStaleEmbeddingsBatch({ subaccountId?, limit? })` returns up to 1000 stale rows; `recomputeStaleEmbeddings({ subaccountId?, limit? })` walks the batch and calls `reembedEntry` per row, returning `{ scanned, recomputed, skipped }`. Both filter `deleted_at IS NULL`.
 
 Treat `reembedEntry` as the only sanctioned write path for the embedding column outside of the initial insert. New callers must not write `embedding` directly without also writing `embedding_content_hash` to the matching content hash.
+
+### Outcome-Gated Entry-Type Promotion (Hermes Tier 1 Phase B)
+
+`workspaceMemoryService.extractRunInsights` takes a `RunOutcome` ({ `runResultStatus`, `trajectoryPassed`, `errorMessage` }) and uses it to gate how insights enter the memory store. The decision matrix lives in `server/services/workspaceMemoryServicePure.ts`:
+
+- **`selectPromotedEntryType(rawType, outcome)`** — on `success + trajectoryPassed=true`, observations may be promoted to patterns; on `failed`, observations/decisions/patterns get demoted to `issue` (preferences demote to `observation`). `success + trajectoryPassed=false` is pass-through (no modifier).
+- **`scoreForOutcome(baseScore, entryType, outcome)`** — applies an outcome-dependent score modifier per type (e.g. `success+true` bumps `pattern` / `decision` / `preference` scores; `failed` demotes everything). The +0.00 / 0.00 cases for `success+false` are pinned by tests.
+- **`computeProvenanceConfidence(outcome)`** — outcome-derived confidence floor for `isUnverified` classification. Anything sourced from a non-success run is unverified by default; `outcomeLearningService` passes explicit `overrides` to mark human-curated lessons verified regardless of outcome.
+- **`applyOutcomeDefaults(outcome, options, runId)`** — single pure helper that returns `{ provenanceConfidence, isUnverified, provenanceSourceType, provenanceSourceId }`. The service calls it in one place so the override chain (`overrides?.x ?? default`) is testable and cannot drift between the success and failure branches.
+
+**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
+
+**Per-entryType half-life decay** — `memoryEntryQualityServicePure.ts::computeDecayFactor` now switches on entry type. Known types use an exponential `0.5^(days/halfLife)` decay (observation 7d, issue 14d, preference 30d, pattern/decision 60d). Unknown types fall back to the pre-existing linear `DECAY_WINDOW_DAYS` path.
+
+Deferred: `runResultStatus='partial'` currently demotes a `completed` run whenever `hasSummary=false`, which couples outcome classification to summary-generation reliability. Tracked as H3 in `tasks/todo.md`; revisit before Tier 2 memory promotion work.
 
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
@@ -1407,6 +1422,35 @@ Honours `Retry-After` headers, exponential backoff with full jitter, structured 
 ### Run cost circuit breaker — `server/lib/runCostBreaker.ts`
 
 Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
+
+**Five exports, two data-source contracts:**
+
+| Export | Reads from | Canonical caller(s) |
+|--------|------------|---------------------|
+| `resolveRunCostCeiling(ctx)` | `subaccount_agents.maxCostPerRunCents` + fallback via `agent_runs.subaccountAgentId` | Both breaker variants |
+| `getRunCostCents(runId)` | `cost_aggregates` (async rollup) | `sendToSlackService`, `transcribeAudioService` |
+| `assertWithinRunBudget(ctx)` | `cost_aggregates` via `getRunCostCents` | `sendToSlackService`, `transcribeAudioService` |
+| `getRunCostCentsFromLedger(runId)` | `llm_requests` directly | `llmRouter.routeCall` |
+| `assertWithinRunBudgetFromLedger(ctx)` | `llm_requests` via `getRunCostCentsFromLedger` | `llmRouter.routeCall` |
+
+The direct-ledger pair exists because `cost_aggregates` is updated asynchronously by `routerJobService.enqueueAggregateUpdate`, so a rollup-based read lags by up to one aggregation interval. The LLM router is the dominant cost surface; it cannot tolerate that lag. Slack and Whisper stay on the rollup path because their per-call magnitudes dwarf the lag and their concurrency profiles are low. The ledger helper takes `insertedLedgerRowId` as a REQUIRED parameter and fails closed on null or row-not-visible — a structural guarantee that a future refactor cannot re-order the call above the ledger insert. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 / §7.4.1.
+
+**Atomic visibility + SUM (ledger helper).** `assertWithinRunBudgetFromLedger` merges the row-visibility check and the cost aggregate into a single scan: one query returns both `SUM(cost_with_margin_cents)` and a `COALESCE(MAX(CASE WHEN id = $insertedId THEN 1 ELSE 0 END), 0)` flag under the same `WHERE run_id = $runId AND status IN ('success','partial')` predicate. This makes the decision atomic (no race window between visibility and aggregation), catches cross-run contamination (wrong-run insert fails visibility), and catches caller misuse (non-counted-status row fails visibility). Future refactors must keep these merged — splitting them re-opens the race window. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 "Implementation note — atomic aggregate".
+
+**Hard-ceiling `>=` semantics.** Both sibling helpers trip at `spent >= limit` (not `>`). The breaker runs **after** each cost is recorded; `>=` means the call that first hits the ceiling is the last one allowed, and the next call is refused. `>` would allow spend to equal the ceiling and only trip on the *following* call — a one-call overshoot window. Hard-ceiling semantics are the contract callers expect.
+
+### Per-run cost visibility — `client/src/components/run-cost/`
+
+The `RunCostPanel` component renders per-run LLM spend on every run-detail surface (`SessionLogCardList` compact row, `RunTraceView` full panel, `AdminAgentEditPage` compact row). Branch decisions + formatted strings live in `RunCostPanelPure.ts` so the full §9.1 rendering matrix (loading / error / zero / in-progress / data with compact + full breakdowns) is pinned by pure tests — the project does not ship React Testing Library, so the component is a thin shell around the pure module.
+
+The shared response type `RunCostResponse` (`shared/types/runCost.ts`) and the `/api/runs/:runId/cost` handler (`server/routes/llmUsage.ts`) return:
+
+- `totalCostCents` — from `cost_aggregates` (includes failed-call cost for accounting completeness).
+- `llmCallCount`, `totalTokensIn`, `totalTokensOut`, `callSiteBreakdown: { app, worker }` — from the archive-safe `llm_requests_all` view under a success/partial filter.
+
+The asymmetry between `totalCostCents` (rollup, includes failures) and the new fields (ledger, success/partial only) is intentional; the H1 deferred follow-up in `tasks/todo.md` proposes adding an explicit `successfulCostCents` field to remove the UI-interpretation trap.
+
+`formatCost` in the pure module handles the full range from zero to thousands-of-dollars, including a scientific-notation fallback for sub-penny values (`toPrecision(2)` emits `"1.2e-7"` below ~1e-6 — the fallback re-renders via `toFixed(12)` with trailing-zero trim so the UI never shows scientific notation).
 
 ### Failure helper — `shared/iee/failure.ts`
 
@@ -2509,9 +2553,78 @@ The ledger is append-only and only observable after a call completes. The in-fli
   - `GET /api/admin/llm-pnl/in-flight?limit=500` — authoritative snapshot for first paint + reconnect resync. Hard cap 500; sort `startedAt DESC, runtimeKey DESC` for stable repeat reads.
   - Socket room `system:llm-inflight` — events `llm-inflight:added` / `llm-inflight:removed`. Join handler in `server/websocket/rooms.ts` silently rejects non-`system_admin` sockets.
   - `/system/llm-pnl` → In-Flight tab (`client/src/components/system-pnl/PnlInFlightTable.tsx`). Physically first, default-selected view stays on P&L.
-- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When the success-path upsert hits the `where: status != 'success'` guard on an already-success row, `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
+- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When a terminal upsert hits its `where: status = 'started'` guard and finds a non-started row (idempotency replay / sweep pre-empted), `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
 - **Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via `createEvent` with `byCallSite` + `byProvider` breakdowns — stuck workers or provider-specific hangs are spottable without digging logs.
 - **Pure tests pin every state-machine invariant:** `server/services/__tests__/llmInflightRegistryPure.test.ts`.
+
+#### Partial-external-success protection (provisional `'started'` row)
+
+The gap the tracker couldn't close on its own: `providerAdapter.call()` succeeds (provider has billed and generated tokens) → `db.insert(llmRequests)` fails for any reason (DB blip, constraint violation, crash) → caller retries under the same `idempotencyKey` → the pre-dispatch idempotency check finds no row → router dispatches a second concurrent call → **double-bill at the provider with no ledger trace of the first success**. No LLM provider currently ships a request-level dedup header.
+
+The `llm_requests.status` enum has a provisional value `'started'` (migration `0190_llm_requests_started_status.sql` — partial index on `created_at WHERE status = 'started'`). Flow:
+
+1. **Atomic idempotency check + provisional INSERT.** `llmRouter.routeCall` step 4+7 runs a single `db.transaction`. It does `SELECT … FOR UPDATE` on `idempotencyKey`; if a `'success'` row exists it returns the cached response; if a `'started'` row exists it returns an `inflight` marker; otherwise it INSERTs a fresh `'started'` row inside the same transaction (with `onConflictDoUpdate` on any non-success state so a retry after terminal-error resets `createdAt` to `now()` — preventing the revived row from being immediately sweep-eligible). A concurrent second caller blocks on the unique-constraint conflict; when the first tx commits, the second's own `FOR UPDATE` returns the `'started'` row and correctly takes the reconciliation branch.
+2. **`ReconciliationRequiredError` thrown on `inflight`.** `server/lib/reconciliationRequiredError.ts` — typed error class, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`, carries `idempotencyKey`. **The router never auto-retries this.** The caller decides (surface banner, poll, fail) — auto-retry inside the router would re-open the exact double-dispatch window this mechanism exists to prevent.
+3. **Single-terminal-transition invariant.** All three terminal writes in `llmRouter.routeCall` — success upsert, failure upsert, budget-blocked upsert — use `where: status = 'started'` (not `!= 'success'`). A mismatch means another transition already happened (sweep fired and claimed as `provisional_row_expired`, or sibling raced). The tightened guard preserves the earlier terminal signal; a ghost log (`llm_router.{budget_block,failure,success}_upsert_ghost` at warn level) surfaces the case so operators can reconcile rather than silently losing the audit trail.
+4. **DB-level sweep backstop.** `server/jobs/llmStartedRowSweepJob.ts` (+ pure cutoff math in `llmStartedRowSweepJobPure.ts`) runs every 2 minutes under `maintenance:llm-started-row-sweep`. It reaps `'started'` rows older than `PROVIDER_CALL_TIMEOUT_MS + STARTED_ROW_SWEEP_BUFFER_MS` (60 s) via a `UPDATE … SET status = 'error', error_message = 'provisional_row_expired'` with `FOR UPDATE SKIP LOCKED`. Admin-bypass (`withAdminConnection` + `SET LOCAL ROLE admin_role`). Telescopes with the in-memory sweep (30 s past timeout) — registry reaps first, DB reaps second.
+5. **Aggregation exclusion.** `systemPnlServicePure.ts::COUNTABLE_COST_STATUSES = ['success', 'partial']`. `contributesToCostAggregate()` is the predicate every P&L query uses in spirit (`status IN ('success','partial')`). Pure test pins the set; any future status-enum expansion trips the test if `'started'` (or another non-success status) accidentally lands inside the countable set.
+
+#### Idempotency-key versioning
+
+`server/lib/idempotencyVersion.ts` ships `IDEMPOTENCY_KEY_VERSION = 'v1'` prepended to every idempotency key produced by `llmRouter.generateIdempotencyKey` (extracted to `server/services/llmRouterIdempotencyPure.ts`) and `actionService.buildActionIdempotencyKey`. Any change to hash inputs, input ordering, or canonicalisation must bump the version in the same commit — without the bump, retries issued before the change don't match their originating rows (provider double-bill, duplicate action execution).
+
+- **Load-time assert** — `/^v\d+$/` check on the constant at module load. Catches the "still a string, but empty/null/unprefixed" failure mode that the type-level `as const` can't express.
+- **Deploy-boundary tradeoff** is explicit and documented: a request in-flight at the moment of a prefix bump will, on retry, hash to the new prefix and not match its prior attempt's row. Narrow window; acceptable risk given the rarity.
+- **Pure test pins** — both `llmRouterIdempotencyPure.test.ts` and `actionServiceCanonicalisationPure.test.ts` pin the `v1:`-prefixed output against a known-good fixture. Accidental prefix removal trips both suites.
+
+#### Queueing-delay + fallback visibility
+
+`InFlightEntry` carries four additional observability fields beyond the base registry contract:
+
+| Field | Populated at | Surface |
+|-------|--------------|---------|
+| `queuedAt` | Top of `routeCall()`, before budget/cooldown/resolver | Paired with `dispatchDelayMs` on the entry |
+| `dispatchDelayMs` | `startedAt - queuedAt`, clamped ≥0 | "Queued" column on the In-Flight tab (>1 s amber, >5 s red) |
+| `attemptSequence` | Monotonic across the entire `routeCall`, ticks once per attempt | Attempt column shows `#${attemptSequence}` when it diverges from the per-provider `attempt` |
+| `fallbackIndex` | 0 for primary provider, 1+ for each fallback | Small `↳fb#N` badge next to the attempt label |
+
+These close the "why is this call slow?" and "which attempt of the logical call is this?" gaps the base tracker left open.
+
+#### Historical archive + soft circuit breaker
+
+`llm_inflight_history` (migration `0191_llm_inflight_history.sql`) captures every add/remove event with its full payload. Retention: `env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS` days (default 7). Daily sweep via `maintenance:llm-inflight-history-cleanup` at 04:15 UTC.
+
+Writes are **fire-and-forget** — a DB hiccup must not delay the sub-second socket emit. Gated by a soft circuit breaker from `server/lib/softBreakerPure.ts`:
+
+- **Sliding-window** — 50 samples, 50% failure threshold, 5-minute open state. Below threshold: debug log per failure. On trip: single `inflight.history_breaker_opened` warn log. While open: silent drop. At expiry: half-open probe on next event.
+- **Pure state machine** — `createBreakerState` / `shouldAttempt(state, nowMs)` / `recordOutcome(state, success, nowMs, config)` returning `{ trippedNow }`. No clock/logger injection — the calling code owns those. **Reusable**: any future fire-and-forget persistence path (payment webhooks, outbound integration events) can adopt the same primitive.
+- **Env kill-switch** — `LLM_INFLIGHT_HISTORY_ENABLED=false` disables writes without a code deploy.
+
+Admin read: `GET /api/admin/llm-pnl/in-flight/history?from=…&to=…&runtimeKey=…&idempotencyKey=…&limit=…` — system-admin-only, 1 000-row hard cap.
+
+#### Per-caller live payload drawer
+
+`server/services/llmInflightPayloadStore.ts` — in-memory LRU keyed by `runtimeKey`. Cap 100 entries / 200 KB per payload (measured against the full stored object, not just `messages`). On truncation the snapshot carries `originalSizeBytes: number` so the admin can distinguish a 201 KB payload from a 50 MB one. Captured at dispatch in `routeCall` right after `inflightRegistry.add()`; cleared on every `remove()` / `updateLedgerLink()` path.
+
+Admin route: `GET /api/admin/llm-pnl/in-flight/:runtimeKey/payload` — 410 Gone when the entry has already completed or been evicted (with a user-friendly message directing to the ledger link). `PnlInFlightPayloadDrawer.tsx` opens on row-click, uses `AbortController` + a `currentRuntimeKey` closure check so a fast row-switch doesn't allow stale responses to overwrite the drawer.
+
+Process-local by design — multi-instance deployments see 410 for calls on sibling nodes. Extending to Redis is out of scope; the ledger detail is the authoritative post-completion surface.
+
+#### Token-level streaming progress (infrastructure only)
+
+The adapter contract (`server/services/providers/types.ts::LLMProviderAdapter`) has an optional streaming hook:
+
+```typescript
+stream?(params: ProviderCallParams): AsyncIterable<StreamTokenChunk> & {
+  done: Promise<ProviderResponse>;
+};
+```
+
+Router wiring in `llmRouter.ts`: when `params.stream === true` AND the adapter implements `stream()`, the router iterates tokens, throttles progress emissions at 1 Hz per runtimeKey via `llmInflightRegistry.emitProgress()`, and returns `await iterable.done` (with a pre-installed `.catch(() => {})` to silence the dangling rejection if the `for-await` exits via exception). Adapters without `stream()` transparently fall through to `call()`.
+
+Socket event: `llm-inflight:progress` carrying `InFlightProgress = { runtimeKey, idempotencyKey, tokensSoFar, lastTokenAt }`. Client merges into a per-runtimeKey `Map<string, InFlightProgress>`; token count renders inline with the Elapsed cell on both desktop table and mobile card.
+
+**No provider adapter implements `stream()` yet.** The infrastructure ships; the adapter wiring is the next-session handoff. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution, postProcess semantics on partial streams. The §1 partial-external-success protection is a **hard prerequisite** — streaming exposes a new partial-success window (tokens billed but stream aborted), and the `'started'` row is the durable reconciliation layer for that case too.
 
 ### Cost aggregate dimensions (spec §6.2)
 

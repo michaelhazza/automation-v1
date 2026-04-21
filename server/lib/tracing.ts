@@ -81,6 +81,8 @@ export const EVENT_NAMES = [
   'iee.queue.depth',
   // LLM in-flight registry (tasks/llm-inflight-realtime-tracker-spec.md §4.4)
   'llm.inflight.active_count',
+  // §1 provisional 'started' row — concurrent-call reconciliation signal
+  'llm.router.reconciliation_required',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

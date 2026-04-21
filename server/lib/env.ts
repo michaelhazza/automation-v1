@@ -67,6 +67,17 @@ const envSchema = z.object({
   // (see server/jobs/llmLedgerArchiveJob.ts). Infrastructure tunable, not
   // a per-org business decision.
   LLM_LEDGER_RETENTION_MONTHS: z.coerce.number().int().positive().optional().default(12),
+  // llm_inflight_history fire-and-forget persistence (deferred-items brief §6).
+  // Defaults to true; set to 'false' to disable writes without a deploy if the
+  // history table becomes temporarily unhealthy.
+  LLM_INFLIGHT_HISTORY_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .default(true)
+    .transform((v) => v === true || v === 'true' || v === '1'),
+  // Retention window (days) for llm_inflight_history rows. Short by design —
+  // the archive is for recent-incident forensics, not long-term storage.
+  LLM_INFLIGHT_HISTORY_RETENTION_DAYS: z.coerce.number().int().positive().optional().default(7),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill

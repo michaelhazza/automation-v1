@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { computeValidationDigest, hashActionArgs } from '../actionService.js';
+import { buildActionIdempotencyKey, computeValidationDigest, hashActionArgs } from '../actionService.js';
+import { IDEMPOTENCY_KEY_VERSION } from '../../lib/idempotencyVersion.js';
 
 // ---------------------------------------------------------------------------
 // Pins the canonical-JSON contract for both idempotency key hashes and the
@@ -92,4 +93,42 @@ test('hashActionArgs — mirrors present-vs-absent behaviour', () => {
   const h3 = hashActionArgs({ args: { x: 1, opt: null } });
   assert.equal(h1, h2);
   assert.notEqual(h1, h3);
+});
+
+// ── Idempotency-key versioning (deferred-items brief §2) ──────────────────
+
+test('buildActionIdempotencyKey — prefixed with IDEMPOTENCY_KEY_VERSION', () => {
+  const key = buildActionIdempotencyKey({
+    runId:      'run_1',
+    toolCallId: 'tc_1',
+    args:       { x: 1 },
+  });
+  assert.ok(key.startsWith(`${IDEMPOTENCY_KEY_VERSION}:`),
+    `idempotency key should start with ${IDEMPOTENCY_KEY_VERSION}: — got ${key}`);
+});
+
+test('buildActionIdempotencyKey — current v1 shape pinned', () => {
+  // Fixture: same inputs must always produce the same v1-prefixed key.
+  // Accidental canonicalisation change (or prefix removal) trips this test.
+  const key = buildActionIdempotencyKey({
+    runId:      '33333333-3333-3333-3333-333333333333',
+    toolCallId: 'tool_call_abc',
+    args:       { contactId: 'c_1', body: 'hi' },
+  });
+  const argsHash = hashActionArgs({ contactId: 'c_1', body: 'hi' });
+  assert.equal(key, `v1:33333333-3333-3333-3333-333333333333:tool_call_abc:${argsHash}`);
+});
+
+test('buildActionIdempotencyKey — same args different key-order → same key (nested via argsHash)', () => {
+  const a = buildActionIdempotencyKey({
+    runId:      'r_1',
+    toolCallId: 't_1',
+    args:       { b: 2, a: 1 },
+  });
+  const b = buildActionIdempotencyKey({
+    runId:      'r_1',
+    toolCallId: 't_1',
+    args:       { a: 1, b: 2 },
+  });
+  assert.equal(a, b);
 });

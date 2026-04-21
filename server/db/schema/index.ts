@@ -56,6 +56,7 @@ export * from './orgMarginConfigs';
 export * from './orgBudgets';
 export * from './llmRequests';
 export * from './llmRequestsArchive';
+export * from './llmInflightHistory';
 export * from './costAggregates';
 export * from './budgetReservations';
 export * from './hierarchyTemplates';

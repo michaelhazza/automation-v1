@@ -39,6 +39,7 @@ import {
   parsePlan,
   isComplexRun,
   mutateActiveToolsPreservingUniversal,
+  computeRunResultStatus,
 } from './agentExecutionServicePure.js';
 import { reorderToolsByTopicRelevance } from './topicClassifierPure.js';
 import { HARD_REMOVAL_CONFIDENCE_THRESHOLD } from '../config/limits.js';
@@ -1141,24 +1142,32 @@ export const agentExecutionService = {
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
-      let finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+      let finalStatus = (loopResult.finalStatus ?? 'completed') as
+        'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+
+      // Pre-fetch runMetadata once — consumed by both the Reporting Agent
+      // finalize hook and Phase B's runResultStatus derivation (which reads
+      // `hadUncertainty` from runMetadata, where the clarification-timeout
+      // job writes it).
+      const [preFinalizeRow] = await db
+        .select({ runMetadata: agentRuns.runMetadata })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, run.id))
+        .limit(1);
+      const preFinalizeMetadata =
+        (preFinalizeRow?.runMetadata ?? null) as Record<string, unknown> | null;
 
       // T25 / T16 — Reporting Agent end-of-run hook. Runs the invariant
       // and persists the content fingerprint. No-op for non-Reporting-Agent
       // runs. Spec v3.4 §6.7.2 / §8.4.2.
       if (finalStatus === 'completed') {
         try {
-          const [runRow] = await db
-            .select({ runMetadata: agentRuns.runMetadata })
-            .from(agentRuns)
-            .where(eq(agentRuns.id, run.id))
-            .limit(1);
           const { finalizeReportingAgentRun } = await import('../lib/reportingAgentRunHook.js');
           await finalizeReportingAgentRun({
             runId: run.id,
             subaccountAgentId: request.subaccountAgentId ?? null,
             organisationId: request.organisationId,
-            runMetadata: (runRow?.runMetadata ?? null) as Record<string, unknown> | null,
+            runMetadata: preFinalizeMetadata,
           });
         } catch (err) {
           // Invariant or persist failed — downgrade to failed so the run
@@ -1171,8 +1180,29 @@ export const agentExecutionService = {
         }
       }
 
-      await db.update(agentRuns).set({
+      // Hermes Tier 1 Phase B §6.3 — derive runResultStatus for the
+      // terminal write. `hadUncertainty` lives on runMetadata (the
+      // clarification-timeout job at `clarificationTimeoutJob.ts` writes
+      // it there); `hasError` is inferred from finalStatus; `hasSummary`
+      // is the trimmed-length > 0 check.
+      const hadUncertainty = preFinalizeMetadata?.hadUncertainty === true;
+      const hasSummary = !!(loopResult.summary && loopResult.summary.trim().length > 0);
+      const derivedRunResultStatus = computeRunResultStatus(
+        finalStatus,
+        /* hasError — only affects the 'completed' branch of computeRunResultStatus;
+           ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
+        hadUncertainty,
+        hasSummary,
+      );
+
+      // Write-once guard (§6.3.1): add `AND run_result_status IS NULL` so
+      // a second attempt at the same terminal write becomes a zero-row
+      // UPDATE rather than an overwrite. `.returning()` lets us detect
+      // that and log rather than silently drift from the first writer's
+      // value.
+      const terminalUpdate = await db.update(agentRuns).set({
         status: finalStatus,
+        runResultStatus: derivedRunResultStatus,
         totalToolCalls: loopResult.totalToolCalls,
         inputTokens: loopResult.inputTokens,
         outputTokens: loopResult.outputTokens,
@@ -1185,7 +1215,16 @@ export const agentExecutionService = {
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
-      }).where(eq(agentRuns.id, run.id));
+      })
+        .where(and(eq(agentRuns.id, run.id), isNull(agentRuns.runResultStatus)))
+        .returning({ id: agentRuns.id });
+      if (terminalUpdate.length === 0) {
+        logger.warn('runResultStatus.write_skipped', {
+          runId: run.id,
+          attemptedStatus: derivedRunResultStatus,
+          writeSite: 'finishLoop_normal',
+        });
+      }
 
       // Brain Tree OS adoption P1 — build the structured handoff document
       // and persist it. Best-effort: a build failure logs and leaves the
@@ -1304,12 +1343,31 @@ export const agentExecutionService = {
       // ── 10. Extract insights for workspace memory + entities ─────────────
       if (loopResult.summary) {
         try {
+          // Hermes Tier 1 Phase B §6.4 — thread the outcome through so
+          // extractRunInsights can branch entry-type promotion, quality
+          // scoring, and provenance confidence per §6.5 / §6.7. The
+          // primary agent-run completion path always passes a non-null
+          // `runResultStatus` here (when derivedRunResultStatus is null
+          // the run is not terminal and this branch is unreachable).
+          const extractionOutcome = {
+            runResultStatus: (derivedRunResultStatus ?? 'partial') as 'success' | 'partial' | 'failed',
+            // trajectoryPassed is always null in Phase B — no per-run
+            // verdict is persisted today. Reserved forward-compat slot.
+            trajectoryPassed: null as boolean | null,
+            // Best-effort errorMessage for the short-summary guard.
+            // The normal terminal path does not set errorMessage on the
+            // run row here (only the catch path does); pass null. A
+            // future refactor could surface loopResult.errorMessage if
+            // the loop ever captures one without throwing.
+            errorMessage: null as string | null,
+          };
           await workspaceMemoryService.extractRunInsights(
             run.id,
             request.agentId,
             request.organisationId,
             request.subaccountId!,
-            loopResult.summary
+            loopResult.summary,
+            extractionOutcome,
           );
         } catch (err) {
           console.error(`[AgentExecution] Memory extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
@@ -1397,14 +1455,35 @@ export const agentExecutionService = {
       const durationMs = Date.now() - startTime;
       const errorMessage = err instanceof Error ? err.message : String(err);
 
-      await db.update(agentRuns).set({
+      // Hermes Tier 1 Phase B §6.3 / §6.3.1 — outer catch-path write-once
+      // terminal update. `finalStatus='failed'` here always maps to
+      // `runResultStatus='failed'` via the pure helper; pinning via the
+      // helper so the two sites stay in lock-step if the derivation
+      // changes.
+      const catchRunResultStatus = computeRunResultStatus(
+        'failed',
+        /* hasError */ true,
+        /* hadUncertainty */ false,
+        /* hasSummary */ false,
+      );
+      const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',
+        runResultStatus: catchRunResultStatus,
         errorMessage,
         errorDetail: { error: errorMessage, stack: err instanceof Error ? err.stack : undefined },
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
-      }).where(eq(agentRuns.id, run.id));
+      })
+        .where(and(eq(agentRuns.id, run.id), isNull(agentRuns.runResultStatus)))
+        .returning({ id: agentRuns.id });
+      if (catchUpdate.length === 0) {
+        logger.warn('runResultStatus.write_skipped', {
+          runId: run.id,
+          attemptedStatus: catchRunResultStatus,
+          writeSite: 'finishLoop_catch',
+        });
+      }
 
       // Emit run failed event
       emitAgentRunUpdate(run.id, 'agent:run:failed', {

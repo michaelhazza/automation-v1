@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import api from '../../lib/api';
 import { useSocketRoom } from '../../hooks/useSocket';
+import PnlInFlightPayloadDrawer from './PnlInFlightPayloadDrawer';
 import type {
   InFlightEntry,
+  InFlightProgress,
   InFlightRemoval,
   InFlightSnapshotResponse,
 } from '../../../../shared/types/systemPnl';
@@ -26,6 +28,7 @@ import type {
 const SOCKET_BUFFER_MS = 100;
 const ADDED_EVENT = 'llm-inflight:added';
 const REMOVED_EVENT = 'llm-inflight:removed';
+const PROGRESS_EVENT = 'llm-inflight:progress';
 
 // Mirror the server's state-machine guard on the client: once a
 // runtimeKey has been removed, a subsequent late `added` event for the
@@ -72,6 +75,13 @@ interface Props {
 export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
   const [entries, setEntries] = useState<Row[]>([]);
   const [recentlyLanded, setRecentlyLanded] = useState<Map<string, LedgerLink>>(new Map());
+  // Per-runtimeKey streaming progress — transient, cleared on remove. Drawn
+  // from `llm-inflight:progress` events (deferred-items brief §5). Stored
+  // separately from `entries` so a progress update doesn't force a
+  // re-render of the entire table.
+  const [progress, setProgress] = useState<Map<string, InFlightProgress>>(new Map());
+  // Open live-payload drawer (deferred-items brief §7). `null` = closed.
+  const [payloadDrawerEntry, setPayloadDrawerEntry] = useState<InFlightEntry | null>(null);
   const [capped, setCapped] = useState(false);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -180,6 +190,14 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
     recordStateVersion(removal.runtimeKey, removal.stateVersion);
     markRecentlyRemoved(removal.runtimeKey);
     setEntries((prev) => prev.filter((r) => r.runtimeKey !== removal.runtimeKey));
+    // Drop the streaming progress for this runtimeKey — tokensOut on the
+    // removal event is now the authoritative source.
+    setProgress((prev) => {
+      if (!prev.has(removal.runtimeKey)) return prev;
+      const next = new Map(prev);
+      next.delete(removal.runtimeKey);
+      return next;
+    });
     setRecentlyLanded((prev) => {
       const next = new Map(prev);
       const existing = prev.get(removal.runtimeKey);
@@ -273,10 +291,24 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
     applyRemoveEntry(removal);
   }, [applyRemoveEntry]);
 
+  const onProgress = useCallback((data: unknown) => {
+    // `useSocketRoom` already unwraps the InFlightEventEnvelope and passes
+    // the inner payload directly — so `data` IS the InFlightProgress, not
+    // the envelope wrapper. Reading `data.payload` would always yield
+    // undefined and the progress indicator would never update.
+    const prog = data as InFlightProgress | undefined;
+    if (!prog || !prog.runtimeKey) return;
+    setProgress((prev) => {
+      const next = new Map(prev);
+      next.set(prog.runtimeKey, prog);
+      return next;
+    });
+  }, []);
+
   useSocketRoom(
     'system-llm-inflight',
     ROOM_TOKEN,
-    { [ADDED_EVENT]: onAdded, [REMOVED_EVENT]: onRemoved },
+    { [ADDED_EVENT]: onAdded, [REMOVED_EVENT]: onRemoved, [PROGRESS_EVENT]: onProgress },
     fetchSnapshot,
   );
 
@@ -331,7 +363,10 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      {/* Desktop table — hidden below md breakpoint. Mobile card view lives
+          directly below (deferred-items brief §8). Both share the same row
+          data; only the rendering differs. */}
+      <div className="hidden md:block bg-white border border-slate-200 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-left">
             <tr>
@@ -340,6 +375,7 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
               <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">Source</th>
               <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">Call site</th>
               <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">Attempt</th>
+              <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 text-right">Queued</th>
               <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 text-right">Elapsed</th>
               <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">Status</th>
             </tr>
@@ -347,7 +383,7 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
           <tbody>
             {rows.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
                   No calls in flight.
                 </td>
               </tr>
@@ -361,8 +397,30 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
               // §12 round 3 item 5). `row.timeoutMs` is the provider ceiling;
               // `deadlineBufferMs` is the extra grace before the sweep fires.
               const pastTimeout = elapsedMs > row.timeoutMs && now < deadlineMs;
+              // Deferred-items brief §4: show the monotonic sequence when a
+              // fallback has happened, otherwise the per-provider counter.
+              const attemptLabel = row.attemptSequence !== row.attempt
+                ? `#${row.attemptSequence}`
+                : `#${row.attempt}`;
+              // Brief §3: colour-code the dispatch-delay cell so a budget
+              // lock wait or cooldown bounce is visible at a glance.
+              // Thresholds: >1s amber, >5s red.
+              const delayClass = row.dispatchDelayMs > 5_000
+                ? 'text-rose-600'
+                : row.dispatchDelayMs > 1_000
+                  ? 'text-amber-700'
+                  : 'text-slate-500';
+              // Brief §5: surface streaming token progress on the Elapsed
+              // cell when available. The authoritative tokensOut still
+              // arrives on the removal event; this is purely a UX signal.
+              const prog = progress.get(row.runtimeKey);
               return (
-                <tr key={row._key} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr
+                  key={row._key}
+                  onClick={() => setPayloadDrawerEntry(row)}
+                  className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                  title="Click for live payload"
+                >
                   <td className="px-4 py-2 font-mono text-xs text-slate-700">{row.label}</td>
                   <td className="px-4 py-2 text-slate-600">{row.featureTag}</td>
                   <td className="px-4 py-2 text-slate-600">
@@ -380,9 +438,37 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
                       {row.callSite}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-slate-600">#{row.attempt}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs text-slate-700">
+                  <td
+                    className="px-4 py-2 text-slate-600"
+                    title={
+                      row.attemptSequence !== row.attempt
+                        ? `Attempt #${row.attemptSequence} of the logical call (provider attempt #${row.attempt}, fallback index ${row.fallbackIndex})`
+                        : `Attempt #${row.attempt}`
+                    }
+                  >
+                    {attemptLabel}
+                    {row.fallbackIndex > 0 && (
+                      <span className="ml-1 text-[10px] text-slate-400">
+                        ↳fb#{row.fallbackIndex}
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className={`px-4 py-2 text-right font-mono text-xs ${delayClass}`}
+                    title={`${row.dispatchDelayMs}ms between routeCall entry and provider dispatch`}
+                  >
+                    {formatElapsed(row.dispatchDelayMs)}
+                  </td>
+                  <td
+                    className="px-4 py-2 text-right font-mono text-xs text-slate-700"
+                    title={prog ? `${prog.tokensSoFar} tokens generated so far (advisory)` : undefined}
+                  >
                     {formatElapsed(elapsedMs)}
+                    {prog && (
+                      <span className="ml-1 text-[10px] text-indigo-500">
+                        · {prog.tokensSoFar}t
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     {pastTimeout ? (
@@ -405,6 +491,108 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
         </table>
       </div>
 
+      {/* Mobile card view — shown below the md breakpoint. Same data, card
+          layout so each row is readable on a narrow viewport without
+          horizontal scrolling. Deferred-items brief §8. */}
+      <div className="md:hidden space-y-2">
+        {rows.length === 0 && !loading && (
+          <div className="bg-white border border-slate-200 rounded-lg py-8 text-center text-sm text-slate-400">
+            No calls in flight.
+          </div>
+        )}
+        {rows.map((row) => {
+          const startedMs = Date.parse(row.startedAt);
+          const elapsedMs = Math.max(0, now - startedMs);
+          const deadlineMs = Date.parse(row.deadlineAt);
+          const pastTimeout = elapsedMs > row.timeoutMs && now < deadlineMs;
+          const attemptLabel = row.attemptSequence !== row.attempt
+            ? `#${row.attemptSequence}`
+            : `#${row.attempt}`;
+          const delayClass = row.dispatchDelayMs > 5_000
+            ? 'text-rose-600'
+            : row.dispatchDelayMs > 1_000
+              ? 'text-amber-700'
+              : 'text-slate-500';
+          // Brief §5 + pr-review finding #5: the mobile card must surface
+          // the same streaming token counter as the desktop table —
+          // otherwise admins on mobile silently lose the "is the stream
+          // making progress" signal when streaming lands.
+          const mobileProg = progress.get(row.runtimeKey);
+          return (
+            <div
+              key={`mobile-${row._key}`}
+              onClick={() => setPayloadDrawerEntry(row)}
+              role="button"
+              className="bg-white border border-slate-200 rounded-lg p-3 cursor-pointer active:bg-slate-50"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-mono text-xs text-slate-700 break-all">{row.label}</div>
+                {pastTimeout ? (
+                  <span
+                    className="shrink-0 inline-block text-[10px] px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800"
+                    title="Provider timeoutMs has passed but the deadline-based sweep hasn't fired yet."
+                  >
+                    sweep pending
+                  </span>
+                ) : (
+                  <span className="shrink-0 inline-block text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700">
+                    in flight
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                <span className="text-slate-700">{row.featureTag}</span>
+                <span className="mx-1.5 text-slate-300">·</span>
+                {row.sourceType}
+                {row.organisationId && (
+                  <span className="ml-1 font-mono text-[10px] text-slate-400">
+                    {row.organisationId.slice(0, 8)}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Attempt</div>
+                  <div className="text-slate-700">
+                    {attemptLabel}
+                    {row.fallbackIndex > 0 && (
+                      <span className="ml-1 text-[10px] text-slate-400">↳fb#{row.fallbackIndex}</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Queued</div>
+                  <div className={`font-mono ${delayClass}`}>
+                    {formatElapsed(row.dispatchDelayMs)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Elapsed</div>
+                  <div
+                    className="font-mono text-slate-700"
+                    title={mobileProg ? `${mobileProg.tokensSoFar} tokens generated so far (advisory)` : undefined}
+                  >
+                    {formatElapsed(elapsedMs)}
+                    {mobileProg && (
+                      <span className="ml-1 text-[10px] text-indigo-500">· {mobileProg.tokensSoFar}t</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className={`inline-block text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                  row.callSite === 'worker'
+                    ? 'bg-violet-50 text-violet-700 border border-violet-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}>
+                  {row.callSite}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       {recentlyLandedList.length > 0 && (
         <div className="mt-3 text-xs text-slate-400">
           Recently landed:{' '}
@@ -425,6 +613,11 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
           ))}
         </div>
       )}
+
+      <PnlInFlightPayloadDrawer
+        entry={payloadDrawerEntry}
+        onClose={() => setPayloadDrawerEntry(null)}
+      />
     </div>
   );
 }

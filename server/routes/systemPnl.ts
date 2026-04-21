@@ -1,9 +1,13 @@
 import { Router } from 'express';
+import { and, desc, gte, lte, eq } from 'drizzle-orm';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { systemPnlService } from '../services/systemPnlService.js';
 import * as llmInflightRegistry from '../services/llmInflightRegistry.js';
+import * as llmInflightPayloadStore from '../services/llmInflightPayloadStore.js';
 import { INFLIGHT_SNAPSHOT_HARD_CAP } from '../config/limits.js';
+import { db } from '../db/index.js';
+import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import type { PnlResponse, PnlResponseMeta } from '../../shared/types/systemPnl.js';
 
 // ---------------------------------------------------------------------------
@@ -142,6 +146,96 @@ router.get(
       : INFLIGHT_SNAPSHOT_HARD_CAP;
     const snapshot = llmInflightRegistry.snapshot(limit);
     res.json(snapshot);
+  }),
+);
+
+// ── Live payload snapshot (deferred-items brief §7) ──────────────────────
+// System-admin only. Returns the captured prompt/system/tools for an
+// in-flight call by runtimeKey. 410 Gone when the entry has already
+// completed or was evicted from the in-memory store.
+router.get(
+  '/api/admin/llm-pnl/in-flight/:runtimeKey/payload',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const runtimeKey = String(req.params.runtimeKey ?? '');
+    if (!runtimeKey) {
+      throw { statusCode: 400, errorCode: 'INVALID_RUNTIME_KEY', message: 'runtimeKey required' };
+    }
+    const snapshot = llmInflightPayloadStore.get(runtimeKey);
+    if (!snapshot) {
+      res.status(410).json({
+        statusCode: 410,
+        errorCode: 'PAYLOAD_GONE',
+        message: 'Payload snapshot is no longer available — the call completed or was evicted from the in-memory store.',
+      });
+      return;
+    }
+    res.json({
+      runtimeKey,
+      payload:     snapshot,
+      generatedAt: new Date().toISOString(),
+    });
+  }),
+);
+
+// ── In-flight historical archive (deferred-items brief §6) ────────────────
+// System-admin only. Returns add/remove events from the llm_inflight_history
+// table within the requested time window. Capped at 1000 rows — narrow
+// the window rather than paginating to avoid long scans under load.
+const INFLIGHT_HISTORY_HARD_CAP = 1_000;
+
+router.get(
+  '/api/admin/llm-pnl/in-flight/history',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const { from, to, runtimeKey, idempotencyKey } = req.query;
+    const fromDate = typeof from === 'string' ? new Date(from) : null;
+    const toDate   = typeof to   === 'string' ? new Date(to)   : null;
+    if (fromDate && Number.isNaN(fromDate.getTime())) {
+      throw { statusCode: 400, errorCode: 'INVALID_FROM', message: 'from must be ISO 8601' };
+    }
+    if (toDate && Number.isNaN(toDate.getTime())) {
+      throw { statusCode: 400, errorCode: 'INVALID_TO', message: 'to must be ISO 8601' };
+    }
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, INFLIGHT_HISTORY_HARD_CAP)
+      : 200;
+
+    const conditions = [];
+    if (fromDate) conditions.push(gte(llmInflightHistory.createdAt, fromDate));
+    if (toDate)   conditions.push(lte(llmInflightHistory.createdAt, toDate));
+    if (typeof runtimeKey === 'string' && runtimeKey.length > 0) {
+      conditions.push(eq(llmInflightHistory.runtimeKey, runtimeKey));
+    }
+    if (typeof idempotencyKey === 'string' && idempotencyKey.length > 0) {
+      conditions.push(eq(llmInflightHistory.idempotencyKey, idempotencyKey));
+    }
+
+    const rows = await db
+      .select()
+      .from(llmInflightHistory)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(llmInflightHistory.createdAt))
+      .limit(limit);
+
+    res.json({
+      events: rows.map((r) => ({
+        id:             r.id,
+        runtimeKey:     r.runtimeKey,
+        idempotencyKey: r.idempotencyKey,
+        organisationId: r.organisationId,
+        subaccountId:   r.subaccountId,
+        eventKind:      r.eventKind,
+        eventPayload:   r.eventPayload,
+        terminalStatus: r.terminalStatus,
+        createdAt:      r.createdAt,
+      })),
+      generatedAt: new Date().toISOString(),
+      capped:      rows.length >= limit,
+    });
   }),
 );
 

@@ -96,7 +96,7 @@ For each accepted recommendation:
 
 ## Output
 
-After the loop completes, write a final report to `tasks/dual-review-log-<slug>-<timestamp>.md`, where `<slug>` is a kebab-case description of what was reviewed (derived from the caller's brief description of what was implemented) and `<timestamp>` is an ISO 8601 UTC timestamp with seconds. This persists the review trail on disk — same pattern as `spec-review-log-*` — so future pattern analysis can mine across many reviews.
+After the loop completes, write a final report to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md`, where `<slug>` is a kebab-case description of what was reviewed (derived from the caller's brief description of what was implemented) and `<timestamp>` is an ISO 8601 UTC timestamp with seconds. This persists the review trail on disk — same pattern as `review-logs/spec-review-log-*` — so future pattern analysis can mine across many reviews.
 
 Report contents:
 
