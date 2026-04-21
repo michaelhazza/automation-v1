@@ -1329,7 +1329,255 @@ Step 6 — HANDOFF TO INTENT CLASSIFIER (Q4 pattern)
 
 ## Q7 — Playbook template instantiation for new-client onboarding
 
-*(section appended below)*
+### Q7 Finding
+
+**Two template tiers exist**, both defined in `server/db/schema/playbookTemplates.ts`.
+
+**System-level templates** (`system_playbook_templates` at `:20-40`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `slug` | text UNIQUE | matches filename `server/playbooks/<slug>.playbook.ts` |
+| `name`, `description` | text | |
+| `scope` | text | `'subaccount' \| 'org'` — added migration 0171; historical rows default `'subaccount'` (`:29`) |
+| `latest_version` | integer | bumped on publish |
+| `created_at`, `updated_at`, `deleted_at` | timestamp | soft delete |
+
+System template content is **not stored inline** — it is a TS file in `server/playbooks/`. The serialised JSON is stored in `system_playbook_template_versions.definition_json jsonb` (`:57`), written by the seeder on every version bump.
+
+**Org-level templates** (`playbook_templates` at `:75-106`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `organisation_id` | uuid FK | scoped to one org |
+| `slug` | text | unique per `(org, slug)` |
+| `name`, `description` | text | |
+| `forked_from_system_id` | uuid nullable FK → `system_playbook_templates` | set when forked |
+| `forked_from_version` | integer nullable | |
+| `latest_version` | integer | |
+| `created_by_user_id` | uuid nullable FK | |
+| `params_json` | jsonb | Phase 1.5 parameterisation — empty in Phase 1 |
+| `created_at`, `updated_at`, `deleted_at` | timestamp | soft delete |
+
+Org content lives in `playbook_template_versions.definition_json jsonb` (`:115-136`) — a snapshot produced by `serialiseDefinition()` (`playbookTemplateService.ts:56-93`; Zod schema instances stripped to structural shape). Source format is TypeScript `definePlaybook(...)` (`server/lib/playbook/definePlaybook.ts`).
+
+**`playbook_runs` schema** (`server/db/schema/playbookRuns.ts:44-92`):
+
+| Column | Notes |
+|---|---|
+| `id` uuid PK | |
+| `organisation_id` uuid FK | |
+| `subaccount_id` uuid nullable FK | null for `scope='org'` runs post-migration 0171 |
+| `scope` text | `'subaccount' \| 'org'` (`:54`) |
+| `template_version_id` uuid FK → `playbook_template_versions` | **immutable version lock at start time** |
+| `run_mode` text | `'auto' \| 'supervised' \| 'background' \| 'bulk'` |
+| `status` text | 9 values (pending, running, awaiting_input, awaiting_approval, completed, completed_with_errors, failed, cancelling, cancelled, partial) |
+| `context_json` jsonb | the growing run context blob |
+| `context_size_bytes` integer | denormalised for limit checks |
+| `replay_mode`, `retain_indefinitely` boolean | |
+| `parent_run_id` uuid self-ref nullable | bulk parent |
+| `target_subaccount_id` uuid nullable | bulk target |
+| `started_by_user_id` uuid FK | |
+| `started_at`, `completed_at` timestamp | |
+| `error`, `failed_due_to_step_id` text | |
+| `is_portal_visible` boolean | Phase E §9.4 |
+| `is_onboarding_run` boolean | Phase E §9.2 |
+| `playbook_slug` text | denormalised for onboarding-tab filter |
+
+**`context_json` shape** (`RunContext` in `server/lib/playbook/types.ts:386-407`):
+
+```ts
+{
+  input: Record<string, unknown>,                          // caller-supplied initialInput
+  subaccount?: { id, name, timezone, slug },
+  org?: { id, name },
+  steps: Record<stepId, { output: unknown }>,              // step outputs accumulate
+  _meta: {
+    runId, templateVersionId, startedAt,
+    resolvedAgents?, resolvedActionAgents?,
+    isReplay?, replaySourceRunId?
+  }
+}
+```
+
+**Template storage scope — both tiers in active use.**
+- System-level (code files + seeded DB rows): `server/playbooks/*.playbook.ts` — `event-creation`, `intelligence-briefing`, `weekly-digest`. Seeded via `server/scripts/seedPlaybooks.ts` → `playbookTemplateService.upsertSystemTemplate()`.
+- Org-level (DB rows): created by forking a system template (`forkSystemTemplate()` at `playbookTemplateService.ts:276-334`) or via Playbook Studio (`playbookStudioService.saveAndOpenPr()` opens a GitHub PR; seeder runs on merge).
+- No per-subaccount template tier.
+
+**Triggering entry points (every way a run starts today):**
+1. `POST /api/subaccounts/:subaccountId/playbook-runs` → `server/routes/playbookRuns.ts:36-78` → `playbookRunService.startRun()`.
+2. `POST /api/subaccounts/:subaccountId/onboarding/start` → `server/routes/subaccountOnboarding.ts:33-63` → `startOwedOnboardingPlaybook()`.
+3. **Subaccount creation hook** (fire-and-forget) — `POST /api/subaccounts` in `server/routes/subaccounts.ts:118-155` calls `subaccountOnboardingService.autoStartOwedOnboardingPlaybooks()` async. Iterates module-declared slugs and starts any with `autoStartOnOnboarding: true`.
+4. Portal run-now: `POST /api/portal/:subaccountId/playbook-runs/:runId/run-now`.
+5. Agent-run hook (`playbookAgentRunHook.ts` → `playbookEngineService.onAgentRunCompleted()`) — completion re-tick, not a start.
+6. Replay: `POST /api/playbook-runs/:runId/replay`.
+
+**No pg-boss job for starting a playbook from outside HTTP.** Engine workers (`playbookEngineService.registerWorkers()` at `:3155-3338`) only advance runs (`playbook-run-tick`, `playbook-watchdog`, `playbook-agent-step`).
+
+**Initial context flow.** `playbookRunService.startRun()` (`:124-293`) builds initial context at `:186-197`:
+
+```ts
+const initialContext: RunContext = {
+  input: input.initialInput,
+  subaccount: { id: sub.id, name: sub.name },
+  org: { id: org.id, name: org.name },
+  steps: {},
+  _meta: {
+    runId: '',              // back-filled post-insert
+    templateVersionId,
+    startedAt: startedAt.toISOString(),
+    resolvedAgents,
+  },
+};
+```
+
+Persisted to `playbook_runs.context_json` at insert (`:222`), `runId` patched back via `jsonb_set` (`:237-239`).
+
+In step execution, templating (`server/lib/playbook/templating.ts`) resolves `{{ run.input.* }}`, `{{ run.subaccount.* }}`, `{{ run.org.* }}`, `{{ steps.<id>.output.* }}` expressions. Prefixes are strictly whitelisted (`:53-56`). Step outputs accumulate via `mergeStepOutputIntoContext()` (`playbookEngineService.ts:576-588`).
+
+**Programmatic trigger API.** No dedicated `triggerPlaybook(templateId, context, subaccountId)` export. The closest is `playbookRunService.startRun()` at `:124`:
+
+```ts
+startRun(input: {
+  organisationId: string;
+  subaccountId: string;
+  templateId?: string;
+  systemTemplateSlug?: string;
+  initialInput: Record<string, unknown>;
+  startedByUserId: string;                      // REQUIRED — FK constraint
+  runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
+  bulkTargets?: string[];
+  isOnboardingRun?: boolean;
+  isPortalVisible?: boolean;
+}): Promise<{ runId: string; status: PlaybookRunStatus }>
+```
+
+Callable from any server-side code. `subaccountOnboardingService.startOwedOnboardingPlaybook()` (`:181-276`) demonstrates the pattern. No current pg-boss job for conversion-driven instantiation.
+
+**Versioning — already immutable.** Both tiers use immutable append-only version snapshots. `playbook_runs.template_version_id` FKs to the specific version row — not the template header. Template edits publish a new version; existing runs read from their locked version. The engine loads the definition at tick time via `loadDefinitionForRun()` (`playbookEngineService.ts:122-136`) — not from `latest_version`. **Zero effect on in-flight runs when a template is edited.**
+
+`playbookTemplateService.upsertSystemTemplate()` (`:152-216`) enforces monotonic versioning (throws `playbook_version_regression` on decrement).
+
+**Subaccount creation already fires onboarding playbooks.** `server/routes/subaccounts.ts:118-155`:
+
+```ts
+subaccountOnboardingService
+  .autoStartOwedOnboardingPlaybooks({
+    organisationId, subaccountId: sa.id, startedByUserId: req.user.id,
+  })
+  .catch(...)
+```
+
+`autoStartOwedOnboardingPlaybooks()` (`subaccountOnboardingService.ts:286-335`):
+1. `listOwedOnboardingPlaybooks()` — resolves slugs from `modules.onboarding_playbook_slugs` across active modules.
+2. For each slug with no existing run: reads `autoStartOnOnboarding` from the latest published definition.
+3. Calls `startOwedOnboardingPlaybook()` for qualifying slugs.
+
+Shipped templates with `autoStartOnOnboarding: true`: `intelligence-briefing` (`:44`) and `weekly-digest` (`:45`). A slug is only "owed" if a module lists it. **No `convert_lead` job or prospect-conversion flow exists.**
+
+**`subaccount_onboarding_state`** (`server/db/schema/subaccountOnboardingState.ts:35-66`) — N:1 to `playbook_runs` via `last_run_id` (`:47`). One state row per `(subaccount_id, playbook_slug)` unique (`:56-59`). `resumeState jsonb` (`:51`) stores the chat-based 9-step onboarding cursor — separate from the playbook engine flow.
+
+### Q7 Gap
+
+- **No `playbook_defaults` / conversion-playbook config** — a slug auto-starts only if a module lists it in `onboarding_playbook_slugs`. Prospect-conversion playbooks are not general-purpose onboarding; module-driven slug resolution is the wrong hook.
+- **`startedByUserId` is required** — `playbookRunService.startRun()` needs a real `users.id`. A system-triggered (pg-boss) run has no such principal. Needs a service-user row per org or a nullable FK + `triggeredBy` enum.
+- **`autoStartOwedOnboardingPlaybooks()` passes no `initialInput`** — the caller site (`subaccountOnboardingService.ts:318-325`) skips the param. The signature supports it but no caller uses it.
+- **No mechanism to pass prospect data** through subaccount creation into the onboarding playbook context. Currently nothing flows from the Sales Pipeline prospect record into the new subaccount's playbook run.
+- **No default-playbook-on-create config** — no `orgs.default_onboarding_playbook_template_id` column or equivalent.
+- **Versioning is already solved** — no gap.
+
+### Q7 Recommended approach
+
+**Template scope — use an org-level DB row forked from a system template.**
+
+- Create `server/playbooks/client-onboarding.playbook.ts` with `autoStartOnOnboarding: false` (because only post-conversion subaccounts should run it, not every new subaccount).
+- Seed it as a system template.
+- Orgs fork via `forkSystemTemplate()` to customise per agency.
+
+**Default-playbook-on-create config — new `playbook_defaults` table** keyed by `(org_id, event_type)`:
+
+```sql
+CREATE TABLE playbook_defaults (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
+  event_type text NOT NULL,                     -- e.g. 'subaccount_converted'
+  template_id uuid REFERENCES playbook_templates(id),
+  system_template_slug text,
+  run_mode text NOT NULL DEFAULT 'supervised',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (organisation_id, event_type)
+);
+```
+
+Preferred over `orgs.default_onboarding_playbook_template_id` because:
+1. supports multiple event types without schema churn,
+2. carries `run_mode`,
+3. joinable.
+
+**Overlap with Q4's `conversion_rules`:** `conversion_rules.target_playbook_template_id` already points at a playbook template. `playbook_defaults` is only needed if there are onboarding playbooks that should fire on generic events beyond conversion (e.g. `scheduled_quarterly_review`). If the only event driver is conversion, collapse the two into `conversion_rules` alone. **Recommend collapsing** — one config table is simpler.
+
+**Prospect-data pass-through — explicit `initialInput` JSON shape:**
+
+```json
+{
+  "companyName": "Acme Roofing",
+  "domain": "acmeroofing.com",
+  "primaryContact": {
+    "name": "Jane Smith",
+    "email": "jane@acmeroofing.com",
+    "phone": "+15105550100"
+  },
+  "gbpStatus": "claimed_unverified",
+  "geoGapScore": 42,
+  "notes": "Referred by partner John Doe; interested in local SEO",
+  "bdConversionEventId": "uuid-of-bd_conversion_events-row"
+}
+```
+
+Stored at `playbook_runs.context_json.input` by `startRun()` at `:188`. Step 1 of the template reads `{{ run.input.companyName }}`. `initialInputSchema` Zod field on the template declares/validates these fields.
+
+**Programmatic trigger — extend `startRun` signature:**
+
+```ts
+startRun(input: {
+  organisationId: string;
+  subaccountId: string;
+  templateId?: string;
+  systemTemplateSlug?: string;
+  initialInput: Record<string, unknown>;
+  startedByUserId?: string;                     // now optional
+  triggeredBy?: 'user' | 'job' | 'system';      // NEW — audit / permission
+  runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
+  isOnboardingRun?: boolean;
+  isPortalVisible?: boolean;
+}): Promise<{ runId: string; status: PlaybookRunStatus }>
+```
+
+Call site from the `convert_lead` job:
+```ts
+await playbookRunService.startRun({
+  organisationId,
+  subaccountId: newSubaccount.id,
+  templateId: rule.targetPlaybookTemplateId,
+  initialInput: { companyName, domain, primaryContact, gbpStatus, geoGapScore, notes },
+  triggeredBy: 'job',
+  runMode: rule.playbookRunMode ?? 'supervised',
+  isOnboardingRun: true,
+});
+```
+
+**Versioning — no change needed.** Already implemented via `template_version_id` FK.
+
+### Q7 Risk / uncertainty
+
+- **Template scoping (org vs system)** — the conversion-specific onboarding playbook is NOT a general onboarding arc; module-driven slug resolution (`modules.onboarding_playbook_slugs`) is the wrong mechanism. Using `conversion_rules.target_playbook_template_id` keeps it clean. Document the distinction — two mechanisms for different trigger sources.
+- **Context validation** — `startRun()` currently skips Zod re-validation at the service layer (comment at `:120`: *"deferred — Phase 1 skips Zod re-validation here"*). Malformed `initialInput` passes through silently. The `convert_lead` job should validate at the job handler, or the deferred validation should be implemented.
+- **Idempotency** — `startOwedOnboardingPlaybook()` handles duplicates by catching `23505` on a partial unique index on `(subaccount_id, playbook_slug)` for active statuses (`:251-273`). The `convert_lead` job must implement equivalent idempotency. An `idempotency_key` column on `playbook_runs` would be a cleaner solution than catching DB errors.
+- **Privilege / RLS** — `startRun()` verifies `subaccount.organisationId === input.organisationId` (`:145`). There is no Postgres-level RLS on `playbook_runs`; access control is in app code. A service-user row (per-org or global) must exist to supply a valid `startedByUserId` — or the FK must be nullable with an explicit `triggeredBy` column as above.
 
 ---
 
