@@ -498,7 +498,70 @@ Usable as the execution side of an event-rules engine, with these additions:
 
 ## Area 7 — Other event/automation patterns (broad scan)
 
-*(section appended below)*
+### What exists — candidates found
+
+- **`workflow_engines` + `processes`** (`server/db/schema/workflowEngines.ts`, `processes.ts:1-73`) — complete external-automation-engine registry. `workflow_engines` stores credentials and base URLs for external platforms (n8n, GHL, Make, Zapier, custom webhooks) scoped system/org/subaccount with HMAC secrets. `processes` is the catalog of named webhook-callable units inside those engines — each has `inputSchema`, `outputSchema`, `configSchema`, `webhookPath`, `requiredConnections[]`. **Verdict: external-engine integration layer, NOT a generic internal event-action system.**
+
+- **`workflow_runs` + `workflowExecutorService` + `types/workflow.ts`** (`server/services/workflowExecutorService.ts:59-160`, `server/types/workflow.ts:9-59`, `server/db/schema/workflowRuns.ts:8-60`) — a fully built internal sequential workflow engine. `WorkflowDefinition` is a list of `WorkflowStep` items, each referencing an `actionType` from `ACTION_REGISTRY`. Executor loops through steps, checkpoints after each, pauses for HITL via `workflow_runs.checkpoint`. Resumption via pg-boss `workflow-resume` queue (`queueService.enqueueWorkflowResume()`). **This is the closest existing sequential event-action sequencer.** But it is invoked only via `skillExecutor` / `actionService` — no org-configurable trigger layer links an external event to a workflow. **Verdict: generic sequential workflow engine (step list → actions with HITL gates), functional but not org-configurable as an event-action rule.**
+
+- **`processConnectionMappings`** (`server/db/schema/processConnectionMappings.ts:1-44`) — join table wiring process `required_connections` slots to `integrationConnections` per subaccount. **Verdict: pure configuration plumbing, false positive.**
+
+- **`processedResources`** (`server/db/schema/processedResources.ts:1-40`) — dedup log for external resource IDs processed. Name is misleading — it's an idempotency seen-set keyed on `(subaccountId, integrationType, resourceType, externalId)`. **Verdict: idempotency guard, false positive.**
+
+- **`processCategories`** — org-scoped taxonomy for UI labelling. **False positive.**
+
+- **`actionEvents`** (`server/db/schema/actionEvents.ts:1-37`) — immutable append-only audit of action state transitions. No routing consumer. **Verdict: audit trail.**
+
+- **`actionResumeEvents`** (`server/db/schema/actionResumeEvents.ts:1-47`) — immutable log of human review decisions. No routing logic. **Verdict: audit trail.**
+
+- **`routingOutcomes`** (`server/db/schema/routingOutcomes.ts:1-43`) — Orchestrator routing decisions paired with downstream outcomes (A/B/C/D paths). Feeds analytics, not a rules engine. **Verdict: analytics feedback table.**
+
+- **`conversionEvents`** — confirmed page-funnel analytics only. Consumers: `formSubmissionService.ts` (inserts), `pageIntegrationWorker.ts` (inserts), `paymentReconciliationJob.ts` (reads `checkout_started`, writes `checkout_completed/abandoned`). **No cross-system routing. Verdict: false positive.**
+
+- **`feedbackVotes`** — thumbs-up/down on agent outputs. **False positive.**
+
+- **`featureRequests`** (`:1-77`) — records Path-D capability gaps and Path-C promotion candidates. `notifiedAt` column triggers a one-shot human notification. **Verdict: signal table, not event-action.**
+
+- **`playbookAgentRunHook` + `reportingAgentRunHook`** (`server/services/playbookAgentRunHook.ts`, `server/lib/reportingAgentRunHook.ts`) — the "hook" mechanism is just **two hard-coded dynamic-import indirections** to break circular module deps. `agentExecutionService` calls `notifyPlaybookEngineOnAgentRunComplete()` after every agent run; dynamically imports `finalizeReportingAgentRun` at `agentExecutionService.ts:1156-1159`. Direct function calls disguised as late imports. **Verdict: two one-off hard-coded hooks, NOT a generic hook registry.**
+
+- **`notifyOperatorFanoutService`** (`:88-145`) — explicitly named a fanout. Called from `skillExecutor` when `notify_operator` executes post-approval. Reads org settings to discover configured channels (in-app, email, Slack), dispatches to three channel-specific functions via hard-coded if-else. **No channel subscription model, no pub/sub. Verdict: domain-specific dispatcher.**
+
+- **`crmFireAutomationServicePure`** — payload validator + provider-call builder for `crm.fire_automation`. Fires an external CRM (e.g. GHL) automation on a contact. **Verdict: skill/action, not platform automation.**
+
+- **`ProcessorHooks` registry inside `skillExecutor`** (`server/types/processor.ts`, `server/processors/budgetGuardrail.ts`, `skillExecutor.ts:259-350`) — in-memory `Map<string, ProcessorHooks>` keyed on tool slug, with `processInput`, `processInputStep`, `processOutputStep` callbacks registerable at module load. Only one processor implemented (`budgetGuardrailProcessor`, currently a no-op stub). `registerProcessor` is exported but not called externally. **Verdict: extensible per-tool processor hook interface exists but underpopulated.**
+
+- **`server/services/middleware/` pipeline** (`middleware/index.ts`, `middleware/types.ts`) — three formal middleware stages (`preCall`, `preTool`, `postTool`) with pluggable `MiddlewarePipeline`. Enforces guardrails (budget, context pressure, loop detection, tool restrictions, HITL proposal, hallucination detection). Runs inside a single agent run's loop. **Verdict: execution-loop guardrail pipeline, not org-level event-action.**
+
+- **`websocket/emitters.ts`** — Socket.IO room-based push (room prefixes: `agent-run:`, `playbook-run:`, `subaccount:`, `org:`, `execution:`, `conversation:`). Server-to-client only; no client-to-server subscription model. **Verdict: WebSocket push, not an event bus.**
+
+- **`jobs/ieeRunCompletedHandler.ts`** (`:72-127`) — pg-boss consumer for `iee-run-completed` queue. Re-reads `iee_runs` row, finalises parent `agent_runs` row. **Verdict: domain-specific pg-boss consumer.**
+
+- **`jobs/connectorPollingTick.ts` + `connectorPollingSync.ts`** — two-level polling fan-out: tick (every minute) selects due connections, dispatches one sync job per connection with singletonKey. **Verdict: data-ingestion polling, domain-specific.**
+
+- **`n8nImportServicePure.ts`** (`:41-60`) — pure functions importing n8n workflow JSON into the platform's intermediate representation. Maps n8n node types to step types `action_call | conditional | prompt | user_input | schedule | trigger`. **No executor implements `conditional` or `trigger` IR step types — they are import-analysis artifacts.** **Verdict: import-mapping utility with aspirational step types, no runtime implementation.**
+
+- **`auditEvents`** — security audit log with free-text `action` and `correlationId`. No consumer routes from it. **False positive.**
+
+### What does NOT exist
+
+- **No in-process `EventEmitter` bus.** The single `EventEmitter` mention (`server/index.ts:529`) is a comment about Node's HTTP server error handling.
+- **No `workflow_rules`, `event_rules`, `automation_rules`, `action_rules`, or any trigger-condition-action table.**
+- **No publish/subscribe model** outside billing `subscriptions`.
+- **No `fanout_rules`, `channel_routing`, `observer`, `reactor`, or `dispatcher` class/table.**
+- **No conditional-action / business-rule engine** (no CEP, no Drools-style ruleset, no IFTTT-style config).
+- **No generic `hook` registry** — the two "hooks" are one-off direct function calls wrapped in dynamic imports.
+- **`workflow_engines` + `processes` are external-engine registries**, not internal rule engines.
+- **`n8nImportServicePure`'s `conditional` / `trigger` IR step types have no runtime executor.**
+
+### Verdict summary
+
+There is **no hidden generic event-action dispatcher**. The codebase has three automation-adjacent subsystems that do NOT overlap with a new `event_rules` table:
+
+1. **`workflow_runs` + `workflowExecutorService`** — sequential step executor for internally-defined skill chains, triggered programmatically. No org-configurable trigger layer.
+2. **`workflow_engines` + `processes`** — registry for calling EXTERNAL automation platforms (n8n, Make, Zapier, GHL) via webhooks.
+3. **pg-boss** — operational jobs (maintenance, polling, HITL timeouts) with no event-condition-action wiring.
+
+Middleware pipeline and processor hooks are **within-run guardrails**, not org-level rules. The closest conceptual ancestor to a new `event_rules` table is `WorkflowDefinition` in `server/types/workflow.ts` — it already has the step-by-step skeleton — but has no org-configurable trigger layer, no condition branching, and no "when event X fires, run this workflow" linkage. **Building a new `event_rules` table would not duplicate any existing system.**
 
 ---
 
