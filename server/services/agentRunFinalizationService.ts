@@ -255,6 +255,11 @@ export async function finaliseAgentRunFromIeeRun(
         .where(and(
           eq(agentRuns.id, parent.id),
           inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
+          // isNull(completedAt) is pre-existing defense-in-depth for the parent's
+          // transitional gate. The write-once invariant for Phase B is guaranteed by
+          // isNull(runResultStatus) alone; the completedAt guard can cause the update
+          // to be silently skipped if completedAt is set by an external path (e.g.,
+          // admin backfill) before runResultStatus is written. See PR review S4.
           isNull(agentRuns.completedAt),
           isNull(agentRuns.runResultStatus),
         ))

@@ -103,6 +103,13 @@ export function computeDecayFactor(params: DecayParams): number {
     // createdAt here — match the linear branch's worst-safe assumption
     // by treating lastAccessed = null as exactly DECAY_WINDOW_DAYS ago.
     // This keeps behaviour continuous across the half-life threshold.
+    //
+    // Note: unlike the linear branch, this path has no "within-window grace
+    // period" — 0.5^(t/halfLife) is strictly < 1.0 for any t > 0. Entries
+    // promoted from Phase B therefore decay slightly faster than pre-Phase-B
+    // entries (linear returned exactly 1.0 within DECAY_WINDOW_DAYS). The
+    // numerical difference is negligible for typical half-lives (≈0.9998 at
+    // 1 hour for a 30-day half-life) but is a design choice, not a bug.
     const daysSinceAccess =
       lastAccessedAt === null
         ? DECAY_WINDOW_DAYS
