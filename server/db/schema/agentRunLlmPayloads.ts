@@ -1,4 +1,6 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { agentRuns } from './agentRuns';
 import { llmRequests } from './llmRequests';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -24,6 +26,11 @@ export const agentRunLlmPayloads = pgTable(
     llmRequestId: uuid('llm_request_id')
       .primaryKey()
       .references(() => llmRequests.id, { onDelete: 'cascade' }),
+    // Denormalised agent-run FK. Nullable — non-agent LLM callers
+    // (skill-analyzer, configuration assistant) produce payloads without
+    // a run. When present, lets us scan payloads per-run in a single
+    // index seek instead of joining through llm_requests.
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'cascade' }),
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
@@ -46,6 +53,9 @@ export const agentRunLlmPayloads = pgTable(
       table.organisationId,
       table.createdAt,
     ),
+    runIdIdx: index('agent_run_llm_payloads_run_id_idx')
+      .on(table.runId)
+      .where(sql`${table.runId} IS NOT NULL`),
   }),
 );
 

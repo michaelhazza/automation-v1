@@ -15,6 +15,11 @@ import type {
 
 const INITIAL_FETCH_LIMIT = 1000;
 const BACKFILL_LIMIT = 1000;
+// Sliding-window cap on events held in client state. Prevents memory + render
+// cost from runs that approach the server-side 10k-event cap. The timeline
+// trims to the most-recent TIMELINE_WINDOW_SIZE events whenever merge exceeds
+// it; the snapshot endpoint remains the authoritative historical record.
+const TIMELINE_WINDOW_SIZE = 2000;
 
 export default function AgentRunLivePage({ user: _user }: { user: User }) {
   const { runId } = useParams<{ runId: string }>();
@@ -92,8 +97,13 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
           initialBufferRef.current.push(event);
           return;
         }
+        // Monotonic guard: drop duplicates + out-of-order arrivals the
+        // snapshot has already covered. Defensive against future id /
+        // sequencing changes; safe because the snapshot backfill on
+        // reconnect always raises lastSeenSeq.
+        if (event.sequenceNumber <= lastSeenSeqRef.current) return;
         setEvents((prev) => mergeEvents(prev, [event]));
-        lastSeenSeqRef.current = Math.max(lastSeenSeqRef.current, event.sequenceNumber);
+        lastSeenSeqRef.current = event.sequenceNumber;
       },
     },
     useCallback(() => {
@@ -131,6 +141,17 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
 }
 
 // Merge two event lists by `id`, preserving ascending `sequenceNumber` order.
+//
+// Monotonic-sequence invariant: events with the same sequenceNumber but
+// different ids (should never happen — the sequence is per-run unique)
+// fall through the id-keyed Map and the last-writer wins. The Map by id
+// handles the normal case — snapshot and socket emit the same row with
+// the same id, and dedup picks one copy. If a future change alters id
+// generation, this function remains safe because sequenceNumber is the
+// sort key.
+//
+// After merge, the returned list is trimmed to TIMELINE_WINDOW_SIZE
+// most-recent entries — the snapshot endpoint is still the full history.
 function mergeEvents(
   existing: AgentExecutionEvent[],
   incoming: AgentExecutionEvent[],
@@ -139,5 +160,9 @@ function mergeEvents(
   const byId = new Map<string, AgentExecutionEvent>();
   for (const e of existing) byId.set(e.id, e);
   for (const e of incoming) byId.set(e.id, e);
-  return Array.from(byId.values()).sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+  const merged = Array.from(byId.values()).sort(
+    (a, b) => a.sequenceNumber - b.sequenceNumber,
+  );
+  if (merged.length <= TIMELINE_WINDOW_SIZE) return merged;
+  return merged.slice(merged.length - TIMELINE_WINDOW_SIZE);
 }

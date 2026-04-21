@@ -222,6 +222,18 @@ router.get(
       res.status(404).json({ error: 'LLM payload not found' });
       return;
     }
+    // Belt-and-braces: when the payload row carries its own denormalised
+    // run_id (populated once the llmRouter wire-up lands — spec §4.5 +
+    // migration 0192), assert it matches the URL run. The upstream
+    // llm_requests.runId pre-check above already gates access; this
+    // secondary check catches a future bug where run_id drifts between
+    // llm_requests and agent_run_llm_payloads. Skipped when run_id is
+    // null (non-agent LLM call) — those rows are filtered out of this
+    // endpoint by the llm_requests.runId pre-check anyway.
+    if (payload.runId !== null && payload.runId !== ctx.run.id) {
+      res.status(403).json({ error: 'Payload does not belong to this run' });
+      return;
+    }
     res.json({ data: payload });
   }),
 );

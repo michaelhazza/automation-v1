@@ -311,6 +311,8 @@ export interface PayloadRedaction {
 
 export interface AgentRunLlmPayload {
   llmRequestId: string;
+  /** Denormalised agent-run id. Null for non-agent LLM callers. */
+  runId: string | null;
   organisationId: string;
   subaccountId: string | null;
   systemPrompt: string;

@@ -555,6 +555,7 @@ export async function getLlmPayload(
   if (!row) return null;
   return {
     llmRequestId: row.llmRequestId,
+    runId: row.runId,
     organisationId: row.organisationId,
     subaccountId: row.subaccountId,
     systemPrompt: row.systemPrompt,

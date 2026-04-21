@@ -68,7 +68,18 @@ CREATE TABLE agent_execution_events (
   linked_entity_id             uuid,
   created_at                   timestamptz  NOT NULL DEFAULT now(),
 
-  UNIQUE (run_id, sequence_number)
+  UNIQUE (run_id, sequence_number),
+
+  -- Null-together invariant: the linked-entity type and id are always
+  -- populated together or both null. The service layer also enforces
+  -- this via validateLinkedEntity(); the DB constraint is the last-
+  -- resort safety net for any future write path that bypasses the
+  -- service. Spec §5.1.
+  CONSTRAINT agent_execution_events_linked_entity_null_together CHECK (
+    (linked_entity_type IS NULL AND linked_entity_id IS NULL)
+    OR
+    (linked_entity_type IS NOT NULL AND linked_entity_id IS NOT NULL)
+  )
 );
 
 CREATE INDEX agent_execution_events_run_seq_idx
@@ -141,6 +152,15 @@ CREATE POLICY agent_run_prompts_org_isolation ON agent_run_prompts
 
 CREATE TABLE agent_run_llm_payloads (
   llm_request_id    uuid         PRIMARY KEY REFERENCES llm_requests(id) ON DELETE CASCADE,
+  -- Denormalised run_id for cheap per-run filtering + debugging. Nullable
+  -- because non-agent LLM callers (skill-analyzer, configuration
+  -- assistant) produce payload rows that are not tied to an agent run.
+  -- When present, the FK enforces referential integrity against agent_runs.
+  -- The route guard in /api/agent-runs/:runId/llm-payloads/:llmRequestId
+  -- cross-checks payload.organisation_id against the run; the run_id
+  -- column lets a future revision replace that check with a direct
+  -- equality test + makes per-run forensic queries a single-column scan.
+  run_id            uuid         REFERENCES agent_runs(id) ON DELETE CASCADE,
   organisation_id   uuid         NOT NULL REFERENCES organisations(id),
   subaccount_id     uuid         REFERENCES subaccounts(id),
   system_prompt     text         NOT NULL,
@@ -155,6 +175,10 @@ CREATE TABLE agent_run_llm_payloads (
 
 CREATE INDEX agent_run_llm_payloads_org_created_idx
   ON agent_run_llm_payloads (organisation_id, created_at DESC);
+
+CREATE INDEX agent_run_llm_payloads_run_id_idx
+  ON agent_run_llm_payloads (run_id)
+  WHERE run_id IS NOT NULL;
 
 ALTER TABLE agent_run_llm_payloads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_run_llm_payloads FORCE  ROW LEVEL SECURITY;

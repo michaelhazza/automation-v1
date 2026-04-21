@@ -12,39 +12,46 @@ interface Props {
   onClose: () => void;
 }
 
+type FetchState = 'idle' | 'loading' | 'forbidden' | 'error';
+
 export default function EventDetailDrawer({ event, runId, onClose }: Props) {
   const [payload, setPayload] = useState<AgentRunLlmPayload | null>(null);
   const [prompt, setPrompt] = useState<AgentRunPrompt | null>(null);
-  const [fetching, setFetching] = useState<'idle' | 'loading' | 'forbidden' | 'error'>('idle');
+  // Separate state machines so a prompt fetch can't be confused by an
+  // in-flight payload fetch (and vice versa). Each CTA renders against
+  // its own state.
+  const [payloadState, setPayloadState] = useState<FetchState>('idle');
+  const [promptState, setPromptState] = useState<FetchState>('idle');
 
   useEffect(() => {
     setPayload(null);
     setPrompt(null);
-    setFetching('idle');
+    setPayloadState('idle');
+    setPromptState('idle');
   }, [event?.id]);
 
   if (!event) return null;
 
   async function fetchLlmPayload(llmRequestId: string) {
-    setFetching('loading');
+    setPayloadState('loading');
     try {
       const { data } = await api.get(`/api/agent-runs/${runId}/llm-payloads/${llmRequestId}`);
       setPayload((data?.data ?? null) as AgentRunLlmPayload | null);
-      setFetching('idle');
+      setPayloadState('idle');
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
-      setFetching(status === 403 ? 'forbidden' : 'error');
+      setPayloadState(status === 403 ? 'forbidden' : 'error');
     }
   }
 
   async function fetchPrompt(assemblyNumber: number) {
-    setFetching('loading');
+    setPromptState('loading');
     try {
       const { data } = await api.get(`/api/agent-runs/${runId}/prompts/${assemblyNumber}`);
       setPrompt((data?.data ?? null) as AgentRunPrompt | null);
-      setFetching('idle');
+      setPromptState('idle');
     } catch {
-      setFetching('error');
+      setPromptState('error');
     }
   }
 
@@ -113,14 +120,14 @@ export default function EventDetailDrawer({ event, runId, onClose }: Props) {
 
           {llmRequestId && (
             <div>
-              {!payload && fetching !== 'forbidden' && (
+              {!payload && payloadState !== 'forbidden' && (
                 <button
                   type="button"
                   onClick={() => fetchLlmPayload(llmRequestId)}
-                  disabled={fetching === 'loading' || !event.permissionMask.canViewPayload}
+                  disabled={payloadState === 'loading' || !event.permissionMask.canViewPayload}
                   className="text-xs rounded border border-slate-300 px-3 py-1 hover:bg-slate-50 disabled:opacity-50"
                 >
-                  {fetching === 'loading' ? 'Fetching…' : 'Fetch full payload'}
+                  {payloadState === 'loading' ? 'Fetching…' : 'Fetch full payload'}
                 </button>
               )}
               {!event.permissionMask.canViewPayload && (
@@ -128,9 +135,14 @@ export default function EventDetailDrawer({ event, runId, onClose }: Props) {
                   Payload view requires agent-edit permission.
                 </div>
               )}
-              {fetching === 'forbidden' && (
+              {payloadState === 'forbidden' && (
                 <div className="text-xs text-slate-500 mt-2">
                   You do not have permission to view this payload.
+                </div>
+              )}
+              {payloadState === 'error' && (
+                <div className="text-xs text-rose-600 mt-2">
+                  Payload fetch failed.
                 </div>
               )}
               {payload && (
@@ -177,11 +189,14 @@ export default function EventDetailDrawer({ event, runId, onClose }: Props) {
                 <button
                   type="button"
                   onClick={() => fetchPrompt(assemblyNumber)}
-                  disabled={fetching === 'loading'}
+                  disabled={promptState === 'loading'}
                   className="text-xs rounded border border-slate-300 px-3 py-1 hover:bg-slate-50 disabled:opacity-50"
                 >
-                  {fetching === 'loading' ? 'Fetching…' : 'View full prompt'}
+                  {promptState === 'loading' ? 'Fetching…' : 'View full prompt'}
                 </button>
+              )}
+              {promptState === 'error' && (
+                <div className="text-xs text-rose-600 mt-2">Prompt fetch failed.</div>
               )}
               {prompt && (
                 <div className="mt-3 space-y-2">
@@ -207,9 +222,6 @@ export default function EventDetailDrawer({ event, runId, onClose }: Props) {
             </div>
           )}
 
-          {fetching === 'error' && (
-            <div className="text-xs text-rose-600">Fetch failed. Check the console for details.</div>
-          )}
         </section>
       </aside>
     </div>
