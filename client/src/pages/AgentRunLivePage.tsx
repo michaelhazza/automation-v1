@@ -109,6 +109,23 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
         // sequencing changes; safe because the snapshot backfill on
         // reconnect always raises lastSeenSeq.
         if (event.sequenceNumber <= lastSeenSeqRef.current) return;
+        // Gap-detection warning — a jump beyond the expected next
+        // sequence is legal (the spec tolerates gaps caused by non-
+        // critical-event cap-drops and transaction rollbacks), but
+        // surface them so operators can correlate missing events with
+        // cap-drop metrics. One-line signal; no runtime guard.
+        if (
+          lastSeenSeqRef.current > 0 &&
+          event.sequenceNumber > lastSeenSeqRef.current + 1
+        ) {
+          // eslint-disable-next-line no-console
+          console.warn('AgentRunLivePage: sequence gap', {
+            lastSeen: lastSeenSeqRef.current,
+            received: event.sequenceNumber,
+            gap: event.sequenceNumber - lastSeenSeqRef.current - 1,
+            runId: event.runId,
+          });
+        }
         setEvents((prev) => mergeEvents(prev, [event]));
         lastSeenSeqRef.current = event.sequenceNumber;
       },
@@ -120,6 +137,18 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
   );
 
   if (!runId) return <div className="p-6 text-slate-600">Missing run id.</div>;
+
+  // Cap-reached banner — the server emits exactly one
+  // `run.event_limit_reached` event when a run exceeds
+  // AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN. When it's in the timeline,
+  // surface a visible banner so operators know why the timeline may
+  // look truncated (critical lifecycle events still emit; non-critical
+  // events after the cap are dropped).
+  const capEvent = events.find((e) => e.eventType === 'run.event_limit_reached');
+  const capDetails =
+    capEvent && capEvent.payload && 'cap' in capEvent.payload
+      ? (capEvent.payload as { eventCountAtLimit?: number; cap?: number })
+      : null;
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -133,6 +162,19 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
         </Link>
       </div>
       <div className="text-xs text-slate-500 mb-3 font-mono">Run {runId}</div>
+
+      {capDetails && (
+        <div
+          role="status"
+          className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+        >
+          <strong>Event cap reached.</strong>{' '}
+          This run exceeded {capDetails.cap ?? 'the configured'} events at sequence #
+          {capDetails.eventCountAtLimit ?? '?'}. Critical lifecycle + LLM events continued
+          to emit; non-critical events after this point were dropped to preserve
+          observability headroom. See the run trace for the full LLM ledger.
+        </div>
+      )}
 
       {loading && <div className="text-sm text-slate-500 p-6 text-center">Loading…</div>}
       {error && <div className="text-sm text-rose-700 bg-rose-50 rounded p-3">{error}</div>}
