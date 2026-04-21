@@ -75,6 +75,8 @@ await test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on nul
   assert.equal((caught as FailureError).failure.failureDetail, 'breaker_no_ledger_link');
 });
 
+console.log(`\n  Pure section: ${passed} passed, ${failed} failed\n`);
+
 // ─── Section 2: Integration (requires DATABASE_URL) ─────────────────────
 
 if (!process.env.DATABASE_URL) {

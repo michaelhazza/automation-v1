@@ -143,7 +143,9 @@ test('sub-cent (< $0.01) → two significant figures', () => {
 
 test('$0.01 ≤ cost < $1 → 4dp', () => {
   assertEqual(formatCost(47), '$0.4700', '$0.47');
-  assertEqual(formatCost(4712), '$47.12', '$47.12 (>=$1, 2dp)');
+});
+test('$1 ≤ cost < $1000 → 2dp (boundary check)', () => {
+  assertEqual(formatCost(4712), '$47.12', '$47.12');
 });
 
 test('$0.47 sub-dollar formatting hits 4dp', () => {
