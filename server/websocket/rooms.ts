@@ -10,6 +10,8 @@ import type { Socket } from 'socket.io';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executions, agentRuns, agentConversations, subaccounts, playbookRuns } from '../db/schema/index.js';
+import { orgUserRoles, permissionSetItems, systemAgents } from '../db/schema/index.js';
+import { resolveAgentRunVisibility } from '../lib/agentRunVisibility.js';
 
 // UUID format check — reject malformed IDs early
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,14 +74,80 @@ export function handleConnection(socket: Socket): void {
     socket.leave(`execution:${executionId}`);
   });
 
-  // ── Join an agent run room (validated against org ownership) ─────────
+  // ── Join an agent run room (full AGENTS_VIEW gate) ─────────────────
+  //
+  // Spec: tasks/live-agent-execution-log-spec.md §7.1. The socket is a
+  // push channel; a user who cannot pull via the HTTP snapshot endpoint
+  // must not receive live events either. We check both:
+  //   1. Run belongs to the socket's current org context.
+  //   2. `resolveAgentRunVisibility` returns canView: true for this user.
+  //
+  // The permission lookup runs once per join, not per event — acceptable
+  // latency. Socket is cached on `socket.data._agentRunOrgPerms` so a
+  // user who joins many rooms doesn't re-query for every join.
   socket.on('join:agent-run', async (runId: unknown) => {
     if (!isValidUUID(runId)) return;
     try {
-      const [run] = await db.select({ id: agentRuns.id })
+      const [run] = await db
+        .select({
+          id: agentRuns.id,
+          organisationId: agentRuns.organisationId,
+          subaccountId: agentRuns.subaccountId,
+          agentId: agentRuns.agentId,
+          executionScope: agentRuns.executionScope,
+        })
         .from(agentRuns)
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)));
       if (!run) return;
+
+      // Load (and cache) this user's org permission set so repeated joins
+      // don't re-query the permission-set table.
+      let orgPerms = (socket.data as { _agentRunOrgPerms?: Set<string> })._agentRunOrgPerms;
+      if (!orgPerms) {
+        if (user.role === 'system_admin' || user.role === 'org_admin') {
+          orgPerms = new Set<string>();
+        } else {
+          const rows = await db
+            .select({ permissionKey: permissionSetItems.permissionKey })
+            .from(orgUserRoles)
+            .innerJoin(
+              permissionSetItems,
+              eq(permissionSetItems.permissionSetId, orgUserRoles.permissionSetId),
+            )
+            .where(
+              and(
+                eq(orgUserRoles.userId, user.id),
+                eq(orgUserRoles.organisationId, orgId),
+              ),
+            );
+          orgPerms = new Set(rows.map((r) => r.permissionKey));
+        }
+        (socket.data as { _agentRunOrgPerms?: Set<string> })._agentRunOrgPerms = orgPerms;
+      }
+
+      // Detect system-agent runs so `resolveAgentRunVisibility`'s tier
+      // rules kick in for non-admin joiners (system-tier is system-admin-only).
+      const [sysAgent] = await db
+        .select({ id: systemAgents.id })
+        .from(systemAgents)
+        .where(eq(systemAgents.id, run.agentId));
+
+      const visibility = resolveAgentRunVisibility(
+        {
+          organisationId: run.organisationId,
+          subaccountId: run.subaccountId,
+          executionScope: run.executionScope as 'subaccount' | 'org',
+          isSystemRun: Boolean(sysAgent),
+        },
+        {
+          id: user.id,
+          role: user.role,
+          organisationId: orgId,
+          orgPermissions: orgPerms,
+        },
+      );
+      if (!visibility.canView) return;
+
       socket.join(`agent-run:${runId}`);
     } catch {
       // DB error — silently reject

@@ -522,6 +522,32 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 - `agent_runs.plan` (migration 0089) — structured plan field for the agent planning phase
 - `agents.complexity_hint` (migration 0090) — agent complexity classification for execution routing
 
+### Live Agent Execution Log (migration 0192 / spec: tasks/live-agent-execution-log-spec.md)
+
+Per-run timeline of every material agent decision — prompt assembly, context-source load, memory retrieval, rule evaluation, skill invocation, LLM call bookends, handoff, clarification, lifecycle start/end. Three new tables:
+
+- `agent_execution_events` — durable typed event log, keyed `UNIQUE (run_id, sequence_number)`. Sequence allocation is atomic against `agent_runs.next_event_seq` via a single `UPDATE … RETURNING` — no MAX scan. Every event carries `source_service`, `duration_since_run_start_ms`, an event-typed `payload jsonb`, and optional `linked_entity_{type,id}` (null-together, enforced by both the service validator and a DB `CHECK` constraint as belt-and-braces). `permissionMask` is **never persisted** — it's computed at read time from the caller's current permissions, closing the privilege-drift hazard where a revoked grant would still read `canEdit: true` on historical rows.
+- `agent_run_prompts` — fully-assembled `system_prompt` + `user_prompt` + `tool_definitions` + `layer_attributions` per run assembly. Closes the audit gap where only `systemPromptTokens` (count, not content) was persisted. Surrogate `id uuid PK` lets `agent_execution_events.linked_entity_id` point at prompts like any other entity; the `(run_id, assembly_number)` UNIQUE is still the drilldown key.
+- `agent_run_llm_payloads` — full request + response per `llm_requests.id` (1:1). Keyed by `llm_request_id`; carries a nullable denormalised `run_id` FK to `agent_runs` (null for non-agent callers — skill-analyzer, config assistant) for cheap per-run scans. Written through the redaction → tool-policy → size-cap pipeline in `server/services/agentRunPayloadWriter.ts::buildPayloadRow`. Defence-in-depth: pattern-based redaction in `server/lib/redaction.ts` scrubs bearer tokens + common secret shapes; per-tool `payloadPersistencePolicy: 'full' | 'args-redacted' | 'args-never-persisted'` lets credential-handling skills opt into stricter persistence. `redacted_fields` records pattern hits; `modifications` records everything else (truncation, tool-policy substitution) with original field sizes. Hard per-row cap at `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (1 MB default) with greatest-first truncation — TOAST compresses what's left transparently.
+
+Sequence-allocation semantics:
+
+- **Critical events** (`run.started` / `run.completed` / `llm.requested` / `llm.completed` / `handoff.decided` / `run.event_limit_reached`) bypass the cap — a lifecycle bookend always emits. `run.started` is **awaited** (`emitAgentEvent`, not `tryEmitAgentEvent`) so it always claims `sequence_number = 1` before any later emission can steal a lower number. Exactly-one retry with fixed 50 ms backoff on transient DB failure; persistent failure increments `agent_exec_log.critical_drops_total` and never fails the agent run.
+- **Non-critical events** use the `next_event_seq < AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` guard in the `UPDATE`. Over the cap: drop + metric increment + one-shot `run.event_limit_reached` signal via atomic-claim on `agent_runs.event_limit_reached_emitted`. The claim + the signal-event insert run inside a single `tx.transaction(...)` so a DB failure on the insert rolls back the claim and allows a retry rather than losing the signal permanently.
+- **Orchestrator dispatch ordering.** `orchestrator.routing_decided` is emitted **inside `executeRun`** (sequence 2, immediately after `run.started`) rather than from the dispatch job after awaiting the run to completion — the earlier shape put the event after `run.completed` on the dispatched run's timeline, breaking the "timeline represents actual execution order" invariant. The job passes an `orchestratorDispatch` field on `AgentRunRequest` to signal the emit.
+
+Visibility model (spec §7):
+
+- View gate (`canView`) inherits from `ORG_PERMISSIONS.AGENTS_VIEW` at the run's tier; subaccount membership is enforced upstream via `resolveSubaccount`. Single-source-of-truth resolver: `server/lib/agentRunVisibility.ts::resolveAgentRunVisibility`.
+- Payload-read gate (`canViewPayload`) tightens to `AGENTS_EDIT` — raw system prompts + tool inputs can carry secrets past redaction, so the audience is the narrower "agent-editor" set. Redaction is defence-in-depth, not a security boundary.
+- Per-event edit links inherit from each linked entity's existing edit permission (WORKSPACE_MANAGE, SKILLS_MANAGE, AGENTS_EDIT, etc.). System-managed agents and immutable entities (`prompt`, `llm_request`, `action`) always return `canEdit: false`.
+
+Read path — `GET /api/agent-runs/:runId/events?fromSeq=&limit=` returns a 1000-row-capped page; `GET …/prompts/:assemblyNumber` returns one assembly; `GET …/llm-payloads/:llmRequestId` is stricter (AGENTS_EDIT) and double-gates via both the `llm_requests.run_id` upstream pre-check AND the denormalised `agent_run_llm_payloads.run_id` secondary check. Live stream via the existing `agent-run:${runId}` socket room and new `agent-run:execution-event` event kind; socket `join:agent-run` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check (not just org-membership) so the push channel matches the pull channel's gate. Client dedup uses the existing 500-entry LRU on `${runId}:${sequenceNumber}:${eventType}` event IDs.
+
+Client timeline (`AgentRunLivePage`) — snapshot + socket merge keyed on event `id` + sorted by `sequenceNumber`. Monotonic guard drops socket events with `sequenceNumber <= lastSeenSeq`; sliding-window cap at `TIMELINE_WINDOW_SIZE = 2000` bounds UI memory while the server-side snapshot endpoint remains the authoritative history. A cap-reached banner surfaces on any timeline that contains a `run.event_limit_reached` event, with a "View run trace →" deep-link for the full LLM ledger. Process-local counters `sequenceGapsTotal` + `sequenceCollisionsTotal` (exported via `getAgentRunLiveClientMetrics()`) complement the per-incident `console.warn` lines for diagnosing upstream invariant breaks.
+
+Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTHS` / `_WARM_MONTHS` / `_COLD_YEARS` env defaults 6 / 12 / 7 match the ledger archive shape from migration 0188.
+
 ---
 
 ## Skill System
