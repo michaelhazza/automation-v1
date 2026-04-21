@@ -181,7 +181,7 @@ Subaccount Agent (subaccountAgents table)
 |--------|--------------------|
 | `skillSlugs` | Per-link skill list. `null` means "inherit the agent's `defaultSkillSlugs`"; an array replaces it entirely. The skill picker (`SkillPickerSection`) shows org skills and system skills side by side. |
 | `customInstructions` | Appended to the agent's `additionalPrompt` at run time. Scoped per subaccount — lets an org agent speak the subaccount's language without org-wide edits. Max 10 000 chars. |
-| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). |
+| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). Callers: Slack + Whisper via `assertWithinRunBudget` (cost_aggregates rollup); the LLM router via the direct-ledger sibling `assertWithinRunBudgetFromLedger` (reads `llm_requests` to avoid aggregation lag — Hermes Tier 1 Phase C, `tasks/hermes-audit-tier-1-spec.md` §7.4.1). |
 | `heartbeatEnabled` / `heartbeatIntervalHours` / `heartbeatOffsetMinutes` | Per-subaccount schedule. Overrides the org agent's heartbeat so different clients can run at different cadences / offsets. |
 | `scheduleCron` / `scheduleEnabled` / `scheduleTimezone` | Cron-based schedule (alternative to heartbeat interval). Schedule changes go through `agentScheduleService.updateSchedule` — **never mutate these columns directly**, or the pg-boss cron registration drifts from the DB. |
 | `concurrencyPolicy` / `catchUpPolicy` / `catchUpCap` / `maxConcurrentRuns` | Concurrency and missed-run behaviour for the scheduler. |
@@ -549,7 +549,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 
-`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
 ### Skill visibility cascade (migration 0074)
 
@@ -1407,6 +1407,18 @@ Honours `Retry-After` headers, exponential backoff with full jitter, structured 
 ### Run cost circuit breaker — `server/lib/runCostBreaker.ts`
 
 Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
+
+**Five exports, two data-source contracts:**
+
+| Export | Reads from | Canonical caller(s) |
+|--------|------------|---------------------|
+| `resolveRunCostCeiling(ctx)` | `subaccount_agents.maxCostPerRunCents` + fallback via `agent_runs.subaccountAgentId` | Both breaker variants |
+| `getRunCostCents(runId)` | `cost_aggregates` (async rollup) | `sendToSlackService`, `transcribeAudioService` |
+| `assertWithinRunBudget(ctx)` | `cost_aggregates` via `getRunCostCents` | `sendToSlackService`, `transcribeAudioService` |
+| `getRunCostCentsFromLedger(runId)` | `llm_requests` directly | `llmRouter.routeCall` |
+| `assertWithinRunBudgetFromLedger(ctx)` | `llm_requests` via `getRunCostCentsFromLedger` | `llmRouter.routeCall` |
+
+The direct-ledger pair exists because `cost_aggregates` is updated asynchronously by `routerJobService.enqueueAggregateUpdate`, so a rollup-based read lags by up to one aggregation interval. The LLM router is the dominant cost surface; it cannot tolerate that lag. Slack and Whisper stay on the rollup path because their per-call magnitudes dwarf the lag and their concurrency profiles are low. The ledger helper takes `insertedLedgerRowId` as a REQUIRED parameter and fails closed on null or row-not-visible — a structural guarantee that a future refactor cannot re-order the call above the ledger insert. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 / §7.4.1.
 
 ### Failure helper — `shared/iee/failure.ts`
 
