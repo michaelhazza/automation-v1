@@ -1878,11 +1878,17 @@ export async function insertSingleResult(
  *
  *  Deduplicated by candidateIndex at the query boundary because
  *  skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint.
- *  Pre-PR (when Stage 1 called clearResultsForJob on every retry) and during
- *  any future window where a partial insert could race with a retry, a single
+ *  Pre-PR (when Stage 1 called clearResultsForJob on every retry) a single
  *  jobId could end up with two rows for the same index; callers that iterate
  *  this list must see each index exactly once so downstream reconstruction
- *  produces a single deterministic classifiedResults entry per candidate. */
+ *  produces a single deterministic classifiedResults entry per candidate.
+ *
+ *  Ordering matters for determinism. We sort by candidate_index ASC, then
+ *  created_at DESC, then id DESC as a final tiebreaker — the first row
+ *  encountered for each candidate_index wins, so "latest write wins" semantics
+ *  apply. Without ORDER BY, Postgres returns rows in storage order, which is
+ *  not stable across vacuum / hot-update boundaries and can flip the chosen
+ *  row between runs. */
 export async function listResultIndicesForJob(
   jobId: string,
 ): Promise<Array<{ candidateIndex: number; classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT' }>> {
@@ -1892,7 +1898,12 @@ export async function listResultIndicesForJob(
       classification: skillAnalyzerResults.classification,
     })
     .from(skillAnalyzerResults)
-    .where(eq(skillAnalyzerResults.jobId, jobId));
+    .where(eq(skillAnalyzerResults.jobId, jobId))
+    .orderBy(
+      skillAnalyzerResults.candidateIndex,
+      desc(skillAnalyzerResults.createdAt),
+      desc(skillAnalyzerResults.id),
+    );
 
   const seen = new Set<number>();
   const deduped: typeof rows = [];

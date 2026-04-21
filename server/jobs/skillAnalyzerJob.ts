@@ -552,6 +552,28 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // backfill agentProposals onto existing rows. Entries here only carry the
   // fields those stages actually use (candidateIndex + classification); other
   // fields are filled with neutral defaults.
+  //
+  // IMPORTANT — RESUME RECONSTRUCTION CONTRACT:
+  //   The neutral defaults below (confidence=0, similarityScore=null,
+  //   libraryId=null, proposedMerge=null, …) are safe ONLY because the
+  //   downstream consumers of classifiedResults read exclusively:
+  //     • r.candidateIndex (Stage 7 agent-propose lookup, Stage 7b enrich set,
+  //       Stage 8 updateResultAgentProposals target)
+  //     • r.classification (Stage 7 DISTINCT filter, Stage 8 classifiedDistinct
+  //       filter)
+  //   If a future change introduces a consumer that reads ANY other field
+  //   from classifiedResults (e.g. r.confidence, r.proposedMerge,
+  //   r.similarityScore, r.libraryId), the resumed entries will deliver the
+  //   neutral default — NOT the real value from the prior run — and crash-
+  //   resume behaviour will silently diverge from a fresh run. When adding
+  //   such a consumer, either:
+  //     (a) extend listResultIndicesForJob + this seeding block to hydrate
+  //         the new field from the DB row, or
+  //     (b) have the consumer re-query skill_analyzer_results directly
+  //         instead of reading through classifiedResults.
+  //   Test: server/services/__tests__/skillAnalyzerJobResumePure.test.ts
+  //   should assert that every field consumed by Stages 6+ is either
+  //   hydrated or explicitly defaulted.
   if (completedCandidateIndices.size > 0) {
     const llmQueueIndices = new Set(llmQueue.map((m) => m.candidateIndex));
     for (const existing of existingResultRows) {
@@ -1336,10 +1358,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // rows that were already written by a prior run must not be re-inserted —
   // skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint,
   // so a plain insert would silently duplicate every such row. Filter against
-  // the indices we observed at the start of Stage 5. candidateIndex is a
-  // required field on $inferInsert, so no undefined guard is needed.
+  // the indices we observed at the start of Stage 5. candidateIndex is
+  // `integer().notNull()` with no default, so $inferInsert types it as number;
+  // no nullability guard needed.
   const resultRowsToWrite = resultRows.filter(
-    (row) => !completedCandidateIndices.has(row.candidateIndex!),
+    (row) => !completedCandidateIndices.has(row.candidateIndex),
   );
 
   // Insert via service (avoids direct db import in jobs)
