@@ -53,6 +53,8 @@ import { fingerprint } from './regressionCaptureServicePure.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
+import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
+import { persistAssembly as persistPromptAssembly } from './agentRunPromptService.js';
 import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
 import { agentBriefingService } from './agentBriefingService.js';
@@ -387,6 +389,22 @@ export const agentExecutionService = {
     });
     emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
       runId: run.id, agentId: request.agentId,
+    });
+
+    // Live Agent Execution Log — critical lifecycle bookend (spec §5.3).
+    tryEmitAgentEvent({
+      runId: run.id,
+      organisationId: request.organisationId,
+      subaccountId: request.subaccountId ?? null,
+      sourceService: 'agentExecutionService',
+      payload: {
+        eventType: 'run.started',
+        critical: true,
+        agentId: request.agentId,
+        runType: request.runType,
+        triggeredBy: request.runSource ?? 'unknown',
+      },
+      linkedEntity: { type: 'agent', id: request.agentId },
     });
 
     // Observability: temporary metric for org subaccount runs (remove after 2 weeks stable)
@@ -845,6 +863,60 @@ export const agentExecutionService = {
       const fullSystemPrompt = stablePrefix + dynamicSuffix;
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
+      // Live Agent Execution Log — persist the fully-assembled prompt + emit
+      // prompt.assembled event. Best-effort layer attributions (spec §5.6):
+      // we record offsets for the top-level layers we know about but do not
+      // drill into memory-block-level attribution in P1 — that's a follow-up
+      // when buildSystemPrompt learns to return per-layer offsets natively.
+      try {
+        const layerAttributions = {
+          master: { startOffset: 0, length: Buffer.byteLength(stablePrefix, 'utf8') },
+          orgAdditional: { startOffset: 0, length: 0 },
+          memoryBlocks: [] as Array<{ blockId: string; startOffset: number; length: number }>,
+          skillInstructions: [] as Array<{ skillSlug: string; startOffset: number; length: number }>,
+          taskContext: {
+            startOffset: Buffer.byteLength(stablePrefix, 'utf8'),
+            length: Buffer.byteLength(dynamicSuffix, 'utf8'),
+          },
+        };
+        const { promptRowId, assemblyNumber } = await persistPromptAssembly({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          systemPrompt: fullSystemPrompt,
+          userPrompt: targetItem?.description ?? targetItem?.title ?? '',
+          toolDefinitions: [],
+          layerAttributions,
+          totalTokens: systemPromptTokens,
+        });
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'prompt.assembled',
+            critical: false,
+            assemblyNumber,
+            promptRowId,
+            totalTokens: systemPromptTokens,
+            layerTokens: {
+              master: approxTokens(stablePrefix),
+              orgAdditional: 0,
+              memoryBlocks: 0,
+              skillInstructions: 0,
+              taskContext: approxTokens(dynamicSuffix),
+            },
+          },
+          linkedEntity: { type: 'prompt', id: promptRowId },
+        });
+      } catch (err) {
+        logger.warn('agentExecutionService.prompt_assembled_persist_failed', {
+          runId: run.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // Persist the context sources snapshot (spec §7.5). Captures every
       // entry considered at run-start time — winners, suppressed losers,
       // lazy manifest, eager-but-budget-excluded. Used by the run detail
@@ -888,6 +960,35 @@ export const agentExecutionService = {
         systemPromptTokens,
         contextSourcesSnapshot,
       }).where(eq(agentRuns.id, run.id));
+
+      // Live Agent Execution Log — emit one context.source_loaded per
+      // source. Payload is a slice of the existing contextSourcesSnapshot
+      // struct; reused directly. Fire-and-forget per §4.1.
+      for (const s of allForSnapshot) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'runContextLoader',
+          payload: {
+            eventType: 'context.source_loaded',
+            critical: false,
+            sourceId: s.id,
+            sourceName: s.name ?? 'unknown',
+            scope: s.scope ?? 'unknown',
+            contentType: s.contentType ?? 'text',
+            tokenCount: s.tokenCount ?? 0,
+            includedInPrompt: s.includedInPrompt ?? false,
+            exclusionReason: (() => {
+              if (s.suppressedByOverride) return 'override_suppressed';
+              if (s.loadingMode === 'lazy') return 'lazy_not_rendered';
+              if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded';
+              return undefined;
+            })(),
+          },
+          linkedEntity: { type: 'data_source', id: s.id },
+        });
+      }
 
       // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
       await db.insert(agentRunSnapshots)
@@ -1225,6 +1326,23 @@ export const agentExecutionService = {
           writeSite: 'finishLoop_normal',
         });
       }
+
+      // Live Agent Execution Log — critical terminal bookend (spec §5.3).
+      tryEmitAgentEvent({
+        runId: run.id,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        sourceService: 'agentExecutionService',
+        payload: {
+          eventType: 'run.completed',
+          critical: true,
+          finalStatus,
+          totalTokens: loopResult.totalTokens,
+          totalCostCents: 0,
+          totalDurationMs: durationMs,
+          eventCount: 0,
+        },
+      });
 
       // Brain Tree OS adoption P1 — build the structured handoff document
       // and persist it. Best-effort: a build failure logs and leaves the

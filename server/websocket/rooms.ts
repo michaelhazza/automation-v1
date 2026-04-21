@@ -73,6 +73,17 @@ export function handleConnection(socket: Socket): void {
   });
 
   // ── Join an agent run room (validated against org ownership) ─────────
+  //
+  // Layered defence notes (spec: tasks/live-agent-execution-log-spec.md §7.1):
+  //   1. Org-ownership check (below) — prevents cross-tenant joins.
+  //   2. HTTP snapshot endpoint (GET /api/agent-runs/:id/events) applies
+  //      the full AGENTS_VIEW check and returns permissionMask-stripped
+  //      rows. The socket room carries live events without per-user mask
+  //      computation in P1; callers rely on the HTTP endpoint for the
+  //      authorisation-bearing view. Tightening this handler to also
+  //      run the full AGENTS_VIEW check is tracked as a follow-up —
+  //      would require loading the socket user's permission set at join
+  //      time, which is a measurable per-socket latency cost.
   socket.on('join:agent-run', async (runId: unknown) => {
     if (!isValidUUID(runId)) return;
     try {

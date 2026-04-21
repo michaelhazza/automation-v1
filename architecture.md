@@ -522,6 +522,29 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 - `agent_runs.plan` (migration 0089) — structured plan field for the agent planning phase
 - `agents.complexity_hint` (migration 0090) — agent complexity classification for execution routing
 
+### Live Agent Execution Log (migration 0192 / spec: tasks/live-agent-execution-log-spec.md)
+
+Per-run timeline of every material agent decision — prompt assembly, context-source load, memory retrieval, rule evaluation, skill invocation, LLM call bookends, handoff, clarification, lifecycle start/end. Three new tables:
+
+- `agent_execution_events` — durable typed event log, keyed `UNIQUE (run_id, sequence_number)`. Sequence allocation is atomic against `agent_runs.next_event_seq` via a single `UPDATE … RETURNING` — no MAX scan. Every event carries `source_service`, `duration_since_run_start_ms`, an event-typed `payload jsonb`, and optional `linked_entity_{type,id}` (null-together). `permissionMask` is **never persisted** — it's computed at read time from the caller's current permissions, closing the privilege-drift hazard where a revoked grant would still read `canEdit: true` on historical rows.
+- `agent_run_prompts` — fully-assembled `system_prompt` + `user_prompt` + `tool_definitions` + `layer_attributions` per run assembly. Closes the audit gap where only `systemPromptTokens` (count, not content) was persisted. Surrogate `id uuid PK` lets `agent_execution_events.linked_entity_id` point at prompts like any other entity; the `(run_id, assembly_number)` UNIQUE is still the drilldown key.
+- `agent_run_llm_payloads` — full request + response per `llm_requests.id` (1:1). Written through the redaction → tool-policy → size-cap pipeline in `server/services/agentRunPayloadWriter.ts::buildPayloadRow`. Defence-in-depth: pattern-based redaction in `server/lib/redaction.ts` scrubs bearer tokens + common secret shapes; per-tool `payloadPersistencePolicy: 'full' | 'args-redacted' | 'args-never-persisted'` lets credential-handling skills opt into stricter persistence. `redacted_fields` records pattern hits; `modifications` records everything else (truncation, tool-policy substitution) with original field sizes. Hard per-row cap at `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (1 MB default) with greatest-first truncation — TOAST compresses what's left transparently.
+
+Sequence-allocation semantics:
+
+- **Critical events** (`run.started` / `run.completed` / `llm.requested` / `llm.completed` / `handoff.decided` / `run.event_limit_reached`) bypass the cap — a lifecycle bookend always emits. Exactly-one retry with fixed 50 ms backoff on transient DB failure; persistent failure increments `agent_exec_log.critical_drops_total` and never fails the agent run.
+- **Non-critical events** use the `next_event_seq < AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` guard in the `UPDATE`. Over the cap: drop + metric increment + one-shot `run.event_limit_reached` signal via atomic-claim on `agent_runs.event_limit_reached_emitted`.
+
+Visibility model (spec §7):
+
+- View gate (`canView`) inherits from `ORG_PERMISSIONS.AGENTS_VIEW` at the run's tier; subaccount membership is enforced upstream via `resolveSubaccount`. Single-source-of-truth resolver: `server/lib/agentRunVisibility.ts::resolveAgentRunVisibility`.
+- Payload-read gate (`canViewPayload`) tightens to `AGENTS_EDIT` — raw system prompts + tool inputs can carry secrets past redaction, so the audience is the narrower "agent-editor" set. Redaction is defence-in-depth, not a security boundary.
+- Per-event edit links inherit from each linked entity's existing edit permission (WORKSPACE_MANAGE, SKILLS_MANAGE, AGENTS_EDIT, etc.). System-managed agents and immutable entities (`prompt`, `llm_request`, `action`) always return `canEdit: false`.
+
+Read path — `GET /api/agent-runs/:runId/events?fromSeq=&limit=` returns a 1000-row-capped page; `GET …/prompts/:assemblyNumber` returns one assembly; `GET …/llm-payloads/:llmRequestId` is stricter (AGENTS_EDIT). Live stream via the existing `agent-run:${runId}` socket room and new `agent-run:execution-event` event kind; client dedup uses the existing 500-entry LRU on `${runId}:${sequenceNumber}:${eventType}` event IDs.
+
+Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTHS` / `_WARM_MONTHS` / `_COLD_YEARS` env defaults 6 / 12 / 7 match the ledger archive shape from migration 0188.
+
 ---
 
 ## Skill System

@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { tasks, subaccountAgents, systemAgents, agents } from '../db/schema/index.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { taskService } from '../services/taskService.js';
+import { tryEmitAgentEvent } from '../services/agentExecutionEventEmitter.js';
 import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -208,7 +209,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   // updatedAt) still dedup.
   const idempotencyKey = `orchestrator-from-task:${taskId}:${task.updatedAt.getTime()}`;
   try {
-    await agentExecutionService.executeRun({
+    const result = await agentExecutionService.executeRun({
       agentId: orchestratorLink.agentId,
       subaccountAgentId: orchestratorLink.subaccountAgentId,
       // The Orchestrator runs from its own link (typically the org sentinel
@@ -231,6 +232,28 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     });
 
     logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: orchestratorLink.subaccountAgentId });
+
+    // Live Agent Execution Log — emit orchestrator.routing_decided on the
+    // newly-dispatched run. `routingSource` is always 'rule' in v1 — the
+    // structured-reasoning extraction is deferred per spec §9. Fire-and-
+    // forget; log-table writes must never gate dispatch.
+    if (result.runId) {
+      tryEmitAgentEvent({
+        runId: result.runId,
+        organisationId,
+        subaccountId: orchestratorLink.subaccountId ?? null,
+        sourceService: 'orchestratorFromTaskJob',
+        payload: {
+          eventType: 'orchestrator.routing_decided',
+          critical: false,
+          taskId,
+          chosenAgentId: orchestratorLink.agentId,
+          idempotencyKey,
+          routingSource: 'rule',
+        },
+        linkedEntity: { type: 'agent', id: orchestratorLink.agentId },
+      });
+    }
   } catch (err) {
     logger.error('orchestratorFromTask.dispatch_failed', {
       taskId,
