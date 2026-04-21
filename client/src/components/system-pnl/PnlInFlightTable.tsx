@@ -291,12 +291,12 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
     applyRemoveEntry(removal);
   }, [applyRemoveEntry]);
 
-  const onProgress = useCallback((envelope: unknown) => {
-    // Progress events come wrapped in the standard InFlightEventEnvelope —
-    // the payload is the InFlightProgress. No buffering: progress is
-    // purely advisory; dropping an event is fine.
-    const env = envelope as { payload?: InFlightProgress } | undefined;
-    const prog = env?.payload;
+  const onProgress = useCallback((data: unknown) => {
+    // `useSocketRoom` already unwraps the InFlightEventEnvelope and passes
+    // the inner payload directly — so `data` IS the InFlightProgress, not
+    // the envelope wrapper. Reading `data.payload` would always yield
+    // undefined and the progress indicator would never update.
+    const prog = data as InFlightProgress | undefined;
     if (!prog || !prog.runtimeKey) return;
     setProgress((prev) => {
       const next = new Map(prev);

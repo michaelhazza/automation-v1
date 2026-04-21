@@ -45,11 +45,28 @@ export default function PnlInFlightPayloadDrawer({ entry, onClose }: Props) {
       setError(null);
       return;
     }
+    // Guard against stale responses: if the admin clicks row A then row B
+    // quickly, A's slower response must not overwrite B's drawer. An
+    // AbortController signals cancellation to axios on cleanup; the
+    // `currentRuntimeKey` closure check is a belt-and-suspenders guard
+    // in case the abort races the response.
+    const controller = new AbortController();
+    const currentRuntimeKey = entry.runtimeKey;
     setLoading(true);
     setError(null);
-    api.get(`/api/admin/llm-pnl/in-flight/${encodeURIComponent(entry.runtimeKey)}/payload`)
-      .then((r) => setSnapshot(r.data as PayloadSnapshotResponse))
+    setSnapshot(null);
+    api.get(`/api/admin/llm-pnl/in-flight/${encodeURIComponent(entry.runtimeKey)}/payload`, {
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        const data = r.data as PayloadSnapshotResponse;
+        // Confirm the response still belongs to the row the drawer is showing.
+        if (data.runtimeKey !== currentRuntimeKey) return;
+        setSnapshot(data);
+      })
       .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
         // 410 Gone = the call completed or was evicted between click and fetch.
         const maybeErr = e as { response?: { status?: number; data?: { message?: string } }; message?: string };
         if (maybeErr.response?.status === 410) {
@@ -58,7 +75,12 @@ export default function PnlInFlightPayloadDrawer({ entry, onClose }: Props) {
           setError(maybeErr.response?.data?.message ?? maybeErr.message ?? 'Failed to load payload');
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => {
+      controller.abort();
+    };
   }, [entry]);
 
   if (!entry) return null;

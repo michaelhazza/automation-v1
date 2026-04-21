@@ -42,8 +42,12 @@ export function set(runtimeKey: string, snapshot: Omit<PayloadSnapshot, 'capture
   try {
     let body: PayloadSnapshot;
     let truncated = false;
-    // Cheap size gate — JSON.stringify the messages to estimate bytes.
-    const serialised = JSON.stringify(snapshot.messages);
+    // Cheap size gate — JSON.stringify the full snapshot to estimate bytes.
+    // Measuring only `messages` bypasses the guard for calls with a small
+    // messages array but a large system prompt or tool schema (both of which
+    // can easily exceed 200 KB on complex agents). Serialize the whole object
+    // so the cap is applied to the true stored footprint.
+    const serialised = JSON.stringify(snapshot);
     if (serialised.length > MAX_PAYLOAD_BYTES) {
       truncated = true;
       body = {

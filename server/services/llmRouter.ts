@@ -510,6 +510,14 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       // with a fresh `'started'` so the retry path works as expected; the
       // `where: status != 'success'` guard protects committed successes
       // (which have already been caught and returned above anyway).
+      //
+      // `createdAt: sql\`now()\`` resets the row's age so a revived
+      // terminal-error row (which may be hours old) doesn't appear
+      // immediately sweep-eligible to `llmStartedRowSweepJob`. Without
+      // this reset, a retry on a key whose prior error row is older than
+      // PROVIDER_CALL_TIMEOUT_MS + 60s would be reaped by the sweep while
+      // the provider call is still in flight — reopening the double-bill
+      // window this provisional-row mechanism exists to prevent.
       .onConflictDoUpdate({
         target: [llmRequests.idempotencyKey],
         set: {
@@ -527,6 +535,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           costRaw:             '0',
           costWithMargin:      '0',
           costWithMarginCents: 0,
+          createdAt:           sql`now()`,
         },
         where: sql`${llmRequests.status} != 'success'`,
       })
