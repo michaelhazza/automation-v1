@@ -567,4 +567,88 @@ Middleware pipeline and processor hooks are **within-run guardrails**, not org-l
 
 ## Synthesis — extend or build new?
 
-*(section appended below)*
+### Is there a single existing subsystem that is the right foundation?
+
+**No — but two are close enough to inform the design.**
+
+`agent_triggers` is the closest conceptually (event → action routing, per-org, per-subaccount, with `eventFilter` conditional matching and cooldown). But it is hard-wired to a single action type (enqueue an agent run). It has no `action_type` column, no `target_type` discriminator, and its dispatch path (`checkAndFire:130-137`) unconditionally calls `triggerJobSender` to `agent-triggered-run`. Extending it to support `start_playbook`, `create_subaccount`, `send_notification`, and `update_record` as alternative targets is a schema plus service refactor — small (3 files change, 0 callers of `checkAndFire` break) but meaningful.
+
+`workflow_runs` + `workflowExecutorService` is the closest *execution* engine — sequential step chains with HITL gates and checkpoint/resume. But it is start-only programmatic; there is no configurable trigger layer that maps an external event to a workflow run. Wiring an event → workflow linkage is the missing piece.
+
+None of the other subsystems — `scheduled_tasks` (RRULE-optimised schema), `onboarding_bundle_configs` (dead schema, replaced by `modules.onboardingPlaybookSlugs`), `policy_rules` (gate decision only, `auto|review|block`), or the middleware/processor pipelines — are the right foundation. Each is either too specialised or scoped to the wrong lifecycle phase.
+
+### Extend `agent_triggers`, or build a new subsystem alongside?
+
+**Recommend: build a new subsystem alongside `agent_triggers`, but design it to share its patterns deliberately.**
+
+Three arguments for "build new":
+
+1. **Semantic drift risk.** `agent_triggers` has a meaningful name — it triggers *agent runs* on workspace-internal events (`task_created`, `task_moved`, `agent_completed`). Adding `email_received`, `conversion_event`, `webhook_received`, `form_submitted`, `subaccount_created` as new event types, plus `start_playbook`, `create_subaccount`, `send_notification`, `update_record` as new target types, dilutes the table into a general-purpose rules engine — the naming no longer maps to its contents. New callers would reach for it, old callers would keep using it, and over time it becomes a mixed-responsibility table that is painful to evolve.
+2. **Different source surface.** `agent_triggers` fires from *internal* state changes (service layer calls `checkAndFire` directly). Email replies, form submissions, webhook events, scheduled triggers, and subaccount-create events all originate from different surfaces — inbound webhooks, pg-boss ticks, other services. A new subsystem can define its own normalised event ingestion surface (likely the `NormalisedEvent` shape from Area 5, widened with `orgId`/`subaccountId`/`source`) and act as the single entry point.
+3. **Room for richer predicates.** Both `triggerService.matchesFilter()` and `policyEngineService.matchesRule()` are strict flat-equality evaluators. A generic `event_rules` engine will eventually need richer predicates (range, presence, regex, JSON-path). Building new makes the eventual evaluator upgrade contained; bolting it onto `agent_triggers` forces the richer evaluator into two HITL-critical paths (`triggerService`, `policyEngineService`) that do not need the complexity.
+
+Three arguments for "share, don't duplicate":
+
+1. **Reuse the existing matcher.** `triggerService.matchesFilter()` and `policyEngineService.matchesRule()` are 12-line identical-semantics evaluators today. Extract to a shared `server/lib/ruleMatcher.ts` and have all three (triggers, policy, new event-rules) consume it. Low-risk refactor, future-proofs the predicate upgrade path.
+2. **Reuse the adapter-dispatch model.** The `executionLayerService` + `apiAdapter` / `workerAdapter` pattern (Area 6) is the right execution-side plumbing — the new rules engine should dispatch through it, not around it, so audit trail and policy evaluation stay consistent.
+3. **Reuse `NormalisedEvent`.** Use it as the input contract, widened minimally (add `orgId`, `subaccountId`, `source`).
+
+### Minimal design that supports the target event + action types
+
+The required scope from the brief:
+
+**Event types:** `email_reply_positive`, `form_submitted`, `crm_stage_changed`, `scheduled_trigger`, `webhook_received`, `subaccount_created`.
+
+**Action types:** `start_playbook`, `create_subaccount`, `send_notification`, `update_record`, `start_agent_run`.
+
+Minimal pieces required for that scope:
+
+| Piece | What's needed | Reuses what? |
+|---|---|---|
+| **Event ingestion surface** | One entry point `eventBus.publish(event: EventRuleInput)` that webhook routes, pg-boss jobs, and internal services call. `EventRuleInput` is `NormalisedEvent` + `{ orgId, subaccountId?, source }`. | `NormalisedEvent` shape (Area 5). |
+| **`event_rules` table** | per-org config with `event_type`, `event_filter jsonb`, `priority`, `is_active`, `target_type`, `target_config jsonb`, `cooldown_seconds`, `last_triggered_at`, `trigger_count`. | Columns cloned from `agent_triggers` — same cooldown + filter pattern. |
+| **Rule matcher** | Extract `matchesFilter`/`matchesRule` into a shared `ruleMatcher` utility. Phase 1: strict equality (current semantics). Phase 2 (later): richer predicates. | `triggerService.matchesFilter` (`:44-52`), `policyEngineService.matchesRule` (`:96-116`). |
+| **Dispatcher** | Switch on `target_type`: <br>• `start_playbook` → `playbookRunService.startRun(...)` with `triggeredBy: 'job'` (per Q7 of the operator-as-agency report). <br>• `create_subaccount` → call `orgSubaccountService` or `executeConfigCreateSubaccount` with extended prospect-data payload. <br>• `send_notification` → call `notifyOperatorFanoutService` directly OR propose a new `send_notification` action with `defaultGateLevel: 'auto'`. <br>• `update_record` → propose an `update_record` action through `actionService` (runs through adapter + policy engine). <br>• `start_agent_run` → call `agentExecutionService.executeRun(...)`. | `playbookRunService`, `orgSubaccountService`, `notifyOperatorFanoutService`, `actionService`, `agentExecutionService`. |
+| **Audit trail** | Every fire writes an `event_rule_fires` row (or `action_events`-style log) with rule ID, event, target dispatch result. | Mirrors `action_events` pattern from Area 6. |
+| **Per-event idempotency** | `event_external_id` deduplication (pattern from `webhookDedupeStore` + `externalEventId` in `NormalisedEvent`). | `webhookDedupeStore` (in-memory LRU, already used by GHL webhook). |
+| **Scheduler integration for `scheduled_trigger`** | pg-boss cron job publishes a synthetic event; `event_rules` rows with `event_type = 'scheduled_trigger'` fire against it. | pg-boss scheduling (Q2 of operator-as-agency report). |
+
+### Event-type source mapping
+
+| Event type | Source that publishes | Status today |
+|---|---|---|
+| `email_reply_positive` | Resend webhook → IMAP polling job → intent classifier → `eventBus.publish(...)` | BUILD (Q4 + Q6 of operator-as-agency report) |
+| `form_submitted` | Existing `conversionEvents` writer in `pageIntegrationWorker.ts` — extend to also `publish` to event bus | Small extension to existing writer |
+| `crm_stage_changed` | GHL webhook (existing) — `ghlWebhook.ts:112-157` already receives `OpportunityStageUpdate` events; add `eventBus.publish(...)` after `canonicalDataService.upsertOpportunity` | Small extension to existing route |
+| `scheduled_trigger` | pg-boss cron job publishing synthetic events for rows with `event_type = 'scheduled_trigger'` | BUILD |
+| `webhook_received` | Generic inbound webhook handler (new) — or each webhook route publishes a matching event post-normalisation | BUILD / small extension per route |
+| `subaccount_created` | `POST /api/subaccounts` after `insert` — add `eventBus.publish(...)` alongside the existing `autoStartOwedOnboardingPlaybooks` call at `subaccounts.ts:121-155` | Small extension to existing route |
+
+### Action-type dispatch mapping
+
+| Action type | Dispatcher | Today status | Needed |
+|---|---|---|---|
+| `start_playbook` | `playbookRunService.startRun({ templateId, initialInput, triggeredBy: 'job', ... })` | Function exists; needs `triggeredBy` + nullable `startedByUserId` per Q7 of operator-as-agency report | Signature extension |
+| `create_subaccount` | `executeConfigCreateSubaccount({ name, slug, settings, prospectData })` or `orgSubaccountService.createClientSubaccount(...)` (new) | `executeConfigCreateSubaccount` exists at `configSkillHandlers.ts:264-307` but takes `{ name, slug }` only | Extend signature |
+| `send_notification` | `notifyOperatorFanoutService.dispatch(...)` OR propose new `send_notification` action with `defaultGateLevel: 'auto'` | `notify_operator` exists with `defaultGateLevel: 'review'` (Area 6) | New auto-gated action OR gate override |
+| `update_record` | `actionService.proposeAction('update_record', {...}, { gateOverride: 'auto' })` | `update_record` exists at `actionRegistry.ts:541` with `defaultGateLevel: 'review'` | Gate-override usage or policy rule |
+| `start_agent_run` | `agentExecutionService.executeRun({ ..., runSource: 'event_rule' })` | Function exists; `agent_runs.runSource` needs a new enum value | Enum extension + system principal handling |
+
+### Compatibility with `conversion_rules` from the operator-as-agency report
+
+The operator-as-agency investigation (Q4) proposed a `conversion_rules` table with `event_type` (`email_reply_positive | email_reply_referral | manual_conversion | crm_stage_changed | form_submitted`), `event_filter jsonb`, `target_playbook_template_id`, `subaccount_defaults jsonb`, and `playbook_run_mode`.
+
+**The generic `event_rules` design subsumes `conversion_rules`.** `conversion_rules` is `event_rules` with `target_type = 'start_playbook'` plus (optionally) a preceding `target_type = 'create_subaccount'` step. If a single rule can only dispatch to one target, chain it via two rules with the second matching on `subaccount_created` from the first. If `event_rules` allows a `target_type: 'sequence'` with a `target_config` step-list (leveraging `WorkflowDefinition` from Area 7), a single rule expresses the full `conversion → create_subaccount → start_playbook` flow.
+
+**Recommendation: do NOT build `conversion_rules` as a separate table.** Build the generic `event_rules` table and model conversion as one specific configuration of it. Single surface for planners, reviewers, and auditors; no divergence risk.
+
+### Summary recommendation
+
+1. **Build a new `event_rules` table and service.** Do not extend `agent_triggers` — semantic drift risk is real.
+2. **Share the matcher with `triggerService` and `policyEngineService`** via a new `server/lib/ruleMatcher.ts`. One evaluator, three consumers.
+3. **Dispatch via existing execution primitives:** `playbookRunService.startRun`, `agentExecutionService.executeRun`, `notifyOperatorFanoutService`, `actionService.proposeAction` (with `gateOverride: 'auto'` where appropriate), `executeConfigCreateSubaccount` (extended). No new action-dispatch framework required.
+4. **Use `NormalisedEvent` (widened with `orgId`/`subaccountId`/`source`) as the input contract.** The webhook routes already produce this shape.
+5. **Collapse the proposed `conversion_rules` into `event_rules`** — one rules surface, configured per event type per org.
+6. **Ship in phases.** Phase 1: strict-equality matcher + five event types + five action types (direct dispatch). Phase 2: richer predicate evaluator (ranges, regex, JSON-path). Phase 3: rule chaining / sequence targets leveraging `WorkflowDefinition`.
+
+The infrastructure to build this is modest — the heaviest lift is not the table or service but the service-user / system-principal plumbing for programmatic `startRun` and `proposeAction` calls, which the operator-as-agency report already flagged as the blocking design decision (Q4d and Q7 of that report).
