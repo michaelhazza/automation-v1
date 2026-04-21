@@ -215,9 +215,12 @@ export interface RunCostBreakerFromLedgerContext extends RunCostBreakerContext {
  *
  * Fail-closed modes (both surface as `FailureError('internal_error', ...)`):
  *   - `breaker_no_ledger_link`: caller passed `insertedLedgerRowId=null`.
- *   - `breaker_ledger_not_visible`: the id is not readable on this
- *     connection — caller has an uncommitted transaction or routes the
- *     read against a lagged replica.
+ *   - `breaker_ledger_not_visible`: the inserted row is not visible under
+ *     the `(run_id = ctx.runId, status IN ('success','partial'))` predicate
+ *     on the breaker's read connection. Covers (a) uncommitted-transaction
+ *     / lagged-replica visibility drift, (b) a future refactor inserting
+ *     against the wrong run, and (c) the caller passing the id of a row
+ *     whose status is not counted toward spend.
  */
 export async function assertWithinRunBudgetFromLedger(
   ctx: RunCostBreakerFromLedgerContext,
@@ -231,12 +234,30 @@ export async function assertWithinRunBudgetFromLedger(
     );
   }
 
-  const [found] = await db
-    .select({ id: llmRequests.id })
+  // Single query: confirms the inserted row is visible under the same
+  // (run_id, status IN counted) predicate that defines the SUM, and returns
+  // the running total in the same scan. The tightened WHERE on the visibility
+  // check (`id = $insertedId AND run_id = $runId AND status IN counted`)
+  // catches (a) a future refactor inserting a row against the wrong run, and
+  // (b) a row whose status is not counted but that the caller treated as
+  // countable — both would silently produce stale breaker reads under the
+  // original two-query shape.
+  const limit = await resolveRunCostCeiling(ctx);
+  const [row] = await db
+    .select({
+      totalCents: sql<number | null>`SUM(${llmRequests.costWithMarginCents})`,
+      found: sql<number>`COALESCE(MAX(CASE WHEN ${llmRequests.id} = ${ctx.insertedLedgerRowId} THEN 1 ELSE 0 END), 0)`,
+    })
     .from(llmRequests)
-    .where(eq(llmRequests.id, ctx.insertedLedgerRowId))
-    .limit(1);
-  if (!found) {
+    .where(
+      and(
+        eq(llmRequests.runId, ctx.runId),
+        inArray(llmRequests.status, LEDGER_COUNTED_STATUSES as unknown as string[]),
+      ),
+    );
+
+  const foundFlag = typeof row?.found === 'number' ? row.found : Number(row?.found ?? 0);
+  if (foundFlag !== 1) {
     throw new FailureError(
       failure('internal_error', 'breaker_ledger_not_visible', {
         runId: ctx.runId,
@@ -246,8 +267,8 @@ export async function assertWithinRunBudgetFromLedger(
     );
   }
 
-  const limit = await resolveRunCostCeiling(ctx);
-  const spent = await getRunCostCentsFromLedger(ctx.runId);
+  const rawTotal = row?.totalCents;
+  const spent = typeof rawTotal === 'number' ? rawTotal : Number(rawTotal ?? 0);
   // Hard-ceiling semantics: trip at spent === limit. See the sibling comment
   // in `assertWithinRunBudget` above for the one-call-overshoot reasoning.
   if (spent >= limit) {
