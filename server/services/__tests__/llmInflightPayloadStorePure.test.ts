@@ -82,6 +82,33 @@ test('payload store — truncates oversized payloads', () => {
   assert.equal(snap.messages, null, 'messages dropped on truncation');
 });
 
+test('payload store — truncation surfaces originalSizeBytes', () => {
+  // Reviewer follow-up (2026-04-21): the admin drawer needs to know HOW
+  // big the dropped payload actually was so operators can decide
+  // whether raising the cap is worthwhile or the call itself is
+  // pathological. originalSizeBytes MUST be populated on truncation
+  // and MUST be null when the payload fit normally.
+  _resetForTests();
+  const huge = 'x'.repeat(MAX_PAYLOAD_BYTES + 1000);
+  set('rt_huge', { messages: [{ role: 'user', content: huge }] });
+  const snap = get('rt_huge');
+  assert.ok(snap);
+  assert.equal(snap.truncated, true);
+  assert.equal(typeof snap.originalSizeBytes, 'number');
+  assert.ok(snap.originalSizeBytes! > MAX_PAYLOAD_BYTES,
+    `originalSizeBytes ${snap.originalSizeBytes} should exceed the cap ${MAX_PAYLOAD_BYTES}`);
+});
+
+test('payload store — non-truncated payloads carry originalSizeBytes: null', () => {
+  _resetForTests();
+  set('rt_small', { messages: tinyMessages('a') });
+  const snap = get('rt_small');
+  assert.ok(snap);
+  assert.equal(snap.truncated, false);
+  assert.equal(snap.originalSizeBytes, null,
+    'originalSizeBytes is null when truncated=false — the payload itself is the truth');
+});
+
 test('payload store — set never throws on bad input', () => {
   _resetForTests();
   // Circular reference would break JSON.stringify — should be caught.

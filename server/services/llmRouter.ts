@@ -27,6 +27,7 @@ import { buildRuntimeKey } from './llmInflightRegistryPure.js';
 import { generateIdempotencyKey } from './llmRouterIdempotencyPure.js';
 import { ReconciliationRequiredError } from '../lib/reconciliationRequiredError.js';
 import * as llmInflightPayloadStore from './llmInflightPayloadStore.js';
+import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // LLM Router — the financial chokepoint for every LLM call in the platform.
@@ -604,7 +605,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // the table until the sweep reaps it 660s later. `where status != 'success'`
   // preserves the invariant that a committed success is never downgraded.
   if (budgetBlockedStatus) {
-    await db
+    const budgetBlockedInsertedRows = await db
       .insert(llmRequests)
       .values({
         idempotencyKey,
@@ -648,8 +649,24 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           errorMessage:     budgetErrorMessage,
           routerOverheadMs: Date.now() - routerStart,
         },
-        where: sql`${llmRequests.status} != 'success'`,
+        // Dual-review round 2 / reviewer feedback: tighten from
+        // `!= 'success'` to `= 'started'`. The budget-blocked path runs
+        // milliseconds after the provisional INSERT in the idempotency tx,
+        // so the row is expected to be in 'started' state. A mismatch
+        // (sweep fired, prior retry already terminalised, etc.) means
+        // something raced and the budget-block's audit record is being
+        // silently discarded — log it rather than swallow.
+        where: sql`${llmRequests.status} = 'started'`,
+      })
+      .returning({ id: llmRequests.id });
+
+    if (budgetBlockedInsertedRows.length === 0) {
+      logger.warn('llm_router.budget_block_upsert_ghost', {
+        idempotencyKey,
+        budgetBlockedStatus,
+        note: 'existing row was not in started state — audit trail dropped',
       });
+    }
 
     throw {
       statusCode: 402,
@@ -1082,12 +1099,28 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           marginMultiplier:       String(margin.multiplier),
           fixedFeeCents:          margin.fixedFeeCents,
         },
-        // Only overwrite if the existing row is NOT already a success.
-        // Terminal-failure rows overwrite 'started' provisional rows
-        // (the common case) and re-write idempotent-retry error rows.
-        where: sql`${llmRequests.status} != 'success'`,
+        // Reviewer follow-up (2026-04-21): tighten the transition guard from
+        // `!= 'success'` to `= 'started'`. The idempotency-check transaction
+        // above always leaves the row in 'started' state before this path
+        // runs — whether it's a fresh call (INSERT 'started') or a retry
+        // after a prior error (onConflictDoUpdate 'started' with fresh
+        // createdAt). A mismatch at this point means either (a) the sweep
+        // fired and claimed the row as provisional_row_expired, or (b) a
+        // second concurrent attempt already terminalised it. In either
+        // case the guard preserves the earlier terminal signal; we log
+        // the ghost so an operator can reconcile rather than silently
+        // losing the audit trail.
+        where: sql`${llmRequests.status} = 'started'`,
       })
       .returning({ id: llmRequests.id });
+
+    if (failureInsertedRows.length === 0) {
+      logger.warn('llm_router.failure_upsert_ghost', {
+        idempotencyKey,
+        callStatus,
+        note: 'existing row was not in started state — terminal failure audit discarded (earlier sweep or race)',
+      });
+    }
 
     // Emit the terminal in-flight removal with ledger reconciliation. The
     // caller's UI uses `ledgerRowId` + `ledgerCommittedAt` to link the live
@@ -1280,12 +1313,36 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         routingReason,
         fallbackChain:       hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
       },
-      // Drizzle where clause: only update if current row is not already a success
-      where: sql`${llmRequests.status} != 'success'`,
+      // Reviewer follow-up (2026-04-21): tighten from `!= 'success'` to
+      // `= 'started'`. The idempotency-check transaction always leaves
+      // the row in 'started' before this path runs. A mismatch here means
+      // another terminal transition has already happened (sweep fired and
+      // claimed as `provisional_row_expired`, or a prior retry
+      // terminalised). Tightening preserves the earlier terminal signal
+      // — the sweep's "call went long enough that something was wrong"
+      // signal is operationally more valuable than a late-arriving
+      // success that pretends everything was fine. Ghost arrivals are
+      // logged below so operators can reconcile.
+      where: sql`${llmRequests.status} = 'started'`,
     })
     .returning({ id: llmRequests.id });
 
   const successLedgerRowId = successInsertedRows[0]?.id ?? null;
+
+  if (successInsertedRows.length === 0) {
+    // Mismatch path — either (a) an identical success already exists
+    // (idempotency replay — the prior success row has status='success'
+    // which our tightened guard correctly refuses to re-overwrite), or
+    // (b) the sweep/sibling raced and terminalised with a non-success
+    // status. The breaker skip path below already tolerates a null
+    // successLedgerRowId by treating it as idempotency replay; this
+    // log surfaces the case so operators can spot the "true success
+    // was discarded by the sweep" variant from the ledger audit.
+    logger.warn('llm_router.success_upsert_ghost', {
+      idempotencyKey,
+      note: 'terminal success could not transition from started (already success, or sweep/sibling claimed it as terminal-error)',
+    });
+  }
 
   // ── 12a. Hermes Tier 1 Phase C — runaway-loop cost breaker ───────────────
   //
@@ -1321,9 +1378,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const breakerRunId = ctx.runId ?? (await resolveRunIdFromIee(ctx.ieeRunId));
   if (breakerRunId) {
     if (!successLedgerRowId) {
-      // Upsert hit the `where status != 'success'` guard — the row already exists as a success
-      // (idempotency replay). The cost was already counted on the first insert; skip the breaker.
-      console.debug('[llmRouter] costBreaker.skip_idempotency_replay', { correlationId: idempotencyKey });
+      // Upsert hit the `where status = 'started'` guard — existing row is
+      // not in 'started' state. Either an idempotency replay against a
+      // prior success, or the sweep / sibling claimed the row with a
+      // terminal-error status (see ghost log above). Skip the breaker
+      // either way — the first insert owns the cost attribution.
+      console.debug('[llmRouter] costBreaker.skip_terminal_preempted', { correlationId: idempotencyKey });
     } else {
       try {
         const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');

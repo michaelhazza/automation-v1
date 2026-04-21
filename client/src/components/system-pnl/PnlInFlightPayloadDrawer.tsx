@@ -18,13 +18,14 @@ import type { InFlightEntry } from '../../../../shared/types/systemPnl';
 interface PayloadSnapshotResponse {
   runtimeKey:  string;
   payload:     {
-    messages:     unknown;
-    system?:      unknown;
-    tools?:       unknown;
-    maxTokens?:   number;
-    temperature?: number;
-    capturedAt:   string;
-    truncated:    boolean;
+    messages:           unknown;
+    system?:            unknown;
+    tools?:             unknown;
+    maxTokens?:         number;
+    temperature?:       number;
+    capturedAt:         string;
+    truncated:          boolean;
+    originalSizeBytes:  number | null;
   };
   generatedAt: string;
 }
@@ -132,8 +133,15 @@ export default function PnlInFlightPayloadDrawer({ entry, onClose }: Props) {
             <>
               {snapshot.payload.truncated && (
                 <div className="rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
-                  Payload too large to snapshot — body was truncated at the store layer.
-                  Use the ledger detail once the call lands.
+                  Payload too large to snapshot — body was dropped at the store layer.
+                  {snapshot.payload.originalSizeBytes !== null && (
+                    <>
+                      {' '}Original size:{' '}
+                      <strong>{formatBytes(snapshot.payload.originalSizeBytes)}</strong>
+                      {' '}(cap 200 KB).
+                    </>
+                  )}
+                  {' '}Use the ledger detail once the call lands.
                 </div>
               )}
               {snapshot.payload.system !== undefined && (
@@ -177,4 +185,10 @@ function stringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }

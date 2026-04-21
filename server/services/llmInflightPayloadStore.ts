@@ -32,6 +32,14 @@ export interface PayloadSnapshot {
   capturedAt: string;                       // ISO 8601 UTC
   /** True when the full body was dropped (exceeded MAX_PAYLOAD_BYTES). */
   truncated: boolean;
+  /** Size of the original JSON-serialised payload in bytes when truncated;
+   *  null when not truncated (client renders the actual payload instead).
+   *  Reviewer follow-up (2026-04-21): the prior "truncated: true" signal
+   *  told the admin the body was dropped but not *how much* — a 201KB
+   *  payload and a 50MB payload were indistinguishable in the UI. Adding
+   *  the original size lets operators decide whether raising the cap is
+   *  worthwhile or whether the call itself is pathological. */
+  originalSizeBytes: number | null;
 }
 
 // Map preserves insertion order in JS — we exploit that for LRU eviction.
@@ -51,15 +59,17 @@ export function set(runtimeKey: string, snapshot: Omit<PayloadSnapshot, 'capture
     if (serialised.length > MAX_PAYLOAD_BYTES) {
       truncated = true;
       body = {
-        messages:  null,
-        capturedAt: new Date().toISOString(),
+        messages:         null,
+        capturedAt:       new Date().toISOString(),
         truncated,
+        originalSizeBytes: serialised.length,
       };
     } else {
       body = {
         ...snapshot,
-        capturedAt: new Date().toISOString(),
+        capturedAt:       new Date().toISOString(),
         truncated,
+        originalSizeBytes: null,
       };
     }
     // LRU eviction: refresh insertion order by delete + re-set.

@@ -492,6 +492,21 @@ function scheduleSlotPrune(runtimeKey: string): void {
 //
 // Route reads (`/api/admin/llm-pnl/in-flight/history`) go via this
 // table; writes are best-effort only.
+//
+// Reviewer follow-up (2026-04-21): a soft circuit breaker wraps the
+// persist path so that a degraded DB doesn't produce one failed INSERT
+// + one warn-log per inflight event. When the failure rate over a 50-
+// sample window exceeds 50% the breaker opens for 5 minutes, suppresses
+// new INSERTs, logs once, and half-opens on expiry. The live broadcast
+// is never affected — the breaker only gates the `.insert()` call.
+
+import {
+  DEFAULT_SOFT_BREAKER_CONFIG,
+  createBreakerState,
+  isOpen,
+  recordOutcome as recordBreakerOutcome,
+  shouldAttempt as shouldBreakerAttempt,
+} from '../lib/softBreakerPure.js';
 
 interface PersistHistoryInput {
   runtimeKey:     string;
@@ -503,11 +518,30 @@ interface PersistHistoryInput {
   terminalStatus: string | null;
 }
 
+const historyBreakerState = createBreakerState();
+
+/** Test-only. Lets the pure tests assert the breaker's open/closed state. */
+export function _historyBreakerIsOpenForTests(nowMs: number = Date.now()): boolean {
+  return isOpen(historyBreakerState, nowMs);
+}
+
+/** Test-only. Resets breaker to pristine state between tests. */
+export function _resetHistoryBreakerForTests(): void {
+  historyBreakerState.outcomes = [];
+  historyBreakerState.openedUntilMs = null;
+  historyBreakerState.lastOpenedLogMs = 0;
+}
+
 function persistHistoryEvent(input: PersistHistoryInput): void {
   // Feature flag — default on. The env var lets an operator disable the
   // write if the history table is temporarily unhealthy, without a code
   // deploy.
   if (env.LLM_INFLIGHT_HISTORY_ENABLED === false) return;
+  // Soft breaker — if open, drop the event silently. The authoritative
+  // ledger still captures everything that matters; the history table is
+  // purely a forensic convenience. Logging is already rate-limited to
+  // once per trip by `recordBreakerOutcome`'s `trippedNow` flag below.
+  if (!shouldBreakerAttempt(historyBreakerState, Date.now())) return;
   Promise.resolve().then(async () => {
     try {
       await db.insert(llmInflightHistory).values({
@@ -519,12 +553,29 @@ function persistHistoryEvent(input: PersistHistoryInput): void {
         eventPayload:   input.eventPayload as Record<string, unknown>,
         terminalStatus: input.terminalStatus,
       });
+      recordBreakerOutcome(historyBreakerState, true, Date.now());
     } catch (err) {
-      logger.warn('inflight.history_persist_failed', {
-        runtimeKey: input.runtimeKey,
-        eventKind:  input.eventKind,
-        error:      err instanceof Error ? err.message : String(err),
-      });
+      const { trippedNow } = recordBreakerOutcome(historyBreakerState, false, Date.now());
+      if (trippedNow) {
+        // Emit exactly one "breaker opened" log per trip so operators see
+        // the signal without the firehose of per-event warnings that
+        // would otherwise drown it out.
+        logger.warn('inflight.history_breaker_opened', {
+          openDurationMs: DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs,
+          failThreshold:  DEFAULT_SOFT_BREAKER_CONFIG.failThreshold,
+          lastError:      err instanceof Error ? err.message : String(err),
+        });
+      } else if (isOpen(historyBreakerState, Date.now())) {
+        // Breaker is open from a prior trip — stay silent.
+      } else {
+        // Transient failure, below threshold — log at debug so it still
+        // surfaces during targeted investigation but doesn't flood logs.
+        logger.debug('inflight.history_persist_failed', {
+          runtimeKey: input.runtimeKey,
+          eventKind:  input.eventKind,
+          error:      err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }).catch(() => { /* exhaustive — never let this reach the event loop */ });
 }
