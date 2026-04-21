@@ -228,6 +228,23 @@ export interface AgentRunRequest {
    * and shown with a "Test" badge in run history. Default false.
    */
   isTestRun?: boolean;
+  /**
+   * When set, executeRun emits a live-log `orchestrator.routing_decided`
+   * event on the dispatched run immediately after `run.started` — i.e.
+   * within the run's own timeline (sequence 2), not after it has finished.
+   *
+   * Set by `orchestratorFromTaskJob` on the downstream `executeRun` call
+   * so the timeline correctly captures the dispatch decision BEFORE the
+   * run completes. Previously the job emitted the event after awaiting
+   * `executeRun`, which put it after `run.completed` on the timeline.
+   * Spec: tasks/live-agent-execution-log-spec.md §5.3.
+   */
+  orchestratorDispatch?: {
+    taskId: string;
+    chosenAgentId: string;
+    idempotencyKey: string;
+    routingSource: 'rule' | 'llm' | 'fallback';
+  };
 }
 
 export interface AgentRunResult {
@@ -411,6 +428,32 @@ export const agentExecutionService = {
       },
       linkedEntity: { type: 'agent', id: request.agentId },
     });
+
+    // Live Agent Execution Log — `orchestrator.routing_decided` (spec §5.3).
+    // Emitted here (not from the orchestrator job) so the event lands
+    // inside THIS run's timeline at sequence 2, immediately after
+    // `run.started`. The previous shape — job calls tryEmitAgentEvent
+    // AFTER awaiting executeRun — put the event after `run.completed`,
+    // breaking the "timeline represents actual execution order"
+    // invariant. Fire-and-forget is safe: this is a non-critical event
+    // and the run is now committed with sequence_number = 1 claimed.
+    if (request.orchestratorDispatch) {
+      tryEmitAgentEvent({
+        runId: run.id,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        sourceService: 'orchestratorFromTaskJob',
+        payload: {
+          eventType: 'orchestrator.routing_decided',
+          critical: false,
+          taskId: request.orchestratorDispatch.taskId,
+          chosenAgentId: request.orchestratorDispatch.chosenAgentId,
+          idempotencyKey: request.orchestratorDispatch.idempotencyKey,
+          routingSource: request.orchestratorDispatch.routingSource,
+        },
+        linkedEntity: { type: 'agent', id: request.orchestratorDispatch.chosenAgentId },
+      });
+    }
 
     // Observability: temporary metric for org subaccount runs (remove after 2 weeks stable)
     if (isOrgSubaccountRun) {

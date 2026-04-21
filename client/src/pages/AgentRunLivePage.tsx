@@ -92,7 +92,14 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
       'agent-run:execution-event': (payload: unknown) => {
         const event = payload as AgentExecutionEvent;
         if (!event || typeof event !== 'object' || !('sequenceNumber' in event)) return;
-        // 100 ms buffer on mount — prevents snapshot/live collisions.
+        // Mount buffer — holds live socket events until the initial
+        // snapshot fetch completes and the buffer is drained. NOTE: the
+        // snapshot/live ordering correctness does NOT rely on this
+        // buffer's timing — it relies on the monotonic `sequenceNumber
+        // <= lastSeenSeqRef.current` guard below, which drops any
+        // already-covered event regardless of arrival order. The buffer
+        // only exists to avoid re-render churn during the initial load;
+        // if a refactor removes it, the guard still holds correctness.
         if (!initialGateRef.current) {
           initialBufferRef.current.push(event);
           return;
@@ -150,6 +157,11 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
 // generation, this function remains safe because sequenceNumber is the
 // sort key.
 //
+// Sequence-collision detector: logs a warning when two distinct ids share
+// a sequenceNumber in the merged output. Not a runtime guard — pure
+// visibility for upstream bugs (emitter double-writing, rebase-race on
+// the atomic-UPDATE allocator, etc.). No-op in production when clean.
+//
 // After merge, the returned list is trimmed to TIMELINE_WINDOW_SIZE
 // most-recent entries — the snapshot endpoint is still the full history.
 function mergeEvents(
@@ -163,6 +175,21 @@ function mergeEvents(
   const merged = Array.from(byId.values()).sort(
     (a, b) => a.sequenceNumber - b.sequenceNumber,
   );
+
+  // Sequence-collision warning — distinct ids sharing a sequenceNumber
+  // indicate an upstream invariant break. Scan after sort so adjacent
+  // collisions are cheap to detect.
+  for (let i = 1; i < merged.length; i++) {
+    if (merged[i - 1].sequenceNumber === merged[i].sequenceNumber) {
+      // eslint-disable-next-line no-console
+      console.warn('AgentRunLivePage.mergeEvents: sequence collision', {
+        sequenceNumber: merged[i].sequenceNumber,
+        ids: [merged[i - 1].id, merged[i].id],
+        runId: merged[i].runId,
+      });
+    }
+  }
+
   if (merged.length <= TIMELINE_WINDOW_SIZE) return merged;
   return merged.slice(merged.length - TIMELINE_WINDOW_SIZE);
 }
