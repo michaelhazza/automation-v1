@@ -228,13 +228,15 @@ No schema change; one extra indexed query on `llm_requests(run_id)` (the view's 
 
 Failed requests (`status IN ('error', 'timeout', 'parse_failure', 'aborted_by_caller', 'rate_limited', 'provider_unavailable', 'budget_blocked')`) are excluded from `llmCallCount`, `callSiteBreakdown`, and token sums.
 
+**Retry semantics.** Cost is written per LLM call, at the router's ledger-insert step, never retroactively aggregated. A retry creates a **new `agent_runs` row with a new `runId`** — the cost ledger for the old run is frozen at whatever was spent before the retry started, and the new run accumulates from zero. `GET /api/runs/:runId/cost` always returns the cost for exactly that `runId`, never a parent+children rollup. If a product surface ever needs "cost across a retry chain", it must derive that from the runs' relationship metadata (e.g. `triggerContext.parentRunId` if set); the cost endpoint itself stays single-run-scoped.
+
 ### 5.5 Layout placement
 
 | Host surface | Rendering component (where the panel actually goes) | Placement | Mode |
 |---|---|---|---|
 | `AgentRunHistoryPage.tsx` | `SessionLogCardList.tsx` | Inside each expanded run card, below the status line | `compact` |
 | `RunTraceViewerPage.tsx` | `RunTraceView.tsx` | In the trace header strip, alongside duration + model | non-compact |
-| `AdminAgentEditPage.tsx` | page itself (existing inline fetch site) | Replaces the inline fetch at lines 1697-1702; renders beside expanded run entries | `compact` |
+| `AdminAgentEditPage.tsx` | page itself (existing inline fetch site) | Replaces the inline fetch at line 1699 (post main merge `ea0f6c5`); renders beside expanded run entries | `compact` |
 
 No tooltip, no popover, no "learn more" link. The panel is static information, not an interactive surface.
 
@@ -277,6 +279,17 @@ Distil successful agent runs into higher-quality, longer-lived semantic memory (
 
 Phase B fixes this in-passing. The field gets populated at the same place `status: finalStatus` is already written (around line 1175), using the derivation rule in §6.3. This is not scope creep — the field was specified to be populated; Phase B just finally populates it.
 
+### 6.2.1 Run state model — where it lives today
+
+This spec does not introduce or redefine the run state machine; it signposts what already exists so Phase B's derivation rule (§6.3) is grounded.
+
+Automation OS already has a two-axis run state model:
+
+- **Execution status** — `agent_runs.status` (`server/db/schema/agentRuns.ts:90`). A 12-value enum covering the run's position in the execution lifecycle: `pending | running | delegated | completed | failed | timeout | cancelled | loop_detected | budget_exceeded | awaiting_clarification | waiting_on_clarification | completed_with_uncertainty`. Stable; governs the loop + scheduler.
+- **Result status** — `agent_runs.runResultStatus` (`server/db/schema/agentRuns.ts:46`). A 3-value enum: `success | partial | failed`. Declared for several releases but never written; Phase B finally populates it.
+
+Phase B does not alter or extend either enum. §6.3 is a pure mapping from the existing execution-status-at-terminal into the existing result-status enum. Transition tables, retry semantics, and replay semantics are governed by the pre-existing loop + scheduler and are out of scope for this spec.
+
 ### 6.3 `runResultStatus` derivation rule
 
 Applied at run completion inside `agentExecutionService.ts::finishLoop` where `finalStatus` is computed:
@@ -305,6 +318,16 @@ Implementation:
   3. `agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun` (around lines 259 / 278). IEE-delegated terminal path; `runResultStatus` derived via the same `computeRunResultStatus` helper on the resolved IEE inputs.
 
 The IEE finalizer writes `finalStatus: resolvedStatus` at two sites in `agentRunFinalizationService.ts` (around lines 259 and 278) — both flow through the same `computeRunResultStatus` helper so the IEE path produces identical derivations from identical inputs as the main path. The catch-path write in `agentExecutionService.ts` deterministically sets `runResultStatus='failed'` because `status` at that branch is always `'failed'`.
+
+### 6.3.2 Legacy runs — pre-spec runs carry NULL runResultStatus
+
+Every `agent_runs` row written before this spec ships has `runResultStatus = NULL`. We do not backfill. NULL is therefore the canonical "legacy or not yet terminal" marker, and every consumer that branches on `runResultStatus` must handle NULL explicitly:
+
+- **Phase B memory extraction.** The new `outcome` parameter (§6.4) is required; callers must pass a non-null `runResultStatus`. The only caller is the terminal-write path in `agentExecutionService.ts`, which derives `runResultStatus` at that point. Historical runs never re-enter this path, so no NULL ever reaches `extractRunInsights`.
+- **Phase A cost panel.** Cost rendering does not depend on `runResultStatus`; NULL is immaterial.
+- **Handoff service** (pre-existing consumer at `agentRunHandoffService.ts:174`) already tolerates NULL (declared as `'success' | 'partial' | 'failed' | null`); no change needed.
+
+Existing historical memory entries (written under the old "generic observation on every completion" logic) keep their existing `qualityScore`, `isUnverified=false`, and `qualityScoreUpdater='initial_score'` values. They co-exist with new Phase B entries. No backfill, no rolloutDate cutoff. Any future feature that wants to distinguish "legacy" entries can filter on `qualityScoreUpdater='initial_score'` plus a `createdAt` bound.
 
 ### 6.4 `extractRunInsights` extended signature
 
@@ -518,9 +541,18 @@ Callers missing:
 
 - `server/services/llmRouter.ts::routeCall` — the gap Phase C closes.
 
+### 7.2.1 Breaker scope, persistence, reset — pinned
+
+To prevent later ambiguity:
+
+- **Scope: per-run.** The breaker aggregates cost for a single `agent_runs.id` and compares against `subaccountAgents.maxCostPerRunCents`. Not per-agent (an agent with 100 legitimate runs should not trip on run 101 because earlier runs accumulated spend). Not per-org (org-level caps are a separate mechanism via `orgBudgets.monthlyCostLimitCents` + `budgetService.checkAndReserve`).
+- **Persistence: stateless helper, reads persisted ledger.** `runCostBreaker.ts` holds no in-memory state. Every `assertWithinRunBudget` call (Slack/Whisper) and `assertWithinRunBudgetFromLedger` call (LLM caller, per §7.3) reads fresh from `cost_aggregates` or `llm_requests_all` respectively. There is no breaker state to leak; the source of truth is the persisted cost ledger.
+- **Reset: implicit, on new run.** A retry or replay produces a new `agent_runs` row with a new `runId`. The new run has zero accumulated cost in the ledger, so the breaker starts fresh. This is by design — a retry is a second attempt at the same work, not a continuation of the first attempt's spend. If a misconfigured task systematically retries and each retry hits the breaker, that is intended signal; the org-level `monthlyCostLimitCents` catches cumulative cost across retries.
+- **Failure-loop protection is NOT the breaker's job.** Per-run breaker does one thing well: stop a single run from exceeding its ceiling. Cross-run spend monitoring is the org-level cap's responsibility.
+
 ### 7.3 Where to insert the call
 
-Inside `routeCall`, after the ledger row is successfully inserted (currently at line 777-ish of the post-call success path) and before the provider response is returned to the caller. Three ledger-write paths exist in the router: the early-fail path (~line 461), the budget-blocked path (~line 669), and the post-call path (~line 777). Phase C wires the breaker only on the post-call path — the budget-blocked path already represents a cap trip of a different kind, and the early-fail path has no cost to check against.
+Inside `routeCall`, after the ledger row is successfully inserted (currently at line 778 of the post-call success path, post main merge `ea0f6c5` which landed the in-flight tracker) and before the provider response is returned to the caller. Three ledger-write paths exist in the router: the early-fail path (~line 463), the alternate/partial path (~line 935), and the post-call path (~line 778). Phase C wires the breaker only on the post-call path — the other two paths either represent a cap trip of a different kind or have no cost to check against.
 
 Pseudocode at the insertion point:
 
@@ -572,6 +604,8 @@ return providerResponse;
 ```
 
 Dynamic import matches the existing pattern in `sendToSlackService.ts` — avoids a module-cycle hazard with the router.
+
+**In-flight registry ordering (post main merge `ea0f6c5`).** The in-flight tracker merged into main from PR #161 wraps each attempt with `inflightRegistry.add()` before the provider call and `inflightRegistry.remove()` + `inflightRegistry.updateLedgerLink()` after the ledger insert. Phase C's breaker call sits **after** `inflightRegistry.updateLedgerLink()` so that by the time the breaker reads the cost ledger, the in-flight entry has been settled to a persisted row. Order at the insertion point: `insert(llmRequests)` → `inflightRegistry.updateLedgerLink()` → Phase C breaker check → `inflightRegistry.remove()` on cleanup path. If the breaker throws `cost_limit_exceeded`, the cleanup path still fires so no ghost in-flight rows persist; this is verified by test scenario #5 in §9.3.1. Verify current line numbers at implementation time — the registry hooks are new and other router refactors may shift insertion positions.
 
 **Fail-open rationale.** The breaker is secondary protection — a belt-and-braces ceiling on top of per-call cost tracking. If the breaker itself fails (DB outage during the read, unexpected throw), we must not take down the LLM request path, which is the primary business function. The cost row is already written in step 12, so cost attribution is intact; losing one enforcement window is preferable to a system-wide outage caused by a breaker infrastructure bug. A `costBreaker.infra_failure` alert lets ops notice and fix without customer-visible impact.
 
@@ -1004,6 +1038,21 @@ On a dev org, trigger a successful run with a 300-char summary and 3 obvious-ins
 | Missing `subaccountAgentId` | Call without per-agent link | Breaker falls back to `SYSTEM_DEFAULT_MAX_COST_CENTS` (100 cents) |
 
 Concurrency test uses real `await Promise.all([...])` against a seeded DB — not mocks. Phase C's actual concurrency guarantee is weaker than "one call overshoot max": without a per-run advisory lock (§11.4 #9), a concurrent batch on the same run can collectively overshoot by up to the inflight batch size × per-call cost before any of them runs the breaker check. The absolute guarantee is that any **serial** call starting after the concurrent burst settles sees the accumulated spend and trips the breaker. The test pins (a) the trip on the follow-up serial call, and (b) that collective spend does not drift unboundedly — not a specific cap on concurrent-batch overshoot.
+
+### 9.3.1 Cross-phase interaction scenarios
+
+Each phase's own tests cover its own surface. Cross-phase interactions — where two phases meet and could silently drift — are covered by a small integration matrix in `server/services/__tests__/hermesTier1Integration.test.ts` (new), seeded DB.
+
+| # | Scenario | Phase combo | Expected behaviour |
+|---|---|---|---|
+| 1 | Breaker trips mid-run | C + B | Run terminates with `finalStatus='budget_exceeded'`; `runResultStatus='failed'` per §6.3 derivation; memory extraction writes only `issue` entries per §6.5 matrix; no `pattern`/`decision` entries created for this run. |
+| 2 | Cost panel on a retried run | A (+ run lifecycle) | Old run's `GET /api/runs/:oldId/cost` returns frozen cost; new run's `GET /api/runs/:newId/cost` starts at zero and accumulates from zero (per retry semantics in §5.4). Old run's panel never retroactively updates. |
+| 3 | Cost panel on a breaker-tripped run | A + C | Panel renders the full cost including the overshoot call (ledger row written before breaker throw). `totalCostCents` exceeds `subaccountAgents.maxCostPerRunCents` by at most one serial call's cost (bounded-race semantics per §7.4 #2). |
+| 4 | Memory after a partial run with uncertainty | B (+ handoff) | `finalStatus='completed_with_uncertainty'` maps to `runResultStatus='partial'`. Memory entries get `isUnverified=true`, `provenanceConfidence=0.5`, `qualityScoreUpdater='initial_score'` (no bump applied — partial is neutral per §6.8.2). |
+| 5 | In-flight registry clean-up on breaker throw | C (+ in-flight tracker, post `ea0f6c5`) | When the breaker throws post-ledger-write, `inflightRegistry.remove()` still fires on the cleanup path; no ghost in-flight rows persist. Cross-checks the ordering pinned in §7.3. |
+| 6 | Legacy run renders cost correctly | A | A pre-existing `agent_runs` row with `runResultStatus=NULL` renders a normal cost panel; Phase A does not branch on `runResultStatus` so NULL is immaterial (§6.3.2). |
+
+Scenario #1 (breaker-trip-mid-run) is the most important — it exercises all three phases in a single run and verifies they cooperate correctly. Run as part of the pre-merge gate.
 
 ### 9.4 Verification commands
 
