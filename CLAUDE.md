@@ -330,7 +330,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
   1. **Partial-external-success protection** — provisional `'started'` ledger row. Financial risk (provider double-bill under DB-blip + retry). Committed follow-up.
   2. **Idempotency-key versioning** (`v1:` prefix on both `llmRouter`'s `generateIdempotencyKey` and `actionService`'s `buildActionIdempotencyKey`). Cheap insurance against canonicalisation drift. Do before any refactor of either function.
   3. **Queueing-delay visibility** (`queuedAt` / `dispatchDelayMs` on the in-flight entry).
-  4. **Provider fallback visibility** (`globalAttemptSequence` across fallback chain).
+  4. **Provider fallback visibility** (`attemptSequence` across fallback chain).
   5. **Token-level streaming progress** (adapter-contract change; coordinates with #1).
   6. **Historical in-flight archive** (defer until after #1 — overlap with `'started'` row coverage).
   7. **Per-caller detail drawer mid-flight** (payload capture at dispatch; coordinates with #5).

@@ -16,7 +16,7 @@ This is not a development specification. It's a primer. Pick any item, start a n
 | 1 | Partial-external-success protection — provisional ledger row | Provider double-bill under DB-blip + retry | Medium | **High** |
 | 2 | Idempotency-key versioning (`v1:` prefix) | Silent dedup break on canonicalisation refactor | Low | **High** |
 | 3 | Queueing-delay visibility (`queuedAt`) | Ops blindness to pre-dispatch contention | Low | Medium |
-| 4 | Provider fallback visibility (`providerAttemptSequence`) | Admin UX gap in In-Flight tab | Low | Medium |
+| 4 | Provider fallback visibility (`attemptSequence`) | Admin UX gap in In-Flight tab | Low | Medium |
 | 5 | Token-level streaming progress | UX polish on long calls; adapter contract change | High | Low-Medium |
 | 6 | Historical in-flight archive | No current trigger; incident-driven | Medium | Low |
 | 7 | Per-caller detail drawer mid-flight | UX polish; needs payload capture | Medium | Low |
@@ -55,9 +55,10 @@ _See detail section below._
 - `migrations/` — new migration adding `'started'` to the status check constraint. Next free sequence number (was 0189 at time of writing).
 - `server/services/systemPnlService.ts` — P&L queries should filter out `status='started'` from cost rollups (those rows don't have a final cost yet). Double-check every `WHERE status IN (...)` predicate.
 
-**Open questions for the draft spec:**
-- **Retry contract.** When a retry sees a `'started'` row, what's the correct return? Options: (a) block and poll until the row terminalises (simple but adds latency); (b) throw a `RECONCILIATION_REQUIRED` error the caller handles (more control, more complexity); (c) return the partial data from the first call's response buffer (would need server-side response caching, bigger scope).
-- **TTL on `'started'` rows.** A crash between `'started'` insert and provider call would leave an orphaned row. The in-flight registry's sweep handles this at the memory layer with a 30s post-timeout buffer, but the DB row needs its own TTL — probably `startedAt + PROVIDER_CALL_TIMEOUT_MS + a minute`, reaped by a pg-boss job.
+**Locked defaults for the draft spec** (pre-decided so the next session doesn't re-debate from scratch):
+
+- **Retry contract — throw `RECONCILIATION_REQUIRED`.** When the pre-dispatch idempotency check sees a `'started'` row, the router throws a typed `ReconciliationRequiredError` (new error class, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`) and the caller decides how to handle it. Rationale: (a) avoids hidden blocking latency for callers that want fast feedback; (b) keeps behaviour explicit rather than stashing response buffers server-side; (c) matches the existing router pattern of surfacing typed errors (`BudgetExceededError`, `ParseFailureError`, `ProviderTimeoutError`) for caller control flow. Blocking/polling semantics can be layered later via an opt-in `RouterCallParams.onReconciliationRequired: 'throw' | 'block'` option if real caller demand surfaces — but the default ships as throw-fast. The draft spec still owns the details (error shape, caller migration path, test pins), but the decision to throw is locked.
+- **TTL on `'started'` rows — `providerTimeoutMs + 60s`.** Reaped by a dedicated pg-boss job (`maintenance:llm-started-row-sweep`) at 2-minute intervals. The 60s buffer past `providerTimeoutMs` is deliberately the same shape as the in-flight registry's `INFLIGHT_DEADLINE_BUFFER_MS` (30s) — the DB row is a longer-horizon durability layer, but the two sweeps need to telescope cleanly: the in-memory sweep reaps first (30s past timeout), the DB sweep reaps second (60s past timeout). If both windows fire, the later one is a no-op against an already-terminalised row. The additional 30s over the memory sweep gives the success-path ledger upsert room to land before the DB sweep touches the row.
 - **Aggregation.** `cost_aggregates` must ignore `'started'` rows. Pinned by test in `systemPnlServicePure.test.ts`.
 
 **Tripwires:**
@@ -105,6 +106,7 @@ If the canonicalisation contract ever changes — a new field added, nested-key 
 **Tripwires:**
 - Don't build a runtime "accepts `v1:` or unprefixed" fallback. The whole point of versioning is to make the contract explicit. If the prefix is optional, operators will forget to bump the version and drift silently — exactly the failure mode this is supposed to prevent.
 - If you need to dedup across the deploy boundary (e.g. a retry of an old call after the prefix lands), the answer is: that request falls back to the normal happy path. The prefix is intentionally a soft line-in-the-sand, not a migration.
+- **Deploy-boundary retries may bypass dedup — this is the accepted tradeoff.** A request in-flight at the moment of a prefix bump will, on retry, hash to the new prefix and not match its prior attempt's row. For the router that creates a narrow double-call window during deploys; for `actionService` it creates a narrow double-execute window. Both are acceptable given the rarity (retries straddling a deploy + the specific pre-existing row) and the fact that every deploy already has failure modes strictly worse than this. Call this out in the deploy notes when a version bump lands; do not surprise-debug it three months later.
 - `tasks/llm-observability-ledger-generalisation-spec.md §17` may also want to reference this — the ledger-side deferred-items list tracks related contract changes.
 
 ---
@@ -147,12 +149,13 @@ If an admin sees "this call has been in-flight for 45s and counting", they can't
 **Tripwires:**
 - Do NOT capture `queuedAt` inside the inner provider-retry loop. That would give dispatch-delay = 0 for retries, which is wrong — we want retry-attempt-N's delay to include the backoff sleep from attempt N-1. Capture once per `routeCall()` invocation.
 - A caller's AbortSignal firing during the queue wait (`budget_blocked` or cache-hit path) never produces a registry entry, so those paths never need the field. Keep the capture at the top of `routeCall()` simple — don't try to only-capture-if-will-dispatch.
+- **`queuedAt` and `dispatchDelayMs` only apply to entries that reach `inflightRegistry.add()`.** Pre-dispatch terminals (`budget_blocked`, `rate_limited`, `cache_hit`) never add to the registry per spec §4.1, so the fields are structurally absent from their ledger rows and never surface on the In-Flight tab. Do not try to unify the semantics across dispatch and pre-dispatch paths — the dispatch-delay signal is meaningless when there was no dispatch. If pre-dispatch latency becomes its own concern later, add a separate `preDispatchLatencyMs` field on the ledger row; don't overload `dispatchDelayMs`.
 - The active-count gauge (`llm.inflight.active_count`) does not need a delay dimension. The current gauge is fine; this is a per-entry display field.
 
 ---
 
 
-## 4. Provider fallback visibility (`providerAttemptSequence`)
+## 4. Provider fallback visibility (`attemptSequence`)
 
 _See detail section below._
 
@@ -168,12 +171,14 @@ _See detail section below._
 
 Row 3's "#1" gives no signal that this is actually the third attempt of the same logical call. Admins debugging a slow call need that lineage.
 
+**Naming note.** Field name locked as `attemptSequence` — short enough to read cleanly in UI and code, paired with the existing `attempt` field (per-provider counter) for clear contrast. `globalAttemptSequence` was considered and rejected as verbose for a UI-facing field; `fallbackIndex` (the optional companion field described below) is the clearer expression of "which provider in the chain".
+
 **Minimal viable shape:**
 
-1. Add a new field to `InFlightEntry`: `globalAttemptSequence: number` — monotonically incrementing across the entire `routeCall()`, starting at 1 for the first provider's first attempt, continuing across provider fallbacks.
-2. In the router, declare `let globalAttemptSequence = 0` alongside `currentRuntimeKey` at line 530. Increment it immediately before each `inflightRegistry.add()` call.
+1. Add a new field to `InFlightEntry`: `attemptSequence: number` — monotonically incrementing across the entire `routeCall()`, starting at 1 for the first provider's first attempt, continuing across provider fallbacks.
+2. In the router, declare `let attemptSequence = 0` alongside `currentRuntimeKey` at line 530. Increment it immediately before each `inflightRegistry.add()` call.
 3. Optionally also add `fallbackIndex: number` — which provider in the fallback chain this attempt belongs to (0 for primary, 1 for first fallback, etc.). Cheap and orthogonal.
-4. Update `PnlInFlightTable` to render `#${attempt}` as `#${globalAttemptSequence}` when `globalAttemptSequence !== attempt` — i.e. show the cross-provider number when fallback has happened, the provider-local number otherwise.
+4. Update `PnlInFlightTable` to render `#${attempt}` as `#${attemptSequence}` when `attemptSequence !== attempt` — i.e. show the cross-provider number when fallback has happened, the provider-local number otherwise.
 5. Pure test: buildEntry + a couple of fixtures pinning the new fields.
 
 **Key files / call sites:**
@@ -184,7 +189,7 @@ Row 3's "#1" gives no signal that this is actually the third attempt of the same
 - `client/src/components/system-pnl/PnlInFlightTable.tsx` — the Attempt column's rendering.
 
 **Tripwires:**
-- Do not conflate `globalAttemptSequence` with the ledger's `attemptNumber`. The ledger field's definition pre-dates the tracker and is per-provider by design (that's how the fallback chain already reports in `fallback_chain` JSON). Don't change the ledger field — add a separate one on the registry entry.
+- Do not conflate `attemptSequence` with the ledger's `attemptNumber`. The ledger field's definition pre-dates the tracker and is per-provider by design (that's how the fallback chain already reports in `fallback_chain` JSON). Don't change the ledger field — add a separate one on the registry entry.
 - The per-attempt `attempt` field stays as-is, because the runtimeKey derivation (`${idempotencyKey}:${attempt}:${startedAt}`) depends on it and changing it would invalidate the crash-restart-safety argument.
 - If you want to also surface this on the ledger, that's a separate conversation — it's a column add + backfill + P&L query update. Keep it off the critical path for this brief.
 
@@ -225,6 +230,7 @@ Either way, every adapter (`anthropicAdapter`, `openaiAdapter`, `geminiAdapter`,
 
 **Tripwires:**
 - Don't emit on every token — socket spam will kill the client. Aggregate to 1 Hz, matching the existing elapsed-time tick.
+- **Router must cap buffered tokens or stream through.** Accumulating the entire response in a server-side buffer trades front-end back-pressure for a back-end memory problem: long responses + slow client consumption + many concurrent streams = quiet heap growth with no direct signal. The draft spec must pick one of (a) streaming through to the caller incrementally so the router's buffer stays bounded at one chunk at a time, or (b) an explicit `MAX_STREAM_BUFFER_TOKENS` cap that aborts the stream when exceeded. Do not ship "accumulate until done" — that's exactly the failure mode backpressure exists to prevent.
 - Streaming + `callWithTimeout` — the timeout is per-call, not per-token-chunk. If a stream starts fast but stalls mid-response, the timeout still fires. Good. The existing `AbortSignal` threading already handles this.
 - `parseFailureError` handling — `postProcess` currently runs on the complete response. Streaming callers either can't use postProcess (schema checks need complete output) or postProcess runs on the accumulated buffer at stream end. Spec needs to decide.
 - Cost attribution for aborted streams — if the caller aborts mid-stream, the provider has already billed for every token emitted. The ledger needs to record partial token counts. This crosses into `llm-observability-ledger-generalisation-spec.md §17` "partial-external-success" territory and should coordinate with §1 of this brief.
