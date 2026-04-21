@@ -648,7 +648,261 @@ if (definition.actionCategory === 'api' && isCrmAction(action.actionType)) {
 
 ## Q4 — Inbound signal handling & event-driven subaccount conversion
 
-*(section appended below)*
+This is the most architecturally significant question in the brief. The answers are grouped into five sub-findings (4a-4e) that together describe the end-to-end flow from inbound reply to provisioned client subaccount.
+
+### Q4 Finding — 4a. Inbound email monitoring
+
+- `server/services/inboxService.ts` is **not** an email monitor. It aggregates `tasks` (status `inbox`), `reviewItems` (status `pending`/`edited_pending`), and failed `agentRuns` from the last 7 days — a human operator task queue (`:64-343`).
+- `server/services/emailService.ts` is outbound-only. It wraps Resend / SendGrid / SMTP send providers (`:232-273`). No `receiveEmail`, `pollInbox`, or webhook ingestion.
+- Webhook routes under `server/routes/webhooks/`: only `ghlWebhook.ts`, `slackWebhook.ts`, `teamworkWebhook.ts`. **No `/api/webhooks/email`, `/api/webhooks/resend`, `/api/webhooks/imap`.** `server/routes/webhooks.ts:28` only handles `POST /api/webhooks/callback/:executionId` (outbound engine return path).
+- Adapters — `server/adapters/index.ts` registers `ghl`, `stripe`, `teamwork`, `slack`. No email adapter.
+- `server/jobs/slackInboundJob.ts` shows the intended pattern (`SlackInboundPayload` at `:11-19`, `processSlackInbound()` at `:22`), but the job body at `:22-45` is a stub with `// TODO: Wire to agentExecutionService.startRun()`. The companion webhook (`slackWebhook.ts:107-157`) normalises inbound Slack events but only logs them.
+- **Contact record association**: `canonical_contacts.email` exists (`canonicalEntities.ts:21`) but there is **no index on email alone** (the only unique index is `(accountId, externalId)` at `:35`). `canonicalDataService.upsertContact()` (line 294) upserts by `(accountId, externalId)`. There is no `findContactByEmail()` service function.
+
+### Q4 Finding — 4b. Intent classification pattern
+
+A `classify_email` skill exists (`server/skills/classify_email.md`), registered in `skillExecutor.ts:742-756`:
+
+```ts
+classify_email: async (input) => {
+  return executeMethodologySkill('classify_email', input, {
+    template: {
+      emailReference: '', primaryIntent: '', urgency: '', sentiment: '',
+      routingAction: '', isAutomated: false, keySignals: [],
+      classificationNotes: '', suggestedReplyTone: '',
+    },
+    guidance: 'Follow the classify_email methodology in your skill context ...',
+  });
+},
+```
+
+**Critical: `executeMethodologySkill` (`skillExecutor.ts:4834`) is a scaffold returner, not an LLM call.** It returns `{ template, guidance }` as context; the agent LLM produces the classification as free text. The result is **not parsed or validated by the skill executor**.
+
+For machine-parseable structured LLM output, the canonical pattern is the playbook `agent_decision` step wrapped by `parseDecisionOutput()` in `server/lib/playbook/agentDecisionPure.ts:363-412`: (1) strips JSON wrapping, (2) parses, (3) Zod-validates against `agentDecisionOutputBaseSchema`, (4) validates `chosenBranchId`. Returns `{ ok: true, output }` or `{ ok: false, error }`. **Any conversion intent classifier should be wrapped in an `agent_decision` step to get machine-validated results.**
+
+The existing `classify_email` taxonomy is customer-support-focused (billing_dispute, cancellation_request, technical_support, etc.). A BD prospect-reply taxonomy (`positive_intent | negative_intent | out_of_office | not_ready | referral`) requires a new skill: `classify_prospect_reply.md`.
+
+`topicClassifier.ts` is keyword-based (`topicClassifierPure.ts:45-80`) and is only used for tool-topic filtering — not usable for nuanced intent.
+
+### Q4 Finding — 4c. Event-driven playbook triggers
+
+`agent_triggers` schema (`server/db/schema/agentTriggers.ts:24-26`) `eventType` is limited to:
+```
+'task_created' | 'task_moved' | 'agent_completed' |
+'org_task_created' | 'org_task_moved' | 'org_agent_completed'
+```
+Workspace-internal state events only. No `email_received`, `conversion_event`, `playbook_completed`, `state_changed`. No `cron` type (schedules go through `scheduled_tasks`).
+
+`triggerService.checkAndFire()` (`server/services/triggerService.ts:63-154`) fires **agent runs**, not playbook runs. The `org_*` variants are schema-declared but the service handler (`:66`) only accepts the three non-`org_*` types — half-implemented.
+
+**Playbook run entry points (all of them):**
+1. `POST /api/playbook-runs` (UI / API)
+2. `subaccountOnboardingService.autoStartOwedOnboardingPlaybooks()` — called from `POST /api/subaccounts:121-155`, driven by `modules.onboardingPlaybookSlugs` + `autoStartOnOnboarding: true`
+3. Portal onboarding flow at `portal.ts:663`
+
+**There is no mechanism to trigger a playbook from an external event (email, webhook, conversion).** `agentTriggers` can't do it — it only fires agent runs.
+
+**pg-boss chain pattern is established.** `playbookEngineService.enqueueTick()` (`:657`) uses `singletonKey`. `completeStepRun()` re-enqueues the tick (`:861`). The engine uses `pgboss.send()` for `AGENT_STEP_QUEUE` dispatch (`:1159`, `:1485`). Trigger service enqueues via `triggerJobSender()` (`:130`). The job-enqueues-job pattern is fully supported.
+
+### Q4 Finding — 4d. Programmatic subaccount creation
+
+**Three paths exist.**
+
+**Path 1 — HTTP route** (`server/routes/subaccounts.ts:73-166`):
+
+```ts
+const [sa] = await db.insert(subaccounts).values({
+  organisationId, name, slug: derivedSlug,
+  status: 'active', settings: settings ?? null,
+  createdAt: new Date(), updatedAt: new Date(),
+}).returning();
+```
+
+Post-creation fire-and-forget hooks:
+- `boardService.initSubaccountBoard(organisationId, sa.id)` (`:114`)
+- `subaccountOnboardingService.autoStartOwedOnboardingPlaybooks({ organisationId, subaccountId, startedByUserId: req.user.id })` (`:121-155`)
+
+**Path 2 — Config Agent action** (`configSkillHandlers.ts:264-307`):
+
+```ts
+export async function executeConfigCreateSubaccount(input, context) {
+  const name = String(input.name ?? '');
+  const slug = input.slug ? String(input.slug) : name.toLowerCase()...;
+  const [sa] = await db.insert(subaccounts).values({
+    organisationId: context.organisationId, name, slug, status: 'active',
+    createdAt: new Date(), updatedAt: new Date(),
+  }).returning();
+  boardService.initSubaccountBoard(context.organisationId, sa.id).catch(() => {});
+  await configHistoryService.recordHistory({...});
+  return { success: true, entityId: sa.id, name: sa.name, slug: sa.slug };
+}
+```
+
+**This path does NOT call `autoStartOwedOnboardingPlaybooks`.** It is callable from playbook `action_call` steps (allowlist at `server/lib/playbook/actionCallAllowlist.ts:36`) and from Configuration Assistant sessions.
+
+**Path 3 — `orgSubaccountService.ensureOrgSubaccount()`** (`:36-78`) creates the org sentinel subaccount. Not for client subaccounts.
+
+**Transaction boundary:** both Path 1 and Path 2 do single-statement inserts (no explicit transaction). Board init and playbook auto-start are intentionally outside — failure-isolated.
+
+**Default seeding:** neither path seeds default agents, skills, or CRM connector. Seeded columns are `organisationId`, `name`, `slug`, `status='active'`, plus schema defaults (`includeInOrgInbox=true`, `isOrgSubaccount=false`, `portalMode='hidden'`). **Nothing else.**
+
+**`config_create_subaccount` takes only `{ name, slug }`.** No parameters for prospect data, onboarding template override, conversion source, parent contact ID, or initial `settings`.
+
+### Q4 Finding — 4e. Conversion rules storage
+
+- **`conversion_events` table (`server/db/schema/conversionEvents.ts`) is page/funnel analytics** — scoped to `pageId`, no `organisationId` FK, eventType enum is `form_submitted | checkout_started | checkout_completed | checkout_abandoned | contact_created`. **Cannot be repurposed.**
+- `policy_rules` (`server/db/schema/policyRules.ts`) is per-org tool-slug gate config — tightly coupled to HITL review-gate decisions. Not a fit.
+- `agent_triggers` — closest conceptual match but fires agent runs, not playbooks, and its event types are workspace-internal.
+- `onboarding_bundle_configs` (`server/db/schema/onboardingBundleConfigs.ts`) is the per-org override of which playbook bundle runs on subaccount creation. Fires only on subaccount creation, not on configurable business events.
+
+**There is no `conversion_rules` table. No per-org config mapping `event_type` → `playbook_template` → `subaccount_defaults`.**
+
+### Q4 Gap
+
+**4a** — No inbound email webhook, no IMAP polling job, no email adapter, no `emailConversations` table, no `findContactByEmail()`, no index on `canonical_contacts.email`; `slackInboundJob.processSlackInbound` is a stub.
+**4b** — `classify_email` is support-focused; no prospect-reply taxonomy; `executeMethodologySkill` returns scaffolds (no machine-parseable result without `agent_decision` wrapper).
+**4c** — `agentTriggers` fires agent runs not playbooks; no `playbook_completed` / `email_received` / `conversion_event` trigger types; `org_*` types schema-present but handler-absent.
+**4d** — `config_create_subaccount` takes `{ name, slug }` only; no idempotency; no transaction spanning create + seed + playbook; no `conversion_source` / `prospect_id` FK on subaccounts.
+**4e** — No `conversion_rules` table; existing `conversion_events` unreusable.
+
+### Q4 Recommended approach — end-to-end sequence
+
+```
+Step 1 — INBOUND EMAIL RECEIVED
+  POST /api/webhooks/email/resend  (new route — mirror server/routes/webhooks/ghlWebhook.ts)
+  HMAC-verify the Resend signature; parse from/subject/body/message_id/in_reply_to.
+  Status: BUILD  (see Q6 for the full Resend webhook spec)
+
+Step 2 — CONTACT RECORD ASSOCIATION
+  findContactByEmail(orgId, fromAddress) — new service function in canonicalDataService
+  Returns { contact.id, contact.accountId } or null.
+  Requires: new index on canonical_contacts(organisation_id, email).
+  Status: BUILD
+
+Step 3 — INTENT CLASSIFICATION
+  Enqueue pg-boss job 'email-intent-classify' { orgId, contactId, subject, body, threadId, messageId }.
+  Handler runs a short agent_decision playbook step; output validated via parseDecisionOutput().
+  Taxonomy: positive_intent | negative_intent | out_of_office | not_ready | referral.
+  Status: BUILD — new skill server/skills/classify_prospect_reply.md, new 1-step playbook template.
+
+Step 4 — CONVERSION EVENT EMISSION
+  Insert into a NEW bd_conversion_events table (BD-scoped, distinct from page analytics):
+    { orgId, contactId, accountId, eventType, emailThreadId, classificationResult jsonb, occurredAt }
+  Add UNIQUE idempotencyKey = hash(orgId, contactId, threadId, eventType) to dedup duplicate replies.
+  Status: BUILD (new table)
+
+Step 5 — CONVERSION RULES LOOKUP (per-org config)
+  SELECT from conversion_rules WHERE orgId = $1 AND event_type = $2 AND is_active ORDER BY priority;
+  If no rule: silent skip (config-driven, not hardcoded).
+  Status: BUILD (new table — schema below)
+
+Step 6 — NEW SUBACCOUNT CREATION
+  db.transaction(async (tx) => {
+    const [sa] = await tx.insert(subaccounts).values({
+      organisationId,
+      name: deriveName(contact, account),
+      slug: deriveSlug(...),
+      status: 'active',
+      crm_type: rule.subaccountDefaults.crmType ?? 'synthetos_native',  // Q3 field
+      settings: {
+        conversionSource: 'email_reply',
+        prospectContactId: contact.id,
+        bdConversionEventId: event.id,
+      },
+    }).onConflictDoUpdate({ target: [subaccounts.organisationId, subaccounts.slug], ... }).returning();
+    return sa;
+  });
+  boardService.initSubaccountBoard(...).catch(...)  // outside tx
+  Status: BUILD — extend config_create_subaccount to accept prospectData + idempotencyKey.
+
+Step 7 — PROSPECT DATA SEEDING
+  Pass as initialInput to the onboarding playbook:
+    { companyName, domain, primaryContact: { name, email, phone },
+      gbpStatus, geoGapScore, notes, bdConversionEventId }
+  Stored at playbook_runs.context_json.input (see Q7).
+  Status: BUILD (plumbing only)
+
+Step 8 — ONBOARDING PLAYBOOK INSTANTIATION
+  playbookRunService.startRun({
+    organisationId, subaccountId: newSubaccount.id,
+    templateId: rule.targetPlaybookTemplateId,
+    initialInput: { ...prospectData, conversionSource: 'email_reply' },
+    startedByUserId: null,  // system-triggered — see Q7 gap on service-user
+    isOnboardingRun: true,
+    runMode: rule.playbookRunMode,
+    triggeredBy: 'job',  // new field proposed in Q7
+  })
+  Status: EXISTS (playbookRunService.startRun at :124) — see Q7 for the service-user caveat.
+```
+
+### Q4 Recommended approach — `conversion_rules` schema
+
+```sql
+CREATE TABLE conversion_rules (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
+
+  event_type      text NOT NULL
+    CHECK (event_type IN (
+      'email_reply_positive',
+      'email_reply_referral',
+      'manual_conversion',
+      'crm_stage_changed',
+      'form_submitted'
+    )),
+
+  -- JSONB filter e.g. { "pipeline_id": "xxx", "tags": ["prospect"] }
+  event_filter    jsonb NOT NULL DEFAULT '{}',
+
+  priority        integer NOT NULL DEFAULT 100,
+  is_active       boolean NOT NULL DEFAULT true,
+
+  -- Target playbook — either org template id or system template slug
+  target_playbook_template_id uuid REFERENCES playbook_templates(id),
+  target_system_playbook_slug text,
+
+  -- Defaults injected into the new subaccount (tags, portalMode, crm_type, etc.)
+  subaccount_defaults jsonb NOT NULL DEFAULT '{}',
+
+  requires_hitl     boolean NOT NULL DEFAULT false,
+  playbook_run_mode text NOT NULL DEFAULT 'supervised'
+    CHECK (playbook_run_mode IN ('auto', 'supervised', 'background')),
+
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz
+);
+
+CREATE INDEX conversion_rules_org_event_idx
+  ON conversion_rules(organisation_id, event_type, is_active)
+  WHERE deleted_at IS NULL;
+```
+
+Mirrors `agent_triggers` (per-org, `eventType`, `eventFilter` jsonb, `priority`, `isActive`) and `policy_rules` (per-org, priority-ordered, `conditions` jsonb). FK to `playbook_templates` (not `system_playbook_templates`) is intentional — orgs should fork and customise the system template before a rule references it.
+
+### Q4 Hardcoding risks — explicit enumeration
+
+1. **Risk:** "positive reply → create subaccount" wired directly in the webhook handler (analogous to how `ghlWebhook.ts` directly calls `canonicalDataService.upsertContact()`).
+   **Alternative:** webhook emits `bd_conversion_events` row; `conversion_rules` lookup decides playbook.
+2. **Risk:** hardcoding the BD agent's `agentId` / `subaccountId` in the classify job.
+   **Alternative:** resolve via the same `subaccountAgents` lookup pattern as `orgSubaccountMigrationJob.ts:158-195`.
+3. **Risk:** `if (result.intent === 'positive_intent') createSubaccount()` inside the job.
+   **Alternative:** emit event with classification; rules table handles branching.
+4. **Risk:** onboarding template slug hardcoded as a string.
+   **Alternative:** `conversion_rules.target_playbook_template_id` points to an org-forked template.
+5. **Risk:** `config_create_subaccount` staying at `{ name, slug }` — callers (playbooks) inline prospect-seeding logic.
+   **Alternative:** extend the action to accept `{ name, slug, settings, prospectData, conversionRuleId }`.
+6. **Risk:** storing org-specific logic (`if org == 'synthetos' { ... }`) inside the playbook template.
+   **Alternative:** `conversion_rules.subaccount_defaults` jsonb holds org-specific overrides; the template stays generic.
+
+### Q4 Risk / uncertainty
+
+- **Transaction atomicity** — `config_create_subaccount` has no explicit `db.transaction()`. Recommend writing `bd_conversion_events` first with `status: 'processing'`; the onboarding playbook start transitions it to `completed`; a watchdog re-processes `status='processing'` rows older than 5 minutes.
+- **Race conditions** — duplicate inbound replies could race the subaccount INSERT. Use the existing partial unique index on `subaccounts.slug` (`:81`) plus an idempotency key on `bd_conversion_events` derived from `hash(orgId + contactId + threadId + eventType)`.
+- **Multi-tenant correctness** — the Resend webhook must route to the correct org before `conversion_rules` lookup. Requires either a new `inbound_email_addresses` mapping table or per-org Resend API keys.
+- **`config_create_subaccount` not wired to onboarding start** — Path 2 skips `autoStartOwedOnboardingPlaybooks`. Design decision: wire it into the action, or leave it to the calling playbook to enqueue an explicit step. Recommend architect-agent review.
+- **Email → contact full-scan risk** — without an index on `canonical_contacts(organisation_id, email)`, Step 2 is O(n) per email. Must be fixed before volume load.
+- **Free-text vs structured classification** — `classify_email`'s scaffold pattern is fragile. Wrap in a playbook `agent_decision` step; don't inline-parse the LLM output.
 
 ---
 
