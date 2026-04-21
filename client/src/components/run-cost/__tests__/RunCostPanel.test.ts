@@ -141,6 +141,12 @@ test('sub-cent (< $0.01) → two significant figures', () => {
   assertEqual(formatCost(0.038), '$0.00038', 'sub-cent');
 });
 
+test('sub-cent scientific-notation fallback → decimal form', () => {
+  // 0.000012 cents = $1.2e-7 dollars. `toPrecision(2)` emits `"1.2e-7"`;
+  // the fallback re-renders via `toFixed(12)` + trailing-zero trim.
+  assertEqual(formatCost(0.000012), '$0.00000012', 'sub-micro scientific-notation path');
+});
+
 test('$0.01 ≤ cost < $1 → 4dp', () => {
   assertEqual(formatCost(47), '$0.4700', '$0.47');
 });
