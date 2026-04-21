@@ -86,3 +86,20 @@ The following schema changes need a DB migration before testing:
 - `task_deliverables` table: new `deleted_at` column (for soft-delete support)
 
 Generate with: `npm run db:generate` then `npm run migrate`
+
+---
+
+## Hermes Tier 1 — Deferred Item (S1 from pr-reviewer)
+
+**Captured**: 2026-04-21  
+**Branch**: `claude/hermes-audit-tier-1-qzqlD`
+
+### §6.8 errorMessage gap on normal-path failed runs
+
+**File**: `server/services/agentExecutionService.ts` lines 1350-1368
+
+When `finalStatus` is `'failed'` but the loop produces a non-empty `loopResult.summary` via the normal terminal path (not a thrown exception), `errorMessage: null` is passed to `extractRunInsights`. The §6.8 short-summary guard then falls back entirely to the `hasMeaningfulSummary >= 100` check. A failed run with a 50-char summary but no thrown exception gets its memory extraction skipped — even if `agent_runs.errorMessage` was set before the loop terminated.
+
+**Why it's deferred**: Pre-existing limitation. Documented at lines 1355-1360 as known; acceptable per spec §11.4 deferred items. The §6.8 "either signal is sufficient" contract is only half-enforced for normal-path failures.
+
+**Suggested fix**: Thread `errorMessage` from `preFinalizeMetadata` (already in scope) into the extraction call when `derivedRunResultStatus === 'failed'`. No new DB read required if a future loop result carries an `errorMessage` field.
