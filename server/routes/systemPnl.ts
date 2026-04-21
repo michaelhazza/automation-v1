@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { systemPnlService } from '../services/systemPnlService.js';
+import * as llmInflightRegistry from '../services/llmInflightRegistry.js';
+import { INFLIGHT_SNAPSHOT_HARD_CAP } from '../config/limits.js';
 import type { PnlResponse, PnlResponseMeta } from '../../shared/types/systemPnl.js';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +118,30 @@ router.get(
     const limit = Math.min(Number(req.query.limit) || 10, 100);
     const data = await systemPnlService.getTopCalls({ month }, limit);
     res.json(wrap(data, month));
+  }),
+);
+
+// ── LLM in-flight snapshot (spec tasks/llm-inflight-realtime-tracker-spec.md §5) ──
+// First-paint + reconnect resync for the In-Flight tab. The socket room
+// `system:llm-inflight` carries live add/remove events; this endpoint is
+// the authoritative read used on mount and after a Redis partition.
+//
+// This endpoint deliberately does NOT use the `wrap()` helper that the
+// other /api/admin/llm-pnl/* routes use. Spec §5 pins the in-flight
+// response shape as its own envelope — `{ entries, generatedAt, capped }`
+// — with `generatedAt` inline rather than in a nested `meta` block. That
+// shape is what `InFlightSnapshotResponse` exports for the client.
+router.get(
+  '/api/admin/llm-pnl/in-flight',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, INFLIGHT_SNAPSHOT_HARD_CAP)
+      : INFLIGHT_SNAPSHOT_HARD_CAP;
+    const snapshot = llmInflightRegistry.snapshot(limit);
+    res.json(snapshot);
   }),
 );
 

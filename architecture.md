@@ -2495,6 +2495,24 @@ A separate internal timeout guards every provider call. `callWithTimeout` (`serv
 
 See spec §17 for why this is the internal mitigation rather than a provider-header fix: no LLM provider currently documents an idempotency header on its generation endpoints (verified April 2026 — Anthropic, OpenAI, OpenRouter, Gemini). Test pins live in `server/services/__tests__/llmRouterTimeoutPure.test.ts` (timeout guard) and `server/services/__tests__/llmRouterErrorMappingPure.test.ts` (ledger-status classifier — 14 cases, including the defensive "classifier never returns an undefined status" property test).
 
+#### LLM in-flight registry (spec `tasks/llm-inflight-realtime-tracker-spec.md`)
+
+The ledger is append-only and only observable after a call completes. The in-flight registry fills the gap between dispatch and completion for system admins — a real-time view of every LLM call currently running, with attribution and elapsed time.
+
+- **Interception point.** `registry.add()` fires inside the provider-retry loop in `llmRouter.ts`, **after** budget reservation and **immediately before** each `providerAdapter.call()` dispatch. `registry.remove()` fires (a) per intermediate retry failure with `terminalStatus='error'` + `ledgerRowId=null`, and (b) once at the end with `ledgerRowId` + `ledgerCommittedAt` populated after the ledger upsert. Pre-dispatch terminal states (`budget_blocked`, `rate_limited`) never add — they write the blocked-row and throw without a registry footprint.
+- **Runtime key.** `runtimeKey = ${idempotencyKey}:${attempt}:${startedAt}`. Crash-restart safe (same idempotencyKey + attempt but different startedAt → different runtimeKey), retry safe (same idempotencyKey + startedAt but different attempt → different runtimeKey).
+- **State machine (pure).** `server/services/llmInflightRegistryPure.ts` owns the add / remove / incoming-Redis-event transitions. Monotonic `stateVersion` ladder — `1=active, 2=removed` — plus a `startedAt` anchor so a late duplicate add can never resurrect a removed entry. Every transition's outcome tag drives a structured debug log (`add_noop_already_exists`, `remove_noop_already_removed`, `remove_noop_missing_key`, `event_stale_ignored`) so steady-state rates are visible and fanout loops diagnosable.
+- **Multi-instance fanout.** `server/services/llmInflightRegistry.ts` optionally connects to Redis pub/sub on channel `llm-inflight` when `REDIS_URL` is set and the `ioredis` module is installed. Local-only mode is the default — the feature works single-instance without Redis. Instances skip their own messages via an `origin` tag. On Redis partition, clients recover cross-fleet consistency via the snapshot endpoint (authoritative read) rather than server-side event replay.
+- **Bounded memory.** `MAX_INFLIGHT_ENTRIES = 5_000` (`server/config/limits.ts`). On overflow, the oldest `active` slot is force-evicted and the removal emission carries `terminalStatus: 'evicted_overflow'` + `evictionContext: { activeCount, capacity }` — sized at 100× steady-state headroom so any eviction is a real signal.
+- **Deadline-based sweep.** Every slot carries `deadlineAt = startedAt + timeoutMs + INFLIGHT_DEADLINE_BUFFER_MS` (30 s). A `60s ± 5s` jittered sweep reaps entries past `deadlineAt` as `terminalStatus: 'swept_stale'` + `sweepReason: 'deadline_exceeded'`. In practice this only fires on crashes between `add()` and `remove()` — the router's own `callWithTimeout` already aborts at `timeoutMs`.
+- **Admin surfaces.**
+  - `GET /api/admin/llm-pnl/in-flight?limit=500` — authoritative snapshot for first paint + reconnect resync. Hard cap 500; sort `startedAt DESC, runtimeKey DESC` for stable repeat reads.
+  - Socket room `system:llm-inflight` — events `llm-inflight:added` / `llm-inflight:removed`. Join handler in `server/websocket/rooms.ts` silently rejects non-`system_admin` sockets.
+  - `/system/llm-pnl` → In-Flight tab (`client/src/components/system-pnl/PnlInFlightTable.tsx`). Physically first, default-selected view stays on P&L.
+- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When the success-path upsert hits the `where: status != 'success'` guard on an already-success row, `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
+- **Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via `createEvent` with `byCallSite` + `byProvider` breakdowns — stuck workers or provider-specific hangs are spottable without digging logs.
+- **Pure tests pin every state-machine invariant:** `server/services/__tests__/llmInflightRegistryPure.test.ts`.
+
 ### Cost aggregate dimensions (spec §6.2)
 
 `cost_aggregates` is the pre-rolled read model for every P&L dashboard. Entity types:

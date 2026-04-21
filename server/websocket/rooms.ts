@@ -114,6 +114,20 @@ export function handleConnection(socket: Socket): void {
     socket.leave(`conversation:${conversationId}`);
   });
 
+  // ── Join the system-wide LLM in-flight room (system-admin only) ─────
+  // Spec tasks/llm-inflight-realtime-tracker-spec.md §7. The room carries
+  // cross-tenant attribution fields — non-admin sockets are silently
+  // rejected to match the pattern used elsewhere in this file (no error
+  // disclosure that a privileged room exists).
+  socket.on('join:system-llm-inflight', () => {
+    if (socket.data.user?.role !== 'system_admin') return;
+    socket.join('system:llm-inflight');
+  });
+
+  socket.on('leave:system-llm-inflight', () => {
+    socket.leave('system:llm-inflight');
+  });
+
   // ── Join a playbook run room (validated against org ownership) ──────
   socket.on('join:playbook-run', async (runId: unknown) => {
     if (!isValidUUID(runId)) return;

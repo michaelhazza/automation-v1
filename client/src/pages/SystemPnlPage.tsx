@@ -20,7 +20,14 @@ import PnlByProviderModelTable from '../components/system-pnl/PnlByProviderModel
 import PnlTrendChart from '../components/system-pnl/PnlTrendChart';
 import PnlTopCallsList from '../components/system-pnl/PnlTopCallsList';
 import PnlCallDetailDrawer from '../components/system-pnl/PnlCallDetailDrawer';
+import PnlInFlightTable from '../components/system-pnl/PnlInFlightTable';
 import type { PnlSortDir, PnlSortState } from '../components/system-pnl/PnlColHeader';
+
+// Top-level view toggle. 'in-flight' is the physically first tab (spec
+// tasks/llm-inflight-realtime-tracker-spec.md §6) but the page defaults
+// to 'pnl' — the financial view is primary; in-flight is diagnostic
+// (spec §12 round 1: "Keep current default").
+type SystemView = 'in-flight' | 'pnl';
 
 // Sort state is per-tab — each grouping tracks its own sort independently so
 // switching tabs preserves the active order. Keys are table-specific; page
@@ -41,6 +48,7 @@ function currentMonth(): string {
 }
 
 export default function SystemPnlPage() {
+  const [view, setView] = useState<SystemView>('pnl');
   const [month, setMonth] = useState<string>(currentMonth());
   const [grouping, setGrouping] = useState<PnlGrouping>('organisation');
   const [topCallsLimit, setTopCallsLimit] = useState<number>(10);
@@ -139,7 +147,7 @@ export default function SystemPnlPage() {
       <div className="max-w-7xl mx-auto px-6 py-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">System P&amp;L</h1>
             <p className="text-sm text-slate-500 mt-1">
@@ -147,7 +155,7 @@ export default function SystemPnlPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {anySortActive && (
+            {view === 'pnl' && anySortActive && (
               <button
                 onClick={clearAllSorts}
                 className="text-sm px-3 py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
@@ -155,27 +163,61 @@ export default function SystemPnlPage() {
                 Clear all
               </button>
             )}
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="text-sm border border-slate-300 rounded px-2 py-1"
-            />
-            <button
-              onClick={fetchAll}
-              disabled={loading}
-              className="text-sm px-3 py-1.5 border border-slate-300 rounded hover:bg-slate-100 disabled:opacity-50"
-            >
-              {loading ? 'Refreshing…' : 'Refresh'}
-            </button>
-            <button
-              onClick={handleExportCsv}
-              className="text-sm px-3 py-1.5 bg-slate-900 text-white rounded hover:bg-slate-800"
-            >
-              Export CSV
-            </button>
+            {view === 'pnl' && (
+              <>
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  className="text-sm border border-slate-300 rounded px-2 py-1"
+                />
+                <button
+                  onClick={fetchAll}
+                  disabled={loading}
+                  className="text-sm px-3 py-1.5 border border-slate-300 rounded hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {loading ? 'Refreshing…' : 'Refresh'}
+                </button>
+                <button
+                  onClick={handleExportCsv}
+                  className="text-sm px-3 py-1.5 bg-slate-900 text-white rounded hover:bg-slate-800"
+                >
+                  Export CSV
+                </button>
+              </>
+            )}
           </div>
         </div>
+
+        {/* Top-level view toggle. In-flight physically first (spec §6),
+            P&L default-selected (spec §12 round 1). */}
+        <div className="mb-6 inline-flex rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
+          <button
+            onClick={() => setView('in-flight')}
+            className={
+              'px-3 py-1.5 text-sm font-medium rounded transition-colors ' +
+              (view === 'in-flight' ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-slate-50')
+            }
+          >
+            In-Flight
+          </button>
+          <button
+            onClick={() => setView('pnl')}
+            className={
+              'px-3 py-1.5 text-sm font-medium rounded transition-colors ' +
+              (view === 'pnl' ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-slate-50')
+            }
+          >
+            P&amp;L
+          </button>
+        </div>
+
+        {view === 'in-flight' && (
+          <PnlInFlightTable onOpenDetail={setSelectedCallId} />
+        )}
+
+        {view === 'pnl' && (
+          <>
 
         {/* Error banner */}
         {error && (
@@ -259,6 +301,8 @@ export default function SystemPnlPage() {
             <span className="text-slate-400 cursor-default" title="Deferred">Billing rules</span>
           </div>
         </div>
+          </>
+        )}
       </div>
 
       <PnlCallDetailDrawer
