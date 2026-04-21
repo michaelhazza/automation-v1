@@ -184,12 +184,6 @@ Low for code; high for schema cleanliness. `nextRunAt` display consumers (`sched
 
 ---
 
-## Area 2 — `scheduled_tasks` + `scheduledTaskService`
-
-*(section appended below)*
-
----
-
 ## Area 3 — `onboarding_bundle_configs` + `subaccountOnboardingService`
 
 ### What exists
