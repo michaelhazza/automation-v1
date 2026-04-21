@@ -54,12 +54,15 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
   let decayed = 0;
 
   try {
-    // Fetch all active entries with quality scoring data
+    // Fetch all active entries with quality scoring data. Phase B §6.6 —
+    // `entryType` is now passed into `computeDecayFactor` so per-type
+    // half-life rates apply.
     const entries = await db
       .select({
         id: workspaceMemoryEntries.id,
         qualityScore: workspaceMemoryEntries.qualityScore,
         lastAccessedAt: workspaceMemoryEntries.lastAccessedAt,
+        entryType: workspaceMemoryEntries.entryType,
       })
       .from(workspaceMemoryEntries)
       .where(
@@ -80,6 +83,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
           qualityScore: currentScore,
           lastAccessedAt: entry.lastAccessedAt,
           now,
+          entryType: entry.entryType,
         });
 
         if (factor < 1.0) {

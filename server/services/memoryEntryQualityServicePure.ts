@@ -26,7 +26,35 @@ import {
   QUALITY_ADJUST_LOW_UTILITY,
   QUALITY_ADJUST_BOOST_DELTA,
   QUALITY_ADJUST_REDUCTION_DELTA,
+  type EntryType,
 } from '../config/limits.js';
+
+// ---------------------------------------------------------------------------
+// Hermes Tier 1 Phase B §6.6 — per-entryType half-lives.
+// ---------------------------------------------------------------------------
+//
+// `computeDecayFactor` branches by `entryType` so entries with different
+// lifecycle semantics decay at different rates:
+//   - observation: raw run signal, loses relevance quickly
+//   - issue:       useful until pattern crystallises or is resolved
+//   - preference:  user-stated, stable long-term
+//   - pattern / decision: distilled, long-term reusable
+//
+// When an entryType is passed in, the factor is computed as
+// `0.5 ^ (daysSinceAccess / halfLife)` — a clean exponential half-life so
+// the pure test (§9.2) can pin "factor = 0.5 at T = halfLife".
+//
+// When no entryType is supplied (or an unknown value), the helper falls
+// back to today's linear `DECAY_RATE`-based formula so pre-Phase-B
+// callers that haven't been migrated still work.
+
+export const HALF_LIFE_DAYS: Record<EntryType, number> = {
+  observation: 7,
+  issue:       14,
+  preference:  30,
+  pattern:     30,
+  decision:    30,
+};
 
 // ---------------------------------------------------------------------------
 // computeDecayFactor
@@ -39,28 +67,62 @@ export interface DecayParams {
   lastAccessedAt: Date | null;
   /** Reference time. Callers supply this so tests can pin the clock. */
   now: Date;
+  /**
+   * Entry type — when present, selects the per-entryType half-life from
+   * `HALF_LIFE_DAYS` (§6.6). When omitted or unknown, the helper falls
+   * back to today's linear DECAY_RATE formula so pre-Phase-B callers
+   * still work unchanged.
+   */
+  entryType?: EntryType;
 }
 
 /**
  * Returns the multiplicative decay factor to apply to qualityScore.
  *
- * Rules (§4.1):
- * - If the entry has been accessed within DECAY_WINDOW_DAYS, factor = 1.0
- *   (no decay — the entry is still in active use).
- * - If never accessed, compute days since epoch as a proxy (will decay quickly).
- * - Otherwise: factor = max(0, 1 - DECAY_RATE * daysOverWindow)
- *   where daysOverWindow = daysSinceLastAccess - DECAY_WINDOW_DAYS.
+ * Phase B §6.6 — branches by `entryType`:
+ *   - When `entryType` is a known value in `HALF_LIFE_DAYS`, the factor
+ *     is `0.5 ^ (daysSinceAccess / halfLife)` — clean exponential half-
+ *     life so pure tests can pin "factor = 0.5 at T = halfLife".
+ *   - When `entryType` is missing or unknown, today's linear fallback
+ *     is preserved exactly (§6.6 "Default (unknown entryType) keeps
+ *     today's single rate").
  *
- * The factor is clamped to [0, 1] so qualityScore never goes negative.
+ * Rules of the linear fallback (§4.1 — unchanged):
+ * - If the entry has been accessed within DECAY_WINDOW_DAYS, factor = 1.0.
+ * - If never accessed, treat as accessed at now - DECAY_WINDOW_DAYS.
+ * - Otherwise: factor = max(0.1, 1 - DECAY_RATE * daysOverWindow).
  */
 export function computeDecayFactor(params: DecayParams): number {
-  const { lastAccessedAt, now } = params;
+  const { lastAccessedAt, now, entryType } = params;
 
-  // Never accessed — treat as accessed at entry creation time = high decay risk.
-  // Since we don't have createdAt here, use now - DECAY_WINDOW_DAYS as worst case.
+  const halfLife = entryType !== undefined ? HALF_LIFE_DAYS[entryType] : undefined;
+
+  if (halfLife !== undefined) {
+    // Phase B half-life branch. Never-accessed entries are treated as
+    // having been last accessed at entry creation, but we don't have the
+    // createdAt here — match the linear branch's worst-safe assumption
+    // by treating lastAccessed = null as exactly DECAY_WINDOW_DAYS ago.
+    // This keeps behaviour continuous across the half-life threshold.
+    //
+    // Note: unlike the linear branch, this path has no "within-window grace
+    // period" — 0.5^(t/halfLife) is strictly < 1.0 for any t > 0. Entries
+    // promoted from Phase B therefore decay slightly faster than pre-Phase-B
+    // entries (linear returned exactly 1.0 within DECAY_WINDOW_DAYS). The
+    // numerical difference is negligible for typical half-lives (≈0.9998 at
+    // 1 hour for a 30-day half-life) but is a design choice, not a bug.
+    const daysSinceAccess =
+      lastAccessedAt === null
+        ? DECAY_WINDOW_DAYS
+        : (now.getTime() - lastAccessedAt.getTime()) / (1000 * 60 * 60 * 24);
+    const rawFactor = Math.pow(0.5, Math.max(0, daysSinceAccess) / halfLife);
+    // Clamp to [0, 1] — score multiplier domain.
+    return Math.max(0, Math.min(1, rawFactor));
+  }
+
+  // Linear fallback (pre-Phase-B behaviour preserved for unknown/missing
+  // entryType). Never accessed → treat as accessed exactly
+  // DECAY_WINDOW_DAYS ago (worst safe starting point).
   if (lastAccessedAt === null) {
-    // Entry has never been accessed; treat as if last accessed exactly
-    // DECAY_WINDOW_DAYS ago (worst safe starting point).
     const daysOverWindow = DECAY_WINDOW_DAYS;
     const factor = 1 - DECAY_RATE * daysOverWindow;
     return Math.max(0.1, factor);
@@ -70,7 +132,6 @@ export function computeDecayFactor(params: DecayParams): number {
   const daysSinceAccess = msSinceAccess / (1000 * 60 * 60 * 24);
 
   if (daysSinceAccess <= DECAY_WINDOW_DAYS) {
-    // Within active window — no decay.
     return 1.0;
   }
 

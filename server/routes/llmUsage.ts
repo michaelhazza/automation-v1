@@ -357,6 +357,20 @@ router.get(
       throw { statusCode: 404, message: 'Run not found' };
     }
 
+    // Hermes Tier 1 Phase A — §5.4, §8.2.
+    //
+    // `totalCostCents` and `requestCount` come from `cost_aggregates` so
+    // their semantics (which include failed-call cost) are preserved for
+    // existing consumers. The four new fields — `llmCallCount`,
+    // `totalTokensIn/Out`, and `callSiteBreakdown` — are computed against
+    // the `llm_requests_all` view (migration 0189) so runs older than
+    // `LLM_LEDGER_RETENTION_MONTHS` still report correct values after the
+    // nightly archive job moves their rows into `llm_requests_archive`.
+    // All four share the same `status IN ('success','partial')` filter so
+    // the UI can reason about a single set of requests; errored calls are
+    // excluded from the new fields by design (their cost is counted in
+    // `totalCostCents` via `cost_aggregates`, which is the one
+    // intentional asymmetry — see §5.4).
     const [runAgg] = await db.select().from(costAggregates).where(
       and(
         eq(costAggregates.entityType, 'run'),
@@ -366,7 +380,58 @@ router.get(
       ),
     );
 
-    res.json(runAgg ?? { entityId: runId, totalCostCents: 0, requestCount: 0 });
+    const [ledgerTotals] = await db.execute<{
+      llm_call_count: number | string;
+      tokens_in:      number | string | null;
+      tokens_out:     number | string | null;
+    }>(sql`
+      SELECT
+        COUNT(*)::int                       AS llm_call_count,
+        COALESCE(SUM(tokens_in), 0)::int    AS tokens_in,
+        COALESCE(SUM(tokens_out), 0)::int   AS tokens_out
+      FROM llm_requests_all
+      WHERE run_id = ${runId}
+        AND status IN ('success', 'partial')
+    `);
+
+    const callSiteRows = await db.execute<{
+      call_site:     'app' | 'worker' | string;
+      cost_cents:    number | string | null;
+      request_count: number | string;
+    }>(sql`
+      SELECT
+        call_site,
+        COALESCE(SUM(cost_with_margin_cents), 0)::int AS cost_cents,
+        COUNT(*)::int                                 AS request_count
+      FROM llm_requests_all
+      WHERE run_id = ${runId}
+        AND status IN ('success', 'partial')
+      GROUP BY call_site
+    `);
+
+    const callSiteBreakdown = {
+      app:    { costCents: 0, requestCount: 0 },
+      worker: { costCents: 0, requestCount: 0 },
+    };
+    for (const row of callSiteRows) {
+      const bucket =
+        row.call_site === 'worker' ? callSiteBreakdown.worker :
+        row.call_site === 'app'    ? callSiteBreakdown.app    :
+        null;
+      if (!bucket) continue; // Defensive: ignore any unexpected call_site value
+      bucket.costCents    = Number(row.cost_cents ?? 0);
+      bucket.requestCount = Number(row.request_count ?? 0);
+    }
+
+    res.json({
+      entityId:       runAgg?.entityId ?? runId,
+      totalCostCents: runAgg?.totalCostCents ?? 0,
+      requestCount:   runAgg?.requestCount   ?? 0,
+      llmCallCount:   Number(ledgerTotals?.llm_call_count ?? 0),
+      totalTokensIn:  Number(ledgerTotals?.tokens_in      ?? 0),
+      totalTokensOut: Number(ledgerTotals?.tokens_out     ?? 0),
+      callSiteBreakdown,
+    });
   }),
 );
 

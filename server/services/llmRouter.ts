@@ -1,9 +1,10 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
+import { llmRequests, ieeRuns, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
 import { createGeneration, createEvent } from '../lib/tracing.js';
 import type { TaskType, SourceType, ExecutionPhase, RoutingMode, CallSite } from '../db/schema/index.js';
 import { RouterContractError } from '../../shared/iee/index.js';
+import { FailureError } from '../../shared/iee/failure.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
@@ -236,6 +237,30 @@ function isNonRetryableError(err: unknown): boolean {
   if (e.code === 'PROVIDER_TIMEOUT') return true;
   const code = (e.code ?? '').toLowerCase();
   return code.includes('auth') || code.includes('invalid') || code.includes('bad_request');
+}
+
+// ---------------------------------------------------------------------------
+// IEE run-id resolver (Hermes Tier 1 Phase C §7.6)
+// ---------------------------------------------------------------------------
+//
+// The cost breaker requires an `agent_runs.id` (`runId`) to look up the
+// per-run cost ceiling. IEE-sourced calls (`sourceType='iee'`) may or may
+// not carry `runId` directly; when they don't, `ieeRunId` is the handle
+// and the parent `agent_run_id` lives on `iee_runs`.
+//
+// Kept local to the router per §7.6: the breaker stays agnostic about how
+// its `runId` was derived, and the router already owns `iee_runs` reads
+// for other routing metadata. One indexed primary-key lookup per
+// `routeCall`; no memoisation across calls (the cache key would be
+// `routeCall` invocation itself, and each invocation runs once).
+async function resolveRunIdFromIee(ieeRunId: string | undefined): Promise<string | null> {
+  if (!ieeRunId) return null;
+  const [row] = await db
+    .select({ agentRunId: ieeRuns.agentRunId })
+    .from(ieeRuns)
+    .where(eq(ieeRuns.id, ieeRunId))
+    .limit(1);
+  return row?.agentRunId ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -774,6 +799,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
+    // Phase C breaker is NOT called on the failure path — failure rows record
+    // costWithMarginCents=0 and do not contribute to per-run spend. If partial-
+    // cost-on-failure is ever introduced, the breaker would need wiring here too.
     const failureInsertedRows = await db
       .insert(llmRequests)
       .values({
@@ -1002,20 +1030,110 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     })
     .returning({ id: llmRequests.id });
 
-  // ── 12a. Remove the in-flight registry entry for the successful attempt ──
+  const successLedgerRowId = successInsertedRows[0]?.id ?? null;
+
+  // ── 12a. Hermes Tier 1 Phase C — runaway-loop cost breaker ───────────────
+  //
+  // Call the direct-ledger breaker AFTER the ledger row is durably written
+  // and BEFORE the in-flight registry is cleaned up. Ordering rationale
+  // pinned in tasks/hermes-audit-tier-1-spec.md §7.3 / §7.4 / §7.4.1:
+  //
+  //   1. Ledger write first → cost attribution is intact regardless of
+  //      whether the breaker trips. The money was already spent with the
+  //      provider; recording it is non-negotiable.
+  //   2. Direct-ledger read (not cost_aggregates) → cost_aggregates is
+  //      updated asynchronously by `routerJobService.enqueueAggregateUpdate`
+  //      below, so a rollup-based read would miss this call's cost and
+  //      inflate worst-case overshoot by the aggregation-interval's worth
+  //      of concurrent traffic.
+  //   3. `insertedLedgerRowId` threaded through as REQUIRED parameter →
+  //      the helper performs a row-visibility check and fails closed on
+  //      null or not-visible. Structural guarantee against a future
+  //      refactor that swaps the call above the ledger insert.
+  //   4. Skip entirely when runId cannot be resolved (sourceType ∈
+  //      {'system','analyzer'} have no run context; IEE runs map via
+  //      `resolveRunIdFromIee` below). See §7.5 / §7.6.
+  //   5. Fail-open on infra errors (non-'cost_limit_exceeded' throws) →
+  //      the breaker is secondary protection; a DB hiccup in the breaker's
+  //      own read must not take down the LLM path, which is the primary
+  //      business function. `costBreaker.infra_failure` is the signal ops
+  //      uses to notice.
+  //
+  // If the breaker throws `cost_limit_exceeded`, the in-flight registry
+  // entry is orphaned until the sweep runs — acceptable per §7.3.2 because
+  // the sweep is the existing safety net for orphaned entries and the
+  // three-branch cleanup pattern above predates Phase C.
+  const breakerRunId = ctx.runId ?? (await resolveRunIdFromIee(ctx.ieeRunId));
+  if (breakerRunId) {
+    if (!successLedgerRowId) {
+      // Upsert hit the `where status != 'success'` guard — the row already exists as a success
+      // (idempotency replay). The cost was already counted on the first insert; skip the breaker.
+      console.debug('[llmRouter] costBreaker.skip_idempotency_replay', { correlationId: idempotencyKey });
+    } else {
+      try {
+        const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');
+        await assertWithinRunBudgetFromLedger({
+          runId:               breakerRunId,
+          insertedLedgerRowId: successLedgerRowId,
+          subaccountAgentId:   ctx.subaccountAgentId ?? null,
+          organisationId:      ctx.organisationId,
+          // The router ctx does not carry a distinct correlationId; the LLM
+          // idempotencyKey is the stable per-call identifier we thread
+          // through downstream logs and the breaker's trip payload.
+          correlationId:       idempotencyKey,
+        });
+        console.debug('[llmRouter] costBreaker.checked', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+        });
+      } catch (err) {
+        const isExpectedBreakerTrip =
+          err instanceof FailureError &&
+          err.failure.failureReason === 'internal_error' &&
+          err.failure.failureDetail === 'cost_limit_exceeded';
+        if (isExpectedBreakerTrip) {
+          // Commit the reservation and enqueue the aggregate update before
+          // rethrowing — without these calls the over-budget call's cost stays
+          // locked in an active reservation and cost_aggregates never receives
+          // the row, so RunCostPanel and aggregate-backed readers permanently
+          // undercount the triggering call's spend. Both calls are best-effort:
+          // failures here must not mask the cost_limit_exceeded error.
+          budgetService.commitReservation(reservationId, costResult.costWithMarginCents).catch((e) => {
+            console.error('[llmRouter] costBreaker.commit_reservation_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+          enqueueAggregateUpdate(idempotencyKey).catch((e) => {
+            console.error('[llmRouter] costBreaker.enqueue_aggregate_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+          throw err;
+        }
+        console.error('[llmRouter] costBreaker.infra_failure', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+          error:         err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  // ── 12b. Remove the in-flight registry entry for the successful attempt ──
   // Emitted AFTER the ledger upsert so `ledgerRowId` + `ledgerCommittedAt`
   // are populated on the removal payload (spec §5). When the upsert hits
   // the `where: status != 'success'` guard on an already-success row,
   // `.returning()` comes back empty — we fall back to `null` and the UI
   // retries via idempotencyKey.
   if (currentRuntimeKey) {
-    const ledgerRowId = successInsertedRows[0]?.id ?? null;
     inflightRegistry.remove({
       runtimeKey:        currentRuntimeKey,
       terminalStatus:    'success',
       completedAt:       new Date().toISOString(),
-      ledgerRowId,
-      ledgerCommittedAt: ledgerRowId ? new Date().toISOString() : null,
+      ledgerRowId:       successLedgerRowId,
+      ledgerCommittedAt: successLedgerRowId ? new Date().toISOString() : null,
       sweepReason:       null,
       evictionContext:   null,
     });
