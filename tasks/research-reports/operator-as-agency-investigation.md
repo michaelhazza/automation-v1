@@ -1638,4 +1638,124 @@ A conservative ship gate: **can a second org be onboarded to the operator-as-age
 
 ## Appendix A — Key files by subsystem
 
-*(section appended below)*
+Consolidated index of every `file:line` cited in the report, grouped by the subsystem an implementer will be working in. All paths are relative to repo root.
+
+### Canonical data layer
+
+- `server/db/schema/canonicalEntities.ts:12-47` — `canonical_contacts` Drizzle definition; also `canonical_accounts`, `canonical_opportunities`, etc.
+- `server/db/schema/clientPulseCanonicalTables.ts:56-68` — uniqueness-mode conventions (GLOBAL / SCOPED); `:110` `canonical_subaccount_mutations`.
+- `server/db/schema/canonicalRowSubaccountScopes.ts`
+- `server/db/schema/conversionEvents.ts` (page-funnel analytics — **not** BD conversion; cannot be repurposed).
+- `server/config/canonicalDictionary.ts` + `server/services/canonicalDictionary/canonicalDictionaryRegistry.ts:17-590` — registry entries required for every canonical table.
+- `server/config/rlsProtectedTables.ts` — RLS allowlist.
+- `migrations/0044_integration_layer_canonical_schema.sql:60-79` — original `canonical_contacts`.
+- `migrations/0166_p3a_canonical_columns.sql:20-35` — visibility-scope columns.
+- `migrations/0168_p3b_canonical_rls.sql:68-113` — RLS policies.
+
+### Subaccount / org / principal
+
+- `server/db/schema/subaccounts.ts:17-85` — current columns (no `crm_type`).
+- `server/db/schema/organisations.ts`, `organisationSecrets.ts`.
+- `server/services/orgSubaccountService.ts:36-78` — `ensureOrgSubaccount()`.
+- `server/routes/subaccounts.ts:73-166` — create-subaccount route + post-create hooks.
+- `server/services/configSkillHandlers.ts:264-307` — `executeConfigCreateSubaccount()` (playbook-callable).
+- `server/lib/playbook/actionCallAllowlist.ts:36` — `config_create_subaccount` allowlist entry.
+- `server/db/withPrincipalContext.ts:21-54` — principal context SQL.
+- `server/lib/createWorker.ts:60-79` — job worker auto-scopes `withOrgTx` from payload IDs.
+
+### pg-boss / scheduling
+
+- `server/lib/pgBossInstance.ts:13-24` — singleton init.
+- `server/services/queueService.ts:123-128, 421-429, 548-629, 812, 946, 998` — queue registrations, worker configs.
+- `server/config/jobConfig.ts` — queue config registry (add `lead-discover` + `email-inbound-poll` + `email-reply-classify` here).
+- `server/jobs/connectorPollingTick.ts:46-52` — canonical `singletonKey` usage example.
+- `server/services/agentScheduleService.ts:61-87, 261-265` — per-subaccount cron scheduling pattern.
+- `server/services/scheduledTaskService.ts:523-568, 718` — RRULE tick + non-atomic `nextRunAt` update.
+- `server/db/schema/agentTriggers.ts:24-26` — event trigger types (task_*, agent_completed, org_*).
+- `server/db/schema/scheduledTasks.ts:34` — RRULE storage.
+- `server/db/schema/subaccountAgents.ts:32` — `scheduleCron` column.
+- `server/services/intelligenceSkillExecutor.ts:601-605` — per-subaccount event-driven `sendJob` example.
+
+### Agent execution
+
+- `server/services/agentExecutionService.ts:285-380` — `executeRun` for scheduled jobs.
+- `server/db/schema/agentRuns.ts:182` — `principalType` default.
+- `server/services/triggerService.ts:63-154` — `checkAndFire()` (agent runs only).
+- `server/services/skillExecutor.ts:388, 742-756, 883-893, 1358-1374, 1760, 2043-2045, 2052, 2354-2397, 3575, 3608, 4834` — SKILL_HANDLERS registry, classify_email, enrich_contact stub, crm.*, executeWithActionAudit, Tavily key check, executeWebSearch, update_crm stub, executeFetchUrl, executeMethodologySkill.
+- `server/config/actionRegistry.ts:291-296, 300-323, 1579-1605, 1722-1738, 2026-2027, 2614-2695` — retry policies, read_inbox spec, enrich_contact metadata, create_lead_magnet, classify_email/draft_reply registry, crm.* param fields.
+
+### Integrations / adapters
+
+- `server/adapters/integrationAdapter.ts:286-335` — the `IntegrationAdapter` interface (generic).
+- `server/adapters/ghlAdapter.ts:48-52` — GHL implementation + axios + per-location rate limiter.
+- `server/adapters/index.ts:8-13` — adapter registry.
+- `server/services/adapters/apiAdapter.ts:132-190, 192-323, 266-288` — GHL-hardwired `ExecutionAdapter`, `GHL_ENDPOINTS` dispatch, token-expiry warnings.
+- `server/services/adapters/ghlReadHelpers.ts:31-58, 158-166` — `resolveGhlContext`, `listGhlContacts`.
+- `server/services/adapters/ghlEndpoints.ts:35` — `fromAddress` field on GHL `send_email` endpoint.
+- `server/services/crmLiveDataService.ts:1+` — live-picker API (GHL-hardwired today).
+- `server/services/clientPulseIngestionService.ts:37, 62` — `connectorType: 'ghl'` literal + signal fetchers.
+- `server/services/connectorPollingService.ts:117-162, 233, 235, 240` — polling dispatcher + GHL-only guard.
+- `server/services/ghlWebhookMutationsService.ts:62, 76-79` — mutation mapper + `onConflictDoNothing`.
+- `server/db/schema/integrationConnections.ts:13-78` — credential store.
+- `server/db/schema/connectorConfigs.ts:6-35` — polling config.
+- `server/db/schema/projectIntegrations.ts` — page-project-scoped refs.
+- `server/services/integrationConnectionService.ts:10-25` — subaccount→org credential resolution order.
+- `server/services/connectionTokenService.ts:15-24, 31-35, 55-61, 69-103, 109-126` — AES-256-GCM helpers, key versioning.
+- `server/lib/env.ts:6, 18, 20, 52-55, 73, 74-80, 116` — `EMAIL_FROM`, `EMAIL_PROVIDER`, `RESEND_API_KEY`, LLM keys, `TAVILY_API_KEY`, `TOKEN_ENCRYPTION_KEY`, `env` export.
+
+### HTTP / webhooks
+
+- `server/routes/webhooks/ghlWebhook.ts:23, 28-33, 42-66, 78, 88, 104-108, 113-157, 162-167` — the cleanest webhook template to mirror.
+- `server/routes/webhooks/slackWebhook.ts:57-61, 107-157` — replay protection + inbound event normalisation.
+- `server/routes/webhooks/teamworkWebhook.ts`
+- `server/routes/webhooks.ts:28` — `/api/webhooks/callback/:executionId` (outbound return).
+- `server/services/webhookService.ts:86` — `timingSafeEqual` HMAC verification.
+- `server/services/webhookAdapterService.ts`
+- `server/lib/rateLimiter.ts` — token-bucket `getProviderRateLimiter()`.
+
+### Email / outreach
+
+- `server/services/emailService.ts:228, 232-273` — `sendGenericEmail` + Resend/SendGrid/SMTP transports.
+- `server/services/inboxService.ts:64-343` — UI task-queue inbox (NOT email).
+- `server/services/notifyOperatorChannels/emailChannel.ts:1, 28-34` — thin `sendGenericEmail` wrapper.
+- `server/services/notifyOperatorFanoutService.ts:75-76` — `settings.fromEmailAddress` gate (unused by sender).
+- `server/services/crmSendEmailServicePure.ts:14, 42-58` — `fromAddress` field + unused idempotency-key formula.
+- `server/jobs/slackInboundJob.ts:11-19, 22-45` — inbound pattern template (stub).
+- `server/skills/classify_email.md` — existing classification skill (support-focused).
+- `server/lib/playbook/agentDecisionPure.ts:363-412` — `parseDecisionOutput()` — canonical structured LLM output pattern.
+
+### Playbook engine
+
+- `server/db/schema/playbookTemplates.ts:20-40, 57, 75-106, 115-136` — system + org template tiers, version tables.
+- `server/db/schema/playbookRuns.ts:44-92` — run table; `template_version_id` FK at `:56`.
+- `server/db/schema/subaccountOnboardingState.ts:35-66` — per-subaccount onboarding progress.
+- `server/services/playbookRunService.ts:124-293, 145, 149, 186-197, 222, 237-239` — `startRun()` internals.
+- `server/services/playbookEngineService.ts:122-136, 576-588, 657, 861, 1159, 1485, 3155-3338` — engine load, context merge, `enqueueTick`, step completion re-tick, agent-step dispatch, worker registrations.
+- `server/services/playbookTemplateService.ts:56-93, 152-216, 276-334` — serialisation, version monotonicity, fork.
+- `server/services/subaccountOnboardingService.ts:181-276, 251-273, 286-335` — onboarding start, idempotency handling, auto-start.
+- `server/services/playbookActionCallExecutor.ts` (+ Pure) — action dispatch within a step.
+- `server/lib/playbook/types.ts:292, 386-407` — `initialInputSchema`, `RunContext` shape.
+- `server/lib/playbook/templating.ts:53-56` — context-prefix whitelist.
+- `server/lib/playbook/onboardingStateHelpers.ts:33-90` — `upsertSubaccountOnboardingState`.
+- `server/lib/playbook/definePlaybook.ts` — template-authoring helper.
+- `server/playbooks/event-creation.playbook.ts`, `intelligence-briefing.playbook.ts`, `weekly-digest.playbook.ts` — shipped templates.
+- `server/routes/playbookRuns.ts:36-78` — generic run-start route.
+- `server/routes/subaccountOnboarding.ts:33-63` — onboarding-start route.
+- `server/routes/portal.ts:663` — portal run-now.
+- `server/scripts/seedPlaybooks.ts` — seeder.
+
+### Migrations / tooling
+
+- `package.json:13-15` — `migrate`, `migrate:drizzle-legacy`, `db:generate` scripts.
+- `scripts/migrate.ts` — live runner.
+- `tasks/windows-iee-setup-guide.md:259, 507-508` — authoritative migration convention (custom runner, hand-written SQL past 0040, no `drizzle-kit push`).
+- `migrations/` — current highest `0189_llm_requests_all_view.sql`; next safe number **`0190`**. Known `0185_` collision; `0183` missing.
+
+### Env / secrets
+
+- `.env.example` — baseline env-var expectations (Resend, SendGrid, SMTP, Tavily, OAuth client IDs). Needs `GOOGLE_PLACES_API_KEY`, `HUNTER_API_KEY`, `RESEND_WEBHOOK_SECRET` additions (investigation only; do not modify yet).
+- `server/lib/env.ts:116` — `env` export parsed at module load.
+
+---
+
+**End of report.** All findings above are the output of read-only investigation agents run on branch `claude/codebase-research-report-xQQbg`. No application code was modified. The only file created in this branch is this report.
