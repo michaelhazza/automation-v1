@@ -212,7 +212,9 @@ export default function SystemPnlPage() {
           </button>
         </div>
 
-        {view === 'in-flight' && <PnlInFlightTable />}
+        {view === 'in-flight' && (
+          <PnlInFlightTable onOpenDetail={setSelectedCallId} />
+        )}
 
         {view === 'pnl' && (
           <>

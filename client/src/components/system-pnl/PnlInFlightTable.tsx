@@ -24,13 +24,6 @@ import type {
 // ---------------------------------------------------------------------------
 
 const SOCKET_BUFFER_MS = 100;
-// While the snapshot fetch is in flight we extend the buffer window —
-// once the fetch resolves it drops back to SOCKET_BUFFER_MS. Deliberately
-// more conservative than spec §5's 100 ms figure: if the snapshot fetch
-// takes longer than 100 ms (cold start, under load), events arriving
-// during the fetch would otherwise merge before the snapshot render and
-// cause the flicker this buffer exists to prevent.
-const FETCH_BUFFER_MS = 1_000;
 const ADDED_EVENT = 'llm-inflight:added';
 const REMOVED_EVENT = 'llm-inflight:removed';
 
@@ -61,7 +54,13 @@ interface BufferedEvent {
   removal?: InFlightRemoval;
 }
 
-export default function PnlInFlightTable() {
+interface Props {
+  /** Called when the user clicks a landed ledger link. Wired to the
+   * parent page's setSelectedCallId so the call-detail drawer opens. */
+  onOpenDetail?: (ledgerRowId: string) => void;
+}
+
+export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
   const [entries, setEntries] = useState<Row[]>([]);
   const [recentlyLanded, setRecentlyLanded] = useState<Map<string, LedgerLink>>(new Map());
   const [capped, setCapped] = useState(false);
@@ -147,9 +146,11 @@ export default function PnlInFlightTable() {
   const fetchSnapshot = useCallback(async () => {
     setLoading(true);
     setError(null);
-    // Re-arm the buffering window — socket events arriving during the fetch
-    // and for 100 ms after are queued, then drained in-order.
-    bufferingUntilRef.current = Date.now() + FETCH_BUFFER_MS;
+    // Hold the buffer open for the full lifetime of the GET so socket events
+    // that arrive while the request is in-flight are queued rather than merged
+    // prematurely. Setting to MAX_SAFE_INTEGER and then resetting in `finally`
+    // ensures the window stays open regardless of how long the fetch takes.
+    bufferingUntilRef.current = Number.MAX_SAFE_INTEGER;
     try {
       const res = await api.get<InFlightSnapshotResponse>(
         '/api/admin/llm-pnl/in-flight',
@@ -165,7 +166,8 @@ export default function PnlInFlightTable() {
       setError(message);
     } finally {
       setLoading(false);
-      // Close the buffering window shortly after render catches up.
+      // Close the buffering window shortly after render catches up, then drain
+      // any events that arrived while the snapshot was in-flight.
       bufferingUntilRef.current = Date.now() + SOCKET_BUFFER_MS;
       window.setTimeout(drainBuffer, SOCKET_BUFFER_MS + 10);
     }
@@ -331,13 +333,14 @@ export default function PnlInFlightTable() {
           {recentlyLandedList.map(([key, link], i) => (
             <span key={key} className="mr-3 inline-block">
               {link.terminalStatus}
-              {link.ledgerRowId && (
-                <a
-                  href={`#call-${link.ledgerRowId}`}
+              {link.ledgerRowId && onOpenDetail && (
+                <button
+                  type="button"
+                  onClick={() => onOpenDetail(link.ledgerRowId!)}
                   className="ml-1 text-indigo-600 hover:underline"
                 >
                   [ledger]
-                </a>
+                </button>
               )}
               {i < recentlyLandedList.length - 1 && ','}
             </span>

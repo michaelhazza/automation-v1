@@ -122,7 +122,11 @@ export function add(input: RegistryAddInput): string {
 
   // Overflow check — only runs on genuine new entries. Evict the oldest
   // active slot to make room, emitting a real `evicted_overflow` event.
-  if (slots.size >= MAX_INFLIGHT_ENTRIES) {
+  //
+  // Use countActive() rather than slots.size so that 'removed' slots
+  // retained for the 30-second dedup window don't inflate the count and
+  // cause premature eviction of still-active entries under churn.
+  if (countActive() >= MAX_INFLIGHT_ENTRIES) {
     const victim = selectEvictionVictim(slots.values());
     if (victim) {
       evictVictim(victim);
@@ -473,6 +477,21 @@ function handleIncomingRedisMessage(msg: RedisMessage): void {
       return;
     }
     if (outcome.kind === 'apply_add') {
+      // Cap check for Redis-fed adds: if this node is already at capacity, drop
+      // the remote event silently rather than evicting a local slot. Unlike the
+      // local add() path, we must NOT call evictVictim() here — evictVictim()
+      // routes through remove() which publishes back to Redis, and that
+      // synthetic `removed` event would reach the origin node, making it think
+      // a live call was evicted when it is still running. Dropping the mirror is
+      // the safe choice: the remote call is still tracked on the origin instance.
+      if (countActive() >= MAX_INFLIGHT_ENTRIES) {
+        logger.debug('inflight.redis_add_dropped_at_cap', {
+          runtimeKey,
+          activeCount: countActive(),
+          capacity:    MAX_INFLIGHT_ENTRIES,
+        });
+        return;
+      }
       slots.set(runtimeKey, outcome.slot);
       broadcast(EVENT_ADDED, outcome.envelope);
       emitActiveCount();
