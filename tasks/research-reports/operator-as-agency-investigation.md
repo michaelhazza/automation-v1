@@ -1583,7 +1583,56 @@ await playbookRunService.startRun({
 
 ## Consolidated risk register
 
-*(section appended below)*
+Risks and uncertainties pulled from all seven sections, categorised so a planner can decide which need HITL before implementation, which warrant a small PoC, and which are long-running operational concerns.
+
+### Design decisions that should go through architect review
+
+| Risk | From | Decision |
+|---|---|---|
+| `canonical_prospect_profiles` extension vs columns on `canonical_contacts` | Q1 | Recommended extension table — confirm. |
+| `converted_to_subaccount_id` `ON DELETE SET NULL` vs `RESTRICT` | Q1 | `SET NULL` is the safety net given soft-delete; `RESTRICT` is stronger correctness. |
+| Formal `CrmAdapter` interface vs inline conditional branching | Q3 | Recommended formal interface — three switch points argues for abstraction. |
+| Collapse `playbook_defaults` (Q7) into `conversion_rules` (Q4)? | Q4 + Q7 | Recommend collapsing — one config table. |
+| `config_create_subaccount` wires into `autoStartOwedOnboardingPlaybooks` automatically, or leave to calling playbook? | Q4d | Architect call — affects every future subaccount-create caller. |
+| Shared Resend account (multi-domain) vs per-agency Resend sub-accounts | Q6 | Deliverability + cost decision — needs operator input. |
+| Whether to use modules-driven `onboarding_playbook_slugs` or `conversion_rules` for the post-conversion onboarding playbook | Q7 | Recommend `conversion_rules` — module path is for general onboarding, not BD conversion. |
+| Service-user row per org vs nullable `startedByUserId` + `triggeredBy` enum | Q7 | Nullable + enum is cleaner; service-user sprawls. |
+
+### Changes that warrant a small PoC before commit
+
+| PoC | Reason | Effort |
+|---|---|---|
+| Writer-layer invariant: `canonical_prospect_profiles.subaccount_id` matches parent `canonical_account` | Q1 | Denormalised FK integrity cannot be a DB CHECK; test the writer path. | 1-2 hr |
+| Two-phase `outreach_stage` upsert under the partial `CHECK` constraint | Q1 | Confirm atomicity before tightening. | 1 hr |
+| Concurrent `scheduled_tasks.fireOccurrence()` on two instances | Q2 | `nextRunAt`/`totalRuns` update is not atomic; verify duplicate protection. | 2-3 hr |
+| `principalType: 'user'` + empty `principalId` for scheduled `lead_discover` runs against canonical writes | Q2 | Confirm RLS doesn't reject writes under this principal shape. | 1-2 hr |
+| `apiAdapter` routing only branches on `crm.*`-namespaced action types | Q3 | Ensure non-CRM `api`-category actions (e.g. GHL `send_email`) are not accidentally rerouted. | 30 min |
+| `findContactByEmail()` performance without an index | Q4a | Confirm behaviour on a seeded 10k-contact subaccount before shipping. | 1 hr |
+| Reply-to-send correlation by `provider_message_id` alone (no thread fallback) | Q6 | Verify Resend always delivers `email_id` and that it matches `outreach_sends.provider_message_id`. | 1-2 hr |
+
+### Operational / long-running concerns
+
+| Concern | From | Nature |
+|---|---|---|
+| Current highest migration is 0189 with a known `0185_` collision and missing `0183` | cross-cutting | Confirm `0190` is uncontested before filing. |
+| `queueService.sendJob()` silently strips `singletonKey` options | Q2 | Latent trap across the codebase. Low-risk one-liner fix is worth a separate chore. |
+| `scheduledTaskService` RRULE tick has no pg-boss backing | Q2 | Option A (pg-boss `schedule()`) sidesteps entirely; option B requires horizontal-scaling PoC. |
+| `clientPulseIngestionService.connectorType: 'ghl'` is a typed literal | Q3 | Must widen to `'ghl' \| 'synthetos_native'` and add null-safe fallbacks per signal. |
+| Resend has no inbound parsing as of April 2026 | Q6 | Commits to IMAP + `imapflow` dependency + OAuth token refresh complexity. |
+| Deliverability / SPF / DKIM per agency sending domain | Q6 | Per-org Resend domain verification is the biggest operational risk of the whole feature. |
+| Places API ToS: 30-day `place_id` cache limit + photo-display restrictions | Q5 | Compliance risk if `lead_discover` persists the raw API response. |
+| Hunter.io free tier only 25/month — need paid plan | Q5 | Budget decision; not a technical blocker. |
+| Multi-tenant correctness of inbound email routing | Q4, Q6 | The Resend webhook must resolve the owning org before any rules lookup — requires either a mapping table (`inbound_email_addresses`) or per-org Resend API keys. |
+
+### Multi-tenant correctness guardrails
+
+Every recommendation in this report assumes **multi-tenant correctness**: any behaviour the operator builds for their own agency must work the same way for a second org that adopts the pattern. The three places this is easiest to get wrong:
+
+1. **Conversion rules must be queryable by `organisation_id`** — never hardcode org-specific branching in the webhook or job handler. `conversion_rules` (Q4) is the only config surface.
+2. **Playbook templates that reference CRM-specific actions must respect `subaccount.crm_type`** — e.g. a generic onboarding template that assumes GHL contact creation will fail on a `synthetos_native` subaccount unless the `CrmAdapter` (Q3) branches cleanly.
+3. **Inbound-email address → owning-org routing** must be table-driven. Writing "if `to_address == 'bd@synthetos.com' then orgId = 'xxx'`" inline kills the pattern for the second adopter.
+
+A conservative ship gate: **can a second org be onboarded to the operator-as-agency pattern entirely through config (new rows in `conversion_rules`, `playbook_defaults` or equivalent, `inbound_email_addresses`, `org_sending_domains`) with zero code changes?** If no, the design has drifted.
 
 ---
 
