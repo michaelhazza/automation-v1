@@ -103,3 +103,69 @@ When `finalStatus` is `'failed'` but the loop produces a non-empty `loopResult.s
 **Why it's deferred**: Pre-existing limitation. Documented at lines 1355-1360 as known; acceptable per spec §11.4 deferred items. The §6.8 "either signal is sufficient" contract is only half-enforced for normal-path failures.
 
 **Suggested fix**: Thread `errorMessage` from `preFinalizeMetadata` (already in scope) into the extraction call when `derivedRunResultStatus === 'failed'`. No new DB read required if a future loop result carries an `errorMessage` field.
+
+---
+
+## Hermes Tier 1 — deferred review follow-ups
+
+Captured from the second-pass code review on branch
+`claude/hermes-audit-tier-1-qzqlD` (2026-04-21). Not blocking merge of
+the Tier 1 build; queued for Tier 2.
+
+### H1 — Add `successfulCostCents` to the `/api/runs/:runId/cost` response
+
+**Context.** The Tier 1 response has an intentional asymmetry: `totalCostCents`
+reads from `cost_aggregates` (includes failed calls) while `llmCallCount`,
+`totalTokensIn/Out`, and `callSiteBreakdown` read from `llm_requests_all`
+with a success/partial filter (excludes failed calls). This is documented
+but UI consumers will misinterpret it eventually (e.g. compute an implied
+cost-per-call by dividing totalCostCents / llmCallCount and get a biased
+number when failures contributed non-trivial ledger cost).
+
+**Fix.** Add an explicit `successfulCostCents` field to `RunCostResponse`
+sourced from the same success/partial filter as the other new fields.
+Remove the mental arithmetic trap; keep `totalCostCents` for accounting
+completeness.
+
+**Scope.** `shared/types/runCost.ts`, `server/routes/llmUsage.ts`,
+`client/src/components/run-cost/RunCostPanel.tsx`, the pure module + test
+matrix. Small but touches the API contract so warrants its own ship.
+
+### H2 — Rollup-vs-ledger breaker asymmetry (Slack / Whisper)
+
+**Context.** After Tier 1 Phase C, the LLM path uses the direct-ledger
+breaker (`assertWithinRunBudgetFromLedger`) and is strongly consistent
+with committed ledger rows. The Slack and Whisper paths still use the
+rollup-based breaker (`assertWithinRunBudget`) which reads
+`cost_aggregates`, updated asynchronously by
+`routerJobService.enqueueAggregateUpdate`. Those paths can under-count
+momentarily under concurrency — fine for their much-lower call volume,
+but a long-term inconsistency risk if Slack/Whisper become hot paths.
+
+**Fix.** Decide per caller whether the ledger read is worth the extra
+DB hit. If yes, introduce sibling ledger-based helpers for
+non-LLM cost boundaries (currently only `llm_requests` carries the
+ledger shape; Slack/Whisper costs live in `cost_aggregates` only).
+May require a unified per-run cost ledger before Slack/Whisper can use
+a ledger-style breaker.
+
+### H3 — `runResultStatus='partial'` coupling to summary presence
+
+**Context.** `computeRunResultStatus(finalStatus, hasError, hadUncertainty,
+hasSummary)` in `agentExecutionServicePure.ts` currently demotes a `completed`
+run to `partial` when `!hasSummary`. Summary generation is not guaranteed
+deterministic (reporting skill can fail, LLM can return empty), so a
+semantically-successful run with no summary gets the `partial` outcome
+tag — which then suppresses the success-only memory promotion and lowers
+retrieval-quality scoring in `workspaceMemoryService`.
+
+**Fix.** Decide whether `!hasSummary` is a downgrade signal or an
+orthogonal field. Options:
+  - Add a separate `hasSummary` flag on `agent_runs` and keep
+    `runResultStatus` purely about task outcome.
+  - Change the `completed + !hasSummary` branch to return `success`
+    with a `summaryMissing=true` side channel.
+  - Leave as-is but monitor production: if `partial` rates spike on
+    the happy path, revisit.
+
+Monitor for now; revisit before Tier 2 memory promotion work.
