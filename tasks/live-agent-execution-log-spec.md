@@ -3,8 +3,9 @@
 **Status:** Draft — awaiting human review. Major task per CLAUDE.md §"Task Classification" (new subsystem, new tables, new permission keys, new WebSocket contract, new client surface).
 **Author:** Main session.
 **Date:** 2026-04-21.
+**Last revised:** 2026-04-21 — main merged in; migration numbers bumped to 0192/0193/0194 (0190/0191 taken by provisional-row + in-flight history landing on main); `AGENT_EXECUTION_LOG_ENABLED` kill-switch removed per `feature_flags: only_for_behaviour_modes` convention; primitives-search updated to reference `softBreakerPure` + `runCostBreaker` + `llm_inflight_history` from the in-flight-tracker deferred-items merge; payload-write timing clarified to acknowledge migration 0190's `'started'` provisional ledger status.
 **Branch when built:** `claude/agent-task-live-logs-MbN8R` (already cut).
-**Predecessor / sibling:** `tasks/llm-inflight-realtime-tracker-spec.md` — the system-admin in-flight LLM tracker at `/system/llm-pnl` In-Flight tab. This spec is the **per-run** companion surface: it attaches a live execution log to every agent run, not every LLM call in the system. The two surfaces share the LLM ledger as a data source but never render in the same page.
+**Predecessor / sibling:** `tasks/llm-inflight-realtime-tracker-spec.md` — the system-admin in-flight LLM tracker at `/system/llm-pnl` In-Flight tab — plus `tasks/llm-inflight-deferred-items-brief.md`, which added the provisional-row partial-external-success protection (migration 0190) + `llm_inflight_history` durable forensic log (migration 0191) + `softBreakerPure` for fire-and-forget persistence paths. This spec is the **per-run** companion surface: it attaches a live execution log to every agent run, not every LLM call in the system. The two surfaces share the LLM ledger as a data source but never render in the same page.
 
 ---
 
@@ -114,6 +115,15 @@ A dedicated typed event table is the correct shape: it preserves every other tab
 - `verify-rls-coverage.sh + verify-rls-contract-compliance.sh` — enforce coverage automatically; no new gate needed.
 - `createWorker()` (`server/lib/createWorker.ts`) — retention archive job uses this primitive, matching the existing `llmLedgerArchiveJob`.
 - `shared/runStatus.ts` — used to decide when to tear down the WebSocket room (terminal statuses) and when to allow events to keep flowing (in-flight / awaiting statuses).
+- `runCostBreaker` (`server/lib/runCostBreaker.ts`) — already wired into `llmRouter`. Events from the router (`llm.requested`, `llm.completed`) inherit the breaker's cost-ceiling behaviour automatically; no new integration.
+
+### Adjacent primitives that landed on main after initial draft
+
+The following primitives shipped with the in-flight tracker deferred-items merge (`tasks/llm-inflight-deferred-items-brief.md`) and are available, but **not used** in this spec. Documented here so a reader doesn't mistake absence for oversight:
+
+- **`softBreakerPure.ts`** (`server/lib/softBreakerPure.ts`) — sliding-window breaker for fire-and-forget persistence paths. Considered for `agent_run_llm_payloads` writes; rejected because §4.5 keeps the payload write **inside the same transaction as the ledger insert** — there is no fire-and-forget seam to guard. If a future revision splits the payload write out of the ledger transaction for performance reasons, `softBreakerPure` is the correct primitive to wrap the split path (same pattern as `persistHistoryEvent` in `llmInflightRegistry.ts`).
+- **`llm_inflight_history`** (migration `0191_llm_inflight_history.sql`) — durable forensic log of in-flight registry events for system-admin cross-fleet queries. Different surface from this spec: `llm_inflight_history` answers "what LLM calls were running at 3:17am last Tuesday across the fleet"; this spec's `agent_execution_events` answers "what did my agent do on this specific run". No overlap, no dependency.
+- **LLM `'started'` provisional status** (migration `0190_llm_requests_started_status.sql`) — relevant context for §4.5 payload-write timing; see that section for the interaction.
 
 ---
 
@@ -161,6 +171,14 @@ The client follows the same pattern `useSocketRoom` already implements for other
 **Why keyed by `llm_request_id` not `run_id`.** One run has many LLM calls; the ledger already has the attribution (run, execution, iee, etc.). Keying the payload table by ledger ID keeps the join cheap and preserves the ledger's source-of-truth role. Non-agent LLM callers (skill-analyzer, config assistant) also produce payloads that this table can hold — but the client UI only joins from `agent_execution_events.linkedEntity` of type `llm_request`, so non-agent rows are dormant until a caller links to them.
 
 **Storage trade-off, explicit.** A typical run produces 5–10 LLM calls averaging 50–500 KB of payload each (full system prompt + messages + response + tool defs). Budget: ~1 MB/run on average, up to 5 MB for heavy runs. At 100K runs/month that's 100 GB hot + 100 GB warm on rotation. Postgres TOAST compresses this ~3–4× in practice. Cold archive drops to S3 at month 18.
+
+**Interaction with migration 0190 (`llm_requests.status = 'started'`).** The in-flight-tracker deferred-items merge added a provisional-row write path: `llmRouter` now writes a `status='started'` ledger row **before** `providerAdapter.call()`, then upserts the terminal row (`success` / `error` / `timeout` / …) in a second transaction after the provider returns. The payload write for this spec sits on the **terminal** write — the same transaction that resolves `status` to its final value. This means:
+
+- If the provider call + ledger terminal-write completes, a matching `agent_run_llm_payloads` row is written in the same transaction. Invariant: `agent_run_llm_payloads.llm_request_id` always points at a terminal ledger row, never a provisional `'started'` row.
+- If the provider call succeeds but the terminal-write fails, the existing reconciliation path (provisional row aged out by the `maintenance:llm-started-row-sweep` job) means no payload row is written — consistent with "payload exists iff terminal row exists". The caller sees `ReconciliationRequiredError`; retry under the same idempotency key hits the existing dedup machinery, not this spec.
+- No payload written for pre-dispatch terminal states (`budget_blocked`, `rate_limited`, `provider_not_configured`) — the adapter was never called, there is no request body to persist. The `llm.requested` event also never fires for these states (matches the in-flight tracker's §4.1 invariant).
+
+No changes needed to migration 0190 or the router's provisional-row contract. The payload write is a strict add-on to the terminal-write transaction, not a modification of it.
 
 ### 4.6 Retention tiering — hot / warm / cold
 
@@ -451,9 +469,9 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 | File | Change | Phase |
 |---|---|---|
-| `migrations/0190_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`; enables RLS + policies on all three; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. | P1 |
-| `migrations/0191_agent_execution_log_retention.sql` | **New** — creates `agent_execution_events_warm` + `agent_run_prompts_warm` + `agent_execution_events_archive` (Parquet BYTEA) tables, all with RLS enabled. | P3 |
-| `migrations/0192_agent_execution_log_edits.sql` | **New** — creates `agent_execution_log_edits` audit table with RLS. | P2 |
+| `migrations/0192_agent_execution_log.sql` | **New** — creates `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads`; enables RLS + policies on all three; adds indexes per §5.1, §5.6, §5.7; adds the three tables to the RLS manifest via the separate TS file update below. Migration numbers 0190 + 0191 already taken on main (LLM `'started'` provisional status + `llm_inflight_history`). | P1 |
+| `migrations/0193_agent_execution_log_retention.sql` | **New** — creates `agent_execution_events_warm` + `agent_run_prompts_warm` + `agent_execution_events_archive` (Parquet BYTEA) tables, all with RLS enabled. | P3 |
+| `migrations/0194_agent_execution_log_edits.sql` | **New** — creates `agent_execution_log_edits` audit table with RLS. | P2 |
 | `server/db/schema/agentExecutionEvents.ts` | **New** — Drizzle schema for `agent_execution_events` + event-type TS union re-exported from `shared/types/agentExecutionLog.ts`. | P1 |
 | `server/db/schema/agentRunPrompts.ts` | **New** — Drizzle schema for `agent_run_prompts`. | P1 |
 | `server/db/schema/agentRunLlmPayloads.ts` | **New** — Drizzle schema for `agent_run_llm_payloads`. | P1 |
@@ -526,13 +544,14 @@ Single source of truth for everything this spec touches. Every prose reference t
 
 ### 6.7 Environment variables
 
+Only operational retention tunables. No feature-flag env var — per `docs/spec-context.md` `feature_flags: only_for_behaviour_modes` + `rollout_model: commit_and_revert`, an emergency disable uses `git revert`, not a toggle.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `AGENT_EXECUTION_LOG_HOT_MONTHS` | `6` | Hot tier retention. Below this age: full-fidelity read. |
 | `AGENT_EXECUTION_LOG_WARM_MONTHS` | `12` | Warm tier retention. Payload bodies stripped; events + prompt metadata retained. |
 | `AGENT_EXECUTION_LOG_COLD_YEARS` | `7` | Cold archive retention. Parquet blobs in `agent_execution_events_archive`. |
 | `AGENT_EXECUTION_LOG_ARCHIVE_BATCH_SIZE` | `500` | Rotation job batch size per tick. |
-| `AGENT_EXECUTION_LOG_ENABLED` | `true` | Master switch. When `false`, `appendEvent` is a silent no-op — safe rollback lever. |
 
 ---
 
@@ -645,7 +664,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 ### Phase 1 — MVP live log (persistence + emission + read paths + basic UI)
 
-**Schema changes introduced:** migration `0190_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads` with RLS policies. Adds all three to `rlsProtectedTables.ts` in the same migration.
+**Schema changes introduced:** migration `0192_agent_execution_log.sql` creates `agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads` with RLS policies. Adds all three to `rlsProtectedTables.ts` in the same migration.
 
 **Services introduced:** `agentExecutionEventService`, `agentExecutionEventServicePure`, `agentRunPromptService`, `agentRunVisibility`, `agentRunEditPermissionMask`, `redaction` (in `server/lib/`).
 
@@ -659,7 +678,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 **Jobs introduced:** none.
 
-**Columns referenced by code:** only columns defined in migration 0190 — no forward references.
+**Columns referenced by code:** only columns defined in migration 0192 — no forward references.
 
 **Ship criterion:** an operator navigating to `/runs/:id/live` for an active agent run sees events stream in within 100 ms of dispatch; after the run ends, the same page renders the durable history from the snapshot endpoint; permission gates reject users who lack agent-view on the run's tier. Full LLM payloads accessible to agent-editors via the drawer CTA.
 
@@ -667,7 +686,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 ### Phase 2 — Inline edit audit trail + entity-edited banner
 
-**Schema changes introduced:** migration `0192_agent_execution_log_edits.sql` creates `agent_execution_log_edits` with RLS + manifest entry.
+**Schema changes introduced:** migration `0194_agent_execution_log_edits.sql` creates `agent_execution_log_edits` with RLS + manifest entry.
 
 **Services introduced:** none new — the existing edit services (memory edit, rule edit, skill edit) gain an optional `triggeringRunId` write path that appends an audit row.
 
@@ -677,13 +696,13 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 **Jobs introduced:** none.
 
-**Columns referenced by code:** `agent_execution_log_edits.*` — created in migration 0192. No forward reference.
+**Columns referenced by code:** `agent_execution_log_edits.*` — created in migration 0194. No forward reference.
 
 **Ship criterion:** edits made via a log-link are auditable; viewing a past run shows a banner on events whose linked entity has been edited since.
 
 ### Phase 3 — Retention tiering + cold archive
 
-**Schema changes introduced:** migration `0191_agent_execution_log_retention.sql` creates `agent_execution_events_warm`, `agent_run_prompts_warm`, `agent_execution_events_archive`, all with RLS + manifest entries.
+**Schema changes introduced:** migration `0193_agent_execution_log_retention.sql` creates `agent_execution_events_warm`, `agent_run_prompts_warm`, `agent_execution_events_archive`, all with RLS + manifest entries.
 
 **Services introduced:** none.
 
@@ -693,7 +712,7 @@ Three phases, each independently shippable and independently reviewable. Depende
 
 **Env vars introduced:** `AGENT_EXECUTION_LOG_HOT_MONTHS`, `AGENT_EXECUTION_LOG_WARM_MONTHS`, `AGENT_EXECUTION_LOG_COLD_YEARS`, `AGENT_EXECUTION_LOG_ARCHIVE_BATCH_SIZE`.
 
-**Columns referenced by code:** `*_warm` and `_archive` tables — created in migration 0191. No forward reference.
+**Columns referenced by code:** `*_warm` and `_archive` tables — created in migration 0193. No forward reference.
 
 **Ship criterion:** job runs nightly and moves rows between tiers; read endpoints transparently fall through hot → warm → cold on lookup (cold returns a job handle + retrieval ETA rather than the row directly, matching the ledger archive pattern).
 
@@ -889,13 +908,13 @@ Cross-checked against the spec-context framing. Compliance:
 | `frontend_tests: none_for_now` | §10.3 — explicit. |
 | `api_contract_tests: none_for_now` | §10.3 — explicit. |
 | `e2e_tests_of_own_app: none_for_now` | §10 — no E2E proposed. |
-| `feature_flags: only_for_behaviour_modes` | **Compliance issue to resolve: §6.7 lists `AGENT_EXECUTION_LOG_ENABLED` as a kill-switch env var.** This is close to a behaviour mode (on/off of the feature) but not quite — it's a rollback lever. **Recommended resolution: drop the env var from the spec.** `rollout_model: commit_and_revert` is the agreed-upon posture; if the feature needs to be disabled post-merge, `git revert` is the tool. The retention env vars (`*_HOT_MONTHS`, `*_WARM_MONTHS`, `*_COLD_YEARS`, `*_ARCHIVE_BATCH_SIZE`) are operational tunables like `LLM_LEDGER_RETENTION_MONTHS`, not feature flags — those stay. Build-time, delete `AGENT_EXECUTION_LOG_ENABLED` from §6.7. |
+| `feature_flags: only_for_behaviour_modes` | **Resolved.** `AGENT_EXECUTION_LOG_ENABLED` kill-switch env var was dropped from §6.7 in the 2026-04-21 revision after raising this exact issue with the author. Posture is now `rollout_model: commit_and_revert` — emergency disable uses `git revert`, not a toggle. Retention env vars (`*_HOT_MONTHS`, `*_WARM_MONTHS`, `*_COLD_YEARS`, `*_ARCHIVE_BATCH_SIZE`) stay — they are operational tunables like `LLM_LEDGER_RETENTION_MONTHS`, not feature flags. |
 | `prefer_existing_primitives_over_new_ones: yes` | §3 — every primitive extends an existing one; the one genuinely new primitive (`agent_execution_events`) has a dedicated justification paragraph. |
 | `accepted_primitives` | Reuse confirmed for: `withOrgTx`, `getOrgScopedDb`, `RLS_PROTECTED_TABLES`, `verify-rls-*.sh`, `createWorker()`, `shared/runStatus.ts`. New additions to the list are post-merge (§6.6). |
 | `convention_rejections: "do not add feature flags for new migrations"` | §8 migrations are not behind feature flags. Resolved by the compliance fix above. |
 | `convention_rejections: "do not introduce new service layers when existing primitives fit"` | §3 rigorous on reuse; new services (`agentExecutionEventService`, `agentRunPromptService`) are thin, single-responsibility, and slot into the existing route→service→db convention. No new layer invented. |
 
-**One open compliance gap — resolve before implementation:** delete `AGENT_EXECUTION_LOG_ENABLED` from §6.7. Logged here rather than silently edited because the checklist says to flag compliance deviations in the framing section rather than fix them implicitly.
+**Compliance gap resolved** (2026-04-21 revision): `AGENT_EXECUTION_LOG_ENABLED` removed from §6.7. No remaining framing deviations.
 
 ### 11.6 Contract self-checks
 
