@@ -34,6 +34,15 @@ const REMOVED_EVENT = 'llm-inflight:removed';
 // Bounded at 256 to keep memory predictable.
 const RECENTLY_REMOVED_MAX = 256;
 
+// Bound on the stateVersion map — mirrors the RECENTLY_REMOVED set size
+// so the monotonic guarantee and the resurrection guard have matching
+// memory footprints. A runtimeKey whose version has rolled out of this
+// map is also well past the 30s server-side retention window, so a
+// straggling add could only surface a stale call whose entry has been
+// long since pruned — the entries-array presence check below catches
+// that separately.
+const STATE_VERSION_MAP_MAX = 256;
+
 // The registry key is a global room — useSocketRoom needs a non-null
 // `roomId` to emit `join:system-llm-inflight`, so we pass a static token.
 // The server handler ignores the argument.
@@ -99,26 +108,87 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
     }
   }, []);
 
+  // Highest stateVersion observed per runtimeKey — the client-side
+  // counterpart to the server's monotonic guard (see `applyIncomingEvent`
+  // in llmInflightRegistryPure.ts). The server already refuses to emit
+  // a lower-version event for a given (runtimeKey, startedAt) tuple, so
+  // this guard is a belt-and-braces backstop against any reorder or
+  // replay that slips through socket-layer dedup. It also closes the
+  // race from pr-review feedback: a delayed `add` arriving after its
+  // `remove` has aged out of the bounded `recentlyRemovedRef` set would
+  // otherwise resurrect the row — the stateVersion comparison rejects
+  // it because a `remove` always stamps version 2, and any subsequent
+  // `add` carrying version 1 is strictly lower.
+  const stateVersionByKeyRef = useRef<Map<string, 1 | 2>>(new Map());
+  const stateVersionOrderRef = useRef<string[]>([]);
+  const recordStateVersion = useCallback(
+    (runtimeKey: string, version: 1 | 2): boolean => {
+      const map = stateVersionByKeyRef.current;
+      const order = stateVersionOrderRef.current;
+      const known = map.get(runtimeKey);
+      // Reject non-monotonic transitions (incoming <= known). The server
+      // enforces this at emission time, so we only see this when a stale
+      // replay leaks through.
+      if (known !== undefined && version <= known) {
+        return false;
+      }
+      map.set(runtimeKey, version);
+      if (known === undefined) {
+        order.push(runtimeKey);
+        while (order.length > STATE_VERSION_MAP_MAX) {
+          const oldest = order.shift();
+          if (oldest !== undefined) map.delete(oldest);
+        }
+      }
+      return true;
+    },
+    [],
+  );
+
   const applyAddEntry = useCallback((entry: InFlightEntry) => {
     // Mirror the server's monotonic state-machine guard (spec §4.3): a
     // removed runtimeKey can never be resurrected by a late add, even if
     // it's dropped out of the entries array and the socket-dedup LRU.
+    //
+    // Two defences in depth:
+    //   1. `recentlyRemovedRef` — bounded-set "I've seen a remove for this
+    //      runtimeKey" check; rejects adds after aged-out remove events.
+    //   2. `stateVersionByKeyRef` — strict monotonic check against the
+    //      server's stateVersion contract (1=active, 2=removed). A v1
+    //      add arriving after a v2 remove has already won is always
+    //      rejected here.
     if (recentlyRemovedRef.current.has(entry.runtimeKey)) return;
+    if (!recordStateVersion(entry.runtimeKey, entry.stateVersion)) return;
     setEntries((prev) => {
       const existing = prev.find((r) => r.runtimeKey === entry.runtimeKey);
       if (existing) return prev;
       return [{ ...entry, _key: entry.runtimeKey }, ...prev];
     });
-  }, []);
+  }, [recordStateVersion]);
 
   const applyRemoveEntry = useCallback((removal: InFlightRemoval) => {
+    // Stamp version=2 (no-op if already 2 — the map stays consistent) and
+    // always apply the merge below. We intentionally DON'T gate this on
+    // `recordStateVersion`'s return value because the router emits a
+    // second remove event ("ledger-link rehydration") for the same
+    // runtimeKey when a retryable-error-removed entry later gets its
+    // ledger row written: both events carry stateVersion=2 but the
+    // second one has `ledgerRowId` populated. The merge below overwrites
+    // the earlier null ledger entry so the UI's [ledger] button appears.
+    // The `setEntries(prev.filter(...))` call is idempotent — filtering
+    // an already-filtered array is a cheap no-op.
+    recordStateVersion(removal.runtimeKey, removal.stateVersion);
     markRecentlyRemoved(removal.runtimeKey);
     setEntries((prev) => prev.filter((r) => r.runtimeKey !== removal.runtimeKey));
     setRecentlyLanded((prev) => {
       const next = new Map(prev);
+      const existing = prev.get(removal.runtimeKey);
+      // Preserve a previously-populated ledgerRowId if the rehydration
+      // event happens to carry null (e.g. a stray replay after the real
+      // link was already delivered). "Once linked, stay linked."
       next.set(removal.runtimeKey, {
-        ledgerRowId:       removal.ledgerRowId,
-        ledgerCommittedAt: removal.ledgerCommittedAt,
+        ledgerRowId:       removal.ledgerRowId ?? existing?.ledgerRowId ?? null,
+        ledgerCommittedAt: removal.ledgerCommittedAt ?? existing?.ledgerCommittedAt ?? null,
         terminalStatus:    removal.terminalStatus,
       });
       return next;
@@ -132,7 +202,7 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
         return next;
       });
     }, 10_000);
-  }, [markRecentlyRemoved]);
+  }, [markRecentlyRemoved, recordStateVersion]);
 
   const drainBuffer = useCallback(() => {
     const pending = bufferedEventsRef.current;
@@ -156,6 +226,14 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
         '/api/admin/llm-pnl/in-flight',
       );
       const data = res.data;
+      // Seed the stateVersion map with version=1 for every snapshot row so
+      // a subsequent duplicate `added` event for the same runtimeKey is
+      // rejected as non-monotonic. Without this, the post-fetch drain of
+      // the buffered `added` events would re-insert rows already present
+      // in the snapshot.
+      for (const e of data.entries) {
+        recordStateVersion(e.runtimeKey, 1);
+      }
       setEntries(data.entries.map((e) => ({ ...e, _key: e.runtimeKey })));
       setCapped(data.capped);
       setGeneratedAt(data.generatedAt);
@@ -171,7 +249,7 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
       bufferingUntilRef.current = Date.now() + SOCKET_BUFFER_MS;
       window.setTimeout(drainBuffer, SOCKET_BUFFER_MS + 10);
     }
-  }, [drainBuffer]);
+  }, [drainBuffer, recordStateVersion]);
 
   useEffect(() => { fetchSnapshot(); }, [fetchSnapshot]);
 

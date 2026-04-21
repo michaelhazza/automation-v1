@@ -203,6 +203,64 @@ export function has(runtimeKey: string): boolean {
 }
 
 /**
+ * Ledger-link rehydration — emit a follow-up `removed` event for an
+ * already-removed runtimeKey so the client's `recentlyLanded` map picks
+ * up the ledger linkage.
+ *
+ * Use case (pr-review feedback): when a retry chain exhausts all
+ * retryable errors, the inner catch already removed each attempt's
+ * entry with `ledgerRowId=null` (the ledger row hadn't been written
+ * yet). The outer failure path then writes the ledger row and knows
+ * the id, but the original entry is gone, so `remove()` would be a
+ * noop and the `[ledger]` button never appears in "Recently landed".
+ *
+ * This method bypasses the state-machine noop path and emits a
+ * standalone event with the same `stateVersion: 2` tag the original
+ * removal carried. The client's `applyRemoveEntry` handles duplicate
+ * removes gracefully — it merges the new `ledgerRowId` +
+ * `ledgerCommittedAt` over any previously-null values.
+ *
+ * No local state change, no Redis publish (the origin instance already
+ * fanned out the first removal). Socket emission only.
+ */
+export function updateLedgerLink(input: {
+  runtimeKey:        string;
+  idempotencyKey:    string;
+  attempt:           number;
+  terminalStatus:    InFlightTerminalStatus;
+  completedAt:       string;
+  durationMs:        number;
+  ledgerRowId:       string;
+  ledgerCommittedAt: string;
+}): void {
+  const removal: InFlightRemoval = {
+    runtimeKey:        input.runtimeKey,
+    idempotencyKey:    input.idempotencyKey,
+    attempt:           input.attempt,
+    stateVersion:      2,
+    terminalStatus:    input.terminalStatus,
+    sweepReason:       null,
+    evictionContext:   null,
+    completedAt:       input.completedAt,
+    durationMs:        input.durationMs,
+    ledgerRowId:       input.ledgerRowId,
+    ledgerCommittedAt: input.ledgerCommittedAt,
+  };
+  const envelope: InFlightEventEnvelope<InFlightRemoval> = {
+    eventId:   `${input.runtimeKey}:removed:ledger-link`,
+    type:      'removed',
+    entityId:  input.runtimeKey,
+    timestamp: new Date().toISOString(),
+    payload:   removal,
+  };
+  broadcast(EVENT_REMOVED, envelope);
+  logger.debug('inflight.ledger_link_rehydrated', {
+    runtimeKey:  input.runtimeKey,
+    ledgerRowId: input.ledgerRowId,
+  });
+}
+
+/**
  * Build a snapshot for the admin snapshot endpoint. Entries are sorted
  * `startedAt DESC, runtimeKey DESC` and capped at `limit` (clamped to
  * `INFLIGHT_SNAPSHOT_HARD_CAP`).
