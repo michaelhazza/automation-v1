@@ -1138,7 +1138,192 @@ Implement `executeLeadDiscover` and `executeLeadScore` as private async fns in t
 
 ## Q6 — Outreach email via Resend & reply tracking
 
-*(section appended below)*
+### Q6 Finding
+
+**Existing email sending.** `server/services/emailService.ts` is the sole send implementation. It supports three transports selected by `EMAIL_PROVIDER`:
+
+- **Resend** (`resend` v6.9.2, confirmed in `package.json`) — `emailService.ts:233-239`
+- **SendGrid** (`@sendgrid/mail` v8.1.0) — `:243-253`
+- **SMTP** (`nodemailer` v8.0.4) — `:253-269`
+- Console log fallback — `:271`
+
+`.env.example` explicitly supports `EMAIL_PROVIDER=resend`. `RESEND_API_KEY` is optional in `env.ts:20`. `EMAIL_FROM` is global and required (`env.ts:6`).
+
+**`emailService.ts` is outbound-only and stateless.** Public API: `sendInvitationEmail`, `sendPasswordResetEmail`, `sendExecutionCompletionEmail`, `sendWelcomeEmail`, `sendDataSourceSyncAlert`, `sendDataSourceSyncRecovery`, `sendGenericEmail` (`:228`, comment: *"public so playbook skills (Phase G §11.6) can call it directly"*).
+
+**Does not** track message IDs, log sends to any DB table, enforce idempotency, or handle delivery events / bounces. The Resend API's returned message ID is **discarded**.
+
+**`inboxService.ts` is not an email inbox** (reiterated from Q4) — aggregates tasks / review items / failed agent runs only.
+
+**`notify_operator` email channel** — `server/services/notifyOperatorChannels/emailChannel.ts` is a thin wrapper over `emailService.sendGenericEmail` (`:1`). Iterates `recipientEmails`, calls `sendGenericEmail` per address (`:28-34`). From-address not customisable — falls through to `env.EMAIL_FROM`. The fanout orchestrator (`notifyOperatorFanoutService.ts:75-76`) reads `settings.fromEmailAddress` as `emailFromAddress` context, but this is only used by `availabilityPure.ts:22` to gate channel availability — the actual `sendGenericEmail` call does not pass a from-override.
+
+**Webhook ingestion pattern — end-to-end GHL example** (the cleanest template to follow):
+
+1. Route: `POST /api/webhooks/ghl` at `server/routes/webhooks/ghlWebhook.ts:23`.
+2. Raw body capture: `raw({ type: 'application/json' })` middleware (`:23`).
+3. JSON parse (`:28-33`).
+4. **Subaccount routing:** resolve `locationId` from payload → look up `canonicalAccounts` joined to `connectorConfigs` → get `organisationId` and `subaccountId` (`:42-66`). The payload carries a tenant discriminator (`locationId`) that maps to a canonical account row carrying the tenant IDs.
+5. Signature verify: HMAC-SHA256 via `adapter.webhook.verifySignature(rawBody, signature, config.webhookSecret)` (`:78`). Skipped with warning if no secret configured.
+6. Ack immediately: `res.status(200).json({ received: true })` before processing (`:88`).
+7. Deduplicate: `webhookDedupeStore.isDuplicate(normalised.externalEventId)` (`:104-108`) — in-memory LRU.
+8. Canonical write: `canonicalDataService.upsertContact/Opportunity/Conversation/Revenue` (`:113-157`).
+9. Mutation log: `recordGhlMutation(...)` → `canonical_subaccount_mutations` with `onConflictDoNothing` (`ghlWebhookMutationsService.ts:76-79`).
+
+Slack webhook (`slackWebhook.ts:57-61`) adds replay protection (rejects timestamps > 5 min old).
+
+**There is no Resend webhook route anywhere in the codebase.**
+
+**Per-subaccount / per-org sending domain — does not exist.** Grep confirmed:
+- `env.EMAIL_FROM` is a single global string (`env.ts:6`).
+- `settings.fromEmailAddress` exists (`notifyOperatorFanoutService.ts:75`) but is only an availability gate.
+- The `crm.send_email` skill has a `fromAddress` field (`crmSendEmailServicePure.ts:14`, `ghlEndpoints.ts:35`) — but this is resolved from GHL's own verified-senders list via `crmLiveDataService.listFromAddresses` and dispatched through GHL's `/contacts/{contactId}/emails` endpoint, not direct Resend.
+- No `sendingDomain`, `from_address`, `from_email`, or `sending_domain` column in any schema file.
+
+**Canonical activity-log location for outreach touchpoints — there isn't one.**
+- `task_activities` (`server/db/schema/taskActivities.ts`) is task-board activity (`activityType` enum: `created | assigned | status_changed | progress | completed | note | blocked | deliverable_added`), not contact/outreach.
+- `canonical_subaccount_mutations` (`clientPulseCanonicalTables.ts:110`) is for GHL webhook events, not email sends.
+- `canonical_contacts` has **no** activity-log child table. No `canonical_contact_activities`, `outreach_sends`, or `email_sends` anywhere.
+
+**IMAP / inbound reply — confirmed absent.** `package.json` has no `imap`, `imapflow`, `node-imap`, `mailparser`. The `read_inbox` action in `actionRegistry.ts:300-323` is spec-only — `readPath: 'liveFetch'` with `liveFetchRationale: 'Provider API — email inbox data not yet migrated to canonical'`.
+
+**Outbound message-ID → activity-row correlation — does not exist.** No `provider_message_id`, `resend_id`, `sendgrid_message_id`, or equivalent column in any schema. `emailService.send()` discards the return value of `resend.emails.send(...)`.
+
+### Q6 Gap
+
+- No per-org/per-subaccount `fromAddress` or sending domain in DB — only global `EMAIL_FROM`.
+- `emailService.send()` is not subaccount-context-aware.
+- No activity log row written before/after send.
+- No returned message ID stored — Resend webhooks can't correlate back.
+- No DB-level idempotency key enforcement (the idempotency key in `crmSendEmailServicePure.ts` is never persisted).
+- No `/api/webhooks/resend` route.
+- No Resend event schema mapper.
+- No `RESEND_WEBHOOK_SECRET` in env.
+- No IMAP / inbound forwarding / Resend inbound parsing.
+- No `canonical_contacts.email` index for reply-to-contact lookup.
+- No thread tracking (`In-Reply-To` / `Message-ID` storage).
+
+### Q6 Recommended approach — end-to-end flow
+
+```
+Step 1 — OUTREACH SKILL → RESEND API
+  a. Resolve from-address via new `org_sending_domains` table:
+       { orgId, domain, fromAddress, resendDomainId, spfVerified, dkimVerified }
+     Fall back to env.EMAIL_FROM if not configured.
+  b. Write PENDING activity row BEFORE send (idempotency-safe):
+       INSERT INTO outreach_sends (new table — see below)
+     UNIQUE(idempotency_key) conflict → return existing row (double-send guard).
+  c. Call Resend API:
+       resend.emails.send({ from, to, subject, html, idempotency_key })
+     Resend returns { id: 'resend_msg_id_xxx' }.
+  d. UPDATE outreach_sends SET provider_message_id='resend_msg_id_xxx', status='sent'.
+
+Step 2 — NEW `outreach_sends` TABLE
+  Column                Type          Notes
+  id                    uuid PK
+  org_id                uuid          FK organisations
+  subaccount_id         uuid          FK subaccounts (RLS + routing)
+  canonical_contact_id  uuid          FK canonical_contacts (nullable if unknown)
+  from_address          text
+  to_email              text          denormalised from contact at send time
+  subject               text
+  body_hash             text          SHA-256 of body (don't store full body)
+  idempotency_key       text UNIQUE
+  status                text          pending|sent|delivered|opened|clicked|bounced|complained|failed
+  provider_message_id   text          Resend's returned id — INDEX
+  provider_name         text          'resend'
+  scheduled_for         timestamptz
+  sent_at               timestamptz
+  delivered_at          timestamptz
+  opened_at             timestamptz
+  bounced_at            timestamptz
+  bounce_type           text          'hard' | 'soft'
+  created_at            timestamptz
+  Index: UNIQUE(provider_name, provider_message_id) for O(1) webhook lookup.
+
+Step 3 — RESEND WEBHOOK INGESTION
+  POST /api/webhooks/resend  (new route at server/routes/webhooks/resendWebhook.ts)
+  a. Raw body capture (mirror ghlWebhook.ts).
+  b. Signature verify: Resend uses svix headers (svix-id, svix-timestamp, svix-signature)
+     Verify with RESEND_WEBHOOK_SECRET (new env var) via crypto.timingSafeEqual
+     (pattern from webhookService.ts:86).
+  c. Subaccount routing — different from GHL:
+     Resend payloads carry no tenant ID. Routing is via stored provider_message_id:
+       SELECT org_id, subaccount_id, canonical_contact_id
+       FROM outreach_sends
+       WHERE provider_message_id = payload.data.email_id
+  d. Event → status mapping (new resendWebhookMutationsPure.ts):
+       'email.sent'       → status='sent',      sent_at=occurred_at
+       'email.delivered'  → status='delivered', delivered_at=occurred_at
+       'email.opened'     → status='opened',    opened_at=occurred_at
+       'email.clicked'    → no status change; log click separately
+       'email.bounced'    → status='bounced',   bounced_at=occurred_at, bounce_type
+       'email.complained' → status='complained'
+  e. Idempotency: onConflictDoNothing on (provider_message_id, event_type)
+     (same pattern as ghlWebhookMutationsService.ts:76).
+  f. Ack 200 before async processing.
+
+Step 4 — INBOUND REPLY DETECTION  (recommendation: IMAP polling)
+  Resend does NOT offer inbound parsing (as of April 2026).
+  Recommend: IMAP polling skill using `imapflow` npm package. New pg-boss
+  job 'email-inbound-poll' analogous to 'slack-inbound' (queueService.ts:998).
+  Auth: use XOAUTH2 via stored OAuth tokens in integration_connections
+  (Gmail/Outlook already supported; no new credential storage needed).
+  Alternative: Cloudflare Email Routing → POST /api/webhooks/email-inbound.
+  Prefer IMAP for V1 simplicity.
+
+Step 5 — REPLY → CONTACT MATCH
+  a. Primary: parse In-Reply-To / References header → lookup outreach_sends
+     WHERE provider_message_id = parsed_message_id → get canonical_contact_id.
+  b. Fallback: match sender From: against canonical_contacts.email WHERE
+     subaccount_id IN (subaccounts owned by org of mailbox owner).
+  c. Ambiguous match handling:
+     - Multiple contacts with same email → create review item flagged 'ambiguous_reply'.
+     - Unknown sender → create canonical contact status='unmatched_reply' + review item.
+     - Automated (noreply, mailer-daemon) → skip per classify_email spam rules.
+  d. Write inbound row (outreach_sends or sibling outreach_replies); mark
+     originating send as "reply received".
+
+Step 6 — HANDOFF TO INTENT CLASSIFIER (Q4 pattern)
+  Enqueue pg-boss job 'email-reply-classify' { orgId, subaccountId,
+    canonicalContactId, outreachSendId, inboundMessageId, senderEmail,
+    senderName, subject, bodyText, threadHistory, receivedAt }.
+  Handler calls classify_prospect_reply (new skill — Q4b). Output:
+  { intent, urgency, sentiment, routing_action, is_automated, suggested_reply_tone }.
+  Routing:
+    'auto_reply'       → enqueue 'email-draft-reply' → draft_reply skill
+    'draft_and_review' → insert reviewItems row
+    'escalate'         → insert tasks row with priority='urgent'
+    'no_action'        → log + discard
+```
+
+**Reused infrastructure** (nothing new to build for these):
+- `emailService.send()` via Resend transport (already wired — just capture and store the returned message ID).
+- `env.ts` schema pattern (add `RESEND_WEBHOOK_SECRET`).
+- GHL webhook route pattern (raw body → HMAC verify → ack → async process).
+- `webhookDedupeStore` LRU.
+- `onConflictDoNothing` mutation pattern from `ghlWebhookMutationsService.ts`.
+- pg-boss worker pattern from `queueService.ts:997` (`slack-inbound`).
+- `integration_connections` OAuth token storage for IMAP XOAUTH2.
+- `reviewItems` table for ambiguous-match escalation.
+- `classify_email` + `draft_reply` skills already in `actionRegistry.ts:2026-2027`.
+
+**New code required:**
+- `outreach_sends` table + migration.
+- `org_sending_domains` table + migration.
+- `server/routes/webhooks/resendWebhook.ts`.
+- `server/services/resendWebhookMutationsPure.ts` (event-type → status mapper).
+- `server/jobs/emailInboundPollJob.ts`.
+- `email-inbound-poll` + `email-reply-classify` + `email-draft-reply` pg-boss job registrations in `jobConfig.ts` + `queueService.ts`.
+- `imapflow` npm dependency.
+
+### Q6 Risk / uncertainty
+
+- **Deliverability and SPF/DKIM per sending domain** — the biggest operational risk. Agency orgs need warmed domains; Resend supports domain verification per account. Architectural decision required: shared Resend account with multi-domain verification (simpler, couples reputation) vs dedicated Resend sub-account per agency (cleaner, more cost/ops). Flag for architect review.
+- **Resend inbound vs IMAP** — Resend has no inbound as of April 2026. IMAP adds: up-to-2-min latency, OAuth refresh complexity, connection rate limits, and requires each agency owner to connect Gmail/Outlook via existing integration flow.
+- **Ambiguous reply matching** — `In-Reply-To` is reliable; `From:` fallback is not. Review-item escalation handles safely but generates noise.
+- **Double-send idempotency** — `crmSendEmailServicePure.ts:42-58` defines an idempotency key but does not persist it. The new `outreach_sends.idempotency_key UNIQUE` constraint closes this.
+- **Multi-threaded email conversation tracking** — `In-Reply-To` chain breaks for forwarded replies or new-subject references. A `thread_id` column grouping related sends/replies is V2 scope.
+- **Resend event ordering** — `delivered` and `opened` can arrive out-of-order under load. Use conditional updates (`UPDATE ... WHERE status != 'bounced'`) to avoid overwriting terminal states with earlier events.
 
 ---
 
