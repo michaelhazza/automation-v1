@@ -53,7 +53,7 @@ Tier 1 as defined here is the minimum work that makes the existing investment vi
 - Extend the per-run cost API response to include `callSite` split (`app` vs `worker`) and LLM call count — this data already exists in `cost_aggregates` and `llm_requests`; we just surface it.
 - Thread `runResultStatus` ('success' | 'partial' | 'failed'), a reserved `trajectoryPassed: boolean | null` slot (always `null` in Phase B — forward-compatible for a future verdict-persistence spec; see §6.4 and §11.4 #6), and the run's `errorMessage` into `extractRunInsights()` via a single `outcome` parameter.
 - Branch extraction behaviour on those signals (detailed in Phase B below).
-- Call `assertWithinRunBudget` from inside `llmRouter.routeCall` after the cost row is written, once per call.
+- Call `assertWithinRunBudgetFromLedger` (new sibling of `assertWithinRunBudget`; reads from `llm_requests` directly — see §7.4.1 and §8.3) from inside `llmRouter.routeCall` after the cost row is written, once per call.
 - Handle the no-`runId` case gracefully (system / analyzer callers don't have a run context and must not be blocked by the breaker).
 - Unit tests for pure extraction logic, integration tests for breaker enforcement, component tests for the cost panel.
 
@@ -80,7 +80,7 @@ Tier 1 as defined here is the minimum work that makes the existing investment vi
 
 Locked at spec-draft time. If a phase needs a file not on this list, stop and update the spec before editing. "New" means the file does not exist today; "modify" means an existing file is edited; "delete" is not used in this spec.
 
-**Exemption — generated review and log artifacts.** Files written under `tasks/` during the course of implementation (e.g. `tasks/pr-review-log-hermes-tier-1-<ISO-timestamp>.md`, `tasks/todo.md` updates, `tasks/lessons.md` appendages, `tasks/triage-*.md`) are exempt from the inventory lock. They are process artifacts, not source files. The lock governs code and schema changes only.
+**Exemption — generated review and log artifacts.** Files written under `tasks/` during the course of implementation (e.g. `tasks/review-logs/pr-review-log-hermes-tier-1-<ISO-timestamp>.md`, `tasks/todo.md` updates, `tasks/lessons.md` appendages, `tasks/triage-*.md`) are exempt from the inventory lock. They are process artifacts, not source files. The lock governs code and schema changes only.
 
 ### 4.1 Phase A — Per-run cost panel
 
@@ -1175,7 +1175,7 @@ Each phase is self-contained — one commit per phase is acceptable, though one-
 Before marking the work done and before any PR:
 
 1. Run `pr-reviewer` against the full set of changes. Per CLAUDE.md: "For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done."
-2. Persist the review log verbatim to `tasks/pr-review-log-hermes-tier-1-<ISO-timestamp>.md` per CLAUDE.md §"Review logs must be persisted".
+2. Persist the review log verbatim to `tasks/review-logs/pr-review-log-hermes-tier-1-<ISO-timestamp>.md` per CLAUDE.md §"Review logs must be persisted".
 3. Address blocking findings before PR creation. Non-blocking findings can be triaged into the follow-up queue.
 4. `dual-reviewer` is optional and local-dev-only. Do not auto-invoke. Only run if the user explicitly asks.
 
