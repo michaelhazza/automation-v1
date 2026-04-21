@@ -280,3 +280,7 @@ test('Every SKILL_HANDLERS entry is a function', () => {
 console.log('');
 console.log(`skillHandlerRegistryEquivalence: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
+
+// Make this file a module so the top-level `await import()` used above
+// satisfies TS1375 (top-level await requires ESM module semantics).
+export {};

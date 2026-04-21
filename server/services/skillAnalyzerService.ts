@@ -1851,11 +1851,6 @@ export async function getJobById(
   return rows[0] ?? null;
 }
 
-/** Delete all results for a job (idempotent retry support). */
-export async function clearResultsForJob(jobId: string): Promise<void> {
-  await db.delete(skillAnalyzerResults).where(eq(skillAnalyzerResults.jobId, jobId));
-}
-
 /** Batch insert results for a job. Splits into 100-row batches. */
 export async function insertResults(
   rows: (typeof skillAnalyzerResults.$inferInsert)[]
@@ -1871,6 +1866,53 @@ export async function insertSingleResult(
   row: typeof skillAnalyzerResults.$inferInsert,
 ): Promise<void> {
   await db.insert(skillAnalyzerResults).values(row);
+}
+
+/** List already-written result rows for a job as a minimal projection.
+ *  Returned for crash-resume in Stage 5: the job handler re-invokes after a
+ *  worker crash, and any candidate_index already present in this list has had
+ *  its LLM classification paid for and persisted — we must not re-call the
+ *  provider for it. Only the fields downstream stages actually read are
+ *  selected (candidateIndex + classification drive Stage 7 agent-propose and
+ *  Stage 8 agent-proposal backfill).
+ *
+ *  Deduplicated by candidateIndex at the query boundary because
+ *  skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint.
+ *  Pre-PR (when Stage 1 called clearResultsForJob on every retry) a single
+ *  jobId could end up with two rows for the same index; callers that iterate
+ *  this list must see each index exactly once so downstream reconstruction
+ *  produces a single deterministic classifiedResults entry per candidate.
+ *
+ *  Ordering matters for determinism. We sort by candidate_index ASC, then
+ *  created_at DESC, then id DESC as a final tiebreaker — the first row
+ *  encountered for each candidate_index wins, so "latest write wins" semantics
+ *  apply. Without ORDER BY, Postgres returns rows in storage order, which is
+ *  not stable across vacuum / hot-update boundaries and can flip the chosen
+ *  row between runs. */
+export async function listResultIndicesForJob(
+  jobId: string,
+): Promise<Array<{ candidateIndex: number; classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT' }>> {
+  const rows = await db
+    .select({
+      candidateIndex: skillAnalyzerResults.candidateIndex,
+      classification: skillAnalyzerResults.classification,
+    })
+    .from(skillAnalyzerResults)
+    .where(eq(skillAnalyzerResults.jobId, jobId))
+    .orderBy(
+      skillAnalyzerResults.candidateIndex,
+      desc(skillAnalyzerResults.createdAt),
+      desc(skillAnalyzerResults.id),
+    );
+
+  const seen = new Set<number>();
+  const deduped: typeof rows = [];
+  for (const row of rows) {
+    if (seen.has(row.candidateIndex)) continue;
+    seen.add(row.candidateIndex);
+    deduped.push(row);
+  }
+  return deduped;
 }
 
 /** Record that a slug's LLM classification is in-flight.
@@ -2257,9 +2299,9 @@ export const skillAnalyzerService = {
   bulkRetryFailedClassifications,
   // Internal — used by job handler only
   getJobById,
-  clearResultsForJob,
   insertResults,
   insertSingleResult,
+  listResultIndicesForJob,
   markSkillInFlight,
   unmarkSkillInFlight,
   updateResultAgentProposals,

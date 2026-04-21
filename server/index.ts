@@ -504,9 +504,44 @@ async function start() {
   llmInflightRegistry.init();
 
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
-  });
+
+  // Windows `node --watch` kills the old process before it can gracefully
+  // release the socket, so the new process typically boots while the port is
+  // still held in TIME_WAIT. Without a retry loop the new process crashes on
+  // EADDRINUSE, --watch restarts it, it crashes again, and the cycle can
+  // burn 2–3 minutes before the kernel releases the port. In production the
+  // process manager (PM2 / Docker) owns restart policy, so we only retry in
+  // dev.
+  const MAX_LISTEN_RETRIES = 30;           // 30 × 2s = 1 min ceiling
+  const LISTEN_RETRY_DELAY_MS = 2_000;
+  const canRetryListen = env.NODE_ENV !== 'production';
+
+  const listenWithRetry = (attempt: number) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && canRetryListen && attempt < MAX_LISTEN_RETRIES) {
+        console.warn(
+          `[SERVER] Port ${PORT} in use (likely TIME_WAIT from previous process) — retrying in ${LISTEN_RETRY_DELAY_MS / 1000}s [${attempt + 1}/${MAX_LISTEN_RETRIES}]`,
+        );
+        setTimeout(() => listenWithRetry(attempt + 1), LISTEN_RETRY_DELAY_MS);
+        return;
+      }
+      // Non-retryable error or retry ceiling reached — exit explicitly rather
+      // than throwing from an EventEmitter listener. The latter relies on
+      // Node's emit machinery routing the throw to uncaughtException, but a
+      // non-fatal path (unhandledRejection, which only logs) would silently
+      // leave the server running without a bound port.
+      console.error(
+        `[SERVER] Fatal: cannot bind port ${PORT} after ${attempt + 1} attempt(s) — ${err.code ?? 'unknown'}: ${err.message}`,
+      );
+      process.exit(1);
+    };
+    httpServer.once('error', onError);
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      httpServer.removeListener('error', onError);
+      console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
+    });
+  };
+  listenWithRetry(0);
 }
 
 start().catch((err) => {

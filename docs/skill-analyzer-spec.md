@@ -898,8 +898,17 @@ z.object({
 
 **Status:** `completed`
 
-1. Insert all `skill_analyzer_results` rows (exact duplicates from Stage 2 + distinct from Stage 4 + reduced LLM-classified from Stage 5). Note: existing results were already deleted at the start of processing for idempotent retry support.
+1. Insert `skill_analyzer_results` rows for exact duplicates from Stage 2 + distinct from Stage 4 (LLM-classified rows were already written incrementally during Stage 5 via `insertSingleResult`). On pg-boss worker-crash retry, the Stage 8 write filters against `completedCandidateIndices` — the same set Stage 5 built from `listResultIndicesForJob` — so previously-inserted rows are not duplicated. The table has no `UNIQUE(job_id, candidate_index)` constraint, so this application-level filter is the current dedup mechanism (tracked for hardening in `tasks/ideas.md` IDEA-1).
 2. Set job status to `completed`, `progress_pct` to 100, `completed_at` to now
+
+**Crash-resume contract (added 2026-04-21).** The handler does NOT clear `skill_analyzer_results` at Stage 1. If a prior worker run died mid-pipeline, the retry preserves every classification already paid for and persisted:
+
+- Stage 1 uses `job.parsedCandidates` when populated (stable `candidateIndex` across retries).
+- Stage 5 reads existing rows via `listResultIndicesForJob` and filters `llmQueue` to skip already-classified slugs.
+- `classifiedResults` is seeded from DB so Stage 7 agent-propose and Stage 7b Haiku enrichment target every candidate (resumed + newly-classified).
+- Stage 8 dedupes against the same index set before batch insert.
+
+The invariant: "if a classification result exists in the DB, it is authoritative and must never be recomputed."
 
 ---
 
