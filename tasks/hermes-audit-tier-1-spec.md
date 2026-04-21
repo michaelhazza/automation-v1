@@ -124,7 +124,7 @@ Note: `server/db/schema/workspaceMemories.ts` is intentionally NOT listed here �
 
 | Action | Path | Role |
 |---|---|---|
-| Modify | `server/services/llmRouter.ts` | After the cost row has been written to `llm_requests` inside `routeCall`, call `assertWithinRunBudgetFromLedger({ runId, subaccountAgentId, organisationId, correlationId })` when `runId` is present (see §7.4.1 — direct-ledger read path). Skip the call when `runId` is null (system / analyzer callers have no run context). The call is dynamic-imported to match the pattern in `sendToSlackService.ts:94`. |
+| Modify | `server/services/llmRouter.ts` | After the cost row has been written to `llm_requests` inside `routeCall`, call `assertWithinRunBudgetFromLedger({ runId, insertedLedgerRowId, subaccountAgentId, organisationId, correlationId })` when `runId` is present (see §7.4.1 — direct-ledger read path). `insertedLedgerRowId` is captured from the ledger insert's `.returning({ id })` result; the helper fails closed if it's missing or not visible (§7.3.1 invariant). Skip the call when `runId` is null (system / analyzer callers have no run context). The call is dynamic-imported to match the pattern in `sendToSlackService.ts:94`. |
 | Modify | `server/lib/runCostBreaker.ts` | (a) Existing exported signatures unchanged — `resolveRunCostCeiling`, `getRunCostCents`, `assertWithinRunBudget` keep their current shapes. Slack (`sendToSlackService.ts:94`) and Whisper (`transcribeAudioService.ts:72`) continue to call `assertWithinRunBudget`, which reads from `cost_aggregates`. (b) **Add a new pair of sibling exports** — `getRunCostCentsFromLedger(runId): Promise<number>` (reads `SUM(cost_with_margin_cents) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial')` directly) and `assertWithinRunBudgetFromLedger(ctx)` (identical to `assertWithinRunBudget` in shape and throw behaviour but internally calls `getRunCostCentsFromLedger` instead of `getRunCostCents`). Only the LLM caller uses the new helpers. Rationale pinned in §7.4.1 — `cost_aggregates` is updated asynchronously by `routerJobService.enqueueAggregateUpdate` (see `llmRouter.ts:897`), so a rollup read would give a stale snapshot and inflate the worst-case overshoot by up to the aggregation lag. The direct-ledger read eliminates that rollup-lag window; the residual concurrency overshoot (bounded by the inflight batch × per-call cost, not by one call's cost — see §7.4 and §11.4 #9) remains because there is no per-run serialization around the insert-and-check sequence. (c) Add a JSDoc line on both `assertWithinRunBudget` and `assertWithinRunBudgetFromLedger` naming their canonical callers — the existing helper lists Slack + Whisper; the new helper lists `llmRouter.routeCall`. |
 | New | `server/services/__tests__/llmRouterCostBreaker.test.ts` | Integration test: (a) call exceeds cap → throws `FailureError` with `failure_reason='internal_error'` and `failure_detail='cost_limit_exceeded'`; (b) call within cap → succeeds; (c) call with `runId=null` → no breaker invocation; (d) when the breaker trips, the ledger row has the router's normal success/error `status` value — **not** `'budget_blocked'` — because the row was written before the throw and the post-write breaker check is decoupled from ledger-status assignment; (e) concurrency test per §9.3 asserts the bounded-but-not-one-call-max behaviour — after a concurrent burst settles, any subsequent serial call trips the breaker; no assertion pins a strict one-call overshoot bound (see §7.4 / §11.4 #9). |
 | Modify | `server/services/llmRouter.ts` comment block | Document the post-cost-record ordering: write ledger row first, then assert budget. Also document the direct-ledger-read choice and the §7.4.1 rationale. |
@@ -549,6 +549,7 @@ To prevent later ambiguity:
 - **Persistence: stateless helper, reads persisted ledger.** `runCostBreaker.ts` holds no in-memory state. Every `assertWithinRunBudget` call (Slack/Whisper) and `assertWithinRunBudgetFromLedger` call (LLM caller, per §7.3) reads fresh from `cost_aggregates` or `llm_requests_all` respectively. There is no breaker state to leak; the source of truth is the persisted cost ledger.
 - **Reset: implicit, on new run.** A retry or replay produces a new `agent_runs` row with a new `runId`. The new run has zero accumulated cost in the ledger, so the breaker starts fresh. This is by design — a retry is a second attempt at the same work, not a continuation of the first attempt's spend. If a misconfigured task systematically retries and each retry hits the breaker, that is intended signal; the org-level `monthlyCostLimitCents` catches cumulative cost across retries.
 - **Failure-loop protection is NOT the breaker's job.** Per-run breaker does one thing well: stop a single run from exceeding its ceiling. Cross-run spend monitoring is the org-level cap's responsibility.
+- **Explicit cross-run delegation.** System safety against cross-run retry loops, scheduler-driven retry storms, and runaway task-creation cascades is delegated to (a) `orgBudgets.monthlyCostLimitCents` enforcement in `budgetService.checkAndReserve` and (b) scheduler-level limits: `agents.maxConcurrentRuns`, `concurrencyPolicy`, and `catchUpPolicy` / `catchUpCap`. Phase C is **single-run-scoped by design** and does not attempt to bound cross-run spend.
 
 ### 7.3 Where to insert the call
 
@@ -557,8 +558,10 @@ Inside `routeCall`, after the ledger row is successfully inserted (currently at 
 Pseudocode at the insertion point:
 
 ```ts
-// ── 12. Write ledger (existing) ────────────────────────────────
-await db.insert(llmRequests).values({ ... });
+// ── 12. Write ledger (existing) — captures inserted row id ────
+const insertedRows = await db.insert(llmRequests).values({ ... })
+  .returning({ id: llmRequests.id });
+const insertedLedgerRowId = insertedRows[0]?.id ?? null;
 
 // ── 12a. Phase C — runaway-loop ceiling ────────────────────────
 const breakerRunId = ctx.runId ?? await resolveRunIdFromIee(ctx);
@@ -569,9 +572,16 @@ if (breakerRunId) {
     // updated asynchronously by `routerJobService.enqueueAggregateUpdate`.
     // Slack / Whisper callers continue to call the unchanged
     // `assertWithinRunBudget`, which reads from `cost_aggregates`.
+    //
+    // `insertedLedgerRowId` is REQUIRED (see §7.3.1 ledger-visibility
+    // invariant). The helper verifies the row is readable before running
+    // the aggregate; a future refactor that moves or skips the ledger
+    // write fails closed here rather than silently producing a stale
+    // breaker read.
     const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');
     await assertWithinRunBudgetFromLedger({
       runId: breakerRunId,
+      insertedLedgerRowId,
       subaccountAgentId: ctx.subaccountAgentId ?? null,
       organisationId: ctx.organisationId,
       correlationId: ctx.correlationId ?? idempotencyKey,
@@ -610,6 +620,85 @@ Dynamic import matches the existing pattern in `sendToSlackService.ts` — avoid
 **Fail-open rationale.** The breaker is secondary protection — a belt-and-braces ceiling on top of per-call cost tracking. If the breaker itself fails (DB outage during the read, unexpected throw), we must not take down the LLM request path, which is the primary business function. The cost row is already written in step 12, so cost attribution is intact; losing one enforcement window is preferable to a system-wide outage caused by a breaker infrastructure bug. A `costBreaker.infra_failure` alert lets ops notice and fix without customer-visible impact.
 
 **`costBreaker.checked` debug log.** One line per LLM call at `debug` level. This is the highest-volume breaker caller (LLM calls dwarf Slack + Whisper by volume), so the log is deliberately debug-only — never emitted at info or higher, never surfaced to customers. Its sole purpose is to let us grep for a specific run's check history when investigating a reported trip.
+
+### 7.3.1 Ledger-visibility invariant — structurally enforced
+
+The pseudocode above makes one thing a type-level contract rather than a comment: `assertWithinRunBudgetFromLedger` takes `insertedLedgerRowId: string | null` as a **required** parameter. The helper implements the following invariant:
+
+```ts
+export async function assertWithinRunBudgetFromLedger(
+  ctx: RunCostBreakerFromLedgerContext,
+): Promise<void> {
+  // Fail-closed: if we got here without a ledger row id, either the
+  // ledger write was skipped (contract violation) or a future refactor
+  // re-ordered operations. Either way, refusing the call surfaces the
+  // bug immediately rather than silently producing a stale breaker read.
+  if (!ctx.insertedLedgerRowId) {
+    throw new FailureError(
+      failure('internal_error', 'breaker_no_ledger_link', {
+        runId: ctx.runId,
+        correlationId: ctx.correlationId,
+      }),
+    );
+  }
+
+  // Visibility check: the row the caller just wrote must be readable by
+  // this connection. If not, we have either (a) an uncommitted transaction
+  // in the caller, or (b) a cross-connection replication-lag anomaly.
+  // Both are contract violations; fail closed.
+  const found = await db
+    .select({ id: llmRequests.id })
+    .from(llmRequests)
+    .where(eq(llmRequests.id, ctx.insertedLedgerRowId))
+    .limit(1);
+  if (found.length === 0) {
+    throw new FailureError(
+      failure('internal_error', 'breaker_ledger_not_visible', {
+        runId: ctx.runId,
+        insertedLedgerRowId: ctx.insertedLedgerRowId,
+        correlationId: ctx.correlationId,
+      }),
+    );
+  }
+
+  // Now safe to run the cost aggregate. The row we just wrote is
+  // visible, therefore the SUM query will include it.
+  const spent = await sumRunCostFromLedger(ctx.runId);
+  const limit = await resolveRunCostCeiling(ctx);
+  if (spent > limit) {
+    throw new FailureError(
+      failure('internal_error', 'cost_limit_exceeded', {
+        spentCents: spent,
+        limitCents: limit,
+        runId: ctx.runId,
+        correlationId: ctx.correlationId,
+      }),
+    );
+  }
+}
+```
+
+What this buys:
+
+1. **Ordering enforcement.** A future refactor that swaps the breaker call above the ledger insert fails at the visibility check (the row doesn't exist yet), not silently.
+2. **Transaction-context enforcement.** If someone wraps the insert in a still-open transaction and runs the breaker on a different connection, the visibility check fails. This surfaces the contract violation at the earliest possible point.
+3. **Typed coupling.** `insertedLedgerRowId` is typed `string | null`, not defaulted. TypeScript catches call sites that forget to pass it at compile time.
+
+The existing `assertWithinRunBudget` (used by Slack and Whisper) is unchanged. It reads from `cost_aggregates` and does not need the ledger-visibility check because its aggregation is always post-commit and the Slack/Whisper flows are simple linear paths with no opportunity for ordering drift.
+
+### 7.3.2 In-flight registry cleanup — existing sweep-based safety net
+
+The merged in-flight tracker (post `ea0f6c5`) has **three** explicit `inflightRegistry.remove()` call sites in `llmRouter.ts` — one per terminal branch (success at `~line 1013`, retryable error at `~line 713`, terminal failure at `~line 845`). It does NOT use a single try/finally. A comment at `llmRouter.ts:525-527` documents the deliberate design: "An unhandled throw between `add()` and `remove()` (e.g. a DB error during the ledger upsert) leaves the entry alive until the deadline-based sweep". The registry's `llmInflightRegistry.ts` sweep loop is the safety net for orphaned entries.
+
+Phase C's breaker call sits **between** the ledger insert and `inflightRegistry.remove()` on the success path. When the breaker throws `cost_limit_exceeded`, the in-flight entry is orphaned until the sweep runs. This is acceptable for Tier 1 because:
+
+- The breaker throw is exceptional, not expected traffic; orphan rate is low.
+- The sweep's safety net handles it within the sweep interval (see `llmInflightRegistry.ts` for the interval).
+- Changing this would require refactoring the existing three-branch cleanup into a single try/finally wrapper, which is a materially larger change than Phase C's scope.
+
+**Phase C's only cleanup obligation**: do not introduce a NEW throw path that orphans an entry outside the branches already covered by the sweep. The pseudocode in §7.3 satisfies this — the breaker's own throw falls into the same `catch` block that fires after a provider-call error, and the existing cleanup branches cover it. Verified by test scenario #7 in §9.3.1 (cleanup-on-throw).
+
+Try/finally refactor of the in-flight registry wrapper is tracked as a deferred hardening item in §11.4 #11. Not Tier 1 scope.
 
 ### 7.4 Ordering invariant — ledger write first, breaker check second
 
@@ -891,6 +980,7 @@ export function getRunCostCentsFromLedger(runId: string): Promise<number>;
 // to `assertWithinRunBudget`; internally calls `getRunCostCentsFromLedger`.
 export function assertWithinRunBudgetFromLedger(ctx: {
   runId: string;
+  insertedLedgerRowId: string | null;  // §7.3.1 — required; helper fails closed on null or not-visible
   subaccountAgentId: string | null;
   organisationId: string;
   correlationId: string;
@@ -1036,6 +1126,8 @@ On a dev org, trigger a successful run with a 300-char summary and 3 obvious-ins
 | IEE call, runId resolvable | `sourceType='iee'`, `ieeRunId` set, parent `runId` exists in `iee_runs` | Breaker resolves and applies |
 | Concurrent overshoot (bounded) | 3 parallel calls on same run, each costs 40 cents, ceiling is 100 | After the three concurrent calls settle, any subsequent serial call on the same run trips the breaker. The three concurrent calls themselves may all succeed (collective spend ≤ ~120 cents) because there is no per-run serialization today — see §7.4 / §7.4.1 "Residual concurrency window" and §11.4 #9. Assertions: (a) a serial follow-up call throws `FailureError('internal_error', 'cost_limit_exceeded', ...)`; (b) collective spend does not grow unboundedly beyond the per-call magnitude × inflight batch size. No assertion pins a specific overshoot bound across the concurrent batch. |
 | Missing `subaccountAgentId` | Call without per-agent link | Breaker falls back to `SYSTEM_DEFAULT_MAX_COST_CENTS` (100 cents) |
+| Missing `insertedLedgerRowId` (invariant breach) | Call the breaker helper directly with `insertedLedgerRowId: null` | Throws `FailureError({ reason: 'internal_error', detail: 'breaker_no_ledger_link', ...})` synchronously; no aggregate query is run. Verifies §7.3.1 fails closed. |
+| Ledger row not yet visible (ordering violation) | Pass an `insertedLedgerRowId` that doesn't exist in `llm_requests` (simulate the insert being rolled back between write and breaker) | Throws `FailureError({ reason: 'internal_error', detail: 'breaker_ledger_not_visible', ...})`. Verifies §7.3.1 visibility check catches the contract violation. |
 
 Concurrency test uses real `await Promise.all([...])` against a seeded DB — not mocks. Phase C's actual concurrency guarantee is weaker than "one call overshoot max": without a per-run advisory lock (§11.4 #9), a concurrent batch on the same run can collectively overshoot by up to the inflight batch size × per-call cost before any of them runs the breaker check. The absolute guarantee is that any **serial** call starting after the concurrent burst settles sees the accumulated spend and trips the breaker. The test pins (a) the trip on the follow-up serial call, and (b) that collective spend does not drift unboundedly — not a specific cap on concurrent-batch overshoot.
 
@@ -1051,6 +1143,7 @@ Each phase's own tests cover its own surface. Cross-phase interactions — where
 | 4 | Memory after a partial run with uncertainty | B (+ handoff) | `finalStatus='completed_with_uncertainty'` maps to `runResultStatus='partial'`. Memory entries get `isUnverified=true`, `provenanceConfidence=0.5`, `qualityScoreUpdater='initial_score'` (no bump applied — partial is neutral per §6.8.2). |
 | 5 | In-flight registry clean-up on breaker throw | C (+ in-flight tracker, post `ea0f6c5`) | When the breaker throws post-ledger-write, `inflightRegistry.remove()` still fires on the cleanup path; no ghost in-flight rows persist. Cross-checks the ordering pinned in §7.3. |
 | 6 | Legacy run renders cost correctly | A | A pre-existing `agent_runs` row with `runResultStatus=NULL` renders a normal cost panel; Phase A does not branch on `runResultStatus` so NULL is immaterial (§6.3.2). |
+| 7 | Cleanup runs when breaker throws on success path | C (+ in-flight tracker) | A breaker trip on the success path still triggers an in-flight `remove()` via the existing per-branch cleanup (NOT a new try/finally wrapper — see §7.3.2). No ghost in-flight row persists beyond the sweep interval. Asserted by polling the in-flight registry after the trip and confirming the entry is gone. |
 
 Scenario #1 (breaker-trip-mid-run) is the most important — it exercises all three phases in a single run and verifies they cooperate correctly. Run as part of the pre-merge gate.
 
@@ -1148,6 +1241,8 @@ Explicitly NOT part of this spec; captured here as pointers for follow-up specs:
 8. **Run-embedding for recurring-task detection (Tier 2 of the audit).** Out of scope; needs its own spec. Independent of Tier 1.
 9. **Per-run cost-breaker serialization.** Phase C's breaker check runs post-ledger-write without a per-run lock around the insert-and-check sequence, so concurrent calls on the same run may collectively overshoot the ceiling by up to the inflight batch size × per-call cost. When live traffic makes this material (concurrent fan-out on a single run is rare today because agent execution is largely sequential), wrap the `INSERT INTO llm_requests` + `assertWithinRunBudget` sequence in `pg_advisory_xact_lock(hashtext(runId))`, or move the assertion into the same transaction as the ledger write with a `SELECT ... FOR UPDATE` on a per-run aggregate row. The same strengthening applies to `sendToSlackService` and `transcribeAudioService` for consistency, though their lower concurrency profiles make the priority lower.
 10. **Playbook-run cost visibility.** A playbook run aggregates cost across its child step runs (those with non-null `agent_run_id` on `playbook_step_runs`). `PlaybookRunDetailPage.tsx` operates on a `playbook_runs` ID, not an `agent_runs` ID — passing that ID into the existing `/api/runs/:runId/cost` endpoint would 404 because the endpoint joins only on `agent_runs.id`; the playbook-run status enum (`awaiting_input`, `completed_with_errors`, `cancelled`) also does not match `isTerminalRunStatus` from `shared/runStatus.ts`. A follow-up spec decides between (a) a new `/api/playbook-runs/:runId/cost` endpoint that sums per-step agent-run costs from `llm_requests_all` joined via `playbook_step_runs.agentRunId`, or (b) a `RunCostPanel`-like component that iterates per-step and displays a per-step breakdown plus an aggregate total. Either way it is non-trivial and out of scope for Tier 1; Phase A ships cost visibility only for the three direct agent-run surfaces (`AgentRunHistoryPage`, `RunTraceViewerPage`, `AdminAgentEditPage`).
+11. **In-flight registry try/finally cleanup refactor.** `llmRouter.ts` uses three explicit `inflightRegistry.remove()` call sites on the success / retryable-error / terminal-error branches, not a single try/finally wrapper. An unhandled throw between `add()` and the appropriate `remove()` orphans an entry until the sweep loop in `llmInflightRegistry.ts` cleans it up. This is documented as deliberate (`llmRouter.ts:525-527`) and acceptable for Tier 1 because (a) Phase C's breaker throw is rare, (b) the sweep safety net contains the blast radius, (c) refactoring the three branches into one try/finally changes a large block of merged-from-main code outside Phase C's scope. A future hardening spec wraps the add/remove pair in a single try/finally so cleanup is structurally guaranteed rather than sweep-dependent. Test scenario #7 in §9.3.1 pins the current behaviour so a refactor can assert no regression.
+12. **Centralised NULL-safe run-result-status accessor.** Today only one consumer (`agentRunHandoffServicePure.ts:63`) reads `agent_runs.runResultStatus` and it already tolerates NULL in its type signature. If a second consumer ever appears and also needs to treat legacy NULL rows uniformly, extract a shared helper `getEffectiveRunResultStatus(run): 'success' | 'partial' | 'failed' | 'unknown'` (mapping NULL → `'unknown'`) and require all new callers to route through it. Not worth extracting proactively at one consumer; the overhead of the indirection exceeds the duplication cost at N=1.
 
 ### 11.5 Post-merge dev-environment observation
 
