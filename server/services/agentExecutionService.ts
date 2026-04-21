@@ -1142,7 +1142,8 @@ export const agentExecutionService = {
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
-      let finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+      let finalStatus = (loopResult.finalStatus ?? 'completed') as
+        'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
 
       // Pre-fetch runMetadata once — consumed by both the Reporting Agent
       // finalize hook and Phase B's runResultStatus derivation (which reads
@@ -1188,7 +1189,8 @@ export const agentExecutionService = {
       const hasSummary = !!(loopResult.summary && loopResult.summary.trim().length > 0);
       const derivedRunResultStatus = computeRunResultStatus(
         finalStatus,
-        /* hasError */ finalStatus !== 'completed',
+        /* hasError — only affects the 'completed' branch of computeRunResultStatus;
+           ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
         hadUncertainty,
         hasSummary,
       );
