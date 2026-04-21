@@ -112,15 +112,18 @@ export function buildPermissionMask(input: BuildMaskInput): PermissionMask {
       };
 
     case 'data_source':
+      // No per-item data-source route exists in the client. Link to the
+      // subaccount knowledge page (the closest parent page that lists
+      // available context sources). editHref is null — there is no
+      // dedicated edit route for individual data sources.
       return {
         canView: superUser || user.canEditAgents || user.orgPermissions.has('org.agents.view'),
-        canEdit: superUser || user.canEditAgents,
+        canEdit: false,
         canViewPayload: baseCanViewPayload,
-        viewHref: `${subaccountPrefix}/data-sources/${entityId}`,
-        editHref:
-          superUser || user.canEditAgents
-            ? `${subaccountPrefix}/data-sources/${entityId}/edit`
-            : null,
+        viewHref: runSubaccountId
+          ? `/admin/subaccounts/${runSubaccountId}/knowledge`
+          : null,
+        editHref: null,
       };
 
     case 'agent':
@@ -128,8 +131,8 @@ export function buildPermissionMask(input: BuildMaskInput): PermissionMask {
         canView: superUser || user.canEditAgents || user.orgPermissions.has('org.agents.view'),
         canEdit: superUser || user.canEditAgents,
         canViewPayload: baseCanViewPayload,
-        viewHref: `/agents/${entityId}`,
-        editHref: superUser || user.canEditAgents ? `/agents/${entityId}/edit` : null,
+        viewHref: `/admin/agents/${entityId}`,
+        editHref: superUser || user.canEditAgents ? `/admin/agents/${entityId}` : null,
       };
 
     case 'prompt':

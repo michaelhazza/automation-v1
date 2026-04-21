@@ -51,6 +51,14 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
 
   useEffect(() => {
     if (!runId) return;
+    // Reset all per-run state so events from a previous run (e.g. navigating
+    // from /runs/A/live to /runs/B/live in the same SPA session) don't bleed
+    // into the new run's timeline.
+    setEvents([]);
+    setSelected(null);
+    lastSeenSeqRef.current = 0;
+    initialBufferRef.current = [];
+    initialGateRef.current = false;
     setLoading(true);
     setError(null);
     fetchSnapshot(1)

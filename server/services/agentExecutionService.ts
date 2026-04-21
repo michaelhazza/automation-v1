@@ -53,7 +53,7 @@ import { fingerprint } from './regressionCaptureServicePure.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
-import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
+import { tryEmitAgentEvent, emitAgentEvent } from './agentExecutionEventEmitter.js';
 import { persistAssembly as persistPromptAssembly } from './agentRunPromptService.js';
 import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
@@ -392,7 +392,12 @@ export const agentExecutionService = {
     });
 
     // Live Agent Execution Log — critical lifecycle bookend (spec §5.3).
-    tryEmitAgentEvent({
+    // Awaited so that run.started claims sequence_number=1 before any later
+    // event (prompt.assembled, context.source_loaded, etc.) allocates a
+    // sequence number. Using tryEmitAgentEvent here would fire it in the
+    // background, creating a race where a subsequent event could win the
+    // lower sequence and sort before the bookend in the timeline.
+    await emitAgentEvent({
       runId: run.id,
       organisationId: request.organisationId,
       subaccountId: request.subaccountId ?? null,
@@ -1341,7 +1346,11 @@ export const agentExecutionService = {
           err: err instanceof Error ? err.message : String(err),
         });
       }
-      const eventCount = terminalUpdate[0]?.nextEventSeq ?? 0;
+      // nextEventSeq is the highest sequence allocated before the terminal
+      // event. Add 1 to count the run.completed event itself, so the
+      // eventCount in the payload matches the number of rows the client
+      // will see when it fetches /events (including this terminal event).
+      const eventCount = (terminalUpdate[0]?.nextEventSeq ?? 0) + 1;
       tryEmitAgentEvent({
         runId: run.id,
         organisationId: request.organisationId,

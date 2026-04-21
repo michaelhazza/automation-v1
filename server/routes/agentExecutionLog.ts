@@ -15,6 +15,7 @@ import { eq, and } from 'drizzle-orm';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
+import { llmRequests } from '../db/schema/llmRequests.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
@@ -200,16 +201,25 @@ router.get(
       res.status(400).json({ error: 'llmRequestId required' });
       return;
     }
+    // Verify the llmRequestId belongs to the run we already visibility-gated.
+    // agent_run_llm_payloads does not carry run_id, so we validate via
+    // llm_requests.run_id before fetching the payload. This prevents an
+    // AGENTS_EDIT-scoped user from accessing another same-org run's raw
+    // prompt/response by guessing a different llmRequestId.
+    const db = getOrgScopedDb('agentExecutionLog.llmRequestRunCheck');
+    const [llmRow] = await db
+      .select({ id: llmRequests.id })
+      .from(llmRequests)
+      .where(and(eq(llmRequests.id, llmRequestId), eq(llmRequests.runId, ctx.run.id)))
+      .limit(1);
+    if (!llmRow) {
+      res.status(404).json({ error: 'LLM payload not found for this run' });
+      return;
+    }
+
     const payload = await getLlmPayload(llmRequestId);
     if (!payload) {
       res.status(404).json({ error: 'LLM payload not found' });
-      return;
-    }
-    // The payload row is keyed by llm_request_id without a run_id FK; enforce
-    // the run↔payload relation here by checking the payload's org matches the
-    // run we visibility-gated against.
-    if (payload.organisationId !== ctx.run.organisationId) {
-      res.status(403).json({ error: 'Payload does not belong to this run' });
       return;
     }
     res.json({ data: payload });

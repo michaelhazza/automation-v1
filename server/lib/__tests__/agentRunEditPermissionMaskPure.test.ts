@@ -130,14 +130,15 @@ test('read-time recomputation: same entity, two different users → different ma
   assert.equal(viewOnly.canEdit, false);
 });
 
-test('system_admin has full mask on every entity type', () => {
+test('system_admin has full mask on every editable entity type', () => {
   const admin = mkUser({ role: 'system_admin' });
+  // data_source is deliberately excluded: no per-item edit route exists,
+  // so canEdit is always false regardless of role (see the data_source case).
   for (const type of [
     'memory_entry',
     'memory_block',
     'policy_rule',
     'skill',
-    'data_source',
     'agent',
   ] as LinkedEntityType[]) {
     const mask = buildPermissionMask({
@@ -150,4 +151,19 @@ test('system_admin has full mask on every entity type', () => {
     assert.equal(mask.canView, true, `${type}: system_admin canView`);
     assert.equal(mask.canEdit, true, `${type}: system_admin canEdit`);
   }
+});
+
+test('data_source: canEdit is always false (no per-item edit route)', () => {
+  // data_source links to the subaccount knowledge page for view; no edit route.
+  const mask = buildPermissionMask({
+    entityType: 'data_source',
+    entityId: 'ds-1',
+    user: mkUser({ role: 'system_admin' }),
+    runOrganisationId: RUN_ORG,
+    runSubaccountId: RUN_SUB,
+  });
+  assert.equal(mask.canView, true);
+  assert.equal(mask.canEdit, false);
+  assert.equal(mask.editHref, null);
+  assert.ok(mask.viewHref, 'viewHref should point to knowledge page');
 });
