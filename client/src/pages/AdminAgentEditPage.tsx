@@ -8,6 +8,8 @@ import { RunActivityChart } from '../components/ActivityCharts';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
 import TestPanel from '../components/runs/TestPanel';
+import { isTerminalRunStatus } from '../lib/runStatus';
+import { RunCostPanel } from '../components/run-cost/RunCostPanel';
 
 interface OrgAgentOption {
   id: string;
@@ -1676,7 +1678,6 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [runCosts, setRunCosts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1693,13 +1694,7 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Fetch cost for expanded run
-  useEffect(() => {
-    if (!expandedId || runCosts[expandedId] !== undefined) return;
-    api.get(`/api/runs/${expandedId}/cost`)
-      .then(r => setRunCosts(prev => ({ ...prev, [expandedId]: r.data.totalCostCents ?? 0 })))
-      .catch(() => setRunCosts(prev => ({ ...prev, [expandedId]: 0 })));
-  }, [expandedId, runCosts]);
+  // Per-run cost now lives in <RunCostPanel/>; no inline state map needed.
 
   const filtered = statusFilter === 'all' ? runs : runs.filter(r => r.status === statusFilter);
   const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
@@ -1744,7 +1739,6 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
         ) : (
           filtered.map(run => {
             const isExpanded = expandedId === run.id;
-            const costCents = runCosts[run.id];
             return (
               <div key={run.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 {/* Run summary row */}
@@ -1787,11 +1781,13 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
                           {fmtTime(run.startedAt)} → {fmtTime(run.completedAt)}
                         </div>
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Cost</div>
-                        <div className="text-[13px] text-slate-700 font-medium">
-                          {costCents !== undefined ? `$${(costCents / 100).toFixed(4)}` : '...'}
-                        </div>
+                        <RunCostPanel
+                          runId={run.id}
+                          runIsTerminal={isTerminalRunStatus(run.status)}
+                          compact
+                        />
                       </div>
                       <div>
                         <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Tool Calls</div>

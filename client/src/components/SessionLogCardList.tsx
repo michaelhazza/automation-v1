@@ -13,6 +13,8 @@
 import { StatusBadge } from '../lib/statusBadge';
 import { formatDuration } from '../lib/formatDuration';
 import { relativeTime } from '../lib/relativeTime';
+import { isTerminalRunStatus } from '../lib/runStatus';
+import { RunCostPanel } from './run-cost/RunCostPanel';
 
 interface HandoffShape {
   version: 1;
@@ -67,38 +69,53 @@ export default function SessionLogCardList({ runs, startNumber, onSelectRun, emp
         const clickable = !!onSelectRun;
 
         return (
-          <button
+          <div
             key={run.id}
-            type="button"
-            disabled={!clickable}
-            onClick={() => clickable && onSelectRun!(run.id)}
-            className={`text-left bg-white border border-slate-200 rounded-xl p-3.5 transition-colors ${
-              clickable ? 'hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer' : 'cursor-default'
+            className={`bg-white border border-slate-200 rounded-xl transition-colors ${
+              clickable ? 'hover:border-indigo-300 hover:bg-indigo-50/30' : ''
             }`}
           >
-            <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-100 text-[11px] font-bold text-slate-600">
-                #{sessionNumber}
-              </span>
-              <StatusBadge status={run.status} />
-              <span className="text-[12px] text-slate-500 font-medium">{formatDuration(run.durationMs)}</span>
-              <span className="text-[12px] text-slate-400">{relativeTime(ts)}</span>
-            </div>
-
-            <div className="text-[13.5px] text-slate-700 leading-snug line-clamp-2">
-              {run.handoffJson?.nextRecommendedAction && (
-                <span className="text-indigo-500 font-semibold">Next: </span>
-              )}
-              {next}
-            </div>
-
-            {showCounters && (
-              <div className="mt-1.5 text-[11px] text-slate-400 flex gap-2">
-                {run.tasksCreated > 0 && <span>{run.tasksCreated} tasks</span>}
-                {run.totalToolCalls > 0 && <span>· {run.totalToolCalls} tool calls</span>}
+            <button
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onSelectRun!(run.id)}
+              className={`w-full text-left p-3.5 bg-transparent border-0 [font-family:inherit] ${
+                clickable ? 'cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-100 text-[11px] font-bold text-slate-600">
+                  #{sessionNumber}
+                </span>
+                <StatusBadge status={run.status} />
+                <span className="text-[12px] text-slate-500 font-medium">{formatDuration(run.durationMs)}</span>
+                <span className="text-[12px] text-slate-400">{relativeTime(ts)}</span>
               </div>
-            )}
-          </button>
+
+              <div className="text-[13.5px] text-slate-700 leading-snug line-clamp-2">
+                {run.handoffJson?.nextRecommendedAction && (
+                  <span className="text-indigo-500 font-semibold">Next: </span>
+                )}
+                {next}
+              </div>
+
+              {showCounters && (
+                <div className="mt-1.5 text-[11px] text-slate-400 flex gap-2">
+                  {run.tasksCreated > 0 && <span>{run.tasksCreated} tasks</span>}
+                  {run.totalToolCalls > 0 && <span>· {run.totalToolCalls} tool calls</span>}
+                </div>
+              )}
+            </button>
+
+            {/* Hermes Tier 1 Phase A — per-run cost line. */}
+            <div className="px-3.5 pb-3">
+              <RunCostPanel
+                runId={run.id}
+                runIsTerminal={isTerminalRunStatus(run.status)}
+                compact
+              />
+            </div>
+          </div>
         );
       })}
     </div>

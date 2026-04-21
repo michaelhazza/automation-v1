@@ -88,7 +88,7 @@ Read the first 200 lines of the spec under review (the framing section, headline
 - Does the spec reference a phase or stage that isn't in the spec-context file? (e.g. spec says "production-ready", context says "rapid evolution")
 - Has the spec been updated since the last time the context file was reviewed? (check `git log --format='%ai' -1 -- <spec>` vs `git log --format='%ai' -1 -- docs/spec-context.md`)
 
-If any of these surface a mismatch, **pause for HITL before starting the review loop**. Write a checkpoint file at `tasks/spec-review-checkpoint-<timestamp>.md` with:
+If any of these surface a mismatch, **pause for HITL before starting the review loop**. Write a checkpoint file at `tasks/review-logs/spec-review-checkpoint-<timestamp>.md` with:
 
 - The spec path and commit hash
 - The spec-context file path and commit hash
@@ -99,7 +99,7 @@ Block and wait for the human to resolve the mismatch before continuing.
 
 ### Step C — Confirm the scope of the review
 
-Before the first iteration, write a short "review plan" section to a scratch file at `tasks/spec-review-plan-<timestamp>.md`:
+Before the first iteration, write a short "review plan" section to a scratch file at `tasks/review-logs/spec-review-plan-<timestamp>.md`:
 
 - Spec path being reviewed
 - Spec commit hash at start of review
@@ -131,7 +131,7 @@ cat "${SPEC_PATH}" | $CODEX_BIN review --stdin 2>&1
 
 Capture the full stdout+stderr as `CODEX_OUTPUT`.
 
-If Codex output is empty or clearly truncated, retry once. If the second attempt also fails, write a diagnostic to `tasks/spec-review-plan-<timestamp>.md` and skip to the next iteration. If two consecutive iterations fail to produce Codex output, stop the loop and report the failure to the caller.
+If Codex output is empty or clearly truncated, retry once. If the second attempt also fails, write a diagnostic to `tasks/review-logs/spec-review-plan-<timestamp>.md` and skip to the next iteration. If two consecutive iterations fail to produce Codex output, stop the loop and report the failure to the caller.
 
 ### Step 2 — Extract findings from Codex output
 
@@ -296,7 +296,7 @@ For every finding classified as directional or ambiguous, write a checkpoint fil
 Write one file per iteration, not per finding. All directional/ambiguous findings from the same iteration are batched into one checkpoint file so the human can review them together:
 
 ```
-tasks/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md
+tasks/review-logs/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md
 ```
 
 Where `<spec-slug>` is the spec file name without extension (e.g. `improvements-roadmap-spec`), `<iteration>` is the iteration number (1..MAX_ITERATIONS), and `<timestamp>` is an ISO 8601 date-time with seconds.
@@ -453,7 +453,7 @@ For every mechanical finding, log in this format:
   Moved to HITL checkpoint: <filename>
 ```
 
-The log is appended to a per-iteration scratch file at `tasks/spec-review-log-<spec-slug>-<iteration>-<timestamp>.md`. This scratch file is the raw evidence trail — the final summary (Step 8 below) is the user-facing version.
+The log is appended to a per-iteration scratch file at `tasks/review-logs/spec-review-log-<spec-slug>-<iteration>-<timestamp>.md`. This scratch file is the raw evidence trail — the final summary (Step 8 below) is the user-facing version.
 
 #### Count the iteration's findings
 
@@ -506,7 +506,7 @@ If none of the above apply, start iteration N+1.
 
 ## Final output (after the loop exits)
 
-When the loop exits for any reason, write a consolidated final report to `tasks/spec-review-final-<spec-slug>-<timestamp>.md`:
+When the loop exits for any reason, write a consolidated final report to `tasks/review-logs/spec-review-final-<spec-slug>-<timestamp>.md`:
 
 ```markdown
 # Spec Review Final Report
@@ -583,6 +583,6 @@ This spec is now mechanically tight against the rubric and against Codex's best-
 - Never run the Codex review against anything other than the exact spec file path provided. Do not broaden the review to "related specs" or "the whole docs/ directory".
 - If Codex output is empty or clearly truncated, retry the command once. If it fails again, skip that iteration and note it in the final output.
 - If the Codex CLI fails to run (non-zero exit, auth error), stop immediately and report the exact error to the caller.
-- Your scratch files (`tasks/spec-review-*`) are informational and can be cleaned up after the loop exits. The final report (`tasks/spec-review-final-*`) is the permanent record.
+- Your scratch files (`tasks/review-logs/spec-review-*`) are informational and can be cleaned up after the loop exits. The final report (`tasks/review-logs/spec-review-final-*`) is the permanent record.
 - You do not touch the spec-context file. Updating `spec-context.md` is the human's job. If you think it needs to change, surface that as a directional finding in a HITL checkpoint.
 - The bias is always toward HITL. A false positive costs the human 30 seconds. A false negative costs a wrong spec.

@@ -87,7 +87,7 @@ Organise findings into three tiers. Be specific — point to file paths and line
 
 Wrap your complete review in a single fenced markdown block tagged `pr-review-log` and emit it as the LAST content in your response. The block must contain: a header with the files reviewed and an ISO 8601 UTC timestamp, the three tier sections (Blocking / Strong / Non-Blocking), and a one-line Verdict. Outside the block you may add a brief prose summary pointing at the highest-priority finding, but the persist-ready review lives INSIDE the block.
 
-Why: the caller is instructed to extract the block verbatim and write it to `tasks/pr-review-log-<slug>-<timestamp>.md` BEFORE fixing any issues, so the review trail persists on disk — same pattern as `spec-review-log-*`. This feeds future pattern mining across many reviews.
+Why: the caller is instructed to extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md` BEFORE fixing any issues, so the review trail persists on disk — same pattern as `review-logs/spec-review-log-*`. This feeds future pattern mining across many reviews.
 
 ---
 

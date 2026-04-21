@@ -284,10 +284,10 @@ The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking 
 
 ### Review logs must be persisted
 
-Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/spec-review-log-*`). The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
+Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/review-logs/spec-review-log-*`). All review logs live in `tasks/review-logs/` to keep the main `tasks/` directory uncluttered. The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
 
-- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
-- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
+- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
+- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
 
 If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
 
@@ -304,12 +304,12 @@ Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checkl
 When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:
 
 - Reads `docs/spec-context.md` as framing ground truth before every run.
-- **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
+- **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/review-logs/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
 - Stops early on two consecutive mechanical-only rounds.
 - Classifies every finding as **mechanical**, **directional**, or **ambiguous**.
 - **Auto-applies mechanical findings** (contradictions, stale language, file inventory drift, sequencing bugs, under-specified contracts).
 - **Pauses for HITL** on directional or ambiguous findings (scope changes, phase re-ordering, testing posture changes, rollout posture changes, architecture changes, anything that would invalidate a baked-in framing assumption).
-- Writes checkpoint files at `tasks/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md` when HITL is needed. The human edits the checkpoint's `Decision:` lines and re-invokes the agent to resume.
+- Writes checkpoint files at `tasks/review-logs/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md` when HITL is needed. The human edits the checkpoint's `Decision:` lines and re-invokes the agent to resume.
 
 **Directional findings are never auto-applied, even if the recommendation looks obviously correct.** The classifier biases aggressively toward HITL — a false positive costs 30 seconds of reading; a false negative costs a wrong-shaped spec and a re-review round.
 
@@ -325,7 +325,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** none. LLM in-flight real-time tracker merged to main via PR #161 on 2026-04-21 (`tasks/llm-inflight-realtime-tracker-spec.md`). All analyzer LLM calls now surface on `/system/llm-pnl` → In-Flight tab with `sourceType='analyzer'` + `featureTag='skill-analyzer-classify'` / `'skill-analyzer-agent-match'` (PR #159's skill-analyzer migration onto `llmRouter.routeCall()` made this automatic).
+**In-flight spec:** `tasks/llm-inflight-realtime-tracker-spec.md` — LLM in-flight real-time tracker. Merged to main via PR #161 on 2026-04-21; post-merge hardening on branch `claude/build-llm-inflight-tracker-m3l2x` (client `stateVersion` guard, `updateLedgerLink()` rehydration) awaiting spec refresh + follow-up PR.
 **Pick-next queue:** Eight follow-up items briefed in `tasks/llm-inflight-deferred-items-brief.md` with per-item problem statements, minimal viable shapes, key files, and tripwires — read that doc before starting any of them. Priority order (top = ship first):
   1. **Partial-external-success protection** — provisional `'started'` ledger row. Financial risk (provider double-bill under DB-blip + retry). Committed follow-up.
   2. **Idempotency-key versioning** (`v1:` prefix on both `llmRouter`'s `generateIdempotencyKey` and `actionService`'s `buildActionIdempotencyKey`). Cheap insurance against canonicalisation drift. Do before any refactor of either function.
@@ -335,7 +335,7 @@ When a draft spec document is written (roadmaps, implementation specs, architect
   6. **Historical in-flight archive** (defer until after #1 — overlap with `'started'` row coverage).
   7. **Per-caller detail drawer mid-flight** (payload capture at dispatch; coordinates with #5).
   8. **Mobile/responsive In-Flight tab layout** (pure UI, lowest urgency).
-**Also live:** ClientPulse Session 3 (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). ClientPulse Session 2 shipped to main 2026-04-20 with durable primitives: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log.
+**Also live / recently merged:** Hermes Tier 1 merged to main via PR #162 on 2026-04-21 (per-run cost panel + success-gated memory promotion + LLM router cost-breaker wire-up; spec at `tasks/hermes-audit-tier-1-spec.md`). ClientPulse Session 3 active (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). ClientPulse Session 2 shipped to main 2026-04-20 with durable primitives: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log.
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
