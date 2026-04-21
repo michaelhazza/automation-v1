@@ -1092,6 +1092,24 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           err.failure.failureReason === 'internal_error' &&
           err.failure.failureDetail === 'cost_limit_exceeded';
         if (isExpectedBreakerTrip) {
+          // Commit the reservation and enqueue the aggregate update before
+          // rethrowing — without these calls the over-budget call's cost stays
+          // locked in an active reservation and cost_aggregates never receives
+          // the row, so RunCostPanel and aggregate-backed readers permanently
+          // undercount the triggering call's spend. Both calls are best-effort:
+          // failures here must not mask the cost_limit_exceeded error.
+          budgetService.commitReservation(reservationId, costResult.costWithMarginCents).catch((e) => {
+            console.error('[llmRouter] costBreaker.commit_reservation_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+          enqueueAggregateUpdate(idempotencyKey).catch((e) => {
+            console.error('[llmRouter] costBreaker.enqueue_aggregate_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
           throw err;
         }
         console.error('[llmRouter] costBreaker.infra_failure', {
