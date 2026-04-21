@@ -154,11 +154,36 @@ Every page that shows a completed agent or playbook run must display, without ex
 
 The panel shows three things, top to bottom:
 
-1. **Total cost.** USD to four decimal places when cost < $1, two decimal places when ≥ $1. Zero state: "— no LLM spend recorded".
-2. **Call count + tokens.** "N LLM calls · Xk tokens in / Yk tokens out". Tokens from a new aggregation on the cost endpoint (below).
-3. **Call-site split.** A two-row breakdown when `compact=false`: `app` (main Node process) and `worker` (background pg-boss workers / IEE). Each row shows cost and count. Hidden entirely in `compact=true`.
+1. **Total cost.** USD, formatted as follows:
+   - cost ≥ $1: two decimal places, e.g. `$12.47`.
+   - $0.01 ≤ cost < $1: four decimal places, e.g. `$0.4712`.
+   - cost > 0 but < $0.01: two significant figures, e.g. `$0.00038`.
+   - cost = 0: "— no LLM spend recorded".
+   - cost ≥ $1000: thousands separators, no decimals, e.g. `$12,345`. (Rare for a single run, but a runaway could produce it — display must not overflow layout.)
+2. **Call count + tokens.** "N LLM calls · Xk tokens in / Yk tokens out". Tokens formatted with `k`/`M` suffixes when ≥ 1,000 / ≥ 1,000,000 to keep the string compact. Call count always shown as a raw integer — even in `compact=true`.
+3. **Call-site split.** A two-row breakdown when `compact=false`: `app` (main Node process) and `worker` (background pg-boss workers / IEE). Each row shows cost and count. Hidden entirely in `compact=true` — but call count and tokens (item 2) remain visible even in compact mode.
 
 When the run has zero LLM calls, the panel still renders with the "no LLM spend recorded" state rather than hiding — the empty state is information too (confirms the run didn't silently drop cost rows).
+
+### 5.2.1 Only render for terminal runs
+
+The cost panel renders only when the run has reached a **terminal status**. For the `status` column on `agent_runs`, terminal means `IN ('completed', 'failed', 'timeout', 'cancelled', 'loop_detected', 'budget_exceeded', 'completed_with_uncertainty')`. For non-terminal statuses (`pending`, `running`, `delegated`, `awaiting_clarification`, `waiting_on_clarification`), the panel renders a static "Run in progress — cost available after completion" placeholder and does not call the cost endpoint.
+
+Reasoning:
+
+- Cost is write-once-per-call and accumulates during a run. Mid-run polling would show monotonically increasing numbers that confuse the operator.
+- No polling is simpler than polling. Every time a page-load reads the cost endpoint, it gets a stable snapshot.
+- The four pages that host the panel (`AgentRunHistoryPage`, `PlaybookRunDetailPage`, `RunTraceViewerPage`, `AdminAgentEditPage`) already know the run's status because they display it. Passing the status (or a `runIsTerminal: boolean`) as an additional prop avoids the panel fetching run metadata just to decide whether to render.
+
+The component API is therefore:
+
+```tsx
+interface RunCostPanelProps {
+  runId: string;
+  runIsTerminal: boolean;  // caller asserts; panel does not re-fetch
+  compact?: boolean;       // default false
+}
+```
 
 ### 5.3 Component contract
 
@@ -175,13 +200,20 @@ The component owns its own fetch lifecycle — no parent is expected to thread t
 
 `GET /api/runs/:runId/cost` today returns the row from `cost_aggregates` keyed as `(entityType='run', entityId=runId, periodType='run', periodKey=runId)`. Phase A extends the response with two computed fields that the UI needs and that the DB can return cheaply:
 
+All four new fields share the same status filter — `status IN ('success', 'partial')` — so every row on the UI refers to the same set of requests:
+
 - `llmCallCount`: `COUNT(*) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial')`.
-- `callSiteBreakdown`: `SELECT call_site, SUM(cost_with_margin_cents), COUNT(*) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial') GROUP BY call_site`.
-- `totalTokensIn`, `totalTokensOut`: same grouping, sum of `tokens_in` / `tokens_out`.
+- `callSiteBreakdown`: `SELECT call_site, SUM(cost_with_margin_cents) AS cost_cents, COUNT(*) AS request_count FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial') GROUP BY call_site`.
+- `totalTokensIn`: `SUM(tokens_in) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial')`. Null-coerced to 0.
+- `totalTokensOut`: `SUM(tokens_out) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial')`. Null-coerced to 0.
 
-The `cost_aggregates` row provides `totalCostCents` and `requestCount` unchanged for backwards compatibility. No schema change; one extra indexed query on `llm_requests(run_id)`.
+The `cost_aggregates` row provides `totalCostCents` and `requestCount` unchanged for backwards compatibility — these continue to match existing `cost_aggregates` semantics, which **include** cost from failed requests that incurred charges before erroring. This is the one intentional asymmetry: `totalCostCents` may exceed the sum of cost in `callSiteBreakdown` when failed calls recorded partial cost.
 
-Failed requests (`status IN ('error', 'timeout', 'parse_failure', 'aborted_by_caller', 'rate_limited', 'provider_unavailable')`) are excluded from the call count but counted toward `totalCostCents` if they recorded a cost. This matches the existing semantics of `cost_aggregates`.
+The asymmetry is called out inline in the response's JSDoc so frontend consumers aren't surprised. The UI shows `totalCostCents` as the headline because it matches what the org actually paid; the call-site split is the "successful traffic" view.
+
+No schema change; one extra indexed query on `llm_requests(run_id)`.
+
+Failed requests (`status IN ('error', 'timeout', 'parse_failure', 'aborted_by_caller', 'rate_limited', 'provider_unavailable', 'budget_blocked')`) are excluded from `llmCallCount`, `callSiteBreakdown`, and token sums.
 
 ### 5.5 Layout placement
 
@@ -247,6 +279,19 @@ Applied at run completion inside `agentExecutionService.ts::finishLoop` where `f
 
 This derivation is a pure function `computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary): 'success' \| 'partial' \| 'failed' \| null` and lives in a new `agentExecutionServicePure.ts` or an appropriate existing pure file. The test suite pins the full truth table.
 
+### 6.3.1 Write-once invariant
+
+`runResultStatus` is **write-once for terminal runs**. Once a non-null value has been persisted for a given `agent_runs` row, no code path may overwrite it. Consumers (handoff service, memory extraction, analytics, the new Phase A cost panel once it surfaces the field) treat it as canonical; re-derivation after the fact would silently diverge from memory rows that were already written.
+
+Implementation:
+
+- The write happens exactly once, at the `finishLoop` terminal-write site (around `agentExecutionService.ts:1175`) where `status: finalStatus` is already being set. `runResultStatus` joins that same `.update({ ... })` so it is committed atomically with the terminal status.
+- Any later code path that touches `agent_runs` for a completed run (e.g. backfill scripts, admin-tool corrections) must not `SET run_result_status = ...`. If such a path is ever needed, it requires a separate spec.
+- The invariant is guarded at the service boundary with a read-then-write check in `finaliseAgentRun` or equivalent — if `runResultStatus` is already non-null on read, skip the write and log `runResultStatus.write_skipped` at warn level.
+- A database-level guard (trigger or partial check constraint) would be ideal but is **explicitly out of scope** for Tier 1 per §3 Out-of-scope. The service-level check is sufficient because we control the only two write sites (the finishLoop terminal write and `finaliseAgentRunFromIeeRun` for IEE-backed runs, which must be updated in the same commit as the main path).
+
+If the IEE path currently calls a status-updating helper that doesn't know about `runResultStatus`, Phase B includes the matching update there. The derivation rule (§6.3) is applied from the same inputs in both paths.
+
 ### 6.4 `extractRunInsights` extended signature
 
 Current signature (`workspaceMemoryService.ts:696`):
@@ -307,7 +352,7 @@ Full matrix:
 | `partial` | any | any | kept, unchanged | +0.00 |
 | `failed` | any | `observation` or `pattern` or `decision` | `issue` (force demoted — a failed run cannot produce a durable pattern) | −0.10 |
 | `failed` | any | `issue` | `issue` (kept) | +0.00 (failures reinforce `issue` entries without penalty) |
-| `failed` | any | `preference` | dropped — do not write (a failed run should not assert a user preference) | n/a |
+| `failed` | any | `preference` | downgraded to `observation` (preserves the signal — a failed run may still reveal a valid preference — but doesn't elevate it to the durable `preference` tier) | −0.10 |
 
 Quality score modifiers apply on top of the existing `scoreMemoryEntry(entry)` baseline. Final score clamped to `[0.0, 1.0]`. The `qualityScoreUpdater` field on the row is set to `'outcome_bump'` when a modifier is applied, so downstream audits can distinguish outcome-driven scores from baseline ones.
 
@@ -337,17 +382,61 @@ Every row Phase B writes sets:
 
 No schema change required — all four columns already exist.
 
-### 6.8 Short-summary guard stays intact
+#### 6.7.1 Semantics change for `isUnverified` — compatibility assessment
 
-The existing `if (!runSummary || runSummary.trim().length < 20) return;` guard at `workspaceMemoryService.ts:704` stays as-is. Phase B adds one further guard:
+Before Phase B, `isUnverified` was set at `workspaceMemoryService.ts:788` as `!runId`, i.e. `true` only for manual or drop-zone inserts that had no `runId`. Run-sourced entries were always `isUnverified = false` regardless of the run's outcome. Phase B changes this to `isUnverified = runResultStatus !== 'success'` for run-sourced entries, which flips a subset of new entries (partial + failed runs) to `true` — while pre-existing rows are untouched.
+
+Compatibility check before merging Phase B:
+
+1. **Grep every consumer of `isUnverified`** — `server/` and `client/` — and verify each handles `true` for run-sourced entries without surprise. Expected callers: retrieval pipelines (which may filter on it), admin panels (which may display it).
+2. **Retrieval filters.** If any retrieval path has an implicit assumption "`isUnverified=true` means non-run-sourced, discount heavily", re-examine — Phase B makes partial-run entries `isUnverified=true` and those entries are still worth retrieving (they're neutral, not wrong).
+3. **Display strings.** If any UI renders `isUnverified` as "user input" or similar, update the copy to reflect the new meaning: "not yet corroborated" regardless of source.
+4. **Test fixtures.** Update any test fixture that hard-codes `isUnverified: false` for a run-sourced entry with a non-success outcome.
+
+If the grep reveals a consumer that can't safely absorb the new semantics in Phase B's timeline, fall back to a transitional approach: add a new column `needsCorroboration` with Phase B's semantics and leave `isUnverified` unchanged. Fallback is only triggered if blocking consumers surface; default plan is to update `isUnverified`.
+
+### 6.8 Short-summary guard on failed runs
+
+The existing `if (!runSummary || runSummary.trim().length < 20) return;` guard at `workspaceMemoryService.ts:704` stays as-is. Phase B adds one further guard, using structured signals only — no string heuristics:
 
 ```ts
-if (outcome.runResultStatus === 'failed' && !runSummary.toLowerCase().includes('fail') && runSummary.length < 100) {
-  return; // Short summaries on failed runs are usually truncated errors; skip.
+// Skip memory extraction when a failed run carries no meaningful signal.
+// Rationale: "Request timed out." / "API error." style summaries on failed
+// runs produce low-value `issue` entries that clog retrieval.
+const hasStructuredError = Boolean(run.errorMessage && run.errorMessage.length > 0);
+const hasMeaningfulSummary = runSummary.trim().length >= 100;
+if (outcome.runResultStatus === 'failed' && !hasStructuredError && !hasMeaningfulSummary) {
+  return;
 }
 ```
 
-This prevents "Request timed out." style error blobs from being captured as `issue` memory. The guard is small and removable if it proves noisy in practice.
+Two independent structured signals, either of which is sufficient to keep the extraction running:
+
+- `run.errorMessage` is set — the failure has a structured diagnostic; the `issue` entry has context.
+- `runSummary.trim().length >= 100` — the run produced enough narrative to distil regardless of structured diagnostics.
+
+No language-dependent substring matching. If both signals are absent, the run did not yield useful learning and we skip rather than write a low-value `issue` that will dilute future retrieval.
+
+### 6.8.1 Idempotency
+
+Phase B does not introduce any new write paths — it modifies post-processing of entries that `extractRunInsights` already writes. The existing deduplication contract (`deduplicateEntries` in `workspaceMemoryService.ts`) is what prevents duplicates across retries, replays, and partial failures. Phase B preserves that contract:
+
+- `selectPromotedEntryType` and `scoreForOutcome` are **pure** — rerunning them on the same inputs yields the same outputs. A retry that re-enters `extractRunInsights` with the same `(runId, summary, outcome)` produces the same candidate entry set.
+- The dedup key used by `deduplicateEntries` is content-based, not outcome-based. A retry on a run whose outcome has been corrected (see §6.3.1 — this should not happen, but defensively) would hit the existing dedup path and update rather than insert.
+- The `qualityScoreUpdater` field goes to `'outcome_bump'` when a modifier is applied; downstream auditors can distinguish `'outcome_bump'` rows from `'initial_score'` rows and reconcile if drift is ever observed.
+
+Rule: Phase B must not introduce any new ADD-style write that bypasses `deduplicateEntries`. If a new write path ever becomes necessary, it needs its own spec and its own dedup key.
+
+### 6.8.2 Partial runs are intentionally neutral
+
+Every row in the §6.5 matrix where `runResultStatus='partial'` is "kept, unchanged" with a `+0.00` score modifier. This is deliberate and worth calling out because future readers may assume it's an oversight:
+
+- **We do not promote on partial**, because the outcome is ambiguous — a run that ended `completed_with_uncertainty` might have the right answer or might not.
+- **We do not demote on partial**, because the extraction is still useful signal — an uncertain agent can still surface a valid preference or issue.
+- **Provenance confidence is set to 0.5** (§6.7), which is the "no strong signal either way" midpoint.
+- **`isUnverified` is set to `true`** on partial entries (same as failed — any non-success triggers the flag), so downstream retrieval can filter them if needed.
+
+Result: partial-run entries coexist with success and failure entries in the same tables, at the neutral midpoint, with their uncertainty visible on the row. Retrieval pipelines can bias for or against them by filtering on `provenanceConfidence` or `isUnverified`.
 
 ### 6.9 Done criteria for Phase B
 
@@ -395,14 +484,37 @@ Pseudocode at the insertion point:
 await db.insert(llmRequests).values({ ... });
 
 // ── 12a. Phase C — runaway-loop ceiling ────────────────────────
-if (ctx.runId) {
-  const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
-  await assertWithinRunBudget({
-    runId: ctx.runId,
-    subaccountAgentId: ctx.subaccountAgentId ?? null,
-    organisationId: ctx.organisationId,
-    correlationId: ctx.correlationId ?? idempotencyKey,
-  });
+const breakerRunId = ctx.runId ?? await resolveRunIdFromIee(ctx);
+if (breakerRunId) {
+  try {
+    const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
+    await assertWithinRunBudget({
+      runId: breakerRunId,
+      subaccountAgentId: ctx.subaccountAgentId ?? null,
+      organisationId: ctx.organisationId,
+      correlationId: ctx.correlationId ?? idempotencyKey,
+    });
+    logger.debug('costBreaker.checked', {
+      runId: breakerRunId,
+      correlationId: ctx.correlationId ?? idempotencyKey,
+    });
+  } catch (err) {
+    // Fail-open on breaker infrastructure errors. A `FailureError` with
+    // detail='cost_limit_exceeded' is the intended trip and must propagate.
+    // Any other error (DB read timeout, module import failure, unexpected
+    // throw from the breaker internals) is an infrastructure failure — we
+    // log and allow the LLM response to be returned. The cost row is
+    // already written; cost attribution is intact either way.
+    if (err instanceof FailureError && err.reason === 'internal_error'
+        && err.detail === 'cost_limit_exceeded') {
+      throw err;
+    }
+    logger.error('costBreaker.infra_failure', {
+      runId: breakerRunId,
+      correlationId: ctx.correlationId ?? idempotencyKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ── 13. Return to caller (existing) ───────────────────────────
@@ -411,15 +523,35 @@ return providerResponse;
 
 Dynamic import matches the existing pattern in `sendToSlackService.ts` — avoids a module-cycle hazard with the router.
 
+**Fail-open rationale.** The breaker is secondary protection — a belt-and-braces ceiling on top of per-call cost tracking. If the breaker itself fails (DB outage during the read, unexpected throw), we must not take down the LLM request path, which is the primary business function. The cost row is already written in step 12, so cost attribution is intact; losing one enforcement window is preferable to a system-wide outage caused by a breaker infrastructure bug. A `costBreaker.infra_failure` alert lets ops notice and fix without customer-visible impact.
+
+**`costBreaker.checked` debug log.** One line per LLM call at `debug` level. This is the highest-volume breaker caller (LLM calls dwarf Slack + Whisper by volume), so the log is deliberately debug-only — never emitted at info or higher, never surfaced to customers. Its sole purpose is to let us grep for a specific run's check history when investigating a reported trip.
+
 ### 7.4 Ordering invariant — ledger write first, breaker check second
 
 The ledger row is written **before** the breaker runs. Reasons:
 
 1. **Cost attribution integrity.** The money was already spent with the provider; we must record it regardless of whether the breaker trips.
-2. **Race safety.** A pre-write breaker check would use a stale `cost_aggregates` snapshot — concurrent in-flight requests reserve against the same run would pile onto the same "within-budget" reading and all fire. Post-write, each concurrent request's own cost row is visible to the check, and the Nth request is guaranteed to trip.
+2. **Race safety.** A pre-write breaker check would use a stale `cost_aggregates` snapshot — concurrent in-flight requests reserve against the same run would pile onto the same "within-budget" reading and all fire. Post-write, each concurrent request's own cost row is visible to the check, and the Nth request is guaranteed to trip (subject to the data-source contract in §7.4.1).
 3. **Consistency with existing callers.** `sendToSlackService.ts` and `transcribeAudioService.ts` already check post-cost-record. Matching that pattern prevents the breaker from having two behaviours.
 
 A comment block at the insertion point documents this ordering so a future refactor doesn't invert it.
+
+### 7.4.1 Data-source contract for the breaker read
+
+The concurrency overshoot claim in §7.4 point 2 holds only if the breaker reads from a data source that has synchronously observed the row we just wrote. The existing `getRunCostCents` implementation (`runCostBreaker.ts:83`) reads from `cost_aggregates` — a rollup table. Two possibilities:
+
+- **If `cost_aggregates` is updated synchronously inside the same DB transaction that inserts into `llm_requests`** (e.g. via a trigger or an in-line upsert), then the breaker sees this call's cost immediately and the worst-case overshoot is **one call's cost per concurrent batch** as claimed.
+- **If `cost_aggregates` is updated asynchronously** (e.g. by a pg-boss aggregator or a trigger with `DEFERRED INITIALLY DEFERRED` semantics), then the breaker read can lag by the aggregation interval and the worst-case overshoot is **up to N concurrent in-flight calls' cost**, where N is the maximum inflight on that run.
+
+Phase C implementation requires verifying which regime applies by:
+
+1. Checking for a trigger on `llm_requests` that updates `cost_aggregates` in the same transaction (`\d+ llm_requests` in psql or inspect `migrations/` for the `cost_aggregates` write path).
+2. If no synchronous update exists, either (a) switch `getRunCostCents` in this code path to a direct `SUM(cost_with_margin_cents) FROM llm_requests WHERE run_id = $1 AND status IN ('success', 'partial')` query, or (b) accept the looser overshoot bound and document it in the breaker's JSDoc.
+
+The conservative default is (a) — switch to a direct `llm_requests` sum for the LLM caller. The Slack and Whisper callers are left on the `cost_aggregates` read because their per-call cost magnitudes are much larger than the aggregation lag's worth of LLM calls, and their concurrency profiles are lower. If the investigation reveals `cost_aggregates` is already synchronous, both callers stay as-is.
+
+Document the chosen regime in a comment block on the breaker insertion site and in `KNOWLEDGE.md` so future reviewers don't re-derive the analysis.
 
 ### 7.5 When to skip the breaker
 
@@ -439,7 +571,7 @@ IEE runs (`sourceType === 'iee'`) set `ieeRunId` but may or may not have `runId`
 - Else if `ctx.ieeRunId` is set, resolve `agent_run_id` from `iee_runs` via a single indexed query.
 - Else skip the breaker (should not happen per contract guards).
 
-The resolution query is cached for the duration of the `routeCall` invocation — no need to re-resolve for each provider call in a retry chain.
+The resolution query is memoised **per `routeCall` invocation context** — not per provider attempt. A single `routeCall` may fan out to multiple provider attempts (primary + fallback providers, retries inside the backoff loop); every attempt inside one `routeCall` uses the same resolved `runId`. The memoisation key is the `routeCall` invocation itself (via a local variable in the function scope), not a module-level cache; this prevents cross-invocation staleness if an `iee_runs` row is updated between calls.
 
 ### 7.7 Failure payload shape
 
@@ -542,6 +674,17 @@ or, for zero-call runs:
 ```
 
 Auth: `authenticate` middleware (existing). Org scoping: the existing check at `llmUsage.ts:354-357` verifying `run.organisationId === req.orgId`. No new permission; no new middleware.
+
+**Backward-compat contract.** The four new response fields are **always present** in the server response — never elided. The server substitutes defaults when the underlying query returns zero rows:
+
+- `llmCallCount: 0`
+- `totalTokensIn: 0`
+- `totalTokensOut: 0`
+- `callSiteBreakdown: { app: { costCents: 0, requestCount: 0 }, worker: { costCents: 0, requestCount: 0 } }` — both `app` and `worker` keys always present regardless of whether either side has rows.
+
+Client consumers that destructure only `{ totalCostCents, requestCount }` continue to work unchanged. Client consumers that read the new fields never see `undefined` for any of them; a cost endpoint that returned `{ entityId, totalCostCents: 0, requestCount: 0 }` before Phase A now returns all four new fields filled with the zero defaults above.
+
+TypeScript consumers must use the `RunCostResponse` type from `shared/types/runCost.ts` (§8.1). The type marks all four new fields as **required** — if a mock response in a test omits them, the type checker fails at compile time, which prevents silent drift.
 
 ### 8.3 Service signatures
 
