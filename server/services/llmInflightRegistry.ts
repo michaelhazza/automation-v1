@@ -203,25 +203,45 @@ export function has(runtimeKey: string): boolean {
 }
 
 /**
- * Ledger-link rehydration — emit a follow-up `removed` event for an
- * already-removed runtimeKey so the client's `recentlyLanded` map picks
- * up the ledger linkage.
+ * Ledger-link rehydration — narrow UI-reconciliation event emitted for
+ * an already-removed runtimeKey so the client's `recentlyLanded` map
+ * picks up a `ledgerRowId` that wasn't available at first removal.
  *
- * Use case (pr-review feedback): when a retry chain exhausts all
- * retryable errors, the inner catch already removed each attempt's
- * entry with `ledgerRowId=null` (the ledger row hadn't been written
- * yet). The outer failure path then writes the ledger row and knows
- * the id, but the original entry is gone, so `remove()` would be a
- * noop and the `[ledger]` button never appears in "Recently landed".
+ * ⚠️ THIS IS NOT A GENERAL-PURPOSE SECOND TERMINAL TRANSITION.
  *
- * This method bypasses the state-machine noop path and emits a
- * standalone event with the same `stateVersion: 2` tag the original
- * removal carried. The client's `applyRemoveEntry` handles duplicate
- * removes gracefully — it merges the new `ledgerRowId` +
- * `ledgerCommittedAt` over any previously-null values.
+ * The state machine (see `applyRemove` in the pure file) is the single
+ * source of truth for "how does an entry end?". A runtimeKey transitions
+ * `active(1) → removed(2)` exactly once, via `remove()`. This method
+ * exists only to re-broadcast the SAME terminal event with a populated
+ * ledger linkage after the fact — it does not change the slot's state,
+ * does not update the map, does not republish to Redis (the origin
+ * instance already fanned out the first removal), and does not bump
+ * `stateVersion` (stays at 2). The client-side contract is that
+ * `applyRemoveEntry` is idempotent on (runtimeKey, stateVersion=2) and
+ * merges populated ledger fields over any earlier nulls.
  *
- * No local state change, no Redis publish (the origin instance already
- * fanned out the first removal). Socket emission only.
+ * The narrow use case (pr-review feedback): when a retry chain
+ * exhausts all retryable errors, each inner-catch `remove()` fired with
+ * `ledgerRowId=null` because the outer failure-path ledger upsert
+ * hadn't run yet. After the upsert writes the row, this method re-
+ * emits the last attempt's removal with the now-known `ledgerRowId`
+ * and `ledgerCommittedAt`, so the UI's `[ledger]` button appears on
+ * "Recently landed". One call per routeCall, after the ledger write.
+ *
+ * DO NOT call this:
+ *   - to update any field other than `ledgerRowId` / `ledgerCommittedAt`
+ *   - to change `terminalStatus` after a `remove()` (that's a logic bug
+ *     upstream — classify the status correctly the first time)
+ *   - more than once per runtimeKey (the merge is convergent but the
+ *     wire traffic is wasted)
+ *   - to "fix" a removal that used the wrong runtimeKey (the pair has
+ *     already diverged from the state machine — just live with it)
+ *
+ * If a future requirement would need richer semantics than "link the
+ * ledger row to the already-landed runtimeKey" — e.g. mid-flight status
+ * updates, partial-success provisional rows, replay after a sweep —
+ * that belongs in a different method with its own contract, not
+ * squeezed into this one.
  */
 export function updateLedgerLink(input: {
   runtimeKey:        string;
