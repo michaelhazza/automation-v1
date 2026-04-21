@@ -17,6 +17,8 @@ import {
   buildAggregatedOverheadRow,
   computeNetProfit,
   computeTotalsRow,
+  COUNTABLE_COST_STATUSES,
+  contributesToCostAggregate,
 } from '../systemPnlServicePure.js';
 
 let passed = 0;
@@ -180,6 +182,48 @@ test('computeTotalsRow — sums across billable + overhead rows', () => {
 test('computeTotalsRow — empty rows → zero row', () => {
   const totals = computeTotalsRow([]);
   assertEqual(totals, { requests: 0, revenueCents: 0, costCents: 0, profitCents: 0, marginPct: 0 }, 'zeros');
+});
+
+// ── Countable-cost status predicate (deferred-items brief §1 tripwire) ───
+//
+// Pins the invariant: `cost_aggregates` must ignore `'started'` rows so a
+// provisional row (written before the provider call to close the double-
+// dispatch window) never inflates cost totals. All terminal non-success
+// statuses are also excluded. Only `success` and `partial` contribute.
+//
+// If this list ever needs to change, the change must be deliberate — both
+// this test and every SQL query in systemPnlService.ts need to update
+// together. The pair is the contract.
+
+test('COUNTABLE_COST_STATUSES pins success + partial (brief §1)', () => {
+  assertEqual([...COUNTABLE_COST_STATUSES], ['success', 'partial'], 'countable set');
+});
+
+test('contributesToCostAggregate — provisional started is EXCLUDED', () => {
+  assertEqual(contributesToCostAggregate('started'), false, "'started' must not count toward cost");
+});
+
+test('contributesToCostAggregate — every terminal non-success is EXCLUDED', () => {
+  const excluded = [
+    'started',               // brief §1 — provisional row
+    'error',
+    'timeout',
+    'budget_blocked',
+    'rate_limited',
+    'provider_unavailable',
+    'provider_not_configured',
+    'client_disconnected',
+    'parse_failure',
+    'aborted_by_caller',
+  ];
+  for (const s of excluded) {
+    assertEqual(contributesToCostAggregate(s), false, `status='${s}' must not count toward cost`);
+  }
+});
+
+test('contributesToCostAggregate — success and partial are INCLUDED', () => {
+  assertEqual(contributesToCostAggregate('success'), true, 'success counts');
+  assertEqual(contributesToCostAggregate('partial'), true, 'partial counts');
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────

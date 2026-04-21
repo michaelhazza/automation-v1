@@ -411,7 +411,22 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     .update(JSON.stringify(params.messages))
     .digest('hex');
 
-  // ── 4+7. Atomic idempotency check + budget reservation ─────────────────
+  // ── 4+7. Atomic idempotency check + provisional ledger write ───────────
+  //
+  // Deferred-items brief §1 — the provisional `'started'` row MUST be
+  // inserted inside this transaction, not after. A SELECT FOR UPDATE only
+  // locks existing rows; when no row exists for `idempotencyKey`, two
+  // concurrent first-calls both pass the check, both commit, and both
+  // proceed to dispatch — the exact double-bill window §1 exists to
+  // prevent. Pulling the INSERT into the transaction makes the second
+  // caller block on the unique-constraint conflict until the first
+  // transaction commits; the second tx's own SELECT FOR UPDATE then
+  // returns the `'started'` row and correctly takes the reconciliation
+  // branch.
+  //
+  // pr-review finding #1 (2026-04-21): this contract was previously
+  // violated — the INSERT was after the transaction and the race window
+  // was open. DO NOT move the INSERT back out of this block.
   let reservationId: string | null = null;
   let budgetBlockedStatus: string | null = null;
   let budgetErrorMessage: string | null = null;
@@ -448,10 +463,76 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // the usual upsert path (see `where status != 'success'` clause on
     // the success-insert at the bottom of this function).
     if (existing.length > 0 && existing[0].status === 'started') {
-      return { inflight: true as const, runtimeKey: null } as const;
+      return { inflight: true as const } as const;
     }
 
-    return { cached: false as const };
+    // Terminal error/terminal-failure rows from a prior attempt exist but
+    // are overwritable — fall through to write a fresh `'started'` row
+    // below. The upsert conflict target is idempotencyKey and the
+    // onConflictDoUpdate `where: status != 'success'` guard keeps any
+    // prior success row (which was already returned above) untouched.
+    const provisional = await tx
+      .insert(llmRequests)
+      .values({
+        idempotencyKey,
+        organisationId:      ctx.organisationId,
+        subaccountId:        ctx.subaccountId,
+        userId:              ctx.userId,
+        sourceType:          ctx.sourceType,
+        runId:               ctx.runId,
+        executionId:         ctx.executionId,
+        ieeRunId:            ctx.ieeRunId,
+        sourceId:            ctx.sourceId,
+        featureTag:          ctx.featureTag ?? 'unknown',
+        callSite:            ctx.callSite ?? 'app',
+        agentName:           ctx.agentName,
+        taskType:            ctx.taskType,
+        executionPhase:      ctx.executionPhase,
+        provider:            effectiveProvider,
+        model:               effectiveModel,
+        tokensIn:            0,
+        tokensOut:           0,
+        costRaw:             '0',
+        costWithMargin:      '0',
+        costWithMarginCents: 0,
+        marginMultiplier:    String(margin.multiplier),
+        fixedFeeCents:       margin.fixedFeeCents,
+        requestPayloadHash,
+        status:              'started',
+        requestedProvider:   effectiveProvider,
+        requestedModel:      effectiveModel,
+        wasEscalated:        ctx.wasEscalated ?? false,
+        escalationReason:    ctx.escalationReason,
+        billingMonth,
+        billingDay,
+      })
+      // A prior terminal-error row may still own this key. Overwrite it
+      // with a fresh `'started'` so the retry path works as expected; the
+      // `where: status != 'success'` guard protects committed successes
+      // (which have already been caught and returned above anyway).
+      .onConflictDoUpdate({
+        target: [llmRequests.idempotencyKey],
+        set: {
+          status:              'started',
+          errorMessage:        null,
+          provider:            effectiveProvider,
+          model:               effectiveModel,
+          requestPayloadHash,
+          requestedProvider:   effectiveProvider,
+          requestedModel:      effectiveModel,
+          marginMultiplier:    String(margin.multiplier),
+          fixedFeeCents:       margin.fixedFeeCents,
+          tokensIn:            0,
+          tokensOut:           0,
+          costRaw:             '0',
+          costWithMargin:      '0',
+          costWithMarginCents: 0,
+        },
+        where: sql`${llmRequests.status} != 'success'`,
+      })
+      .returning({ id: llmRequests.id });
+
+    return { cached: false as const, provisionalRowId: provisional[0]?.id ?? null };
   });
 
   if ('inflight' in idempotencyResult) {
@@ -460,10 +541,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       model: effectiveModel,
       provider: effectiveProvider,
     });
-    throw new ReconciliationRequiredError({
-      idempotencyKey,
-      existingRuntimeKey: idempotencyResult.runtimeKey,
-    });
+    throw new ReconciliationRequiredError({ idempotencyKey });
   }
 
   if (idempotencyResult.cached) {
@@ -474,6 +552,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     });
     return idempotencyResult.response;
   }
+  // `idempotencyResult.provisionalRowId` is populated at this point but
+  // isn't threaded downstream — the terminal upsert at the bottom of
+  // routeCall uses the idempotencyKey as the conflict target, not the
+  // row id. Kept on the return shape for future debugging / breaker
+  // wiring without re-opening the concurrency window.
 
   try {
     reservationId = await budgetService.checkAndReserve(
@@ -505,7 +588,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
   }
 
-  // Write the audit record for blocked calls (budget_blocked / rate_limited)
+  // Write the audit record for blocked calls (budget_blocked / rate_limited).
+  // The provisional `'started'` row was already inserted inside the
+  // idempotency-check transaction above, so we must overwrite it here
+  // — not onConflictDoNothing — otherwise the `'started'` row stays in
+  // the table until the sweep reaps it 660s later. `where status != 'success'`
+  // preserves the invariant that a committed success is never downgraded.
   if (budgetBlockedStatus) {
     await db
       .insert(llmRequests)
@@ -544,7 +632,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         billingMonth,
         billingDay,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [llmRequests.idempotencyKey],
+        set: {
+          status:           budgetBlockedStatus,
+          errorMessage:     budgetErrorMessage,
+          routerOverheadMs: Date.now() - routerStart,
+        },
+        where: sql`${llmRequests.status} != 'success'`,
+      });
 
     throw {
       statusCode: 402,
@@ -553,67 +649,10 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     };
   }
 
-  // ── 7a. Write provisional 'started' ledger row (deferred-items brief §1) ──
-  //
-  // Closes the partial-external-success window: if `providerAdapter.call()`
-  // succeeds (provider bills) but the terminal ledger insert later fails
-  // (DB blip, constraint violation, crash), a retry under the same
-  // idempotencyKey sees this row and throws ReconciliationRequiredError
-  // instead of re-dispatching to the provider.
-  //
-  // The insert is outside the budget-reservation transaction deliberately:
-  // the budget reservation is a separate table (`budget_reservations`) and
-  // already has its own idempotency semantics via `idempotencyKey`. Pulling
-  // the ledger write into the same transaction would widen the failure
-  // blast radius — a temporary DB issue that affects only `llm_requests`
-  // should not roll back a successful budget reservation.
-  //
-  // `onConflictDoNothing` makes this insert idempotent: a retry under the
-  // same key (after a crash between insert and provider call) is a no-op.
-  // The terminal upsert at the bottom of routeCall carries
-  // `where: status != 'success'` so success rows are never downgraded;
-  // 'started' IS overwritable (that's the whole point — we replace the
-  // provisional row with the terminal row on completion).
-  const provisionalInsertedRows = await db
-    .insert(llmRequests)
-    .values({
-      idempotencyKey,
-      organisationId:      ctx.organisationId,
-      subaccountId:        ctx.subaccountId,
-      userId:              ctx.userId,
-      sourceType:          ctx.sourceType,
-      runId:               ctx.runId,
-      executionId:         ctx.executionId,
-      ieeRunId:            ctx.ieeRunId,
-      sourceId:            ctx.sourceId,
-      featureTag:          ctx.featureTag ?? 'unknown',
-      callSite:            ctx.callSite ?? 'app',
-      agentName:           ctx.agentName,
-      taskType:            ctx.taskType,
-      executionPhase:      ctx.executionPhase,
-      provider:            effectiveProvider,
-      model:               effectiveModel,
-      tokensIn:            0,
-      tokensOut:           0,
-      costRaw:             '0',
-      costWithMargin:      '0',
-      costWithMarginCents: 0,
-      marginMultiplier:    String(margin.multiplier),
-      fixedFeeCents:       margin.fixedFeeCents,
-      requestPayloadHash,
-      status:              'started',
-      requestedProvider:   effectiveProvider,
-      requestedModel:      effectiveModel,
-      wasEscalated:        ctx.wasEscalated ?? false,
-      escalationReason:    ctx.escalationReason,
-      billingMonth,
-      billingDay,
-    })
-    .onConflictDoNothing()
-    .returning({ id: llmRequests.id });
-  const provisionalRowId = provisionalInsertedRows[0]?.id ?? null;
-
   // ── 8. Call the provider with retry-fallback loop ───────────────────────
+  // (The provisional `'started'` row is now written atomically inside the
+  // idempotency-check transaction above — see the brief §1 / pr-review
+  // finding #1. Do NOT re-introduce a separate post-transaction INSERT.)
   const providerStart = Date.now();
   let providerResponse: ProviderResponse | null = null;
   let callStatus: string = 'success';
@@ -786,6 +825,16 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
                 temperature: params.temperature,
                 signal,
               });
+              // pr-review finding #3 (2026-04-21): if the for-await loop
+              // exits via exception, `iterable.done` is left as an
+              // unobserved Promise and Node.js emits
+              // UnhandledPromiseRejection. Attach a no-op catch FIRST so
+              // the handler is installed before any throw site, then
+              // await it normally at the end. `await iterable.done`
+              // re-observes the same Promise; a no-op handler alongside
+              // the normal await is the standard node idiom for
+              // "observe a Promise twice without double-reporting".
+              iterable.done.catch(() => { /* intentional no-op — propagated via for-await */ });
               let tokensSoFar = 0;
               for await (const chunk of iterable) {
                 if (typeof chunk.tokensSoFar === 'number') {
@@ -802,7 +851,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
                   tokensSoFar,
                 });
               }
-              return iterable.done;
+              return await iterable.done;
             }
             return providerAdapter.call({
               model:       mappedModel,
@@ -1017,6 +1066,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           capabilityTier:         routingTier,
           wasDowngraded,
           routingReason,
+          // pr-review finding #4 (2026-04-21): mirror the success set's
+          // margin-fields policy so a future move of pricingService.getMargin
+          // inside the retry loop can't silently leave stale provisional
+          // defaults on the terminal failure row.
+          marginMultiplier:       String(margin.multiplier),
+          fixedFeeCents:          margin.fixedFeeCents,
         },
         // Only overwrite if the existing row is NOT already a success.
         // Terminal-failure rows overwrite 'started' provisional rows

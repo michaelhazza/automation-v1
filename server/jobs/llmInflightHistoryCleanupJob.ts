@@ -28,6 +28,11 @@ export async function cleanOldInflightHistoryRows(): Promise<CleanupResult> {
     nowMs:         Date.now(),
     retentionDays: env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS,
   });
+  // Plain `db` (not withAdminConnection) — llm_inflight_history has no RLS.
+  // If RLS is ever added to this table (see brief §6 tripwires — "FORCE
+  // ROW LEVEL SECURITY + admin bypass" option), switch to
+  // withAdminConnection + `SET LOCAL ROLE admin_role` to match the
+  // pattern in llmStartedRowSweepJob.ts / llmLedgerArchiveJob.ts.
   const result = await db
     .delete(llmInflightHistory)
     .where(lt(llmInflightHistory.createdAt, cutoff))

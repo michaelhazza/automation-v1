@@ -25,6 +25,21 @@ export class ReconciliationRequiredError extends Error {
   readonly code = 'RECONCILIATION_REQUIRED' as const;
   readonly statusCode = 409 as const;
   readonly idempotencyKey: string;
+  /**
+   * Optional runtimeKey hint — always `null` when the error is thrown from
+   * the `'started'`-row idempotency-check path because the `llm_requests`
+   * row stores only the `idempotencyKey`, not the in-memory registry's
+   * `runtimeKey` (those are per-attempt identifiers scoped to one process).
+   *
+   * Callers that want to show a "there is a live call for this key — check
+   * the In-Flight tab" banner should use `idempotencyKey` to query
+   * `GET /api/admin/llm-pnl/in-flight` (the snapshot endpoint filters
+   * results client-side by idempotencyKey). Future work could thread the
+   * registry's runtimeKey here by looking up the live entry during the
+   * error construction, but that would tie this error to the registry's
+   * lifetime and make the typed surface more fragile — the brief §1
+   * explicitly leaves this field nullable for that reason.
+   */
   readonly existingRuntimeKey: string | null;
 
   constructor(args: {

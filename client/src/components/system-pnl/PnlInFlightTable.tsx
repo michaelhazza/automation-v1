@@ -513,6 +513,11 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
             : row.dispatchDelayMs > 1_000
               ? 'text-amber-700'
               : 'text-slate-500';
+          // Brief §5 + pr-review finding #5: the mobile card must surface
+          // the same streaming token counter as the desktop table —
+          // otherwise admins on mobile silently lose the "is the stream
+          // making progress" signal when streaming lands.
+          const mobileProg = progress.get(row.runtimeKey);
           return (
             <div
               key={`mobile-${row._key}`}
@@ -563,7 +568,15 @@ export default function PnlInFlightTable({ onOpenDetail }: Props = {}) {
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-slate-400">Elapsed</div>
-                  <div className="font-mono text-slate-700">{formatElapsed(elapsedMs)}</div>
+                  <div
+                    className="font-mono text-slate-700"
+                    title={mobileProg ? `${mobileProg.tokensSoFar} tokens generated so far (advisory)` : undefined}
+                  >
+                    {formatElapsed(elapsedMs)}
+                    {mobileProg && (
+                      <span className="ml-1 text-[10px] text-indigo-500">· {mobileProg.tokensSoFar}t</span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="mt-2 flex items-center gap-2">
