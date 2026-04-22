@@ -1,6 +1,6 @@
 # Universal Brief — Development Brief
 
-**Status:** Draft development brief — revision 4 (final iteration pass before spec)
+**Status:** Final development brief — revision 5 (locked; next step is implementation spec)
 **Author:** Design session on `claude/research-questioning-feature-ddKLi`
 **Audience:** architect, spec-reviewer, further external review rounds, then implementation session
 **Date:** 2026-04-22
@@ -33,14 +33,41 @@
   7. **Tightened `source` semantics.** Cached provider data is `live` with non-zero `freshnessMs`, not mis-classified as canonical. Freshness is what users care about; classification is internal bookkeeping.
   8. **Declined: per-filter confidence.** Feedback suggested per-filter confidence on `filtersApplied`. Rejected for v1 — artefact-level confidence from rev 2 is sufficient; per-filter granularity is over-engineering at this stage.
   9. **Updated open questions and sequencing notes** to reflect contract expansion.
-- **rev 4** (this version — post external review rounds 3 + 4, final pass before spec) — closed out developer-ergonomics gap:
+- **rev 4** (post external review rounds 3 + 4) — closed out developer-ergonomics gap:
   1. **Contract additions (round 3):** `confidenceSource?: 'llm' | 'heuristic' | 'deterministic'` on structured + approval artefacts; `window?: 'per_run' | 'per_day' | 'per_month' | 'unknown'` on `BriefBudgetContext`. Both optional.
   2. **Contract rules (round 3):** single-active-artefact rule for lifecycle chains, execution reuse rule (latest-only), relationship directionality rule (not automatically bidirectional), RLS backstop expanded to cover aggregate invariants, `freshnessMs` hybrid rule (maximum age across contributors).
   3. **§9 expanded (round 4):** three canonical flows, artefact-by-artefact with explicit IDs, parent links, related links, and status transitions. Pressure-tests the contract end-to-end against read refinement, write + execution, and failure + retry.
   4. **New §12 Implementation guidance (round 4):** golden implementation guidelines (directive SHOULD/MUST rules), implementation boundaries (capability / orchestrator / execution / client), failure handling principles (invalid artefacts, missing parents, out-of-order updates), contract test requirements (gate for every capability).
   5. **New §15.1 Build sequence (round 4):** contract-layer implementation order within product phases. Each step is independently shippable; avoids the "half-done everything" failure mode.
   6. **Tone shift in new sections (round 4):** directive language ("capabilities SHOULD...", "MUST", "MUST NOT") in implementation guidance sections. Existing rationale sections retain explanatory tone — they serve a different audience.
-  7. **This is the last iteration pass.** Further feedback is welcome but the brief is now treated as build-ready. The next step after this is `architect` → implementation spec → `spec-reviewer`.
+  7. **This was the last planned iteration pass.** One more polish round followed in rev 5.
+- **rev 5** (this version — final polish, locked) — post external review round 5. Four targeted additions; no rework:
+  1. **Developer quick-start preamble.** A 9-bullet "read this first" section between metadata and TOC, giving implementers the mental-model anchor before they read ~1100 lines of depth. Addresses signal dilution introduced by rev 4's length.
+  2. **Hard-boundary statement.** Reinforced in §12 intro and echoed in the quick-start: the contract is not a guideline; non-conforming capabilities do not emit artefacts. Cultural expectation matters as much as technical enforcement.
+  3. **Canonical flows elevated to reference patterns.** §9's intro now explicitly marks the three flows as reference patterns, not examples. Deviations are design-level decisions warranting review, not routine implementation choices.
+  4. **New §12.5 Anti-patterns.** Twelve "do NOT" directives covering the most common failure modes under real development pressure. Complements §12.1's positive directives. Experienced devs often read anti-patterns more carefully than positive rules.
+
+  The brief is now LOCKED for external iteration. Further refinement happens in the implementation spec (`tasks/universal-brief-dev-spec.md`) and via the spec-reviewer loop. The brief is the stable contract for what we're building and why; the spec is where we work through how.
+
+---
+
+---
+
+## Developer quick-start — non-negotiables
+
+**Read this before the full brief.** These are the rules every implementer MUST internalise before writing a single line of capability code. Full rationale for each is in the body of the brief; this is the mental model anchor.
+
+- **The artefact contract is a hard boundary, not a guideline.** Capabilities that do not conform MUST NOT emit artefacts into the Brief system. There is no "ship now, fix later" path. Non-conforming capabilities are blocked at the orchestrator boundary (see §11.3, §12).
+- **Artefact chain tip rule.** For any chain linked via `parentArtefactId`, only the latest artefact with no children is authoritative. Consumers resolve the chain and render the tip. Predecessors are history, not state. (See §9 + `docs/brief-result-contract.md`.)
+- **Artefacts are immutable.** To update an artefact, emit a NEW one with `status: 'updated'` and `parentArtefactId` pointing to the predecessor. Never mutate in place. (See §12.1.)
+- **Approval execution pattern.** Approvals transition through a linked chain: initial card → `executionId` populated on dispatch → `executionStatus` transitions (`pending → running → completed / failed`). Each transition is a new artefact. `executionId` is latest-only; retries emit a new chain. (See §9.2, §12.1.)
+- **RLS is primary at the capability, backstopped at the orchestrator.** Capabilities enforce scope at the read boundary — no post-filtering. Orchestrator validates identifier scope + aggregate invariants as defence in depth. (See §11.3.)
+- **Confidence is mandatory on LLM-interpreted output.** Any artefact produced via LLM interpretation MUST emit a `confidence` value. Omission implies ~1.0 and means "deterministic" — claim that only when you can defend it. Populate `confidenceSource` where meaningful. (See §11.4, §12.1.)
+- **Populate `relatedArtefactIds` when an artefact originates from another.** Approval cards reference the result they offer action over. Errors reference the operation that failed. Silence breaks UI grouping. (See §12.1.)
+- **Canonical flows (§9) are reference patterns, not just examples.** Capabilities SHOULD align to these flows unless there's a strong reason not to. Deviations are design-level decisions that warrant review.
+- **Every capability MUST pass §12.4 contract tests before shipping.** Valid schema, lifecycle-chain validation, RLS scope validation (IDs + aggregates), relationship integrity, canonical flow coverage, directive-rule assertions. The shared test harness (`server/lib/briefContractTestHarness.ts`, Phase 0) makes this a one-import-away gate.
+
+That's the mental model. Now the rest of the brief.
 
 ---
 
@@ -69,6 +96,7 @@
     - 12.2 Implementation boundaries — who does what
     - 12.3 Failure handling principles
     - 12.4 Contract test requirements
+    - 12.5 Anti-patterns — what NOT to do
 13. Non-goals
 14. Relationship to other in-flight work
 15. Sequencing
@@ -402,9 +430,11 @@ This sub-phase lands before W3.3 (approval-gate suggestion) and W3.4 (provenance
 
 ## 9. Canonical flows — artefact-by-artefact
 
+**These flows are reference patterns, not just examples.** All capabilities SHOULD align their user-facing interactions to one of these three shapes unless there's a strong, documented reason not to. A capability that invents its own flow pattern is a design-level decision that warrants review — not a routine implementation choice. Consistency across capabilities is what turns the contract from a formal document into an actual platform protocol.
+
 Three canonical flows pressure-test the contract end-to-end. Each shows artefact IDs, `parentArtefactId` chains, `relatedArtefactIds`, and `status` transitions explicitly. If a flow can't be modelled cleanly in these artefact primitives, the contract has a gap. If these three can, the contract is sound for v1.
 
-Every capability implementer MUST be able to map their surface into at least one of these flows. The spec's contract-test harness (§12.4) validates this mapping.
+Every capability implementer MUST be able to map their surface into at least one of these flows. The §12.4 contract-test harness validates this mapping.
 
 ---
 
@@ -805,7 +835,9 @@ Observability is a day-zero concern, not something that gets bolted on after thi
 
 This section exists because a contract without implementation guidance produces inconsistent implementations. Different developers interpret the same rules differently and ship subtly divergent artefacts. The sections below are the **directives** that turn this brief from a spec-shaped document into a build-ready one.
 
-**Every capability implementation MUST be reviewed against this section.** The `architect` agent will reference these rules when producing the implementation spec; the `pr-reviewer` agent will cite them when reviewing capability implementations.
+**The artefact contract is a hard boundary, not a guideline.** Capabilities that do not conform MUST NOT emit artefacts into the Brief system. There is no "just ship it and fix later" path — non-conforming artefacts are rejected at the orchestrator boundary, producers are logged, and the capability does not ship. Cultural expectation matters as much as technical enforcement; treating the contract as optional is how platform protocols rot.
+
+**Every capability implementation MUST be reviewed against this section.** The `architect` agent will reference these rules when producing the implementation spec; the `pr-reviewer` agent will cite them when reviewing capability implementations. The §12.4 test harness is the gate; no capability ships without passing it.
 
 ### 12.1 Golden implementation guidelines
 
@@ -860,6 +892,27 @@ Every capability MUST pass the following tests before shipping. These are not su
 **Test harness location.** A shared capability-test harness lives in `server/lib/briefContractTestHarness.ts` (to be created in Phase 0) providing reusable assertions for each of the above. Capability-specific tests import from it. No capability ships without passing these assertions.
 
 **Principle.** The contract's value comes from consistency. The test harness is how consistency is enforced; without it, "everyone follows the rules" is an unenforced aspiration.
+
+### 12.5 Anti-patterns — what NOT to do
+
+The "do this" rules above catch about half the drift. The other half comes from well-intentioned shortcuts that feel reasonable in isolation but compound into inconsistency across capabilities. Enumerating anti-patterns explicitly prevents that.
+
+Every item below is phrased as a directive negation. If you find yourself tempted to do any of these, stop and re-read the linked section.
+
+- **Do NOT mutate artefacts in place.** Artefacts are immutable once emitted. Updates are new artefacts with `status: 'updated'` and a `parentArtefactId` link. In-place mutation breaks replay, breaks audit, and breaks the single-active-artefact rule. (§12.1)
+- **Do NOT emit multiple active artefacts for the same logical result.** Only one tip per chain. Emitting two `kind: 'structured'` artefacts with overlapping scope from one turn forces the UI to guess which is authoritative. One MUST supersede the other via `parentArtefactId`. (§12.1)
+- **Do NOT omit `filtersApplied` even when filters are inferred.** Users need to see how their intent was parsed — especially when the system inferred filters they didn't explicitly state. Silent filter application is how trust erodes. `filtersApplied` is mandatory, not optional. (§9, contract doc)
+- **Do NOT treat `confidence` as optional when using LLM interpretation.** Any artefact produced by interpreting ambiguous input through an LLM MUST emit `confidence`. Omitting it implies "deterministic" (~1.0 confidence). Misrepresenting LLM output as deterministic is a trust failure. (§11.4, §12.1)
+- **Do NOT bypass the orchestrator for execution updates.** Execution status transitions (`pending → running → completed / failed`) flow through the orchestrator emitting updated approval artefacts. Direct client-side execution tracking breaks the replay invariant (§12.2) — "what did the user see at time T" must be answerable from artefact history alone. (§12.1, §12.2)
+- **Do NOT reuse `executionId` across retries.** Each retry is a new approval artefact in the chain with a new `executionId`. Reusing the ID loses history and makes failure diagnosis impossible. (§12.1, contract doc)
+- **Do NOT post-filter RLS at the chat layer.** RLS is enforced at the capability's read boundary. Post-filtering is brittle (misses aggregates, counts, derived data) and creates a false sense of safety. If a capability emits out-of-scope rows, the capability is broken — fix it there, not downstream. (§11.3)
+- **Do NOT emit artefacts without `artefactId`.** Every artefact has an ID so other artefacts can reference it. Random UUIDs on retry break lifecycle chains — prefer deterministic derivation from `(brief_id, turn_index, kind, sequence)` so retries produce identical IDs for logically identical artefacts. (§12.1)
+- **Do NOT invent chat-layer state that isn't backed by an artefact.** The client never fabricates state. Every UI transition reflects a new artefact the server emitted. Inventing local-only state breaks the replay invariant and creates surprise mismatches between what the user saw and what the audit trail records. (§12.2)
+- **Do NOT bypass `actionRegistry` for approval dispatch.** Every `actionSlug` on an approval card resolves through the registered action pipeline. The approval card is a UX affordance over the existing review gate, not a parallel dispatch path. Capability code that dispatches actions directly without going through `actionRegistry` skips audit, skips review, skips cost accounting. (§12.1)
+- **Do NOT ship a capability without running the §12.4 test harness.** "I'll add tests later" is how contract drift starts. The test harness is the gate. If your capability doesn't pass it, it doesn't emit artefacts.
+- **Do NOT treat canonical flows (§9) as suggestions.** If your capability's user-facing flow doesn't map to one of the three canonical flows, that's a design-level decision — not a routine implementation choice. Deviations warrant explicit discussion, not silent invention.
+
+**Why this list matters.** The positive rules in §12.1 describe the target state. The anti-patterns here describe the failure modes most likely to emerge under real development pressure. Keep both in mind when reviewing your own code.
 
 ---
 
