@@ -29,8 +29,8 @@ export function TaskChatPane({ taskId }: TaskChatPaneProps) {
         `/api/conversations/task/${taskId}`,
       )
       .then((res) => {
-        setConversationId(res.conversationId);
-        setMessages(res.messages);
+        setConversationId(res.data.conversationId);
+        setMessages(res.data.messages);
       })
       .catch(() => {});
   }, [taskId]);
@@ -45,8 +45,9 @@ export function TaskChatPane({ taskId }: TaskChatPaneProps) {
     setInput('');
     setSending(true);
 
+    const tempId = crypto.randomUUID();
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: tempId,
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
@@ -54,11 +55,19 @@ export function TaskChatPane({ taskId }: TaskChatPaneProps) {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const res = await api.post<{ message: ChatMessage }>(
+      // The write endpoint returns { messageId, artefactsAccepted, artefactsRejected }
+      // — no assistant reply is echoed back. Replace the optimistic row's id with
+      // the server-issued id so later websocket / refetch merges dedupe correctly.
+      const res = await api.post<{ messageId: string }>(
         `/api/conversations/${conversationId}/messages`,
         { content: text },
       );
-      setMessages((prev) => [...prev, res.message]);
+      const serverId = res.data.messageId;
+      if (serverId) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, id: serverId } : m)),
+        );
+      }
     } finally {
       setSending(false);
     }

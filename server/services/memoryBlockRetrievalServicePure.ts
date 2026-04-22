@@ -59,8 +59,11 @@ function scopeSpecificity(
 export function rankByPrecedencePure(input: MemoryBlockRetrievalInput): MemoryBlockRow[] {
   const context = { subaccountId: input.subaccountId, agentId: input.agentId };
 
+  // Defence-in-depth: pure function should not trust the caller to have
+  // pre-filtered to the correct org. A mis-wired caller passing mixed-org
+  // candidates would otherwise rank cross-org rules into the same list.
   const active = input.candidates.filter(
-    (r) => !r.pausedAt && !r.deprecatedAt,
+    (r) => r.organisationId === input.organisationId && !r.pausedAt && !r.deprecatedAt,
   );
 
   return active.sort((a, b) => {

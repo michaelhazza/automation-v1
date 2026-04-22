@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { fastPathDecisions } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastPathDecision } from '../../shared/types/briefFastPath.js';
 import { logger } from '../lib/logger.js';
 
@@ -53,6 +53,7 @@ export async function logFastPathDecision(
  */
 export async function recordFastPathOutcome(
   briefId: string,
+  organisationId: string,
   outcome: DownstreamOutcome,
   userOverrodeScopeTo?: FastPathDecision['scope'],
 ): Promise<void> {
@@ -64,7 +65,10 @@ export async function recordFastPathOutcome(
         outcomeAt: new Date(),
         ...(userOverrodeScopeTo ? { userOverrodeScopeTo } : {}),
       })
-      .where(eq(fastPathDecisions.briefId, briefId));
+      .where(and(
+        eq(fastPathDecisions.briefId, briefId),
+        eq(fastPathDecisions.organisationId, organisationId),
+      ));
   } catch (err) {
     logger.warn('fastPathDecisionLogger.record_outcome_failed', {
       briefId,

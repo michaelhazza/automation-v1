@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import api from '../lib/api.js';
 import { LearnedRulesTable } from '../components/rules/LearnedRulesTable.js';
 import { RuleCaptureDialog } from '../components/rules/RuleCaptureDialog.js';
-import type { RuleRow, RuleListResult, RuleListFilter, RulePatch } from '../../../shared/types/briefRules.js';
+import type { RuleRow, RuleListResult, RuleListFilter, RulePatch, RuleScope } from '../../../shared/types/briefRules.js';
 
 interface LearnedRulesPageProps {
   user?: { organisationId?: string };
@@ -14,6 +14,10 @@ type ScopeFilter = 'all' | 'subaccount' | 'agent' | 'org';
 
 export default function LearnedRulesPage({ user: _user }: LearnedRulesPageProps) {
   const [searchParams] = useSearchParams();
+  // Mounted under two routes: `/rules` (org-wide) and `/subaccounts/:id/rules`
+  // (scoped to a single client). Without reading `:id` the subaccount route
+  // silently shows org-wide rules and any capture defaults to org scope.
+  const { id: subaccountId } = useParams<{ id?: string }>();
   const [rules, setRules] = useState<RuleRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -27,20 +31,30 @@ export default function LearnedRulesPage({ user: _user }: LearnedRulesPageProps)
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const filter: RuleListFilter = {
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        scopeType: scopeFilter === 'all' ? undefined : scopeFilter,
-      };
+      // When mounted on /subaccounts/:id/rules, force-pin the filter to that
+      // subaccount regardless of the dropdown — the route itself names the
+      // scope. On /rules the dropdown drives filtering.
+      const filter: RuleListFilter = subaccountId
+        ? {
+            status: statusFilter === 'all' ? undefined : statusFilter,
+            scopeType: 'subaccount',
+            scopeId: subaccountId,
+          }
+        : {
+            status: statusFilter === 'all' ? undefined : statusFilter,
+            scopeType: scopeFilter === 'all' ? undefined : scopeFilter,
+          };
       const params = new URLSearchParams();
       if (filter.status) params.set('status', filter.status);
       if (filter.scopeType) params.set('scopeType', filter.scopeType);
+      if (filter.scopeId) params.set('scopeId', filter.scopeId);
       const result = await api.get<RuleListResult>(`/api/rules?${params}`);
-      setRules(result.rules);
-      setTotalCount(result.totalCount);
+      setRules(result.data.rules);
+      setTotalCount(result.data.totalCount);
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, scopeFilter]);
+  }, [statusFilter, scopeFilter, subaccountId]);
 
   useEffect(() => {
     void load();
@@ -116,6 +130,11 @@ export default function LearnedRulesPage({ user: _user }: LearnedRulesPageProps)
 
       {showCapture && (
         <RuleCaptureDialog
+          defaultScope={
+            subaccountId
+              ? ({ kind: 'subaccount', subaccountId } as RuleScope)
+              : ({ kind: 'org' } as RuleScope)
+          }
           onSaved={() => { void load(); }}
           onClose={() => setShowCapture(false)}
         />

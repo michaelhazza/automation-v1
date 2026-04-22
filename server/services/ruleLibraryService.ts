@@ -117,7 +117,9 @@ export async function patchRule(
   if (patch.status === 'paused') {
     updates.pausedAt = new Date();
   } else if (patch.status === 'active') {
-    updates.pausedAt = undefined;
+    // Drizzle treats undefined as "don't touch this column" — pass null to
+    // actually clear paused_at so the rule returns to active.
+    updates.pausedAt = null;
   }
 
   const [updated] = await db

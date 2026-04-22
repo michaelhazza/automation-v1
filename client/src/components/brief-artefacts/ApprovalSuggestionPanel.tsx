@@ -35,7 +35,7 @@ export function ApprovalSuggestionPanel({
         '/api/rules/draft-candidates',
         { artefactId, wasApproved },
       );
-      setCandidates(result.candidates);
+      setCandidates(result.data.candidates);
     } catch {
       onDismiss();
     } finally {

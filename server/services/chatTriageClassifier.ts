@@ -54,6 +54,7 @@ Also classify scope:
 
 Respond with JSON only: { "route": "...", "scope": "...", "confidence": 0.0-1.0, "reasoning": "..." }`;
 
+  let parsed: FastPathDecision | null = null;
   const response = await routeCall({
     messages: [{ role: 'user', content: input.text }],
     system: systemPrompt,
@@ -65,11 +66,11 @@ Respond with JSON only: { "route": "...", "scope": "...", "confidence": 0.0-1.0,
       organisationId: input.uiContext.currentOrgId,
     },
     postProcess: (content: string) => {
-      parseLlmDecision(content, input);
+      parsed = parseLlmDecision(content, input);
     },
   });
 
-  return parseLlmDecision(response.content, input);
+  return parsed ?? parseLlmDecision(response.content, input);
 }
 
 /**

@@ -64,6 +64,6 @@ test('returns notice string when truncated', () => {
 });
 
 test('returns null when truncated is undefined', () => {
-  const notice = deriveTruncationNotice({ truncated: undefined, rows: [], rowCount: 0 } as Parameters<typeof deriveTruncationNotice>[0]);
+  const notice = deriveTruncationNotice({ truncated: undefined, rows: [], rowCount: 0 } as unknown as Parameters<typeof deriveTruncationNotice>[0]);
   assert.equal(notice, null);
 });

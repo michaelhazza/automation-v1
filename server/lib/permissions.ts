@@ -204,6 +204,13 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.geo_audit (Generative Engine Optimisation)
   { key: ORG_PERMISSIONS.GEO_AUDIT_VIEW, description: 'View GEO audit results and history',        groupName: 'org.geo_audit' },
   { key: ORG_PERMISSIONS.GEO_AUDIT_RUN,  description: 'Run on-demand GEO audits for subaccounts',  groupName: 'org.geo_audit' },
+  // org.briefs + org.rules (Universal Brief)
+  { key: ORG_PERMISSIONS.BRIEFS_READ,  description: 'View Briefs and their artefacts',                                          groupName: 'org.briefs' },
+  { key: ORG_PERMISSIONS.BRIEFS_WRITE, description: 'Create Briefs and post messages into a conversation',                      groupName: 'org.briefs' },
+  { key: ORG_PERMISSIONS.RULES_READ,   description: 'View Learned Rules',                                                       groupName: 'org.rules' },
+  { key: ORG_PERMISSIONS.RULES_WRITE,  description: 'Create, edit, pause, resume, and delete Rules',                            groupName: 'org.rules' },
+  { key: ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE,
+                                       description: 'Mark a Rule as authoritative (overrides non-authoritative rules)',        groupName: 'org.rules' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
@@ -292,6 +299,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.AGENTS_CHAT,
       ORG_PERMISSIONS.WORKSPACE_VIEW,
       ORG_PERMISSIONS.WORKSPACE_MANAGE,
+      ORG_PERMISSIONS.BRIEFS_READ,
+      ORG_PERMISSIONS.BRIEFS_WRITE,
+      ORG_PERMISSIONS.RULES_READ,
+      ORG_PERMISSIONS.RULES_WRITE,
     ],
   },
   {
@@ -306,6 +317,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.AGENTS_VIEW,
       ORG_PERMISSIONS.AGENTS_CHAT,
       ORG_PERMISSIONS.WORKSPACE_VIEW,
+      ORG_PERMISSIONS.BRIEFS_READ,
+      ORG_PERMISSIONS.RULES_READ,
     ],
   },
   {

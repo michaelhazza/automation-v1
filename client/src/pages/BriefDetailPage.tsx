@@ -14,7 +14,7 @@ interface BriefMeta {
   id: string;
   title: string;
   status: string;
-  conversationId?: string;
+  conversationId: string | null;
 }
 
 interface ConversationMessage {
@@ -65,20 +65,20 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
   const load = useCallback(async () => {
     if (!briefId) return;
     try {
-      const [taskRes, artefactsRes] = await Promise.all([
-        api.get<BriefMeta>(`/api/tasks/${briefId}`).catch(() => null),
+      const [briefRes, artefactsRes] = await Promise.all([
+        api.get<BriefMeta>(`/api/briefs/${briefId}`),
         api.get<BriefChatArtefact[]>(`/api/briefs/${briefId}/artefacts`),
       ]);
 
-      if (taskRes?.data) setBrief(taskRes.data);
+      setBrief(briefRes.data);
 
       const fetchedArtefacts = artefactsRes.data ?? [];
       setArtefacts(fetchedArtefacts);
       setChainState({ artefacts: fetchedArtefacts });
 
-      if (taskRes?.data?.conversationId) {
+      if (briefRes.data.conversationId) {
         const convRes = await api.get<{ conversation: { id: string }; messages: ConversationMessage[] }>(
-          `/api/conversations/${taskRes.data.conversationId}`,
+          `/api/conversations/${briefRes.data.conversationId}`,
         );
         setMessages(convRes.data.messages ?? []);
       }

@@ -23,7 +23,20 @@ CREATE INDEX IF NOT EXISTS fast_path_org_idx       ON fast_path_decisions (organ
 CREATE INDEX IF NOT EXISTS fast_path_route_idx     ON fast_path_decisions (decided_route);
 CREATE INDEX IF NOT EXISTS fast_path_decided_at_idx ON fast_path_decisions (decided_at);
 
+-- Row Level Security — matches the 0079 canonical pattern:
+-- ENABLE + FORCE RLS, guard session variable for NULL/empty before the ::uuid
+-- cast, and set both USING + WITH CHECK so writes are filtered too.
 ALTER TABLE fast_path_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fast_path_decisions FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY fast_path_decisions_org_isolation ON fast_path_decisions
-  USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );

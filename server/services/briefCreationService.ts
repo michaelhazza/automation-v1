@@ -93,6 +93,43 @@ export async function createBrief(input: {
   return { briefId, fastPathDecision, conversationId: conversation.id };
 }
 
+export interface BriefMeta {
+  id: string;
+  title: string;
+  status: string;
+  conversationId: string | null;
+}
+
+export async function getBriefMeta(
+  briefId: string,
+  organisationId: string,
+): Promise<BriefMeta | null> {
+  const [task] = await db
+    .select({ id: tasks.id, title: tasks.title, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, organisationId)))
+    .limit(1);
+
+  if (!task) return null;
+
+  const [conv] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(
+      eq(conversations.scopeType, 'brief'),
+      eq(conversations.scopeId, briefId),
+      eq(conversations.organisationId, organisationId),
+    ))
+    .limit(1);
+
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    conversationId: conv?.id ?? null,
+  };
+}
+
 export async function getBriefArtefacts(
   briefId: string,
   organisationId: string,

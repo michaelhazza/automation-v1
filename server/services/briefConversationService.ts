@@ -38,10 +38,18 @@ export async function findOrCreateBriefConversation(input: {
   const [existing] = await db
     .select()
     .from(conversations)
-    .where(and(eq(conversations.scopeType, input.scopeType), eq(conversations.scopeId, input.scopeId)))
+    .where(and(
+      eq(conversations.organisationId, input.organisationId),
+      eq(conversations.scopeType, input.scopeType),
+      eq(conversations.scopeId, input.scopeId),
+    ))
     .limit(1);
   if (existing) return existing;
 
+  // INSERT ... ON CONFLICT DO NOTHING handles the SELECT→INSERT race where
+  // two concurrent callers both miss on the initial select. The loser of the
+  // race gets an empty RETURNING, so re-select to pick up the row the winner
+  // inserted.
   const [created] = await db
     .insert(conversations)
     .values({
@@ -53,8 +61,23 @@ export async function findOrCreateBriefConversation(input: {
       status: 'open',
       metadata: {},
     })
+    .onConflictDoNothing({ target: [conversations.scopeType, conversations.scopeId] })
     .returning();
-  return created!;
+  if (created) return created;
+
+  const [winner] = await db
+    .select()
+    .from(conversations)
+    .where(and(
+      eq(conversations.organisationId, input.organisationId),
+      eq(conversations.scopeType, input.scopeType),
+      eq(conversations.scopeId, input.scopeId),
+    ))
+    .limit(1);
+  if (!winner) {
+    throw new Error('findOrCreateBriefConversation: row vanished between ON CONFLICT and re-select');
+  }
+  return winner;
 }
 
 export async function assertCanViewConversation(

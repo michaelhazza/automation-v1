@@ -336,8 +336,7 @@ export async function applyBlockQualityDecay(organisationId: string): Promise<Bl
         isNull(memoryBlocks.deletedAt),
         isNull(memoryBlocks.deprecatedAt),
       ),
-    )
-    .limit(500);
+    );
 
   for (const row of rows) {
     const currentScore = Number(row.qualityScore ?? 0.5);
@@ -350,13 +349,25 @@ export async function applyBlockQualityDecay(organisationId: string): Promise<Bl
       await db
         .update(memoryBlocks)
         .set({ deprecatedAt: now, deprecationReason: 'low_quality', updatedAt: now })
-        .where(eq(memoryBlocks.id, row.id));
+        .where(and(
+          eq(memoryBlocks.id, row.id),
+          eq(memoryBlocks.organisationId, organisationId),
+        ));
       autoDeprecated += 1;
     } else if (newScore !== currentScore) {
+      // Do NOT bump `updatedAt` on a decay-only write. `daysSinceUpdate` above
+      // is measured against `updatedAt`, and if we bumped it here every rule
+      // would look freshly updated after the first decay pass — the
+      // `>= BLOCK_AUTO_DEPRECATE_DAYS` gate could then never fire for a rule
+      // whose score gradually falls below threshold. `updatedAt` tracks
+      // user-facing changes; decay is a background scoring adjustment.
       await db
         .update(memoryBlocks)
-        .set({ qualityScore: String(newScore.toFixed(2)), updatedAt: now })
-        .where(eq(memoryBlocks.id, row.id));
+        .set({ qualityScore: String(newScore.toFixed(2)) })
+        .where(and(
+          eq(memoryBlocks.id, row.id),
+          eq(memoryBlocks.organisationId, organisationId),
+        ));
       decayed += 1;
     }
   }

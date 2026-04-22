@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { createBrief, getBriefArtefacts } from '../services/briefCreationService.js';
+import { createBrief, getBriefArtefacts, getBriefMeta } from '../services/briefCreationService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
@@ -43,6 +43,27 @@ router.post(
     });
 
     res.status(201).json(result);
+  }),
+);
+
+// GET /api/briefs/:briefId — Brief metadata + its conversationId. The client
+// joins tasks → conversations here rather than calling /api/tasks + a
+// separate /api/conversations lookup; /api/tasks is subaccount-scoped and
+// doesn't carry conversationId.
+router.get(
+  '/api/briefs/:briefId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const { briefId } = req.params;
+
+    const meta = await getBriefMeta(briefId, req.orgId!);
+    if (!meta) {
+      res.status(404).json({ message: 'Brief not found' });
+      return;
+    }
+
+    res.json(meta);
   }),
 );
 

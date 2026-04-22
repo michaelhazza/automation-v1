@@ -38,12 +38,34 @@ CREATE INDEX conv_msgs_conversation_idx ON conversation_messages (conversation_i
 CREATE INDEX conv_msgs_org_idx ON conversation_messages (organisation_id);
 CREATE INDEX conv_msgs_subaccount_idx ON conversation_messages (subaccount_id);
 
--- Row Level Security
+-- Row Level Security — matches the 0079 canonical pattern:
+-- ENABLE + FORCE RLS, guard session variable for NULL/empty before the ::uuid
+-- cast, and set both USING + WITH CHECK so writes are filtered too.
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY conversations_org_isolation ON conversations
-  USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
 CREATE POLICY conversation_messages_org_isolation ON conversation_messages
-  USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );

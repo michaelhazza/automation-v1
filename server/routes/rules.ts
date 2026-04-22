@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { saveRule } from '../services/ruleCaptureService.js';
@@ -17,12 +17,12 @@ router.post(
     const body = req.body as RuleCaptureRequest & { allowConflicts?: boolean };
     const ctx = {
       userId: req.user!.id,
-      organisationId: req.user!.organisationId,
+      organisationId: req.orgId!,
     };
 
     if (body.isAuthoritative) {
-      const hasPermission = (req.user?.orgPermissions ?? []).includes(ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE);
-      if (!hasPermission) {
+      const allowed = await hasOrgPermission(req, ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE);
+      if (!allowed) {
         res.status(403).json({ error: 'rules.set_authoritative permission required' });
         return;
       }
@@ -48,7 +48,7 @@ router.get(
       cursor: req.query.cursor as string | undefined,
     };
 
-    const result = await listRules(filter, req.user!.organisationId);
+    const result = await listRules(filter, req.orgId!);
     res.json(result);
   }),
 );
@@ -62,8 +62,8 @@ router.patch(
     const patch = req.body as RulePatch;
 
     if (patch.isAuthoritative !== undefined) {
-      const hasPermission = (req.user?.orgPermissions ?? []).includes(ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE);
-      if (!hasPermission) {
+      const allowed = await hasOrgPermission(req, ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE);
+      if (!allowed) {
         res.status(403).json({ error: 'rules.set_authoritative permission required' });
         return;
       }
@@ -71,7 +71,7 @@ router.patch(
 
     const updated = await patchRule(
       req.params.ruleId,
-      req.user!.organisationId,
+      req.orgId!,
       patch,
       req.user!.id,
     );
@@ -91,7 +91,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.RULES_WRITE),
   asyncHandler(async (req, res) => {
-    const deleted = await deprecateRule(req.params.ruleId, req.user!.organisationId, 'user_deleted');
+    const deleted = await deprecateRule(req.params.ruleId, req.orgId!, 'user_deleted');
 
     if (!deleted) {
       res.status(404).json({ error: 'Rule not found' });

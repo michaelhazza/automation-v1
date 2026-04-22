@@ -30,12 +30,19 @@ export function RuleCaptureDialog({
     setSaving(true);
     setError(null);
 
-    const scope: RuleScope =
-      scopeKind === 'org'
-        ? { kind: 'org' }
-        : defaultScope.kind === scopeKind
-        ? defaultScope
-        : { kind: 'org' };
+    // Defensive guard — the dropdown disables non-matching options, but if the
+    // user somehow selected a non-org scope without a matching defaultScope
+    // (browser dev-tools edit, stale state) refuse the save rather than
+    // silently widening the rule to org.
+    if (scopeKind !== 'org' && defaultScope.kind !== scopeKind) {
+      setError(
+        `Cannot save a ${scopeKind}-scoped rule from this dialog — open the capture flow from a ${scopeKind} context.`,
+      );
+      setSaving(false);
+      return;
+    }
+
+    const scope: RuleScope = scopeKind === 'org' ? { kind: 'org' } : defaultScope;
 
     const body: RuleCaptureRequest = {
       text: text.trim(),
@@ -47,8 +54,8 @@ export function RuleCaptureDialog({
 
     try {
       const result = await api.post<SaveRuleResult>('/api/rules', body);
-      if (result.saved) {
-        onSaved?.(result);
+      if (result.data.saved) {
+        onSaved?.(result.data);
         onClose();
       } else {
         setError('Conflicts detected — please resolve before saving.');
@@ -87,8 +94,18 @@ export function RuleCaptureDialog({
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
             >
               <option value="org">Entire organisation</option>
-              <option value="subaccount">This client</option>
-              <option value="agent">Specific agent</option>
+              {/*
+                Non-org options are only selectable when the caller supplied a
+                matching non-org defaultScope carrying the concrete id. Without
+                that id the dialog cannot honour the selection and would
+                silently save as org — see RuleCaptureDialog scope-fallback.
+              */}
+              <option value="subaccount" disabled={defaultScope.kind !== 'subaccount'}>
+                This client{defaultScope.kind === 'subaccount' ? '' : ' (open from a client to save here)'}
+              </option>
+              <option value="agent" disabled={defaultScope.kind !== 'agent'}>
+                Specific agent{defaultScope.kind === 'agent' ? '' : ' (open from an agent to save here)'}
+              </option>
             </select>
           </div>
           <div className="flex-1">
