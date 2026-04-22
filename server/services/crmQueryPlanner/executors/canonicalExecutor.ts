@@ -3,6 +3,7 @@
 // Registry is passed as a parameter so the executor can be used without importing
 // the real canonicalQueryRegistry (which pulls in drizzle-orm).
 
+import { logger } from '../../../lib/logger.js';
 import type {
   QueryPlan,
   ExecutorContext,
@@ -62,11 +63,23 @@ export async function executeCanonical(
 
   // Per-entry capability check (§12.1 skip-unknown-capability rule).
   // v1: all canonical.* slugs are forward-looking, so they are always skipped.
-  // The only enforced gate in v1 is `crm.query` at the route layer.
+  // The only enforced gate in v1 is `crm.query` at the route layer. Per spec
+  // §12.1 ("log `capabilityCheck: 'skipped_unknown_capability'` with the slug
+  // name") the skip must be observable so future contributors cannot silently
+  // ship a canonical entry that was never gated.
   for (const cap of entry.requiredCapabilities) {
     if (context.callerCapabilities.has(cap)) continue;
     const isForwardLooking = cap.startsWith('canonical.') || cap.startsWith('clientpulse.');
-    if (isForwardLooking) continue;
+    if (isForwardLooking) {
+      logger.info('crm_query_planner.capability_check_skipped', {
+        capabilityCheck: 'skipped_unknown_capability',
+        capabilitySlug:  cap,
+        registryKey:     plan.canonicalCandidateKey,
+        orgId:           context.orgId,
+        subaccountId:    context.subaccountId,
+      });
+      continue;
+    }
     throw new MissingPermissionError(cap);
   }
 

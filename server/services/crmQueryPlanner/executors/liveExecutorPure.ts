@@ -102,3 +102,30 @@ const LIVE_ONLY_FIELDS = new Set([
 export function isLiveOnlyField(field: string): boolean {
   return LIVE_ONLY_FIELDS.has(field);
 }
+
+// ── Filter-composition diagnostics (spec §13.2) ───────────────────────────────
+//
+// `translateToProviderQuery` collapses email/firstName/lastName into a single
+// `query` param for `listContacts` using `??` precedence (email → firstName →
+// lastName). When more than one of those filters is present the translator
+// silently drops the lower-priority ones. That is the pragmatic v1 mapping
+// (GHL's search endpoint accepts a single free-text query), but it is also a
+// correctness trap if the caller assumed AND composition.
+//
+// This helper reports which contact-filter fields were dropped when the
+// translation fires, so the caller (`liveExecutor.ts`) can surface it via the
+// repo's structured logger without adding a logger dependency to this pure
+// module. Shape is a simple string array ordered by the precedence the
+// translator actually applied.
+const CONTACT_QUERY_FILTER_PRIORITY: readonly string[] = ['email', 'firstName', 'lastName'];
+
+export function detectDroppedContactFilters(
+  filters: Array<{ field: string }>,
+): { picked: string | null; dropped: string[] } {
+  const present = CONTACT_QUERY_FILTER_PRIORITY.filter((field) =>
+    filters.some((f) => f.field === field),
+  );
+  if (present.length <= 1) return { picked: present[0] ?? null, dropped: [] };
+  const [picked, ...dropped] = present;
+  return { picked, dropped };
+}

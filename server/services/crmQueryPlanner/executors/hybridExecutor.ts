@@ -4,6 +4,7 @@
 
 import { executeCanonical } from './canonicalExecutor.js';
 import { executeLive } from './liveExecutor.js';
+import { logger } from '../../../lib/logger.js';
 import {
   HYBRID_LIVE_CALL_CAP,
   HybridCapError,
@@ -107,6 +108,25 @@ export async function executeHybrid(
 
   // Step 1: run canonical base
   const baseResult = await executeCanonical(canonicalBase, context, registry);
+
+  // Near-cap signal: if the canonical base already returned plan.limit rows
+  // AND we still have live-only filters to apply in-memory, the working set
+  // is at the v1 structural ceiling (spec §13.4 / §14.3: default limit 100).
+  // This doesn't fail the query — the live filter will reduce the set — but
+  // it's the strongest signal we have that a caller will need an ID-scoped
+  // live fetch (deferred — see tasks/todo.md) once the cap is raised, or that
+  // the canonical base needs narrowing. Emit a warn so it's visible in logs
+  // without needing a new plannerEvent kind.
+  if (liveFilters.length > 0 && baseResult.rowCount >= plan.limit) {
+    logger.warn('crm_query_planner.hybrid_base_at_plan_limit', {
+      baseRowCount:    baseResult.rowCount,
+      planLimit:       plan.limit,
+      liveFilterCount: liveFilters.length,
+      primaryEntity:   plan.primaryEntity,
+      orgId:           context.orgId,
+      subaccountId:    context.subaccountId,
+    });
+  }
 
   // Step 2: pre-dispatch cap check against actual base row count
   const estimatedCalls = liveFilters.length;

@@ -2,6 +2,7 @@
 // Read-only by structural import restriction: only ghlReadHelpers is imported.
 
 import { getProviderRateLimiter } from '../../../lib/rateLimiter.js';
+import { logger } from '../../../lib/logger.js';
 import { resolveGhlContext } from '../../adapters/ghlReadHelpers.js';
 import {
   listGhlContacts,
@@ -11,7 +12,7 @@ import {
   listGhlTasks,
   listGhlUsers,
 } from '../../adapters/ghlReadHelpers.js';
-import { translateToProviderQuery } from './liveExecutorPure.js';
+import { translateToProviderQuery, detectDroppedContactFilters } from './liveExecutorPure.js';
 import type { TranslatedGhlRead } from './liveExecutorPure.js';
 import type {
   QueryPlan,
@@ -111,6 +112,24 @@ export async function executeLive(
   // integration_connections.configJson) so the planner shares a bucket with
   // ClientPulse polling and any other ghlAdapter consumer. §13.5 / §16.3.
   await getProviderRateLimiter('ghl').acquire(ghlCtx.locationId);
+
+  // Surface filter-composition drops so hybrid/live traces show which caller
+  // intent bits got collapsed by the GHL single-`query` translation. See
+  // liveExecutorPure.detectDroppedContactFilters — v1's contact translation
+  // picks one of email/firstName/lastName and ignores the others. A caller
+  // combining multiple name-like filters should see this in the trace rather
+  // than silently getting partial semantics.
+  if (plan.primaryEntity === 'contacts') {
+    const drop = detectDroppedContactFilters(plan.filters);
+    if (drop.dropped.length > 0) {
+      logger.debug('crm_query_planner.live_filter_composition_dropped', {
+        picked:       drop.picked,
+        dropped:      drop.dropped,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+      });
+    }
+  }
 
   const translated = translateToProviderQuery(plan);
   const startedAt = Date.now();
