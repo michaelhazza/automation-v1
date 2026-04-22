@@ -1,3 +1,53 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase.
+
+SPEC: docs/riley-observations-dev-spec.md — "Riley Observations" spec. Six Parts: (1) a three-step naming pass (rename internal `workflow*` -> `flow*`, then `processes` -> `automations`, then `playbooks` -> `workflows`) all in one PR with 5 migrations; (2) new Workflow step type `invoke_automation` that calls a registered external Automation; (3) Explore Mode / Execute Mode run-safety feature; (4) deterministic heartbeat activity-gate; (5) a single `context.assembly.complete` telemetry event; (6) one-paragraph agent-decomposition rule for the checklist.
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, no staged % rollout, no feature flags for new migrations. Commit-and-revert.
+- Testing posture: static gates primary + pure-function unit tests only. NO new vitest/jest/playwright/supertest/frontend/E2E/API-contract/composition/performance tests. Small carved-out integration tests are OK if the spec already names them.
+- Prefer existing primitives. Approved: policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService (to-be-renamed), failure() + FailureReason, createWorker(), agentExecutionEventService, agentRunPromptService. Don't suggest NEW primitives that duplicate these.
+- Two deliberate behaviour-mode toggles are in scope: `heartbeat_activity_gate_enabled` (opt-in per agent) and `run_mode` (Explore vs Execute per run). These are behaviour modes, not rollout flags.
+- 5 migrations ship in ONE PR; reviewers should assume that is the decided rollout posture.
+
+YOUR JOB: Review the spec for implementation-readiness issues. Focus on:
+
+1. CONTRADICTIONS — same concept described differently in different sections.
+2. STALE / RETIRED LANGUAGE — approaches explicitly retired still appearing in prose.
+3. LOAD-BEARING CLAIMS WITHOUT MECHANISMS — "must be idempotent" / "authoritative" / "single source of truth" / "reversible" without a named enforcement mechanism or citation.
+4. FILE INVENTORY DRIFT — prose references files/columns/tables not in the Files-to-change lists (§4.3, §4.6, §4.8, §5.x, §6.x, §7.x, §8.x), or prose mentions a migration number not in §10.1, or schema files referenced in §4.8 but skipped in prose.
+5. SCHEMA / TYPE OVERLAP — Part 1 has a namespace-swap (step 1 `workflow_runs` -> `flow_runs`, step 3 `playbook_runs` -> `workflow_runs`). Is it always clear which "workflow_runs" is meant? Are any FK constraint names or indexes going to collide across the three migrations?
+6. SEQUENCING BUGS — Part 1's three steps all ship in one PR. §6.3 migration 0175 references `workflow_runs` (post-step-3 table). Does any migration reference a column that won't exist until a later migration in the same PR?
+7. INVARIANT HOLES — §6.7 says orchestrator-delegated runs inherit parent's run_mode (transitivity); §6.6 says scheduled runs always execute. If a run in Explore Mode schedules a sub-run, which rule wins?
+8. MISSING VERDICTS — every Part has a Wave assignment in §11.1. §12 Open Questions mixes real blockers with architect detail. Are any §12 items actually NOT safe to defer?
+9. UNNAMED NEW PRIMITIVES — "a new service that handles X" without naming the file / function / table.
+10. CONTRACT BOUNDARY MISMATCHES — `InvokeAutomationStep` (§5.3) includes `automationId`, `inputMapping`, `outputMapping`, `gateLevel`. §5.8 says credential resolution uses `automation_engine_id` and `required_connections`. Does the step carry anything the Automation row does not already imply? Is credential-override surface needed on the step?
+11. DEFAULT VALUES AT BOUNDARIES — §5.3 defaults timeoutSeconds to "inherit from automation.timeout_seconds (300 today)". Does the Automation row actually have a `timeout_seconds` column today, or is the spec assuming one? If assuming, it's an unnamed new column.
+12. NAMING COLLISION — §5.3 scoping note vs §5.8 scope-matching rule: same rule or different? Is subaccount-scoped Workflow + subaccount-scoped Automation ALWAYS a match, or does the subaccount have to be the SAME subaccount?
+13. EXPLORE MODE + INVOKE_AUTOMATION — §5.6 says "Explore Mode forces `invoke_automation` steps to 'review' ... no special-case code beyond the generic gate resolution." But §6.5's `resolveEffectiveGate` pseudocode branches on `skill.sideEffects === true` — it does not branch on "step is invoke_automation". Does `invoke_automation` need to be treated as side-effecting by default, or does per-step gateLevel go through a different code path?
+14. SIDE_EFFECTS DEFAULT — §6.4 says unannotated skills default to `true`. What happens if a new skill lands AFTER the audit without the frontmatter set? CI failure or silent default?
+15. MODE PROMOTION LOGIC — §6.9 says "Failed run -> no preference update." If the user runs in Execute and the run fails, `last_successful_mode` stays 'execute' from a previous successful run. Intended, or should a failure roll back?
+16. SCHEDULED RUN MODE — §6.6 step 2 says scheduled always Execute. §6.13 success 4 agrees. But what about scheduled runs of an agent with `default_run_mode = 'explore'`? (§6.6 step 2 is evaluated before step 4, so override wins — confirm deliberate.)
+17. HEARTBEAT "CHECK NOW" TRIGGER — §7.4 Rule 3 assumes a "Check now" button / API. §12.16 marks the plumbing as Open Question. Is "Check now" a shipped feature or a new surface this spec adds? If new, it's missing from Files-to-change and §7.3 schema changes.
+18. HEARTBEAT LAST_MEANINGFUL_TICK_AT — §7.3 adds `last_meaningful_tick_at` and `ticks_since_last_meaningful_run`. §7.6 step 5 says reset when the run produces output. §12.17 flags "produces output" as an open question. Is the update trigger actually defined?
+19. CONTEXT ASSEMBLY EVENT MULTIPLICITY — §8.2 totalTokens + §8.8 success 1 ("exactly one per agent-loop run"). What about multi-turn agent loops that reassemble between turns? Is the invariant once-per-run or once-per-turn?
+20. TELEMETRY FIRE-AND-FORGET LATENCY — §8.5 step 3 says fire-and-forget. §8.8 success 3 targets <5ms pre-loop latency. Does 5ms measure build-and-enqueue or sink-write roundtrip?
+21. DEFERRED ITEMS SECTION — spec-authoring-checklist.md §7 requires one "## Deferred Items" section. The spec has §1.2 Non-goals and §12 Open Questions instead. Does the spec need a consolidated Deferred Items section?
+22. CONTRACTS SECTION — checklist §3 requires a Contracts subsection aggregating data shapes. Spec has inline TypeScript interfaces in §5.3, §6.6, §7.5, §8.2. Acceptable or is an aggregated section needed?
+23. RLS / PERMISSIONS — §6.3 adds `user_run_mode_preferences` (has `user_id`, `agent_id`, `subaccount_id`). Checklist §4 requires RLS policy + rlsProtectedTables.ts entry + route guard + principal-scoped context. The spec does not mention RLS for this table. Missed gate?
+24. PRIMARY KEY + NULL — §6.3 `PRIMARY KEY (user_id, agent_id, subaccount_id)` with `subaccount_id` NULLable. Postgres does not allow NULL in PRIMARY KEY columns — this is a schema bug.
+25. REBASE SCRIPTS — §10.4 proposes `scripts/rebase-post-riley-rename.sh` + `scripts/codemod-riley-rename.ts`. Neither is in §10.1 (correct — scripts) nor in any Files-to-change list. In scope or out-of-scope for this PR?
+26. TEST STRATEGY FRAMING — §11.2 Part 2 proposes "Integration: end-to-end test ... against a test engine fixture (MSW or similar)." MSW is a frontend mock. Is it the right tool server-side, and is this test inside or outside the framing posture?
+27. SUPERVISED MODE REMOVAL — §6.8 says "The existing Supervised-mode checkbox is removed". §12.14 marks "Supervised-mode removal safety" as Open Question. In-scope for Part 3's PR or deferred?
+28. AGENT DECOMPOSITION RULE — §9.2 appends a paragraph to `docs/spec-authoring-checklist.md`. The checklist already has a "Maintenance" section. Where exactly does the append land?
+29. DATA MIGRATION REVERSIBILITY — §10.1 marks all 5 migrations "Reversible." §10.5 says `git revert`. But Drizzle `ALTER TABLE ... RENAME` migrations are reversible only if the down migration is WRITTEN in the same file. Where is the down-migration plan?
+30. NAMING DRIFT — §11.1 W0 is "Rec 5 (agent-decomposition rule). Ship immediately." But Rec 5 is Part 6 (§9) in the numbering of the spec. "Rec 5" is carried over from the brief — does any other "Rec N" reference appear in the spec body?
+
+Also run your own rubric: anything that looks like a real issue in the spec that the 30 prompts above did not catch, surface it.
+
+OUTPUT: A bulleted list of distinct findings. Each finding: cite the spec section (§N.N), one-sentence description of the issue, one-sentence suggested fix. No preamble, no summary, just the list. Aim for concrete, actionable findings — not "the spec could be clearer about X" without naming what X is.
+
+Here is the spec to review:
+
 # Riley Observations — Development Specification
 
 _Date: 2026-04-22_
@@ -30,8 +80,6 @@ Every proposed change in this spec has: a clear contract, named files/surfaces, 
 7. [Part 4 — Heartbeat activity-gate](#7-part-4--heartbeat-activity-gate)
 8. [Part 5 — Context-assembly telemetry](#8-part-5--context-assembly-telemetry)
 9. [Part 6 — Agent-decomposition rule](#9-part-6--agent-decomposition-rule)
-9a. [Contracts](#9a-contracts)
-9b. [Deferred Items](#9b-deferred-items)
 10. [Data migration plan](#10-data-migration-plan)
 11. [Rollout plan + test strategy](#11-rollout-plan--test-strategy)
 12. [Open questions for architect](#12-open-questions-for-architect)
@@ -62,11 +110,11 @@ Every proposed change in this spec has: a clear contract, named files/surfaces, 
 
 | # | Criterion | Measurement |
 |---|---|---|
-| 1 | Zero user-visible "Playbook" / "Playbooks" strings remain | grep of `client/src/**/*.{ts,tsx,md,html}`, server-rendered templates (`server/templates/**`, `server/emails/**` if present), and portal-facing copy files returns zero hits. (Migration files under `migrations/**` and historical review logs under `tasks/review-logs/**` are out of scope for this grep — they document historical state and are not renamed.) |
+| 1 | Zero user-visible "Playbook" / "Playbooks" strings remain | grep of `client/src/`, server-rendered templates, portal surfaces returns only historical migration file comments |
 | 2 | Zero user-visible "Workflows" referring to external integrations | grep + manual audit across nav, empty states, portal cards |
-| 3 | `drizzle-kit introspect` diff against updated schema is clean after all five migrations (§10.1: three naming-pass migrations + Explore/Execute migration + heartbeat-gate migration) | CI job runs this check on the PR |
+| 3 | `drizzle-kit introspect` diff against updated schema is clean after all three migrations | CI job runs this check on the PR |
 | 4 | A first-time user cannot auto-execute a side-effecting action on a new agent without explicitly switching from Explore to Execute | Verified by manual QA and by a new integration test |
-| 5 | 100% of agent-loop runs (excluding Universal Brief simple_reply paths, which skip the agent loop — see §8.7 edge 1) emit exactly one `context.assembly.complete` event | Query on the tracing sink; zero missing for a 24h window post-launch |
+| 5 | 100% of agent-loop runs emit exactly one `context.assembly.complete` event | Query on the tracing sink; zero missing for a 24h window post-launch |
 | 6 | Portfolio Health Agent skip-rate lands in 20–60% window after 2 weeks of post-launch operation | Query on `heartbeat.tick.gated` events |
 | 7 | No in-flight feature branch is broken for more than one day after the naming-pass PR merges | Manual audit of open PRs + rebase script |
 
@@ -115,7 +163,7 @@ This is the vocabulary every Part builds on. Reference section — skip to Part 
 | **Orchestrator** | `server/jobs/orchestratorFromTaskJob.ts`, `docs/orchestrator-capability-routing-spec.md` | Receives tasks and routes to the right agent or delegates to the Configuration Assistant. |
 | **Universal Brief fast-path** | `server/services/briefCreationService.ts`, `server/services/chatTriageClassifier.ts` | Two-layer classifier (heuristic tier 1 + Haiku LLM tier 2) that decides simple_reply / cheap_answer / needs_clarification / needs_orchestrator. Logs to `fast_path_decisions`. |
 | **Agent execution** | `server/services/agentExecutionService.ts` | Assembles context (briefing + beliefs + memory blocks + workspace memory + known entities) before the agent loop starts. |
-| **Playbooks** (to become Workflows) | DB: `playbook_runs`, `playbook_step_runs`, `playbook_step_reviews`, `playbook_templates`, `playbook_template_versions`, `playbook_studio_sessions`, `playbook_run_event_sequences`, `system_playbook_templates`, `system_playbook_template_versions` (note: there is no top-level `playbooks` table — the primary identity lives on `playbook_templates`/`playbook_runs`). Services: `playbookStudioService.ts`, `playbookRunService.ts`, `playbookTemplateService.ts`, `playbookStepReviewService.ts`, `playbookEngineService.ts`. UI: `PlaybookStudioPage`, `PlaybooksLibraryPage`, `PlaybookRunModal`, `PlaybookRunDetailPage`. Files: `*.playbook.ts`. Skills: `playbook_*`. | Native DAG orchestration with HITL gates, memory integration, scheduling, simulation, cost estimation, per-step reviews. |
+| **Playbooks** (to become Workflows) | DB: `playbooks`, `playbook_runs`, `playbook_step_runs`, `playbook_step_reviews`, `playbook_templates`, `playbook_template_versions`, `playbook_studio_sessions`, `playbook_run_event_sequences`, `system_playbook_templates`, `system_playbook_template_versions`. Services: `playbookStudioService.ts`. UI: `PlaybookStudioPage`, `PlaybooksLibraryPage`, `PlaybookRunModal`, `PlaybookRunDetailPage`. Files: `*.playbook.ts`. Skills: `playbook_*`. | Native DAG orchestration with HITL gates, memory integration, scheduling, simulation, cost estimation, per-step reviews. |
 | **Processes** (UI: Workflows; to become Automations) | DB: `processes`, `process_categories`, `subaccount_process_links`, `process_connection_mappings`. Service: `processService.ts`, `processResolutionService.ts`. Routes: `/api/processes/*`. Pages: `TasksPage.tsx` (lazy-loaded as `ProcessesPage`), `AdminTasksPage.tsx`, `TaskExecutionPage.tsx`, `AdminTaskEditPage.tsx`, `SystemProcessesPage.tsx`. | Webhook wrappers for external engines. Each row points at a Make scenario / n8n flow / GHL workflow / Zapier zap / custom webhook. |
 | **Workflow engines** (to become Automation engines) | DB: `workflow_engines`. | Infrastructure registry of external engines (`engineType: 'n8n' \| 'ghl' \| 'make' \| 'zapier' \| 'custom_webhook'`). |
 | **Internal flow stack** (to be renamed out of the way) | DB: `workflow_runs`, `workflow_step_outputs`, `canonicalWorkflowDefinitions`. Service: `workflowExecutorService.ts`. Types: `server/types/workflow.ts`. Consumers: `actionService.ts`, `scanIntegrationFingerprintsService.ts`. Migration provenance: `0037_phase1c_memory_and_workflows.sql`. | A separate internal flow-execution stack ("Flows pattern" per schema comment). Predates Playbooks (migration 0076). Not user-facing. Collides with the target namespace for Playbook → Workflow rename. |
@@ -160,7 +208,7 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 
 **Purpose:** clear the `workflow*` namespace so step 3 can use it.
 
-**Schema changes** (migration: `0202_rename_workflow_runs_to_flow_runs.sql`):
+**Schema changes** (migration: `0172_rename_workflow_runs_to_flow_runs.sql`):
 
 | From | To |
 |---|---|
@@ -221,7 +269,7 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 
 **Purpose:** user-facing "Workflows" (external engine wrappers) become "Automations." Internal table and code names match the UI.
 
-**Schema changes** (migration: `0203_rename_processes_to_automations.sql`):
+**Schema changes** (migration: `0173_rename_processes_to_automations.sql`):
 
 | From | To |
 |---|---|
@@ -284,7 +332,7 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 | `/api/system/processes/*` | `/api/system/automations/*` |
 | Route registration in `server/index.ts` or equivalent | Updated |
 
-**Permission keys** (full enumeration — every `PROCESSES_*` key defined in `server/lib/permissions.ts`):
+**Permission keys:**
 
 | From | To |
 |---|---|
@@ -292,19 +340,8 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 | `ORG_PERMISSIONS.PROCESSES_CREATE` | `ORG_PERMISSIONS.AUTOMATIONS_CREATE` |
 | `ORG_PERMISSIONS.PROCESSES_EDIT` | `ORG_PERMISSIONS.AUTOMATIONS_EDIT` |
 | `ORG_PERMISSIONS.PROCESSES_DELETE` | `ORG_PERMISSIONS.AUTOMATIONS_DELETE` |
-| `ORG_PERMISSIONS.PROCESSES_ACTIVATE` | `ORG_PERMISSIONS.AUTOMATIONS_ACTIVATE` |
 | `ORG_PERMISSIONS.PROCESSES_TEST` | `ORG_PERMISSIONS.AUTOMATIONS_TEST` |
-| `ORG_PERMISSIONS.PROCESSES_VIEW_SYSTEM` | `ORG_PERMISSIONS.AUTOMATIONS_VIEW_SYSTEM` |
-| `ORG_PERMISSIONS.PROCESSES_CLONE` | `ORG_PERMISSIONS.AUTOMATIONS_CLONE` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CREATE` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EDIT` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_DELETE` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_DELETE` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_CLONE` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CLONE` |
-| `SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE` | `SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CONFIGURE` |
-| Permission seed data in `server/lib/permissions.ts` `ORG_PERMISSION_DEFINITIONS` + `SUBACCOUNT_PERMISSION_DEFINITIONS` arrays | Updated alongside the enum rename (same commit) |
-| Group-name strings `'org.processes'` + `'subaccount.processes'` | `'org.automations'` + `'subaccount.automations'` |
+| Permission seed data in migrations / bootstrap | Updated alongside the enum rename |
 
 **UI page changes:**
 
@@ -316,26 +353,6 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 | `client/src/pages/AdminTaskEditPage.tsx` | `client/src/pages/AdminAutomationEditPage.tsx` |
 | `client/src/pages/SystemProcessesPage.tsx` | `client/src/pages/SystemAutomationsPage.tsx` |
 | Lazy-import aliases in `client/src/App.tsx` | Renamed both alias and target consistently (no more misleading `ProcessesPage → TasksPage` aliasing) |
-
-**Additional client files referencing `/processes` or `/api/processes`** (confirmed via grep; each gets its `/processes` → `/automations` update in the same commit):
-
-| File | What to update |
-|---|---|
-| `client/src/App.tsx` | Route registration, lazy imports |
-| `client/src/components/CommandPalette.tsx` | `{ label: 'Workflows', to: '/processes', keywords: 'processes automations' }` → `{ label: 'Automations', to: '/automations', keywords: 'automations' }` |
-| `client/src/pages/AdminSubaccountDetailPage.tsx` | `api.get('/api/processes')` + any downstream `processes` property references |
-| `client/src/pages/PortalExecutionPage.tsx` | `/processes` → `/automations` in any referenced paths |
-| `client/src/pages/PortalExecutionHistoryPage.tsx` | Same |
-| `client/src/pages/OrgSettingsPage.tsx` | Any settings panels referencing `/processes` or permission names |
-
-**Additional server routes referencing `/processes`:**
-
-| File | What to update |
-|---|---|
-| `server/routes/subaccounts.ts` | Any downstream `/processes` path or `processService` import |
-| `server/routes/portal.ts` | Any downstream `/processes` or `processService` usage |
-| `server/routes/systemProcesses.ts` | Already renamed above — confirm no stale path strings inside |
-| `server/routes/processConnectionMappings.ts` | Already renamed above — confirm all handler functions and response shapes referencing `process*` are renamed |
 
 **URL path changes:**
 
@@ -385,7 +402,7 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 
 **Purpose:** native multi-step orchestration adopts the `workflow*` namespace (cleared by step 1). Final end state.
 
-**Schema changes** (migration: `0204_rename_playbooks_to_workflows.sql`):
+**Schema changes** (migration: `0174_rename_playbooks_to_workflows.sql`):
 
 | From | To |
 |---|---|
@@ -398,27 +415,20 @@ Step 3 cannot ship until Step 1 clears the `workflow*` namespace. Naively renami
 | Table `system_playbook_template_versions` | `system_workflow_template_versions` |
 | Table `playbook_studio_sessions` | `workflow_studio_sessions` |
 | Table `playbook_run_event_sequences` | `workflow_run_event_sequences` |
-| Column `playbook_id` (on child tables) | `workflow_id` |
-| Column `playbook_template_id` | `workflow_template_id` |
-| Column `playbook_run_id` (on `agent_runs` and others) | `workflow_run_id` |
-| Column `playbook_step_run_id` | `workflow_step_run_id` |
-| Column `playbook_slug` (on memory/onboarding tables) | `workflow_slug` |
-| Column `last_written_by_playbook_slug` | `last_written_by_workflow_slug` |
-| Column `created_by_playbook_slug` | `created_by_workflow_slug` |
-| Onboarding slug-array columns containing `playbook_*` slugs (e.g. `modules.onboarding_playbook_slugs`) | Renamed to `onboarding_workflow_slugs` |
+| Any column named `playbook_id` / `playbook_template_id` on child tables | `workflow_id` / `workflow_template_id` |
 | FK constraints referencing renamed tables | Renamed for consistency |
 | Indexes referencing `playbook_*` | Renamed to `workflow_*` |
 
-**Cross-table columns carrying playbook identity** (enumerated — the migration renames each):
+**Check for columns carrying playbook identity in unrelated tables:**
 
-- `memoryBlocks.ts` / migration 0120 `memory_block_playbook_fields` — rename the `playbook_*` fields (including `playbook_slug`, `last_written_by_playbook_slug`, `created_by_playbook_slug` where present).
-- `modules.ts` / migrations 0119 + 0122 `modules_onboarding_playbook_slugs` — rename slug-array column.
-- `subaccountOnboardingState.ts` — rename any `playbook_slug` or `active_playbook_slugs` reference.
-- `portalBriefs.ts` — rename `playbook_run_id` column to `workflow_run_id`.
-- `agentRuns.ts` — rename `playbook_run_id` linkage column.
-- `onboardingBundleConfigs.ts` — rename any `playbook_slug`-keyed fields.
+- `memoryBlocks.ts` — `memory_block_playbook_fields` migration (0120) added fields; audit and rename.
+- `modules.ts` — `modules_onboarding_playbook_slugs` migration (0119, 0122). Audit.
+- `subaccountOnboardingState.ts` — references Playbook slugs.
+- `portalBriefs.ts` — references Playbook runs.
+- `agentRuns.ts` — may carry `playbook_run_id` linkage.
+- `onboardingBundleConfigs.ts` — carries Playbook references.
 
-Architect pass runs `grep -rE "'playbook_|playbook_id|playbook_run_id|playbook_slug" server/db/schema/` once more at plan time to catch any column missed here; any new hit is added to the migration in the same PR.
+Each of these is confirmed from `grep -lE "'playbooks'|'playbook_" server/db/schema/`. The migration renames any `playbook_*` column on these tables to `workflow_*`, and the corresponding Drizzle schema files update their field declarations and references.
 
 **Drizzle schema file changes:**
 
@@ -439,33 +449,21 @@ Architect pass runs `grep -rE "'playbook_|playbook_id|playbook_run_id|playbook_s
 | `PlaybookStepRun`, `PlaybookStepReview` | `WorkflowStepRun`, `WorkflowStepReview` |
 | `PlaybookStudioSession` | `WorkflowStudioSession` |
 
-**Service changes** (full enumeration — every `playbook*` file under `server/services/` and `server/lib/`):
+**Service changes:**
 
 | From | To |
 |---|---|
 | `server/services/playbookStudioService.ts` | `server/services/workflowStudioService.ts` |
-| `server/services/playbookRunService.ts` | `server/services/workflowRunService.ts` |
-| `server/services/playbookTemplateService.ts` | `server/services/workflowTemplateService.ts` |
-| `server/services/playbookStepReviewService.ts` | `server/services/workflowStepReviewService.ts` |
-| `server/services/playbookEngineService.ts` | `server/services/workflowEngineService.ts` |
-| `server/services/playbookStudioGithub.ts` | `server/services/workflowStudioGithub.ts` |
-| `server/services/playbookActionCallExecutor.ts` | `server/services/workflowActionCallExecutor.ts` |
-| `server/services/playbookActionCallExecutorPure.ts` | `server/services/workflowActionCallExecutorPure.ts` |
-| `server/services/playbookAgentRunHook.ts` | `server/services/workflowAgentRunHook.ts` |
-| `server/lib/playbook/*` directory | `server/lib/workflow/*` directory (mirror all subfiles: `types.ts`, `__tests__/`, validators, renderer, etc.) |
+| Any sibling `playbook*Service.ts` (audit) | Renamed to `workflow*Service.ts` |
 | Exported class / function names | Renamed from `Playbook*` to `Workflow*` |
 
-**Route changes** (full enumeration — every route file referencing playbook surfaces):
+**Route changes:**
 
 | From | To |
 |---|---|
-| `server/routes/playbookRuns.ts` | `server/routes/workflowRuns.ts` |
-| `server/routes/playbookTemplates.ts` | `server/routes/workflowTemplates.ts` |
-| `server/routes/playbookStudio.ts` | `server/routes/workflowStudio.ts` |
-| `server/routes/subaccountOnboarding.ts` | Retained as-is — update internal references to renamed Playbook functions/types |
 | `/api/playbooks/*` | `/api/workflows/*` |
 | `/api/system/playbook-studio/*` | `/api/system/workflow-studio/*` |
-| Route registration in `server/index.ts` / `server/routes/index.ts` | Updated |
+| Route registration | Updated |
 
 **Permission keys:**
 
@@ -593,52 +591,33 @@ type WorkflowStep =
 
 interface InvokeAutomationStep {
   kind: 'invoke_automation';
-  automationId: string;           // references automations.id
-  // Input values: each field is either a literal JSON value or a template string
-  // in the existing Workflow DSL's form (e.g. "{{ steps.previousStep.output.field }}").
-  // Template resolution matches the existing `playbookEngineService` expression
-  // renderer; no new DSL is introduced. Confirmed file/function name during architect pass.
-  inputMapping: Record<string, TemplateExpression | JsonLiteral>;
-  outputMapping?: Record<string, TemplateExpression>;
-  timeoutSeconds?: number;        // default: `DEFAULT_TIMEOUT_SECONDS` (300s, defined in
-                                  // `server/services/processService.ts:7` today; moves to
-                                  // `server/services/automationService.ts` after Part 1 rename).
-                                  // Note: the Automation row does NOT carry a per-row timeout
-                                  // today — this is a service-level constant. Adding a per-row
-                                  // override column is an open question deferred to architect (§12).
-  retryPolicy?: StepRetryPolicy;  // default: inherit from Workflow's step-retry default
-  gateLevel?: 'auto' | 'review';  // default: review (see §5.6). `'block'` is intentionally
-                                  // excluded — to block an external call, remove the step.
-                                  // Workflow-definition validator rejects persisted steps
-                                  // with `gateLevel: 'block'` at authoring time.
-  // Scoping note: the resolved Automation must be the SAME scope as this Workflow run's
-  // scope AND share the same identity on the shared scope column.
-  //   - subaccount-scoped Workflow + subaccount-scoped Automation → same `subaccount_id`
-  //   - subaccount-scoped Workflow + org-scoped Automation → same `organisation_id` (fallback)
-  //   - subaccount-scoped Workflow + system-scoped Automation → always matches (system)
-  //   - org-scoped Workflow + org-scoped Automation → same `organisation_id`
-  //   - org-scoped Workflow + system Automation → always matches
-  //   - system Workflow → system Automation only.
-  // Cross-subaccount references are rejected at dispatch with `error_code: 'automation_scope_mismatch'`.
-  // See §5.8 for the full resolution rule and error posture.
+  automationId: string;        // references automations.id
+  inputMapping: Record<string, JsonPathExpression | LiteralValue>;
+  outputMapping?: Record<string, JsonPathExpression>;
+  timeoutSeconds?: number;     // default: inherit from automation.timeout_seconds (300 today)
+  retryPolicy?: StepRetryPolicy; // default: inherit from Workflow's step-retry default
+  gateLevel?: GateLevel;       // default: review (see §5.6)
+  // Scoping note: the resolved automation must match the scope of this Workflow run
+  // — subaccount-scoped Workflow → subaccount-scoped Automation (or org/system fallback);
+  // see §5.8.
 }
 ```
 
-`TemplateExpression` is the existing Workflow DSL expression form used in `server/lib/playbook/types.ts` — a template-literal string resolved by the engine's expression renderer (e.g. `"{{ steps.event_basics.output.venue }}"` or `"{{ run.input.name }}"`). Authored templates for `invoke_automation` MUST use the same syntax as every other Workflow step type; no parallel expression language is introduced. Architect pass cites the exact renderer module.
+`JsonPathExpression` reuses the existing Workflow input-expression format (assumed to support `$.previousStep.field` style references). The architect pass confirms the exact expression language from the existing Workflow DSL.
 
 ### 5.4 Input mapping contract
 
-- The Automation's `input_schema` column (currently `text` on `processes`, post-rename `automations`) is the intended source of the required input shape.
-- **v1 posture on runtime validation.** `input_schema` is stored as a `text` column today with no canonical format. v1 of `invoke_automation` treats input validation as best-effort: if the column is non-empty and parseable as JSON Schema (ajv-compatible), the step validates and fails with `error_code: 'automation_input_validation_failed'` on mismatch. If the column is empty OR not parseable as recognised JSON Schema, the step skips input validation and fires the webhook with the rendered `inputMapping` as-is. The exact validator library and format are §12 open questions — architect picks before Part 2 lands.
-- Missing required fields (as declared by a parseable schema) fail fast with `error_code: 'automation_input_validation_failed'`.
-- Extra fields are permitted unless the parsed schema declares `additionalProperties: false`.
+- The Automation's declared `input_schema` defines the required input shape.
+- The step's `inputMapping` must produce a JSON document that validates against that schema at runtime.
+- Validation happens before the webhook fires. On validation failure, the step fails with `error_code: 'automation_input_validation_failed'` and the full validation error is recorded.
+- Missing required fields fail fast; extra fields are permitted if the Automation's schema is non-strict (audit existing schema strictness posture — this is an open question).
 
 ### 5.5 Output mapping contract
 
 - The Automation's response (whatever the engine returns) is treated as the step output.
-- The optional `outputMapping` projects fields out of the response into the Workflow's variable space, addressable by later steps as `{{ steps.{stepId}.output.{mappedKey} }}` — the same template syntax used everywhere else in the DSL.
-- If `outputMapping` is omitted, the full response body is available at `{{ steps.{stepId}.output.response }}`.
-- Output-schema validation: same best-effort posture as §5.4. If `output_schema` is non-empty and parseable, validate and fail with `error_code: 'automation_output_validation_failed'` on mismatch; otherwise skip.
+- The optional `outputMapping` projects fields out of the response into the Workflow's variable space, addressable by later steps as `$.steps.{stepId}.{mappedKey}`.
+- If `outputMapping` is omitted, the full response body is available at `$.steps.{stepId}.response`.
+- Output-schema validation: if the Automation declares `output_schema`, validate the response against it. On mismatch, step fails with `error_code: 'automation_output_validation_failed'`.
 
 ### 5.6 HITL gate semantics
 
@@ -659,19 +638,15 @@ interface InvokeAutomationStep {
 ### 5.8 Credential resolution and scoping
 
 - At step dispatch, resolve the Automation's `automation_engine_id` to an `automation_engines` row.
-- **Scope-matching rule — identity must match at the shared tenancy column, not just the scope tier:**
-  - Subaccount-scoped Workflow must resolve to either (a) a subaccount-scoped Automation with the SAME `subaccount_id`, (b) an org-scoped Automation with the SAME `organisation_id`, or (c) a system Automation.
-  - Org-scoped Workflow must resolve to either (a) an org-scoped Automation with the SAME `organisation_id`, or (b) a system Automation.
-  - System-scoped Workflow may only resolve to a system Automation.
-  - Cross-subaccount or cross-org references are rejected at dispatch with `error_code: 'automation_scope_mismatch'` before the webhook fires. Engine resolution applies the same tenant-equality rule.
+- Scope-matching: subaccount-scoped Workflow → subaccount-scoped Automation / Engine (or org / system fallback). Org-scoped Workflow → org or system Automation. System → system.
 - HMAC signing: reuse the existing per-engine HMAC secret from `automation_engines.hmac_secret` for outbound request signatures.
 - Required connections: the Automation declares required connections in its `required_connections` field. At dispatch, resolve each required connection's credential for the subaccount context. If any required connection is missing, the step fails with `error_code: 'automation_missing_connection'` before the webhook fires.
 
 ### 5.9 Telemetry emissions
 
-Two events per `invoke_automation` step, but the `dispatched` event is conditional on successful pre-dispatch resolution. Pre-dispatch failures (scope mismatch, missing connection, not-found, input-validation failure) emit ONLY the completion event, and ONLY if the step reached the telemetry call path at all — authoring-time validation rejections never emit anything.
+Two events per `invoke_automation` step:
 
-**At dispatch (only after successful resolution — automation found, scope matched, connections resolved, input validated):**
+**At dispatch:**
 
 ```typescript
 {
@@ -688,7 +663,7 @@ Two events per `invoke_automation` step, but the `dispatched` event is condition
 }
 ```
 
-**At completion (success or failure; fires for every resolved-or-failed dispatch attempt):**
+**At completion (success or failure):**
 
 ```typescript
 {
@@ -697,34 +672,15 @@ Two events per `invoke_automation` step, but the `dispatched` event is condition
   workflowId: string,
   stepId: string,
   automationId: string,
-  // Every terminal outcome the step can reach:
-  //   'ok'                            — webhook fired, 2xx response, passed output validation
-  //   'http_error'                    — webhook fired, non-2xx response
-  //   'timeout'                       — webhook fired, request timed out
-  //   'network_error'                 — webhook fire failed (DNS / TCP / TLS)
-  //   'input_validation_failed'       — pre-dispatch: rendered input failed `input_schema`
-  //   'output_validation_failed'      — post-dispatch: response body failed `output_schema`
-  //   'missing_connection'            — pre-dispatch: a required connection was unresolved
-  //   'automation_not_found'          — pre-dispatch: automationId could not be resolved
-  //   'automation_scope_mismatch'     — pre-dispatch: scope rule in §5.8 rejected the match
-  status:
-    | 'ok'
-    | 'http_error'
-    | 'timeout'
-    | 'network_error'
-    | 'input_validation_failed'
-    | 'output_validation_failed'
-    | 'missing_connection'
-    | 'automation_not_found'
-    | 'automation_scope_mismatch',
-  httpStatus?: number,           // present when `status` is `'ok'`, `'http_error'`, or `'output_validation_failed'`
-  latencyMs: number,             // time from step start to step terminal outcome (pre-dispatch failures have low latency)
-  responseSizeBytes?: number,    // present when the webhook returned a body
+  status: 'ok' | 'http_error' | 'timeout' | 'network_error' | 'input_validation_failed' | 'output_validation_failed' | 'missing_connection',
+  httpStatus?: number,
+  latencyMs: number,
+  responseSizeBytes?: number,
   timestamp: ISO8601,
 }
 ```
 
-Both events register in `server/lib/tracing.ts`. Keep response bodies OUT of the event payload for privacy; store them (if needed) in the native workflow step-output column `workflow_step_runs.output_json` (post-Part-1-rename). This is the Playbook/Workflow step-run storage — NOT `flow_step_outputs` (the internal flow stack renamed in Part 1 Step 1).
+Both events register in `server/lib/tracing.ts`. Keep response bodies OUT of the event payload for privacy; store them (if needed) in the existing workflow-step-output table.
 
 ### 5.10 Edge cases
 
@@ -739,7 +695,7 @@ Both events register in `server/lib/tracing.ts`. Keep response bodies OUT of the
 - The Workflow Studio (renamed in Part 1) gains a new step-type option: "Call Automation."
 - Selecting it opens a picker listing the user's Automations filtered by scope.
 - Picker shows Automation name, description, engine type (Make / n8n / etc.), required connections.
-- Input mapping editor uses the same `{{ steps.X.output.Y }}` template-expression UI as other Workflow step types — no parallel DSL for `invoke_automation`.
+- Input mapping editor uses the same JSON-path expression UI as other steps.
 - Output mapping editor previews the Automation's declared `output_schema` if present.
 
 Exact UI layout and component list: architect pass.
@@ -770,73 +726,44 @@ Exactly one mode per run. Not a matrix.
 
 ### 6.3 Schema changes
 
-One migration (`0205_explore_execute_mode.sql`):
-
-> **Naming collision with pre-existing `run_mode` column.** `playbook_runs.run_mode` was introduced in migration `0086_playbook_run_mode.sql` with values `('auto', 'supervised', 'background', 'bulk')` — execution-style semantics, not safety semantics. After Part 1's Step 3 rename the column lands on `workflow_runs.run_mode` with those four legacy values. The Explore/Execute safety mode is a **separate** dimension and gets its own column (`safety_mode`) rather than overloading `run_mode`. The supervised-mode overlap with Explore is addressed by §6.8 (Supervised checkbox removal) and must not bleed into the existing `run_mode` enum. Architect pass confirms the final approach (see §12.24 open question).
+One migration (`0175_explore_execute_mode.sql`):
 
 ```sql
--- Add default_safety_mode to agents (NEW — Explore/Execute safety dimension)
+-- Add default_run_mode to agents
 ALTER TABLE agents
-  ADD COLUMN default_safety_mode text NOT NULL DEFAULT 'explore'
-  CHECK (default_safety_mode IN ('explore', 'execute'));
+  ADD COLUMN default_run_mode text NOT NULL DEFAULT 'explore'
+  CHECK (default_run_mode IN ('explore', 'execute'));
 
--- Add safety_mode to workflow_runs (renamed from playbook_runs in Part 1; separate
--- from the pre-existing `run_mode` column which carries auto|supervised|background|bulk).
+-- Add run_mode to workflow_runs (renamed from playbook_runs in Part 1)
 ALTER TABLE workflow_runs
-  ADD COLUMN safety_mode text NOT NULL DEFAULT 'explore'
-  CHECK (safety_mode IN ('explore', 'execute'));
+  ADD COLUMN run_mode text NOT NULL DEFAULT 'explore'
+  CHECK (run_mode IN ('explore', 'execute'));
 
--- Add safety_mode to agent_runs (no pre-existing column collision here).
+-- Add run_mode to agent_runs
 ALTER TABLE agent_runs
-  ADD COLUMN safety_mode text NOT NULL DEFAULT 'explore'
-  CHECK (safety_mode IN ('explore', 'execute'));
+  ADD COLUMN run_mode text NOT NULL DEFAULT 'explore'
+  CHECK (run_mode IN ('explore', 'execute'));
 
--- User-safety-mode-preference storage (see §6.8). Tenant-scoped — includes organisation_id
--- for the RLS policy; see §6.3a below for the complete RLS contract.
--- Table name uses `safety_mode` consistently with the column name — no `run_mode` leakage.
-CREATE TABLE user_agent_safety_mode_preferences (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organisation_id uuid NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+-- User-mode-preference storage (see §6.8)
+CREATE TABLE user_run_mode_preferences (
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   subaccount_id uuid NULL REFERENCES subaccounts(id) ON DELETE CASCADE,
   last_successful_mode text NOT NULL CHECK (last_successful_mode IN ('explore', 'execute')),
   successful_explore_runs integer NOT NULL DEFAULT 0,
   promoted_to_execute_at timestamptz NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, agent_id, subaccount_id)
 );
-
--- Two partial unique indexes to express "one row per (user, agent, subaccount)" where
--- subaccount_id is nullable. Postgres does not allow NULL in PRIMARY KEY columns, so
--- the surrogate `id` is the PK and uniqueness is enforced via the two partial indexes.
-CREATE UNIQUE INDEX user_agent_safety_mode_preferences_scoped_uniq_idx
-  ON user_agent_safety_mode_preferences (user_id, agent_id, subaccount_id)
-  WHERE subaccount_id IS NOT NULL;
-CREATE UNIQUE INDEX user_agent_safety_mode_preferences_unscoped_uniq_idx
-  ON user_agent_safety_mode_preferences (user_id, agent_id)
-  WHERE subaccount_id IS NULL;
-
-CREATE INDEX user_agent_safety_mode_preferences_user_agent_idx
-  ON user_agent_safety_mode_preferences (user_id, agent_id);
+CREATE INDEX ON user_run_mode_preferences (user_id, agent_id);
 ```
 
-Naming convention: `safety_mode` (explicitly distinct from the pre-existing `run_mode` execution-style column).
+Naming convention: `run_mode` (not `mode`) so it's unambiguous in joined queries.
 
 Defaults favour safety:
-- New agents: `default_safety_mode = 'explore'`
-- New runs: `safety_mode = 'explore'` unless explicitly overridden
+- New agents: `default_run_mode = 'explore'`
+- New runs: `run_mode = 'explore'` unless explicitly overridden
 - New user preferences (no row yet): treated as `'explore'`
-
-#### 6.3a RLS and manifest entry for `user_agent_safety_mode_preferences`
-
-The table is tenant-scoped (per-organisation) and must ship with the four-requirement bundle from `docs/spec-authoring-checklist.md §4`:
-
-1. **RLS policy** in migration `0205_explore_execute_mode.sql`: `ENABLE ROW LEVEL SECURITY`, `CREATE POLICY user_agent_safety_mode_preferences_tenant_isolation ON user_agent_safety_mode_preferences USING (organisation_id = current_setting('app.current_organisation_id')::uuid)`. Exact policy shape matches the existing three-layer model in `architecture.md §1155`.
-2. **Manifest entry** in `server/config/rlsProtectedTables.ts`: add `{ tableName: 'user_agent_safety_mode_preferences', schemaFile: 'userAgentSafetyModePreferences.ts', policyMigration: '0205_explore_execute_mode.sql', rationale: 'Per-user safety-mode preferences — PII via user identity plus agent-usage history.' }`.
-3. **Route-level guard**: all HTTP access requires `authenticate` + `requireOrganisation` and the preference mutation routes require a permission key (new: `ORG_PERMISSIONS.AGENT_RUN_MODE_MANAGE` — added in Part 3's permission seed).
-4. **Principal-scoped context**: reads from an agent-execution path use `withOrgTx` / `getOrgScopedDb` per `architecture.md §1116`.
-
-Throughout the rest of §6 and every downstream section, the Part 3 safety dimension is always referred to as `safety_mode` (SQL) / `safetyMode` (TypeScript) — NEVER `run_mode` / `runMode`. The term `run_mode` in this spec refers exclusively to the legacy execution-style enum on `workflow_runs` (`auto|supervised|background|bulk`, from migration `0086`). Prose, code examples, telemetry events, and API fields all follow this rule.
 
 ### 6.4 Skill side-effect declaration
 
@@ -850,95 +777,59 @@ side_effects: true    # NEW — boolean, required for all skills
 ---
 ```
 
-**Runtime storage and migration.** Skills are DB-backed at runtime via the `system_skills` table (`system_skills.definition` JSONB column), with markdown files in `server/skills/*.md` acting as the authoring seed. The `side_effects` field must be accessible during gate resolution — the exact storage location (dedicated `system_skills.side_effects` boolean column vs nested inside `definition`) is §12.22 open question; this spec authors the frontmatter on every markdown file as the source of truth and treats the DB surface as an open decision for architect pass.
-
-**Migration for existing 152 skills:** one-time audit pass annotates every skill markdown file with `side_effects: true | false`. Guidance:
+**Migration for existing 152 skills:** one-time audit pass annotates every skill with `side_effects: true | false`. Guidance:
 - `true` for anything mutating external state: send email, update CRM, modify ad spend, post message, create GHL contact, write Notion page, fire webhook, transition pipeline stage.
 - `false` for pure reads: list deals, get campaign stats, fetch thread, search messages.
 - When ambiguous, default to `true` (safe).
 - Audit happens as part of Part 3's spec execution; tracked in `tasks/builds/riley-observations/skills-side-effects-audit.md`.
 
-**Enforcement mechanism — static gate, not runtime default.** A new CI gate `scripts/gates/verify-skill-side-effects.sh` runs on every PR and fails the build if any file under `server/skills/**/*.md` or `companies/*/skills/*.md` lacks a top-level `side_effects` frontmatter key. The gate also re-validates the DB-backed skill rows once §12.22 resolves (so skills inserted via `systemSkillService` cannot skip the field). Runtime behaviour on a missing field still defaults to `true` (safe fallback) but the static gate ensures that never happens in practice. This matches the codebase's testing posture (static gates primary).
+**Fallback heuristic during migration:** if a skill file has no `side_effects` frontmatter at dispatch time, default to `true`. This fails safely on unannotated skills.
 
 ### 6.5 Gate resolution algorithm
 
-To give `invoke_automation` steps (Part 2 §5.6) and side-effecting skills a single enforcement site, extract the gate decision into a **shared pure function** and call it from both the agent-execution path and the workflow-engine step-dispatch path. The shared function lives at `server/services/gateResolutionServicePure.ts` with a matching wet wrapper in `server/services/gateResolutionService.ts`; both `agentExecutionService.ts` and `playbookEngineService.ts` (post-rename `workflowEngineService.ts`) call the pure function before any side-effecting branch.
+Resolved in `server/services/agentExecutionService.ts` (or wherever `gateLevel` is computed today). Pseudocode:
 
 ```typescript
-// server/services/gateResolutionServicePure.ts
-type GateSubject =
-  | { kind: 'skill'; skill: Skill }
-  | { kind: 'invoke_automation'; step: InvokeAutomationStep };
+function resolveEffectiveGate(skill: Skill, context: RunContext): GateLevel {
+  // 1. Block always wins — never bypassed.
+  if (skill.defaultGateLevel === 'block') return 'block';
 
-function resolveEffectiveGate(subject: GateSubject, context: RunContext): GateLevel {
-  // 1. Block always wins — never bypassed. Only applies to skills, since
-  //    InvokeAutomationStep.gateLevel is narrowed to 'auto' | 'review' at authoring
-  //    time (see §5.3); a workflow-definition validator rejects 'block' on invoke_automation.
-  if (subject.kind === 'skill' && subject.skill.defaultGateLevel === 'block') {
-    return 'block';
-  }
-
-  // 2. Safety mode Explore forces review on side-effecting skills and on every
-  //    invoke_automation step. Rationale: external webhook calls are treated as
-  //    side-effecting by definition (§5.6).
-  const isSideEffecting =
-    subject.kind === 'invoke_automation' ||
-    (subject.kind === 'skill' && subject.skill.sideEffects === true);
-  if (context.safetyMode === 'explore' && isSideEffecting) {
+  // 2. Explore Mode forces review on side-effecting skills.
+  if (context.runMode === 'explore' && skill.sideEffects === true) {
     return 'review';
   }
 
   // 3. Fall through to existing per-agent, per-subaccount, per-run gate overrides.
-  return resolveExistingGateOverrides(subject, context);
+  return resolveExistingGateOverrides(skill, context);
 }
 ```
 
-`invoke_automation` steps (Part 2 §5.6) route through the same shared function — no branch duplication, no separate gate pathway. The workflow engine's step-dispatch loop calls `resolveEffectiveGate({ kind: 'invoke_automation', step }, context)` immediately before firing the outbound webhook.
+Applies identically to `invoke_automation` steps (Part 2 §5.6): Explore Mode forces `review` regardless of declared gate.
 
 ### 6.6 Run-creation contract
 
 When a run is initiated (agent chat, Workflow run modal, scheduled trigger, external API):
 
 ```typescript
-// Naming note: the TypeScript field name `safetyMode` (camelCase) maps to the SQL
-// column `safety_mode` (snake_case). The Part 3 safety dimension is always
-// `safetyMode` in code / `safety_mode` in SQL — NEVER `run_mode` / `runMode`,
-// which is reserved for the legacy execution-style enum on `workflow_runs`.
 interface RunCreationRequest {
   agentId: string;
   subaccountId: string | null;
   // ... other existing fields
-  safetyMode?: 'explore' | 'execute';  // optional; defaulting logic below
-  triggerType?: 'user' | 'scheduled' | 'delegated';
-  // parentRun is populated when this run is spawned by another run (delegation chain).
-  // It is the DIRECT parent only — a grandchild-scheduled sub-run sees only its parent's
-  // safety_mode, which was itself already resolved by this function on an earlier call.
-  parentRun?: { safetyMode: 'explore' | 'execute' } | null;
+  runMode?: 'explore' | 'execute';  // optional; defaulting logic below
 }
 
-function resolveSafetyMode(
-  request: RunCreationRequest,
-  agent: Agent,                    // carries the `defaultSafetyMode` field (`default_safety_mode` column)
-  userPref: UserAgentSafetyModePreference | null,
-): 'explore' | 'execute' {
-  // 1. Delegation inheritance wins over everything. If this run is spawned by a parent
-  //    run (including delegated-then-scheduled sub-runs), it inherits the parent's mode.
-  //    See §6.7 edge 7: Explore is transitive; you can't escape by delegating or scheduling
-  //    from within an Explore-mode parent.
-  if (request.parentRun) return request.parentRun.safetyMode;
+function resolveRunMode(request: RunCreationRequest, agent: Agent, userPref: UserRunModePreference | null): 'explore' | 'execute' {
+  // 1. Explicit override from the request wins.
+  if (request.runMode) return request.runMode;
 
-  // 2. Explicit override from the request wins.
-  if (request.safetyMode) return request.safetyMode;
-
-  // 3. Top-level scheduled runs always Execute (no interactive approval). This applies
-  //    ONLY to schedules with no parent run — delegation-then-schedule hits rule 1 above.
+  // 2. Scheduled runs always Execute (no interactive approval).
   if (request.triggerType === 'scheduled') return 'execute';
 
-  // 4. User preference for this (user, agent, subaccount) if one exists.
+  // 3. User preference for this (user, agent, subaccount) if one exists.
   if (userPref?.last_successful_mode) return userPref.last_successful_mode;
 
-  // 5. Agent default (which starts as 'explore' for new agents).
-  return agent.defaultSafetyMode;
+  // 4. Agent default (which starts as 'explore' for new agents).
+  return agent.default_run_mode;
 }
 ```
 
@@ -952,7 +843,7 @@ Scheduled runs forcing `execute` is deliberate — review queues would pile up u
 4. **Skill declared `side_effects: true` but actually safe** (audit miss). Reviewer approves through. No harm done — just review-queue noise. Audit the skill post-launch; toggle to `false`.
 5. **Skill declared `side_effects: false` but actually unsafe** (audit miss). Explore Mode does NOT force review. Potential incident. **Mitigation: default-true fallback on missing frontmatter**; audit pass annotates every skill deliberately; post-launch monitoring looks for missed annotations via `context.assembly.complete` telemetry (Part 5).
 6. **Workflow with mixed gate levels.** Entire run is in one mode. No per-step mode switching. If a Workflow has some auto-safe and some review-needed steps, use per-skill `defaultGateLevel` in Execute Mode; don't fragment the mode model.
-7. **Orchestrator-delegated runs.** If the Orchestrator dispatches a sub-task to another agent, the sub-run inherits the parent's `safety_mode`. Explore Mode is transitive — you can't escape Explore by delegating. **Delegation wins over scheduling:** if a parent Explore-mode run enqueues a scheduled sub-run (e.g. "tomorrow at 9am, do X"), the scheduled sub-run still inherits `safety_mode = 'explore'` from the parent — the scheduled-runs-always-execute rule in §6.6 step 2 applies only to top-level schedules (no parent run in the delegation chain).
+7. **Orchestrator-delegated runs.** If the Orchestrator dispatches a sub-task to another agent, the sub-run inherits the parent's `run_mode`. Explore Mode is transitive — you can't escape Explore by delegating.
 
 ### 6.8 UI surfaces
 
@@ -972,7 +863,7 @@ The mode is visible on every run surface. Not hidden, not collapsible.
 - Scheduled runs: mode selector disabled, tooltip explains *"Scheduled runs always execute. Use Explore Mode for manual test runs."*
 
 **Agent config page** (`AdminAgentEditPage.tsx` + `SubaccountAgentEditPage.tsx` / `OrgAgentConfigsPage.tsx`):
-- New field under the existing config: "Default safety mode for this agent: [ Explore | Execute ]". Default is `explore` for new agents. (Form field name / column: `default_safety_mode`, never `default_run_mode`.)
+- New field under the existing config: "Default run mode for this agent: [ Explore | Execute ]". Default is `explore` for new agents.
 - Help text: *"New runs for this agent start in this mode unless you've already run it successfully in the other mode."*
 
 **Portal run surfaces** (customer-facing):
@@ -981,14 +872,13 @@ The mode is visible on every run surface. Not hidden, not collapsible.
 
 ### 6.9 Mode persistence per (user, agent, subaccount)
 
-Persistence is stored in `user_agent_safety_mode_preferences` (DB-backed, not localStorage). Rationale: user might log in from multiple devices; preferences follow the user, not the device.
+Persistence is stored in `user_run_mode_preferences` (DB-backed, not localStorage). Rationale: user might log in from multiple devices; preferences follow the user, not the device.
 
 Resolution order (as in §6.6):
-1. Delegation inheritance (parent run's safety mode)
-2. Explicit request override
-3. Top-level scheduled → Execute
-4. User preference for this (user, agent, subaccount)
-5. Agent default
+1. Explicit request override
+2. Scheduled → Execute
+3. User preference for this (user, agent, subaccount)
+4. Agent default
 
 **Reset conditions:**
 - User runs the agent against a *new* subaccount for the first time → no preference row; falls through to agent default (Explore).
@@ -1018,7 +908,7 @@ With two buttons: *Switch to Execute* / *Not yet*.
 
 ### 6.11 Analytics / telemetry
 
-Emit `run.safety_mode.selected` at run creation with `{runId, agentId, subaccountId, userId, resolvedSafetyMode, resolutionReason}` where `resolutionReason` ∈ `{explicit_request, scheduled, user_preference, agent_default}` and `resolvedSafetyMode` ∈ `{'explore', 'execute'}`. Drives analytics on:
+Emit `run.mode.selected` at run creation with `{runId, agentId, subaccountId, userId, resolvedMode, resolutionReason}` where `resolutionReason` ∈ `{explicit_request, scheduled, user_preference, agent_default}`. Drives analytics on:
 - What percentage of new agents ever get promoted to Execute?
 - Which agents have the highest Execute adoption?
 - Which agents' promote prompts get declined most?
@@ -1028,10 +918,10 @@ Event registers in `server/lib/tracing.ts` alongside other run-lifecycle events.
 ### 6.12 Edge cases
 
 1. **Concurrent runs in different modes.** User has two conversations open with the same agent against the same subaccount: one in Explore, one in Execute. Both should work correctly. Mode is per-run, not per-agent-subaccount pairing.
-2. **Agent config change mid-conversation.** Admin changes agent's `default_safety_mode` from Explore → Execute. Active conversations retain their mode; new conversations use the new default.
-3. **Subaccount deletion.** Cascade delete on `user_agent_safety_mode_preferences` via FK `ON DELETE CASCADE`.
+2. **Agent config change mid-conversation.** Admin changes agent's `default_run_mode` from Explore → Execute. Active conversations retain their mode; new conversations use the new default.
+3. **Subaccount deletion.** Cascade delete on `user_run_mode_preferences` via FK `ON DELETE CASCADE`.
 4. **Skill added with missing `side_effects` frontmatter.** Defaults to `true`. Runs pause for review in Explore Mode, erring on safe. Audit and annotate.
-5. **Empty `user_agent_safety_mode_preferences` after schema deploy.** Pre-launch state; all users default to agent-level default. No backfill required.
+5. **Empty `user_run_mode_preferences` after schema deploy.** Pre-launch state; all users default to agent-level default. No backfill required.
 
 ### 6.13 Success criteria
 
@@ -1059,7 +949,7 @@ Portfolio Health Agent ticks every 4h unconditionally. Add a deterministic pre-d
 
 ### 7.3 Schema changes
 
-One migration (`0206_heartbeat_activity_gate.sql`):
+One migration (`0176_heartbeat_activity_gate.sql`):
 
 ```sql
 -- Per-agent config
@@ -1074,16 +964,8 @@ ALTER TABLE subaccount_agents
   ADD COLUMN heartbeat_event_delta_threshold integer NULL,
   ADD COLUMN heartbeat_min_ticks_before_mandatory_run integer NULL;
 
--- Track tick state:
---   last_tick_evaluated_at: every gate evaluation (run OR skip) updates this. Used as the
---     event-delta cursor in Rule 1 and as the "since last tick" reference in §7.7 queries.
---   last_meaningful_tick_at: only meaningful runs update this (see §12.17 for the definition
---     of "meaningful" that architect pass pins). Used by Rule 2 + Rule 4.
---   ticks_since_last_meaningful_run: monotonically incremented on skip, reset on meaningful
---     run. Duplicates (count of skipped ticks since last_meaningful_tick_at) but cheap to
---     maintain and avoids a count(*) on gate telemetry during dispatch.
+-- Track the last tick that actually produced output (not counting skipped ticks)
 ALTER TABLE subaccount_agents
-  ADD COLUMN last_tick_evaluated_at timestamptz NULL,
   ADD COLUMN last_meaningful_tick_at timestamptz NULL,
   ADD COLUMN ticks_since_last_meaningful_run integer NOT NULL DEFAULT 0;
 ```
@@ -1105,15 +987,13 @@ Where `new_events_since_last_tick` counts domain-relevant entities added/modifie
 
 Exact event source per agent: defined per agent. Portfolio Health details in §7.7.
 
-**Rule 2 — Time-since-last-meaningful-output (with first-tick branch)**
+**Rule 2 — Time-since-last-meaningful-output**
 
 ```
-last_meaningful_tick_at IS NULL           # first tick ever — always run to establish baseline
-  OR
 ticks_since_last_meaningful_run >= heartbeat_min_ticks_before_mandatory_run
 ```
 
-Prevents permanent silence. If we've been skipping for 6 ticks (24h at 4h cadence), force a run on the next tick to check state regardless of delta. The first-tick branch keeps the §7.10 edge-1 behaviour ("always run first tick") mechanically derivable from the rule, rather than an exception layered on top.
+Prevents permanent silence. If we've been skipping for 6 ticks (24h at 4h cadence), force a run on the next tick to check state regardless of delta.
 
 **Rule 3 — Explicit trigger**
 
@@ -1141,7 +1021,6 @@ New service: `server/services/heartbeatActivityGateService.ts`. Pure function (n
 interface HeartbeatGateInput {
   agentId: string;
   subaccountId: string;
-  lastTickEvaluatedAt: Date | null;
   lastMeaningfulTickAt: Date | null;
   ticksSinceLastMeaningfulRun: number;
   config: {
@@ -1150,20 +1029,12 @@ interface HeartbeatGateInput {
   };
 }
 
-type HeartbeatGateReason =
-  | 'event_delta'
-  | 'time_threshold'
-  | 'explicit_trigger'
-  | 'state_flag'
-  | 'no_signal'
-  | 'gate_error';
-
 interface HeartbeatGateDecision {
   shouldRun: boolean;
-  reason: HeartbeatGateReason;
+  reason: 'event_delta' | 'time_threshold' | 'explicit_trigger' | 'state_flag' | 'no_signal';
   signalsEvaluated: {
     newEventCount: number;
-    ticksSinceLastMeaningfulRun: number;
+    ticksSinceLastRun: number;
     explicitTriggerQueued: boolean;
     stateFlagSet: boolean;
   };
@@ -1184,28 +1055,10 @@ Wrap the heartbeat-originated dispatch path (currently in `agentExecutionService
 Flow:
 1. pg-boss fires heartbeat job.
 2. Handler resolves agent + subaccount + config.
-3. Handler loads gate state from `subaccount_agents` — specifically `last_tick_evaluated_at`, `last_meaningful_tick_at`, and `ticks_since_last_meaningful_run` for the `(agent_id, subaccount_id)` pair.
-4. If `heartbeat_activity_gate_enabled = false` → dispatch as today (no tick-state updates, no gate call).
-5. If enabled → build `HeartbeatGateInput` from the loaded state + resolved config, then call `evaluateHeartbeatGate`:
-
-   ```typescript
-   await evaluateHeartbeatGate({
-     agentId,
-     subaccountId,
-     lastTickEvaluatedAt: subaccountAgent.lastTickEvaluatedAt,
-     lastMeaningfulTickAt: subaccountAgent.lastMeaningfulTickAt,
-     ticksSinceLastMeaningfulRun: subaccountAgent.ticksSinceLastMeaningfulRun,
-     config: {
-       eventDeltaThreshold: resolvedConfig.eventDeltaThreshold,
-       minTicksBeforeMandatoryRun: resolvedConfig.minTicksBeforeMandatoryRun,
-     },
-   });
-   ```
-
-6. If decision is `shouldRun: true` → dispatch. Update `last_tick_evaluated_at = now()` in the same transaction that enqueues the run. When the dispatched run subsequently produces "meaningful" output (definition deferred to architect per §12.17; recommendation: `status='completed'` AND at least one action proposed OR memory block written), the run-completion hook updates `last_meaningful_tick_at = now()` and resets `ticks_since_last_meaningful_run = 0` on `subaccount_agents`.
-7. If decision is `shouldRun: false` → emit `heartbeat.tick.gated` telemetry, update `last_tick_evaluated_at = now()`, increment `ticks_since_last_meaningful_run += 1`, return.
-
-**Ownership of `last_meaningful_tick_at` / counter-reset writes.** The recommendation is to site these writes alongside the existing `agent_runs.completed_at` write — `server/services/agentRunFinalizationService.ts` is the candidate hook (it already handles terminal-state transitions for agent runs; see its docblock). Architect confirms during plan decomposition (see §12.17); if a different completion hook is used in the heartbeat-originated path, name it in the plan.
+3. If `heartbeat_activity_gate_enabled = false` → dispatch as today.
+4. If enabled → call `evaluateHeartbeatGate`.
+5. If decision is `shouldRun: true` → dispatch. Reset `ticks_since_last_meaningful_run` when the run produces output.
+6. If decision is `shouldRun: false` → emit `heartbeat.tick.gated` telemetry, increment `ticks_since_last_meaningful_run` by 1, return.
 
 The gate adds one DB-read-only service call before dispatch. Expected latency: <50ms.
 
@@ -1215,10 +1068,10 @@ Define the per-agent event-source list. For Portfolio Health:
 
 | Signal | Source | Query shape |
 |---|---|---|
-| New memory blocks | `memory_blocks` | `count(*) where subaccount_id = ? and created_at > last_tick_evaluated_at` |
-| Onboarding state changes | `subaccount_onboarding_state` | `count(*) where subaccount_id = ? and updated_at > last_tick_evaluated_at` |
-| Failed agent runs | `agent_runs` | `count(*) where subaccount_id = ? and status = 'failed' and created_at > last_tick_evaluated_at` |
-| Integration errors | `connections` | `count(*) where subaccount_id = ? and status = 'error' and updated_at > last_tick_evaluated_at` |
+| New memory blocks | `memory_blocks` | `count(*) where subaccount_id = ? and created_at > last_tick_at` |
+| Onboarding state changes | `subaccount_onboarding_state` | `count(*) where subaccount_id = ? and updated_at > last_tick_at` |
+| Failed agent runs | `agent_runs` | `count(*) where subaccount_id = ? and status = 'failed' and created_at > last_tick_at` |
+| Integration errors | `connections` | `count(*) where subaccount_id = ? and status = 'error' and updated_at > last_tick_at` |
 | Pending review items | (existing review-queue table — audit) | `count(*) where subaccount_id = ? and assigned_agent_id = ? and status = 'pending'` |
 | Explicit "check now" triggers | (new column or existing mechanism — audit) | Boolean: has one been enqueued since last tick |
 
@@ -1238,7 +1091,7 @@ Emit `heartbeat.tick.gated` on every gate evaluation (both run and skip outcomes
   reason: 'event_delta' | 'time_threshold' | 'explicit_trigger' | 'state_flag' | 'no_signal' | 'gate_error',
   signalsEvaluated: {
     newEventCount: number,
-    ticksSinceLastMeaningfulRun: number,
+    ticksSinceLastRun: number,
     explicitTriggerQueued: boolean,
     stateFlagSet: boolean,
   },
@@ -1311,9 +1164,7 @@ Event name: `context.assembly.complete`
   latencyMs: number,                  // total time in context assembly
   totalTokens: number,                // everything injected into the final prompt
   contextBudget: number,              // the model's context window
-  contextPressure: number,            // totalTokens / contextBudget, 0..1; when contextBudget = 0
-                                      // (budget unknown — see §8.7 edge 3), contextPressure = 0
-                                      // AND `context_pressure_unknown` appears in gapFlags.
+  contextPressure: number,            // totalTokens / contextBudget, 0..1
 
   // How much memory showed up
   memoryBlockCount: number,           // blocks included after precedence filtering
@@ -1348,8 +1199,6 @@ Strict enum, extensible:
 - `stale_beliefs` — beliefs loaded but last-updated > 30d ago
 - `missing_integration` — agent expected a connection that wasn't resolved
 - `context_pressure_high` — `contextPressure > 0.9`
-- `context_pressure_unknown` — `contextBudget` could not be resolved (see §8.7 edge 3)
-- `workspace_memory_truncated` — workspace memory exceeded the injection budget and was truncated (see §8.7 edge 4)
 - `memory_retrieval_timeout` — memory retrieval hit timeout before returning
 - `assembly_partial_failure` — one or more sub-phases failed but assembly continued
 
@@ -1376,7 +1225,7 @@ No event duplication. Each answers a specific question.
 
 1. **Simple_reply path from Universal Brief.** No agent-loop runs → no event emitted. Documented behaviour.
 2. **Assembly partial failure.** Event still emitted with `gapFlags: ['assembly_partial_failure']` plus specific gap flags.
-3. **Model context window unknown.** If `contextBudget` can't be resolved, set `contextBudget = 0`, set `contextPressure = 0`, and include `context_pressure_unknown` in `gapFlags`. Consumers that filter on `contextPressure > 0.9` therefore never fire on unknown-budget runs (intentional — no signal is better than a false positive).
+3. **Model context window unknown.** If `contextBudget` can't be resolved, set to `0` and include `context_pressure_unknown` in `gapFlags`.
 4. **Extremely long workspace memory truncated before injection.** Assembly truncates; `workspaceMemoryLength` reflects the pre-truncation length. Add `workspace_memory_truncated` to `gapFlags`.
 5. **Telemetry sink unavailable.** Agent run continues. Event loss is acceptable — no retry, no queue.
 
@@ -1421,82 +1270,17 @@ A future session authoring an agent spec reads the rule on their first pass thro
 
 ---
 
-## 9a. Contracts
-
-Per `docs/spec-authoring-checklist.md §3`, every data shape crossing a service / parser / persistence boundary is pinned here with Name, Type, Producer, Consumer, Nullability, and Example. Detailed schemas remain inline in the per-Part sections above; this table is the single source of truth for the boundary shapes.
-
-| Name | Type | Producer | Consumer | Nullability / defaults | Example |
-|---|---|---|---|---|---|
-| `InvokeAutomationStep` | TypeScript discriminated union member in the Workflow DSL (see §5.3) | Workflow author (authoring UI) → stored in the Workflow definition JSON on `workflow_templates` / `workflow_runs` | `workflowEngineService.ts` step dispatcher (post-rename) | `kind` required; `outputMapping`/`timeoutSeconds`/`retryPolicy`/`gateLevel` optional with documented defaults | `{ kind: 'invoke_automation', automationId: 'uuid-a', inputMapping: { to: '{{ run.input.email }}', subject: 'Hi' }, gateLevel: 'review' }` |
-| `workflow.step.automation.dispatched` | Tracing event registered in `server/lib/tracing.ts` (see §5.9) | `workflowEngineService.ts` at the moment the webhook fetch is initiated | Tracing sink / operator observability queries | All fields required except optional ones per the type; `subaccountId` nullable for org-scoped runs | `{ eventType: 'workflow.step.automation.dispatched', runId: 'r-1', workflowId: 'w-1', stepId: 's-1', automationId: 'a-1', automationEngineId: 'e-1', engineType: 'make', subaccountId: 'sa-1', orgId: 'o-1', timestamp: '2026-04-22T21:45:51Z' }` |
-| `workflow.step.automation.completed` | Tracing event (see §5.9) | `workflowEngineService.ts` after the step reaches a terminal outcome (dispatched-and-returned OR pre-dispatch failure) | Tracing sink / operator queries | `httpStatus` / `responseSizeBytes` optional (absent on `timeout`, `network_error`, `missing_connection`, `automation_not_found`, `automation_scope_mismatch`, `input_validation_failed`); status enum per §5.9 — every terminal outcome appears. Invariant: `workflow.step.automation.dispatched` fires iff the step reached successful pre-dispatch resolution; pre-dispatch failures emit ONLY the completed event. | `{ eventType: 'workflow.step.automation.completed', runId: 'r-1', workflowId: 'w-1', stepId: 's-1', automationId: 'a-1', status: 'ok', httpStatus: 200, latencyMs: 842, responseSizeBytes: 1240, timestamp: '2026-04-22T21:45:51Z' }` |
-| `UserAgentSafetyModePreference` row | `user_agent_safety_mode_preferences` table row (see §6.3) | `userAgentSafetyModePreferencesService` on run completion | Run-creation resolver (`resolveSafetyMode` in §6.6) | `subaccount_id` nullable; `promoted_to_execute_at` nullable; all others NOT NULL | `{ id: 'pref-1', organisation_id: 'o-1', user_id: 'u-1', agent_id: 'a-1', subaccount_id: 'sa-1', last_successful_mode: 'explore', successful_explore_runs: 3, promoted_to_execute_at: null, updated_at: '2026-04-22T21:45:51Z' }` |
-| `HeartbeatGateInput` | TypeScript value (see §7.5) | `heartbeatActivityGateService.ts` dispatch handler | `evaluateHeartbeatGate` pure function | `lastTickEvaluatedAt` / `lastMeaningfulTickAt` nullable (first-tick) | `{ agentId: 'a-1', subaccountId: 'sa-1', lastTickEvaluatedAt: null, lastMeaningfulTickAt: null, ticksSinceLastMeaningfulRun: 0, config: { eventDeltaThreshold: 3, minTicksBeforeMandatoryRun: 6 } }` |
-| `HeartbeatGateDecision` | TypeScript value (see §7.5) | `evaluateHeartbeatGate` | Dispatch handler + `heartbeat.tick.gated` telemetry emitter | All fields required; `reason` enum includes `gate_error`. Invariant: `reason: 'no_signal'` ⇒ `shouldRun: false`. Every other reason may pair with either `shouldRun: true` (`event_delta` / `time_threshold` / `explicit_trigger` / `state_flag` / `gate_error`) or `shouldRun: false` (never, for those — `gate_error` always runs per §7.5 error posture). | `{ shouldRun: false, reason: 'no_signal', signalsEvaluated: { newEventCount: 0, ticksSinceLastMeaningfulRun: 2, explicitTriggerQueued: false, stateFlagSet: false }, latencyMs: 12 }` |
-| `heartbeat.tick.gated` | Tracing event (see §7.8) | `heartbeatActivityGateService.ts` after decision | Tracing sink | All fields required | `{ eventType: 'heartbeat.tick.gated', agentId: 'a-1', subaccountId: 'sa-1', timestamp: '2026-04-22T21:45:51Z', shouldRun: true, reason: 'event_delta', signalsEvaluated: { newEventCount: 5, ticksSinceLastMeaningfulRun: 1, explicitTriggerQueued: false, stateFlagSet: false }, latencyMs: 12 }` |
-| `context.assembly.complete` | Tracing event (see §8.2) | `agentExecutionService.ts` at end of context assembly | Tracing sink | `subaccountId` nullable; `gapFlags` can be empty array; flag values constrained to the §8.4 enum | `{ eventType: 'context.assembly.complete', runId: 'r-1', agentId: 'a-1', subaccountId: 'sa-1', orgId: 'o-1', timestamp: '2026-04-22T21:45:51Z', latencyMs: 120, totalTokens: 8500, contextBudget: 200000, contextPressure: 0.0425, memoryBlockCount: 12, workspaceMemoryLength: 320, gapFlags: [] }` |
-| `resolveEffectiveGate(subject, context)` | Pure function signature in `server/services/gateResolutionServicePure.ts` (see §6.5) | Both `agentExecutionService.ts` (for skill invocations) and `workflowEngineService.ts` (for `invoke_automation` steps) | Callers who need to know whether a side-effecting action must pause for review | `subject` is a discriminated union `{ kind: 'skill', skill } \| { kind: 'invoke_automation', step }`; `context.safetyMode` required | Call: `resolveEffectiveGate({ kind: 'invoke_automation', step: stepRow }, { safetyMode: 'explore', agentId, subaccountId })` → returns `'review'` |
-| `run.safety_mode.selected` | Tracing event (see §6.11) | Run-creation resolver (`resolveSafetyMode` in §6.6) at run-creation time | Tracing sink / adoption-analytics queries | `subaccountId` nullable; `resolvedSafetyMode` ∈ `{'explore', 'execute'}`; `resolutionReason` ∈ `{explicit_request, scheduled, user_preference, agent_default}` | `{ eventType: 'run.safety_mode.selected', runId: 'r-1', agentId: 'a-1', subaccountId: 'sa-1', userId: 'u-1', resolvedSafetyMode: 'explore', resolutionReason: 'agent_default' }` |
-
----
-
-## 9b. Deferred Items
-
-Per `docs/spec-authoring-checklist.md §7`, every prose mention of "deferred", "later", "v2", "not in v1", "future", or "follow-up" appears here with a one-line rationale.
-
-**Run-mode / Explore-Execute Part 3 deferrals:**
-- **Portal mode field selection.** §6.8 defers naming the `subaccount_agents` field that drives portal run mode. Architect must resolve before Part 3 migration lands; see §12.13.
-- **`side_effects` runtime storage schema.** §6.4 defers the DB vs JSONB placement decision. Architect pass; see §12.22.
-- **Promote-to-Execute risk posture.** §6.10 defers the question of whether a single click-through is safe enough, or whether typing "Execute" / time-windowed trust / re-selection is needed. Decision gated on post-launch incident rate.
-
-**Workflow-composition Part 2 deferrals:**
-- **Cost estimation for Workflows containing Automation steps.** §5.10 edge 5 — the existing `workflow_estimate_cost` skill doesn't incorporate external engine cost; v2 follow-up.
-- **Automation-to-Workflow composition.** §5.2 out-of-scope — callback-based composition where an Automation triggers a Workflow is doable with existing webhook primitives; not part of this spec.
-- **UI picker / Studio panel redesign for the new step type.** §5.2 out-of-scope — spec pins the contract; Studio UI is an architect-plan detail.
-- **Output-schema validator format.** §5.4 / §5.5 defer the validator choice and the JSON-Schema strictness posture. Architect pass; see §12.23.
-- **Per-row timeout override column on `automations`.** §5.3 defers whether to add `automations.timeout_seconds` or keep the service-level constant. Architect pass.
-
-**Heartbeat Part 4 deferrals:**
-- **LLM-based heartbeat signal detection.** §7.2 / §1.2 — deterministic rules only in v1; LLM layer considered only if deterministic rules prove insufficient.
-- **Rule 3 "Check now" trigger mechanism.** §7.4 / §12.16 — either add the "Check now" surface to this spec or drop Rule 3 from v1. Recommendation: drop Rule 3 from v1. Architect decides.
-- **"Meaningful" output definition for `last_meaningful_tick_at` update.** §7.6 / §12.17 — recommendation: `status='completed'` AND at least one action proposed OR memory block written. Architect confirms before coding.
-- **Operator dashboard for gate telemetry.** §7.8 — future work; v1 has no UI.
-- **Agency-admin exposure of the heartbeat gate toggle.** §7.9 — system-admin only in v1; agency-admin after operational validation.
-
-**Context-assembly telemetry Part 5 deferrals (all §8.3):**
-- **Per-phase token breakdown.** Briefing / beliefs / memory / known-entities separately.
-- **Per-source memory attribution** (which retrievers contributed).
-- **Full authorised-skills / available-skills arrays.**
-- **Per-sub-phase latencies.**
-- **Operator UI for `context.assembly.complete` queries.** §8.5 step 5 — query via existing observability tooling in v1.
-
-**Naming-pass Part 1 deferrals:**
-- **`processedResources` / `dropZoneProcessingLog` renaming.** §1.2 / §4.6 — unrelated to the `processes` primitive; explicitly left as-is.
-- **External-provider `engineType` value strings** (`n8n`, `ghl`, `make`, `zapier`, `custom_webhook`) — external-provider identifiers; our wrapper concept changes name, the providers don't (§4.6).
-- **Review logs and historical artefacts** — §4.8 explicitly leaves as-is because they reference a primitive that existed at the time; rewriting history is churn with no benefit.
-
-**Cross-cutting / pipeline deferrals:**
-- **Next-wave UX.** §1.2 — new onboarding flow, guided first-run, starter-workflow library, outcome-first navigation. Tracked as the next wave.
-- **Data sandbox** (duplicated DBs, synthetic data). §1.2 — Explore Mode is the substitute in v1.
-- **OpenClaw substrate work.** §1.2 — covered in `openclaw-strategic-analysis.md`, not this spec.
-
-Architect pass reviews this list at plan time; any item that turns out to block v1 gets promoted out of Deferred Items and into the phase it belongs in.
-
----
-
 ## 10. Data migration plan
 
 ### 10.1 Ordered migration list
 
-Every forward migration below ships alongside a paired down-migration file under `migrations/_down/` (matching the codebase's existing reversibility pattern). "Reversible" means the `_down/` file is authored and green-on-rerun; `git revert` alone does not execute DDL.
-
-| # | Forward file | Down file | Purpose |
+| # | File | Purpose | Reversibility |
 |---|---|---|---|
-| 1 | `0202_rename_workflow_runs_to_flow_runs.sql` | `_down/0202_rename_workflow_runs_to_flow_runs.sql` | Clear `workflow*` namespace. Rename internal flow stack. |
-| 2 | `0203_rename_processes_to_automations.sql` | `_down/0203_rename_processes_to_automations.sql` | `processes → automations`, `workflow_engines → automation_engines`, all child tables and columns. |
-| 3 | `0204_rename_playbooks_to_workflows.sql` | `_down/0204_rename_playbooks_to_workflows.sql` | `playbooks → workflows`, all child tables and columns, cross-table `playbook_*` columns. |
-| 4 | `0205_explore_execute_mode.sql` | `_down/0205_explore_execute_mode.sql` | See §6.3. New `safety_mode` column on renamed `workflow_runs` (distinct from the pre-existing `run_mode` column; see §12.24), new `safety_mode` on `agent_runs`, new `default_safety_mode` on `agents`, new `user_agent_safety_mode_preferences` table with RLS policy + `rlsProtectedTables.ts` manifest entry. |
-| 5 | `0206_heartbeat_activity_gate.sql` | `_down/0206_heartbeat_activity_gate.sql` | Heartbeat gate columns on `agents` + `subaccount_agents`, `last_tick_evaluated_at` + `last_meaningful_tick_at` tracking columns. |
+| 1 | `0172_rename_workflow_runs_to_flow_runs.sql` | Clear `workflow*` namespace. Rename internal flow stack. | Reversible (rename tables back). |
+| 2 | `0173_rename_processes_to_automations.sql` | `processes → automations`, `workflow_engines → automation_engines`, all child tables and columns. | Reversible. |
+| 3 | `0174_rename_playbooks_to_workflows.sql` | `playbooks → workflows`, all child tables and columns, cross-table `playbook_*` columns. | Reversible. |
+| 4 | `0175_explore_execute_mode.sql` | `run_mode` columns on `agent_runs` + `workflow_runs`, `default_run_mode` on `agents`, new `user_run_mode_preferences` table. | Reversible (drop columns + table). |
+| 5 | `0176_heartbeat_activity_gate.sql` | Heartbeat gate columns on `agents` + `subaccount_agents`, plus tracking columns for last-meaningful-tick. | Reversible. |
 
 No data migration needed on any of these — pre-launch posture means zero rows in tables we care about (beyond seed data, which is regenerated by each rename).
 
@@ -1528,10 +1312,10 @@ Before the PR merges to `main`:
 Because all migrations ship in one PR, there is a single coordinated merge window. Process:
 
 1. Announce in #engineering: "Riley-observations naming-pass PR merging at {time}. All open feature branches will need rebase."
-2. Prepare a rebase-script committed under `scripts/rebase-post-riley-rename.sh` (new file — tooling artefact scoped to this PR, not a runtime script):
+2. Prepare a rebase-script committed under `scripts/rebase-post-riley-rename.sh`:
    - Fetches main
    - Merges main into the current branch
-   - Runs `scripts/codemod-riley-rename.ts` (new file — tooling artefact scoped to this PR) which does:
+   - Runs `scripts/codemod-riley-rename.ts` (new) which does:
      - Replace `playbook_` → `workflow_` in SQL strings, TypeScript imports, references
      - Replace `Playbook` → `Workflow` in TypeScript type usages
      - Replace `/api/playbooks` → `/api/workflows` in route strings
@@ -1541,11 +1325,9 @@ Because all migrations ship in one PR, there is a single coordinated merge windo
 3. After merge, open-PR owners run the rebase script on their branch, resolve any remaining conflicts manually, and force-push.
 4. For 72 hours post-merge, engineering team prioritises unblocking any branch that can't auto-rebase.
 
-**Inventory note.** Both `scripts/rebase-post-riley-rename.sh` and `scripts/codemod-riley-rename.ts` are new files committed as part of Part 1's PR. They are one-time tooling — not retained or scheduled. List them explicitly alongside the Part 1 file-inventory tables (§4.3 / §4.6 / §4.8) when the architect decomposes the plan.
-
 ### 10.5 Rollback posture
 
-- If the PR merges and something breaks: `git revert` the merge commit AND run the five paired `_down/` migrations in reverse order (5 → 4 → 3 → 2 → 1). `git revert` on its own does not execute DDL; the `_down/` files are the actual rollback mechanism.
+- If the PR merges and something breaks: `git revert` the merge commit. All five migrations revert in reverse order automatically (they're reversible).
 - Post-revert, re-run tests; assert clean rollback.
 - Post-mortem before re-attempting.
 
@@ -1559,7 +1341,7 @@ Rollback window: up to 48h post-merge. After that, any downstream work has made 
 
 | Wave | Content | Gating |
 |------|---|---|
-| **W0** | Part 6 (agent-decomposition rule, §9) | No spec. Ship immediately. |
+| **W0** | Rec 5 (agent-decomposition rule) | No spec. Ship immediately. |
 | **W1** | Part 1 (naming pass) + Part 2 (Workflows invoking Automations composition) | This spec + spec-review + architect plan → `spec-conformance` → `pr-reviewer` → PR. |
 | **W2** | Part 3 (Explore / Execute Mode) | Depends on W1. Spec drafted after W1 lands so it uses the final vocabulary. |
 | **W3** | Part 5 (context-assembly telemetry) | Standard-class. Lightweight spec. Depends on nothing. |
@@ -1574,13 +1356,13 @@ Rollback window: up to 48h post-merge. After that, any downstream work has made 
 - Manual QA per §10.3.
 
 **Part 2 (composition):**
-- Unit (pure-function): `invoke_automation` step-dispatch logic in `invokeAutomationStepPure.ts` — input mapping resolution, output mapping projection, scope-matching rule, error-code mapping, gate-resolution branch. Test matrix covers every `error_code` listed in §5.7 and §5.8. No HTTP layer involved — the webhook fetch is mocked at the service boundary (a function-level stub), not via an HTTP-level mocking library. This follows the codebase's testing posture (static gates + pure-function unit tests; no MSW / supertest for the app's own surfaces).
-- Failure-mode coverage (part of the same unit suite): timeout, 5xx response, input-schema mismatch, missing connection, automation not found, scope mismatch.
-- Explore-Mode interaction (unit): `resolveEffectiveGate` called with a `{ kind: 'invoke_automation' }` subject under Explore-mode context returns `'review'`. This is one case in the Part 3 gate matrix (below) and does not require a new test harness.
+- Unit: step-dispatch logic isolated; mock engine response.
+- Integration: end-to-end test — Workflow with one `invoke_automation` step against a test engine fixture (MSW or similar).
+- Failure-mode tests: timeout, 5xx response, input-schema mismatch, missing connection.
+- Explore-Mode interaction test: `invoke_automation` step forced to review in Explore.
 
 **Part 3 (Explore / Execute Mode):**
-- Unit (pure-function): `server/services/gateResolutionServicePure.test.ts` — test matrix against `resolveEffectiveGate` exported from `server/services/gateResolutionServicePure.ts` (extracted in §6.5). Every combination of `context.safetyMode` × subject kind (`skill` vs `invoke_automation`) × `skill.sideEffects` × `skill.defaultGateLevel`. Confirms the `invoke_automation` branch always treats the step as side-effecting and that `'block'` on a skill wins over every other rule.
-- Unit (pure-function): `server/services/resolveSafetyModeServicePure.test.ts` — test matrix against `resolveSafetyMode` (§6.6). Covers: explicit override wins; delegated parent inheritance wins over scheduled; top-level scheduled → execute; user preference fallback; agent default last.
+- Unit: `resolveEffectiveGate` test matrix — every combination of mode × sideEffects × defaultGateLevel.
 - Integration: create run in Explore, dispatch side-effecting skill, assert review-queue entry; approve; assert execution.
 - Schedule test: scheduled run ignores user preference, always executes.
 - Promotion test: 5 successful Explore runs → prompt surfaces.
@@ -1632,7 +1414,7 @@ Items the architect should confirm or decide during plan decomposition. None blo
 ### 12.2 Part 2 (composition)
 
 7. **Workflow step-type enum location.** Exact file and discriminator name. Architect finds and specifies.
-8. **Template-expression renderer module citation.** The `invoke_automation` step uses the existing `{{ steps.X.output.Y }}` template form (§5.3). Architect cites the exact renderer module in `server/lib/playbook/` (post-rename `server/lib/workflow/`) that `invoke_automation` reuses — no parallel renderer is introduced.
+8. **JSON-path expression language.** What expression format does the existing Workflow DSL use? Architect confirms and ensures `invoke_automation` step uses the same syntax.
 9. **Output-schema strictness.** Does the current Automation (`processes`) output-schema validation reject extra fields, or permit them? Architect confirms and ensures composition step matches.
 10. **Engine-degraded-mode behaviour.** What does the current process-execution path do when an external engine is offline? Architect confirms and ensures `invoke_automation` step inherits that behaviour.
 
@@ -1640,16 +1422,14 @@ Items the architect should confirm or decide during plan decomposition. None blo
 
 11. **Exact sidebar component/icon for mode indicator.** Architect chooses component primitives.
 12. **`side_effects` audit process.** Architect defines the process for auditing all 152 skills and assigning `side_effects: true/false`. Output: a work log under `tasks/builds/riley-observations/skills-side-effects-audit.md`.
-13. **Portal mode behaviour — naming the field.** §6.8 says "agency-configured defaults" but does not name the field. Architect must either (a) identify the existing `subaccount_agents` column that drives portal-facing run mode, OR (b) add a new column (e.g. `subaccount_agents.portal_default_safety_mode text NOT NULL DEFAULT 'explore'`) to migration `0205_explore_execute_mode.sql` and inventory it in §4.8. Non-negotiable before Part 3 ships.
-14. **Supervised-mode removal — decided; architect confirms call-site migration.** §6.8 decides the Supervised checkbox is removed. Architect audits all call sites of `runMode: 'supervised' | 'auto'` in the existing `playbook_runs.run_mode` column and confirms the migration path leaves no orphaned references. NOT an open decision — just an audit step.
-22. **`side_effects` runtime storage — schema decision.** §6.4 proposes `side_effects` as skill-markdown frontmatter, but runtime skills are DB-backed via `system_skills.definition` JSONB. Architect picks one of: (a) add `side_effects boolean NOT NULL DEFAULT true` as a top-level column on `system_skills` in migration `0205` with backfill from the markdown audit, OR (b) require the `definition` JSONB to contain `side_effects` and add a CI gate that validates it, OR (c) keep frontmatter-only and treat `system_skills` as regenerated from markdown at seed time. Recommendation: (a) — top-level column enables fast reads during gate resolution without JSONB unpacking on every dispatch. Non-negotiable before Part 3 ships; name the mechanism before coding.
-23. **`input_schema` / `output_schema` validator and format.** §5.4 / §5.5 claim runtime validation against the `processes.input_schema` / `output_schema` `text` columns. Architect picks the validator (ajv / zod / custom) and the schema format (JSON Schema vs plain JSON-Schema-Lite) and cites it in the spec. Until resolved, the spec's validation claim is best-effort only.
+13. **Portal mode behaviour.** §6.8 says "agency-configured defaults" — architect confirms exactly which field on `subaccount_agents` drives portal-facing run mode (or introduces one).
+14. **Supervised-mode removal safety.** Audit all call sites of `runMode: 'supervised' | 'auto'`. Architect confirms nothing breaks with Supervised mode's removal.
 
 ### 12.4 Part 4 (heartbeat gate)
 
 15. **Event-source table list per agent.** §7.7 defines for Portfolio Health; architect audits other heartbeat-enabled agents (if any) and defines per-agent source mappings.
-16. **"Check now" trigger plumbing OR Rule 3 removal.** Rule 3 in §7.4 depends on a "Check now" button/API that does NOT exist in the current codebase. Architect picks one of: (a) add the "Check now" surface to Part 4's Files-to-change list with a specific mechanism (e.g. `subaccount_agents.check_now_requested_at timestamptz NULL` column + `POST /api/subaccount-agents/:id/check-now` route + admin UI button), OR (b) remove Rule 3 from v1, shipping the gate with only 3 rules. Recommendation: (b) for v1 — defer "Check now" as a post-launch enhancement.
-17. **`last_meaningful_tick_at` update site AND "meaningful" definition.** §7.6 resets `ticks_since_last_meaningful_run` when a run produces "meaningful" output. Architect pins the exact definition and update hook. Recommendation: "meaningful" = agent run completed with `status = 'completed'` AND either proposed at least one action OR wrote at least one memory block. Non-negotiable before Part 4 ships.
+16. **"Check now" trigger plumbing.** How does a user-initiated "check now" signal get to the gate? Architect specifies the mechanism (DB column, queue flag, pg-boss message).
+17. **`last_meaningful_tick_at` update site.** Where in the dispatch path is the counter reset when a run produces "meaningful" output? Architect defines "meaningful" and the update hook.
 
 ### 12.5 Part 5 (telemetry)
 
@@ -1660,7 +1440,6 @@ Items the architect should confirm or decide during plan decomposition. None blo
 
 20. **Spec-review iteration.** Does this spec go through `spec-reviewer` before architect? Default per CLAUDE.md: yes. Architect confirms that review iteration completed before plan-writing starts.
 21. **Plan decomposition.** Does architect produce one plan covering all 6 Parts, or six separate plans? Recommendation: one plan per Wave (W1 combined Part 1+2 plan; W2–W4 each a plan). Architect confirms.
-24. **`safety_mode` vs pre-existing `run_mode` reconciliation.** Part 3 introduces `safety_mode` (`explore|execute`) as a new column to avoid overloading the pre-existing `workflow_runs.run_mode` (`auto|supervised|background|bulk` — from migration 0086). Architect confirms this split is correct OR proposes an alternative: (a) migrate the existing `run_mode` to hold the new enum and record execution-style elsewhere, or (b) add a mapping table. Default: keep the split. Non-negotiable decision captured before Part 3 ships.
 
 ---
 
@@ -1675,7 +1454,7 @@ Items the architect should confirm or decide during plan decomposition. None blo
 | External engine registry | Workflow Engine | Automation Engine | Infrastructure only |
 | Internal flow-execution stack | Workflow Run (legacy) | Flow Run | Internal only |
 | Workflow composition step type | (new) | `invoke_automation` | Authoring UI |
-| Run safety mode (NEW `safety_mode` column, distinct from legacy `run_mode` enum) | (no previous dedicated dimension — the old Supervised checkbox was subsumed into Explore) | Explore Mode / Execute Mode | Yes |
+| Run safety mode | Dry Run / Supervised (old) | Explore Mode / Execute Mode | Yes |
 | Heartbeat pre-check | (new) | Heartbeat activity-gate | Internal with admin UI |
 | Agent context telemetry | (new) | `context.assembly.complete` | Observability only |
 
