@@ -1002,6 +1002,8 @@ export function validateLifecycleChainPure(
 - On `valid: true`, artefact flows through.
 - On `valid: false`, orchestrator synthesises a substitute `BriefErrorResult` with `errorCode: 'internal_error'`, `severity: 'high'`, and logs structured producer error (capability name, validation errors).
 
+**Note on `errorCode` values.** The values `'internal_error'` and `'unsupported_query'` referenced in this spec are the subset of error codes emitted by this spec's own code paths (validator failure, backstop failure, unmatched cheap-answer template). The canonical error code enum for `BriefErrorResult` is defined in `shared/types/briefResultContract.ts` and `docs/brief-result-contract.md`. These spec-level references must stay in sync with the canonical enum; if the contract is revised, review §6.1 (`briefSimpleReplyGeneratorPure`) and §6.4 to ensure the referenced values are still valid members.
+
 **Backstop (§12.2 defence-in-depth RLS):**
 
 ```ts
@@ -1096,6 +1098,8 @@ export function resolveLifecyclePure(state: ArtefactChainState): ResolvedChains;
 3. For each tip, walk parents to find chain root; accumulate superseded artefacts in order.
 4. Orphans: artefacts whose `parentArtefactId` points to an absent artefact. Treat as new chain roots (per §12.3 failure handling in the brief).
 5. Out-of-order handling: if a predecessor arrives after its successor, the predecessor's `parentArtefactId: X` is still honored — X's children index gains the predecessor, but the predecessor is not promoted to tip because its successor still has no children.
+
+**Ordering guarantee.** The `ArtefactChainState.artefacts` array is ordered by arrival position (append-only; each new artefact is pushed to the end of the array). The resolver does not sort by a separate timestamp — chain membership is determined exclusively by `parentArtefactId` linkage, not by time. `conversation_messages.createdAt` (§5.1) provides an audit-time ordering for persistence but is not read by `resolveLifecyclePure`. Tie-breaking within orphan sets (multiple artefacts with no `parentArtefactId`) uses array position: the first orphan in the array becomes the first chain root.
 
 **Client integration:** `BriefChatPage` subscribes to artefact stream, builds `ArtefactChainState`, calls `resolveLifecyclePure` after each new artefact, renders only tips with chain-root → tip visualisation.
 
