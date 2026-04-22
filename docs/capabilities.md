@@ -43,6 +43,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Platform Feature Request Pipeline](#platform-feature-request-pipeline)
   - [Configuration Assistant](#configuration-assistant)
   - [Skill System](#skill-system)
+  - [CRM Query Planner](#crm-query-planner)
   - [Playbook Engine](#playbook-engine)
   - [Human-in-the-Loop](#human-in-the-loop)
   - [Task Board & Workspace](#task-board--workspace)
@@ -251,6 +252,21 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 - **Review gating** — 42+ skills require human approval before execution; 6 deterministic skills run instantly without AI involvement
 - Smart skill selection dynamically prioritises relevant skills per conversation; skill modules enable bulk management
 - See [Skills Reference](#skills-reference) for the full catalogue
+
+### CRM Query Planner
+
+Natural-language CRM reads that stay cheap and deterministic by default. Agents and operators ask in plain English — the planner answers from pre-approved queries first, falls back to live CRM reads only when needed, and bills nothing for the common path.
+
+- **Deterministic-first** — A curated library of canonical CRM queries (inactive contacts, stale opportunities, upcoming appointments, etc.) matches common phrasings directly, with zero AI cost and sub-second latency
+- **Structured plan cache** — Repeat intents within a short window reuse the prior plan across users in the same workspace, keyed per workspace so clients never see each other's queries
+- **AI fallback for the long tail** — When a question doesn't match the library, a focused AI step produces a validated query plan; an elevated tier only engages on low confidence or complex hybrid intents
+- **Hybrid execution** — The planner can combine a canonical base with a live-read filter for hard-to-canonicalise fields (city, country, custom tags) without forcing a full live scan
+- **Read-only by construction** — The planner cannot write to the CRM. Enforced structurally via import restrictions and a CI guard script; the failure mode for a misconfigured query is "no data", never "wrong data"
+- **Row-level tenant isolation** — Every query executes inside a per-caller security context; cross-workspace leakage is structurally impossible
+- **Cost-bounded** — Per-query cost ceiling with a router-level budget breaker; rate-limited calls are treated as transient and never mapped to a cost-exceeded surface
+- **Per-query trace** — Every response carries a full execution trace (which stage resolved the query, whether the cache was hit, which plan mutations fired, final executor used) so operators can debug "why did this return X?" without replaying the request
+- **Dual surface** — Exposed as an HTTP endpoint for users/Briefs and as an agent skill (`crm.query`) governed by the normal capability-gate and review system
+- **Observability built in** — Dashboard surfaces stage-hit rate, escalation rate, live-call rate, and cost-per-resolved-query so agencies can tune the deterministic library against real usage
 
 ### Playbook Engine
 
@@ -694,6 +710,7 @@ Complete list of all 112 skills.
 | `draft_followup` | Draft contextual follow-up email for stale deal or at-risk contact | LLM | — |
 | `enrich_contact` | Retrieve enrichment data for contact and write back to CRM | Deterministic | — |
 | `read_crm` | Retrieve contact, deal, and pipeline data from CRM | Deterministic | — |
+| `crm.query` | Natural-language CRM read via the CRM Query Planner (canonical-first, AI fallback, read-only) | Hybrid | — |
 | `trigger_account_intervention` | Propose intervention action (check-in, pause, alert) | LLM | HITL |
 | `update_crm` | Write contact/deal updates to CRM | Deterministic | HITL |
 
@@ -904,6 +921,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-22 | CRM Query Planner (P1–P3): add deterministic-first natural-language CRM query layer with canonical registry (Stage 1), in-process plan cache (Stage 2), AI fallback with single-escalation retry (Stage 3), and hybrid execution for canonical-base-plus-live-filter intents. Read-only by construction (CI guard + structural import restriction). Per-query trace, per-workspace cache isolation, per-query cost ceiling, router-level budget breaker, subaccount-level capability gate, row-level tenant isolation via principal session context. Dual surface: HTTP endpoint + `crm.query` agent skill. Observability dashboard surfaces stage-hit rate, escalation rate, live-call rate, cost-per-resolved-query. | — |
 | 2026-04-21 | LLM Spend Observability follow-ups — 8 deferred items from the in-flight tracker brief land as one release. Partial-external-success double-bill protection: a provisional audit record is written before every LLM call, a retry under the same logical identity sees the provisional record and surfaces a typed reconciliation signal instead of re-dispatching, and a background sweep reaps orphaned provisional records after the provider timeout ceiling. Single-terminal-transition invariant: every terminal status is guarded against silent overwrite; late-arriving results are detected and logged as ghost arrivals. Pre-dispatch queue-wait visibility surfaces the gap between call request and provider dispatch. Logical-attempt sequencing shows the cumulative attempt number across fallback providers. Click-through live payload inspection lets admins see the exact prompt context before the call completes. Forensic in-flight archive captures every dispatch + terminal transition for 7-day incident reconstruction, gated by a self-disabling soft circuit on write degradation. Mobile-responsive operations view. Token-level streaming progress infrastructure (adapter wiring rolls out per-vendor). Deterministic idempotency-key versioning with load-time shape assertion. | — |
 | 2026-04-20 | LLM cost protection — provider-call timeout hardening. The internal per-call timeout guard now genuinely aborts the underlying network request on timer fire (previously the outer promise rejected while the fetch kept running, so the retry loop fired a second concurrent call and the platform was double-billed upstream). The cap was raised from 30 s to 600 s — above every documented provider ceiling including reasoning models — so legitimate long generations (skill analyzer, long-form outputs, reasoning-mode responses) stop tripping false-positive timeouts. Ambiguous-state failures (timeouts, network resets) are now classified non-retryable, so a second billable provider call is never issued under the same logical attempt. Together these close the root cause behind the skill-analyzer timeout bug that triggered the LLM observability work. | — |
 | 2026-04-20 | LLM Spend Observability & Per-Client P&L: add new Agency Capability section covering cross-client financial dashboard, attribution-per-call (source type + feature tag), platform overhead surfacing, per-org / per-subaccount / per-source-type / per-provider+model breakdowns with sort + totals, top-cost call triage with detail drawer, structured parse-failure capture, cancellation-aware billing, and retention-safe historical access (12-month default retention with on-demand archive lookup). | — |
