@@ -1101,6 +1101,8 @@ export function resolveLifecyclePure(state: ArtefactChainState): ResolvedChains;
 
 **Ordering guarantee.** The `ArtefactChainState.artefacts` array is ordered by arrival position (append-only; each new artefact is pushed to the end of the array). The resolver does not sort by a separate timestamp — chain membership is determined exclusively by `parentArtefactId` linkage, not by time. `conversation_messages.createdAt` (§5.1) provides an audit-time ordering for persistence but is not read by `resolveLifecyclePure`. Tie-breaking within orphan sets (multiple artefacts with no `parentArtefactId`) uses array position: the first orphan in the array becomes the first chain root.
 
+**Partial-knowledge behaviour.** Chain resolution assumes complete local knowledge of the artefact set. Consumers operating on a partial artefact set (e.g., after a reconnect, mid-stream pagination, or log truncation) MAY temporarily identify multiple candidate tips — this is expected and not an error. In such cases, the most recently received artefact SHOULD be treated as the active candidate until the full chain is resolved. Consumers MUST NOT treat a multi-tip state as an error; they MUST render all candidate tips and converge to the true tip as missing artefacts arrive.
+
 **Client integration:** `BriefChatPage` subscribes to artefact stream, builds `ArtefactChainState`, calls `resolveLifecyclePure` after each new artefact, renders only tips with chain-root → tip visualisation.
 
 **Rendering consequences:**
@@ -1274,6 +1276,7 @@ Per-kind components, each with a pure twin for table-data formatting:
 - Render `suggestions` as clickable follow-up chips that create a new Brief turn with `suggestion.intent` as the input
 - Surface `confidence` per thresholds in `docs/brief-result-contract.md` §"Confidence surfaces"
 - Render `budgetContext.window` alongside `remainingCents` / `limitCents`
+- `source` MUST be surfaced to the user when it materially affects trust — specifically, when `source: 'canonical'` with a non-trivial `freshnessMs` (indicating stale data) or when `source: 'hybrid'` (mixed freshness). Silently omitting `source` when it would change how a user interprets a result is not permitted. The `StructuredResultCard` component is the primary surface point; the exact visual treatment (label, badge, tooltip) is a Phase 2 UX decision.
 
 ### 8.4 Learned Rules library page (Phase 5)
 

@@ -55,3 +55,42 @@ Findings:
 **Top themes:** Most findings targeted the cross-branch artefact contract (`briefResultContract.ts` / `docs/brief-result-contract.md`), which is already merged to main and out of scope for this spec. 7 of 10 findings were deferred or rejected on that basis. The 2 accepted edits addressed in-spec ambiguities: ordering guarantee for the lifecycle resolver and sync-point annotation for contract-referenced error codes.
 
 ---
+
+## Round 2 — 2026-04-22T01-00-00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: solid shape after round 1. Round 2 focuses on eliminating ambiguity under real-world failure conditions and tightening cross-boundary responsibilities. 3 substantive findings + 2 minor.
+
+1. Subtle ambiguity: "tip of chain" vs partial knowledge — what happens when consumer doesn't have full chain yet (streaming / reconnect / log truncation → multiple apparent tips). Suggested: clarify that partial views are allowed to be temporarily inconsistent; most-recently-received artefact should be treated as active candidate until full chain resolved.
+
+2. Execution lifecycle: missing terminal guarantee — every execution MUST eventually emit terminal state (completed or failed); systems responsible MUST ensure eventual resolution. Suggested: "Every execution MUST eventually emit a terminal state. Systems responsible MUST ensure eventual resolution even in failure scenarios."
+
+3. Budget context: ownership still slightly unclear — `budgetContext` could be read as enforcement signal rather than purely descriptive. Suggested: add explicit line that `budgetContext` is descriptive only and MUST NOT be used by capabilities to enforce limits; enforcement owned by orchestrator.
+
+4. Minor: tighten "source is user-relevant" — suggested: "source MUST be surfaced to the user when it materially affects trust (e.g. stale canonical vs live data)."
+
+5. Optional cleanup: "v1 (this version)" + "v1 (initial)" duplicate changelog still present in contract file — not blocking, worth cleaning.
+
+### Decisions
+
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| 1. Partial-chain / multiple candidate tips — resolver behaviour under incomplete local knowledge | accept | high | Real distributed-systems edge case not addressed in §6.5. The algorithm defines tip-resolution assuming complete knowledge, but reconnects and mid-stream pagination produce legitimate multi-tip transient states. Added a Partial-knowledge behaviour paragraph to §6.5 specifying MUST-render-all / MUST-converge obligations. In-spec resolver behaviour, not contract territory. |
+| 2. Execution terminal guarantee — every execution must reach completed or failed | defer | medium | Execution lifecycle (terminal state guarantee, timeout → failed, heartbeat) belongs in `docs/brief-result-contract.md` on `BriefApprovalCard.executionStatus`. Consistent with round 1 deferral #4. This spec does not own executionStatus semantics. |
+| 3. `budgetContext` descriptive-only / enforcement ownership clarification | defer | medium | `BriefBudgetContext` field semantics and enforcement ownership are in `briefResultContract.ts` + `docs/brief-result-contract.md`. Consistent with round 1 deferral #5. The spec already references `runCostBreaker` for enforcement — no in-spec gap. |
+| 4. `source` must be surfaced when trust-affecting | accept | medium | Client rendering obligation for `source` is in-spec territory (§8.3 directive rules). The field definition is in the contract, but when the client must surface it to users is a rendering concern this spec owns. Added a bullet to §8.3 directive rules: `source` MUST be surfaced when it materially affects trust, with specific conditions (`canonical` + non-trivial `freshnessMs`, or `hybrid`). Visual treatment deferred to Phase 2 UX. |
+| 5. v1/v1 duplicate changelog in contract file | defer | low | Targets `docs/brief-result-contract.md` which is already merged to main and out of scope for this spec. Consistent with round 1 reject #8 (same artefact, same reasoning). |
+
+### Applied
+
+- §6.5 "Algorithm" block: added **Partial-knowledge behaviour** paragraph — specifies that multi-tip transient states under incomplete local knowledge are expected and not errors; consumers MUST render all candidate tips and converge as missing artefacts arrive; most-recently-received artefact is the active candidate during resolution.
+- §8.3 "Directive rules" block: added bullet — `source` MUST be surfaced to users when it materially affects trust (stale canonical or hybrid); `StructuredResultCard` is the primary surface; exact visual treatment is a Phase 2 UX decision.
+
+### Integrity check
+
+0 issues found this round.
+
+**Top themes:** Round 2 feedback was narrower and more production-focused than round 1. 2 accepted / 2 deferred / 1 deferred (contract). Both accepted edits are in-spec behavioural obligations for the client-side lifecycle resolver and the artefact rendering layer — neither touches the contract. The 3 deferred items (terminal guarantee, budgetContext ownership, changelog duplicate) all target the cross-branch contract doc, consistent with the round 1 deferral pattern.
+
+---
