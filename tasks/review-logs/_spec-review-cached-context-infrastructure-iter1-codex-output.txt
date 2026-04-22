@@ -1,3 +1,54 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: c:\Files\Projects\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019db720-e5fc-77c0-a7ba-bbf0d06597e5
+--------
+user
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase.
+
+SPEC: docs/cached-context-infrastructure-spec.md — Cached Context Infrastructure v1. A new subsystem introducing user-uploaded reference documents grouped into packs, run-time resolved into immutable snapshots, assembled deterministically with a versioned serialization contract and prefix-hash identity, validated against a canonical ExecutionBudget, and routed through the existing LLM router — with HITL-block safety on budget breach and per-run cache attribution on the existing cost ledger.
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, no staged % rollout, no feature flags beyond "behaviour modes" (shadow vs active, dev vs prod). Commit-and-revert.
+- Testing posture: static gates primary + pure-function unit tests only. NO vitest / jest / playwright / supertest / frontend unit tests / E2E tests / API contract tests / composition tests / performance baselines. Integration tests are pure-adjacent DB tests, one per flow, not supertest.
+- Prefer existing primitives. Approved: llmRouter, anthropicAdapter (already writes cache_control + reads cache tokens), actionService.proposeAction, hitlService, runCostBreaker, withBackoff, policyEngineService, memory_blocks (deliberately NOT extended), rlsProtectedTables manifest, actionRegistry, withPrincipalContext. Don't suggest NEW governance primitives.
+- Memory blocks continue unchanged — this spec invents a sibling primitive, with the "why not extend memory_blocks" analysis in §3.3.
+
+The spec has already been through four external-review passes (commits 4bb4da0, 16d6e07, 68d50f5, ea6482b). Expect most mechanical issues to already be resolved. Push hard on remaining CONSISTENCY, LOAD-BEARING CLAIMS WITHOUT MECHANISMS, FILE INVENTORY DRIFT, SEQUENCING BUGS, and UNNAMED NEW PRIMITIVES.
+
+YOUR JOB: Review the spec for implementation-readiness issues. Focus on:
+
+1. CONTRADICTIONS — same concept described differently in different sections (e.g. §4.1 says `maxOutputTokens ≤ reserveOutputTokens` but §6.5 step 4 narrows `reserveOutputTokens = min(modelTierPolicy.reserveOutputTokens, resolvedMaxOutputTokens)` — is `maxOutputTokens ≤ reserveOutputTokens` truly the correct invariant direction, or should it be the inverse?).
+2. STALE / RETIRED LANGUAGE — approaches explicitly retired still appearing in prose.
+3. LOAD-BEARING CLAIMS WITHOUT MECHANISMS — "idempotent" / "authoritative" / "single source of truth" / "atomic" without a named enforcement mechanism.
+4. FILE INVENTORY DRIFT — prose references files not in §13, or §13 lists files never referenced by prose. Check migration 0211 status — §5.10 says "skip entirely" but §13.1 does not list 0211. Check `utilizationByModelFamily` erratum in §6.7 — is the column added in migration 0204 actually reflected in §5.3's drizzle schema block?
+5. SCHEMA / TYPE OVERLAP — two fields with adjacent purposes without source-of-truth clarity. E.g. `agent_runs.applied_memory_block_ids` (existing) vs `agent_runs.pack_snapshot_ids` (new) — roles stated clearly?
+6. SEQUENCING BUGS — Phase N depends on something shipped in Phase N+k. Check Phase 1 acceptance ("permission checks fire correctly") against when permissions are seeded (migration 0202 seeds reference_documents.* keys, migration 0204 seeds document_packs.* keys — but 0204 is Phase 1 too, so fine).
+7. INVARIANT HOLES — an invariant stated in one section another section could violate. E.g. "no silent fallback" (§6.6) — does any other section describe behaviour that implicitly truncates/drops/downgrades?
+8. MISSING VERDICTS — items without explicit BUILD / DEFER / WON'T DO verdict. The open-questions section §15 has Q1–Q5; are all resolved with decision+rationale?
+9. UNNAMED NEW PRIMITIVES — "a new service that handles X" without naming the file / function / table / column.
+10. CONTRACT BOUNDARY MISMATCHES — e.g. does `CONTEXT_ASSEMBLY_RESULT` (§4.2) match what `cachedContextOrchestrator.execute` (§6.6) consumes step-by-step? Does §4.5's `HitlBudgetBlockPayload.thresholdBreached` enum line up with the §4.1 invariants — `max_output_tokens` breach is listed in §4.5 as NOT a threshold, which seems odd if `maxOutputTokens` is part of the budget.
+11. ASSEMBLY_VERSION BUMP DISCIPLINE — §4.4 / §6.4 / §11.1 describe the bump rule. Is the bump enforced by more than "code review" and the one golden-fixture test? R8 concedes the gap — is the residual risk acceptable?
+12. POLYMORPHIC FK INVARIANTS — §5.5 `document_pack_attachments.subject_id` has no DB FK. §6.2 validates at attach time. What happens if the subject row is deleted after attach? R2 says "deferred". Is this acceptable given no tenant has this data?
+13. RUN_OUTCOME TRANSACTIONALITY — §4.6 + §9.3 say the terminal write "sets both run_outcome and the LLM-request status atomically." Is there a specific mechanism named? The prose points at "the router's existing write path" — does the router write in the same tx as the orchestrator's UPDATE? If not, claim is overblown.
+14. `ON CONFLICT DO NOTHING` + re-select PATTERN (§6.3) — does the re-select reliably find the winning row if the conflict happens before the insert commits in the loser's snapshot? Typically safe under READ COMMITTED; worth a one-line call-out.
+15. TOKEN-COUNT VALIDITY — §4.3 `orderedDocumentVersions[].tokenCount` is recorded at version-create time per model family. What happens if the pack attaches a document for a model family that wasn't present when the document was created (e.g. haiku-4-5 added post-hoc)? §12 defers "token-estimate calibration" but this is a different failure mode.
+16. HITL APPROVAL + RE-RESOLVE LOOP — §6.6 step 4 says approval "re-runs steps 1–3 (the operator may have trimmed the pack)." Is there a bound on the number of re-approvals? Infinite loop risk?
+17. `countTokens` FAILURE POLICY — §6.1 says document create rolls back on countTokens failure. Is this consistent with the async/sync model? If countTokens is a provider call, this makes document upload dependent on provider availability. Acceptable?
+18. PACK UTILIZATION JSONB ON `document_packs` (§6.7 erratum) — tenant-scoped column updated by a background job. Does RLS permit the job to write across orgs? Or does the job use withAdminConnection? §8.6 bans withAdminConnection. Contradiction?
+19. "NO AUTO-ATTACH" (§5.5 NOTES) — reference documents are explicitly NOT auto-attached. Is there any other section that describes implicit attachment?
+20. DEFERRED ITEMS COVERAGE — every prose mention of "deferred", "future", "v2", or "later" resolved back to §12? E.g. Q2 in §15 mentions "deferred to §12.13"; does §12.13 exist? Yes. Any other orphans?
+
+OUTPUT: A bulleted list of distinct findings. Each finding: cite the spec section (§N.N), one-sentence description of the issue, one-sentence suggested fix. No preamble, no summary, just the list. Aim for concrete, actionable findings — not "the spec could be clearer about X" without naming what X is. If you see zero findings in a category, do not list the category.
+
+Here is the spec to review:
+
 # Cached Context Infrastructure — Development Spec
 
 **Status:** Draft implementation spec — ready for `spec-reviewer`
@@ -208,12 +259,10 @@ Every data shape that crosses a service boundary is pinned here with a worked ex
 interface ResolvedExecutionBudget {
   /** Max input-side tokens (pack prefix + variable input). */
   maxInputTokens: number;
-  /** Max output-side tokens (response reservation). Passed to the router as the per-call response cap (§6.6 step 6 — `max_tokens` in the Anthropic request). Enforced by the router, not by the assembly validator. */
+  /** Max output-side tokens (response reservation). */
   maxOutputTokens: number;
-  /** Hard per-call cost ceiling in USD. Integer cents internally, USD at boundary. Not enforced by the assembly-time validator — mid-flight cost enforcement belongs to `runCostBreaker` (§2.1). Carried on the budget for audit / debugging. */
+  /** Hard per-call cost ceiling in USD. Integer cents internally, USD at boundary. */
   maxTotalCostUsd: number;
-  /** Per-document hard cap in tokens. The assembly validator emits `thresholdBreached='per_document_cap'` when any included document exceeds this. Carried forward from `model_tier_budget_policies.perDocumentMaxTokens`. */
-  perDocumentMaxTokens: number;
   /** Reserved output tokens subtracted from maxInputTokens headroom. */
   reserveOutputTokens: number;
   /** Soft-warn threshold as a fraction of maxInputTokens (0 < x < 1). Default 0.7. */
@@ -238,7 +287,6 @@ interface ResolvedExecutionBudget {
   "maxInputTokens": 800000,
   "maxOutputTokens": 16000,
   "maxTotalCostUsd": 5.00,
-  "perDocumentMaxTokens": 100000,
   "reserveOutputTokens": 16000,
   "softWarnRatio": 0.70,
   "resolvedFrom": {
@@ -251,12 +299,12 @@ interface ResolvedExecutionBudget {
 }
 ```
 
-**Nullability and defaults:** `maxInputTokens`, `maxOutputTokens`, `maxTotalCostUsd`, `perDocumentMaxTokens`, `reserveOutputTokens`, `softWarnRatio`, `modelFamily`, `modelContextWindow` are all required. `taskConfigId` and `orgCeilingPolicyId` are nullable when no override exists.
+**Nullability and defaults:** `maxInputTokens`, `maxOutputTokens`, `maxTotalCostUsd`, `reserveOutputTokens`, `softWarnRatio`, `modelFamily`, `modelContextWindow` are all required. `taskConfigId` and `orgCeilingPolicyId` are nullable when no override exists.
 
 **Invariants enforced at resolution time (raises `BudgetResolutionError`):**
 
 - `maxInputTokens + reserveOutputTokens ≤ modelContextWindow`
-- `maxOutputTokens ≤ reserveOutputTokens` — reserve must be at least as large as the response cap. Equality is the expected post-resolution state whenever a task/org override narrows `maxOutputTokens` below the tier's default reserve (see §6.5 step 4); that is by design, not a contradiction.
+- `maxOutputTokens ≤ reserveOutputTokens`
 - `0 < softWarnRatio < 1`
 - All numeric fields > 0.
 
@@ -277,8 +325,9 @@ type ContextAssemblyResult =
         messages: Array<{ role: 'user' | 'assistant'; content: string }>;
         estimatedContextTokens: number;
       };
-      /** Call-level assembled-prefix-hash identity (§4.4 via `computeAssembledPrefixHash`). Aggregates every attached-pack snapshot's per-pack `prefixHash` under a single `modelFamily + assemblyVersion` root. This is the value written to `llm_requests.prefix_hash`. Per-pack components live on each `pack_resolution_snapshots` row. */
+      /** Prefix-hash identity (see §4.4). */
       prefixHash: string;
+      prefixHashComponents: PrefixHashComponents;
       /** Hash of the variable input alone (not cached), for full run identity. */
       variableInputHash: string;
       /** Snapshot IDs referenced by this assembly (for agent_runs.pack_snapshot_ids). */
@@ -309,6 +358,7 @@ type ContextAssemblyResult =
     "estimatedContextTokens": 45231
   },
   "prefixHash": "0x4a9f8e...",
+  "prefixHashComponents": { /* see §4.4 */ },
   "variableInputHash": "0x7c3b1e...",
   "packSnapshotIds": ["pks_5f2a..."],
   "softWarnTripped": false,
@@ -323,7 +373,7 @@ type ContextAssemblyResult =
 **Type:** Drizzle row from `pack_resolution_snapshots` (schema §5.6). JSONB fields pinned here.
 
 **Producer:** `packResolutionService.resolveAtRunStart()` (§6.3).
-**Consumers:** `contextAssemblyEngine.assemble()` (§6.4) — uses the snapshot's `orderedDocumentVersions` to fetch the pinned `reference_document_versions` rows (by `documentId + documentVersion`) and produces `routerPayload` from those immutable bytes. The snapshot's `serializedBytesHash` values are the integrity check — the engine re-hashes each fetched version row during assembly and fails loudly on mismatch (a live content mutation under a pinned version row indicates tampering or a schema-invariant violation). Debugging / audit (read-only everywhere else).
+**Consumers:** `contextAssemblyEngine.assemble()` (§6.4) — reads the snapshot to produce `routerPayload`. Debugging / audit (read-only everywhere else).
 
 ```ts
 interface PackResolutionSnapshot {
@@ -337,11 +387,10 @@ interface PackResolutionSnapshot {
   orderedDocumentVersions: Array<{
     documentId: string;
     documentVersion: number;
-    /** SHA-256 of the serialized-with-delimiters form of this document version — mirrors `reference_document_versions.serializedBytesHash` (§5.2) and is the source-of-truth input to `PrefixHashComponents.documentSerializedBytesHashes` (§4.4). The raw-content hash `reference_document_versions.contentHash` is NOT stored here; it serves the idempotent-write check in §6.1 and plays no role in prefix identity. */
-    serializedBytesHash: string;
+    contentHash: string;
     tokenCount: number;
   }>;
-  /** SHA-256 of the full assembled prefix for this single pack. Per-pack; the call-level `prefix_hash` on `llm_requests` is computed over all attached-pack snapshot hashes (§6.4 `computeAssembledPrefixHash`). */
+  /** SHA-256 of the full assembled prefix. See §4.4 for components. */
   prefixHash: string;
   prefixHashComponents: PrefixHashComponents;
   /** Total estimated input tokens for this snapshot (prefix only, not variable input). */
@@ -361,8 +410,8 @@ interface PackResolutionSnapshot {
   "packVersion": 3,
   "modelFamily": "anthropic.claude-sonnet-4-6",
   "orderedDocumentVersions": [
-    { "documentId": "doc_001...", "documentVersion": 2, "serializedBytesHash": "0xaaa...", "tokenCount": 8421 },
-    { "documentId": "doc_002...", "documentVersion": 1, "serializedBytesHash": "0xbbb...", "tokenCount": 6117 }
+    { "documentId": "doc_001...", "documentVersion": 2, "contentHash": "0xaaa...", "tokenCount": 8421 },
+    { "documentId": "doc_002...", "documentVersion": 1, "contentHash": "0xbbb...", "tokenCount": 6117 }
   ],
   "prefixHash": "0x4a9f8e...",
   "prefixHashComponents": { /* see §4.4 */ },
@@ -371,23 +420,23 @@ interface PackResolutionSnapshot {
 }
 ```
 
-**Uniqueness invariant:** `UNIQUE(pack_id, prefix_hash)` at the DB level (§5.6). Two distinct packs whose current document sets happen to hash identically will each get their own snapshot row — cross-pack reuse of the provider's cache entry still happens at the adapter level (identical `prefix_hash` → same cached prefix), but per-pack attribution stays clean. Concurrent cron bursts resolving the same pack against the same model family insert at most one row; losers re-select the winning row.
+**Uniqueness invariant:** `UNIQUE(prefix_hash)` at the DB level. Concurrent cron bursts resolving the same pack against the same model family insert at most one row; losers read the winning row.
 
 ### 4.4 `PREFIX_HASH_COMPONENTS`
 
-**Type:** TypeScript interface. Exported from `shared/types/cachedContext.ts`. Stored as JSONB on `pack_resolution_snapshots.prefix_hash_components`. `llm_requests` does NOT carry components directly — diffing is done by joining `llm_requests.prefix_hash` through `agent_runs.pack_snapshot_ids` to the snapshot row (§5.9 explicitly calls out the absence of the column there; the join is the only lookup path).
+**Type:** TypeScript interface. Exported from `shared/types/cachedContext.ts`. Stored as JSONB on `pack_resolution_snapshots.prefix_hash_components` and logged to `llm_requests.prefix_hash_components` for diffing.
 
 **Producer:** `contextAssemblyEnginePure.computePrefixHash()` (§6.4).
 **Consumers:** Debugging tools that diff two snapshots with different hashes.
 
 ```ts
 interface PrefixHashComponents {
-  orderedDocumentIds: string[];                // document_id ascending
-  documentSerializedBytesHashes: string[];     // parallel to orderedDocumentIds; each entry is `reference_document_versions.serializedBytesHash` for the version pinned in the snapshot
-  includedFlags: Array<{                       // parallel to orderedDocumentIds
+  orderedDocumentIds: string[];        // document_id ascending
+  documentContentHashes: string[];     // parallel to orderedDocumentIds
+  includedFlags: Array<{               // parallel to orderedDocumentIds
     documentId: string;
-    included: true;                            // only included docs appear; excluded ones are absent
-    reason: 'attached_and_active';             // only this value in v1; kept as enum for future
+    included: true;                    // only included docs appear; excluded ones are absent
+    reason: 'attached_and_active';     // only this value in v1; kept as enum for future
   }>;
   modelFamily: string;
   assemblyVersion: number;
@@ -399,7 +448,7 @@ interface PrefixHashComponents {
 ```json
 {
   "orderedDocumentIds": ["doc_001...", "doc_002..."],
-  "documentSerializedBytesHashes": ["0xaaa...", "0xbbb..."],
+  "documentContentHashes": ["0xaaa...", "0xbbb..."],
   "includedFlags": [
     { "documentId": "doc_001...", "included": true, "reason": "attached_and_active" },
     { "documentId": "doc_002...", "included": true, "reason": "attached_and_active" }
@@ -423,14 +472,16 @@ interface PrefixHashComponents {
 ```ts
 interface HitlBudgetBlockPayload {
   kind: 'cached_context_budget_breach';
-  /** Which budget dimension was breached first. v1 enumerates only the assembly-time breach modes. Cost enforcement at mid-flight is `runCostBreaker`'s responsibility (§2.1) and surfaces as `run_outcome='failed'` rather than a HITL block. */
-  thresholdBreached: 'max_input_tokens' | 'per_document_cap';
+  /** Which budget dimension was breached first. */
+  thresholdBreached: 'max_input_tokens' | 'max_total_cost_usd' | 'per_document_cap';
   budgetUsed: {
     inputTokens: number;
+    estimatedCostUsd: number;
     worstPerDocumentTokens: number;
   };
   budgetAllowed: {
     maxInputTokens: number;
+    maxTotalCostUsd: number;
     perDocumentCap: number;
   };
   /** Top 5 contributors, ordered by token count descending. */
@@ -457,10 +508,12 @@ interface HitlBudgetBlockPayload {
   "thresholdBreached": "max_input_tokens",
   "budgetUsed": {
     "inputTokens": 845000,
+    "estimatedCostUsd": 2.54,
     "worstPerDocumentTokens": 132000
   },
   "budgetAllowed": {
     "maxInputTokens": 800000,
+    "maxTotalCostUsd": 5.00,
     "perDocumentCap": 100000
   },
   "topContributors": [
@@ -472,7 +525,7 @@ interface HitlBudgetBlockPayload {
 }
 ```
 
-**Action flow:** the orchestrator (§6.6) calls `actionService.proposeAction` with `actionType='cached_context_budget_breach'`, `gateLevel='block'`, `payloadJson = HitlBudgetBlockPayload`. `hitlService` blocks the orchestrator until an operator approves, rejects, or the suspend window elapses. Approval does NOT automatically execute — approval only unblocks the orchestrator, which then re-runs the resolver + assembly **exactly once** (§6.6 step 4 retry cap). If the second assembly still breaches, the run terminates with `run_outcome='failed'` and `failureReason='hitl_second_breach'` — no further HITL cycles. Rejection or timeout terminates the run with `run_outcome='failed'` and the matching `failureReason`.
+**Action flow:** the orchestrator (§6.6) calls `actionService.proposeAction` with `actionType='cached_context_budget_breach'`, `gateLevel='block'`, `payloadJson = HitlBudgetBlockPayload`. `hitlService` blocks the orchestrator until an operator approves, rejects, or the suspend window elapses. Approval does NOT automatically execute — approval only unblocks the orchestrator, which then re-runs the resolver + assembly. Rejection terminates the run with `run_outcome='failed'`.
 
 ### 4.6 `RUN_OUTCOME_CLASSIFICATION`
 
@@ -499,7 +552,7 @@ type RunOutcome = 'completed' | 'degraded' | 'failed';
 { "run_outcome": "failed" /* terminal LLM request status != 'success' */ }
 ```
 
-**Invariant:** `run_outcome` is written exactly once, at the terminal write. In-flight runs have `run_outcome IS NULL`. The terminal-write UPDATE carries the `run_outcome IS NULL` optimistic-lock precondition (§9.3) — duplicate writes under retry update 0 rows. This UPDATE is NOT co-transactional with the router's `llm_requests` insert; both writes are idempotent in effect, and no observer can see a contradictory in-flight state.
+**Invariant:** `run_outcome` is written exactly once, at the terminal write. In-flight runs have `run_outcome IS NULL`. The terminal-write transaction sets both `run_outcome` and the LLM-request status atomically (see §9.3).
 
 ---
 
@@ -621,7 +674,7 @@ export const referenceDocumentVersions = pgTable(
 
 **Notes.**
 - `tokenCounts` is a JSONB map keyed by `modelFamily`. v1 writes three keys (Sonnet / Opus / Haiku). New model families append new keys in a future migration — no schema change.
-- `serializedBytesHash` is hashed over the serialized form (document bytes plus the delimiter/metadata wrapper from the engine's serialization format — see §6.4). This is the hash that feeds `prefix_hash_components.documentSerializedBytesHashes` (§4.4) and is mirrored onto each snapshot's `orderedDocumentVersions[].serializedBytesHash` entry (§4.3 / §5.6). We hash the serialized form (not raw content) because that is what Anthropic sees — byte-identical serialization is the identity that matters for cache hits. `contentHash` on this table is the RAW-content hash; it serves the idempotent-write check in §6.1 (`updateContent` short-circuits when new content's `contentHash` matches the current version) and plays no role in prefix identity.
+- `serializedBytesHash` is hashed over the serialized form (document bytes plus the delimiter/metadata wrapper from the engine's serialization format — see §6.4). This is the hash that feeds `prefix_hash_components.documentContentHashes`. We hash the serialized form (not raw content) because that is what Anthropic sees — byte identical serialization is the identity that matters for cache hits.
 - No `deletedAt` — version rows are immutable. Document-level soft-delete cascades via FK.
 - Idempotent writes: if the caller attempts to write a version row whose content matches the current version's `contentHash`, `referenceDocumentService.writeVersion` returns the existing row without inserting — matches the `memoryBlockVersions` coalescing pattern.
 
@@ -778,12 +831,12 @@ export const packResolutionSnapshots = pgTable(
     /** The engine version that produced this snapshot. Bumped per §4.4. */
     assemblyVersion: integer('assembly_version').notNull(),
 
-    /** JSONB array matching the shape in §4.3. Ordered by documentId ascending. `serializedBytesHash` mirrors `reference_document_versions.serializedBytesHash` for the pinned version (§4.3 / §5.2). */
+    /** JSONB array matching the shape in §4.3. Ordered by documentId ascending. */
     orderedDocumentVersions: jsonb('ordered_document_versions').notNull().$type<
-      Array<{ documentId: string; documentVersion: number; serializedBytesHash: string; tokenCount: number }>
+      Array<{ documentId: string; documentVersion: number; contentHash: string; tokenCount: number }>
     >(),
 
-    /** Per-pack prefix-hash identity (§4.4). The unique index below is `(pack_id, prefix_hash)` — cross-pack reuse of the same hash is expected and supported at the provider-cache layer; per-pack attribution stays clean. */
+    /** Prefix-hash identity (§4.4). UNIQUE constraint — the dedup mechanism. */
     prefixHash: text('prefix_hash').notNull(),
     prefixHashComponents: jsonb('prefix_hash_components').notNull().$type<PrefixHashComponents>(),
 
@@ -793,8 +846,7 @@ export const packResolutionSnapshots = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    packPrefixHashUniq: uniqueIndex('pack_resolution_snapshots_pack_prefix_hash_uq').on(t.packId, t.prefixHash),
-    prefixHashLookupIdx: index('pack_resolution_snapshots_prefix_hash_idx').on(t.prefixHash),
+    prefixHashUniq: uniqueIndex('pack_resolution_snapshots_prefix_hash_uq').on(t.prefixHash),
     packVersionIdx: index('pack_resolution_snapshots_pack_version_idx').on(t.packId, t.packVersion),
     orgIdx: index('pack_resolution_snapshots_org_idx').on(t.organisationId),
   })
@@ -802,8 +854,7 @@ export const packResolutionSnapshots = pgTable(
 ```
 
 **Notes.**
-- **`UNIQUE(pack_id, prefix_hash)` is the concurrency guard.** Under cron burst, two runs resolving the same pack at the same time will race to insert. The first wins; the loser catches the unique-violation error, re-reads the winning row, and carries on. `packResolutionService.resolveAtRunStart` (§6.3) owns this retry logic. The non-unique `prefix_hash` index is for cross-pack lookup (e.g. Usage Explorer queries correlating an `llm_requests.prefix_hash` back to the snapshot row).
-- **Two packs can share a `prefix_hash`.** If Pack A and Pack B attach the same document set (same serialized bytes), their per-pack snapshots will share the same `prefix_hash`. This is expected and beneficial — the provider's cached prefix is the same byte sequence — but each pack gets its own row under the `(pack_id, prefix_hash)` unique index, preserving per-pack utilization and audit attribution.
+- **`UNIQUE(prefix_hash)` is the concurrency guard.** Under cron burst, two runs resolving the same pack at the same time will race to insert. The first wins; the loser catches the unique-violation error, re-reads the winning row, and carries on. `packResolutionService.resolveAtRunStart` (§6.3) owns this retry logic.
 - **No `deletedAt`.** Snapshots are immutable and retained indefinitely (v1). Retention tiering — deleting snapshots older than N days that are no longer referenced by any run row — is deferred (§12.2).
 - **No FK from `agent_runs.pack_snapshot_ids` to this table.** The agent_runs column is a JSONB array; enforcing RI on array elements is a Postgres anti-pattern. Referential integrity is preserved by never deleting snapshot rows in v1.
 
@@ -942,7 +993,7 @@ No schema change to `scheduled_tasks` itself. Pack attachments at the schedule l
 | `document_packs` | `(organisation_id, name) WHERE deleted_at IS NULL` | Prevents duplicate pack names within an org |
 | `document_pack_members` | `(pack_id, document_id) WHERE deleted_at IS NULL` | Prevents duplicate membership |
 | `document_pack_attachments` | `(pack_id, subject_type, subject_id) WHERE deleted_at IS NULL` | Prevents duplicate attachment |
-| `pack_resolution_snapshots` | `(pack_id, prefix_hash)` | Dedup across concurrent resolution, per pack (cross-pack prefix sharing permitted) |
+| `pack_resolution_snapshots` | `(prefix_hash)` | Dedup across concurrent resolution |
 | `model_tier_budget_policies` | `(organisation_id, model_family)` | One policy per org per model, NULL org = platform default |
 
 **DB CHECK constraints:**
@@ -965,7 +1016,7 @@ No schema change to `scheduled_tasks` itself. Pack attachments at the schedule l
 | Reference-document pausing excludes from assembly | `packResolutionService.resolveAtRunStart` |
 | Pack attachment subject row must exist | `documentPackService.attach` |
 | Assembly-version bump required on engine logic change | `contextAssemblyEnginePure.test.ts` fixture assertion |
-| Run outcome written exactly once | `cachedContextOrchestrator.execute` — single-row `UPDATE agent_runs SET run_outcome = :outcome WHERE id = :runId AND run_outcome IS NULL` (optimistic lock; duplicate terminal writes under retry update 0 rows and are treated as idempotent no-ops) |
+| Run outcome written exactly once | `cachedContextOrchestrator.execute` + Postgres row-lock on `agent_runs` terminal write |
 | No silent fallback (no auto-truncation, auto-drop, auto-downgrade) | `contextAssemblyEngine.validate` raises `BudgetBreachError` instead of mutating the payload |
 
 ---
@@ -1011,7 +1062,6 @@ export interface ReferenceDocumentService {
 
   listByOrg(organisationId: string, filters?: { subaccountId?: string | null; includeDeleted?: boolean }): Promise<ReferenceDocument[]>;
   getByIdWithCurrentVersion(documentId: string): Promise<{ doc: ReferenceDocument; version: ReferenceDocumentVersion } | null>;
-  listVersions(documentId: string): Promise<ReferenceDocumentVersion[]>;
   getVersion(documentId: string, version: number): Promise<ReferenceDocumentVersion | null>;
 }
 ```
@@ -1037,8 +1087,6 @@ export function serializeDocument(args: { documentId: string; version: number; c
 - `CACHED_CONTEXT_DOC_NOT_FOUND` (404).
 - `CACHED_CONTEXT_DOC_ALREADY_DEPRECATED` (409).
 - `CACHED_CONTEXT_DOC_TOKEN_COUNT_FAILED` (502) — upstream `countTokens` failed; the document is not persisted.
-- `CACHED_CONTEXT_DOC_CONTAINS_DELIMITER` (400) — document content contains the reserved `---DOC_END---` delimiter (§6.4).
-- `CACHED_CONTEXT_DOC_TOKEN_COUNT_MISSING` (500) — assembly requested a `modelFamily` whose `tokenCounts` key is missing from a stored version row; triggers the §12.14 backfill escalation.
 
 **Token-count failure policy.** If `countTokens` fails for any of the three model families, the document create / update-content operation rolls back. No document is persisted without its token counts for all declared model families. This is strict by design: the budget resolver MUST be able to answer "does this fit?" for any model without a re-measurement round trip. Retry is the caller's responsibility.
 
@@ -1083,7 +1131,7 @@ export interface DocumentPackService {
 
 - **`create`** inserts the pack at `currentVersion = 1`.
 - **`addMember` / `removeMember`** each bump `document_packs.currentVersion` in the same transaction. Re-adding a previously-removed document creates a new `document_pack_members` row (soft-deleted rows are left in place). The pack-version bump is the signal that pack state has changed — `packResolutionService` reads the current version and builds a fresh snapshot on the next run.
-- **`attach`** verifies the subject row exists by table lookup (`agents` / `tasks` / `scheduled_tasks`) and that the subject's org scope matches the pack's org scope. The polymorphic FK is service-enforced here. A duplicate attachment against a currently-LIVE row (same `(pack_id, subject_type, subject_id)`, `deleted_at IS NULL`) returns the existing row idempotently. A re-attach against a soft-deleted row INSERTS a fresh row — the partial unique index `(pack_id, subject_type, subject_id) WHERE deleted_at IS NULL` (§5.5) permits this; the audit trail stays linear rather than resurrecting old attribution.
+- **`attach`** verifies the subject row exists by table lookup (`agents` / `tasks` / `scheduled_tasks`) and that the subject's org scope matches the pack's org scope. The polymorphic FK is service-enforced here. Duplicate `(pack_id, subject_type, subject_id)` attachments — including re-attach after detach — return the existing row (idempotent).
 - **`detach`** soft-deletes the row. Live attachments under a soft-deleted pack return no results in `listAttachmentsForSubject` — the pack-level soft-delete is authoritative.
 - **Authorisation** — same pattern as `referenceDocumentService`: routes enforce, service trusts.
 
@@ -1128,10 +1176,10 @@ export interface PackResolutionService {
 **Public surface (pure):**
 
 ```ts
-/** Produces the ordered document-version list for a given pack at a given point in time. The `serializedBytesHash` mirrors `reference_document_versions.serializedBytesHash` (§5.2). */
+/** Produces the ordered document-version list for a given pack at a given point in time. */
 export function orderDocumentsDeterministically(
-  members: Array<{ documentId: string; documentVersion: number; serializedBytesHash: string; tokenCount: number; pausedAt: Date | null; deprecatedAt: Date | null }>
-): Array<{ documentId: string; documentVersion: number; serializedBytesHash: string; tokenCount: number }>;
+  members: Array<{ documentId: string; documentVersion: number; contentHash: string; tokenCount: number; pausedAt: Date | null; deprecatedAt: Date | null }>
+): Array<{ documentId: string; documentVersion: number; contentHash: string; tokenCount: number }>;
 
 /** Produces the snapshot row candidate — full shape except DB-generated id + createdAt. */
 export function buildSnapshotRow(input: {
@@ -1141,9 +1189,9 @@ export function buildSnapshotRow(input: {
   packVersion: number;
   modelFamily: string;
   assemblyVersion: number;
-  orderedDocumentVersions: Array<{ documentId: string; documentVersion: number; serializedBytesHash: string; tokenCount: number }>;
+  orderedDocumentVersions: Array<{ documentId: string; documentVersion: number; contentHash: string; tokenCount: number }>;
 }): {
-  orderedDocumentVersions: Array<{ documentId: string; documentVersion: number; serializedBytesHash: string; tokenCount: number }>;
+  orderedDocumentVersions: Array<{ documentId: string; documentVersion: number; contentHash: string; tokenCount: number }>;
   prefixHash: string;
   prefixHashComponents: PrefixHashComponents;
   estimatedPrefixTokens: number;
@@ -1158,7 +1206,7 @@ export function buildSnapshotRow(input: {
   3. Filter out paused (`pausedAt` set) and deprecated (`deprecatedAt` set) documents, and soft-deleted documents.
   4. Order by `documentId` ascending (via the pure `orderDocumentsDeterministically`).
   5. Compute the prefix-hash components (§4.4) and final `prefixHash` via `contextAssemblyEnginePure.computePrefixHash` (cross-service call — pure-layer only).
-  6. Attempt `INSERT ... ON CONFLICT (pack_id, prefix_hash) DO NOTHING RETURNING *`. If no row returned, the conflict fired — re-select the existing row by `(pack_id, prefix_hash)`.
+  6. Attempt `INSERT ... ON CONFLICT (prefix_hash) DO NOTHING RETURNING *`. If no row returned, the conflict fired — re-select the existing row by `prefix_hash`.
   7. Sum `estimatedPrefixTokens` across all snapshots (one per pack).
 - **No writes to live tables.** This service reads documents / versions / packs / members / attachments and writes only to `pack_resolution_snapshots`.
 - **Execution model.** Synchronous, called inline from the orchestrator. See §9.
@@ -1167,7 +1215,7 @@ export function buildSnapshotRow(input: {
 
 - `CACHED_CONTEXT_NO_PACKS_ATTACHED` (409) — called on a subject with zero attached packs. The orchestrator catches this and decides whether to treat it as an error (pilot mode: yes) or to fall back to a non-cached call (future, §12.8).
 
-**Concurrency invariant.** The `UNIQUE(pack_id, prefix_hash)` constraint + `ON CONFLICT DO NOTHING` + re-select pattern is the full concurrency story. Two concurrent runs resolving identical snapshots for the same pack will both end up with the same winning row. Under Postgres's default `READ COMMITTED` isolation level, the loser's re-select sees the winner's committed row, not its own failed insert — no row-level locking is needed.
+**Concurrency invariant.** The `UNIQUE(prefix_hash)` constraint + `ON CONFLICT DO NOTHING` + re-select pattern is the full concurrency story. Two concurrent runs resolving identical snapshots will both end up with the same winning row. No row-level locking is needed.
 
 ### 6.4 `contextAssemblyEngine` + `contextAssemblyEnginePure`
 
@@ -1209,42 +1257,16 @@ export function serializeDocument(args: {
 }): string;
 
 /**
- * Produces the full cached prefix string from an ordered list of snapshots plus
- * their pinned version rows. Deterministic ordering:
- *   1. Snapshots sort by `packId` ascending.
- *   2. Within each snapshot, documents sort by `documentId` ascending (the order
- *      recorded on the snapshot row).
- * Equivalent to concatenating serializeDocument() per document across all packs
- * with a fixed separator. The pinned version rows (fetched by the caller and
- * passed in) are the source of content bytes — snapshots carry integrity
- * hashes, not content.
+ * Produces the full cached prefix string from an ordered list of snapshots.
+ * Equivalent to concatenating serializeDocument() per document with a fixed separator.
  */
-export function assemblePrefix(input: {
-  snapshots: PackResolutionSnapshot[];
-  versionsByDocumentVersionKey: Map<string /* `${documentId}:${version}` */, { content: string }>;
-}): string;
+export function assemblePrefix(snapshots: PackResolutionSnapshot[]): string;
 
 /**
- * Computes the PER-PACK prefix hash from its components. Used by
- * `packResolutionService.buildSnapshotRow` to populate each snapshot's
- * `prefixHash`. The hash algorithm and input ordering are part of the contract
- * and covered by ASSEMBLY_VERSION.
+ * Computes the prefix hash from its components. The hash algorithm and input
+ * ordering are part of the contract and covered by ASSEMBLY_VERSION.
  */
 export function computePrefixHash(components: PrefixHashComponents): string;
-
-/**
- * Computes the CALL-LEVEL assembled prefix hash from the ordered list of
- * per-pack snapshot prefix hashes. This is the value stored on
- * `llm_requests.prefix_hash` and used by the router for cache attribution.
- * Ordering: snapshot hashes are sorted by the originating snapshot's `packId`
- * ascending before hashing — matches the `assemblePrefix` cross-pack rule.
- * Covered by ASSEMBLY_VERSION.
- */
-export function computeAssembledPrefixHash(input: {
-  snapshotPrefixHashesByPackIdAsc: string[];
-  modelFamily: string;
-  assemblyVersion: number;
-}): string;
 
 /**
  * The validator — pure budget check producing either 'ok' or a structured breach payload.
@@ -1279,14 +1301,12 @@ Between documents: a single blank line (the trailing `\n` after `---DOC_END---` 
 
 **Assembly flow (from `assembleAndValidate`):**
 
-1. **Stateful pre-step (in `contextAssemblyEngine.ts`, not `Pure`):** load the pinned `reference_document_versions` rows for every `(documentId, documentVersion)` pair across all snapshots. For each row, verify `SHA-256(serializeDocument(row))` matches the snapshot's recorded `serializedBytesHash` — if any mismatch, raise `CACHED_CONTEXT_SNAPSHOT_INTEGRITY_VIOLATION` (500). This is the engine's read-time integrity check.
-2. Call `assemblePrefix({ snapshots, versionsByDocumentVersionKey })` — deterministic string concat across all packs: snapshots ordered by `packId` asc, documents within each snapshot ordered by `documentId` asc.
-3. Compute `variableInputTokens` (pure — uses a token-count helper; the count is an *estimate*, not a call to `countTokens`).
-4. Compute `estimatedContextTokens = snapshots.sum(estimatedPrefixTokens) + variableInputTokens + resolvedBudget.reserveOutputTokens + fixed_system_overhead(100)`.
-5. Compute the call-level `assembledPrefixHash = computeAssembledPrefixHash({ snapshotPrefixHashesByPackIdAsc: snapshots.map(s => s.prefixHash).sort(), modelFamily, assemblyVersion })`. This is the single hash that goes to `llm_requests.prefix_hash`.
-6. Call `validateAssembly(...)`.
-7. If `{ kind: 'breach' }` — return `{ kind: 'budget_breach', blockPayload }`.
-8. If `{ kind: 'ok' }` — return `{ kind: 'ok', routerPayload: { system: { stablePrefix, dynamicSuffix }, messages: [...], estimatedContextTokens }, prefixHash: assembledPrefixHash, prefixHashComponents: null /* components live per-snapshot */, variableInputHash, packSnapshotIds, softWarnTripped, assemblyVersion }`.
+1. Call `assemblePrefix(snapshots)` — deterministic string concat.
+2. Compute `variableInputTokens` (pure — uses a token-count helper; the count is an *estimate*, not a call to `countTokens`).
+3. Compute `estimatedContextTokens = snapshots.sum(estimatedPrefixTokens) + variableInputTokens + resolvedBudget.reserveOutputTokens + fixed_system_overhead(100)`.
+4. Call `validateAssembly(...)`.
+5. If `{ kind: 'breach' }` — return `{ kind: 'budget_breach', blockPayload }`.
+6. If `{ kind: 'ok' }` — return `{ kind: 'ok', routerPayload: { system: { stablePrefix, dynamicSuffix }, messages: [...], estimatedContextTokens }, prefixHash, prefixHashComponents, variableInputHash, packSnapshotIds, softWarnTripped, assemblyVersion }`.
 
 **Assembly-version enforcement test** (§11 Testing). A pure unit test asserts:
 
@@ -1333,7 +1353,7 @@ export function resolveBudgetPure(input: {
 1. Start from `modelTierPolicy` (platform default or org override — the stateful wrapper queries for the org-specific row first, falling back to the platform default row where `organisation_id IS NULL`).
 2. If `orgCeilingPolicy` is present, narrow: each dimension becomes `min(current, orgCeiling)`.
 3. If `taskConfig` has an override, narrow further: each dimension becomes `min(current, taskOverride)`. Task config cannot widen — only narrow.
-4. Compute `reserveOutputTokens = min(modelTierPolicy.reserveOutputTokens, resolvedMaxOutputTokens)`. This preserves §4.1's `maxOutputTokens ≤ reserveOutputTokens` invariant: when the resolved `maxOutputTokens` is narrower than the tier's default reserve, the reserve narrows to match (equality post-resolution). When not narrowed, the tier's default reserve survives.
+4. Compute `reserveOutputTokens = min(modelTierPolicy.reserveOutputTokens, resolvedMaxOutputTokens)`.
 5. Assert `maxInputTokens + reserveOutputTokens ≤ modelTierPolicy.modelContextWindow`. If not, throw `BudgetResolutionError` (500 — this can't happen if the DB CHECK constraint is correct; it's defence in depth).
 6. Assert all numeric fields > 0.
 7. Return the resolved `ResolvedExecutionBudget`.
@@ -1355,39 +1375,6 @@ The public entry point for callers. Wraps snapshot resolution → budget resolut
 **Public surface:**
 
 ```ts
-export type CachedContextOrchestratorResult =
-  | {
-      runOutcome: 'completed' | 'degraded';
-      llmResponseContent: string;   // passthrough from anthropicAdapter
-      llmRequestId: string;
-      packSnapshotIds: string[];
-      prefixHash: string;           // call-level assembled hash (§4.4)
-      cacheStats: {
-        readTokens: number;
-        creationTokens: number;
-        hitType: 'miss' | 'partial' | 'full';
-      };
-    }
-  | {
-      runOutcome: 'failed';
-      failureReason:
-        | 'hitl_rejected'
-        | 'hitl_timeout'
-        | 'hitl_second_breach'        // §6.6 step 4 — one-retry cap reached
-        | 'router_error'
-        | 'provider_error'
-        | 'parse_failure'
-        | 'budget_resolution_error'
-        | 'snapshot_integrity_violation'
-        | 'no_packs_attached';
-      /** Snapshots resolved before failure, if any. Present when failure happened post-resolution. */
-      packSnapshotIds?: string[];
-      /** Call-level assembled hash, if computed before failure. Present on failures after successful assembly. */
-      prefixHash?: string;
-      /** LLM request row, if the router wrote one before the failure. */
-      llmRequestId?: string;
-    };
-
 export interface CachedContextOrchestrator {
   execute(input: {
     organisationId: string;
@@ -1399,8 +1386,19 @@ export interface CachedContextOrchestrator {
     instructions: string;
     modelFamily: string;
     taskConfig?: ExecutionBudgetOverrides;
-    ttl?: '5m' | '1h'; // caller hint passed through to the adapter; no resolver narrowing in v1 (§12.15)
-  }): Promise<CachedContextOrchestratorResult>;
+    ttl?: '5m' | '1h'; // caller hint; resolver may narrow (see §6.6 TTL note)
+  }): Promise<{
+    runOutcome: RunOutcome;
+    llmResponseContent: string; // passthrough from anthropicAdapter
+    llmRequestId: string;
+    packSnapshotIds: string[];
+    prefixHash: string;
+    cacheStats: {
+      readTokens: number;
+      creationTokens: number;
+      hitType: 'miss' | 'partial' | 'full';
+    };
+  }>;
 }
 ```
 
@@ -1409,22 +1407,21 @@ export interface CachedContextOrchestrator {
 1. Resolve `ExecutionBudget` (§6.5) — includes the capacity invariant check.
 2. Resolve pack snapshots (§6.3) — produces one snapshot per attached pack. If no packs attached, raises `CACHED_CONTEXT_NO_PACKS_ATTACHED` (the caller decides handling; pilot mode treats as error).
 3. Call `contextAssemblyEngine.assembleAndValidate(...)` (§6.4).
-4. **If `{ kind: 'budget_breach' }`:** call `actionService.proposeAction({ actionType: 'cached_context_budget_breach', gateLevel: 'block', payloadJson: blockPayload, ... })`. Wait for `hitlService` resolution. On approval → re-run steps 1–3 **exactly once** (the operator may have trimmed the pack). If the second assembly attempt ALSO returns `{ kind: 'budget_breach' }`, terminate with `run_outcome='failed'` and `failureReason='hitl_second_breach'` — no third attempt, no second HITL block. On rejection or suspend-window timeout → write `run_outcome='failed'` on `agent_runs` with `failureReason='hitl_rejected'` or `'hitl_timeout'` respectively.
+4. **If `{ kind: 'budget_breach' }`:** call `actionService.proposeAction({ actionType: 'cached_context_budget_breach', gateLevel: 'block', payloadJson: blockPayload, ... })`. Wait for `hitlService` resolution. On approval → re-run steps 1–3 (the operator may have trimmed the pack). On rejection or suspend-window timeout → write `run_outcome='failed'` on `agent_runs` and return with `runOutcome='failed'`.
 5. **If `{ kind: 'ok' }`:** write `pack_snapshot_ids` + `variable_input_hash` + `soft_warn_tripped` to `agent_runs` (pre-call write). The run outcome is still `NULL`.
-6. Call `llmRouter.routeCall({ payload: routerPayload, estimatedContextTokens, prefixHash: assembledPrefixHash, featureTag: 'cached-context', maxTokens: resolvedBudget.maxOutputTokens, cacheTtl: ttl ?? '1h', ... })`. Router handles idempotency, attribution, provider fallback, and cost ceilings. `maxOutputTokens` is the per-call response cap (existing router parameter, named `maxTokens` at the router surface, passed through to `anthropicAdapter` as `max_tokens` on the request body). `prefixHash` + `cacheTtl` are new optional params the router's `llmRouter.ts` gains (see below).
+6. Call `llmRouter.routeCall({ payload: routerPayload, estimatedContextTokens, prefixHash, featureTag: 'cached-context', cacheTtl: ttl ?? '1h', ... })`. Router handles idempotency, attribution, provider fallback, and cost ceilings. The `prefixHash` + `ttl` are new optional params the router's `llmRouter.ts` gains (see below).
 7. Parse `response.usage`: capture `cachedPromptTokens = cache_read_input_tokens`, `cacheCreationTokens = cache_creation_input_tokens`. Determine `hitType` from the ratio.
 8. **Run outcome classification (§4.6):**
    - If soft-warn was tripped → `degraded`.
    - If actual input tokens exceed estimated by > 10% → `degraded` (drift flag).
    - If `hitType === 'miss'` AND a prior snapshot with this `prefixHash` exists in-window → `degraded` (unexpected miss).
    - Otherwise → `completed`.
-9. **Terminal write on `agent_runs`** (single-row UPDATE, not in the same transaction as the router's `llm_requests` write): `UPDATE agent_runs SET run_outcome = :outcome, ... WHERE id = :runId AND run_outcome IS NULL`. The `run_outcome IS NULL` precondition is the optimistic lock — a duplicate terminal write under retry updates 0 rows and is treated as an idempotent re-entry (no error; the caller observes the row already has a terminal outcome). The router's `llm_requests` row is committed by the router at call completion (its existing write path, now also carrying `prefix_hash` + `cache_creation_tokens`); this write is not co-transactional with the `agent_runs` UPDATE. Cross-table atomicity is not required: the `prefix_hash` column on `llm_requests` is append-only once the router commits, and the `agent_runs` UPDATE is idempotent — a reconciler reading the two tables cannot observe a contradictory in-flight state.
+9. Terminal write (single transaction): update `agent_runs.run_outcome` + assert `run_outcome IS NULL WHERE id = ?` (optimistic lock — prevents double-terminal-write under retry). Also upsert `llm_requests.prefix_hash` via the router's existing write path (the router already writes the row; we're adding the column).
 
 **Router-side changes** (minimal — §2.1 confirmed the router has the hooks):
 
-- `llmRouter.routeCall` gains optional params: `prefixHash?: string`, `cacheTtl?: '5m' | '1h'` (default `'1h'` — sent through to `anthropicAdapter` which already supports `cache_control: { type: 'ephemeral', ttl: '1h' }` via its existing shape). `prefixHash` is written to `llm_requests.prefix_hash` at row insert time. `maxTokens` is an existing router parameter — the orchestrator now always passes `resolvedBudget.maxOutputTokens` through it.
+- `llmRouter.routeCall` gains optional params: `prefixHash?: string`, `cacheTtl?: '5m' | '1h'` (default `'1h'` — sent through to `anthropicAdapter` which already supports `cache_control: { type: 'ephemeral', ttl: '1h' }` via its existing shape). `prefixHash` is written to `llm_requests.prefix_hash` at row insert time.
 - No changes to idempotency, attribution, or provider fallback.
-- **`cacheTtl` is a direct caller hint**, not a resolver-narrowed value. v1 does not include TTL in `ResolvedExecutionBudget` or in `model_tier_budget_policies`. Resolver-narrowed TTL is deferred (§12.15).
 
 **Execution model** — see §9 for the end-to-end sync/async accounting.
 
@@ -1448,13 +1445,10 @@ export const packUtilizationJob = {
 
 **Handler behaviour:**
 
-The handler runs under `withAdminConnection` + `SET LOCAL ROLE admin_role` (see §8.6 carve-out). This matches the pattern used by `memoryDedupJob`, `llmLedgerArchiveJob`, `securityEventsCleanupJob`, and `regressionReplayJob`. The handler's top-level block MUST start with the admin-connection wrapper; any direct `db` access inside the job would violate `verify-rls-contract-compliance.sh`.
-
 1. For every live pack + every model family present in `model_tier_budget_policies`:
    - Read the pack's latest snapshot row via `pack_resolution_snapshots` ordered by `createdAt DESC LIMIT 1` for that `(pack_id, model_family)`.
-   - **If the latest snapshot's `packVersion < pack.currentVersion`** (the pack has been edited since the last run resolved it): recompute `estimatedPrefixTokens` live by summing the current `document_pack_members`' pinned current-version `tokenCounts[modelFamily]`. This prevents the utilization metric from lying to users after a pack edit — the pre-run warning must reflect the CURRENT pack state, not the last resolved state.
-   - If no snapshot exists (pack has never been resolved): derive `estimatedPrefixTokens` by summing the live members' `tokenCounts[modelFamily]`.
    - Compute `utilizationRatio = estimatedPrefixTokens / modelTierBudgetPolicy.maxInputTokens`.
+   - If no snapshot exists (pack has never been resolved): derive `estimatedPrefixTokens` by summing the live members' `tokenCounts[modelFamily]`.
 2. Write to a new `pack_utilization_metrics` table (schema deferred — see note below) or, more simply for v1, a single flat JSONB column on `document_packs` — `utilizationByModelFamily: jsonb` — updated in place. v1 uses the flat JSONB column to avoid a second migration.
 3. Emit nothing else; the operator UI reads the column directly.
 
@@ -1564,25 +1558,7 @@ Applied to:
 - `document_pack_members` (inherits via pack FK, same EXISTS pattern)
 - `document_pack_attachments`
 - `pack_resolution_snapshots`
-- `model_tier_budget_policies` — **uses a custom policy shape** that permits platform-default rows (`organisation_id IS NULL`) for SELECT across all orgs, while scoping INSERT / UPDATE / DELETE to matching org or `admin_role`:
-
-  ```sql
-  ALTER TABLE model_tier_budget_policies ENABLE ROW LEVEL SECURITY;
-
-  CREATE POLICY model_tier_budget_policies_read ON model_tier_budget_policies
-    FOR SELECT
-    USING (
-      organisation_id IS NULL
-      OR organisation_id = current_setting('app.current_organisation_id')::uuid
-    );
-
-  CREATE POLICY model_tier_budget_policies_write ON model_tier_budget_policies
-    FOR ALL
-    USING (organisation_id = current_setting('app.current_organisation_id')::uuid)
-    WITH CHECK (organisation_id = current_setting('app.current_organisation_id')::uuid);
-  ```
-
-  Platform-default row editing is admin-role only (§8.5 + §12.13). The generic `<table>_org_isolation` template in this section is NOT applied to `model_tier_budget_policies` — the table has its own explicit block above.
+- `model_tier_budget_policies` (org-nullable: platform defaults readable by all orgs; org overrides policy-gated)
 
 ### 8.2 `rlsProtectedTables.ts` manifest entries
 
@@ -1612,13 +1588,11 @@ When `cachedContextOrchestrator.execute` is invoked from the agent-run path, `wi
 
 ### 8.5 System-wide reference data
 
-`model_tier_budget_policies` rows with `organisation_id IS NULL` are the platform defaults — readable to all orgs. The table-specific policy block in §8.1 permits this via a custom SELECT policy (`organisation_id IS NULL OR organisation_id = current_setting(...)`). Writes (INSERT / UPDATE / DELETE) stay org-scoped, so platform-default rows can only be modified by an `admin_role` connection — v1 does not expose a system-admin route (§12.13); seed rows are edited via direct DB access until that route ships.
+`model_tier_budget_policies` rows with `organisation_id IS NULL` are the platform defaults — readable to all orgs. The RLS policy above permits this: `organisation_id IS NULL OR organisation_id = current_setting(...)`. Updates to platform-default rows are restricted to the `system_admin` route (not defined in v1 — seed rows are editable only via direct DB access or a future admin UI; §15).
 
-### 8.6 No bypasses (with one documented exception)
+### 8.6 No bypasses
 
-No service, route, or orchestrator path uses `withAdminConnection` or any RLS-bypass primitive. Every read and write on the request/orchestrator path goes through the principal-scoped connection. Adding `withAdminConnection` to any cached-context request-path code is a reviewer-blocker.
-
-**Documented exception — `packUtilizationJob` (§6.7).** The hourly utilization sweep is a cross-tenant maintenance job and follows the codebase's accepted convention for such jobs: `withAdminConnection` + `SET LOCAL ROLE admin_role`, mirroring `memoryDedupJob`, `llmLedgerArchiveJob`, `securityEventsCleanupJob`, and `regressionReplayJob`. The job MUST write that explicit justification in its header comment (same pattern the existing jobs use) and MUST be registered in the cross-org-job list that maintenance scripts recognise. No other cached-context code path is permitted this carve-out.
+Neither service nor route path uses `withAdminConnection` or any RLS-bypass primitive. Every read and write goes through the principal-scoped connection. Adding `withAdminConnection` to any cached-context code path is a reviewer-blocker.
 
 ---
 
@@ -1650,11 +1624,11 @@ No other pg-boss jobs. In particular, budget breaches go through `actionService.
 Two multi-statement operations use a single transaction:
 
 - **`referenceDocumentService.create` / `updateContent`** — document row + version row + `currentVersionId` update, all in one tx.
-- **`cachedContextOrchestrator.execute` terminal `agent_runs` UPDATE** — the single-row UPDATE that sets `agent_runs.run_outcome` carries the `WHERE id = :runId AND run_outcome IS NULL` optimistic-lock precondition, making the terminal write idempotent under retry (a second attempt updates 0 rows and is treated as a no-op). This UPDATE is NOT co-transactional with the router's `llm_requests` insert — the router commits the ledger row at call completion via its own write path (§6.6 step 9). Cross-table atomicity is not required because both writes are idempotent and append-only in effect.
+- **`cachedContextOrchestrator.execute` terminal write** — the transaction that sets `agent_runs.run_outcome` also inserts (via router) the `llm_requests` row with `prefix_hash`. The `run_outcome IS NULL` precondition on the UPDATE makes the terminal write idempotent under retry (the second attempt's UPDATE affects 0 rows and is detected as a `ReconciliationRequiredError`-shaped condition, surfaced via the router's existing idempotency machinery — `v1:`-prefixed keys).
 
 ### 9.4 Cached vs dynamic
 
-- **Cached (stable prefix):** the concatenated `reference_documents` serialized content, with `cache_control: { type: 'ephemeral', ttl: '1h' }` via the existing adapter. Default TTL 1h. v1 treats `ttl` as a direct caller hint (§6.6) — resolver-narrowed TTL is deferred (§12.15).
+- **Cached (stable prefix):** the concatenated `reference_documents` serialized content, with `cache_control: { type: 'ephemeral', ttl: '1h' }` via the existing adapter. Default TTL 1h, narrowable by task-override or org-max via the resolver.
 - **Dynamic (no cache):** `instructions + "\n\n" + variableInput` lives in `dynamicSuffix` and is never cached.
 - **Cache efficiency claim:** no numeric target for v1. Cadence-driven workloads (once-daily scheduled tasks) have intrinsically low hit rates because cache TTLs max out at 1h. This is stated plainly in the brief and reflected here — no non-functional goal contradicts it.
 
@@ -1674,7 +1648,7 @@ Six phases. Each phase is a standalone commit series mergeable to `main` in orde
 
 All new tables created + RLS + manifest entries + DB CHECK constraints + seed `model_tier_budget_policies` rows for the three model families.
 
-**Services:** `referenceDocumentService` + Pure (create / updateContent / rename / pause / resume / deprecate / list / getByIdWithCurrentVersion / listVersions / getVersion). Token-count helper added to `anthropicAdapter`.
+**Services:** `referenceDocumentService` + Pure (create / updateContent / rename / pause / resume / deprecate / list / getByIdWithCurrentVersion / getVersion). Token-count helper added to `anthropicAdapter`.
 
 **Routes:** `/api/reference-documents/*` full surface.
 
@@ -1709,9 +1683,9 @@ All new tables created + RLS + manifest entries + DB CHECK constraints + seed `m
 
 **Router-side additions:** `llmRouter.routeCall` gains optional `prefixHash` and `cacheTtl` params.
 
-**Acceptance:** `cachedContextOrchestrator.execute` can run end-to-end against a test DB and stubbed `anthropicAdapter` in a manual check. The snapshot row is persisted; `agent_runs.pack_snapshot_ids`, `agent_runs.variable_input_hash`, and `agent_runs.run_outcome` are written correctly. Cache attribution on `llm_requests` is NOT asserted here — those columns land in Phase 5 (§11.2's integration test is attached to Phase 5).
+**Acceptance:** an integration test invoking `cachedContextOrchestrator.execute` against a fixture pack completes end-to-end (in a test DB against a stubbed `anthropicAdapter` — see §11 for the test fixture pattern). Prefix-hash snapshot is persisted. `agent_runs.pack_snapshot_ids` and `run_outcome` are written correctly.
 
-**Columns referenced by code:** 0202–0209 must all be present. `llm_requests.prefix_hash` / `cache_creation_tokens` are NOT referenced in Phase 4 — the orchestrator passes `prefixHash` to the router, but the router-side write of the column is a Phase 5 change.
+**Columns referenced by code:** 0202–0209 must all be present.
 
 ### Phase 5 — Ledger attribution + HITL block path
 
@@ -1768,14 +1742,10 @@ All `*Pure.ts` modules get unit tests via the existing tsx + static-gate convent
 
 **`contextAssemblyEnginePure.test.ts`:**
 - `ASSEMBLY_VERSION` asserts equals the current constant; changing it without updating fixtures fails.
-- **Three-layered golden-fixture test.** The fixture covers a representative multi-pack input (two packs, three documents total, one document paused-and-excluded) and asserts:
-  1. `computePrefixHash(GOLDEN_COMPONENTS_PACK_A) === GOLDEN_PER_PACK_HASH_A` and same for pack B — the per-pack hash function.
-  2. `assemblePrefix(GOLDEN_SNAPSHOTS, GOLDEN_VERSION_ROWS) === GOLDEN_ASSEMBLED_PREFIX_BYTES` — the full assembled stablePrefix bytes. Catches serialization / separator / cross-pack ordering changes even if `computePrefixHash` inputs happen to be stable.
-  3. `computeAssembledPrefixHash({ snapshotPrefixHashesByPackIdAsc, modelFamily, assemblyVersion }) === GOLDEN_CALL_LEVEL_HASH` — the call-level aggregation used for `llm_requests.prefix_hash`.
-  Any change to `serializeDocument`, `assemblePrefix`, `computePrefixHash`, or `computeAssembledPrefixHash` that doesn't also regenerate the matching fixture fails the build. This closes R8's "non-hash pure-logic change slips through" hole within the pure-function test envelope.
+- Golden-fixture test: `computePrefixHash(GOLDEN_COMPONENTS) === GOLDEN_HASH`. Adding the test produces the fixture; changing serialization without regenerating both fails.
 - `serializeDocument` produces byte-identical output for identical input across invocations.
-- `assemblePrefix` is stable under reordering the input array (must sort snapshots by `packId` asc, then documents by `documentId` asc, before concat).
-- `validateAssembly` returns `{ kind: 'breach' }` for the two v1 `thresholdBreached` values (`max_input_tokens`, `per_document_cap`). Returns `{ kind: 'ok', softWarnTripped: true }` when over the warn ratio but under the hard limit.
+- `assemblePrefix` is stable under reordering the input array (must sort by documentId internally before concat).
+- `validateAssembly` returns `{ kind: 'breach' }` for: over-input-budget, over-per-document-cap, over-cost-budget (the three `thresholdBreached` values). Returns `{ kind: 'ok', softWarnTripped: true }` when over the warn ratio but under the hard limit.
 
 **`executionBudgetResolverPure.test.ts`:**
 - Narrowing math: `min(task, min(org, modelTier))` across all four dimensions.
@@ -1784,9 +1754,9 @@ All `*Pure.ts` modules get unit tests via the existing tsx + static-gate convent
 - `softWarnRatio` passed through.
 
 **`packResolutionServicePure.test.ts`:**
-- `orderDocumentsDeterministically` sorts by `documentId` ascending stably and carries `serializedBytesHash` verbatim.
+- `orderDocumentsDeterministically` sorts by `documentId` ascending stably.
 - Paused / deprecated / soft-deleted documents are excluded.
-- `buildSnapshotRow` produces a `prefixHash` that matches `computePrefixHash(components)` — cross-module consistency check using the same components the snapshot persists.
+- `buildSnapshotRow` produces a `prefixHash` that matches `computePrefixHash(components)` — cross-module consistency check.
 
 **`referenceDocumentServicePure.test.ts`:**
 - `hashContent` is SHA-256 over raw bytes.
@@ -1797,15 +1767,14 @@ All `*Pure.ts` modules get unit tests via the existing tsx + static-gate convent
 
 Per spec-context framing, API contract tests are `none_for_now`. This spec deliberately does NOT ship supertest-style route tests. Integration coverage is limited to one harness test per the Live Agent Execution Log spec's pattern (pure-adjacent integration against a test DB):
 
-**`cachedContextOrchestrator.integration.test.ts`** — single end-to-end flow. **Phase 5**, not Phase 4 — the test asserts `llm_requests.prefix_hash` + `cache_creation_tokens` which land in migration 0210.
+**`cachedContextOrchestrator.integration.test.ts`** — single end-to-end flow:
 
 1. Seed: org, subaccount, 3 reference documents, 1 pack with all 3 as members, attach to a synthetic task.
 2. Stub `anthropicAdapter.call` to return a canned response with `cache_creation_input_tokens=1000, cache_read_input_tokens=0`.
 3. Invoke `cachedContextOrchestrator.execute` with a fixture variable input.
-4. Assert: `pack_resolution_snapshots` row created; `agent_runs` row has `pack_snapshot_ids`, `variable_input_hash`, `run_outcome='completed'`; `llm_requests` row has `prefix_hash` (call-level assembled hash per §4.4), `cache_creation_tokens=1000`.
-5. Second invocation with identical inputs — stub returns `cache_creation=0, cache_read=1000`. Assert: same snapshot row (no new insert — dedup by `(pack_id, prefix_hash)`); `run_outcome='completed'`; `cachedPromptTokens=1000`.
+4. Assert: `pack_resolution_snapshots` row created; `agent_runs` row has `pack_snapshot_ids`, `variable_input_hash`, `run_outcome='completed'`; `llm_requests` row has `prefix_hash`, `cache_creation_tokens=1000`.
+5. Second invocation with identical inputs — stub returns `cache_creation=0, cache_read=1000`. Assert: same snapshot row (no new insert — dedup by `prefix_hash`); `run_outcome='completed'`; `cachedPromptTokens=1000`.
 6. Third invocation with budget-breach — stub not called; `actions` row created with `gateLevel='block'` and the structured payload.
-7. Fourth invocation: approve the block, but the re-assembly still breaches (pack unchanged). Assert: `run_outcome='failed'`, `failureReason='hitl_second_breach'`, stub never called — exercises the one-retry cap (§6.6 step 4).
 
 ### 11.3 Concurrency test (pure, but worth calling out)
 
@@ -1842,8 +1811,6 @@ Per `docs/spec-authoring-checklist.md §7`. Every deferred item here corresponds
 - **12.11 Parallel fan-out across multiple API calls.** Splitting a task across multiple parallel LLM calls (for token-count-over-budget workloads) is a separate concern.
 - **12.12 Pack UI.** Browse / edit / attach visualisation on a dedicated page. v1 exposes the route surface only.
 - **12.13 Admin editing of platform-default `model_tier_budget_policies`.** v1 seed rows are editable only via direct DB access. A system-admin-gated route is deferred.
-- **12.14 New-model-family backfill.** When a new `model_tier_budget_policies` row is added for a previously-unseen `modelFamily`, existing `reference_document_versions.tokenCounts` rows lack that key and assembly against that family would fail. v1 does not ship a backfill migration/job because v1 has a fixed three-family set (Sonnet / Opus / Haiku per §5.2). Adding a fourth family post-pilot is a deliberate operational step that MUST include: (a) a data migration that computes `tokenCounts[newFamily]` for every live `reference_document_versions` row via the Anthropic `countTokens` helper, and (b) a gate on the `model_tier_budget_policies` insert that refuses to activate until the backfill reports zero unfilled rows. Strict fail policy: `referenceDocumentService` throws `CACHED_CONTEXT_DOC_TOKEN_COUNT_MISSING` (500) if assembly encounters a missing `tokenCounts[modelFamily]` key at run time.
-- **12.15 Resolver-narrowed cache TTL.** v1 treats the caller's `ttl` hint as a pass-through. A future `model_tier_budget_policies.maxCacheTtl` column + resolver narrowing (`min(caller, orgCeiling, modelTier)`) is deferred — the adapter today supports only `'5m'` and `'1h'` values, so narrowing has small practical value until multi-tier TTLs land upstream.
 
 ---
 
@@ -1953,7 +1920,7 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 | `server/services/__tests__/executionBudgetResolverPure.test.ts` | 3 | Pure |
 | `server/services/__tests__/packResolutionServicePure.test.ts` | 4 | Pure |
 | `server/services/__tests__/referenceDocumentServicePure.test.ts` | 1 | Pure |
-| `server/services/__tests__/cachedContextOrchestrator.integration.test.ts` | 5 | Integration (DB + stubbed adapter) — asserts `llm_requests` columns that land in 0210 |
+| `server/services/__tests__/cachedContextOrchestrator.integration.test.ts` | 4 | Integration (DB + stubbed adapter) |
 | `server/services/__tests__/packResolutionService.concurrency.test.ts` | 4 | Concurrency (DB) |
 
 ### 13.12 Documentation (modified)
@@ -1976,7 +1943,7 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 | R5 | **HITL block window (suspend_until) elapses before operator approves.** | Existing `hitlService` timeout logic produces a `run_outcome='failed'`. The operator can re-trigger the scheduled task. Not considered a bug — this is the documented failure mode. |
 | R6 | **Concurrent pack edits vs in-flight runs.** If a user removes a document from a pack mid-run, does the run fail? | Snapshot-at-run-start (§4.3 + §6.3) resolves this: the run reads the pre-edit snapshot; the edit applies from the next run onwards. Atomic resolution rule (§10 brief principle). |
 | R7 | **`prefixHash` collisions.** SHA-256 collision probability is negligible for our cardinality but theoretically non-zero. | Hash collision would produce a false cache hit (wrong prefix serves a different pack). Mitigation: `prefixHashComponents` stored alongside the hash — a post-hoc audit can detect mismatched components sharing a hash. If the collision actually fires before that audit runs, we have a bad day; accepted risk. |
-| R8 | **`ASSEMBLY_VERSION = 1` forever risk.** The manual-bump convention means a dev forgetting the bump produces silent cache-invalidation confusion. | Mitigated by a three-layered golden-fixture test in §11.1 covering: per-pack `computePrefixHash`, the full assembled `stablePrefix` bytes, and the call-level `computeAssembledPrefixHash` aggregation. Any serialization, separator, ordering, or hash-input change that doesn't regenerate the matching fixture fails the build. CI-based auto-detection of "spec-layer contract changed without ASSEMBLY_VERSION bumped" is deferred — v1 relies on tests + code-review + the checklist. |
+| R8 | **`ASSEMBLY_VERSION = 1` forever risk.** The manual-bump convention means a dev forgetting the bump produces silent cache-invalidation confusion — tests catch the serialization-change case but not every edge. | Tests + code-review + the checklist. v1 accepts this — CI-based auto-detection is a v2 improvement. |
 | R9 | **Router contract extension drift.** Adding `prefixHash` + `cacheTtl` to `llmRouter.routeCall` is a caller-side change. If another caller passes these unintentionally, they'd land in `llm_requests.prefix_hash`. | Both params are optional; only `cachedContextOrchestrator` passes them. A one-line check in the router's callsite can assert the caller is registered, but v1 relies on code review. |
 | R10 | **`run_outcome` classification drift.** Future additions (a new enum value like `cancelled`) could break dashboards expecting the three current values. | The column is text, not Postgres ENUM — adding values is schema-free. Dashboards read via aggregation that groups by the enum; unknown values surface as their own bucket. Documented in §4.6. |
 
@@ -1991,7 +1958,7 @@ The brief's open questions (§8) were all resolved in the brief's fourth review 
 2. Budget layering: one canonical `ExecutionBudget` at the enforcement boundary, three inputs at resolution.
 3. Lifecycle vs cache coherence: the `included_flags` input to `prefix_hash` handles this naturally.
 4. Quality-score interaction: pack membership wins; paused/deprecated hard-exclude.
-5. Attribution lives across two tables: `agent_runs.applied_memory_block_ids` + `agent_runs.applied_memory_block_citations` (both existing, unchanged by this spec) record memory-block attribution; `agent_runs.pack_snapshot_ids` (new, §5.8) records the pack snapshots resolved for the run; `llm_requests.prefix_hash` (new, §5.9) records the call-level cache-attribution hash. There is NO `agent_runs.cached_prefix_hash` column — the prefix hash lives on `llm_requests` because that is where cache-attribution queries join.
+5. Attribution: three separate fields on `agent_runs` (applied_memory_block_ids, cited_memory_block_ids, cached_prefix_hash).
 6. External connectors: deferred with `source_type` / `source_ref` / `last_synced_at` columns from day one.
 
 **Remaining (spec-level, resolved in implementation):**
@@ -1999,7 +1966,7 @@ The brief's open questions (§8) were all resolved in the brief's fourth review 
 - **Q1. User-controlled pack ordering.** v1 sorts by `documentId` ascending at resolution time. If operators want a specific order (e.g. most important document last, closest to the breakpoint), we'd add an `orderIndex` column on `document_pack_members`. Decision: ship v1 with deterministic-by-ID; promote to user-controlled only if operators request it during pilot.
 - **Q2. Platform-default policy editing.** §5.7 admin-edit route is deferred (§12.13). Open question: do we edit via direct DB in the interim, or add a minimal system-admin route in Phase 1? Recommendation: direct DB for v1; a seed-tuning exercise mid-pilot (§11) will reveal whether a route is necessary before general release.
 - **Q3. `estimatedContextTokens` source for `variable_input`.** v1 uses a pure token-count estimator (approximation based on character count — roughly `chars / 3.5`). This is cheap but introduces the drift tracked in §4.2 / §4.6. Alternative: call `countTokens` on the variable input per run (+200ms latency). Decision: go with the approximation for v1, track drift, revisit if drift exceeds threshold.
-- **Q4. `actions.subaccount_scope` for the budget-breach action.** The `actions.actionScope` column defaults to `'subaccount'`. For budget-breach blocks, does the org-admin see breaches across all subaccounts? **Decision for v1: `'subaccount'` scope.** Breaches belong to the subaccount whose pack budget was breached; org-admin cross-subaccount visibility is handled by existing review-queue projections that aggregate across subaccounts an admin has access to, not by changing the action scope here. Implemented in Phase 5 via the `actionRegistry` entry for `cached_context_budget_breach`.
+- **Q4. `actions.subaccount_scope` for the budget-breach action.** The `actions.actionScope` column defaults to `'subaccount'`. For budget-breach blocks, does the org-admin see breaches across all subaccounts? Recommendation: `'subaccount'` scope (the default) — breaches belong to the subaccount whose pack budget was breached. Confirm during Phase 5 implementation.
 - **Q5. Prefix-hash dedup across model families.** A snapshot row is keyed by `prefix_hash` only (§5.6). The hash includes `modelFamily` in its inputs (§4.4), so Sonnet and Opus naturally produce different hashes. Confirmed — no action needed; noted here for reviewer-clarity.
 
 ---
@@ -2030,3 +1997,97 @@ When all nine are green, cached-context is promoted from pilot to general-availa
 
 
 
+
+codex
+- §4.1 and §6.5: `maxOutputTokens ≤ reserveOutputTokens` conflicts with `reserveOutputTokens = min(modelTierPolicy.reserveOutputTokens, resolvedMaxOutputTokens)`, which effectively forces equality whenever output is narrowed and leaves the invariant direction ambiguous. Fix by declaring whether v1 intends `reserveOutputTokens === maxOutputTokens` after resolution or by flipping/removing the invariant so the resolver and contract express one rule.
+
+- §4.5, §6.4, and §6.5: `validateAssembly` is specified to emit `thresholdBreached='max_total_cost_usd' | 'per_document_cap'`, but neither `ResolvedExecutionBudget` nor the validator inputs include `perDocumentMaxTokens` or a named pricing source needed to compute `estimatedCostUsd`. Fix by adding those inputs to the budget/validator contract from an existing pricing source, or drop those breach modes from v1.
+
+- §4.1, §4.5, and §6.6: `maxOutputTokens` is part of the canonical budget, but no contract ever checks a requested output value against it, and `thresholdBreached` has no max-output case. Fix by naming the caller field compared to `maxOutputTokens` and adding a breach mechanism, or remove `maxOutputTokens` from the v1 block contract if it is only a reserve alias.
+
+- §4.4 and §5.9: `PREFIX_HASH_COMPONENTS` says components are logged to `llm_requests.prefix_hash_components`, but §5.9 explicitly says there is no such column and §13 lists no migration for it. Fix by removing the `llm_requests.prefix_hash_components` claim everywhere or adding the column/migration/inventory consistently.
+
+- §4.3, §5.2, and §6.3: the snapshot/resolution contract calls the per-document hash `contentHash`, while §5.2 says the hash that feeds prefix identity is `serializedBytesHash`, so the source-of-truth hash is described two different ways. Fix by renaming the snapshot field to `serializedBytesHash` or storing both hashes with one explicitly designated as the prefix-hash input.
+
+- §4.3 and §6.4: `contextAssemblyEngine.assemble()` is said to read only persisted snapshots, but `pack_resolution_snapshots` stores no document body or serialized bytes, so the engine cannot reconstruct `stablePrefix` from the snapshot contract as written. Fix by either persisting the serialized document bytes on the snapshot or explicitly having assembly re-read immutable version rows by pinned identifier and updating the “snapshot-only” language.
+
+- §5.6 and §6.3: `pack_resolution_snapshots` is deduped globally by `UNIQUE(prefix_hash)` even though each row also stores `packId` and `packVersion`, so two different packs with identical document sets would collide onto one row carrying the wrong pack identity. Fix by scoping uniqueness to pack identity, or redefining the row as a pack-agnostic prefix snapshot and moving pack linkage elsewhere.
+
+- §4.2, §5.6, §6.3, and §6.6: the orchestrator/ledger contract carries one `prefixHash` per run, but resolution produces one snapshot hash per attached pack and the spec never names how multiple pack hashes combine into a single call-level hash. Fix by introducing an explicit assembled-prefix hash computed over the ordered attached-pack snapshots and use that single value for `llm_requests.prefix_hash` and cache attribution.
+
+- §6.4 and §11.1: v1 supports multiple attached packs, but no deterministic cross-pack flattening/order rule is defined before computing the full prefix, and the test text only says `assemblePrefix` sorts by `documentId` internally even though its input type is `PackResolutionSnapshot[]`. Fix by specifying a global ordering rule across attached packs/documents and reflecting that same rule in `assemblePrefix`, `computePrefixHash`, and the golden fixture.
+
+- §4.2 and §6.6: `cachedContextOrchestrator.execute()` returns required `llmResponseContent`, `llmRequestId`, `prefixHash`, and `cacheStats`, but the documented HITL rejection/timeout path returns `runOutcome='failed'` before any router call, so the return type cannot be satisfied. Fix by making the execute result a discriminated union or marking router-derived fields nullable on failure paths.
+
+- §5.5 and §6.2: attachments are described as creating a fresh row on re-attach after detach, but `documentPackService.attach` says duplicate attachments “including re-attach after detach” return the existing row idempotently. Fix by separating the rules so live duplicates return the existing row, while re-attach after a soft-deleted row inserts a new row.
+
+- §5.11, §6.6, and §9.3: the spec claims the terminal write sets `agent_runs.run_outcome` and `llm_requests` status/prefix data atomically, but the flow calls `llmRouter.routeCall()` before the terminal transaction and never names a shared transaction handle or reconciliation mechanism. Fix by either relaxing the claim to non-atomic best-effort writes or specifying the exact router/orchestrator transaction boundary that writes both tables together.
+
+- §6.6: approval of a budget block “re-runs steps 1–3” with no retry bound or unchanged-input check, so an unchanged oversize pack can loop through HITL forever. Fix by adding a hard cap on approval cycles per run or requiring a material pack/version change before a second assembly attempt.
+
+- §6.7 and §8.6: `packUtilizationJob` is defined as an hourly cross-tenant background sweep, but §8.6 forbids `withAdminConnection` and says every cached-context read/write uses a principal-scoped connection, leaving no named mechanism for the job to read and update all orgs under RLS. Fix by specifying the exact per-org execution context the job uses under `withPrincipalContext` or equivalent existing primitive, and narrow the “no bypasses” text accordingly.
+
+- §6.7: the utilization job reads the latest snapshot for a pack/model family even if the pack’s `currentVersion` has advanced since that snapshot, which makes the pre-run warning metric stale after pack edits until the next run resolves a new snapshot. Fix by falling back to live-member recomputation whenever the latest snapshot’s `packVersion` lags `document_packs.currentVersion`.
+
+- §8.1 and §8.5: the generic RLS template shown for `model_tier_budget_policies` only permits `organisation_id = current_setting(...)`, but §8.5 later says `organisation_id IS NULL` platform-default rows are readable to all orgs. Fix by writing a model-tier-policy-specific policy block in §8.1/0208 that explicitly includes the `organisation_id IS NULL` case.
+
+- §6.6 and §9.4: TTL is described as “narrowable by task-override or org-max via the resolver”, and `execute()` references a “TTL note”, but no TTL policy field, resolver logic, or note actually exists. Fix by either removing the narrowing language and treating `ttl` as a direct caller hint, or adding a named TTL policy source and resolver output.
+
+- §10 Phase 4 and §11.2: Phase 4 acceptance/tests assert `llm_requests.prefix_hash` and `cache_creation_tokens`, but those columns and the router write path do not land until Phase 5/0210. Fix by moving those assertions to Phase 5 or pulling the 0210/router-attribution work forward into Phase 4.
+
+- §15 (“Resolved in the brief”, item 5) and §5.8/§5.9: the prose still says cached-context attribution lives on `agent_runs.cached_prefix_hash`, but the schema actually adds `pack_snapshot_ids` on `agent_runs` and `prefix_hash` on `llm_requests`. Fix by updating §15 to the implemented storage contract or adding the missing `cached_prefix_hash` field if that is still required.
+
+- §15 Q4: “confirm during Phase 5 implementation” is not an implementation verdict, so the open-questions section still contains an unresolved decision. Fix by turning Q4 into an explicit v1 decision now or moving it back to a genuine deferred/open item with owner and rationale.
+
+- §5.2, §6.1, and §12.5: `reference_document_versions.tokenCounts` must exist for every declared model family, but the spec never says what happens when a new model family/policy row is added after existing versions were created and lack that key. Fix by requiring a backfill migration/job before a new `model_tier_budget_policies` family can be activated, or define a named hard-fail path on missing `tokenCounts[modelFamily]`.
+
+- §7.1 and §6.1: the route surface exposes `GET /api/reference-documents/:id/versions`, but `ReferenceDocumentService` has no `listVersions` method or other named read path for that endpoint. Fix by adding the missing service method to §6.1 or dropping the route from §7.1.
+
+- §11.1, §4.4, and R8: the only enforced `ASSEMBLY_VERSION` check is a `computePrefixHash(GOLDEN_COMPONENTS)` fixture, which would not catch non-hash pure-logic changes like pack flattening/order/filter rules that still alter the assembled prefix contract. Fix by expanding the pure fixture to assert exact assembled stable-prefix bytes and final assembled-prefix hash for representative multi-pack inputs, not just the component-hash function.
+tokens used
+63,028
+- §4.1 and §6.5: `maxOutputTokens ≤ reserveOutputTokens` conflicts with `reserveOutputTokens = min(modelTierPolicy.reserveOutputTokens, resolvedMaxOutputTokens)`, which effectively forces equality whenever output is narrowed and leaves the invariant direction ambiguous. Fix by declaring whether v1 intends `reserveOutputTokens === maxOutputTokens` after resolution or by flipping/removing the invariant so the resolver and contract express one rule.
+
+- §4.5, §6.4, and §6.5: `validateAssembly` is specified to emit `thresholdBreached='max_total_cost_usd' | 'per_document_cap'`, but neither `ResolvedExecutionBudget` nor the validator inputs include `perDocumentMaxTokens` or a named pricing source needed to compute `estimatedCostUsd`. Fix by adding those inputs to the budget/validator contract from an existing pricing source, or drop those breach modes from v1.
+
+- §4.1, §4.5, and §6.6: `maxOutputTokens` is part of the canonical budget, but no contract ever checks a requested output value against it, and `thresholdBreached` has no max-output case. Fix by naming the caller field compared to `maxOutputTokens` and adding a breach mechanism, or remove `maxOutputTokens` from the v1 block contract if it is only a reserve alias.
+
+- §4.4 and §5.9: `PREFIX_HASH_COMPONENTS` says components are logged to `llm_requests.prefix_hash_components`, but §5.9 explicitly says there is no such column and §13 lists no migration for it. Fix by removing the `llm_requests.prefix_hash_components` claim everywhere or adding the column/migration/inventory consistently.
+
+- §4.3, §5.2, and §6.3: the snapshot/resolution contract calls the per-document hash `contentHash`, while §5.2 says the hash that feeds prefix identity is `serializedBytesHash`, so the source-of-truth hash is described two different ways. Fix by renaming the snapshot field to `serializedBytesHash` or storing both hashes with one explicitly designated as the prefix-hash input.
+
+- §4.3 and §6.4: `contextAssemblyEngine.assemble()` is said to read only persisted snapshots, but `pack_resolution_snapshots` stores no document body or serialized bytes, so the engine cannot reconstruct `stablePrefix` from the snapshot contract as written. Fix by either persisting the serialized document bytes on the snapshot or explicitly having assembly re-read immutable version rows by pinned identifier and updating the “snapshot-only” language.
+
+- §5.6 and §6.3: `pack_resolution_snapshots` is deduped globally by `UNIQUE(prefix_hash)` even though each row also stores `packId` and `packVersion`, so two different packs with identical document sets would collide onto one row carrying the wrong pack identity. Fix by scoping uniqueness to pack identity, or redefining the row as a pack-agnostic prefix snapshot and moving pack linkage elsewhere.
+
+- §4.2, §5.6, §6.3, and §6.6: the orchestrator/ledger contract carries one `prefixHash` per run, but resolution produces one snapshot hash per attached pack and the spec never names how multiple pack hashes combine into a single call-level hash. Fix by introducing an explicit assembled-prefix hash computed over the ordered attached-pack snapshots and use that single value for `llm_requests.prefix_hash` and cache attribution.
+
+- §6.4 and §11.1: v1 supports multiple attached packs, but no deterministic cross-pack flattening/order rule is defined before computing the full prefix, and the test text only says `assemblePrefix` sorts by `documentId` internally even though its input type is `PackResolutionSnapshot[]`. Fix by specifying a global ordering rule across attached packs/documents and reflecting that same rule in `assemblePrefix`, `computePrefixHash`, and the golden fixture.
+
+- §4.2 and §6.6: `cachedContextOrchestrator.execute()` returns required `llmResponseContent`, `llmRequestId`, `prefixHash`, and `cacheStats`, but the documented HITL rejection/timeout path returns `runOutcome='failed'` before any router call, so the return type cannot be satisfied. Fix by making the execute result a discriminated union or marking router-derived fields nullable on failure paths.
+
+- §5.5 and §6.2: attachments are described as creating a fresh row on re-attach after detach, but `documentPackService.attach` says duplicate attachments “including re-attach after detach” return the existing row idempotently. Fix by separating the rules so live duplicates return the existing row, while re-attach after a soft-deleted row inserts a new row.
+
+- §5.11, §6.6, and §9.3: the spec claims the terminal write sets `agent_runs.run_outcome` and `llm_requests` status/prefix data atomically, but the flow calls `llmRouter.routeCall()` before the terminal transaction and never names a shared transaction handle or reconciliation mechanism. Fix by either relaxing the claim to non-atomic best-effort writes or specifying the exact router/orchestrator transaction boundary that writes both tables together.
+
+- §6.6: approval of a budget block “re-runs steps 1–3” with no retry bound or unchanged-input check, so an unchanged oversize pack can loop through HITL forever. Fix by adding a hard cap on approval cycles per run or requiring a material pack/version change before a second assembly attempt.
+
+- §6.7 and §8.6: `packUtilizationJob` is defined as an hourly cross-tenant background sweep, but §8.6 forbids `withAdminConnection` and says every cached-context read/write uses a principal-scoped connection, leaving no named mechanism for the job to read and update all orgs under RLS. Fix by specifying the exact per-org execution context the job uses under `withPrincipalContext` or equivalent existing primitive, and narrow the “no bypasses” text accordingly.
+
+- §6.7: the utilization job reads the latest snapshot for a pack/model family even if the pack’s `currentVersion` has advanced since that snapshot, which makes the pre-run warning metric stale after pack edits until the next run resolves a new snapshot. Fix by falling back to live-member recomputation whenever the latest snapshot’s `packVersion` lags `document_packs.currentVersion`.
+
+- §8.1 and §8.5: the generic RLS template shown for `model_tier_budget_policies` only permits `organisation_id = current_setting(...)`, but §8.5 later says `organisation_id IS NULL` platform-default rows are readable to all orgs. Fix by writing a model-tier-policy-specific policy block in §8.1/0208 that explicitly includes the `organisation_id IS NULL` case.
+
+- §6.6 and §9.4: TTL is described as “narrowable by task-override or org-max via the resolver”, and `execute()` references a “TTL note”, but no TTL policy field, resolver logic, or note actually exists. Fix by either removing the narrowing language and treating `ttl` as a direct caller hint, or adding a named TTL policy source and resolver output.
+
+- §10 Phase 4 and §11.2: Phase 4 acceptance/tests assert `llm_requests.prefix_hash` and `cache_creation_tokens`, but those columns and the router write path do not land until Phase 5/0210. Fix by moving those assertions to Phase 5 or pulling the 0210/router-attribution work forward into Phase 4.
+
+- §15 (“Resolved in the brief”, item 5) and §5.8/§5.9: the prose still says cached-context attribution lives on `agent_runs.cached_prefix_hash`, but the schema actually adds `pack_snapshot_ids` on `agent_runs` and `prefix_hash` on `llm_requests`. Fix by updating §15 to the implemented storage contract or adding the missing `cached_prefix_hash` field if that is still required.
+
+- §15 Q4: “confirm during Phase 5 implementation” is not an implementation verdict, so the open-questions section still contains an unresolved decision. Fix by turning Q4 into an explicit v1 decision now or moving it back to a genuine deferred/open item with owner and rationale.
+
+- §5.2, §6.1, and §12.5: `reference_document_versions.tokenCounts` must exist for every declared model family, but the spec never says what happens when a new model family/policy row is added after existing versions were created and lack that key. Fix by requiring a backfill migration/job before a new `model_tier_budget_policies` family can be activated, or define a named hard-fail path on missing `tokenCounts[modelFamily]`.
+
+- §7.1 and §6.1: the route surface exposes `GET /api/reference-documents/:id/versions`, but `ReferenceDocumentService` has no `listVersions` method or other named read path for that endpoint. Fix by adding the missing service method to §6.1 or dropping the route from §7.1.
+
+- §11.1, §4.4, and R8: the only enforced `ASSEMBLY_VERSION` check is a `computePrefixHash(GOLDEN_COMPONENTS)` fixture, which would not catch non-hash pure-logic changes like pack flattening/order/filter rules that still alter the assembled prefix contract. Fix by expanding the pure fixture to assert exact assembled stable-prefix bytes and final assembled-prefix hash for representative multi-pack inputs, not just the component-hash function.
