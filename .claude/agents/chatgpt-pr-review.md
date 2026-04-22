@@ -97,6 +97,9 @@ For each round:
    When you reply to a pending architectural item ("implement" / "defer" /
    "reject"):
    - Remove it (and its overlapping dependents) from `pending_architectural_items`
+     immediately — regardless of which decision you choose. "defer" removes it
+     just as "implement" and "reject" do; routing it to tasks/todo.md is the
+     resolution, not a state that leaves it pending.
    - Re-activate all paused dependent items — process them immediately in the
      current round if the decision allows it (i.e. if you said "implement" or if
      the architectural change doesn't invalidate them)
@@ -120,7 +123,9 @@ For each round:
    - "continue" → proceed with remaining items
    - "stop" → halt implementation; remaining accepted items are deferred to
      tasks/todo.md under § PR Review deferred items
-   - "split" → halt implementation; list remaining items for a follow-up PR
+   - "split" → halt implementation; route remaining accepted items to
+     tasks/todo.md under § PR Review deferred items with reason
+     "deferred: split to follow-up PR"
 5. Implement the accepted items (excluding any flagged for your decision in step 3)
    using Edit, Write, Bash — follow CLAUDE.md and architecture.md conventions.
 6. Run `npm run lint && npm run typecheck` — fix any issues before continuing
@@ -192,7 +197,10 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - Systematic gap: same finding category in 2+ rounds → add/update KNOWLEDGE.md
    - [missing-doc] >2 → directly update CLAUDE.md or architecture.md
 4. Structured index: append one JSONL line per finding to
-   tasks/review-logs/_index.jsonl (create file if not exists, append only):
+   tasks/review-logs/_index.jsonl (create file if not exists, append only).
+   Only write findings with a final decision (accept / reject / defer).
+   Do NOT write items still in `pending_architectural_items` — write them
+   only after the user resolves them (at which point decision is final).
    {"timestamp":"...","agent":"chatgpt-pr-review","finding_type":"null_check",
     "decision":"accept","severity":"high","file":"agentExecutionService.ts",
     "category":"bug","fingerprint":"a3f9c2"}
