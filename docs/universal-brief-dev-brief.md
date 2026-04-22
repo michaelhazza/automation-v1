@@ -1,6 +1,6 @@
 # Universal Brief — Development Brief
 
-**Status:** Draft development brief — revision 3, after second round of external LLM critique
+**Status:** Draft development brief — revision 4 (final iteration pass before spec)
 **Author:** Design session on `claude/research-questioning-feature-ddKLi`
 **Audience:** architect, spec-reviewer, further external review rounds, then implementation session
 **Date:** 2026-04-22
@@ -23,7 +23,7 @@
   7. Added §11.5 observability and failure visibility — instrumentation as a day-zero concern.
   8. Updated sequencing (§14) to reflect the new sub-phase and four-scope v1.
   9. Updated open questions (§15) — marked resolved items, reframed remaining ones.
-- **rev 3** (this version — post external review round 2) — contract extensions accepted pre-build rather than retrofitted later:
+- **rev 3** (post external review round 2) — contract extensions accepted pre-build rather than retrofitted later:
   1. **Artefact lifecycle primitives.** Added `artefactId` (required), optional `status` (`final` / `pending` / `updated` / `invalidated`), `parentArtefactId`, `relatedArtefactIds`, per-artefact `contractVersion`. Enables streaming, refresh flows, and loose artefact relationships without contract churn later. See §11.1.
   2. **Structured result — `columns` + `freshnessMs`.** Soft schema hint for deterministic UI rendering; data-freshness signal that disambiguates cached provider data (still `live`, non-zero `freshnessMs`) from true canonical reads. See §11.2.
   3. **Approval card — `executionId` + `executionStatus`.** Execution linkage so approvals transition through pending → running → completed/failed on a single artefact chain. See §11.2.
@@ -33,6 +33,14 @@
   7. **Tightened `source` semantics.** Cached provider data is `live` with non-zero `freshnessMs`, not mis-classified as canonical. Freshness is what users care about; classification is internal bookkeeping.
   8. **Declined: per-filter confidence.** Feedback suggested per-filter confidence on `filtersApplied`. Rejected for v1 — artefact-level confidence from rev 2 is sufficient; per-filter granularity is over-engineering at this stage.
   9. **Updated open questions and sequencing notes** to reflect contract expansion.
+- **rev 4** (this version — post external review rounds 3 + 4, final pass before spec) — closed out developer-ergonomics gap:
+  1. **Contract additions (round 3):** `confidenceSource?: 'llm' | 'heuristic' | 'deterministic'` on structured + approval artefacts; `window?: 'per_run' | 'per_day' | 'per_month' | 'unknown'` on `BriefBudgetContext`. Both optional.
+  2. **Contract rules (round 3):** single-active-artefact rule for lifecycle chains, execution reuse rule (latest-only), relationship directionality rule (not automatically bidirectional), RLS backstop expanded to cover aggregate invariants, `freshnessMs` hybrid rule (maximum age across contributors).
+  3. **§9 expanded (round 4):** three canonical flows, artefact-by-artefact with explicit IDs, parent links, related links, and status transitions. Pressure-tests the contract end-to-end against read refinement, write + execution, and failure + retry.
+  4. **New §12 Implementation guidance (round 4):** golden implementation guidelines (directive SHOULD/MUST rules), implementation boundaries (capability / orchestrator / execution / client), failure handling principles (invalid artefacts, missing parents, out-of-order updates), contract test requirements (gate for every capability).
+  5. **New §15.1 Build sequence (round 4):** contract-layer implementation order within product phases. Each step is independently shippable; avoids the "half-done everything" failure mode.
+  6. **Tone shift in new sections (round 4):** directive language ("capabilities SHOULD...", "MUST", "MUST NOT") in implementation guidance sections. Existing rationale sections retain explanatory tone — they serve a different audience.
+  7. **This is the last iteration pass.** Further feedback is welcome but the brief is now treated as build-ready. The next step after this is `architect` → implementation spec → `spec-reviewer`.
 
 ---
 
@@ -50,14 +58,22 @@
    - 8.2 Clarifying + Sparring Partner skills
    - 8.3 User-triggered memory capture
    - 8.4 Retrieval audit
-9. End-to-end flow — how it all plugs together
+9. Canonical flows — artefact-by-artefact
+   - 9.1 Flow A — Read with refinement
+   - 9.2 Flow B — Write with approval and execution
+   - 9.3 Flow C — Failure and retry
 10. Rationale — decisions we deliberately made
 11. Cost and safety posture
-12. Non-goals
-13. Relationship to other in-flight work
-14. Sequencing
-15. Open questions for external review
-16. Success criteria
+12. Implementation guidance
+    - 12.1 Golden implementation guidelines
+    - 12.2 Implementation boundaries — who does what
+    - 12.3 Failure handling principles
+    - 12.4 Contract test requirements
+13. Non-goals
+14. Relationship to other in-flight work
+15. Sequencing
+16. Open questions for external review
+17. Success criteria
 
 ---
 
@@ -384,75 +400,224 @@ This sub-phase lands before W3.3 (approval-gate suggestion) and W3.4 (provenance
 
 **Why this goes first in the sequence.** Cheap insurance. Half a day of investigation before committing to §8.3.3 (the most expensive phase) can save a week of building on a broken foundation. Also informs §8.3.1 and §8.3.2 — if retrieval is fine today, we can focus on capture UX with confidence.
 
-## 9. End-to-end flow
+## 9. Canonical flows — artefact-by-artefact
 
-A worked example showing how the pieces compose. User types into the global ask bar while viewing a subaccount dashboard: *"Show me VIP contacts inactive 30 days and email them a check-in."*
+Three canonical flows pressure-test the contract end-to-end. Each shows artefact IDs, `parentArtefactId` chains, `relatedArtefactIds`, and `status` transitions explicitly. If a flow can't be modelled cleanly in these artefact primitives, the contract has a gap. If these three can, the contract is sound for v1.
+
+Every capability implementer MUST be able to map their surface into at least one of these flows. The spec's contract-test harness (§12.4) validates this mapping.
+
+---
+
+### 9.1 Flow A — Read with refinement
+
+Scenario: User types *"Show me VIP contacts inactive 30 days"* while viewing a subaccount dashboard. Then clicks a suggestion to narrow the query.
+
+**Turn 1 — initial result:**
 
 ```
-1.  Global ask bar captures input + UI context (subaccount_id = "acme")
-        ↓
-2.  Brief created with scope = subaccount (Tier 1 UI context wins; no LLM call)
-        ↓
-3.  Triage classifier (W1) runs — heuristic tier first:
-    - Has action verb ("email") → needs_orchestrator
-    - Has data query ("VIP contacts inactive 30 days") → needs_orchestrator
-    - Confidence high → skip Tier 2 Haiku
-        ↓
-4.  Orchestrator (COO) routes:
-    - Decomposes intent: {read: VIP contact query} + {write: send email}
-    - Read part → invokes crm.query_planner capability (separate branch)
-    - Planner returns BriefStructuredResult (per contract):
-        summary: "14 VIP contacts inactive 30 days"
-        rows: [...]
-        filtersApplied: [tag=VIP, lastActivity<30d]
-        suggestions: ["Narrow to last 7d", "Sort by oldest activity"]
-    - Write part → flags for approval (destructive action)
-        ↓
-5.  Brief chat renders:
-    - The structured result (table + chip for filters + suggestions)
-    - BELOW: an approval card for the email send:
-        summary: "Send 'Quarterly Check-in' email to 14 VIP contacts"
-        actionSlug: "crm.send_email"
-        affectedRecordIds: [14 UUIDs]
-        riskLevel: "medium"
-        estimatedCostCents: 5
-        ↓
-6.  Orchestrator masterPrompt evaluates challenge gate:
-    - 14-contact email crosses the "medium scope" threshold
-    - Invokes challenge_assumptions skill
-    - Output surfaces on the approval card: "Two of these 14 contacts
-      opted out of bulk email in the last 30d — proceed?"
-        ↓
-7.  User sees the result, reviews the approval card + challenge,
-    maybe clicks a suggestion ("Sort by oldest activity") to refine,
-    then approves the email send
-        ↓
-8.  Action dispatches through existing review-gated crm.send_email action
-    (same path as any structured write)
-        ↓
-9.  Sub-task spawned under the Brief for the send — tracked in real time
-        ↓
-10. On completion: teachability heuristic (W3b) evaluates:
-    - Novel decision (first VIP bulk email from this user)
-    - Suggestion panel appears:
-        "Teach the system? 'Always exclude contacts with recent opt-outs
-         from VIP bulk email' — scope: Cold Outreach Agent"
-    - User clicks "Save rule"
-    - Rule written to memoryBlocks with source='user_triggered'
-        ↓
-11. Next time the user runs a similar Brief, the COO's output surfaces:
-    - "Applied rule: Always exclude contacts with recent opt-outs" 🔗
-    - Provenance trail (W3c) lets the user click through if the rule misfires
-        ↓
-12. Brief closes with outcome attached; conversation thread preserved;
-    user can re-open and ask follow-ups anytime
+Artefact A (BriefStructuredResult)
+  artefactId:           "art_001"
+  status:               "final"
+  parentArtefactId:     (none)
+  relatedArtefactIds:   []
+  kind:                 "structured"
+  entityType:           "contacts"
+  summary:              "14 VIP contacts inactive 30 days"
+  filtersApplied:       [tag=VIP, lastActivity<30d]
+  rows:                 [14 contact records]
+  rowCount:             14
+  columns:              [name, email, lastActivityAt, owner]
+  suggestions:          ["Narrow to last 7d", "Sort by oldest activity"]
+  source:               "canonical"
+  freshnessMs:          180000       // 3 min old
+  confidence:           0.95
+  confidenceSource:     "deterministic"
+  costCents:            2
 ```
 
-**What this flow demonstrates:**
-- Single entry point (global ask bar), single entity (Brief), single conversation thread
-- Classifier (W1), clarifying/sparring skills (W2), memory capture (W3a+b+c), CRM query planner all compose transparently
-- Read-only results render inline; writes are always review-gated
-- The user never sees the underlying routing machinery — they see a conversation with their COO
+**Turn 2 — user clicks "Narrow to last 7d" suggestion:**
+
+A new Brief turn is initiated with the suggestion's `intent` as input. The COO interprets, the CRM Planner re-runs with the narrower filter, and emits an updated artefact:
+
+```
+Artefact B (BriefStructuredResult)
+  artefactId:           "art_002"
+  status:               "updated"
+  parentArtefactId:     "art_001"         // ← supersedes Artefact A
+  relatedArtefactIds:   []
+  kind:                 "structured"
+  entityType:           "contacts"
+  summary:              "3 VIP contacts inactive 7 days"
+  filtersApplied:       [tag=VIP, lastActivity<7d]
+  rows:                 [3 contact records]
+  rowCount:             3
+  columns:              [same]
+  suggestions:          ["Broaden to 30d", "Group by owner"]
+  source:               "canonical"
+  freshnessMs:          180000
+  confidence:           0.95
+  confidenceSource:     "deterministic"
+  costCents:            2
+```
+
+**UI behaviour:** Artefact B renders in place of A. A is accessible via history (parent link) but is no longer the "active" artefact — per the single-active-artefact rule, only the tip of the chain (B, since nothing supersedes it) renders as primary content.
+
+**What this flow validates:**
+- Lifecycle chain via `parentArtefactId` works for refinement
+- `status: 'updated'` replaces in-place cleanly
+- Single-active rule resolves the chain deterministically
+- Suggestions are re-parseable as new Brief turns (suggestion's `intent` becomes the next turn's input)
+- `costCents` accumulates per-turn (Brief's total spend is the sum)
+
+---
+
+### 9.2 Flow B — Write with approval and execution
+
+Scenario: From the refined result in Flow A, user types *"Email these 3 contacts a check-in."*
+
+**Turn 3 — result + approval card:**
+
+The COO interprets as a write intent. Since the write targets the 3 records from Artefact B, the approval card references B via `relatedArtefactIds`:
+
+```
+Artefact C (BriefApprovalCard)
+  artefactId:           "art_003"
+  status:               "final"                // initial state before user action
+  parentArtefactId:     (none)
+  relatedArtefactIds:   ["art_002"]           // ← refers to the result that spawned it
+  kind:                 "approval"
+  summary:              "Send 'Check-in' email to 3 VIP contacts"
+  actionSlug:           "crm.send_email"
+  actionArgs:           { templateId: "quarterly-check-in", contactIds: [...] }
+  affectedRecordIds:    [3 contact UUIDs]
+  riskLevel:            "medium"
+  estimatedCostCents:   3
+  confidence:           0.9
+  confidenceSource:     "llm"
+  budgetContext:        { remainingCents: 98, limitCents: 100, window: "per_run" }
+  executionId:          (none — not yet dispatched)
+  executionStatus:      (none)
+```
+
+**Sparring gate fires on the approval.** Since the action crosses the challenge threshold (external-facing write, multi-recipient), the `challenge_assumptions` skill runs. Output surfaces on Artefact C inline — the UI renders it adjacent to the approval card, not as a separate artefact.
+
+**User approves → Turn 4 — execution linkage:**
+
+The orchestrator emits an updated approval card with `executionId` + `executionStatus`:
+
+```
+Artefact D (BriefApprovalCard)
+  artefactId:           "art_004"
+  status:               "updated"
+  parentArtefactId:     "art_003"             // ← supersedes original card
+  relatedArtefactIds:   ["art_002"]           // ← preserved from parent
+  kind:                 "approval"
+  summary:              "Send 'Check-in' email to 3 VIP contacts"
+  actionSlug:           "crm.send_email"
+  actionArgs:           [same]
+  affectedRecordIds:    [same]
+  riskLevel:            "medium"
+  executionId:          "exec_xyz123"         // ← populated on dispatch
+  executionStatus:      "running"
+  ... (other fields inherited/replicated)
+```
+
+As the execution progresses, further updates fire: `executionStatus: 'completed'` (with a final `status: 'updated'` artefact). Each transition is a new artefact superseding the prior via `parentArtefactId`.
+
+**Final state — Turn 5:**
+
+```
+Artefact E (BriefApprovalCard)
+  artefactId:           "art_005"
+  status:               "updated"
+  parentArtefactId:     "art_004"
+  relatedArtefactIds:   ["art_002"]
+  executionId:          "exec_xyz123"
+  executionStatus:      "completed"
+  ... (with any return value summary)
+```
+
+**What this flow validates:**
+- Approval → execution → completion is one linked artefact chain (art_003 → art_004 → art_005)
+- Related artefact link (Artefact B, the source result) preserved across the chain
+- Execution status transitions are first-class artefact updates, not out-of-band UI state
+- Sparring skill output surfaces inline on the approval, not as a separate artefact
+- Single-active rule: the current active artefact is always the tip (art_005)
+
+---
+
+### 9.3 Flow C — Failure and retry
+
+Scenario: The send in Flow B fails because the SMTP provider rate-limits. User retries.
+
+**Turn 5 — execution failure:**
+
+The orchestrator emits a failure artefact referencing the approval that failed:
+
+```
+Artefact F (BriefApprovalCard)
+  artefactId:           "art_005"
+  status:               "updated"
+  parentArtefactId:     "art_004"
+  relatedArtefactIds:   ["art_002"]
+  executionId:          "exec_xyz123"
+  executionStatus:      "failed"
+```
+
+Accompanied by an error artefact describing the failure:
+
+```
+Artefact G (BriefErrorResult)
+  artefactId:           "art_006"
+  status:               "final"
+  parentArtefactId:     (none)
+  relatedArtefactIds:   ["art_005"]           // ← links to the failed approval
+  kind:                 "error"
+  errorCode:            "rate_limited"
+  message:              "Email provider rate-limited the send. Try again in 30s."
+  severity:             "medium"
+  retryable:            true
+  suggestions:          ["Retry now", "Retry in 1min"]
+```
+
+**UI behaviour:** the failed approval (art_005) stays visible with a red ✗; the error (art_006) renders below it with a "Retry" affordance.
+
+**Turn 6 — user clicks Retry:**
+
+The orchestrator emits a new approval artefact — NOT by re-activating art_005, but by creating a fresh chain. Per the execution reuse rule, retries emit new approval artefacts via the `parentArtefactId` chain:
+
+```
+Artefact H (BriefApprovalCard)
+  artefactId:           "art_007"
+  status:               "final"
+  parentArtefactId:     "art_005"             // ← the failed approval is the parent
+  relatedArtefactIds:   ["art_002", "art_006"] // ← related to both the original result and the error
+  kind:                 "approval"
+  summary:              "Retry: Send 'Check-in' email to 3 VIP contacts"
+  actionSlug:           "crm.send_email"
+  actionArgs:           [same]
+  executionId:          (none — awaiting dispatch)
+  executionStatus:      (none)
+```
+
+On approval, the chain continues: art_007 → art_008 (running) → art_009 (completed or failed).
+
+**What this flow validates:**
+- Failures are first-class artefacts, not hidden UI state
+- Error artefacts carry enough context (severity, retryable, suggestions) for the UI to act without custom per-error logic
+- Retries emit NEW approval chains — history preserved via `parentArtefactId`, current attempt via latest `executionId`
+- `relatedArtefactIds` captures cross-chain context (the retry knows about both the original result AND the error that caused the retry)
+- Single-active rule still applies: at any moment, the tip of the current chain is authoritative
+
+---
+
+**What these three flows collectively demonstrate:**
+- The contract holds for read refinement, write-with-execution, and failure-with-retry without UI guesswork
+- Every UI state transition is a new artefact with a deterministic parent link
+- Relationships across chains are explicit via `relatedArtefactIds`
+- No contract primitive is unused; no common user flow is unmodelable
+
+If any future capability produces a flow that can't be modelled this cleanly, the contract has a gap — that's the signal to revisit, not to work around.
 
 ---
 
@@ -636,7 +801,69 @@ Observability is a day-zero concern, not something that gets bolted on after thi
 
 ---
 
-## 12. Non-goals
+## 12. Implementation guidance
+
+This section exists because a contract without implementation guidance produces inconsistent implementations. Different developers interpret the same rules differently and ship subtly divergent artefacts. The sections below are the **directives** that turn this brief from a spec-shaped document into a build-ready one.
+
+**Every capability implementation MUST be reviewed against this section.** The `architect` agent will reference these rules when producing the implementation spec; the `pr-reviewer` agent will cite them when reviewing capability implementations.
+
+### 12.1 Golden implementation guidelines
+
+Directive rules for any capability producing artefacts. Phrased as SHOULD / MUST per standard RFC 2119 convention.
+
+- **Capabilities MUST emit `artefactId` on every artefact.** Never absent. Deterministic derivation is preferred — e.g., `hash(brief_id, turn_index, kind, sequence)` — so retries don't produce divergent IDs for logically identical artefacts. Random UUIDs on retry break the lifecycle chain.
+- **Capabilities MUST populate `relatedArtefactIds` when an artefact originates from another.** Approval cards MUST reference the result they're offering action over. Errors MUST reference the failed operation's source artefact. Silence here creates UI grouping inconsistency.
+- **Capabilities MUST use `status: 'updated'` rather than mutating a prior artefact.** Artefacts are immutable once emitted. Updates are new artefacts with a `parentArtefactId` pointing to the predecessor. In-place mutation breaks the single-active-artefact rule and makes history unreliable.
+- **Capabilities MUST NOT emit multiple active artefacts for the same logical result.** Per the single-active rule, only the tip of any chain is authoritative. Emitting two `kind: 'structured'` artefacts with overlapping scope from one turn creates ambiguity; one MUST supersede the other.
+- **Capabilities SHOULD populate `columns` when emitting tabular data.** Deterministic UI rendering. Omitting `columns` works but forces per-`entityType` UI logic — acceptable when the UI already has entity-specific rendering; avoid otherwise.
+- **Capabilities SHOULD omit `confidence` only when truly deterministic.** Any LLM-interpretation-based output emits confidence. Omission implies ~1.0 — claim it only when you can defend it.
+- **Capabilities MUST NOT bypass `actionRegistry` for approval cards.** Every `actionSlug` on an approval card resolves to a registered action. The approval UI dispatches through the standard review gate; the approval card is a UX affordance, not a parallel dispatch path.
+- **Capabilities SHOULD surface refinement `suggestions[]` on broad or truncated results.** Users given a 1,482-row truncated result with no suggestions have no productive next step. Three narrowing suggestions turn a dead-end into a conversation.
+- **Capabilities MUST honour RLS at the read boundary.** No post-filtering at the artefact layer. If a capability emits a count that exceeds the caller's scoped total, it has leaked data — the orchestrator-level backstop (§11.3) catches this, but prevention at the capability is primary.
+
+### 12.2 Implementation boundaries — who does what
+
+Responsibilities across the system. When in doubt about where logic belongs, this table is the answer.
+
+| Layer | Responsibility |
+|---|---|
+| **Capability** | Constructs base artefact with all semantic content (summary, rows, filtersApplied, confidence, suggestions). Enforces RLS at the read boundary. Assigns initial `artefactId` and populates `relatedArtefactIds` for any artefact spawned from another. Does NOT populate `budgetContext` or execution linkage fields — those are orchestrator-owned. |
+| **Orchestrator** | Assigns `artefactId` only if the capability omitted one (fallback). Injects `budgetContext` after capability returns (capability doesn't know caller's broader budget posture). Enforces lifecycle rules — rejects invalid artefacts, logs orphan `parentArtefactId` references, resolves out-of-order updates. Runs the RLS defence-in-depth backstop (aggregate invariants + ID scope). Emits `status: 'updated'` execution-progress artefacts on approval cards during action dispatch. |
+| **Execution layer** | Updates approval artefacts with `executionId` on dispatch. Transitions `executionStatus` through `pending → running → completed / failed` via new artefacts in the chain. Emits error artefacts on failure with appropriate `severity` + `retryable` based on the underlying failure class. |
+| **Client** | Resolves lifecycle chains — finds the tip of each `parentArtefactId` chain and renders only that. Visually marks predecessors as superseded (history available). Handles `status: 'invalidated'` by marking the predecessor stale; does not render the invalidation artefact as primary content. Renders `relatedArtefactIds` as grouping affordances. Surfaces `confidence`, `freshnessMs`, `budgetContext.window` per §11.1 thresholds. Never invents state — every UI update reflects a new artefact the server emitted. |
+
+**Principle.** State lives in artefacts. The client doesn't fabricate; the server emits. When a UI state change is needed, a new artefact is emitted and the client's lifecycle-resolution logic picks it up. This invariant makes the system replayable and debuggable — "what did the user see at time T?" is answered by "what was the tip of each chain at time T?"
+
+### 12.3 Failure handling principles
+
+System-level rules for failure modes. These prevent the chaos that emerges when each team handles failure differently.
+
+- **Invalid artefact shape → rejected at orchestrator boundary.** Artefacts failing schema validation (wrong types, missing required fields) are rejected before reaching the client. The orchestrator emits a `BriefErrorResult` with `errorCode: 'internal_error'` + `severity: 'high'` in their place. The capability's log gets a structured error record.
+- **Missing `parentArtefactId` references → ignored, logged.** When an artefact's `parentArtefactId` points to an unknown artefact (never emitted, or already garbage-collected from history), the orchestrator accepts the artefact as a new chain root and logs the orphan reference for investigation. No user-visible error — don't fail the user for an internal bookkeeping issue.
+- **Multiple artefacts claiming the same parent → latest timestamp wins, others logged.** When two artefacts both set `parentArtefactId: X`, the one with the latest `createdAt` becomes the tip. Earlier claimants are retained but not active. Producers responsible for this get a warning log.
+- **Out-of-order execution status updates → latest state wins if it's terminal; else the tip rule applies.** If `completed` arrives before `running`, the `completed` is authoritative. If `running` arrives after `completed`, it's logged and ignored (the action has already terminated). Terminal states (`completed`, `failed`) are sticky.
+- **Capability emission failures → orchestrator emits substitute error artefact.** If a capability throws, times out, or returns malformed output, the orchestrator emits a `BriefErrorResult` with an appropriate `errorCode` (`provider_error` for external failures, `internal_error` for capability bugs) in its place. The Brief chat never shows a blank turn; there's always an artefact.
+- **Lifecycle conflicts → logged, not escalated.** The orchestrator's job is to produce a consistent user experience, not to bubble producer bugs to users. Conflicts emit structured logs for producers to review; users see coherent state.
+
+### 12.4 Contract test requirements
+
+Every capability MUST pass the following tests before shipping. These are not suggested; they are the gate. The `architect` agent's spec template will include a testing section mirroring these.
+
+1. **Valid artefact schema.** Every emitted artefact validates against the TypeScript types in `shared/types/briefResultContract.ts`. Runtime validation at the capability boundary — producers emit through a type-checked path.
+2. **Lifecycle chain validation.** For any artefact chain the capability produces (refinement flows, approval → execution flows), all `parentArtefactId` references resolve within the chain, and exactly one artefact in each chain is the tip (no children).
+3. **RLS scope validation.** Every emitted artefact's referenced entity IDs fall within the caller's scope. Aggregate invariants (counts, sums) fall within scoped totals. Automated via a harness that runs capability queries against multiple test subaccounts and asserts no cross-scope leakage.
+4. **Relationship integrity.** Every `relatedArtefactIds` entry points to an artefact that was emitted earlier in the same Brief turn or an earlier turn. No forward references. No broken references.
+5. **Canonical flow coverage.** The capability provides at least one worked example matching at least one of the three canonical flows in §9 (read refinement, write with execution, failure with retry). The example runs end-to-end in the test harness and produces valid artefacts at every step.
+6. **Lifecycle rules — single active tip.** Given any artefact chain, a deterministic function identifies the single active tip. No chain produces ambiguous tips. No chain has zero tips.
+7. **Directive rules from §12.1.** Every directive is verifiable: test emits an artefact, assert `artefactId` is present, assert `relatedArtefactIds` is populated for spawned artefacts, assert `columns` present for tabular data, etc.
+
+**Test harness location.** A shared capability-test harness lives in `server/lib/briefContractTestHarness.ts` (to be created in Phase 0) providing reusable assertions for each of the above. Capability-specific tests import from it. No capability ships without passing these assertions.
+
+**Principle.** The contract's value comes from consistency. The test harness is how consistency is enforced; without it, "everyone follows the rules" is an unenforced aspiration.
+
+---
+
+## 13. Non-goals
 
 Explicit non-goals, so an external reviewer doesn't propose them as scope expansion:
 
@@ -651,15 +878,15 @@ Explicit non-goals, so an external reviewer doesn't propose them as scope expans
 
 ---
 
-## 13. Relationship to other in-flight work
+## 14. Relationship to other in-flight work
 
-### 13.1 ClientPulse (in-flight, other branch)
+### 14.1 ClientPulse (in-flight, other branch)
 
 ClientPulse Phase 4 + 4.5 has merged via PR #152, but ClientPulse remains mid-flight overall — refactors and follow-on changes are in progress. This brief does not interfere with ClientPulse execution; it waits.
 
 **Dependency direction:** none either way. ClientPulse's intervention + outcome measurement loops are internal to ClientPulse; the Brief surface doesn't touch them. Later, a Brief could query ClientPulse's outcome data ("how did our intervention do last month?") — that's a read query against canonical data, no integration work.
 
-### 13.2 Tier-1 tech-debt paydown (foundational, other branch)
+### 14.2 Tier-1 tech-debt paydown (foundational, other branch)
 
 Four ghost features from a recent audit need fixing before the Brief work starts:
 1. Per-run cost panel in agent run detail pages
@@ -669,7 +896,7 @@ Four ghost features from a recent audit need fixing before the Brief work starts
 
 **Dependency direction:** (2) is a hard prerequisite for W3. If the memory substrate is writing low-quality auto-extractions, user-triggered rules will land alongside garbage and the Learned Rules library will be polluted.
 
-### 13.3 CRM Query Planner (separate branch, parallel)
+### 14.3 CRM Query Planner (separate branch, parallel)
 
 The CRM Query Planner is a *capability* that plugs into the Brief surface. It's UI-agnostic by design — v1 can ship as a dedicated "Ask CRM" panel while the universal Brief surface is being built in parallel, and converge later.
 
@@ -679,17 +906,17 @@ The CRM Query Planner is a *capability* that plugs into the Brief surface. It's 
 - The Brief surface branch renders those artefacts per contract.
 - Both branches can develop independently after the contract landed.
 
-### 13.4 Agent Live Execution Logs (shipped, PR #166)
+### 14.4 Agent Live Execution Logs (shipped, PR #166)
 
 Shipped. The Brief surface benefits — a Brief's "agent run" conversation scope (§6) reads from the execution log. No duplication; the chat is a conversational layer over the already-persisted log.
 
-### 13.5 Hermes Tier 1 (shipped)
+### 14.5 Hermes Tier 1 (shipped)
 
 Shipped. Per-run cost panels, `runCostBreaker` enforcement, cost aggregates, ledger-based cost reads — all live. The Brief surface can surface cost information to users (the "$0.04 used" display) because this infrastructure is ready.
 
 ---
 
-## 14. Sequencing
+## 15. Sequencing
 
 ### Prerequisite: finish ClientPulse + Tier 1 paydown
 
@@ -720,13 +947,33 @@ Each phase is independently shippable. Stop after any phase and the app remains 
 - P6 is a hard gate in front of P7 and P8 — don't ship user-capture-at-scale without precedence + conflict detection.
 - P8 is intentionally late — it touches the agent execution loop and requires P0's findings plus P6's precedence model.
 
+### 15.1 Contract-layer build sequence (within P1 + P2)
+
+The phased table above describes product-level phases. Within those phases — especially P1 (Brief entity + chat) and P2 (universal Brief entry) — implementing the artefact contract itself has its own internal order. Attempting to build every contract primitive in parallel is the fastest path to inconsistency.
+
+Recommended internal build order for the contract layer:
+
+1. **Base artefact types + validation.** `BriefArtefactBase` + runtime schema validation at the orchestrator boundary. Nothing emits until validation works.
+2. **`BriefStructuredResult` rendering, no lifecycle.** Simplest artefact, simplest flow — just render the table. No `parentArtefactId` handling yet. Validates the end-to-end pipe.
+3. **Lifecycle resolution client-side.** Single-active-tip rule. `status: 'updated'` replacing in place. `status: 'invalidated'` marking stale. Before this, the contract doesn't actually deliver refinement.
+4. **`BriefApprovalCard` without execution linkage.** Approval cards that render + dispatch through `actionRegistry`, but without `executionId` tracking yet. Validates the approval path.
+5. **Execution lifecycle updates.** `executionId`, `executionStatus`, the full approved → running → completed chain. Completes Flow B (§9.2).
+6. **`BriefErrorResult` + retry flow.** Error rendering, `severity` / `retryable` driving UX, retry affordance emitting fresh chains. Completes Flow C (§9.3).
+7. **`relatedArtefactIds` grouping.** UI grouping based on relationships. Comes late because until there are multiple artefact kinds flowing, there's nothing to group.
+8. **`confidence` + `confidenceSource` surfaces.** Trust indicators. Requires threshold tuning against real capability output — too early and the UI thresholds are guesses.
+9. **`budgetContext` + `freshnessMs` surfaces.** Depend on real cost data flowing through the ledger and real timing data from canonical/live reads. Ship last because the signals are only meaningful once there's usage.
+
+**Why this order.** Each step produces a shippable increment. A team that stops at step 2 has a working Brief → result UI. Stopping at step 5 gives the full read + write loop. The later steps enrich the experience but aren't gating. Building them in this order avoids the "half-done everything, working nothing" failure mode.
+
+**Gate: step 1 must pass the §12.4 contract test harness before step 2 begins.** This is the non-negotiable. Without validation at step 1, every later step accumulates silent bugs.
+
 ---
 
-## 15. Open questions for external review
+## 16. Open questions for external review
 
 Some questions from the first review round have been resolved; remaining questions invite further critique.
 
-### Resolved after review rounds 1 + 2
+### Resolved after review rounds 1 + 2 + 3 + 4
 
 - **~~Is seven conversation scopes in v1 too many?~~** (rev 2) Resolved — v1 reduced to four. Others become one-enum-value additions when demand surfaces.
 - **~~Does the "everything routes through the COO" framing hold?~~** (rev 2) Resolved — triage is the Orchestrator's own fast path. The three-role separation (triage, plan, execute) exists in architecture already.
@@ -740,6 +987,15 @@ Some questions from the first review round have been resolved; remaining questio
 - **~~Budget context on artefacts?~~** (rev 3) Addressed via optional `budgetContext` on structured + approval kinds.
 - **~~Source ambiguity (is cached API data canonical or live?)~~** (rev 3) Tightened semantics in the contract doc: cached provider data is `'live'` with non-zero `freshnessMs`. Freshness is the user-facing signal.
 - **~~RLS enforcement risk (one mis-implemented capability leaks)?~~** (rev 3) Added §11.3 — primary enforcement stays at capability layer; orchestrator adds a sanity-check backstop.
+- **~~Lifecycle chain ambiguity (out-of-order updates)?~~** (rev 4) Addressed via single-active-artefact rule — only the tip of the chain is authoritative. Out-of-order updates logged but don't re-activate superseded artefacts.
+- **~~Approval reuse / re-run semantics?~~** (rev 4) Addressed via execution reuse rule — retries emit new approval artefacts via `parentArtefactId` chain. Latest `executionId` is current; history preserved in chain.
+- **~~Relationship directionality?~~** (rev 4) Addressed — `relatedArtefactIds` is not automatically bidirectional; capabilities include reciprocal links when symmetric.
+- **~~Confidence provenance?~~** (rev 4) Addressed via `confidenceSource` field — consumers weigh LLM-derived confidence differently from deterministic.
+- **~~Budget window ambiguity?~~** (rev 4) Addressed via `window` field on `BriefBudgetContext` — per_run / per_day / per_month / unknown.
+- **~~freshnessMs hybrid rule?~~** (rev 4) Tightened — for `source: 'hybrid'`, `freshnessMs` represents the maximum age across contributors. Conservative by design.
+- **~~Inconsistent implementations across capabilities?~~** (rev 4) Addressed via §12 (Implementation guidance) — directive rules, boundaries, failure handling, and contract test requirements. Plus §12.4 test harness gating every capability.
+- **~~How do we model read refinement / write+execution / failure+retry?~~** (rev 4) Addressed via three canonical flows in §9, artefact-by-artefact. Any capability's flow must map to one of the three; if it can't, the contract has a gap.
+- **~~Where does the contract implementation begin?~~** (rev 4) Addressed via §15.1 build sequence — base types + validation first, lifecycle resolution second, then progressively enrich.
 
 ### Still open — invite critique
 
@@ -778,7 +1034,7 @@ The most valuable response to this document is a question we haven't asked ourse
 
 ---
 
-## 16. Success criteria
+## 17. Success criteria
 
 The brief is ready to become a detailed spec when a reviewer can answer yes to all of:
 

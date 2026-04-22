@@ -35,12 +35,16 @@ export type BriefArtefactStatus = 'final' | 'pending' | 'updated' | 'invalidated
 
 /**
  * Budget context for "you've used N% of your limit" UX messaging.
- * Both fields optional — capabilities may report one, the other, or neither
- * depending on what budget layer is active (per-Brief, per-run, per-day).
+ * All fields optional — capabilities may report remaining, limit, window,
+ * or any combination depending on what budget layer is active (per-Brief,
+ * per-run, per-day, per-month). When `window` is set, it disambiguates
+ * which budget layer the `remainingCents` / `limitCents` refer to —
+ * essential once multiple overlapping budgets exist.
  */
 export interface BriefBudgetContext {
   remainingCents?: number;
   limitCents?: number;
+  window?: 'per_run' | 'per_day' | 'per_month' | 'unknown';
 }
 
 /**
@@ -181,6 +185,12 @@ export interface BriefStructuredResult extends BriefArtefactBase {
    */
   confidence?: number;
   /**
+   * Provenance of the confidence score. Debugging + tuning aid — lets
+   * downstream consumers weigh LLM-derived confidence differently from
+   * deterministic confidence. Optional.
+   */
+  confidenceSource?: 'llm' | 'heuristic' | 'deterministic';
+  /**
    * Budget context for "you've used N% of your limit" UX.
    * Typically populated by the orchestrator after the capability returns, not
    * by the capability itself. Optional.
@@ -222,10 +232,18 @@ export interface BriefApprovalCard extends BriefArtefactBase {
    */
   confidence?: number;
   /**
+   * Provenance of the confidence score. See BriefStructuredResult.confidenceSource.
+   */
+  confidenceSource?: 'llm' | 'heuristic' | 'deterministic';
+  /**
    * Execution linkage — populated after the user approves and the action dispatches.
    * Links this approval card to the run / action-execution record for audit trail
    * and UI post-dispatch state (e.g., "✓ Completed" / "✗ Failed — retry").
-   * Empty until approval occurs.
+   *
+   * Reuse rule: `executionId` always refers to the LATEST execution. If the user
+   * retries a failed action or re-runs a completed one, a new approval artefact
+   * is emitted (via `parentArtefactId` chain) with the new `executionId`. The
+   * chain preserves history; this field always points at the current attempt.
    */
   executionId?: string;
   executionStatus?: BriefExecutionStatus;

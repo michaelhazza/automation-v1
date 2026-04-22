@@ -48,6 +48,10 @@ Every artefact — regardless of kind — carries the fields in `BriefArtefactBa
 - **`updated`** — This artefact supersedes a previous one referenced by `parentArtefactId`. UI replaces the previous artefact in place; the superseded one remains in history via the parent link.
 - **`invalidated`** — The underlying data for a previous artefact has changed; that artefact is no longer accurate. `parentArtefactId` points to what's invalidated. UI visually marks the predecessor as stale; does not render this artefact as primary content.
 
+**Single-active-artefact rule.** For any artefact chain linked via `parentArtefactId`, only the latest artefact with no children is authoritative. Consumers rendering a chain must find the tip (the one nothing supersedes) and treat that as the current state. Intermediate artefacts remain accessible for history / audit but are not rendered as primary content.
+
+**Out-of-order update handling.** When multiple updates for the same chain arrive out of order (e.g., due to retries or async execution updates), the tip rule still applies: the artefact with no children wins. If an earlier update arrives after a later one, the earlier artefact already has children — its `status: 'updated'` emission is still recorded for history but does not re-activate it. Orchestrator-level logs any out-of-order arrivals so producers can debug their emission order.
+
 ### Relationship semantics
 
 `relatedArtefactIds` is intentionally loose — it expresses "these artefacts are related in the user's flow," not a strict parent/child graph. Typical uses:
@@ -56,6 +60,8 @@ Every artefact — regardless of kind — carries the fields in `BriefArtefactBa
 - A set of suggestions references the result they refine
 
 The UI uses this for grouping and "show related" affordances; it doesn't enforce any specific relationship semantics. Keep it loose.
+
+**Directionality rule.** `relatedArtefactIds` is **not** automatically bidirectional. If artefact A lists B in `relatedArtefactIds`, B is not implicitly related to A. Capabilities SHOULD include reciprocal links when the relationship is semantically symmetric (e.g., approval card ↔ result that spawned it). Unidirectional links are valid when the relationship is not symmetric (e.g., an error references a result, but the result does not reference the error that followed).
 
 ### Per-artefact versioning
 
@@ -99,6 +105,8 @@ The common shape. Used by any capability returning data to the user.
 
 **Important:** the answer to "is cached API data canonical or live?" is: **it's `live` with `freshnessMs` > 0.** Cache is a latency optimisation, not a data-source change.
 
+**Hybrid consistency rule.** For `source: 'hybrid'` results, `freshnessMs` MUST represent the maximum age across all contributing data sources. This is intentionally conservative — a hybrid result combining canonical data (2h old) with a live lookup (50ms old) reports `freshnessMs: 7200000`. Removing this rule would let producers cherry-pick the freshest contributor and misrepresent the overall result's reliability.
+
 ---
 
 ## Approval card (`kind: 'approval'`)
@@ -133,6 +141,8 @@ Once the user approves an action, the orchestrator populates `executionId` on th
 | `'failed'` | Failure — show ✗ and retry affordance |
 
 This keeps the Brief chat coherent end-to-end: the user sees the approval → execution → outcome on a single linked artefact chain, not across disconnected updates.
+
+**Execution reuse rule.** `executionId` always refers to the latest execution. When the user retries a failed action or re-runs a completed one, a new approval artefact is emitted via the `parentArtefactId` chain with the new `executionId`. The chain preserves the full history of attempts; the field itself always points at the current attempt. This keeps linkage unambiguous without requiring a history array on every approval.
 
 ---
 
@@ -185,6 +195,20 @@ Both `BriefStructuredResult` and `BriefApprovalCard` carry an optional `confiden
 
 **Thresholds are UI-owned.** The contract doesn't enforce thresholds — capabilities report the raw number; the client decides when to show / hide / escalate. This lets UX iterate without contract churn.
 
+### Confidence provenance — `confidenceSource`
+
+The optional `confidenceSource` field distinguishes where a confidence score came from:
+
+| Value | Meaning |
+|---|---|
+| `'llm'` | Derived from an LLM self-assessment or classification output |
+| `'heuristic'` | Derived from a deterministic rule or scoring heuristic |
+| `'deterministic'` | Near-certain — derived from structural checks (exact-match lookups, schema-validated parses) |
+
+**Why it matters.** Consumers weight confidence differently by source. A `'llm'`-derived 0.8 confidence carries different meaning than a `'deterministic'` 0.8 — the former signals interpretation uncertainty; the latter signals structural uncertainty (rarely used at 0.8 since deterministic checks are usually binary). Downstream analytics and tuning systems use this to calibrate trust thresholds per source over time.
+
+**Optional.** Capabilities that can't meaningfully attribute the source may omit it. When omitted, consumers treat the confidence as source-unknown.
+
 ---
 
 ## Cost preview (separate, not an artefact)
@@ -210,9 +234,15 @@ Every capability that produces an artefact **must** scope its reads to the Brief
 
 **Primary enforcement: at the capability layer.** No capability may emit rows the caller isn't authorised to see. This is enforced inside the capability, not by a post-filter at the chat layer. Post-filtering is brittle and misses aggregated cases (counts, sums).
 
-**Recommended defence-in-depth: orchestrator-level sanity check.** Relying purely on capability-side enforcement means one mis-implemented capability can leak data across tenants. The orchestrator should implement a lightweight backstop that verifies artefact output doesn't contain IDs outside the Brief's scope (e.g., `organisationId` mismatches, unexpected `subaccountId` references). This isn't a replacement for capability-layer enforcement — it's a safety net that catches implementation errors before they leak. Exact implementation is a spec-level detail; the principle belongs in every capability spec's review checklist.
+**Recommended defence-in-depth: orchestrator-level sanity check.** Relying purely on capability-side enforcement means one mis-implemented capability can leak data across tenants. The orchestrator should implement a lightweight backstop that verifies artefact output against the Brief's scope. Backstop validation MUST include:
 
-**Budget context scoping.** `budgetContext` (when populated) reflects the caller's budget for the current scope (per-Brief, or per-run, or per-day). It's populated by the orchestrator after the capability returns, since the capability typically doesn't know the caller's broader budget posture.
+1. **Identifier-scope checks.** Every referenced entity ID (`organisationId`, `subaccountId`, `affectedRecordIds`) falls within the Brief's scope.
+2. **Aggregate-level invariants.** Counts, sums, and derived metrics cannot exceed scoped totals. A result reporting "1,482 contacts" when the subaccount only has 800 contacts is a leakage indicator — the aggregate itself encodes out-of-scope data.
+3. **Referenced-field invariants.** For `source: 'canonical'` reads, any referenced canonical field is within the RLS view of the caller's principal (`withPrincipalContext`).
+
+This isn't a replacement for capability-layer enforcement — it's a safety net that catches implementation errors before they leak. Exact implementation is a spec-level detail; the principles above belong in every capability spec's review checklist. ID-scope checks alone are insufficient — aggregates can leak across tenants without mentioning a single ID.
+
+**Budget context scoping.** `budgetContext` (when populated) reflects the caller's budget for the current scope. `window` disambiguates whether the budget is per-Brief, per-run, per-day, or per-month — essential once multiple overlapping budget layers exist. Populated by the orchestrator after the capability returns; the capability typically doesn't know the caller's broader budget posture.
 
 ---
 
@@ -270,3 +300,12 @@ The client must:
   - **Error result:** optional `severity`, `retryable` for UX treatment
   - **RLS:** clarified defence-in-depth recommendation for orchestrator-level sanity check in addition to capability-layer primary enforcement
   - All additions are backward-compatible. Consumers ignore unknown fields; capabilities opt in.
+- **v1 (additive, round 3):** Refinement pass — rules tightened, two optional fields added:
+  - **Single-active-artefact rule.** For any chain linked via `parentArtefactId`, only the latest artefact with no children is authoritative. Out-of-order updates logged but don't re-activate superseded artefacts.
+  - **Execution reuse rule.** `executionId` is latest-only. Retries / re-runs emit a new approval artefact via the `parentArtefactId` chain. Chain preserves history; field points at current attempt.
+  - **Relationship directionality rule.** `relatedArtefactIds` is not automatically bidirectional — capabilities include reciprocal links when the relationship is semantically symmetric.
+  - **RLS backstop expanded.** Orchestrator-level checks MUST cover identifier scope AND aggregate-level invariants (counts, sums can leak across tenants without mentioning IDs). Tightened wording to reflect this.
+  - **`freshnessMs` hybrid rule.** For `source: 'hybrid'`, `freshnessMs` MUST be the maximum age across all contributing data sources (conservative).
+  - **`confidenceSource` field added** on structured + approval — `'llm' | 'heuristic' | 'deterministic'`. Debugging + trust-calibration aid.
+  - **`window` field added** on `BriefBudgetContext` — `'per_run' | 'per_day' | 'per_month' | 'unknown'`. Disambiguates overlapping budget layers.
+  - All additions backward-compatible.
