@@ -1,3 +1,63 @@
+You are reviewing a markdown spec document for the Automation OS codebase. This is iteration 2 of a structured review loop. Iteration 1 applied the following fixes — **do not re-raise if they now read correctly**:
+
+**Iteration 1 summary:**
+- `conversation_messages` column `artefactIds` renamed to `artefacts` (stores full `BriefChatArtefact[]` blobs); §7.2 no longer says "joins to actual artefact records"; §9.7 and §13 cascaded.
+- `paused_at` column + partial index added to §5.3 migration; precedence algorithm now 7-step (paused filter → deprecated filter → authoritative tier → scope specificity → priority → recency). Derived `status` helper (`'active' | 'paused' | 'deprecated'`) added to `memoryBlockRetrievalServicePure.ts`.
+- §15.2 mitigation text aligned to §5.3 ordering (authoritative > scope > priority > recency).
+- `briefs.read` / `briefs.write` permissions moved from Phase 5 to Phase 2 in both §14.2 and the Phase 2 scope list.
+- `conversation_messages` schema got a `subaccountId` denormalised column + supplementary subaccount RLS policy; §5.1 added a "Denormalisation invariant" paragraph naming `briefConversationWriter` as the single write path.
+- Two new named primitives introduced: `server/services/briefSimpleReplyGeneratorPure.ts` (Phase 3) and `server/services/briefConversationWriter.ts` (Phase 2). §6.1, §7.1, §14.1, and the Phase 2/3 scope lists all reference them.
+- "System rules" language removed from §9.5; `RuleScope` remains `subaccount | agent | org`. A new Deferred item in §13 covers system-scoped user-captured rules.
+- §1 item 2 and §8.7 reconciled: schema admits four scopes, but v1 populates the new tables for Brief / Task / Agent-run-log only; Agent-scope chat stays on `agent_conversations`.
+- Migration `0TTT_user_settings_suggestion_frequency.sql` added to §14.1; existing Drizzle schema-file edits (`tasks.ts`, `memoryBlocks.ts`, `agentRuns.ts`, `orgSettings.ts`, `userSettings.ts`) added to §14.2.
+- Backstop split into `briefArtefactBackstop.ts` (async wrapper) + `briefArtefactBackstopPure.ts` (pure module); both inventoried; pure-test file added.
+- §7.11 "and `briefArtefactBackstop`" removed.
+- §6.3.2 step 2 clarifies Phase 5 uses a named no-op `ruleConflictDetectorService.check()` stub, replaced in Phase 6; §17 criterion rewritten accordingly.
+- `shared/types/briefFastPath.ts` advanced to Phase 2 (types only). §6.3.1 adds a "Phase-2 vs Phase-3 behaviour" paragraph stating Phase 2 returns a stub `FastPathDecision` with `route: 'needs_orchestrator'`.
+- §10 execution-model table gained three rows: Brief creation, conversation message persistence, Brief artefact websocket emission.
+- `server/lib/briefVisibility.ts` inventoried (Phase 2).
+- `server/db/schema/conversations.ts` annotated as exporting both `conversations` and `conversationMessages`.
+- §7.10 approval-route corrected from `/api/actions/:actionId/approve` to `/api/review-items/:id/approve` (verified against `server/routes/reviewItems.ts`).
+- Two new Deferred items in §13: system-scoped user-captured rules; `verify-conversation-message-denorm.sh` static gate.
+
+Project framing (unchanged from iteration 1, per `docs/spec-context.md`):
+
+```yaml
+pre_production: yes
+live_users: no
+stage: rapid_evolution
+testing_posture: static_gates_primary
+runtime_tests: pure_function_only
+rollout_model: commit_and_revert
+feature_flags: only_for_behaviour_modes
+staged_rollout: never_for_this_codebase_yet
+prefer_existing_primitives_over_new_ones: yes
+```
+
+Do NOT raise findings about:
+- Adding frontend unit tests, E2E tests, API contract tests, supertest, playwright, vitest-for-own-app, composition tests.
+- Adding feature flags or staged rollouts.
+- Adding production-readiness items (monitoring, compliance, multi-region, rate limiting, circuit breaking, chaos engineering).
+- Introducing new service layers where existing `accepted_primitives` already fit (policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, failure()/FailureReason, createWorker, agentExecutionEventService, agentRunPromptService, agentRunPayloadWriter, redaction, agentRunVisibility, RLS_PROTECTED_TABLES, withOrgTx, withPrincipalContext).
+- Any of the iteration-1 summary items above.
+
+Focus this pass on:
+
+1. **New or residual contradictions** introduced by iteration-1 edits. Specifically: (a) Phase-2 `briefFastPath.ts` types shipping without classifier — are all downstream references consistent? (b) the `briefConversationWriter` / `briefSimpleReplyGeneratorPure` split — are all Orchestrator-output paths also routed through the writer, or only fast-path inline responses? (c) the new `paused_at` column — does any other section still describe a missing pause mechanism?
+2. **Sequencing / dependency bugs** across Phases 0–9 that survived iteration 1. Especially dependencies on the new Phase-2 primitives that inadvertently got pushed earlier than they should be.
+3. **Load-bearing claims without a named mechanism** — every "must be idempotent", "source of truth", "fail-closed", "authoritative" claim should have a concrete mechanism pinned.
+4. **File-inventory drift** — prose references not reflected in §14, or inventory entries not explained in prose.
+5. **Contract / type surface** — §4 new types are fully specified, producers + consumers named, examples match shapes.
+6. **RLS coverage gaps** remaining on any tenant-scoped table or column.
+7. **Unnamed primitives** that the spec introduces by narrative only.
+8. **Self-consistency** between §1 / §17 end-to-end behaviours and §6/§7/§8 implementation + §11 phasing.
+
+For each finding: (a) section/line reference, (b) one-sentence description, (c) concrete recommendation. Severities: **P1** must-fix, **P2** should-fix, **P3** nit.
+
+The updated spec follows.
+
+---
+
 # Universal Brief — Development Spec
 
 **Status:** Draft implementation spec — ready for `spec-reviewer`
@@ -201,16 +261,6 @@ export type FastPathRoute =
 
 export type BriefScope = 'subaccount' | 'org' | 'system';
 
-// UI-context envelope carried from the Brief creation call into the fast path.
-// Defined in the Phase-2 types file so Phase-2 callers (`createBrief`, `POST /api/briefs`) do
-// not depend on the Phase-3 classifier module.
-export interface BriefUiContext {
-  surface: 'global_ask_bar' | 'brief_chat' | 'task_chat' | 'agent_chat' | 'agent_run_chat';
-  currentSubaccountId?: string;   // if user is in a subaccount view
-  currentOrgId: string;
-  userPermissions: Set<string>;   // for scope downgrade decisions
-}
-
 export interface FastPathDecision {
   route: FastPathRoute;
   scope: BriefScope;
@@ -368,8 +418,6 @@ export interface RuleCaptureRequest {
 
 **Nullability:** `text` + `scope` required (scope is mandatory per brief §8.3.1). `context`, `originatingArtefactId`, `originatingBriefId`, `priority`, `isAuthoritative` optional.
 
-**Governance of `isAuthoritative`.** Setting or clearing `is_authoritative = true` requires an **org-admin** permission on the target scope (new permission key `rules.set_authoritative`; see §9.5). Non-admin callers that POST with `isAuthoritative: true` (or PATCH to set it) receive `403 Forbidden` from `ruleCaptureService` / `PATCH /api/rules/:ruleId`. This closes the authoritative-tier governance gap created by authoritative rules outranking scope in the §5.3 precedence algorithm.
-
 ### 4.7 Rule conflict report (new)
 
 Produced by `ruleConflictDetectorService.check()` during `saveRule()`. Drives the conflict-resolution UI.
@@ -504,11 +552,7 @@ ALTER TABLE memory_blocks
   ADD COLUMN deprecated_at timestamp,
   ADD COLUMN deprecation_reason text CHECK (
     deprecation_reason IN ('low_quality', 'user_replaced', 'conflict_resolved', 'user_deleted')
-  ),
-  -- Mirror of the workspace_memory_entries.quality_score pattern. Owned by
-  -- memoryEntryQualityService (post-write mutations only; see CLAUDE.md key-files table).
-  ADD COLUMN quality_score numeric(3, 2) NOT NULL DEFAULT 0.50
-    CHECK (quality_score >= 0.00 AND quality_score <= 1.00);
+  );
 
 CREATE INDEX memory_blocks_paused_idx ON memory_blocks (paused_at)
   WHERE paused_at IS NOT NULL;
@@ -624,12 +668,15 @@ export const fastPathDecisions = pgTable('fast_path_decisions', {
 **Pure function signature:**
 
 ```ts
-import type { BriefUiContext } from '../../../shared/types/briefFastPath.js';
-
 export interface ChatTriageInput {
   text: string;
-  uiContext: BriefUiContext;         // reuses Phase-2 shared type (§4.2)
-  conversationContext?: {            // optional — last N turns for disambiguation
+  uiContext: {
+    surface: 'global_ask_bar' | 'brief_chat' | 'task_chat' | 'agent_chat' | 'agent_run_chat';
+    currentSubaccountId?: string;   // if user is in a subaccount view
+    currentOrgId: string;
+    userPermissions: Set<string>;   // for scope downgrade decisions
+  };
+  conversationContext?: {           // optional — last N turns for disambiguation
     priorTurns: Array<{ role: 'user' | 'assistant'; content: string }>;
   };
   config: ChatTriageConfig;
@@ -772,15 +819,13 @@ Five services across the four sub-phases:
 **Signature:**
 
 ```ts
-import type { BriefUiContext, FastPathDecision } from '../../../shared/types/briefFastPath.js';
-
 export async function createBrief(input: {
   organisationId: string;
   subaccountId?: string;         // null for org / system scope
   submittedByUserId: string;
   text: string;
   source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
-  uiContext: BriefUiContext;     // Phase-2 shared type; not dependent on the Phase-3 classifier
+  uiContext: ChatTriageInput['uiContext'];
 }): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }>;
 ```
 
@@ -806,7 +851,7 @@ export async function saveRule(
 ```
 
 **Flow:**
-1. Validate `request` (text non-empty, scope present, permission check — user must have `rules.write` on the target scope). If `isAuthoritative: true`, additionally assert the caller holds `rules.set_authoritative` (org-admin on the scope) — else return `403`. See §4.6 governance note.
+1. Validate `request` (text non-empty, scope present, permission check — user must have edit on the target scope).
 2. Invoke `ruleConflictDetectorService.check(request)` to get `RuleConflictReport`. In Phase 5 this is a named no-op stub returning `{ conflicts: [], checkedAt: now }`; Phase 6 replaces it with the real LLM-backed detector (§6.3.3). The call site and response shape are identical across phases so no call-site change is needed in Phase 6.
 3. If conflicts detected AND no `allowConflicts: true` flag, return `saved: false` with conflicts; UI surfaces conflict-resolution dialog. User re-submits with resolution.
 4. Otherwise, insert `memory_blocks` row with `captured_via`, `priority`, `is_authoritative`, scope fields, `createdByUserId`.
@@ -1186,7 +1231,7 @@ No dedicated `/api/remember` endpoint — it's just a UI affordance over the rul
 
 **File:** `server/routes/rules.ts`
 **Handler:** updates `memory_blocks` (text, priority, isAuthoritative, status transitions). Audit trail via `memory_block_versions`.
-**Permissions:** creator OR user with edit permission on the rule's scope (per brief §10.5 — "anyone with scope edit permission"). Additionally, any body that flips `isAuthoritative` requires `rules.set_authoritative` — see §4.6 governance note + §9.5 permission key.
+**Permissions:** creator OR user with edit permission on the rule's scope (per brief §10.5 — "anyone with scope edit permission").
 
 ### 7.9 `DELETE /api/rules/:ruleId` — soft-delete a rule
 
@@ -1200,20 +1245,6 @@ No dedicated `/api/remember` endpoint — it's just a UI affordance over the rul
 ### 7.11 Orchestrator fast path exposure (internal only)
 
 The fast path is not exposed as a standalone route — it's invoked server-side within `briefCreationService.createBrief()` only. Exposing it as an endpoint is deferred; no external caller needs it in v1.
-
-### 7.12 Generic conversation-message endpoints (Phase 2)
-
-The Task chat pane (Phase 2) and Agent-run-log chat pane (Phase 7) consume a scope-agnostic conversation API. Brief-specific routes in §7.1–§7.4 remain for Brief-level operations (Brief creation, artefact list, Brief stream), but message append / list and the WebSocket room are conversation-scoped, not Brief-scoped.
-
-**File:** `server/routes/conversations.ts` (new, Phase 2) — handles the routes below. Delegates to `conversationService.ts` (Phase 2, §14.1).
-
-- **`POST /api/conversations/:conversationId/messages`** — append a user message. Middleware: `authenticate` + scope-specific permission check derived from the conversation's `scopeType` + `scopeId` (resolved by `conversationService.assertUserCanMessage(principal, conversationId)`). On Task / Agent-run scopes, the handler does NOT re-invoke the fast path — it writes the user message via `briefConversationWriter` and, if the scope is `task`, optionally forwards to the Orchestrator via `orchestratorFromTaskJob`.
-- **`GET /api/conversations/:conversationId`** — returns the conversation metadata + paginated messages.
-- **WebSocket room:** `conversation:${conversationId}`. Room-join guard: `conversationService.assertUserCanView(principal, conversationId)`. Emitters: `conversation-message:new`, `conversation-message:updated`. The Brief stream room (`brief:${briefId}`, §7.3) is preserved for Brief-specific artefact events; the conversation room is for message-level events.
-
-**Phase 2 vs Phase 7 coverage.** Phase 2 ships the routes + the Task chat pane + the Agent-run-log chat pane's read path. Phase 7 turns on the agent-run-log-specific "why did you do this?" write path. Between Phase 2 and Phase 7, the Agent-run-log pane reads-only.
-
-**Inventory:** `server/routes/conversations.ts` added to §14.1.
 
 ---
 
@@ -1363,7 +1394,6 @@ Added to `server/lib/permissions.ts`:
 - `briefs.write` — create Briefs in a scope
 - `rules.read` — browse Learned Rules in a scope
 - `rules.write` — create / edit / pause / delete rules in a scope
-- `rules.set_authoritative` — flip `is_authoritative` on or off. Org-admin on the target scope. Required in addition to `rules.write` whenever a rule-save or rule-edit request includes `isAuthoritative: true` (§4.6 governance note, §6.3.2 flow step 1).
 
 Scope is derived from the resource (subaccount for sub-account rules, agent for agent-scoped rules, org for org-level rules). User-captured rules do not admit a `system` scope in v1 — `RuleScope` (§4.6) is `subaccount | agent | org`. Existing permission inheritance applies (org admins can always edit subaccount-scoped + agent-scoped rules within their org). System-scoped user-captured rules are deferred (see §13).
 
@@ -1405,7 +1435,7 @@ Each new service operation picks one execution model per `docs/spec-context.md` 
 | Auto-deprecation (low-quality rule sweep) | **Queued / async (pg-boss)** | Nightly. New job `maintenance:rule-auto-deprecate` registered in `queueService.ts`. |
 | Fast-path recalibration sweep | **Queued / async (pg-boss)** | Nightly. New job `maintenance:fast-path-recalibrate`. |
 | `fast_path_decisions` retention prune | **Queued / async (pg-boss)** | Daily at 03:30 UTC. New job `maintenance:fast-path-decisions-prune`. |
-| Shadow-eval outcome recording (`fastPathDecisionLogger.recordOutcome`) | **Inline / synchronous with soft-breaker fire-and-forget wrapping** | When a Brief closes, the lifecycle handler calls `fastPathDecisionLogger.recordOutcome(briefId, outcome)` in-process. The call is wrapped in `server/lib/softBreakerPure.ts` so failures are swallowed (structured log, breaker state update) and do not block Brief closure. **No pg-boss row** — the best-effort write happens synchronously inside the Brief-closure handler's request. Idempotency: the `downstream_outcome` column uses `WHERE brief_id = ? AND downstream_outcome IS NULL` on update so a retried close never double-writes. |
+| Shadow-eval outcome recording | **Queued / async — fire-and-forget** | When a Brief closes, the lifecycle handler enqueues an outcome-recording task that updates `fast_path_decisions.downstream_outcome`. Uses the existing soft-breaker fire-and-forget pattern (`server/lib/softBreakerPure.ts`) — doesn't block Brief closure on logging success. |
 
 ### 10.1 Consistency pass
 
@@ -1437,7 +1467,7 @@ Phases map to the dev brief's §14 sequencing. Each phase is independently shipp
 
 **Columns referenced by code:** none new — all work is on types already on main.
 
-**Exit gate:** contract test harness passes the local synthetic-capability example fixture (`briefContractTestHarness.example.test.ts`); retrieval audit findings written up with severity labels. Cross-branch CRM Planner adoption is out of Phase 0 scope — see Phase 9.
+**Exit gate:** contract test harness passes a synthetic capability's artefact emission; retrieval audit findings written up with severity labels.
 
 ### Phase 1 — Brief entity + artefact validation wiring
 
@@ -1469,7 +1499,6 @@ Phases map to the dev brief's §14 sequencing. Each phase is independently shipp
 - `POST /api/briefs` endpoint (§7.1).
 - `GET /api/briefs/:briefId/artefacts` endpoint (§7.2).
 - `GET /api/briefs/:briefId/stream` WebSocket room (§7.3).
-- Generic conversation-message endpoints `POST /api/conversations/:conversationId/messages` + `GET /api/conversations/:conversationId` + `conversation:${conversationId}` WebSocket room (§7.12).
 - `GlobalAskBar` client component (§8.1).
 - `BriefDetailPage` client component (§8.2) — renders the Brief's conversation, reads artefacts from the stream, runs `resolveLifecyclePure` on each new artefact.
 - `StructuredResultCard`, `ApprovalCard` (basic, no sparring output yet), `ErrorArtefactCard`, `ConfidenceBadge`, `BudgetContextStrip` (§8.3).
@@ -1479,7 +1508,7 @@ Phases map to the dev brief's §14 sequencing. Each phase is independently shipp
 
 **Services introduced:** `briefCreationService`, `briefConversationWriter`, `conversationService` (thin CRUD over `conversations`). `briefVisibility` helper in `server/lib/briefVisibility.ts`.
 
-**Routes introduced:** `/api/briefs` (POST, GET artefacts, GET stream, POST messages); `/api/conversations/:conversationId` (GET metadata + messages, POST messages, WebSocket room).
+**Routes introduced:** `/api/briefs` (POST, GET artefacts, GET stream).
 
 **Exit gate:** a user can type a Brief into `GlobalAskBar`, submit, land on `BriefDetailPage`, and see the Orchestrator's response as a `StructuredResultCard` or `ApprovalCard` with lifecycle-aware rendering.
 
@@ -1532,7 +1561,7 @@ Phases map to the dev brief's §14 sequencing. Each phase is independently shipp
 - `ruleCaptureService.ts` (§6.3.2) — save path. Conflict detection is wired to a named no-op in `ruleConflictDetectorService.ts` (always returns empty conflicts in Phase 5); real LLM-backed detection replaces the implementation in Phase 6 behind the same signature.
 - `ruleLibraryService.ts` (new) — list / edit / pause / delete.
 - Routes `/api/rules` POST, GET, PATCH, DELETE (§7.6–7.9).
-- New permission keys: `rules.read`, `rules.write`, `rules.set_authoritative` added to `permissions.ts` (see §9.5).
+- New permission keys: `rules.read`, `rules.write` added to `permissions.ts`.
 - `LearnedRulesPage` + `LearnedRulesTable` + `RuleEditDialog` + `RuleCaptureDialog` (§8.4–8.5).
 - `/remember` slash command handling in `BriefDetailPage` (§8.5).
 
@@ -1610,7 +1639,6 @@ Phases map to the dev brief's §14 sequencing. Each phase is independently shipp
 **Scope:**
 - CRM Query Planner ships its v1 on the separate branch as a dedicated "Ask CRM" panel.
 - When this branch's universal Brief surface is ready, the Planner is registered as a capability the Orchestrator can route to.
-- **CRM Planner harness adoption.** The Planner's test suite imports `briefContractTestHarness` and adds its emitted-artefact assertions — done as part of Phase 9 convergence work, not earlier. (Phase 0 only requires the local synthetic fixture — see §12.2.)
 - Contract compatibility already ensured — both branches developed against `docs/brief-result-contract.md`.
 
 **Schema changes:** none from this branch.
@@ -1670,7 +1698,7 @@ Every pure module gets a companion `*.test.ts` alongside it. The list of pure mo
 
 ### 12.2 Contract-test harness coverage
 
-Every capability that emits artefacts into the Brief system runs the §6.4 test harness assertions as part of its own test suite. Phase 0 ships a local synthetic fixture at `server/lib/__tests__/briefContractTestHarness.example.test.ts` demonstrating each assertion type — no cross-branch dependency. CRM Query Planner's adoption of the harness is coordinated under Phase 9 (convergence), not Phase 0.
+Every capability that emits artefacts into the Brief system runs the §6.4 test harness assertions as part of its own test suite. Phase 0 ships one example capability (CRM Query Planner's CRM contract test — coordinated cross-branch) demonstrating each assertion type.
 
 Harness assertions:
 - `assertValidArtefact` — schema validity
@@ -1737,7 +1765,7 @@ Complete manifest of files this spec touches, grouped by phase. Every file refer
 ### 14.1 New files
 
 **Shared types:**
-- `shared/types/briefFastPath.ts` (Phase 2 — types only; `BriefUiContext`, `FastPathDecision`, `FastPathRoute`, `BriefScope`. The classifier behaviour lands in Phase 3 and imports `BriefUiContext` from this file; Phase 2 emits a stub decision — see §6.3.1)
+- `shared/types/briefFastPath.ts` (Phase 2 — types only; `FastPathDecision`, `FastPathRoute`, `BriefScope`. The classifier behaviour lands in Phase 3; Phase 2 emits a stub decision — see §6.3.1)
 - `shared/types/briefSkills.ts` (Phase 4) — `ClarifyingQuestionsPayload`, `ChallengeAssumptionsPayload`, `ClarifyingQuestion`, `ChallengeItem`
 - `shared/types/briefRules.ts` (Phase 5) — `RuleScope`, `RuleCaptureRequest`, `RuleConflictReport`, `RuleConflict`
 
@@ -1786,7 +1814,6 @@ Complete manifest of files this spec touches, grouped by phase. Every file refer
 
 **Server routes:**
 - `server/routes/briefs.ts` (Phase 2)
-- `server/routes/conversations.ts` (Phase 2) — generic conversation-message endpoints + WebSocket room for Task / Agent-run-log scopes (§7.12)
 - `server/routes/rules.ts` (Phase 5)
 
 **Server schema (Drizzle):**
@@ -1797,7 +1824,6 @@ Complete manifest of files this spec touches, grouped by phase. Every file refer
 - `server/services/__tests__/briefArtefactValidatorPure.test.ts` (Phase 0)
 - `server/services/__tests__/briefArtefactBackstopPure.test.ts` (Phase 0)
 - `server/lib/__tests__/briefContractTestHarness.test.ts` (Phase 0)
-- `server/lib/__tests__/briefContractTestHarness.example.test.ts` (Phase 0) — local synthetic capability fixture exercising every harness assertion (§12.2)
 - `server/services/__tests__/chatTriageClassifierPure.test.ts` (Phase 3)
 - `server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts` (Phase 4)
 - `server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts` (Phase 4)
@@ -1858,7 +1884,7 @@ Complete manifest of files this spec touches, grouped by phase. Every file refer
 - `server/db/schema/userSettings.ts` (Phase 7 — `suggestionFrequency`, `suggestionBackoffUntil`)
 
 **Server libraries (existing, modified):**
-- `server/lib/permissions.ts` (Phase 2 — `briefs.read`, `briefs.write`; Phase 5 — `rules.read`, `rules.write`, `rules.set_authoritative`)
+- `server/lib/permissions.ts` (Phase 2 — `briefs.read`, `briefs.write`; Phase 5 — `rules.read`, `rules.write`)
 - `server/websocket/emitters.ts` (Phase 2 — `brief-artefact:new`, `brief-artefact:updated`)
 - `server/websocket/rooms.ts` (Phase 2 — `brief:${briefId}` room join guard)
 
