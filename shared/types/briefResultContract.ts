@@ -105,6 +105,14 @@ export interface BriefStructuredResult {
   /** Actual spend for this result, in cents. Always present. */
   costCents: number;
   source: BriefResultSource;
+  /**
+   * System's self-assessed confidence in the interpretation, 0.0–1.0.
+   * Optional: capabilities that can't meaningfully estimate confidence may omit.
+   * When present, the UI surfaces a confidence indicator for values below a
+   * threshold (e.g. < 0.8) so users can spot-check borderline results.
+   * See docs/brief-result-contract.md §"Confidence surfaces" for rendering guidance.
+   */
+  confidence?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +139,13 @@ export interface BriefApprovalCard {
    * the scope/blast-radius of the args.
    */
   riskLevel: BriefApprovalRiskLevel;
+  /**
+   * System's self-assessed confidence that this action matches user intent, 0.0–1.0.
+   * Optional. When present and below a threshold, the UI surfaces an uncertainty
+   * indicator prompting explicit user scrutiny before approval. See
+   * docs/brief-result-contract.md §"Confidence surfaces" for rendering guidance.
+   */
+  confidence?: number;
 }
 
 // ---------------------------------------------------------------------------

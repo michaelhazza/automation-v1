@@ -1,15 +1,28 @@
 # Universal Brief — Development Brief
 
-**Status:** Draft development brief — intended for external LLM critique before becoming a spec
+**Status:** Draft development brief — revision 2, after first round of external LLM critique
 **Author:** Design session on `claude/research-questioning-feature-ddKLi`
-**Audience:** architect, spec-reviewer, external LLM review, then implementation session
+**Audience:** architect, spec-reviewer, further external review rounds, then implementation session
 **Date:** 2026-04-22
 **Related artefacts:**
-- `docs/brief-result-contract.md` (v1 cross-branch contract — merged to main)
-- `shared/types/briefResultContract.ts` (TypeScript types — merged to main)
+- `docs/brief-result-contract.md` (cross-branch contract — merged to main, amended for `confidence` field)
+- `shared/types/briefResultContract.ts` (TypeScript types — merged to main, amended for `confidence` field)
 - `tasks/research-questioning-design-notes.md` (prior session notes — now superseded by this brief)
 - Universal Chat Entry Brief (prior session thinking document — supersedes details herein)
 - CRM Query Planner Brief (separate branch; this document aligns with it)
+
+**Revision history:**
+- **rev 1** (initial draft) — captured full session's design thinking on Brief entity, COO persona, seven conversation scopes, triage classifier, clarifying/sparring skills, three-phase memory capture, retrieval audit.
+- **rev 2** (this version — post external review round 1) — incorporated external critique:
+  1. Reframed W1 from "classifier in front of Orchestrator" to "Orchestrator's fast path" (triage + scope detection is architecturally part of the Orchestrator, not a separate concern).
+  2. Reduced v1 conversation scopes from seven to four (Brief, Agent, Task, Agent run log).
+  3. Tightened Brief framing as "control plane, not work plane" — Brief coordinates; surfaces attached to it (memory, approvals, execution) live in their own systems.
+  4. Added new sub-phase §8.3.2 — rule precedence model + conflict detection + quality scoring + auto-deprecation — before the memory capture scales.
+  5. Added classifier safety nets — shadow-eval logging, risk-aware second-look, confidence decay.
+  6. Added optional `confidence` field to `BriefStructuredResult` and `BriefApprovalCard` (contract amended on main) + §11.1 UX guidance.
+  7. Added §11.2 observability and failure visibility — instrumentation as a day-zero concern.
+  8. Updated sequencing (§14) to reflect the new sub-phase and four-scope v1.
+  9. Updated open questions (§15) — marked resolved items, reframed remaining ones.
 
 ---
 
@@ -20,10 +33,10 @@
 3. The north star
 4. The Brief — entity, lifecycle, naming
 5. The COO — agent persona and routing brain
-6. Conversation scopes (v1: seven scopes)
+6. Conversation scopes (v1: four scopes)
 7. Scope routing (subaccount / organisation / system)
 8. The four capability workstreams
-   - 8.1 Triage classifier
+   - 8.1 Orchestrator fast path (triage + scope detection)
    - 8.2 Clarifying + Sparring Partner skills
    - 8.3 User-triggered memory capture
    - 8.4 Retrieval audit
@@ -80,6 +93,15 @@ Three things have converged to make this the right moment:
 This is not a chat product. It's an operations layer with a conversational surface. The chat is subordinate to the work — every Brief has an outcome, an audit trail, and a structured record. The conversation is how that work gets shaped, not what the product is.
 
 ## 4. The Brief — entity, lifecycle, naming
+
+**Architectural stance: Brief is a control plane, not a work plane.** This is the most important framing in the document. The Brief coordinates and displays; it does not execute, does not own memory, does not own approval logic. Each of those lives in its own system, and the Brief is the surface where they converge for the user. Reading the Brief as an "everything-entity that owns six roles" would be wrong — it's a thin coordination record with many attached surfaces.
+
+Concrete separation:
+- **Brief** — intent container + conversation record + status tracker. Thin.
+- **Sub-tasks** — execution units. Spawned by the Brief; execute independently; report back.
+- **Approval layer** — `actionRegistry` + existing review gates. Cards *render* in the Brief; dispatch goes through the existing path.
+- **Memory system** — `memoryBlocks` + synthesis + quality scoring + citation (existing infrastructure). Brief is an observation surface and a trigger surface for memory events; it doesn't own memory.
+- **Analytics** — aggregation queries over `tasks`. Brief doesn't own these; analytics surfaces query the same tables.
 
 **What it replaces.** The current product surfaces work items as "Issues" in the UI, backed by a `tasks` table in the schema. The name "Issue" reads as a bug-tracker concept, not what an agency operator actually does (brief their executive). The name "Task" reads as a to-do checklist item and has no natural fit for exploratory or read-only requests. Neither name matches the relationship we're modelling.
 
@@ -139,9 +161,9 @@ The Brief remains browseable after closing. The conversation is preserved. Users
 
 ---
 
-## 6. Conversation scopes (v1: seven scopes)
+## 6. Conversation scopes (v1: four scopes)
 
-Chat surfaces exist today only for Agents (per-agent chat at `/agents/{agentId}`, backed by `agentConversations` + `agentMessages`). V1 expands chat to six additional scopes, so users can converse with the system at the level that matches their current context.
+Chat surfaces exist today only for Agents (per-agent chat at `/agents/{agentId}`, backed by `agentConversations` + `agentMessages`). V1 expands chat to three additional scopes, so users can converse with the system at the level that matches their current context.
 
 **V1 scopes:**
 
@@ -150,19 +172,19 @@ Chat surfaces exist today only for Agents (per-agent chat at `/agents/{agentId}`
 | **Agent** | "Why did you decide X?" / general agent ops | The agent itself (exists today) |
 | **Brief** | "Refine this proposal" / "add context" / "what's the status" | The COO, who delegates |
 | **Task (sub-task)** | "Override how you're doing this" / "I have new info" | The agent assigned to the sub-task |
-| **Recurring task** | "Change the cadence" / "skip this run" / "why did last run fail" | The recurring task's configured agent |
-| **Playbook run** | "Diagnose this failure" / "why did the run stop here" | The playbook's owning agent |
-| **Proposal / approval card** | "Discuss before I approve" / "what are the risks" | The agent that produced the proposal |
 | **Agent run (execution log)** | "Why did you do this?" / "Why didn't you do that?" | Q&A over a specific run's log |
 
-**Schema shape — polymorphic, extensible.** `agentConversations` is renamed to `conversations` and generalised with `scopeType` + `scopeId`. Adding a new scope later is one enum value + one service-layer handler, no schema migration.
+**Why four, not seven.** Earlier drafts proposed seven scopes (adding Recurring Task, Playbook Run, Proposal/Approval card). External review flagged this as UX weight without proven demand. V1 ships the four scopes that cover the vast majority of conversations; additional scopes become one-enum-value additions when usage demand is evident.
 
-**Deferred (Tier 3 — add when use case appears):**
-- Organisation (covered by org-scope Briefs in most cases)
-- Playbook definition (more a config concern)
-- Integration / connection (config concern)
-- Memory block / Learned Rule (edit the rule via library; don't chat about it)
-- Subaccount and canonical-entity conversations — these are covered by the global input field with the relevant context auto-attached to a Brief. No dedicated pane needed.
+**Schema shape — polymorphic, extensible.** `agentConversations` is renamed to `conversations` and generalised with `scopeType` + `scopeId`. The polymorphic design means adding a new scope is one enum value + one service-layer handler, not a schema migration. This is deliberate: we're committing to four scopes for v1 behaviour, but the schema is future-proofed for the other three (and beyond) without rework.
+
+**Deferred to v2 (add when demand surfaces):**
+- **Recurring task** — "change the cadence" use case likely better served via the recurring task's config page; revisit if users specifically ask for conversational access
+- **Playbook run** — diagnostics currently rendered via run trace viewer; add chat when users request conversational diagnosis
+- **Proposal / approval card** — discussion before approval currently inline in the Brief's chat; dedicated scope added only if that's insufficient
+- **Organisation** (covered by org-scope Briefs in most cases)
+- **Playbook definition** / **Integration** / **Memory block** (config concerns, not conversation concerns)
+- **Subaccount and canonical-entity conversations** — covered by the global input field with the relevant context auto-attached to a Brief. No dedicated pane needed.
 
 **Inter-scope notifications.** A message in a sub-task conversation can surface as a notification on the parent Brief ("Sub-task #4 has a question"). Lets the COO orchestrate without the user having to hunt across surfaces.
 
@@ -187,7 +209,7 @@ Every Brief targets one of three scopes:
 
 **Permission enforcement.** If routing picks a scope the user can't access, the system downgrades silently to the highest scope they have (e.g. system → org for a non-sysadmin) or surfaces a soft refusal ("That's a platform-admin action — your Brief has been filed as a request to the platform team"). No silent failures.
 
-**Why this isn't new infrastructure.** Scope detection is already one of the triage classifier's (W1) outputs. It's a richer output contract on the same classifier, not a separate system.
+**Why this isn't new infrastructure.** Scope detection is one of the outputs of the Orchestrator's fast path (§8.1). It's a dimension of the existing routing decision, not a separate system.
 
 ## 8. The four capability workstreams
 
@@ -197,21 +219,29 @@ These workstreams were originally conceived before the Universal Brief surface w
 
 ---
 
-### 8.1 Triage classifier
+### 8.1 Orchestrator fast path (triage + scope detection)
 
-**What it is.** A lightweight router that sits in front of the Orchestrator and decides — per Brief — what kind of handling the request needs. Not every free-text input needs a full Orchestrator run; some are one-liners that deserve a direct reply; others are ambiguous and need clarification before anything happens; others clearly need the full routing pipeline.
+**Reframe note:** earlier drafts referred to this as a "classifier in front of the Orchestrator." That framing implied a separate concern that decides whether to invoke the Orchestrator. The correct framing is: **this is the Orchestrator's own fast path** — a cheap pre-LLM step owned by the Orchestrator that decides whether the full LLM pipeline is needed. Code is a separate service file for reusability; conceptually it's part of the Orchestrator.
 
-**Why it matters.** Today there's no triage step. Every task that meets the eligibility gates fires a full Orchestrator run — expensive, slow, overkill for simple queries. With a chat-shaped front door, this over-invocation gets worse: users will type "thanks" or "got it" as conversation fillers, and the system shouldn't dispatch an LLM run for them.
+**What it is.** The Orchestrator's cheap pre-LLM decision layer. Per Brief, it decides: does this need the full planning pipeline, a direct reply, a clarifying question, or a cheap canned answer? And: what scope does it target (subaccount / org / system)?
 
-**Shape.**
-- **Tier 1 — heuristic (zero LLM cost, ~1ms).** Keyword patterns, message length, UI context. Decides `simple_reply` / `needs_clarification` / `needs_orchestrator` / `cheap_answer` with a confidence score.
+**Why it matters.** Today the Orchestrator's LLM pipeline runs on every eligible task. With a conversational front door, that's wasteful — users will type "thanks" and "got it" as fillers; simple routine queries don't need full decomposition; ambiguous queries should be clarified before anything happens. The fast path triages cheaply and only escalates to the full Orchestrator LLM when planning is genuinely needed.
+
+**Shape — two tiers.**
+- **Tier 1 — heuristic (zero LLM cost, ~1ms).** Keyword patterns, message length, UI context. Decides `simple_reply` / `needs_clarification` / `needs_orchestrator` / `cheap_answer` with a confidence score. Scope detection is a dimension of the same output.
 - **Tier 2 — Haiku fallback (~100ms, cents).** Triggered only when Tier 1's confidence is below threshold. Small structured output call; same decision space.
 
-**Scope detection is one of its outputs.** The classifier returns `{route, scope, confidence}` — not just routing. Scope routing from §7 is a dimension of the same classifier, not a separate system.
+The full Orchestrator LLM pipeline (Paths A/B/C/D decomposition) runs only when Tier 1 or Tier 2 returns `needs_orchestrator`.
 
-**In-house precedent.** `queryIntentClassifier`, `topicClassifier`, `pulseLaneClassifier` — all three are existing heuristic-tier routers. The new classifier follows the same pattern (pure function + thin service wrapper + tests).
+**Safety nets against the worst failure mode.** Tier 1 returning a high-confidence wrong answer is the worst case — the system commits to a wrong path without surfacing uncertainty. Three mitigations:
 
-**Net new work.** One new service + pure twin + tests. Integration points at wherever Brief creation dispatches to the Orchestrator.
+1. **Shadow evaluation logging.** Every classification decision logged alongside the user's follow-up behaviour: did they re-issue the Brief (misroute indicator), clarify (ambiguity indicator), abandon (wrong route), or proceed (correct route)? Creates a drift-detection feedback loop reviewable weekly for the first month post-launch, monthly thereafter.
+2. **Risk-aware second-look.** Even when Tier 1 is confident, certain categories force a second look: detected writes, cost above a threshold, scope ≠ UI context, known-brittle keyword patterns. Second-look is a cheap structured LLM confirmation or an explicit user-prompt — cost of misrouting these categories is too high to trust heuristics alone.
+3. **Confidence decay + periodic recalibration.** Heuristic thresholds are not static. Tier 1 confidence scores decay toward "escalate to Tier 2" when recent patterns show drift. Thresholds get tuned from the shadow-eval logs on a regular cadence.
+
+**In-house precedent.** `queryIntentClassifier`, `topicClassifier`, `pulseLaneClassifier` — all three are existing heuristic-tier routers. The new fast path follows the same pattern (pure function + thin service wrapper + tests).
+
+**Net new work.** One new service + pure twin + tests + shadow-eval logging schema + risk-aware second-look helper. Integration at the Orchestrator's entry point.
 
 ---
 
@@ -263,7 +293,37 @@ These workstreams were originally conceived before the Universal Brief surface w
 
 **Important design decision: user-triggered rules skip the admin review queue.** They go live at their chosen scope immediately. The user explicitly vouched for them — an extra gate is overkill friction. If multi-user governance at org scope proves needed later, add a lightweight admin confirmation specifically for `scope=org` rules, not a blanket gate.
 
-#### 8.3.2 Approval-gate suggestion + teachability heuristic
+#### 8.3.2 Rule precedence + conflict detection
+
+**Why this exists as a distinct sub-phase.** External review flagged that user-authored rules are system-behaviour modifiers without built-in conflict resolution. Ship W3a (capture) without this, and the Learned Rules library becomes a field of contradictions at scale — two rules that overlap, with no deterministic answer to "which wins." Agent behaviour becomes inconsistent; users lose trust.
+
+This sub-phase lands before W3.3 (approval-gate suggestion) and W3.4 (provenance) so every downstream rule-consuming surface has a clean substrate.
+
+**Three components:**
+
+**1. Rule precedence model.**
+- **Scope specificity wins.** More specific scope trumps less specific: subaccount-scoped > agent-scoped > org-scoped. Within a scope, an explicit `priority` field (nullable, default `medium`) breaks ties.
+- **Paused rules don't participate.** A user who paused a rule is explicitly opting out; the rule stays in the library but doesn't get injected or cited.
+- **Deprecated rules don't participate.** Rules auto-deprecated for low quality (see component 3) are removed from retrieval; user can resurrect them from the library.
+- **Explicit override trumps precedence.** A rule tagged `authoritative=true` by the user wins regardless of scope — for cases where "this is an org policy, don't let subaccount rules override it."
+
+**2. Conflict detection at capture time.**
+- **LLM-assisted overlap check.** When a user saves a new rule, a Haiku-tier call checks for overlap with existing rules in the same scope + adjacent scopes.
+- **Surface inline.** If overlap detected, the capture dialog pauses and shows: *"This rule contradicts an existing one: [quoted rule]. Pick which wins, or edit both."* — with options: keep-new-deprecate-old / keep-old-discard-new / keep-both-with-priorities / edit-new-to-remove-overlap.
+- **Don't auto-resolve silently.** Silent auto-resolution is what destroys trust at scale. User is always in the loop when conflicts are detected.
+- **False positives are the risk.** The LLM may flag as "conflict" things that aren't truly conflicting. Mitigation: bias toward false-positives (flag more, resolve interactively) — annoying is recoverable; silent conflict is not.
+
+**3. Rule quality scoring.**
+- **Folds into existing `memoryEntryQualityService`.** Avoids a parallel quality system.
+- **Inputs:** usage frequency (how often cited in agent outputs), recency (when last cited), outcome alignment (did runs citing this rule succeed? — uses existing `runResultStatus` signal), user corrections (did a user edit/pause this rule after citation?).
+- **Low-score auto-deprecation.** Rules that score below a threshold for N weeks enter a `deprecated` state — removed from retrieval but retained in the library. User is notified once via the existing notification channel; they can resurrect or delete.
+- **User-authored rules decay more slowly than auto-synthesised ones.** Explicit user intent carries more weight than auto-extraction — asymmetric decay half-lives are already supported by `memoryEntryQualityServicePure` per-entryType configuration.
+
+**Schema additions.** `memoryBlocks` gets: `priority` (nullable enum), `isAuthoritative` (boolean, default false), `deprecatedAt` (nullable timestamp), `deprecationReason` (nullable enum: 'low_quality' / 'user_replaced' / 'conflict_resolved'). All backward-compatible with existing rows.
+
+**Why this can't wait until v2.** The approval-gate suggestion flow (8.3.3) generates candidate rules; if those candidates overlap with existing rules, we need conflict detection at that moment. And the provenance trail (8.3.4) is only meaningful if the system can say "I applied rule X because it was authoritative / more specific / higher priority than rule Y." Without precedence + conflict detection, W3.3 and W3.4 ship into an inconsistent substrate.
+
+#### 8.3.3 Approval-gate suggestion + teachability heuristic
 
 **Goal.** When the user approves or rejects a proposal through an approval card, offer an optional in-context "teach the system?" prompt with LLM-drafted candidate rules.
 
@@ -278,7 +338,7 @@ These workstreams were originally conceived before the Universal Brief surface w
 
 **Important design decision: "Not now" is always first-class.** The suggestion panel is secondary to the approval action — the approval completes whether or not the user engages.
 
-#### 8.3.3 Provenance trail on agent outputs
+#### 8.3.4 Provenance trail on agent outputs
 
 **Goal.** When an agent acts on a remembered rule, show *which rule* influenced the output — so bad rules are discoverable at the moment they misfire.
 
@@ -288,7 +348,7 @@ These workstreams were originally conceived before the Universal Brief surface w
 - **Prompt modification** — agents are prompted to cite rules when they act on them.
 - **UI surfacing** — agent output cards show "Rules applied: [rule X], [rule Y]." Clicking jumps to the Learned Rules library with that rule focused for editing.
 
-**Why this phase is the most ambitious.** Touches the agent execution loop, run logs (schema change), citation detection (service extension), prompt templates, and a new UI component. Likely a separate session's worth of work. Depends on the retrieval audit (§8.4) to scope correctly — if retrieval is leaky, scope grows.
+**Why this phase is the most ambitious.** Touches the agent execution loop, run logs (schema change), citation detection (service extension), prompt templates, and a new UI component. Likely a separate session's worth of work. Depends on the retrieval audit (§8.4) to scope correctly — if retrieval is leaky, scope grows. Also depends on §8.3.2 (precedence + conflict) to produce coherent "this rule applied because X" explanations.
 
 **Why provenance is non-negotiable for long-term scalability.** A memory system you can't see is actively dangerous. A wrong rule could quietly warp agent behaviour for months. Provenance makes bad rules findable the moment they misfire — it's the mechanism that makes the whole memory system trustworthy at scale.
 
@@ -477,11 +537,55 @@ Key invariants the implementation spec must preserve:
 - **Every LLM call routes through `llmRouter.routeCall`.** No direct provider calls anywhere. This keeps the in-flight registry, cost ledger, and budget breaker wired in automatically.
 - **Per-Brief cost ceiling.** Each Brief accrues spend; a visible "$0.04 used / $1.00 cap" surface lets the user see where they are. Default caps are conservative; user can raise.
 - **Review gating stays sacred.** Any action marked `defaultGateLevel: 'review'` in `actionRegistry` surfaces as an approval card — never auto-dispatched, even inside conversation context.
-- **Read-only-by-default.** When the classifier is ambiguous between a read and a write, the COO picks read. Writes require an explicit verb ("send," "create," "schedule," "update").
+- **Read-only-by-default.** When the fast path is ambiguous between a read and a write, the COO picks read. Writes require an explicit verb ("send," "create," "schedule," "update").
 - **Per-subaccount rate-limit awareness.** A noisy Brief thread shouldn't starve ClientPulse polling or outcome-measurement jobs. Existing `getProviderRateLimiter` budgets apply; consider a per-subaccount-per-minute cap on free-text provider reads.
 - **Scope + RLS enforcement at capability boundaries.** Capabilities emit results already scoped — no post-filtering at the chat layer, because post-filtering is brittle for aggregates.
 - **User-triggered rules still audit-trailed.** Even though they skip review, every save writes to `memoryBlockVersions` with `createdByUserId` — full audit trail preserved.
 - **The Orchestrator's capability-query budget (8 calls / run) is preserved.** Clarifying and sparring invocations count against this budget.
+
+### 11.1 Confidence surfaces — a trust mechanism
+
+The contract (§8 and `docs/brief-result-contract.md`) carries an optional `confidence` field on structured results and approval cards. This is a deliberate UX and safety mechanism, not a debugging artifact.
+
+**Principle:** users given a 70%-confident answer know to verify; users given a 100%-confident wrong answer don't. Admitting uncertainty builds trust; hiding it erodes it.
+
+**Where confidence is set:**
+- Orchestrator fast path emits confidence with routing + scope decisions.
+- Capabilities that interpret ambiguous intent (CRM Query Planner, approval-card synthesis, teachability candidate drafter) report their own confidence.
+- Deterministic operations (canonical reads with well-formed filters, direct API calls) omit the field — effectively 1.0.
+
+**Where confidence is surfaced:**
+- `confidence >= 0.85` — rendered normally, no badge.
+- `0.60 <= confidence < 0.85` — subtle indicator ("~70% confident this is what you meant"), prompts spot-check.
+- `confidence < 0.60` — prominent indicator + refinement prompt. On approval cards, forces explicit-approval-required mode regardless of `riskLevel`.
+
+This makes risky interpretations hard to miss without spamming users on confident ones.
+
+### 11.2 Observability and failure visibility
+
+Observability is a day-zero concern, not something that gets bolted on after things break. Without the following instrumentation, the system cannot be tuned, debugged, or safely iterated:
+
+**Classification / routing:**
+- Every fast-path decision logged with `{input, route, scope, confidence, tier_used}` + the user's subsequent behaviour (re-issued? clarified? abandoned? proceeded?) — this is the shadow-eval feedback loop for drift detection.
+- Rate of Tier 2 (Haiku) fallback — a rising rate indicates Tier 1 drift.
+
+**Clarification / challenge:**
+- Clarification-loop rounds per Brief (how many back-and-forths before user converged).
+- Challenge-skill outputs: accepted (user refined their plan) vs. dismissed (user proceeded unchanged).
+
+**Memory:**
+- Capture-rate per user / subaccount (how often `/remember` is used).
+- Suggestion panel engagement (offered / accepted / dismissed / "Not now"-skipped) — drives auto-backoff.
+- Rule conflict detection: false-positive rate (user resolved as "keep both — no real conflict") vs. true-positive rate (user resolved one of the real-conflict options).
+- Quality-score distribution + auto-deprecation rate.
+- Citation rate per rule (is this rule ever actually used?).
+
+**Brief lifecycle:**
+- Outcomes by status: `closed_with_answer` / `closed_with_action` / `closed_no_action` / `cancelled` — proportions inform the Brief-board pollution question (§15).
+- Time-to-close percentiles.
+- Cost-per-Brief distribution — surfaces outliers.
+
+**Principle:** anything the team will need to see to decide "is this feature working" must be logged from day one. Instrumentation is cheaper to add up-front than to retrofit after a metric is needed.
 
 ---
 
@@ -552,74 +656,70 @@ Each phase is independently shippable. Stop after any phase and the app remains 
 |---|---|---|
 | **P0** | Retrieval audit (§8.4) | Half-day — investigation only |
 | **P1** | Entity relabel: "Issue" → "Brief" in UI; COO persona label; Brief detail page layout (chat + sub-tasks + artefacts) | ~1 week |
-| **P2** | Universal Brief entry bar in global header; free-text submission creates a Brief; `conversations` polymorphic schema for Brief + Task scopes first | ~1–2 weeks |
-| **P3** | Triage classifier (W1) including scope detection | ~1 week |
-| **P4** | Clarifying + Sparring Partner capability skills (W2) + masterPrompt gates | ~1 week |
-| **P5** | Memory capture W3a — `/remember` + Learned Rules library + Scope picker UI | ~1 week |
-| **P6** | Memory capture W3b — teachability heuristic + approval-gate suggestion + candidate drafter | ~1–2 weeks |
-| **P7** | Conversation scopes expanded to full v1 seven scopes (recurring task, playbook run, proposal, agent run log) | ~1 week |
-| **P8** | Memory capture W3c — provenance trail on agent outputs | ~2–3 weeks (depends on P0 audit) |
+| **P2** | Universal Brief entry bar in global header; free-text submission creates a Brief; `conversations` polymorphic schema for v1 four scopes (Brief, Agent, Task, Agent run log) | ~1–2 weeks |
+| **P3** | Orchestrator fast path (§8.1) — triage + scope detection + shadow-eval logging + risk-aware second-look | ~1 week |
+| **P4** | Clarifying + Sparring Partner capability skills (§8.2) + masterPrompt gates | ~1 week |
+| **P5** | Memory capture §8.3.1 — `/remember` + Learned Rules library + scope picker UI | ~1 week |
+| **P6** | Memory capture §8.3.2 — rule precedence + conflict detection + quality scoring + auto-deprecation | ~1–2 weeks |
+| **P7** | Memory capture §8.3.3 — teachability heuristic + approval-gate suggestion + candidate drafter | ~1–2 weeks |
+| **P8** | Memory capture §8.3.4 — provenance trail on agent outputs | ~2–3 weeks (depends on P0 audit) |
 | **P9** | CRM Query Planner integration with Brief surface (converging from separate branch's dedicated panel) | Coordination, not code — ~days |
 
-**Total effort estimate:** ~8–12 weeks, multi-session. This is not a single-session build.
+**Total effort estimate:** ~10–14 weeks, multi-session. This is not a single-session build.
 
 **Parallelism opportunities:**
 - P3, P4, P5 can run in parallel with different owners (minimal shared surface).
 - CRM Query Planner's separate branch runs throughout; convergence at P9.
-- P8 is intentionally late — it touches the agent execution loop and requires P0's findings.
+- P6 is a hard gate in front of P7 and P8 — don't ship user-capture-at-scale without precedence + conflict detection.
+- P8 is intentionally late — it touches the agent execution loop and requires P0's findings plus P6's precedence model.
 
 ---
 
 ## 15. Open questions for external review
 
-**The main purpose of this document is to invite critique on these. Please challenge any of them.**
+Some questions from the first review round have been resolved; remaining questions invite further critique.
 
-### 15.1 Is "Brief" the right name?
+### Resolved after review round 1
 
-We chose it for agency-native fit and executive parlance. Alternatives considered: Directive, Ask, Objective, Matter. Is there a better name? Does "Brief" clash unhelpfully with engineering usage (design briefs, implementation briefs)? Will non-English markets translate it cleanly?
+- **~~Is seven conversation scopes in v1 too many?~~** Resolved — v1 reduced to four (Brief, Agent, Task, Agent run log). Others become one-enum-value additions when demand surfaces.
+- **~~Does the "everything routes through the COO" framing hold?~~** Resolved — triage is the Orchestrator's own fast path (not a separate receptionist). Planning is the Orchestrator's LLM step. Executors are the existing specialist-agent fleet. The three-role separation exists in architecture; it doesn't need its own personas.
+- **~~Is Brief overloaded with six roles?~~** Resolved via reframing — Brief is a control plane, not a work plane. Surfaces *attached to* Brief (approvals, memory, execution) live in their own systems; Brief is the thin coordination record where they converge.
+- **~~Classifier worst-case: high-confidence wrong classification?~~** Addressed via the three safety nets in §8.1 — shadow-eval logging, risk-aware second-look, confidence decay + recalibration.
+- **~~Memory rule conflicts + precedence?~~** Addressed via new sub-phase §8.3.2 — rule precedence model, conflict detection at capture time, quality scoring + auto-deprecation.
 
-### 15.2 Is three-level scope routing (subaccount / org / system) over-engineered for v1?
+### Still open — invite critique
 
-The alternative is "subaccount only, use a dedicated org page for cross-client queries." We rejected it on UX grounds (awkward workaround). Is system-level scope especially premature? Should we defer it?
+**15.1 Is "Brief" the right name?**
+Chosen for agency-native fit and executive parlance. Alternatives considered: Directive, Ask, Objective, Matter. Does "Brief" clash unhelpfully with engineering usage (design briefs, implementation briefs)? Will non-English markets translate it cleanly?
 
-### 15.3 Is seven conversation scopes in v1 too many?
+**15.2 Is three-level scope routing (subaccount / org / system) over-engineered for v1?**
+The alternative is "subaccount only, use a dedicated org page for cross-client queries." We rejected it on UX grounds. Is system-level scope especially premature? Should we defer it to v2?
 
-Agent, Brief, Task, Recurring Task, Playbook Run, Proposal/Approval card, Agent Run Log. Could this be phased — e.g. Brief + Task + Agent for initial release, others following? What's the usability risk of conversing at too many levels?
+**15.3 Is the polymorphic `conversations` schema the right call?**
+`scopeType` + `scopeId` is flexible but sacrifices DB-enforced referential integrity. Alternative: distinct tables per scope. Given v1 has only four scopes, is polymorphism over-engineered here?
 
-### 15.4 Is the polymorphic `conversations` schema the right call?
+**15.4 Can the teachability heuristic work without training data?**
+§8.3.3's pre-filter decides which approvals are "teachable." Without labelled data, the initial heuristic is rule-based. Is that sufficient to avoid false-positive suggestions (annoying users) and false-negatives (missing learning moments)?
 
-`scopeType` + `scopeId` is flexible but sacrifices DB-enforced referential integrity. Alternative: distinct tables per scope (`briefConversations`, `taskConversations`, etc.). Worth revisiting if expected scope growth is low?
+**15.5 Is the conflict detection LLM call robust enough?**
+§8.3.2 uses a Haiku-tier call to detect rule overlap at capture time. False-positives (flagging non-conflicts) are recoverable but annoying; false-negatives (missing real conflicts) are the failure mode that erodes trust silently. What's the expected accuracy? How do we validate it?
 
-### 15.5 Does the triage classifier two-tier pattern scale?
+**15.6 Is provenance trail (§8.3.4) achievable without re-architecting context injection?**
+The existing context injection pipeline may not cleanly expose "which blocks were injected." If it doesn't, §8.3.4 grows to include a context-injection refactor — possibly a multi-week scope expansion. The retrieval audit (§8.4) should answer this; any judgement on whether we're underestimating the work?
 
-Heuristic first, Haiku fallback. What's the expected miss rate at Tier 1? How quickly will heuristic drift make Tier 2 the dominant path? Is there a risk of Tier 1 producing high-confidence wrong answers (worst failure mode)?
+**15.7 Does the unified Brief entity scale?**
+Every free-text query becomes a Brief. Read-only queries ("what's my pipeline") create records that close with an answer. Will the Brief board get polluted with exploratory queries, making actionable Briefs hard to find? Is the `closed_with_answer` status + UI filtering enough, or does the UX need something stronger (e.g. "ephemeral" Briefs that don't show on the main board)?
 
-### 15.6 Can the teachability heuristic work without training data?
+**15.8 Is the CRM Query Planner contract flexible enough?**
+`BriefStructuredResult` + `BriefApprovalCard` + `BriefErrorResult`. The CRM Planner will emit these. Is the contract missing anything obvious for complex query results (charts, time series, multi-entity joins)? Is `rows: Array<Record<string, unknown>>` too loose or appropriately flexible? Is `confidence` the only missing trust-affordance, or are there others?
 
-W3b's pre-filter decides which approvals are "teachable." Without labelled data, the initial heuristic is rule-based. Is that sufficient to avoid false-positive suggestions (annoying users) and false-negatives (missing learning moments)?
+**15.9 Is the sequencing realistic given everything else in flight?**
+Pre-launch context means ClientPulse is the active focus; this work waits. Ten to fourteen weeks of this work after ClientPulse stabilises — is that the right priority order given the product's launch runway? What should be descoped or deferred to v2?
 
-### 15.7 Is provenance trail (W3c) achievable without re-architecting context injection?
+**15.10 Is the observability stack the right shape?**
+§11.2 lists the metrics and logs we want in place from day one. Is any of it over-instrumented (cost noise)? Is any of it missing (will regret retrofitting)? Is shadow-eval logging genuinely practical at scale, or will it produce unread data lakes?
 
-The existing context injection pipeline may not cleanly expose "which blocks were injected." If it doesn't, W3c grows to include a context-injection refactor — possibly a multi-week scope expansion.
-
-### 15.8 Does the unified Brief entity scale?
-
-Every free-text query becomes a Brief. Read-only queries ("what's my pipeline") create Brief records that close with an answer. Will the Brief board get polluted with exploratory queries, making it hard to find actionable Briefs? Is the `closed_with_answer` status enough to filter them out, or does the UX need something stronger?
-
-### 15.9 Is the CRM Query Planner contract flexible enough?
-
-`BriefStructuredResult` + `BriefApprovalCard` + `BriefErrorResult`. The CRM Planner will emit these. Is the contract missing anything obvious for complex query results (charts, time series, multi-entity joins)? Is `rows: Array<Record<string, unknown>>` too loose or appropriately flexible?
-
-### 15.10 Is the sequencing realistic given everything else in flight?
-
-The brief assumes ClientPulse + Tier 1 paydown complete before this starts. That's a ~4-week queue in front of a ~8–12 week build. Is this the right priority given other commitments? What should be descoped or phased further?
-
-### 15.11 Does the "everything routes through the COO" framing hold?
-
-Is it confusing to have the COO be both the routing engine AND the persona the user talks to? Would a separate "receptionist" persona (routes) vs "COO" (decides) be clearer? Or is that over-engineering?
-
-### 15.12 What are we missing?
-
+**15.11 What are we missing?**
 The most valuable response to this document is a question we haven't asked ourselves. Please look for those.
 
 ---

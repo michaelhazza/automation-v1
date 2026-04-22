@@ -105,6 +105,25 @@ Used for any failure mode — not just technical errors. Includes "I don't under
 
 ---
 
+## Confidence surfaces
+
+Both `BriefStructuredResult` and `BriefApprovalCard` carry an optional `confidence: number` field (0.0–1.0) that represents the system's self-assessed confidence in the interpretation.
+
+**When to set it:**
+- Capabilities backed by deterministic logic (e.g., a canonical read against a well-formed filter) can skip it — confidence is effectively 1.0 and surfacing it adds noise.
+- Capabilities backed by LLM interpretation (query planning, intent parsing, approval-card synthesis) should set it — it's the signal users need to spot-check borderline cases.
+
+**UI surfacing guidance:**
+- `confidence >= 0.85` — no badge; render normally.
+- `0.60 <= confidence < 0.85` — subtle indicator ("~70% confident this is what you meant").
+- `confidence < 0.60` — prominent indicator + explicit refinement prompt. For `BriefApprovalCard`, low-confidence forces the card into explicit-approval-required mode regardless of `riskLevel`.
+
+**Design intent:** the confidence field builds trust by admitting uncertainty. Users given a 70%-confident answer know to verify; users given a 100%-confident wrong answer don't. The field is a first-class trust surface, not a debugging hint.
+
+**Thresholds are UI-owned.** The contract doesn't enforce thresholds — capabilities report the raw number; the client decides when to show / hide / escalate. This lets UX iterate without contract churn.
+
+---
+
 ## Cost preview (separate, not an artefact)
 
 `BriefCostPreview` is returned by capabilities *before* execution, when the Orchestrator is deciding whether to dispatch. It's not rendered as a chat artefact — it surfaces in the pre-dispatch confirmation UI (or skipped for cheap/free operations).
@@ -175,4 +194,5 @@ The client must:
 
 ## Change log
 
-- **v1 (this version):** initial contract. Structured result, approval card, error, cost preview.
+- **v1 (initial):** Structured result, approval card, error, cost preview.
+- **v1 (additive):** Added optional `confidence?: number` field to `BriefStructuredResult` and `BriefApprovalCard` following external review feedback on the development brief. Backward-compatible — existing consumers ignore the new field; new consumers opt in.
