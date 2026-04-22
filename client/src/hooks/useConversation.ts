@@ -46,6 +46,11 @@ export function useConversation(
   const [sending, setSending] = useState(false);
   const [assistantPending, setAssistantPending] = useState(false);
   const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Synchronous lock for send(). React state (`sending`) updates asynchronously,
+  // so a rapid double-trigger (e.g. two Enter presses in the same microtask)
+  // can slip past the state guard before the first call has flipped `sending`
+  // to true. A ref mutates synchronously and closes that window.
+  const sendInFlightRef = useRef(false);
 
   const clearPendingTimer = useCallback(() => {
     if (pendingTimerRef.current) {
@@ -82,8 +87,9 @@ export function useConversation(
   const send = useCallback(
     async (content: string) => {
       const text = content.trim();
-      if (!text || !conversationId || sending) return;
+      if (!text || !conversationId || sendInFlightRef.current) return;
 
+      sendInFlightRef.current = true;
       setSending(true);
       clearPendingTimer();
 
@@ -116,9 +122,10 @@ export function useConversation(
         }
       } finally {
         setSending(false);
+        sendInFlightRef.current = false;
       }
     },
-    [conversationId, sending, clearPendingTimer],
+    [conversationId, clearPendingTimer],
   );
 
   return { conversationId, messages, sending, assistantPending, send };

@@ -269,3 +269,101 @@ Final-layer improvements only — no correctness gaps remain:
 ChatGPT's "merge-ready / production-safe / architecturally coherent" verdict now carries three additional polish items. No further rounds planned unless user has specific concerns.
 
 ---
+
+## Round 6 — 2026-04-22T23-00-00Z — final pass + merge main
+
+### Context
+
+User merged `main` into the branch (pulling the CRM Query Planner feature — conflicts resolved in `server/config/actionRegistry.ts` and `server/index.ts`; both sides added new entries that were kept side-by-side). ChatGPT round 6 explicitly said "you're done" with only two micro findings + one architectural note (not actionable, capture in KNOWLEDGE.md).
+
+### ChatGPT Feedback (condensed)
+
+1. Double-send race in chat pane — a rapid double Enter can slip past the `sending` state guard.
+2. Ensure metrics getter is side-effect free (does not mutate or reset counters).
+3. Architectural note (not actionable): capture the mutation-path pattern in KNOWLEDGE.md.
+
+### Decisions (per-finding)
+
+| Finding | Recommendation | User Decision | Rationale |
+|---------|----------------|---------------|-----------|
+| R6 item 1 — double-send race | implement (ref-based lock, in the hook) | implement | ChatGPT's `useState` fix has the same async-update race it claims to fix; `useRef` mutates synchronously and closes the window — and placing it in `useConversation` fixes both panes at once |
+| R6 item 2 — metrics getter purity verification | reject-as-action (already compliant) | reject-as-action | Verified: `getBriefConversationWriterMetrics` returns a fresh object literal reading current counters; no mutation, no reset |
+| R6 item 3 — capture mutation-path pattern in KNOWLEDGE.md | implement at finalization | implement | Institutional knowledge; this PR established the six-layer pattern across two subsystems |
+
+### Implemented (Round 6)
+
+- **`client/src/hooks/useConversation.ts`**: added `sendInFlightRef = useRef(false)` synchronous lock. `send()` now guards on the ref instead of React state — a rapid double-trigger can no longer pass the guard before the first call flips `sending` to true. Dropped `sending` from the callback dep array since it's no longer read inside. Both chat panes inherit the fix with no per-caller changes.
+
+- **`KNOWLEDGE.md`**: new entry — *Mutation-path skeleton for any write that lands user or capability content: pure → validate → guard → write → signal → test*. Documents the six-layer pattern, maps each layer to Universal Brief references, states the rule for new mutation-class features, and points at the next features that inherit it (approval dispatch, rule idempotency, CRM writes post-P0).
+
+### Merge resolution
+
+- `server/config/actionRegistry.ts`: kept both sides — HEAD added `ask_clarifying_questions` + `challenge_assumptions` (Universal Brief Phase 4 skills); main added `crm.query` (CRM Query Planner). All three entries land in the registry side-by-side.
+- `server/index.ts`: kept both sides — Universal Brief router registrations + `crmQueryPlannerRouter` registration.
+- Post-merge typecheck: 69 errors (up from 66 on branch, 54 on main) — all pre-existing on one or both sides; none in files I touched. 41/41 lifecycle tests pass. 10/10 policy tests pass.
+
+### Deferred (Round 6)
+
+- None.
+
+### Rejected (Round 6)
+
+- None structurally. R6 item 2 was verification-only with no code change needed.
+
+### Verdict
+
+Session complete. PR is ready for final review + merge.
+
+---
+
+## Final Summary
+
+- **Rounds**: 6
+- **Findings processed**: 23
+- **Implemented in-session**: 11 (rounds 1, 2, 3, 4, 5, 6)
+- **Rejected**: 4 (R1/F7 feedback loop, R4/F4 fork reason, R5/F3 source field, R5/F4 rename)
+- **Deferred to `tasks/todo.md`**: 2 (CGF4b extract ConversationPane, CGF6 rule idempotency key)
+- **Agent definition updates**: 1 commit (`82675ef` — both chatgpt-pr-review and chatgpt-spec-review now require per-finding user approval before acting)
+
+### Per-round commits (in order)
+
+| Commit | Round |
+|--------|-------|
+| `ade0f27` | Round 1 — 3 findings implemented (Findings 2, 3, 6) |
+| `82675ef` | Agent definition update — per-finding approval gate |
+| `dba3847` | Round 2 — assistantPending + useConversation hook (Findings 4A, 5) |
+| `7ccf486` | Round 3 — backend lifecycle write-guard (Finding 1) |
+| `d2b8add` | Round 4 — policy-function auto-pause + structured lifecycle conflicts |
+| `f57f3c7` | Round 5 — metrics counters + MAX_ARTEFACTS_PER_WRITE + mixed-validity test |
+| `8d54cd4` | Merge `main` (conflicts in actionRegistry.ts + index.ts) |
+| (round 6) | Ref-based send lock + KNOWLEDGE.md pattern |
+
+### KNOWLEDGE.md updates
+
+- New entry — *Mutation-path skeleton: pure → validate → guard → write → signal → test* — six-layer pattern established across artefact persistence + rule capture, maps to Universal Brief references, rule for future mutation features.
+
+### Deferred items (persisted in `tasks/todo.md`)
+
+- **CGF4b** — Extract shared `ConversationPane` shell component (hook already shipped as `useConversation`; remaining shell-only duplication low priority).
+- **CGF6** — Idempotency key for `saveRule` (retry dedup; overlaps with existing conflict detector — needs separate design PR).
+
+### Metrics baseline established
+
+New in-memory counters ready for scraping:
+- `lifecycleConflictsTotal` — write-guard rejections
+- `artefactsOverLimitTotal` — cap-breaching writes
+- `artefactsValidationRejectedTotal` — schema/enum rejections
+
+Accessed via `getBriefConversationWriterMetrics()`.
+
+### PR Readiness
+
+- Typecheck: 69 server errors (all pre-existing), 11 client errors (all pre-existing, none in modified files).
+- Tests: 41/41 briefArtefactValidatorPure (write-guard + lifecycle chain), 10/10 ruleCapturePolicyPure.
+- Conflicts resolved from main merge; side-by-side integration of Universal Brief skills + CRM Query Planner.
+- Review log persisted here; deferred items in `tasks/todo.md`.
+- KNOWLEDGE.md pattern captured.
+
+**Ready to merge — PR #176: https://github.com/michaelhazza/automation-v1/pull/176**
+
+---
