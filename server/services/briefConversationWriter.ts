@@ -23,6 +23,10 @@ export interface WriteMessageResult {
   messageId: string;
   artefactsAccepted: number;
   artefactsRejected: number;
+  // True when the turn is expected to produce an assistant follow-up
+  // (role === 'user'). Lets the client show a deterministic "Thinking…" state
+  // without relying on websocket or refetch timing.
+  assistantPending: boolean;
 }
 
 /**
@@ -104,5 +108,6 @@ export async function writeConversationMessage(
     messageId,
     artefactsAccepted: acceptedArtefacts.length,
     artefactsRejected,
+    assistantPending: input.role === 'user',
   };
 }

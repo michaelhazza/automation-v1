@@ -60,3 +60,66 @@ Verdict: Approve with minor pre-merge tightening.
 - **Finding 7** — Fast-path feedback loop — YAGNI; ChatGPT explicitly noted "not for this PR"
 
 ---
+
+## Round 2 — 2026-04-22T21-10-00Z — retroactive user approval + 2 overrides
+
+### Context
+
+Process correction: the chatgpt-pr-review agent was auto-implementing and auto-deferring findings without user approval. Per user direction, all 7 Round 1 findings were replayed as recommendations and the user decided per-item. The agent definitions for `chatgpt-pr-review` and `chatgpt-spec-review` were updated in commit `82675ef` to require per-finding user approval going forward (see [Agent updates](#agent-definition-updates-82675ef) below).
+
+### ChatGPT Feedback (verbatim)
+
+Executive Summary: Your decisions are mostly correct and well-calibrated. 2 items to change, 1 to tighten slightly.
+
+Finding 1 (lifecycle): keep deferred — correct call. Nuance: this is a write-path invariant system, not just a validator change. Treat as P1 architecture follow-up, not backlog nice-to-have.
+Finding 2 (boundary comment): keep as-is. Correct.
+Finding 3 (auto-suggested rules paused): keep as-is. Highest-leverage fix in the review.
+Finding 4 (chat pane dedup): change to soft-implement now OR enforce guardrail. Preferred option: extract only `useConversation()` hook; leave UI components separate. Reason: duplication still cheap to fix but about to become entrenched.
+Finding 5 (assistantPending): change to implement now. It is functionally a UX reliability bug, not a contract tweak. Implementation is trivial (additive field). Sits on the core interaction primitive (conversation as control surface).
+Finding 6 (showSource centralisation): keep as-is.
+Finding 7 (fast-path feedback loop): keep as-is.
+
+Micro-tweak (not previously called out): in `ruleCaptureService.saveRule`, also gate on confidence threshold: `if (originatingArtefactId || confidence < 0.8) status = 'pending_review'`. Not required, but strong polish — prevents low-confidence manual rules slipping through as active.
+
+### Decisions (per-finding)
+
+| Finding | Round 1 Action | Round 2 Decision | Rationale |
+|---------|----------------|------------------|-----------|
+| Finding 1 — Backend lifecycle enforcement | deferred | keep deferred; upgrade to **P1 architecture follow-up** | User agreed with defer but raised priority — dedicated follow-up PR, not backlog |
+| Finding 2 — Conversation boundary comment | implemented | keep as-is | Confirmed |
+| Finding 3 — Auto-suggested rules paused | implemented | keep as-is | Confirmed |
+| Finding 4 — Extract useConversation / ConversationPane | deferred | **partial-implement**: extract `useConversation` hook only; defer `ConversationPane` shell component | Option A per feedback — dedupes fetch/state/send logic while keeping UI components separate |
+| Finding 5 — `assistantPending: true` in POST response | deferred | **implement** | User agreed with ChatGPT: UX reliability, not contract tweak; implementation is trivial additive field |
+| Finding 6 — Centralize showSource | implemented | keep as-is | Confirmed |
+| Finding 7 — Fast-path feedback loop | rejected | keep as-is | Confirmed |
+| **CGF3-tweak** — confidence-threshold gate in `saveRule` | — | **surfaced for user decision** | New recommendation; not auto-implemented per updated agent rules |
+
+### Implemented (Round 2)
+
+- **Finding 5 — `assistantPending: true`**
+  - `server/services/briefConversationWriter.ts`: `WriteMessageResult` gained `assistantPending: boolean` field; returned `true` when `input.role === 'user'`. Additive, non-breaking.
+  - Consumers (`server/routes/conversations.ts`, `server/routes/briefs.ts`, `server/services/briefCreationService.ts`) unchanged — they return/await the result directly, so the field surfaces automatically.
+- **Finding 4 Option A — extract `useConversation` hook**
+  - New file: `client/src/hooks/useConversation.ts` — manages `conversationId`, `messages`, `sending`, and `assistantPending` state for any conversation scope (`task` / `agent_run` / `brief` / `agent`). Handles deterministic "Thinking…" state with a 15s timeout fallback plus auto-clear when the next assistant message arrives.
+  - `client/src/components/task-chat/TaskChatPane.tsx` — rewrote to use the hook; added `aria-live="polite"` "Thinking…" bubble.
+  - `client/src/components/agent-run-chat/AgentRunChatPane.tsx` — same pattern.
+
+### Deferred (updated)
+
+- **CGF1** — Backend lifecycle write-time enforcement — **now P1 architecture follow-up** (not backlog). `tasks/todo.md` entry updated.
+- **CGF4b** — Extract shared `ConversationPane` component (hook already shipped; remaining shell component deferred — revisit when a third chat pane emerges). `tasks/todo.md` entry updated.
+- ~~CGF5~~ — **removed from deferral** (implemented this round).
+
+### Rejected (Round 2)
+
+- None — all Round 2 decisions were implement / keep as-is / defer.
+
+### Surfaced for user decision
+
+- **CGF3-tweak** — `saveRule` confidence-threshold gate. Recommendation: implement (low-risk polish, strengthens Finding 3's quality guard). Awaiting user response.
+
+### Agent definition updates (82675ef)
+
+Commit `82675ef` updated `.claude/agents/chatgpt-pr-review.md` and `.claude/agents/chatgpt-spec-review.md` so every finding is surfaced with a recommendation and requires per-item user approval before action. No more auto-implement, auto-reject, or auto-defer. Affects all future reviews, not just this PR.
+
+---

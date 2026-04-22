@@ -1,12 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import api from '../../lib/api.js';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  createdAt: string;
-}
+import { useConversation } from '../../hooks/useConversation.js';
 
 interface TaskChatPaneProps {
   taskId: string;
@@ -17,61 +10,22 @@ interface TaskChatPaneProps {
  * Uses the polymorphic conversations table with scopeType='task'.
  */
 export function TaskChatPane({ taskId }: TaskChatPaneProps) {
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, sending, assistantPending, send } = useConversation('task', taskId);
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void api
-      .get<{ conversationId: string; messages: ChatMessage[] }>(
-        `/api/conversations/task/${taskId}`,
-      )
-      .then((res) => {
-        setConversationId(res.data.conversationId);
-        setMessages(res.data.messages);
-      })
-      .catch(() => {});
-  }, [taskId]);
-
-  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, assistantPending]);
 
-  async function send() {
-    if (!input.trim() || !conversationId || sending) return;
-    const text = input.trim();
+  async function handleSend() {
+    if (!input.trim() || sending) return;
+    const text = input;
     setInput('');
-    setSending(true);
-
-    const tempId = crypto.randomUUID();
-    const userMsg: ChatMessage = {
-      id: tempId,
-      role: 'user',
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    try {
-      // The write endpoint returns { messageId, artefactsAccepted, artefactsRejected }
-      // — no assistant reply is echoed back. Replace the optimistic row's id with
-      // the server-issued id so later websocket / refetch merges dedupe correctly.
-      const res = await api.post<{ messageId: string }>(
-        `/api/conversations/${conversationId}/messages`,
-        { content: text },
-      );
-      const serverId = res.data.messageId;
-      if (serverId) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, id: serverId } : m)),
-        );
-      }
-    } finally {
-      setSending(false);
-    }
+    await send(text);
   }
+
+  const visibleMessages = messages.filter((m) => m.role !== 'system');
 
   return (
     <div className="flex flex-col h-64 border border-gray-200 rounded-lg bg-white">
@@ -79,25 +33,31 @@ export function TaskChatPane({ taskId }: TaskChatPaneProps) {
         <p className="text-xs font-medium text-gray-600">Ask about this brief</p>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        {messages.filter((m) => m.role !== 'system').length === 0 && (
+        {visibleMessages.length === 0 && !assistantPending && (
           <p className="text-xs text-gray-400 py-4 text-center">
             Ask a question or leave a note for your AI team.
           </p>
         )}
-        {messages
-          .filter((m) => m.role !== 'system')
-          .map((msg) => (
-            <div
-              key={msg.id}
-              className={`text-xs rounded-lg px-3 py-2 max-w-sm ${
-                msg.role === 'user'
-                  ? 'ml-auto bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-800'
-              }`}
-            >
-              {msg.content}
-            </div>
-          ))}
+        {visibleMessages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`text-xs rounded-lg px-3 py-2 max-w-sm ${
+              msg.role === 'user'
+                ? 'ml-auto bg-indigo-600 text-white'
+                : 'bg-gray-100 text-gray-800'
+            }`}
+          >
+            {msg.content}
+          </div>
+        ))}
+        {assistantPending && (
+          <div
+            aria-live="polite"
+            className="text-xs rounded-lg px-3 py-2 max-w-sm bg-gray-100 text-gray-500 italic"
+          >
+            Thinking…
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
       <div className="px-3 py-2 border-t border-gray-100 flex gap-2">
@@ -107,14 +67,14 @@ export function TaskChatPane({ taskId }: TaskChatPaneProps) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              void send();
+              void handleSend();
             }
           }}
           placeholder="Ask a question…"
           className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
         />
         <button
-          onClick={() => void send()}
+          onClick={() => void handleSend()}
           disabled={!input.trim() || sending}
           className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
         >
