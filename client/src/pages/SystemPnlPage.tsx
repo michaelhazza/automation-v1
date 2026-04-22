@@ -10,6 +10,7 @@ import type {
   DailyTrendRow,
   TopCallRow,
   PnlResponse,
+  PlannerMetrics,
 } from '../../../shared/types/systemPnl';
 import PnlKpiCard from '../components/system-pnl/PnlKpiCard';
 import PnlGroupingTabs, { type PnlGrouping } from '../components/system-pnl/PnlGroupingTabs';
@@ -63,6 +64,7 @@ export default function SystemPnlPage() {
   const [models, setModels]       = useState<ProviderModelRow[]>([]);
   const [trend, setTrend]         = useState<DailyTrendRow[]>([]);
   const [topCalls, setTopCalls]   = useState<TopCallRow[]>([]);
+  const [planner, setPlanner]     = useState<PlannerMetrics | null>(null);
   const [loading, setLoading]     = useState<boolean>(true);
   const [error, setError]         = useState<string | null>(null);
 
@@ -84,7 +86,7 @@ export default function SystemPnlPage() {
     setLoading(true);
     setError(null);
     try {
-      const [s, o, sb, st, pm, tr, tc] = await Promise.all([
+      const [s, o, sb, st, pm, tr, tc, pl] = await Promise.all([
         api.get<PnlResponse<PnlSummary>>(`/api/admin/llm-pnl/summary?month=${month}`),
         api.get<PnlResponse<{ orgs: OrgRow[]; overhead: OverheadRow }>>(`/api/admin/llm-pnl/by-organisation?month=${month}`),
         api.get<PnlResponse<SubacctRow[]>>(`/api/admin/llm-pnl/by-subaccount?month=${month}`),
@@ -92,6 +94,7 @@ export default function SystemPnlPage() {
         api.get<PnlResponse<ProviderModelRow[]>>(`/api/admin/llm-pnl/by-provider-model?month=${month}`),
         api.get<PnlResponse<DailyTrendRow[]>>(`/api/admin/llm-pnl/trend?days=30`),
         api.get<PnlResponse<TopCallRow[]>>(`/api/admin/llm-pnl/top-calls?month=${month}&limit=${topCallsLimit}`),
+        api.get<PnlResponse<PlannerMetrics>>(`/api/admin/llm-pnl/planner-metrics?days=30`),
       ]);
       setSummary(s.data.data);
       setOrgs(o.data.data.orgs);
@@ -101,6 +104,7 @@ export default function SystemPnlPage() {
       setModels(pm.data.data);
       setTrend(tr.data.data);
       setTopCalls(tc.data.data);
+      setPlanner(pl.data.data);
       setLastRefresh(new Date());
     } catch (err: unknown) {
       // Surface the failure explicitly — pre-fix, any non-2xx silenced all
@@ -291,6 +295,58 @@ export default function SystemPnlPage() {
             onViewAll={handleViewAllTopCalls}
           />
         </div>
+
+        {/* CRM Query Planner metrics (spec §17.2 / §19 P3) */}
+        {planner && (
+          <div className="mb-6 rounded-lg border border-slate-200 bg-white p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">CRM Query Planner</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Stage 3 LLM calls — last {planner.periodDays} days</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="bg-slate-50 rounded-md p-3">
+                <div className="text-xs text-slate-500 mb-1">Stage 3 calls</div>
+                <div className="text-xl font-semibold text-slate-900">{planner.totalStage3Calls.toLocaleString()}</div>
+              </div>
+              <div className="bg-slate-50 rounded-md p-3">
+                <div className="text-xs text-slate-500 mb-1">Escalated</div>
+                <div className="text-xl font-semibold text-slate-900">{planner.escalatedCalls.toLocaleString()}</div>
+                {planner.escalationRate !== null && (
+                  <div className="text-xs text-slate-500 mt-0.5">{planner.escalationRate.toFixed(1)}%</div>
+                )}
+              </div>
+              <div className="bg-slate-50 rounded-md p-3">
+                <div className="text-xs text-slate-500 mb-1">Total cost</div>
+                <div className="text-xl font-semibold text-slate-900">
+                  {planner.totalCostCents > 0
+                    ? `$${(planner.totalCostCents / 100).toFixed(2)}`
+                    : '$0.00'}
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-md p-3">
+                <div className="text-xs text-slate-500 mb-1">Avg cost / call</div>
+                <div className="text-xl font-semibold text-slate-900">
+                  {planner.avgCostCentsPerCall !== null
+                    ? `${planner.avgCostCentsPerCall}¢`
+                    : <span className="text-slate-400 text-sm">—</span>}
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-md p-3">
+                <div className="text-xs text-slate-500 mb-1">Avg latency</div>
+                <div className="text-xl font-semibold text-slate-900">
+                  {planner.avgLatencyMs !== null
+                    ? `${planner.avgLatencyMs.toLocaleString()} ms`
+                    : <span className="text-slate-400 text-sm">—</span>}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-slate-400">
+              LLM-skipped rate and brief-refinement rate pending log aggregation.
+            </div>
+          </div>
+        )}
 
         {/* Footer — mockup copy. Links are decorative per spec §11.4.1. */}
         <div className="mt-10 pt-6 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">

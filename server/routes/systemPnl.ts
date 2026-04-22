@@ -240,6 +240,17 @@ router.get(
 );
 
 router.get(
+  '/api/admin/llm-pnl/planner-metrics',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const days = Math.min(Number(req.query.days) || 30, 365);
+    const data = await systemPnlService.getPlannerMetrics(days);
+    res.json(wrap(data, `last-${days}d`));
+  }),
+);
+
+router.get(
   '/api/admin/llm-pnl/call/:id',
   authenticate,
   requireSystemAdmin,

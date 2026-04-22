@@ -263,6 +263,7 @@ export type BriefErrorCode =
   | 'ambiguous_intent'
   | 'missing_permission'
   | 'cost_exceeded'
+  | 'live_call_failed'
   | 'rate_limited'
   | 'provider_error'
   | 'internal_error';
