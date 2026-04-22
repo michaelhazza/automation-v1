@@ -221,8 +221,10 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
 | `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
-| `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, pauses for HITL on anything directional. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After a draft spec is written, before starting implementation against it |
+| `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
+| `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
+| `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
 
 ### Task Classification
 
@@ -286,8 +288,9 @@ The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking 
 
 Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/review-logs/spec-review-log-*`). All review logs live in `tasks/review-logs/` to keep the main `tasks/` directory uncluttered. The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
 
-- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
+- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context. **After persisting**, process findings in this order: (1) Blocking non-architectural findings → implement in-session; (2) Blocking findings that are architectural in nature (significant redesign, contract change, multi-service impact) → route to `tasks/todo.md` under `## PR Review deferred items / ### <slug>` rather than attempting in-place; (3) Strong Recommendations → implement if in-scope, otherwise defer to the same backlog section.
 - **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
+- **`chatgpt-pr-review` and `chatgpt-spec-review` self-write.** Both agents write their own session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md` and `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md` respectively. The caller does not need to persist anything.
 
 If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
 
@@ -312,28 +315,6 @@ For any Significant or Major spec, read `docs/spec-authoring-checklist.md` befor
 The checklist points back at the deep references in `architecture.md` and `docs/spec-context.md`; it does not restate them. Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop — every unchecked box is a finding the reviewer will raise anyway.
 
 Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checklist — just write and move on.
-
-### Spec review is the equivalent pipeline for spec documents
-
-When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:
-
-- Reads `docs/spec-context.md` as framing ground truth before every run.
-- **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/review-logs/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
-- Stops early on two consecutive mechanical-only rounds.
-- Classifies every finding as **mechanical**, **directional**, or **ambiguous**.
-- **Auto-applies mechanical findings** (contradictions, stale language, file inventory drift, sequencing bugs, under-specified contracts).
-- **Pauses for HITL** on directional or ambiguous findings (scope changes, phase re-ordering, testing posture changes, rollout posture changes, architecture changes, anything that would invalidate a baked-in framing assumption).
-- Writes checkpoint files at `tasks/review-logs/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md` when HITL is needed. The human edits the checkpoint's `Decision:` lines and re-invokes the agent to resume.
-
-**Directional findings are never auto-applied, even if the recommendation looks obviously correct.** The classifier biases aggressively toward HITL — a false positive costs 30 seconds of reading; a false negative costs a wrong-shaped spec and a re-review round.
-
-**When to invoke `spec-reviewer`:**
-
-- After writing any non-trivial spec document
-- Before starting implementation against a spec
-- After a major edit to an existing spec (e.g. incorporating feedback from a stakeholder) — **but only if the 5-iteration lifetime cap has not been reached**
-- NOT for trivial doc updates (typos, one-line clarifications) — just edit and move on
-- NOT for mid-loop spec additions where the review has already cleanly exited once — the spec-review pipeline is not a perfection engine, and re-invoking after every refinement creates an infinite-loop failure mode that has already burned real session time. Diminishing returns kick in fast. Apply judgement and move on to the architect or build phase.
 
 ---
 
