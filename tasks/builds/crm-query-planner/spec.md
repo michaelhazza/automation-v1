@@ -841,6 +841,8 @@ if (detectLikelyHybrid(intent, schemaContext)) {
 
 **Retry contract — explicit invariant.** Stage 3 issues **at most two LLM calls per request**: one initial parse at the default tier, plus at most one escalation retry at the escalated tier. Escalation is triggered only by (a) `confidence < threshold` on the initial parse, (b) the `detectLikelyHybrid` heuristic firing (which skips the default-tier call entirely and replaces it with a single escalated call), or (c) large-schema trigger (§11.11 / brief §5.3). There are no further retries on parse failure, adapter timeout, rate-limit rejection, or validation failure — any of those surfaces as a `BriefErrorResult` on the first occurrence. There is no multi-model escalation chain beyond the single default-tier → escalation-tier step. This invariant is the cost envelope for Stage 3: worst case per request is `default_tier_tokens + escalation_tier_tokens`, never more.
 
+**Retry tie-break (deterministic resolution).** If both the default-tier and escalation-tier calls return valid `DraftQueryPlan` objects, the **escalation attempt is authoritative** — its draft is the one passed to Stage 4. The default-tier draft is discarded; its cost is still captured on the `planner.stage3_parse_completed` event (for the `avg_query_cost_cents` metric) but its content is not referenced past the escalation decision. This rules out any "best-of-N" selection and keeps the same-input-same-plan determinism property for the planner.
+
 ### 10.5 Test plan
 
 Pure tests in `llmPlannerPromptPure.test.ts`:
@@ -874,28 +876,30 @@ The validator is **authoritative**. LLM output is advisory. This is not enforced
 
 ### 11.2 Validation rules
 
+**Classification — spec-enforceable invariant.** Every rule in this list MUST declare its classification inline: `[principal-dependent]` (inputs include `PrincipalContext` — reruns on cache hit per §9.3.1) or `[plan-dependent]` (inputs are pure over the cached plan shape — does not rerun on cache hit). Additionally, a `[stage1-subset]` tag marks rules that run under Stage 1's reduced subset per §8.3. A rule without a classification tag is a **spec violation**; `spec-reviewer` and `pr-reviewer` both check for it. When adding or modifying a rule, update §9.3.1 (cache-hit rerun list) and §8.3 (Stage 1 subset list) in the same edit if the tag changes.
+
 Per brief §11.4, in order:
 
-1. **Entity existence** — `primaryEntity` is in `PrimaryEntity` enum; resolved via schemaContext.
-2. **Field existence** — every `filter.field`, `sort.field`, `projection` field, `aggregation.field`, `aggregation.groupBy` entry exists on `primaryEntity` per the subaccount's schemaContext.
-3. **Operator sanity** — each filter's `operator` is valid for the field's type (e.g. no `gt` on a string field unless it's date-ish).
-4. **Date-range sanity** — `dateContext.from < dateContext.to` when both present.
-5. **Entity-relation validity** — e.g. filtering on `opportunity.stage` requires `primaryEntity === 'opportunities'`.
-6. **Aggregation compatibility** — `sum`/`avg` only on numeric fields; `group_by` fields must exist on `primaryEntity`.
-7. **Hybrid pattern check** — if `source === 'hybrid'`, plan must match `canonical_base_with_live_filter` shape:
+1. **Entity existence** `[plan-dependent]` — `primaryEntity` is in `PrimaryEntity` enum; resolved via schemaContext.
+2. **Field existence** `[plan-dependent]` `[stage1-subset]` — every `filter.field`, `sort.field`, `projection` field, `aggregation.field`, `aggregation.groupBy` entry exists on `primaryEntity` per the subaccount's schemaContext.
+3. **Operator sanity** `[plan-dependent]` `[stage1-subset]` — each filter's `operator` is valid for the field's type (e.g. no `gt` on a string field unless it's date-ish).
+4. **Date-range sanity** `[plan-dependent]` — `dateContext.from < dateContext.to` when both present.
+5. **Entity-relation validity** `[plan-dependent]` — e.g. filtering on `opportunity.stage` requires `primaryEntity === 'opportunities'`.
+6. **Aggregation compatibility** `[plan-dependent]` — `sum`/`avg` only on numeric fields; `group_by` fields must exist on `primaryEntity`.
+7. **Hybrid pattern check** `[plan-dependent]` — if `source === 'hybrid'`, plan must match `canonical_base_with_live_filter` shape:
    - `canonicalCandidateKey` is non-null and in the registry
    - Exactly one filter is a "live" filter (live-only field per schemaContext)
    - Other filters are canonical-resolvable
    - `limit` ≤ canonical base's native limit
    - `hybridPattern` field set to `'canonical_base_with_live_filter'`.
-8. **Canonical-precedence tie-breaker** — applies only when `source === 'live'` AND `canonicalCandidateKey` is non-null and registry-valid. Three cases:
+8. **Canonical-precedence tie-breaker** `[plan-dependent]` — applies only when `source === 'live'` AND `canonicalCandidateKey` is non-null and registry-valid. Three cases:
    - **Zero live-only filters present** → promote `source` to `'canonical'`, **keep `canonicalCandidateKey` on the plan** (canonicalExecutor requires it — see §12.1), log `planner.canonical_promoted`, dispatch via canonical executor.
    - **Live-only filters present AND plan matches `canonical_base_with_live_filter` shape** → promote to `source: 'hybrid'` with `hybridPattern: 'canonical_base_with_live_filter'`, **keep `canonicalCandidateKey`** so the hybrid executor can reuse the canonical base path, log `planner.canonical_promoted` with `toSource: 'hybrid'`, dispatch via hybrid executor (once P3 ships — see §19.1 P2 rejection rule).
    - **Live-only filters present AND plan does NOT match the hybrid shape** → keep as `source: 'live'`, no promotion. The filters the user asked for are preserved.
 
    The rule never silently strips filters. Dropping a user-specified filter would change query semantics — which is a correctness bug, not a tie-breaker. Promotion keeps `canonicalCandidateKey` populated because both canonical and hybrid executors dereference it to find the registry handler.
-9. **Projection overlap** — `projection` fields must be a subset of fields permitted for `primaryEntity` on the caller's principal context (read-permission check).
-10. **Per-entry capability check** — for canonical and hybrid plans (`source !== 'live'`), the caller's `capabilityMap` must contain every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities`. This rule enforces the per-entry gate that the canonical executor otherwise runs at dispatch (§12.1); running it in the validator means cache hits and Stage 3 drafts are caught before executor dispatch. For v1, `requiredCapabilities` is forward-looking metadata (see §12.1 note) — the rule executes against whatever capabilities the caller's `capabilityMap` actually exposes, treating missing entries as absent.
+9. **Projection overlap** `[principal-dependent]` `[stage1-subset]` — `projection` fields must be a subset of fields permitted for `primaryEntity` on the caller's principal context (read-permission check).
+10. **Per-entry capability check** `[principal-dependent]` — for canonical and hybrid plans (`source !== 'live'`), the caller's `capabilityMap` must contain every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities`. This rule enforces the per-entry gate that the canonical executor otherwise runs at dispatch (§12.1); running it in the validator means cache hits and Stage 3 drafts are caught before executor dispatch. For v1, `requiredCapabilities` is forward-looking metadata (see §12.1 note) — the rule executes against whatever capabilities the caller's `capabilityMap` actually exposes, treating missing entries as absent.
 
 ### 11.3 Validation failure
 
@@ -1266,6 +1270,8 @@ Executor does not re-validate; if any of these invariants are violated, it throw
 
 This guarantees the cap holds even when call count cannot be fully determined pre-execution.
 
+**Short-circuit result shape (explicit invariant).** When the cap fires — at pre-dispatch estimate or mid-iteration — the executor returns `BriefErrorResult { errorCode: 'cost_exceeded', suggestions: [...] }`. **No partial `BriefStructuredResult` is returned in v1**, even if some rows have been live-filtered before short-circuit. Mixing cap-truncated and cap-complete rows in a structured result would mislead the user about query completeness; the error-plus-suggestions shape forces a refinement instead. Partial-result return is explicitly out of scope for v1 (see Deferred Items if it ever becomes signal-driven).
+
 ### 14.4 Test plan
 
 `hybridExecutor.test.ts`:
@@ -1434,7 +1440,7 @@ Live-executor dispatch does NOT make a new `routeCall`, so `runCostBreaker` does
 
 **Executor cost boundary (explicit invariant).** The per-query cent ceiling is a **Stage 3 cost guard only**. Executor runtime cost — canonical executor DB work, live executor provider calls, hybrid executor live-filter calls — is **not pre-bounded** in v1 beyond these two existing guards:
 
-- **Hybrid 10-call cap** (§14.3) — hybrid executor short-circuits at 10 live calls, enforced pre-dispatch and mid-iteration.
+- **Hybrid 10-call cap** (§14.3) — hybrid executor short-circuits at 10 live calls, enforced pre-dispatch and mid-iteration. **The cap bounds call count only, not response payload size or per-call latency.** A hybrid query issuing 9 calls each returning a 10 MB response is within the cap; response-size cost remains unbounded in v1 beyond the canonical `limit` on the base query and the provider's own payload limits.
 - **Per-run ledger check** via `runCostBreaker` — fires on any `runId`-carrying Stage 3 call; catches runaway cost at run scope.
 
 No additional planner-local budget is imposed on canonical DB queries or on non-hybrid live calls because (a) canonical reads are bounded by `LIMIT`-capped queries, (b) single live reads are a single provider call, and (c) the brief's §11.5 explicitly defers per-subaccount rate-budget enforcement until signal justifies it. Callers with strict per-query cost requirements must rely on the run-level ceiling (`runCostBreaker`), not a planner-local cap.
@@ -1463,7 +1469,12 @@ export function computeActualCostCents(input: {
   stage3EscalationUsage?: { inputTokens: number; outputTokens: number; model: string };
   liveCallCount?:         number;
   hybridLiveCallCount?:   number;
-}): number { /* pure — sum of token×price + per-live-call cost from pricingService */ }
+}): { total: number; stage3: number; executor: number } {
+  /* pure — returns the split (§18.2 cost attribution invariant):
+     stage3   = token×price for parse + escalation calls
+     executor = per-call cost × (liveCallCount + hybridLiveCallCount)
+     total    = stage3 + executor                                   */
+}
 ```
 
 - `computePlannerCostPreview` runs **pre-dispatch** and fills `QueryPlan.costPreview`. `confidence` reflects source reliability (static_heuristic for Stage 1, cached_similar_query for Stage 2, planner_estimate for Stage 3). `basedOn` is picked by the caller at call-site.
@@ -1471,7 +1482,7 @@ export function computeActualCostCents(input: {
 - Stage 3 token counts come from the `ProviderResponse.usage` returned by `llmRouter.routeCall` (the router does NOT return ledger rows — ledger persistence is its internal side-effect; the `usage` object is the caller-visible cost signal). `crmQueryPlannerService` captures the `usage` object from each Stage 3 call (initial parse + optional escalation retry) and feeds it to the calculator.
 - Live-call / hybrid-call counts come from the executor layer (each executor increments a local counter as it dispatches).
 
-The per-query ceiling check reads `computeActualCostCents(...)` (after Stage 3, before executor dispatch) and compares to `systemSettings.crm_query_planner_per_query_cents`. Per-run ceiling is enforced by `runCostBreaker` inside the router, post-ledger — see §16.2 for the primitive boundary.
+The per-query ceiling check reads `computeActualCostCents(...).stage3` (after Stage 3, before executor dispatch — only the Stage 3 component matters at this point since executor has not run) and compares to `systemSettings.crm_query_planner_per_query_cents`. Per-run ceiling is enforced by `runCostBreaker` inside the router, post-ledger — see §16.2 for the primitive boundary.
 
 Because `BriefCostPreview` carries only predicted cost and `DraftQueryPlan` must not force the LLM to emit planner-derived values, `DraftQueryPlan` is **`Omit<QueryPlan, 'validated' | 'stageResolved' | 'costPreview'>`**. The planner fills `costPreview` after the Stage 3 parse succeeds, using `computePlannerCostPreview`. Stage 1 / Stage 2 hits fill `costPreview` the same way on their own code paths (with `basedOn: 'static_heuristic'` and `'cached_similar_query'` respectively).
 
@@ -1547,7 +1558,7 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.classified` | `{ intentHash, source, intentClass, confidence, stageResolved, canonicalCandidateKey }` |
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
-| `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents, stageResolved }` |
+| `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved }` |
 | `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
@@ -1555,6 +1566,8 @@ Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as s
 **Invariant — every request emits exactly one `stageResolved`-bearing event.** On the success path that is `planner.classified` (with `stageResolved: 1 | 2 | 3`). On every error path — validation failure, cost-exceeded pre-dispatch, executor error, unsupported intent, parse failure at Stage 3 — the service emits `planner.error_emitted` with `stageResolved` populated to the last stage the request reached. The only case the value is `null` is an error raised before any stage runs (e.g. a route-level precondition failure that shortcuts to an error without invoking `runQuery`'s pipeline); inside the planner itself this cannot happen — intent normalisation is Stage 0 and raises its own `ambiguous_intent` error with `stageResolved: 1` (the first matching-stage the request would have entered). The `null` slot exists as an explicit escape hatch for future route-layer errors, not as a missing-field signal.
 
 Dashboards filter on `stageResolved` including error events; silent drop-off (an error path missing the field) is a spec violation and should be caught by `crmQueryPlannerService.test.ts`.
+
+**Terminal-emission rule.** The `stageResolved`-bearing event (`planner.classified` or `planner.error_emitted`) is emitted **only at terminal resolution** of the request — the moment the service has decided "this request is done, here is the outcome." Pre-terminal events (`planner.stage3_parse_started`, `planner.stage3_parse_completed`, `planner.stage3_escalated`, `planner.validation_failed`, `planner.canonical_promoted`, `planner.executor_dispatched`) are status transitions and MUST NOT carry `stageResolved`. This prevents a future async/streaming path from double-emitting (early success event followed by a late error) — the terminal event fires exactly once, after the pipeline has committed to an outcome.
 
 The standard envelope `{ kind, at, orgId, subaccountId, runId?, intentHash }` is extended with an optional `briefId?: string` — same pass-through as the request-body field (§18.1). `briefId` is what powers the `planner.brief_refinement_rate` correlation metric in §17.2; without it, per-session re-query detection is not possible.
 
@@ -1569,7 +1582,7 @@ Computed from the event stream (batch, not per-event):
 - **`planner.avg_stage3_latency_ms`** — mean LLM Stage 3 `latencyMs`.
 - **`planner.escalation_rate`** — `stage3_escalated / stage3_parse_completed`.
 - **`planner.validation_failure_rate`** — `validation_failed / stage3_parse_completed`.
-- **`planner.brief_refinement_rate`** — correctness proxy. For each `briefId` the planner saw within a 10-minute window, count as "refined" if the brief either (a) emitted `planner.error_emitted` with `errorCode: 'ambiguous_intent' | 'unsupported_query'`, or (b) was followed within the same `briefId` by another `planner.classified` event (re-query). `brief_refinement_rate = refined_briefIds / total_briefIds`. Without this metric, efficiency optimisation (lower cost, higher `llm_skipped_rate`) could bias toward cheap-but-wrong plans users have to refine. The correlation uses the new `briefId` envelope field (§17.1). **Dashboard surfacing is P3+**; event data is captured in v1 so the metric is computable without further schema changes, but the system-pnl subsection only adds a visual in P3 once there is enough traffic to distinguish signal from noise. Metric name and derivation are locked in v1.
+- **`planner.brief_refinement_rate`** — correctness proxy. **Session boundary:** one `briefId` = one chat session (per §18.1 request body); all queries carrying the same `briefId` are one session. **Per-session classification window:** 10 minutes rolling from the first query in the `briefId`; queries arriving after that count as a new session even if the `briefId` is reused. A `briefId` is classified as "refined" if within its 10-minute window it either (a) emitted `planner.error_emitted` with `errorCode: 'ambiguous_intent' | 'unsupported_query'`, or (b) was followed within the same `briefId` by another `planner.classified` event (re-query). **Aggregation window:** `brief_refinement_rate = refined_briefIds / total_briefIds` is rolled up **daily** (UTC calendar day, matching the system-pnl dashboard convention). No sub-daily aggregation in v1 — noise floor is too high under low traffic. Without this metric, efficiency optimisation (lower cost, higher `llm_skipped_rate`) could bias toward cheap-but-wrong plans users have to refine. The correlation uses the `briefId` envelope field (§17.1). **Dashboard surfacing is P3+**; event data is captured in v1 so the metric is computable without further schema changes, but the system-pnl subsection only adds a visual in P3 once there is enough traffic to distinguish signal from noise. Metric name, session boundary, per-session window, and aggregation window are locked in v1.
 
 Metrics surface through the existing system-pnl admin route (`/system/llm-pnl`) with a new subsection under "Task-class breakdown." No new dashboard.
 
@@ -1663,6 +1676,8 @@ The entry matches the real `ActionDefinition` shape declared in `server/config/a
 Handler registration follows the existing `ACTION_HANDLERS` pattern (see `server/config/actionRegistry.ts` for how `actionType` keys map to handlers in the registry module — the handler is NOT inlined on `ActionDefinition`). The handler calls `crmQueryPlannerService.runQuery` with the authenticated principal, not payload-supplied identifiers.
 
 **Semantics note — `crm.query` is a routing action.** Unlike most entries in `actionRegistry.ts`, `crm.query` does not execute a single discrete operation. It dispatches through the planner pipeline, which may in turn call the canonical executor, the live executor, the hybrid executor, or short-circuit to an error — each with its own cost and latency profile. Action-level attributes (`readPath: 'liveFetch'`, `actionCategory: 'api'`, `defaultGateLevel: 'auto'`) describe the **entry-point contract**, not the execution path. Downstream cost attribution, latency attribution, and observability reflect the resolved execution path (`stageResolved`, `executor`, `source`) and must not be collapsed into the action-level attributes. This is the same pattern the Orchestrator uses above the planner — a router whose action-level registration names the entry point, not the branch it takes.
+
+**Cost attribution split (explicit invariant).** `crm.query`'s action-level cost breakdown MUST distinguish two components: **(1) Planner cost** — Stage 3 LLM tokens (initial + optional escalation), plus any planner-internal compute. This is the cost of *deciding how to answer*. **(2) Executor cost** — canonical DB query cost, live provider call cost, hybrid live-filter calls. This is the cost of *running the answer*. The two are reported separately on `planner.result_emitted` (`stage3CostCents` and `executorCostCents` sub-fields of `actualCostCents`, implied by §16.2.1's `computeActualCostCents` decomposition) and MUST NOT be summed into a single action-level "cost of `crm.query`" slot. Dashboards that show action-level cost without this split misattribute executor cost to the planner and make optimisation decisions against a misleading signal.
 
 Agent-facing tool. Exposed to any agent whose `capabilityMap` grants `crm.query`. The MCP server's tool catalogue auto-picks this up via the `mcp.annotations` block (existing pattern from `server/mcp/mcpServer.ts`).
 
@@ -1838,6 +1853,8 @@ Per `CLAUDE.md` rule: "No feature flags or backwards-compatibility shims when yo
 Access is gated by the existing skill-permission system: agents need `crm.query` in their `capabilityMap` to invoke. Orgs not yet onboarded to the planner simply don't grant the capability.
 
 **Capability gate applies to both user-initiated and system-initiated invocations.** The `crm.query` check is enforced at the route layer (§18.1) — every HTTP caller passes through it. Any **in-process caller** that invokes `crmQueryPlannerService.runQuery` directly (scheduled Briefs, orchestrator paths, future internal agents) is responsible for performing the equivalent `capabilityMap` check **before** invoking the service — the route layer's check does not fire on direct service calls, and the service itself does not re-check (it trusts its caller on capability, matching the rest of the repo's service-layer convention). To prevent drift, `crmQueryPlannerService.runQuery` takes an explicit `callerCapabilities: Set<string>` on `ExecutorContext` that downstream executor dispatch reads for the per-entry `canonical.*` capability checks (§12.1); a caller that invokes `runQuery` without populating `callerCapabilities` gets a deterministic `MissingPermissionError` on the first canonical dispatch, not silent bypass. No exemption path ships in v1; the "internal system caller" concept is deferred until a concrete internal caller needs it, at which point the exemption is a typed field on `ExecutorContext`, not an implicit bypass.
+
+**Missing-capability failure mode (explicit invariant).** A request lacking `crm.query` at the route layer, or lacking a required per-entry `canonical.*` capability at executor dispatch (via §11.2 rule 10 / §12.1), resolves to `BriefErrorResult { errorCode: 'missing_permission', message, suggestions? }`. **No fallback is attempted** — the planner does not silently rewrite a canonical plan into a live plan, degrade the projection, or drop the filter. The user (or calling agent) must either acquire the capability or accept the refusal. This matches the `MissingPermissionError` internal class (§12.1); the service-level translation is `errorCode: 'missing_permission'`. The error code is deliberately `missing_permission` rather than `unauthorized` to match the existing taxonomy in `shared/types/briefResultContract.ts` and to distinguish from authentication failures (which are handled by the `authenticate` middleware at the route layer and never reach the planner).
 
 ### 21.2 System-settings for tier config
 
