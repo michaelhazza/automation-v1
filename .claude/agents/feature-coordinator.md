@@ -65,6 +65,25 @@ Review the plan for:
 
 Update `progress.md`.
 
+### B.5) Plan gate — STOP before execution
+
+After the architect produces the plan and you have reviewed it:
+
+1. **Present the plan to the user.** Summarise the chunks, their order, and any dependencies or risks you spotted during review.
+2. **Hard stop.** Do not proceed to implementation. Output the following message verbatim:
+
+> **Plan is finalised.** Review the plan at `tasks/builds/{slug}/plan.md`.
+>
+> **Action required before I continue:**
+> - If you are satisfied with the plan, switch your session to **Sonnet** (lower cost, sufficient for execution).
+> - Then reply with "proceed" or "execute" to start implementation.
+>
+> I will not begin implementation until you confirm.
+
+3. **Wait for the user's explicit confirmation.** Only proceed to section C after receiving "proceed", "execute", or equivalent confirmation. Do not interpret silence or unrelated messages as confirmation.
+
+---
+
 ### C) Implementation (per chunk)
 
 Process chunks from the plan **one at a time**. For each chunk:

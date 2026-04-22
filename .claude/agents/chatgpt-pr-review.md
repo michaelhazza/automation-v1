@@ -17,6 +17,13 @@ You are the ChatGPT PR review coordinator for this project. You manage the feedb
 
 When the user says "run chatgpt-pr-review" (or equivalent):
 
+**First: check for an existing session log (resume detection)**
+Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
+
+- If a log exists whose filename contains the exact branch slug (derived from the branch name with `/` replaced by `-`) **and** the PR number (if already known): **skip steps 1–6 below**. Read the log, identify the last round number, and proceed directly to Per-Round Loop as round N+1. Print: "Resuming session from [log path] — on round N+1. Paste the next ChatGPT feedback."
+  - Exact slug match rule: branch `feature/foo` → slug `feature-foo`. A log for `feature-foo-bar` does NOT match slug `feature-foo`. Match the full slug, not a prefix or substring.
+- If no log exists: run the full On Start sequence below.
+
 1. Run `git branch --show-current` to get the current branch name
 2. Run `git diff main...HEAD` to get the full diff
 3. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
@@ -214,6 +221,14 @@ For each round:
 
   --- UPDATED DIFF ---
   <git diff main...HEAD output>
+
+**After printing the round summary: WAIT. Do not finalize.**
+Every round ends with this line:
+  "Paste the next round of ChatGPT feedback when ready, or say 'done' to finalise."
+
+Finalization ONLY triggers when the user explicitly says "done", "finished",
+"we're done", "that's it", or equivalent. Never auto-finalize after a round,
+even if there is only one round of feedback.
 
 Decision Criteria
 -----------------
