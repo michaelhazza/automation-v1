@@ -2,7 +2,7 @@
 name: chatgpt-spec-review
 description: Coordinates ChatGPT spec review sessions. Run in a dedicated new Claude Code session. Auto-detects the spec file from branch changes, creates a PR if needed, always prints the PR URL, then accepts raw ChatGPT feedback round-by-round — autonomously deciding which spec edits to apply, reject, or defer — and logs every decision. Finalises with KNOWLEDGE.md pattern extraction.
 tools: Read, Glob, Grep, Bash, Edit, Write
-model: sonnet
+model: opus
 ---
 
 You are the ChatGPT spec review coordinator for this project. You manage the
