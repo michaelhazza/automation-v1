@@ -193,3 +193,98 @@ _None — both accepted items are doc-level surgical edits inside a single agent
 ### Top themes
 
 architecture (plan-validation boundary), scope (cross-section reference rule)
+
+---
+
+## Round 4 — 2026-04-22 (confirmation only)
+
+### ChatGPT Feedback (raw)
+
+> DONE — FINALISE. No further actionable items. System is complete and production-grade for its intended use. Three-layer validation (spec-reviewer → spec-conformance → pr-reviewer) is coherent, fail-closed posture is preserved end-to-end, classification and scoping boundaries are explicit. Approve for merge.
+
+### Decisions
+
+_No actionable findings — confirmation-only round. No rows._
+
+### Implemented
+
+_None._
+
+### Rejected
+
+_None._
+
+### Deferred
+
+_None._
+
+### Top themes
+
+confirmation (final verdict DONE — FINALISE)
+
+---
+
+## Finalisation
+
+### Final status
+
+**Merged.** PR #174 landed on `main` on 2026-04-22. The `spec-conformance` agent is now part of the fleet and referenced from `CLAUDE.md § Local Dev Agent Fleet`, the Task Classification table, `§ Independent review is not optional`, `§ Review logs must be persisted`, and `§ Review-log filename convention — canonical definition`.
+
+### Round-by-round roll-up
+
+| Round | Commit | Implemented | Rejected (already-done) | Deferred | Notes |
+|-------|--------|-------------|-------------------------|----------|-------|
+| 1 | `65b9280` | 2 (NON_CONFORMANT contract hoist + canonical chunk-slug definition) | 2 (chunk-scoping STOP guard; spec-contradiction handling) | 3 (coverage metrics, drift detection, automated plan validation) | Strategic deferrals routed to `tasks/todo.md` |
+| 2 | `f25c8e1` | 1 (`plan.md` named as single source of truth for chunk→spec mapping) | 5 (all other findings traced to pre-round-1 state) | 0 | ChatGPT reviewing a stale snapshot for 5 of 6 items |
+| 3 | `8cf570d` | 2 (explicit cross-section reference rule; `You are not a plan validator` boundary rule) | 0 | 0 | Both doc-only surgical edits inside `spec-conformance.md` |
+| 4 | _(no commit — confirmation only)_ | 0 | 0 | 0 | ChatGPT verdict: `DONE — FINALISE` |
+| **Total** | **—** | **5** | **7** | **3** | — |
+
+### Commit verification
+
+All three implementation commits landed on `main` via the PR merge. Verified via `git log --oneline main..HEAD` returning only review-round commits ahead of main at session close, and the PR page reporting "Merged".
+
+### Deferred items confirmation
+
+All three round-1 deferrals are present in `tasks/todo.md` under the dated section `## Deferred from chatgpt-pr-review — PR #174 (2026-04-22)` (lines 309–318):
+
+- Spec coverage metrics (gate: first production use where a reviewer asks "how much of the spec did this PR land?")
+- Drift detection over time (gate: first confirmed drift incident)
+- Automated plan validation (gate: next feature where `feature-coordinator` + `spec-conformance` run end-to-end on a multi-chunk plan)
+
+No additional deferrals from rounds 2, 3, or 4.
+
+### KNOWLEDGE.md pattern extraction
+
+Four durable patterns surfaced across rounds 1–3 that were not already captured in the N2 entry from the pr-reviewer pass:
+
+1. **Fail-closed classification gate ordering matters for LLM-driven agents** (round 2, finding 3 already-done): the "Am I 100% certain this is mechanical?" question must be the *first* instruction in the classification step, above the MECHANICAL_GAP criteria themselves. Ordering biases LLM behaviour.
+2. **Explicit source-of-truth naming prevents reviewer drift** (round 2, finding 4): naming `tasks/builds/<slug>/plan.md` as the single authoritative source for chunk→spec mapping — and forbidding inference from any other source — closes a whole class of "the reviewer re-derived a different mapping than the planner intended" bugs.
+3. **Cross-section dependency rule vs implicit inference** (round 3, finding 1): the agent may follow *explicit, named* cross-section references (named section, heading, §-number in the spec's own structure) into another spec section, but must NOT follow implicit mentions. The spec's own structure is not inference; guessing at adjacent sections is.
+4. **Three-layer validation pattern: spec-reviewer / spec-conformance / pr-reviewer** (round 3 strategic observation): a fleet-level pattern — different agents own different correctness dimensions (spec quality / implementation-vs-spec / code quality), each with an explicit scope boundary. The boundary statements ("you are not a plan validator", "you are not a code reviewer") are as load-bearing as the positive descriptions.
+
+Appended as four new entries to `KNOWLEDGE.md` (2026-04-22 dates).
+
+### Docs-cleanup findings (for the separate doco-update branch)
+
+Spotted during the docs-cleanup scan but **not fixed in this session** — user has a separate doco-update branch coming next:
+
+- **`CLAUDE.md:340`** — "Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk" — misses `spec-conformance` (also a log-producing agent now). The next paragraphs correctly list all six log-producing agents, but the opening sentence lists only two. Rewrite to "Every review agent that writes a review log (`pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review`)..." to match the filename-convention subsection at `:361`.
+- **`CLAUDE.md:382`** — "Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop" — reads as if the spec loop is the only review loop. Low priority; optionally rephrase to acknowledge that for spec-driven code work the same principle applies to `spec-conformance` (a well-scoped spec + plan shortens the conformance loop too).
+- **`docs/capabilities.md`** — no mentions of `spec-conformance` to update. (Confirmed via grep: zero hits.) The review-gating sections describe *product* review queues for end users, which are a different concept from the dev-fleet review agents. No staleness.
+
+None of the above is blocking. All are within `CLAUDE.md` scope for the next branch.
+
+### Session counters
+
+- Rounds: 4 (3 actionable + 1 confirmation)
+- Implemented: 5
+- Rejected (already-done, already-covered by prior pr-reviewer / dual-reviewer / pre-existing agent spec): 7
+- Deferred: 3
+- Architectural items surfaced for user decision: 0 (all accepted items passed the size filter)
+- `pending_architectural_items` at close: empty
+- `index_write_failures`: 0
+
+### Verdict
+
+**Merged — review session complete.** No unresolved architectural decisions, no blocking findings. PR #174 is on `main`.
