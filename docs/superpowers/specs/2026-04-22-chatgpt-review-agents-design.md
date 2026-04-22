@@ -1,7 +1,7 @@
 # Design: ChatGPT Review Agents
 
 **Date:** 2026-04-22
-**Status:** Draft
+**Status:** Implemented — see `.claude/agents/chatgpt-pr-review.md` and `.claude/agents/chatgpt-spec-review.md` for the canonical agent specs, which supersede this document where they diverge.
 
 ## Overview
 
@@ -153,6 +153,26 @@ After applying accepted items, prints the changed sections only (not the full sp
 6. Prints: "Spec review complete. PR #<N>: <url>. Hand off to architect or invoke writing-plans when ready to implement."
 
 The spec agent **does** create a PR at the end — the spec document itself has been edited and those changes need to land on a branch.
+
+---
+
+## Post-Implementation Enhancements
+
+The following behavioral additions were made during the ChatGPT review loop after the original spec was written. They are fully specified in the agent files; this section records what changed and why.
+
+**`chatgpt-pr-review`:**
+- **Architectural checkpoint** (structured UI): large architectural findings now surface a structured block — Finding / Impact / Recommendation / Reply with — instead of a flat one-liner. Includes a size filter: ≤30 LOC, single file, no contract break → implement directly.
+- **`pending_architectural_items` register**: session-level list of unresolved architectural decisions. Re-printed at the start of every round. "defer" removes items immediately by routing to `tasks/todo.md`. Finalization gates "Ready to merge" on an empty list.
+- **Overlap guard**: accepted items touching the same files/services as a flagged architectural item are paused until the decision is resolved, then re-activated. Scope check re-runs after re-activation.
+- **Scope prompt is blocking**: waits for "continue" / "stop" / "split" before proceeding. "stop" and "split" route remaining accepted items to `tasks/todo.md`.
+- **Decision table completeness**: pending architectural items are written to the round's Decisions table as "pending (architectural — awaiting your decision)" so logs are structurally complete before reply.
+- **`_index.jsonl` only logs final decisions**: items in `pending_architectural_items` are not written to the index until resolved.
+- **Ordering rule**: if both architectural decisions and scope warning fire in the same round, architectural decisions are resolved first.
+
+**`chatgpt-spec-review`:**
+- **Recursive glob patterns**: auto-detection now uses `tasks/**/*.md` and `docs/**/*.md` to catch nested specs (e.g. `docs/superpowers/specs/*.md`).
+- **Integrity-check recursion guard**: the post-edit integrity pass runs exactly once per round; findings introduced by integrity-check fixes do not trigger another pass.
+- **Post-integrity sanity pass**: after ≥1 mechanical integrity fix, a lightweight break-check confirms no heading is referenced that no longer exists and no section was left empty.
 
 ---
 
