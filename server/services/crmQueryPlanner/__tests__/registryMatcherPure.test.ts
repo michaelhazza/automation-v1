@@ -166,6 +166,61 @@ test('collision detected at index build time', () => {
   assert(threw, 'RegistryConflictError expected on alias collision');
 });
 
+// ── All-alias coverage — §8.4 requirement ─────────────────────────────────
+// Build a mock registry from REGISTRY_META (pure — no DB) and assert every
+// registered alias produces a Stage 1 hit.  Synonyms that would collide
+// (e.g. 'deal velocity' = 'pipeline velocity' via 'deal'→'opportunities')
+// are intentionally absent from REGISTRY_META.aliases; they still match via
+// synonym substitution at lookup time.
+
+import { REGISTRY_META } from '../executors/canonicalQueryRegistryMeta.js';
+import type { CanonicalQueryHandlerArgs, ExecutorResult } from '../../../../shared/types/crmQueryPlanner.js';
+
+const STUB_HANDLER = async (_args: CanonicalQueryHandlerArgs): Promise<ExecutorResult> =>
+  ({ rows: [], rowCount: 0, truncated: false, actualCostCents: 0, source: 'canonical' as const });
+
+// Construct a full mock registry from REGISTRY_META without handlers importing drizzle-orm
+const fullMockRegistry: CanonicalQueryRegistry = Object.freeze(
+  Object.fromEntries(
+    Object.entries(REGISTRY_META).map(([key, meta]) => [
+      key,
+      { ...meta, handler: STUB_HANDLER },
+    ]),
+  ) as CanonicalQueryRegistry,
+);
+
+const fullCtx = { callerCapabilities: new Set(['crm.query']) };
+
+for (const [registryKey, entry] of Object.entries(REGISTRY_META)) {
+  for (const alias of entry.aliases) {
+    test(`alias "${alias}" → ${registryKey}`, () => {
+      const intent = normaliseIntent(alias);
+      const result = matchRegistryEntry(intent, fullMockRegistry, fullCtx);
+      assert(result !== null, `expected a hit for alias "${alias}"`);
+      assertEqual(result!.registryKey, registryKey, `registryKey for "${alias}"`);
+    });
+  }
+}
+
+// Synonym-path aliases that are NOT in the alias list (they'd collide as explicit
+// entries but still match via synonym substitution at lookup time)
+const synonymAliasChecks: Array<{ alias: string; expectedKey: string }> = [
+  { alias: 'inactive contacts',     expectedKey: 'contacts.inactive_over_days' },   // inactive→stale
+  { alias: 'deal velocity',         expectedKey: 'opportunities.pipeline_velocity' }, // deal→opportunities
+  { alias: 'future appointments',   expectedKey: 'appointments.upcoming' },           // upcoming→future handled in registered alias; future stays future but matches via synonym at lookup
+  { alias: 'deals stage',           expectedKey: 'opportunities.count_by_stage' },   // deal→opportunities
+  { alias: 'pipeline by stage',     expectedKey: 'opportunities.count_by_stage' },   // pipeline→opportunities
+];
+
+for (const { alias, expectedKey } of synonymAliasChecks) {
+  test(`synonym alias "${alias}" → ${expectedKey} (not in explicit alias list)`, () => {
+    const intent = normaliseIntent(alias);
+    const result = matchRegistryEntry(intent, fullMockRegistry, fullCtx);
+    assert(result !== null, `expected a synonym-path hit for "${alias}"`);
+    assertEqual(result!.registryKey, expectedKey, `registryKey for "${alias}"`);
+  });
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
