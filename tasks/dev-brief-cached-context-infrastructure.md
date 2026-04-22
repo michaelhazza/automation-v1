@@ -30,6 +30,8 @@ Today we'd build this ad-hoc per tenant. Wrong shape. Every tenant on our platfo
 
 After mapping the initial design against the codebase, we found that most of the *plumbing* exists (LLM router, HITL gate, cost ledger, cache-control support, scheduled tasks) but the *reference-document primitive itself is a genuine gap*. Documents are explicitly-attached, never-cascaded material — a different loading model from memory blocks, and a different primitive. v1 introduces `reference_documents` + `document_packs` as a new sibling to memory blocks, adds run-time pack snapshots for reproducibility, unifies three overlapping budget primitives into one canonical `ExecutionBudget` at the router, and wires a concrete block-path through the existing HITL gate.
 
+**System boundary.** Cached-context infrastructure is responsible for deterministic assembly, budgeting, and execution of *explicitly attached* reference documents. It does not decide document relevance dynamically, does not perform retrieval, and does not infer which documents a task needs. Attachment is the input; assembly is the output. Relevance inference and retrieval are separate concerns (see §6) and belong to a different primitive.
+
 ---
 
 ## 2. The problem we're solving
@@ -289,4 +291,5 @@ The infrastructure is validated when:
 - **Idempotent by contract.** A single logical task run produces exactly one billed LLM execution, even under retry, scheduler duplication, or worker restart. The router is where this invariant is enforced; cached-context inherits it.
 - **Reconstructable from persisted state.** Any run can be replayed end-to-end from the snapshot, budget, and prefix-hash components on the row — never from the live document or pack tables. Mutable state must not be load-bearing for reproducibility.
 - **Resilient to upstream drift.** Tokenisers, model versions, cache semantics, and provider pricing will all change under us. Token-count drift is tracked (§4.2); assembly is versioned (§4.4). The principle generalises: no code path may silently depend on an upstream invariant we do not ourselves validate.
+- **No silent fallback.** The system must not silently alter the input set or execution strategy to fit within constraints. Auto-truncation, auto-dropping documents, silent model downgrade, quiet retry on a reduced pack — all forbidden by default. Any such change must be explicit (a named transform in the assembly pipeline — see §4.4), observable (logged on the run row with a structured reason), or operator-approved (routed through the HITL gate). This protects against "helpful" future code paths that trade correctness for silent convenience.
 - Defer complexity; v1 must be boring and observable before it is clever.
