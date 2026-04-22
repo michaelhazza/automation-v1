@@ -278,3 +278,71 @@ No deferred items from round 3 — all four findings applied in-session.
 - No unresolved items.
 - Commit + push follows.
 
+---
+
+## Session Finalisation — 2026-04-22T12:10:00Z
+
+### Totals across all 3 rounds
+
+| Round | Accept / Implemented | Reject | Defer |
+|-------|----------------------|--------|-------|
+| 1     | 3                    | 4      | 4     |
+| 2     | 3                    | 0      | 0     |
+| 3     | 4                    | 0      | 0     |
+| **Total** | **10**           | **4**  | **4** |
+
+Round 1 commit: a1bb8663 — 3 accepted (capability-skip logging, hybrid base-at-plan-limit warn, filter-drop diagnostics).
+Round 2 commit: 51e2a691 — 3 accepted (terminal forwarder dedup, Stage-3 error taxonomy split, service-level cache tests).
+Round 3 commit: 4bd6ea78 — 4 accepted (cache-versioning invariant comment, `PlannerTrace.executionMode`, retry-posture comment, cache-write-after-validation invariant comment).
+
+### Pre-existing `pending_architectural_items`
+
+None. All accepted findings across the three rounds passed the architectural-checkpoint size filter (all surgical single-file edits or additive-optional contract extensions — spec §17 `errorSubcategory` enum extension in round 2, `PlannerTrace.executionMode` optional field in round 3). No item was ever held for user decision.
+
+### Final PR-readiness verdict
+
+**Ready to merge.** No blockers. No unresolved architectural decisions. No open review items. All ChatGPT pre-merge recommendations (round 2 #1 duplicate-terminal, #2 error taxonomy, #3 cache tests) closed in-session. All round-3 edge-level polish applied.
+
+### Reviewer's own closing verdict (round 3, verbatim)
+
+> "production-grade planner with clean orchestration boundaries. No blockers. No correctness issues. Only observability and future-proofing polish left. If you said 'done' here, I'd agree."
+
+Baseline verdict at round 3 entry: "mergeable without hesitation."
+
+### Deferred-items sweep
+
+All deferred items from rounds 1 / 2 / 3 already captured in `tasks/todo.md` under `## Deferred from chatgpt-pr-review — crm-query-planner (2026-04-22)` during round 1. Verified 2026-04-22 during finalisation:
+
+- Finding #1 remainder (ID-scoped live fetch / pagination-aware `applyLiveFilter`) — already captured in round 1.
+- Finding #2 (runtime read-only `ExecutorContext` enforcement) — already captured in round 1.
+- Finding #6 (live executor retry on rate_limited — spec-change-first) — already captured in round 1.
+- Observation (planner metrics panel Stage 1 vs 3 hit rate + cache hit rate) — already captured in round 1.
+
+Rounds 2 and 3 produced no deferred items. No additions required to `tasks/todo.md` during finalisation.
+
+### Verification summary (at finalisation time)
+
+- `crmQueryPlannerService.test.ts` — 13 / 13 tests pass.
+- Planner unit-test suite (pure / orchestration) — 233 / 233 pass (includes planCachePure, validatePlanPure, normaliseIntent, costCalculator, registry).
+- `npx tsc --noEmit` — zero planner-related errors. Pre-existing unrelated client errors (ClarificationInbox.tsx / SkillAnalyzerExecuteStep.tsx) persist unchanged — out of scope for this PR.
+- Integration test (`integration.test.ts`) — still deferred per `tasks/todo.md:318`; requires local DB harness.
+
+### KNOWLEDGE.md additions
+
+Three entries appended (see KNOWLEDGE.md entries dated 2026-04-22 under Pattern / Convention / Pattern — review-loop learnings):
+1. One-terminal-per-run invariant for agent-execution-log forwarders.
+2. Error-taxonomy separation between user-facing semantics and internal analytics subcategory.
+3. Top-level execution-mode flag on a staged trace beats nested per-stage inspection for quick observability.
+
+### Index write failures
+
+`index_write_failures = 0`. All 14 findings written to `tasks/review-logs/_index.jsonl`.
+
+### Session complete
+
+- Rounds: 3
+- Implemented: 10
+- Rejected: 4
+- Deferred: 4
+- PR: #177 — https://github.com/michaelhazza/automation-v1/pull/177 — ready to merge.
+
