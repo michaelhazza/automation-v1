@@ -17,6 +17,13 @@ You are the ChatGPT PR review coordinator for this project. You manage the feedb
 
 When the user says "run chatgpt-pr-review" (or equivalent):
 
+**First: check for an existing session log (resume detection)**
+Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
+
+- If a log exists whose filename contains the exact branch slug (derived from the branch name with `/` replaced by `-`) **and** the PR number (if already known): **skip steps 1–6 below**. Read the log, identify the last round number, and proceed directly to Per-Round Loop as round N+1. Print: "Resuming session from [log path] — on round N+1. Paste the next ChatGPT feedback."
+  - Exact slug match rule: branch `feature/foo` → slug `feature-foo`. A log for `feature-foo-bar` does NOT match slug `feature-foo`. Match the full slug, not a prefix or substring.
+- If no log exists: run the full On Start sequence below.
+
 1. Run `git branch --show-current` to get the current branch name
 2. Run `git diff main...HEAD` to get the full diff
 3. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
@@ -133,6 +140,15 @@ For each round:
 5. Implement the accepted items (excluding any flagged for your decision in step 3)
    using Edit, Write, Bash — follow CLAUDE.md and architecture.md conventions.
 6. Run `npm run lint && npm run typecheck` — fix any issues before continuing
+6a. Commit and push — after lint/typecheck passes, commit all changes from this round
+    and push so the PR reflects the latest state (required for the next ChatGPT round):
+    ```
+    git add -A
+    git commit -m "chatgpt-review(round <N>): implement <X> finding(s) from ChatGPT feedback"
+    git push
+    ```
+    If there are no file changes this round (all findings rejected/deferred), skip the commit.
+    Print the commit SHA after pushing.
 7. Append the round to the session log with a Top themes line using finding_type
    vocabulary (e.g. null_check, naming, architecture) — not free-form text.
    If `pending_architectural_items` is still non-empty at end of round, add each
@@ -160,6 +176,14 @@ For each round:
 
   --- UPDATED DIFF ---
   <git diff main...HEAD output>
+
+**After printing the round summary: WAIT. Do not finalize.**
+Every round ends with this line:
+  "Paste the next round of ChatGPT feedback when ready, or say 'done' to finalise."
+
+Finalization ONLY triggers when the user explicitly says "done", "finished",
+"we're done", "that's it", or equivalent. Never auto-finalize after a round,
+even if there is only one round of feedback.
 
 Decision Criteria
 -----------------
