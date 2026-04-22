@@ -91,6 +91,12 @@ Brief chat intent (free text)
   │  Hit → direct canonical handler, QueryPlan emitted free     │
   │  NOT a regex layer, NOT a mini-LLM — it IS the registry's   │
   │  alias index. No duplicate matching logic.                  │
+  │                                                             │
+  │  Intent normalisation is a single shared utility used by    │
+  │  BOTH Stage 1 (matcher) and Stage 2 (cache). Owning it in   │
+  │  one place prevents the two stages from drifting (e.g. a    │
+  │  Stage 1 hit that a Stage 2 cache lookup misses because the │
+  │  two use different whitespace/casing/tokenisation rules).   │
   └─────────────────────────────────────────────────────────────┘
         │ miss
         ▼
@@ -228,7 +234,7 @@ The fallback LLM is **not hardcoded** inside the planner. Every Stage 3 call goe
 
 Every plan carries an explicit `source`. This makes the routing testable, observable, and refactor-safe. "Which path ran?" is a logged field, not a code-path inference.
 
-Plans also carry a `stageResolved` field indicating whether Stage 1, 2, or 3 produced them. This is the measurable signal for deterministic-coverage optimisation over time.
+Plans also carry a `stageResolved` field indicating whether Stage 1, 2, or 3 produced them. **This is the primary signal for measuring deterministic coverage and driving optimisation over time** — not a diagnostic field. Architect should treat it as first-class telemetry: every dashboard, alert, and optimisation target that cares about "how much of our traffic is paying LLM cost" keys off `stageResolved`. See §11.9 for the derived metrics and §11.12 for its role in the future Query Memory Layer.
 
 ---
 
@@ -289,6 +295,8 @@ const canonicalQueryRegistry: Record<string, CanonicalQueryRegistryEntry>;
 - Stage 3 emits `canonicalCandidateKey: null` → executor falls through to live
 
 Architect settles threshold values in §11.2. Key property: a canonical match **preempts** LLM — it is never re-evaluated if Stage 1 hits.
+
+**Tie-breaker rule: canonical always wins.** When a Stage 3 LLM plan carries both a valid `canonicalCandidateKey` AND a `source: 'live'` preference (which can happen if the model hedges), the validator promotes to canonical. Canonical is cheaper, more trustworthy, and deterministic — there is no scenario where picking live over a valid canonical match is correct. This is a hard rule, not a score comparison: the validator checks `canonicalCandidateKey` first; if present and registry-valid, `source` is forced to `'canonical'` regardless of what the LLM said.
 
 **Why registry over prose list:** every entry is a testable contract. "Do we cover question X?" becomes a grep. Adding a new canonical query is a PR against the registry, not a negotiation about whether the planner's LLM prompt should mention it.
 
@@ -571,6 +579,18 @@ If yes to all eight, the spec is ready for implementation.
 - The planner emits into your chat thread via the committed contract. No extra wiring needed from your side.
 - If your surface needs a new artefact `kind`, coordinate with this branch via the contract file — do not create a parallel envelope.
 - The stopgap "Ask CRM" panel mentioned in the reviewer's brief is **optional** — if your universal chat surface lands before the planner's v1 ships, the panel is not needed. Architect on this branch decides based on sequencing.
+
+**Recommended quality gate — 10-15 query pressure test before implementation:**
+
+After `architect` closes the §11 open decisions and before implementation begins, run a pressure test with 10–15 real queries sampled from how operators actually talk about CRM data. Not LLM-generated synthetic queries — real ones, ideally pulled from support tickets, the founder's own ops notes, or a paying agency's playbook. Assert against each:
+
+- Which stage resolves it? (Stage 1 / 2 / 3)
+- If Stage 1: is the alias list wide enough, or does the obvious phrasing miss?
+- If Stage 3: does the LLM produce a plan the validator accepts?
+- If hybrid: does it fit the `canonical_base_with_live_filter` pattern, or does it expose a second pattern that should ship in v1?
+- If unsupported: is the `suggestions[]` array genuinely constructive, or does it point nowhere?
+
+This is the only meaningful thing still hiding after design review. Matcher coverage, hybrid edge cases, and failure-loop quality all reveal themselves here and are expensive to discover post-implementation. Target: 30-45 minutes, architect-led, output feeds directly into the spec's test plan.
 
 ---
 
