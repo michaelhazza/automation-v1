@@ -102,7 +102,9 @@ For each round:
      resolution, not a state that leaves it pending.
    - Re-activate all paused dependent items — process them immediately in the
      current round if the decision allows it (i.e. if you said "implement" or if
-     the architectural change doesn't invalidate them)
+     the architectural change doesn't invalidate them). After re-activation,
+     re-run the scope check (step 4) before implementing — re-activated items
+     may push the diff over the threshold.
    - Record the decision in the current round's Decisions table:
      "implement" → accept | "defer" → defer | "reject" → reject
    - Then execute: accepted items implement as normal; deferred route to
@@ -119,6 +121,8 @@ For each round:
 
      Reply with: "continue" | "stop" | "split"
 
+   Ordering: if architectural decisions (step 3) and the scope prompt are
+   both pending in the same round, resolve architectural decisions first.
    Wait for response before continuing:
    - "continue" → proceed with remaining items
    - "stop" → halt implementation; remaining accepted items are deferred to
