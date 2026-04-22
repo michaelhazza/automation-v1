@@ -10,6 +10,7 @@
 import {
   validateArtefactPure,
   validateLifecycleChainPure,
+  validateLifecycleWriteGuardPure,
   type ValidationError,
 } from '../briefArtefactValidatorPure.js';
 import type { BriefChatArtefact } from '../../../shared/types/briefResultContract.js';
@@ -354,6 +355,73 @@ test('15 scenarios total — all prior tests exercise the expected behaviours', 
   // enum errors, type errors, empty chain, single tip, linear chain, two independent chains,
   // branching (duplicate tip), orphan parent, out-of-order
   assert(passed >= 14, `expected at least 14 passing by now, have ${passed}`);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// validateLifecycleWriteGuardPure — write-time supersession invariant
+// ══════════════════════════════════════════════════════════════════════════════
+
+test('write guard: empty existing + no new parents → valid', () => {
+  const B = makeStructured({ artefactId: 'B' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([], [B]);
+  assert(result.valid, 'expected valid — no parent references anywhere');
+  assertEqual(result.conflicts.length, 0, 'conflict count');
+});
+
+test('write guard: new child with no existing siblings → valid', () => {
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A], [B]);
+  assert(result.valid, 'expected valid — first supersession of A');
+});
+
+test('write guard: existing sibling blocks new supersession of the same parent', () => {
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const C = makeStructured({ artefactId: 'C', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A, B], [C]);
+  assert(!result.valid, 'expected invalid — A already superseded by B');
+  assertEqual(result.conflicts.length, 1, 'one conflict');
+  assertEqual(result.conflicts[0]!.artefactId, 'C', 'conflicting new artefact');
+  assertEqual(result.conflicts[0]!.error.code, 'duplicate_supersession', 'error code');
+  assertEqual(result.conflicts[0]!.error.parentArtefactId, 'A', 'conflict parent');
+  assertEqual(result.conflicts[0]!.error.conflictingArtefactId, 'B', 'conflicting existing artefact');
+});
+
+test('write guard: two new artefacts supersede the same parent in one batch → second conflicts', () => {
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const C = makeStructured({ artefactId: 'C', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A], [B, C]);
+  assert(!result.valid, 'expected invalid — duplicate supersession within batch');
+  assertEqual(result.conflicts.length, 1, 'one conflict (second artefact)');
+  assertEqual(result.conflicts[0]!.artefactId, 'C', 'second new artefact is the conflict');
+  assertEqual(result.conflicts[0]!.error.conflictingArtefactId, 'B', 'first batch artefact is conflicting');
+});
+
+test('write guard: idempotent re-write of the same artefactId → valid', () => {
+  // Retry semantics: the same artefact B is written twice (e.g. network retry).
+  // The second write must not be flagged as a duplicate supersession.
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A, B], [B]);
+  assert(result.valid, 'expected valid — same artefactId re-write is idempotent');
+});
+
+test('write guard: child with no parent reference → ignored', () => {
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A], [B]);
+  assert(result.valid, 'expected valid — B has no parentArtefactId, so no invariant to check');
+});
+
+test('write guard: independent chains both valid in one batch', () => {
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const X = makeStructured({ artefactId: 'X' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const Y = makeStructured({ artefactId: 'Y', parentArtefactId: 'X', status: 'updated' }) as unknown as BriefChatArtefact;
+  const result = validateLifecycleWriteGuardPure([A, X], [B, Y]);
+  assert(result.valid, 'expected valid — two distinct chains, one supersession each');
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

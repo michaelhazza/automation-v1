@@ -19,7 +19,8 @@ export type ValidationError =
   | { code: 'missing_required'; field: string }
   | { code: 'invalid_enum'; field: string; value: unknown; validValues: string[] }
   | { code: 'orphan_parent'; parentArtefactId: string }
-  | { code: 'duplicate_tip'; chainRoot: string; tips: string[] };
+  | { code: 'duplicate_tip'; chainRoot: string; tips: string[] }
+  | { code: 'duplicate_supersession'; parentArtefactId: string; conflictingArtefactId: string };
 
 export type ValidateArtefactResult =
   | { valid: true; artefact: BriefChatArtefact }
@@ -303,4 +304,73 @@ export function validateLifecycleChainPure(artefacts: BriefChatArtefact[]): Vali
 
   const valid = errors.length === 0;
   return { valid, errors, tips };
+}
+
+// ---------------------------------------------------------------------------
+// Public: validateLifecycleWriteGuardPure
+// ---------------------------------------------------------------------------
+
+export type WriteGuardConflict = {
+  artefactId: string;
+  error: Extract<ValidationError, { code: 'duplicate_supersession' }>;
+};
+
+export type ValidateWriteGuardResult = {
+  valid: boolean;
+  conflicts: WriteGuardConflict[];
+};
+
+/**
+ * Write-time invariant: a parent artefact can only be superseded once.
+ *
+ * Surgical guard that checks only the one invariant which is unambiguously
+ * wrong regardless of arrival order — it does NOT flag orphan parents
+ * (those are tolerated as an eventual-consistency case: a child can
+ * arrive before its parent; the UI's resolveLifecyclePure handles this).
+ *
+ * Returns a per-artefact conflict list for the new batch — callers drop
+ * the offending artefacts and persist the rest.
+ */
+export function validateLifecycleWriteGuardPure(
+  existingArtefacts: BriefChatArtefact[],
+  newArtefacts: BriefChatArtefact[],
+): ValidateWriteGuardResult {
+  // Build a lookup of every artefactId that already supersedes a given parent.
+  // An artefact "supersedes" its parent when `parentArtefactId === parent`.
+  const supersederByParent = new Map<string, string>();
+  for (const a of existingArtefacts) {
+    if (a.parentArtefactId !== undefined) {
+      // If the existing set already has duplicates, we still only record the
+      // first one — subsequent ones are already-broken state the guard can't
+      // fix here. Our job is to stop the new write from making it worse.
+      if (!supersederByParent.has(a.parentArtefactId)) {
+        supersederByParent.set(a.parentArtefactId, a.artefactId);
+      }
+    }
+  }
+
+  const conflicts: WriteGuardConflict[] = [];
+
+  for (const a of newArtefacts) {
+    if (a.parentArtefactId === undefined) continue;
+
+    // Idempotent re-write of the same artefactId is allowed (covers retries).
+    const existing = supersederByParent.get(a.parentArtefactId);
+    if (existing !== undefined && existing !== a.artefactId) {
+      conflicts.push({
+        artefactId: a.artefactId,
+        error: {
+          code: 'duplicate_supersession',
+          parentArtefactId: a.parentArtefactId,
+          conflictingArtefactId: existing,
+        },
+      });
+      continue;
+    }
+
+    // Claim this parent for subsequent new artefacts in the same batch.
+    supersederByParent.set(a.parentArtefactId, a.artefactId);
+  }
+
+  return { valid: conflicts.length === 0, conflicts };
 }

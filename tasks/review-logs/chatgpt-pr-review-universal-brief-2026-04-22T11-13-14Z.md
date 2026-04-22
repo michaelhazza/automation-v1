@@ -123,3 +123,51 @@ Micro-tweak (not previously called out): in `ruleCaptureService.saveRule`, also 
 Commit `82675ef` updated `.claude/agents/chatgpt-pr-review.md` and `.claude/agents/chatgpt-spec-review.md` so every finding is surfaced with a recommendation and requires per-item user approval before action. No more auto-implement, auto-reject, or auto-defer. Affects all future reviews, not just this PR.
 
 ---
+
+## Round 3 — 2026-04-22T21-40-00Z — Finding 1 implementation (user pushback on defer)
+
+### Context
+
+User pushed back on keeping Finding 1 deferred: "change the advice on the first thing, let's come up with a solution, not defer". A surgical write-time guard was designed and approved.
+
+### Design decision
+
+Rather than port all four client-side lifecycle invariants to the backend (which would break out-of-order arrival), the guard enforces exactly one invariant that is unambiguous regardless of arrival order:
+
+> **A parent artefact can only be superseded once.**
+
+Orphan-parent remains an eventual-consistency case (UI resolves). Duplicate-tip / fork at write time becomes a hard rejection. Matches the existing per-artefact rejection pattern so callers see consistent behaviour.
+
+### Decisions (per-finding)
+
+| Finding | Round 2 Decision | Round 3 Decision | Notes |
+|---------|------------------|------------------|-------|
+| Finding 1 — Backend lifecycle enforcement | deferred (P1 follow-up) | **implement** | Surgical write-time guard; duplicate-supersession rejection only |
+
+### Implemented (Round 3)
+
+- **`server/services/briefArtefactValidatorPure.ts`**
+  - New `ValidationError` variant: `{ code: 'duplicate_supersession'; parentArtefactId; conflictingArtefactId }`
+  - New pure function: `validateLifecycleWriteGuardPure(existingArtefacts, newArtefacts): { valid, conflicts: WriteGuardConflict[] }`
+  - Enforces: for each new artefact with `parentArtefactId = P`, reject if any existing or batch-internal artefact already supersedes P. Idempotent re-writes of the same `artefactId` are allowed.
+
+- **`server/services/briefArtefactValidator.ts`**
+  - New async helper: `validateLifecycleChainForWrite(conversationId, newArtefacts)` — fetches flattened artefacts from `conversationMessages.artefacts` (one query, scoped by `conversationId`), delegates to the pure guard, returns conflicts. Early-exits when no new artefact has a parent reference (no query).
+
+- **`server/services/briefConversationWriter.ts`**
+  - Write-guard runs after per-artefact validation, before insert. Violating artefacts are dropped from `acceptedArtefacts`, `artefactsRejected` is incremented, and each conflict is logged under `briefConversationWriter.lifecycle_conflict` with the parent + conflicting artefact IDs. Matches the existing rejection-accept-valid-drop-invalid pattern.
+
+- **Tests: `server/services/__tests__/briefArtefactValidatorPure.test.ts`**
+  - 7 new tests for the write guard: empty existing + no parents, new child with no siblings, existing sibling blocks new supersession, batch-internal duplicate, idempotent re-write, no-parent artefact ignored, independent chains.
+  - All 40 tests pass (33 existing + 7 new).
+
+### Deferred (updated)
+
+- ~~CGF1~~ — Implemented this round; crossed off in `tasks/todo.md`.
+- CGF4b — Extract `ConversationPane` shell component — unchanged.
+
+### Rejected (Round 3)
+
+- None.
+
+---

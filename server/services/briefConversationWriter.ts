@@ -2,7 +2,10 @@ import { db } from '../db/index.js';
 import { conversations, conversationMessages } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
-import { validateArtefactForPersistence } from './briefArtefactValidator.js';
+import {
+  validateArtefactForPersistence,
+  validateLifecycleChainForWrite,
+} from './briefArtefactValidator.js';
 import { emitBriefArtefactNew, emitBriefArtefactUpdated, emitConversationUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
 
@@ -49,7 +52,7 @@ export async function writeConversationMessage(
   }
 
   // Validate artefacts
-  const acceptedArtefacts: BriefChatArtefact[] = [];
+  const perArtefactAccepted: BriefChatArtefact[] = [];
   let artefactsRejected = 0;
 
   for (const artefact of (input.artefacts ?? [])) {
@@ -58,7 +61,7 @@ export async function writeConversationMessage(
       briefId: input.briefId,
     });
     if (result.valid) {
-      acceptedArtefacts.push(artefact);
+      perArtefactAccepted.push(artefact);
     } else {
       artefactsRejected++;
       logger.warn('briefConversationWriter.artefact_rejected', {
@@ -67,6 +70,26 @@ export async function writeConversationMessage(
         conversationId: input.conversationId,
       });
     }
+  }
+
+  // Write-time lifecycle guard — reject artefacts that would duplicate-supersede
+  // an already-superseded parent in this conversation. Scoped to one invariant
+  // that is unambiguous regardless of arrival order; orphan parents are tolerated.
+  const writeGuard = await validateLifecycleChainForWrite(
+    input.conversationId,
+    perArtefactAccepted,
+  );
+  const conflictingIds = new Set(writeGuard.conflicts.map((c) => c.artefactId));
+  const acceptedArtefacts = perArtefactAccepted.filter((a) => !conflictingIds.has(a.artefactId));
+  for (const conflict of writeGuard.conflicts) {
+    artefactsRejected++;
+    logger.warn('briefConversationWriter.lifecycle_conflict', {
+      artefactId: conflict.artefactId,
+      parentArtefactId: conflict.error.parentArtefactId,
+      conflictingArtefactId: conflict.error.conflictingArtefactId,
+      conversationId: input.conversationId,
+      briefId: input.briefId,
+    });
   }
 
   // Insert message — copy org/subaccount from parent conversation for RLS
