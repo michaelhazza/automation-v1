@@ -143,6 +143,13 @@ Brief chat intent (free text)
 - LLM budget is preserved for genuinely novel questions — the place where it earns its cost.
 - Target is maximal deterministic coverage over time, measured by `planner.llm_skipped_rate` (see §11.9). Not a v1 acceptance threshold — a trend to optimise.
 
+**Execution-model invariants (do not violate):**
+
+- **Single plan per query.** Each query resolves to exactly one validated QueryPlan. The planner does not produce or rank multiple candidate plans in parallel. No "best-scoring plan" selection logic. Whichever stage resolves first wins; later stages are never reached once an earlier stage has produced a valid plan.
+- **Validator is authoritative; LLM is advisory.** The validator has final say over the plan that reaches the executor. LLM Stage 3 output is a proposal, not a decision — it cannot bypass validator rules, cannot override the canonical-always-wins tie-breaker, and cannot elevate a rejected plan on confidence grounds. Future "confidence-weighted execution" or "LLM override" ideas are explicitly out of scope.
+- **Validation failure does not trigger automatic re-planning.** If the validator rejects a Stage 3 plan, the planner returns a `BriefErrorResult` with `errorCode: 'ambiguous_intent'` and suggestions. It does not loop back to Stage 3 with a reworked prompt. Re-planning is the user's next Brief, not a system retry — this keeps cost deterministic. (Tier escalation per §5.3 happens *once* on low confidence *before* validation; it is not a retry mechanism after validation failure.)
+- **Plan cache overwrite semantics.** The cache always reflects the *most recent* validated plan for a given normalised intent. Successful validations overwrite prior entries; the cache never holds stale plans when a fresh validation produces a different shape. This is most-recent-wins, not merge / rank / version.
+
 **What the planner is NOT:** a new MCP server, a new transport layer, a new persistence tier. It's a typed, testable service in `server/services/` alongside other capability services.
 
 **What the planner IS:** the first-class abstraction for answering any CRM read question. Every new executor plugs in underneath it. Every new surface (Brief chat, agent tool call, stopgap Ask CRM panel) calls it.
@@ -348,6 +355,16 @@ Some questions span both surfaces — e.g. "VIP contacts (live tag lookup) who h
 - `BriefStructuredResult` — normal data response (table + count + filters + suggestions + `source: 'canonical' | 'live' | 'hybrid'`).
 - `BriefApprovalCard` — when a read query produces an obvious follow-up write ("email these 14 contacts"), the planner emits approval cards whose `actionSlug` points at an existing review-gated `crm.*` skill. The planner does not execute writes itself.
 - `BriefErrorResult` — with `errorCode` from the contract's enum (`unsupported_query`, `ambiguous_intent`, `missing_permission`, `cost_exceeded`, `rate_limited`) and constructive `suggestions`.
+
+**Error taxonomy — non-overlapping definitions:**
+
+- `unsupported_query` — the query cannot be expressed within current executor capabilities (e.g. hybrid patterns outside the v1 `canonical_base_with_live_filter` shape, entities the live executor doesn't support, aggregations the canonical executor can't compose). NOT for validation failures. NOT for ambiguous intent.
+- `ambiguous_intent` — the LLM produced a plan that failed validation OR Stage 3 returned low confidence after tier escalation. The intent was parseable-in-principle, but not unambiguously.
+- `missing_permission` — the caller's principal context lacks the capability to read the requested entity.
+- `cost_exceeded` — per-query or per-run cent ceiling hit before the executor could complete.
+- `rate_limited` — provider rate limit reached, surfaced from the live executor.
+
+These are distinct buckets by design. Keep them that way — if an implementer is tempted to overload one code with multiple meanings, that's a signal the taxonomy needs a new code, not a stretched existing one.
 
 **Why this matters:** every Brief chat surface (universal chat when it lands, stopgap Ask CRM panel if built first, agent-facing tool calls) already knows how to render these. No rendering work duplicates across surfaces. No contract negotiation between branches. The files are on main.
 
