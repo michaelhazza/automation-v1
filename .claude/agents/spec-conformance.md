@@ -27,10 +27,11 @@ You run after the development session claims completion and **before** `pr-revie
 
 ## Context Loading
 
-Before doing anything else, read:
+Before Setup, read:
 1. `CLAUDE.md` — project conventions (fleet ordering, review-log persistence rules, deferred-items routing)
 2. `architecture.md` — patterns and contracts your mechanical fixes must follow
-3. The spec file you detect in the Setup step (full read, not just framing)
+
+The third context input — the spec file itself — is read **after** Setup Step A identifies its path (see Step A's closing instruction "Once detected, read the spec in full"). It can't be read before Setup because Setup is what resolves which spec to read.
 
 ---
 
@@ -101,11 +102,11 @@ Scoping is **mandatory**. A partial implementation verified against the full spe
 
 Try the following in order:
 
-1. **Caller-provided chunk/phase.** If the caller named a specific phase/chunk (e.g. "check phase 1 only", or feature-coordinator's per-chunk invocation `"chunk 2 — DB schema"`), use that. When the caller names a plan chunk, read the plan at `tasks/builds/<slug>/plan.md` to identify which spec sections that chunk maps to, and scope Step 1's extraction to those sections. If the plan does not make the mapping explicit, verify only the spec items that correspond to files in the changed-code set.
-2. **`progress.md` chunks marked done.** If `tasks/builds/<slug>/progress.md` lists which chunks are `done`, restrict to those (and use the plan mapping from step 1 to resolve each chunk to spec sections).
+1. **Caller-provided chunk/phase.** If the caller named a specific phase/chunk (e.g. "check phase 1 only", or feature-coordinator's per-chunk invocation `"chunk 2 — DB schema"`), use that. When the caller names a plan chunk, read the plan at `tasks/builds/<slug>/plan.md` to identify which spec sections that chunk maps to, and scope Step 1's extraction to those sections. For those sections, extract **all** concrete requirements — including new-file requirements whose files are not yet in the changed-code set. (The agent's strongest catch is precisely the missing-file case; narrowing the checklist to only touched files would blind it there.) **If the plan-to-spec mapping is ambiguous or silent on which sections this chunk covers, STOP and ask the caller which spec sections this chunk covers.** Do not silently narrow scope to "only items corresponding to files in the changed-code set" — that shortcut defeats the agent's primary purpose.
+2. **`progress.md` chunks marked done.** If `tasks/builds/<slug>/progress.md` lists which chunks are `done`, restrict to those (and use the plan mapping from step 1 to resolve each chunk to spec sections, applying the same "extract all concrete requirements including not-yet-touched files" rule).
 3. **All-of-spec with full changed-code coverage.** If the spec is a single phase (no chunking) AND the branch is a completed implementation (not a work-in-progress mid-way through a multi-chunk spec), verify the entire spec against the entire changed-code set. The caller must confirm this — do not infer it from the absence of a build slug.
 
-**If none of the above yield a clear scope — no chunk/phase named AND no `progress.md` with `done` markers AND no caller confirmation of all-of-spec coverage — STOP and ask the user for scope.** Do not fall through to "verify the entire spec" silently. Matches the fleet's "when in doubt, stop" posture (see `spec-reviewer.md` Step A item 5 for the spec-detection precedent).
+**If none of the above yield a clear scope — no chunk/phase named AND no `progress.md` with `done` markers AND no caller confirmation of all-of-spec coverage — STOP and ask the user for scope.** Do not fall through to "verify the entire spec" silently. Matches the fleet's "when in doubt, stop" posture — mandatory scoping lives in CLAUDE.md §*Local Dev Agent Fleet* and in this agent's own B1 finding resolution.
 
 Record the scope decision in the log. Future sessions need to know *what was verified*, not just *that verification ran*.
 
@@ -290,6 +291,8 @@ Write the consolidated review log to `tasks/review-logs/spec-conformance-log-<sl
 - AMBIGUOUS → deferred:       <count>
 - OUT_OF_SCOPE → skipped:     <count>
 
+> `AMBIGUOUS` is reported separately for diagnostic visibility — it lets the reader see how many items the classifier wasn't sure about vs how many it was sure were directional. Both are routed to `tasks/todo.md` and both count toward the `NON_CONFORMANT` verdict the same way.
+
 **Verdict:** CONFORMANT | CONFORMANT_AFTER_FIXES | NON_CONFORMANT (N blocking gaps — see deferred items)
 
 ---
@@ -326,7 +329,7 @@ Write the consolidated review log to `tasks/review-logs/spec-conformance-log-<sl
 - NON_CONFORMANT — <N> directional gaps must be addressed by the main session before `pr-reviewer`. See `tasks/todo.md` under "Deferred from spec-conformance review".
 ```
 
-Clean up the scratch file at `tasks/review-logs/spec-conformance-scratch-<slug>[-<chunk-slug>]-<timestamp>.md` — it's informational only. The permanent record is the final log.
+Clean up the scratch file at `tasks/review-logs/spec-conformance-scratch-<slug>[-<chunk-slug>]-<timestamp>.md` — it's informational only. The permanent record is the final log. **Exception:** if the run aborts before the final log is written (e.g. a mechanical-fix Edit errors and you stop), leave the scratch file in place — it's the only progress record for a post-mortem.
 
 ---
 

@@ -100,12 +100,14 @@ Process chunks from the plan **one at a time**. For each chunk:
 
 > "Verify the current branch implements chunk '{chunk name}' from the plan at `tasks/builds/{slug}/plan.md`. Auto-detect changed files. Scope to this chunk only — the plan may have later chunks not yet implemented."
 
-`spec-conformance` self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` and returns the path. Record the path in `progress.md` under the chunk's Notes column.
+`spec-conformance` self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` and returns the path (where `<chunk-slug>` is a kebab-case version of the chunk name — same convention as C2's pr-review-log — and `<timestamp>` is ISO 8601 UTC with seconds). Record the path in `progress.md` under the chunk's Notes column.
 
 Process the log's Next-step verdict:
 - **CONFORMANT** — proceed to C2 (`pr-reviewer`).
 - **CONFORMANT_AFTER_FIXES** — `spec-conformance` applied mechanical fixes in-session. Proceed to C2 (`pr-reviewer`) on the **expanded** changed-code set; the reviewer needs to see the fixed state.
-- **NON_CONFORMANT** — directional gaps were routed to `tasks/todo.md`. Ask the main session to resolve them first (same contract as C3 fix-review rounds). Re-invoke `spec-conformance` after the fixes land. **Max 2 spec-conformance rounds.** On the third, stop and escalate to the user — the chunk's spec is likely under-specified and needs human judgment.
+- **NON_CONFORMANT** — directional and/or ambiguous gaps were routed by `spec-conformance` to `tasks/todo.md` under its own section (`## Deferred from spec-conformance review — <spec-slug>`). Triage the section the agent just appended: for each gap, decide whether it is non-architectural (resolvable in-session by the main session — same contract as C3 fix-review rounds) or architectural (significant redesign, contract change, multi-service impact — stays deferred per `CLAUDE.md` § *Review logs must be persisted*, do not force into the execution loop). After triage:
+    - If any non-architectural gaps were resolved in-session, re-invoke `spec-conformance` to confirm closure. **Max 2 spec-conformance rounds.** On the third, stop and escalate.
+    - If the gap set is architectural-only (nothing to resolve in-session) or contains only ambiguous items that need human judgment, do not re-invoke `spec-conformance` — that would only churn. Stop and escalate to the user with the deferred items still open.
 
 **C2. Review** — Delegate to `pr-reviewer`:
 > "Review the changes just implemented for chunk '{chunk name}'. Read the plan at `tasks/builds/{slug}/plan.md` for context. Review the following files: [list changed files]."
