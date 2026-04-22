@@ -18,6 +18,7 @@ import { validatePlanPure, ValidationError } from './validatePlanPure.js';
 import { computePlannerCostPreview, computeActualCostCents } from './plannerCostPure.js';
 import { systemSettingsService, SETTING_KEYS } from '../systemSettingsService.js';
 import { BudgetExceededError } from '../budgetService.js';
+import { isParseFailureError } from '../../lib/parseFailureError.js';
 import { FailureError } from '../../../shared/iee/failure.js';
 import { withPrincipalContext } from '../../db/withPrincipalContext.js';
 import { getOrgTxContext } from '../../instrumentation.js';
@@ -125,6 +126,36 @@ function isBudgetExceededError(err: unknown): boolean {
     if (shape.statusCode === 402 && shape.code === 'BUDGET_EXCEEDED') return true;
   }
   return false;
+}
+
+// Distinguishes reservation-side rate-limit 402s from budget-exceeded 402s.
+// `llmRouter` shares `statusCode: 402` across BUDGET_EXCEEDED / RATE_LIMITED
+// but uses the `code` discriminator for the semantic. Rate-limit is transient
+// provider-side infrastructure failure, not user-side ambiguity or malformed
+// model output — it deserves its own internal subcategory for analytics.
+function isRateLimitedError(err: unknown): boolean {
+  if (typeof err === 'object' && err !== null && 'statusCode' in err) {
+    const shape = err as { statusCode?: unknown; code?: unknown };
+    if (shape.statusCode === 402 && shape.code === 'RATE_LIMITED') return true;
+  }
+  return false;
+}
+
+// Stage 3 fall-through bucket previously lumped three distinct classes of
+// failure — genuine model-output parse failures, transient router rate-limits,
+// and generic router/internal errors — into a single `'parse_failure'`
+// subcategory. Per spec §17.1 the subcategory is analytics-only; operators
+// read it to distinguish user-side ambiguity (genuine parseable-but-unclear
+// outcomes) from planner-internal breakage. Split:
+//   - ParseFailureError         → 'parse_failure'        (model output couldn't be parsed)
+//   - statusCode:402, RATE_LIMITED → 'rate_limited'       (transient, retryable upstream)
+//   - anything else             → 'planner_internal_error' (router / network / unknown)
+// The user-facing `errorCode` stays `'ambiguous_intent'` across all three so
+// the clarification-UX is unchanged; only the internal event payload splits.
+function classifyStage3FallbackSubcategory(err: unknown): 'parse_failure' | 'rate_limited' | 'planner_internal_error' {
+  if (isParseFailureError(err)) return 'parse_failure';
+  if (isRateLimitedError(err)) return 'rate_limited';
+  return 'planner_internal_error';
 }
 
 /**
@@ -435,9 +466,12 @@ async function runQueryPipeline(
         intentHash,
       };
     }
-    // Parse failure or router error → ambiguous_intent
+    // Stage 3 fall-through → ambiguous_intent (user-facing) with a finer-
+    // grained internal subcategory for analytics (§17.1): genuine parse
+    // failure vs transient rate-limit vs generic router/internal error.
+    const subcategory = classifyStage3FallbackSubcategory(err);
     const artefact = makeAmbiguousIntentError(intentHash, (err as Error).message);
-    trace.stage3 = { used: true, parseFailure: true };
+    trace.stage3 = { used: true, parseFailure: subcategory === 'parse_failure' };
     trace.terminalOutcome = 'error';
     trace.terminalErrorCode = 'ambiguous_intent';
     await emit({
@@ -446,7 +480,7 @@ async function runQueryPipeline(
       intentHash,
       errorCode:        'ambiguous_intent',
       stageResolved:    3,
-      errorSubcategory: 'parse_failure',
+      errorSubcategory: subcategory,
       trace:            freezeTrace(trace),
     });
     return {

@@ -204,6 +204,127 @@ test('NotImplementedError extends Error', async () => {
   assert(e.message.includes('test message'), 'message preserved');
 });
 
+// ── Orchestration-level cache tests (round 2 finding #3) ──────────────────────
+// Unit tests in planCachePure cover key-shape / TTL / subaccount isolation; these
+// tests exercise the service-layer sequence end-to-end (Stage 3 write → Stage 2
+// hit; principal mismatch → fallback to Stage 3; Stage 1 hits never populate).
+
+// Stub that produces a valid canonical plan the validator accepts and
+// planCache.set persists (stageResolved will be 3 when the LLM path is taken).
+function stage3ReturnsCanonical(): RunQueryDeps['runLlmStage3'] {
+  return async () => ({
+    draft: {
+      source:                'canonical',
+      intentClass:           'list_entities',
+      primaryEntity:         'contacts',
+      filters:               [],
+      limit:                 50,
+      canonicalCandidateKey: 'contacts.inactive_over_days',
+      confidence:            0.9,
+    } as RunLlmStage3Output['draft'],
+    escalated: false,
+    // Token usage stubs — the route populates these; zero keeps cost calc trivial.
+    defaultTierUsage:    { inputTokens: 0, outputTokens: 0, model: 'x' },
+    escalationTierUsage: undefined,
+  });
+}
+
+// Instrument runLlmStage3 so tests can assert it was (or wasn't) called.
+function stage3Counting(inner: NonNullable<RunQueryDeps['runLlmStage3']>): {
+  stub: NonNullable<RunQueryDeps['runLlmStage3']>;
+  calls: () => number;
+} {
+  let n = 0;
+  return {
+    stub:   async (args: any) => { n++; return inner(args); },
+    calls:  () => n,
+  };
+}
+
+test('cache: Stage 3 validated plan is cached → second identical request hits cache (stageResolved:2)', async () => {
+  const planCache = await import('../planCache.js');
+  planCache._clear();
+  const { stub, calls } = stage3Counting(stage3ReturnsCanonical()!);
+  const intent = 'bespoke cache test intent aardvark';
+
+  // Request 1: miss → Stage 3 → validated → written to cache → stageResolved:3
+  const first = await runQuery(
+    { rawIntent: intent, subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stub },
+  );
+  assertEqual(first.stageResolved, 3, 'first request resolves at Stage 3');
+  assertEqual(calls(), 1, 'Stage 3 called exactly once on first request');
+  assert(planCache._size() >= 1, 'cache populated after Stage 3 success');
+
+  // Request 2: hit → Stage 2 cache → same stub must NOT be called again
+  const second = await runQuery(
+    { rawIntent: intent, subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stub },
+  );
+  assertEqual(second.stageResolved, 2, 'second request resolves at Stage 2 via cache');
+  assertEqual(calls(), 1, 'Stage 3 NOT called on second (cached) request');
+  assertEqual(second.intentHash, first.intentHash, 'same intentHash across both calls');
+});
+
+test('cache: principal_mismatch falls back to Stage 3 (does not reuse cache for a different caller)', async () => {
+  const planCache = await import('../planCache.js');
+  planCache._clear();
+  const intent = 'principal mismatch scenario wombat';
+
+  // Build a registry that requires a capability NOT held by the second caller,
+  // so the cached plan's rule-10 check (capability_check) fails for caller 2.
+  // The stub registry's canonical.contacts.read capability is forward-looking
+  // and skipped by canonicalExecutor, so it cannot demonstrate the mismatch.
+  // Use a non-forward-looking required capability that validatePlanPure's
+  // rule-10 enforces against `callerCapabilities`.
+  const guardedRegistry = Object.freeze({
+    ...stubRegistry,
+    'contacts.inactive_over_days': {
+      ...stubRegistry['contacts.inactive_over_days']!,
+      requiredCapabilities: ['crm.elevated_read'],
+    },
+  });
+  const guardedDeps: RunQueryDeps = { registry: guardedRegistry };
+
+  // Caller 1 holds the capability → Stage 3 succeeds, plan cached.
+  const { stub, calls } = stage3Counting(stage3ReturnsCanonical()!);
+  const ctx1 = makeContext({ callerCapabilities: new Set(['crm.query', 'crm.elevated_read']) });
+  const first = await runQuery(
+    { rawIntent: intent, subaccountId: 'sub-1' },
+    ctx1,
+    { ...guardedDeps, runLlmStage3: stub },
+  );
+  assertEqual(first.stageResolved, 3, 'caller 1 resolves at Stage 3 and cache is populated');
+  assertEqual(calls(), 1, 'Stage 3 invoked for caller 1');
+
+  // Caller 2 lacks the capability → cache lookup hits key, but rule-10 rerun
+  // rejects (principal_mismatch) → pipeline falls back to Stage 3 (invoking
+  // the stub again, NOT serving the stale cached plan).
+  const ctx2 = makeContext({ callerCapabilities: new Set(['crm.query']) });
+  const second = await runQuery(
+    { rawIntent: intent, subaccountId: 'sub-1' },
+    ctx2,
+    { ...guardedDeps, runLlmStage3: stub },
+  );
+  assertEqual(second.stageResolved, 3, 'caller 2 falls back to Stage 3 (not Stage 2)');
+  assertEqual(calls(), 2, 'Stage 3 invoked again for caller 2, not cache-reused');
+});
+
+test('cache: Stage 1 hits do NOT populate the plan cache', async () => {
+  const planCache = await import('../planCache.js');
+  planCache._clear();
+
+  const output = await runQuery(
+    { rawIntent: 'stale contacts', subaccountId: 'sub-1' },
+    makeContext(),
+    deps,
+  );
+  assertEqual(output.stageResolved, 1, 'sanity — intent resolves at Stage 1');
+  assertEqual(planCache._size(), 0, 'Stage 1 hits MUST NOT populate the plan cache (spec §9.3)');
+});
+
 // ── Wait for all async tests ──────────────────────────────────────────────────
 
 await Promise.all(promises);

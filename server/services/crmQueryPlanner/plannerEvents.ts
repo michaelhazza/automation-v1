@@ -27,11 +27,20 @@ export async function emit(event: PlannerEvent): Promise<void> {
   logger[level](kind, rest as Record<string, unknown>);
 
   // 2. Agent execution log (runId-gated; lazy import avoids drizzle-orm at module load)
+  //
+  // Terminal projection to the agent-execution-log surface must fire EXACTLY
+  // ONCE per planner request. The planner emits both `planner.classified` and
+  // `planner.result_emitted` on the success path (classified = terminal-state
+  // marker per spec §17.1; result_emitted = the actual result envelope). Both
+  // carry `stageResolved`, but only ONE of them should append a
+  // `skill.completed` row — otherwise a single logical execution double-counts.
+  // `planner.classified` stays a structured-log-only status marker; the
+  // terminal forwarders are `planner.result_emitted` (success) and
+  // `planner.error_emitted` (failure) — never both, never `classified`.
   if (event.runId) {
     try {
       const isTerminal =
         kind === 'planner.result_emitted' ||
-        kind === 'planner.classified' ||
         kind === 'planner.error_emitted';
       if (isTerminal) {
         const { appendEvent } = await import('../agentExecutionEventService.js');

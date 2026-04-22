@@ -1662,7 +1662,7 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
 | `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved, trace: PlannerTrace }` |
-| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null, errorSubcategory?: 'no_pattern_match' \| 'p1_stub' \| 'p2_hybrid_rewrite' \| 'validation_failed' \| 'capability_missing' \| 'cost_exceeded_stage3' \| 'cost_exceeded_executor' \| 'parse_failure' \| 'live_call_failed' \| 'partial_failure' }` |
+| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null, errorSubcategory?: 'no_pattern_match' \| 'p1_stub' \| 'p2_hybrid_rewrite' \| 'validation_failed' \| 'capability_missing' \| 'cost_exceeded_stage3' \| 'cost_exceeded_executor' \| 'parse_failure' \| 'rate_limited' \| 'planner_internal_error' \| 'live_call_failed' \| 'partial_failure' }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
 
