@@ -922,3 +922,19 @@ Complete list of all 112 skills.
 | 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
 | 2026-04-13 | Add Core Value Proposition; compress Product Capabilities; reframe Agency to outcomes; add Type column to Skills | — |
 | 2026-04-12 | Initial capabilities registry created from full code audit | — |
+
+---
+
+## Non-goals: what Automation OS is NOT
+
+These are durable product stances. When an LLM provider or horizontal agent platform ships a new primitive (routines, agent SDKs, skills, memory, hosted managed agents, team chat), the reflex should be to **absorb the category into this capabilities registry's positioning, ship any UX polish that closes a demo gap, and never drift the pitch toward parity with the provider's primitive.** The moat is the operations layer, not any one feature.
+
+- **Not a better agent SDK.** Consume LLM-provider primitives under the hood rather than competing with them.
+- **Not a hosted routines / scheduled-prompt product.** We build the operations layer on top of supply from every provider — multi-tenant isolation, approval workflows, client portals, per-client P&L, model-agnostic routing — surfaces an LLM provider's hosted-agent or routine product structurally cannot ship, because their buyer is an individual or an internal team, not an agency serving many clients.
+- **Not a general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for org-level extensibility — not as a competitor to general-purpose coding assistants.
+- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
+- **Not a public skill or playbook marketplace.** Anthropic-scale distribution isn't the agency play.
+- **Not a bidirectional bridge to no-code workflow tools.** We import from them (supervised-migration wedge); we do not export back.
+
+If a PR, marketing asset, or sales deck drifts toward a non-goal, push back. The right response to a provider shipping a new primitive is never "we have that too" — it is "we're the operations system you use on top of that."
