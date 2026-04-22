@@ -1,0 +1,34 @@
+**Findings**
+
+**Critical**
+1. Rootless-subaccount semantics are self-contradictory and currently impossible for an executing agent: §4.1 gives a reachable `HierarchyContext` example with `rootId: null`, the same section later says executing agents should never see `rootId === null`, and §§5.1/6.4/6.6/16.3 also treat zero-root as a valid steady state. Section: §§4.1, 5.1, 6.4, 6.6, 16.3. Fix: define zero-root strictly as “no local active subaccount agents / no local root for routing,” remove the executable rootless `HierarchyContext` example, and make `parentId === null` mean “this run’s agent is the root” only. Severity: critical.
+
+2. Phase 1 sequencing contradicts itself: §11 says Phase 1 ships telemetry writes and “records what’s happening under the flat model BEFORE any enforcement lands,” but §§1, 4.3, 10.3, and 12.4 all say `delegation_outcomes` writes start only in Phase 4 and the Phase 1 table ships empty. Section: §11 plus §§1, 4.3, 10.3, 12.4. Fix: rewrite Phase 1 as storage-only and remove any claim that delegation attempts are recorded before Phase 4. Severity: critical.
+
+**Important**
+3. The framing contract says hierarchy enforcement does not affect capability selection, but §6.5 changes the resolved tool set based on graph position by adding/removing delegation skills. Section: Framing “Scope of enforcement” and §6.5. Fix: either change the framing line to say only non-delegation capabilities stay unchanged, or remove derived skill resolution from this spec. Severity: important.
+
+4. The “explicit attachment is a supported escape hatch for no-child agents” claim is not implementable as written: §§6.5 and 6.9 treat that state as supported, but §6.3 makes `spawn_sub_agents` unusable for those agents and §6.4 only leaves a narrow parent-only handoff. Section: §§6.3, 6.4, 6.5, 6.9. Fix: narrow the documented escape hatch to the concrete skills/actions that still work, or define explicit no-child behavior and validation for the trio. Severity: important.
+
+5. The rollout plan depends on a dashboard that the spec marks optional: §15.1 says the team will review outcome rows in “the dashboard” daily during the Phase 4 adjustment window, but §§8.3 and 13 explicitly allow `AdminDelegationOutcomesPage` to be deferred. Section: §§8.3, 13, 15.1. Fix: either make the dashboard mandatory by Phase 4 or replace that dependency with a named SQL/query path or existing admin surface. Severity: important.
+
+6. Stale “trigger context” language survived after the spec explicitly chose job-payload propagation: §6.7 says there is no task-column change and scope travels only in pg-boss job data, but §§14.1 and 14.2 still say `agentExecutionService` reads from trigger context and `briefCreationService` passes scope into task trigger context. Section: §6.7, §§14.1–14.2. Fix: remove all remaining trigger-context references and rename those inventory lines to job-payload wiring. Severity: important.
+
+7. Phase 4 exit criteria overstate telemetry guarantees: §11 says `delegation_outcomes` will have accept/reject rows with “full fidelity,” while §§4.3 and 10.3 make writes best-effort and explicitly exclude unresolvable-target failures. Section: §11, §§4.3, 10.3. Fix: change the claim to best-effort telemetry for resolvable actors and keep `agent_execution_events` named as the lossless companion. Severity: important.
+
+8. The access model for the delegation graph is internally inconsistent: §7.2 says the route reuses the existing `/api/agent-runs/:id` pattern with `authenticate` plus org-scoped lookup only, but §9.3 says a user may see the DAG summary yet get a 404 when clicking a child run because detail access is separately enforced. No mechanism creates that difference. Section: §§7.2, 9.3. Fix: either explicitly state that same-org users can read both graph summaries and run details under the current model, or add a named per-run access check and include it in routes/services/file inventory. Severity: important.
+
+9. The spec’s schema summaries are stale in places: the TOC and §3.1 summarize `agent_runs` as adding only `delegation_scope` and `hierarchy_depth`, while §§1, 5.3, and 14 also require `delegation_direction` and `handoff_source_run_id`. Section: TOC, §3.1, §§1, 5.3, 14. Fix: normalize the summary sections so planning/review passes do not miss two load-bearing columns. Severity: important.
+
+**Minor**
+10. The Phase 4 test plan still describes impossible spawn directions: §12.2 says `skillExecutor.spawnSubAgents.test.ts` should cover `down / up / lateral`, but §6.3 says accepted spawn direction is always `down` and cross-subtree cases are rejected before dispatch. Section: §§6.3, 12.2. Fix: trim that test to `down` plus rejection cases; keep `up/lateral` only under `reassign_task`. Severity: minor.
+
+11. The implementation-efficiency success metric cannot pass against the file inventory: §17.6 targets fewer than 15 new files, while §14 already enumerates materially more than that before optional items. Section: §§14, 17.6. Fix: set a realistic cap or drop the metric. Severity: minor.
+
+12. The self-consistency pass overstates `delegation_outcomes` as the sole delegation telemetry source, but the body of the spec repeatedly says it is incomplete and must be paired with `agent_execution_events`. Section: Self-consistency pass, §§4.3, 10.3, 17.2. Fix: rename it to the primary metrics table, not the sole telemetry source. Severity: minor.
+
+**Assumptions**
+- I assumed `validateHierarchy()` still implies a tree/forest, so a subaccount with active local agents cannot also be “rootless” unless the spec explicitly redefines that term.
+- I took the run-access model at face value from the spec itself and did not assume any hidden ACL beyond org scoping.
+
+Net: not implementation-ready yet. The main blockers are the root/null semantics, the Phase 1/Phase 4 sequencing contradiction, and the stale rollout/access language that currently describes mechanisms the spec does not actually provide.

@@ -1,3 +1,32 @@
+You are reviewing a DEVELOPMENT SPECIFICATION DOCUMENT (markdown), not code. Apply an implementation-readiness rubric.
+
+Context about the project:
+- Pre-production codebase. No live users. Rapid evolution, breaking changes expected.
+- Testing posture: static gates are primary; runtime tests are pure-function-only. No frontend tests, no E2E tests, no API contract tests.
+- Rollout model: commit-and-revert. No feature flags unless for behaviour modes. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Your task: critique the spec as a senior engineer reviewing whether it is implementation-ready. Focus on:
+1. Internal contradictions (same concept defined differently in two sections)
+2. Stale / retired language that survives in prose
+3. Load-bearing claims ("idempotent", "source of truth", "must", "guarantees") without a named enforcement mechanism
+4. File-inventory drift (prose names a file/column/migration that isn't in the Files-to-change inventory)
+5. Schema overlap (two tables/columns with adjacent purposes without a clear source-of-truth declaration)
+6. Sequencing / phase-dependency bugs (Phase N references Phase N+k artefact)
+7. Invariants stated in one place but not enforced in another
+8. Items without explicit verdicts (no "ships in Phase N" / "deferred" / "won't do")
+9. New primitives introduced without concrete names (types, functions, tables, columns)
+10. Permissions / RLS gaps for tenant-scoped tables
+11. Execution-model contradictions (sync/async, inline/queued, cached/dynamic)
+
+Note: do NOT suggest adding tests that this codebase's posture rejects (frontend tests, E2E tests, API contract tests, performance baselines, composition tests). Do NOT suggest feature flags or staged rollout. Do NOT suggest inventing new abstractions where existing primitives could be extended.
+
+For every finding, state: (a) one-sentence description, (b) which section of the spec, (c) specific suggested fix, (d) severity (critical / important / minor / nit).
+
+The spec follows. Review it thoroughly.
+
+---
+
 # Hierarchical Agent Delegation — Development Spec
 
 **Status:** Draft — ready for `spec-reviewer`
@@ -22,7 +51,7 @@ This spec follows the conventions in `docs/spec-context.md`:
 - **Primitive reuse:** every new primitive has a "why not reuse" justification. Extension of existing tables (`subaccount_agents`, `tasks`) is preferred over new tables; one new table (`delegation_outcomes`) is justified in §5.4.
 - **Pre-production:** no live users; breaking changes to skill handler signatures are expected.
 
-**Scope of enforcement — one-line contract.** Hierarchy enforcement is intentionally minimal: it constrains *delegation* and the derived set of delegation skills (§6.5). It does NOT constrain agent cognition, planning, or non-delegation capability selection.
+**Scope of enforcement — one-line contract.** Hierarchy enforcement is intentionally minimal: it constrains *delegation*, not agent cognition, planning, or capability selection.
 
 ---
 
@@ -40,7 +69,7 @@ This spec follows the conventions in `docs/spec-context.md`:
 5. Schema changes
    - 5.1 `subaccount_agents` — partial unique index for root enforcement
    - 5.2 `tasks` — `delegation_direction` column
-   - 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` + `delegation_direction` + `handoff_source_run_id` columns
+   - 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` columns
    - 5.4 `delegation_outcomes` — new table
 6. Services
    - 6.1 `hierarchyContextBuilderService` — new
@@ -161,7 +190,7 @@ Without these, this spec would have had to build its own scope / template / obse
 **Schema (§5):**
 - `subaccount_agents` — partial unique index for root-agent contract (migration 0202).
 - `tasks` — new `delegation_direction` text column (migration 0203).
-- `agent_runs` — new `delegation_scope` text column, `hierarchy_depth` smallint column, `delegation_direction` text column, and `handoff_source_run_id` uuid column (migration 0204).
+- `agent_runs` — new `delegation_scope` text column + `hierarchy_depth` smallint column (migration 0204).
 - `delegation_outcomes` — new table with RLS policy + `rlsProtectedTables` manifest entry (migration 0205).
 
 **Services (§6):**
@@ -229,14 +258,14 @@ All contracts live in `shared/types/delegation.ts` (new file) unless otherwise n
 
 ```ts
 export interface HierarchyContext {
-  /** The caller's parent agent id. Null iff the caller IS the subaccount root (the active row with `parent_subaccount_agent_id IS NULL` per §5.1 schema predicate). */
+  /** The caller's parent agent id. Null iff the caller is the subaccount root OR the subaccount has no configured root (the caller is treated as a root-adjacent leaf). */
   parentId: string | null;
   /** Direct reports only. Empty array for leaf agents. Ordered by id asc for determinism. */
   childIds: string[];
-  /** 0 at the root, incremented per level walking down. Bounded by MAX_DEPTH = 10. */
+  /** 0 at the root (or for a caller in a root-less subaccount), incremented per level walking down. Bounded by MAX_DEPTH = 10. */
   depth: number;
-  /** The subaccount root's agent id. Equals `agentId` when the caller IS the root. Always populated for an executing agent (the builder throws if the caller's subaccount has no root — §6.1 `HierarchyContextBuildError`). */
-  rootId: string;
+  /** The subaccount root's agent id. Null iff the subaccount has no configured root (valid per §5.1 — at most one root, zero allowed). Equals `agentId` if the caller is the root. */
+  rootId: string | null;
 }
 ```
 
@@ -251,25 +280,23 @@ export interface HierarchyContext {
 }
 ```
 
-**Example instance (subaccount root — the common "everyone routes through me" case):**
+**Example instance (subaccount with no configured root — transitional state between Phase 2 migration and operator assigning a root):**
 
 ```json
 {
   "parentId": null,
-  "childIds": ["agt_dev_1", "agt_qa_2", "agt_sales_1"],
+  "childIds": [],
   "depth": 0,
-  "rootId": "agt_orch_root"
+  "rootId": null
 }
 ```
 
-Note: `parentId === null` means "this agent IS the subaccount root" — by the §5.1 schema predicate, any active `subaccount_agents` row with `parent_subaccount_agent_id IS NULL` is a root. There is no other semantic. The `rootId` field is therefore always populated for any executing agent (it equals this agent's id when the caller is the root).
-
 **Nullability and defaults:**
-- `parentId` is `null` iff the caller IS the subaccount root (per §5.1's partial unique index: `parent_subaccount_agent_id IS NULL AND is_active = true`). Any active executing agent with `parentId === null` is therefore the configured root of its subaccount. There is no "rootless" state for a running agent — the builder never successfully constructs a context with no root.
+- `parentId` is `null` when the caller's `parentSubaccountAgentId IS NULL`. By the schema's root predicate (§5.1 partial unique index: `parent_subaccount_agent_id IS NULL AND is_active = true`), ANY active agent with `parentId === null` is by definition a root agent. "Rootless" is not a valid state for a reachable agent — it means the subaccount has zero active agents, and no agent can run.
 - `childIds` is always an array (empty for leaves, never null). Sorted by `id` ascending for determinism — the pure builder does this in a stable sort so two invocations over the same roster produce identical output.
 - `depth` is always present and non-negative. `0` for root callers.
-- `rootId` is always populated for an executing agent. It equals the id of the subaccount's active root (equals `context.agentId` when the caller IS the root). If the builder can't find a root during the upward walk (the agent's ancestor chain terminates at a row that is not `parent_subaccount_agent_id IS NULL`), it throws `HierarchyContextBuildError('agent_not_in_subaccount')` per §6.1.
-- **About "root-less subaccounts" in earlier prose:** when §6.6 refers to a subaccount having no root, that means no subaccount-level root; the Brief dispatches to the ORG-level Orchestrator instead. The org Orchestrator runs inside ITS own subaccount (the org sentinel), which does have a root — itself. So the executing agent always sees a well-formed `HierarchyContext` with a non-null `rootId`.
+- `rootId` equals the id of the subaccount's active root (equals `context.agentId` when the caller IS the root). `null` only in the edge case where the builder is invoked for a subaccount with zero active agents — which should never happen during normal agent execution (an agent about to run must exist in the roster). If it does happen, the builder throws `HierarchyContextBuildError('agent_not_in_subaccount')` per §6.1; no non-root caller can reach a state where `rootId === null`.
+- The `string | null` shape on `rootId` exists for type-safety only; in practice every executing agent sees a non-null `rootId`.
 - The entire `hierarchy` field on `SkillExecutionContext` is optional (`hierarchy?: HierarchyContext`). Skills that don't need it don't pay for it. Missing-hierarchy handling differs by skill type:
   - **Write-side delegation skills** (`spawn_sub_agents`, `reassign_task` — §6.3, §6.4) MUST fail closed with `hierarchy_context_missing` (§4.3) if invoked without `context.hierarchy`. They cannot validate scope without it, and silent fallthrough would be a correctness hole.
   - **Read-side list skills** (`config_list_agents`, `config_list_subaccounts`, `config_list_links` — §6.2) fall through to the subaccount-wide result with a WARN-level telemetry log. Read skills are not correctness-critical; falling through preserves behaviour for diagnostic / system runs where hierarchy wasn't built.
@@ -842,15 +869,7 @@ return resolveSlugsToTools(effectiveSlugs);
 
 **Why all three derived together:** the three skills form a coherent "can delegate" capability. Giving a manager any one without the others creates a half-working agent (e.g. `spawn_sub_agents` without `config_list_agents` forces the manager to guess target IDs). Always unioned together keeps prompts and behaviours consistent.
 
-**Interaction with explicit attachment (narrow escape hatch — realistic scope).** If an agent already has any of the three attached explicitly, the union is idempotent (de-duped via Set). The graph-derived logic only *adds*, never *removes*. **However, for agents with `childIds.length === 0`, the execution-side validation (§6.3, §6.4) sharply narrows what the attached skills can DO:**
-
-- `spawn_sub_agents` — unusable. With no children, `effectiveScope` resolves to `subaccount` (adaptive default §4.2), which §6.3 step 2 rejects for all callers. An explicit `delegationScope: 'children'` or `'descendants'` would also be rejected because `childIds` is empty, so every target is out-of-scope.
-- `reassign_task` — usable only for the upward-escalation special case (§6.4 step 2): a no-child agent can reassign to its own `parentId`. All other targets fail scope validation.
-- `config_list_agents` — fully usable (read-side; no scope validation blocks results per §6.2).
-
-**Effective practical use.** Explicit attachment for a no-child agent grants "see the list of org agents + escalate upward." This is a coherent narrow capability (an escalation-only role). The `explicitDelegationSkillsWithoutChildren` detector (§6.9) surfaces it as informational for operator awareness, not as drift.
-
-**If broader delegation capability is needed for a no-child agent,** the right approach is to give the agent children (restructure the hierarchy), not to rely on explicit attachment — the validation will block any broader use regardless.
+**Interaction with explicit attachment:** If an agent already has any of the three attached explicitly, the union is idempotent (de-duped via Set). Explicit attachment continues to work for any special case (e.g. an agent with no children that needs delegation for a narrow reason can have the skills explicitly attached; the graph-derived logic only *adds*, never *removes*).
 
 **When children change mid-session:** No mid-run effect (§4.1 immutability contract). Next run of the agent reads the updated roster and resolves accordingly. Transition is automatic, drift-free.
 
@@ -1219,7 +1238,7 @@ All four RLS requirements from the Spec Authoring Checklist §4 are met for the 
 
 **Subtree access policy — root-grants-summary.** If the user can view the root run (the one they opened from the Brief), they see **summary-level** data for every run in the DAG returned by the graph route: `runId`, `agentId`, `agentName`, `isSubAgent`, `delegationScope`, `hierarchyDepth`, `delegationDirection`, `status`, `startedAt`, `completedAt`. These summary fields are not sensitive individually — the same data appears on the agent detail page anyone in the org can see. Cross-org jumps are impossible because the service runs under `orgScopedDb`; RLS on `agent_runs` prevents any row from a different org from being returned even if the service code drifts.
 
-**Under the current access model, same-org users can read both graph summaries and run details.** `authenticate` + service-layer org-scoping is the only access gate in v1 (there is no per-run ACL helper — see §7.2). A user in the org who can view the graph can also navigate to each child run's detail page. The graph is a summary rendering, not a stricter permission surface. If and when a finer-grained per-run ACL lands in a future spec, this section will need re-evaluation; for v1, same-org-reads-everything is the full policy.
+**The graph is a summary, not a pass-through grant.** Clicking a child node navigates to that run's own trace page (client-side route corresponding to `GET /api/agent-runs/:id`), which re-enforces `authenticate` + service-layer org-scoping via the existing endpoint. A user who can view the graph but not a specific child run sees the summary node in the graph but gets a 404 on navigation (the existing pattern — `agentActivityService.getRunDetail` returns 404 for rows outside the caller's org) — correct UX: the structural overview is cheap; the detailed payload is gated.
 
 **What the graph response deliberately omits.** Per-run LLM payload, tool-call arguments, scratch-pad content, cost breakdowns — none appear in `DelegationGraphNode` shape (§7.2). Only the already-public summary fields ship, so per-node access checking is not required for correctness.
 
@@ -1307,7 +1326,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 
 ### Phase 1 — Observability foundations
 
-**Ships:** Telemetry STORAGE (tables + columns), health detectors, and the schema to hold future telemetry. No write paths ship in Phase 1 — the `delegation_outcomes` table is empty until Phase 4 activates the write path in `spawn_sub_agents` / `reassign_task`. The `agent_runs` new columns are null on new rows until Phase 3 (hierarchy_depth) and Phase 4 (delegation_scope, delegation_direction, handoff_source_run_id) populate them. No behaviour change to delegation or routing in this phase.
+**Ships:** Telemetry writes, health detectors, run-trace data columns. No behaviour change to delegation or routing. The platform records what's happening under the flat model BEFORE any enforcement lands.
 
 **Schema (§5):**
 - Migration 0204 — `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable; populated in later phases per §5.3)
@@ -1327,13 +1346,13 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Client (§8):**
 - `AdminDelegationOutcomesPage` — optional; see §13
 
-**Columns referenced by code in this phase:** `agent_runs.delegation_scope`, `agent_runs.hierarchy_depth`, `agent_runs.delegation_direction`, `agent_runs.handoff_source_run_id`, `delegation_outcomes.*`. All introduced in this phase (schema only; values are null until later phases populate).
+**Columns referenced by code in this phase:** `agent_runs.delegation_scope`, `agent_runs.hierarchy_depth`, `delegation_outcomes.*`. All introduced in this phase.
 
 **Exit criteria:**
 - Migrations 0204 + 0205 applied cleanly.
 - `rlsProtectedTables` manifest covers `delegation_outcomes`; `verify-rls-coverage.sh` green.
 - `subaccountMultipleRoots` and `subaccountNoRoot` detectors registered and visible in `AdminHealthFindingsPage`. `explicitDelegationSkillsWithoutChildren` is NOT registered in this phase — it depends on Phase 4's derived-skill resolution and ships with Phase 4.
-- `delegation_outcomes` ships empty; `agent_runs.delegation_scope` / `hierarchy_depth` / `delegation_direction` / `handoff_source_run_id` columns exist but are null on new rows until later phases populate them.
+- `delegation_outcomes` ships empty; `agent_runs.delegation_scope` / `hierarchy_depth` columns exist but are null on new rows until later phases populate them.
 - No-op for end users; no delegation behaviour changes.
 
 ### Phase 2 — Root contract + scope-aware routing + template picker
@@ -1420,7 +1439,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 - Rejection-rate metrics show an initial spike that trends down over the first 1–2 weeks.
 - Trace graph UI renders fan-out correctly for sub-agent and handoff chains.
 - `config_list_agents` + `spawn_sub_agents` + `reassign_task` are automatically available to any agent with children (observable in the agent's resolved tool list, surfaced in `AgentExecutionLog` / run trace).
-- `delegation_outcomes` table is receiving accept + reject rows on a best-effort basis for resolvable actors (per §4.3 / §10.3). Unresolvable-target errors and any DB-write gaps remain visible in `agent_execution_events` — that table is the lossless companion for audit-grade rejection accounting.
+- `delegation_outcomes` table is receiving accept + reject rows with full fidelity.
 
 **Rollout posture (brief §6):**
 - 1–2 week adjustment period after Phase 4 lands is expected. Prompt tweaks surface during this window.
@@ -1445,7 +1464,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 
 | Column | Introduced in | First referenced in |
 |---|---|---|
-| `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` | Phase 1 | Phase 1 (schema); populated Phase 3 (`hierarchy_depth`) and Phase 4 (others) |
+| `agent_runs.delegation_scope`, `hierarchy_depth` | Phase 1 | Phase 1 |
 | `delegation_outcomes.*` | Phase 1 | Phase 1 |
 | partial unique index on `subaccount_agents` | Phase 2 | Phase 2 |
 | `tasks.delegation_direction` | Phase 4 | Phase 4 |
@@ -1488,7 +1507,7 @@ One test file per pure module. Each lives alongside its source under `__tests__/
 - `config/configSkillHandlersPure.test.ts` (new or extend existing) — scope filter logic. Covers adaptive default (has-children → children, no-children → subaccount); explicit scope override; missing-context fallback.
 
 **Phase 4:**
-- `skillExecutor.spawnSubAgents.test.ts` — pure validation logic extracted from the handler. Covers: all-children-accepted with `delegationDirection: 'down'`; one-out-of-scope → whole call rejected with only out-of-scope targets logged as rejected; `cross_subtree_not_permitted` when `effectiveScope === 'subaccount'` regardless of caller role; `max_handoff_depth_exceeded` when `context.handoffDepth >= MAX_HANDOFF_DEPTH`. `up` and `lateral` directions are NOT valid outcomes for spawn — they're tested under `reassign_task` only.
+- `skillExecutor.spawnSubAgents.test.ts` — pure validation logic extracted from the handler. Covers: all-children-accepted; one-out-of-scope → whole call rejected with only out-of-scope targets logged as rejected; cross_subtree_not_permitted when non-root uses subaccount scope; direction computed per target (down / up / lateral).
 - `skillExecutor.reassignTask.test.ts` — same shape. Covers direction computation (down / up / lateral) and the upward-escalation special case (§6.4 step 2) committed in §16.1.
 - `skillService.resolver.test.ts` — pure `computeDerivedSkills({ hierarchy })` returns `[]` when childIds is empty, returns the trio when non-empty.
 - `delegationGraphServicePure.test.ts` — given a flat run list, assemble the `{ nodes, edges }` graph. Covers MAX_HANDOFF_DEPTH bound, both edge types (spawn via `parentRunId`, handoff via `handoffSourceRunId`), direction sourcing (spawn→always down per §6.3; handoff→from `agent_runs.delegation_direction` on the child run, §5.3), and deduplication when a run has both a spawn-parent and a handoff-parent.
@@ -1573,7 +1592,7 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 - `server/db/schema/agentRuns.ts` — new columns
 - `server/db/schema/index.ts` — export `delegationOutcomes`
 - `server/config/rlsProtectedTables.ts` — add `delegation_outcomes`
-- `server/services/agentExecutionService.ts` — writes new `agent_runs` columns at run construction (Phase 3 populates `hierarchy_depth`; Phase 4 populates `delegation_scope`, `delegation_direction`, `handoff_source_run_id`; Phase 1 values are null)
+- `server/services/agentExecutionService.ts` — write new run-row columns (reads from trigger context initially; fully populated once Phase 3 ships the hierarchy builder)
 - `server/services/workspaceHealth/detectors/index.ts` — register two new Phase-1 detectors (`subaccountMultipleRoots`, `subaccountNoRoot`); `explicitDelegationSkillsWithoutChildren` registered in Phase 4
 - `server/index.ts` — mount new route
 - `server/lib/permissions.ts` — add `ORG_OBSERVABILITY_VIEW` permission key to `ALL_PERMISSIONS`; add it to the `org_admin` entry in `DEFAULT_PERMISSION_SET_TEMPLATES` (the seed consumer is `server/services/permissionSeedService.ts` which loops `DEFAULT_PERMISSION_SET_TEMPLATES` — no change needed there)
@@ -1591,7 +1610,7 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 **Modified:**
 - `server/db/schema/subaccountAgents.ts` — add `uniqueIndex` declaration matching the partial unique index
 - `server/jobs/orchestratorFromTaskJob.ts` — subaccount-scope routing now calls the resolver (reads `scope` from pg-boss job payload); `ORCHESTRATOR_AGENT_SLUG` constant retained for the org-scope fallback path (§6.6 case 2, §13). No `triggerContext` column change.
-- `server/services/briefCreationService.ts` — pass `fastPathDecision.scope` into the pg-boss job payload via `enqueueOrchestratorRoutingIfEligible(task, { scope })` (no task-column change)
+- `server/services/briefCreationService.ts` — pass `fastPathDecision.scope` into task trigger context
 - `server/services/hierarchyTemplateService.ts` — same-transaction root rotation in `apply()` and `importToSubaccount()`
 - `client/src/pages/AdminSubaccountsPage.tsx` — add picker + apply-on-submit (the actual create surface in the repo; `SubaccountCreatePage.tsx` does not exist)
 
@@ -1666,7 +1685,7 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 
 **Mitigation:**
 - Phase 1 ships the observability storage (tables + columns + detectors) but NOT the write paths or graph UI (those ship in Phase 4, same commit as enforcement). So "observability" in Phase 1 means "storage and detectors exist"; the actual rows and graph rendering arrive together with the enforcement code that produces them. This is still a dependency-ordering win — the detectors for invariant violations register early, and the schema is ready so Phase 4's code change is all-runtime-no-DDL.
-- Brief §6 budgets 1–2 weeks of prompt tweaks as the intended Phase 4 rollout posture. During this window, the team reviews outcome rows directly from the database using the query patterns in §17.1 / §17.2 / §17.3 (ad-hoc SQL against `delegation_outcomes`) and from `agent_execution_events` for lossless rejection signals. The `AdminDelegationOutcomesPage` dashboard (§8.3) is a nicer surface but is optional — daily review does not depend on it. If the dashboard ships with Phase 4, it's the primary surface; otherwise the SQL queries in §17 are.
+- Brief §6 budgets 1–2 weeks of prompt tweaks as the intended Phase 4 rollout posture. The team reviews outcome rows (now flowing as of Phase 4 landing) in the dashboard daily during this window.
 - Rejections return structured errors with `suggestedScope` hints where possible (see §4.3) so the agent's next attempt is informed, not random.
 
 ### 15.2 Split-brain root window during template re-apply
@@ -1845,8 +1864,8 @@ Behavioural success criteria from the brief (§8 of `docs/hierarchical-delegatio
 ### 17.6 Implementation efficiency
 
 **Measurement (vanity, for retrospective):**
-- Total LOC added across all four phases: target <3,500 lines including tests. (Revised up from an earlier 2,500-line estimate after §14 file inventory grew during review.)
-- Number of new files: the §14 inventory currently lists ~25 new files across all phases (including tests, pure-core pairs, detectors, client components, and the one new table + migrations). Target is not a strict cap — the file count reflects the pure+impure convention (each service doubles file count) and per-detector-test convention. Informational only.
+- Total LOC added across all four phases: target <2,500 lines including tests.
+- Number of new files: target <15.
 - Static gate passes first try rate: target ≥80% of commits (measures spec-to-code fidelity).
 
 **Not a launch gate.** Informational for the retrospective that feeds `KNOWLEDGE.md` entries.
@@ -1868,7 +1887,7 @@ Final pass over the spec before handing to `spec-reviewer`. Each question answer
 - §16 open questions have a recommendation + decision owner, not left abstract. ✓
 
 **Does every "single source of truth" claim survive?**
-- §4.3 / §4.4 frame `delegation_outcomes` as the **primary** source of delegation telemetry (best-effort; scope-validation rejections with resolvable actors). Unresolvable-target errors and any DB-write gaps surface via `agent_execution_events` (the lossless companion). Two-table model is consistent across §4.3, §10.3, §17.2-3 after iter3/iter4/iter5 clean-up. ✓
+- §4.4 claims `delegation_outcomes` is the sole source of delegation telemetry. Grep confirms: only `spawn_sub_agents` and `reassign_task` write to it; no other path logs delegations. ✓
 - §5.5 claims the Files-to-change table is the single source for schema changes. §14 mirrors and extends. ✓
 - §6.6 claims `hierarchyRouteResolverService` is the canonical root-finding path post-Phase-2. §6.7 confirms the only caller change is `orchestratorFromTaskJob`; §6.8 doesn't call it (template apply handles root-rotation directly on the table). ✓
 

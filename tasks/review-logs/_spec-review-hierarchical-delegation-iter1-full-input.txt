@@ -1,3 +1,32 @@
+You are reviewing a DEVELOPMENT SPECIFICATION DOCUMENT (markdown), not code. Apply an implementation-readiness rubric.
+
+Context about the project:
+- Pre-production codebase. No live users. Rapid evolution, breaking changes expected.
+- Testing posture: static gates are primary; runtime tests are pure-function-only. No frontend tests, no E2E tests, no API contract tests.
+- Rollout model: commit-and-revert. No feature flags unless for behaviour modes. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Your task: critique the spec as a senior engineer reviewing whether it is implementation-ready. Focus on:
+1. Internal contradictions (same concept defined differently in two sections)
+2. Stale / retired language that survives in prose
+3. Load-bearing claims ("idempotent", "source of truth", "must", "guarantees") without a named enforcement mechanism
+4. File-inventory drift (prose names a file/column/migration that isn't in the Files-to-change inventory)
+5. Schema overlap (two tables/columns with adjacent purposes without a clear source-of-truth declaration)
+6. Sequencing / phase-dependency bugs (Phase N references Phase N+k artefact)
+7. Invariants stated in one place but not enforced in another
+8. Items without explicit verdicts (no "ships in Phase N" / "deferred" / "won't do")
+9. New primitives introduced without concrete names (types, functions, tables, columns)
+10. Permissions / RLS gaps for tenant-scoped tables
+11. Execution-model contradictions (sync/async, inline/queued, cached/dynamic)
+
+Note: do NOT suggest adding tests that this codebase's posture rejects (frontend tests, E2E tests, API contract tests, performance baselines, composition tests). Do NOT suggest feature flags or staged rollout. Do NOT suggest inventing new abstractions where existing primitives could be extended.
+
+For every finding, state: (a) one-sentence description, (b) which section of the spec, (c) specific suggested fix, (d) severity (critical / important / minor / nit).
+
+The spec follows. Review it thoroughly.
+
+---
+
 # Hierarchical Agent Delegation — Development Spec
 
 **Status:** Draft — ready for `spec-reviewer`
@@ -22,7 +51,7 @@ This spec follows the conventions in `docs/spec-context.md`:
 - **Primitive reuse:** every new primitive has a "why not reuse" justification. Extension of existing tables (`subaccount_agents`, `tasks`) is preferred over new tables; one new table (`delegation_outcomes`) is justified in §5.4.
 - **Pre-production:** no live users; breaking changes to skill handler signatures are expected.
 
-**Scope of enforcement — one-line contract.** Hierarchy enforcement is intentionally minimal: it constrains *delegation* and the derived set of delegation skills (§6.5). It does NOT constrain agent cognition, planning, or non-delegation capability selection.
+**Scope of enforcement — one-line contract.** Hierarchy enforcement is intentionally minimal: it constrains *delegation*, not agent cognition, planning, or capability selection.
 
 ---
 
@@ -40,7 +69,7 @@ This spec follows the conventions in `docs/spec-context.md`:
 5. Schema changes
    - 5.1 `subaccount_agents` — partial unique index for root enforcement
    - 5.2 `tasks` — `delegation_direction` column
-   - 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` + `delegation_direction` + `handoff_source_run_id` columns
+   - 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` columns
    - 5.4 `delegation_outcomes` — new table
 6. Services
    - 6.1 `hierarchyContextBuilderService` — new
@@ -72,23 +101,23 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 
 **What ships (nine changes, grouped into four phases):**
 
-1. **Observability foundations (Phase 1).** A new `delegation_outcomes` table is created (write path ships Phase 4; the table ships empty). `agent_runs` gains `delegation_scope`, `hierarchy_depth`, `delegation_direction`, and `handoff_source_run_id` columns (all nullable; `hierarchy_depth` populated from Phase 3 onward; `delegation_scope` / `delegation_direction` / `handoff_source_run_id` populated from Phase 4 onward). Two health detectors register: `subaccountMultipleRoots` (critical) and `subaccountNoRoot` (severity `info` — zero roots is a valid steady state per §16.3; detector is informational, not a failure). The Run Trace delegation-graph view is a Phase 4 deliverable (§8.2) — it is not part of Phase 1.
+1. **Observability foundations (Phase 1).** A new `delegation_outcomes` table records every delegation attempt (accepted or rejected) with caller, target, scope, and reason. Three new health detectors fire on hierarchy invariant violations. The Run Trace Viewer gains a delegation-graph view that stitches parent / sub-agent runs into a single legible tree.
 
-2. **Root-agent contract (Phase 2).** Partial unique index on `subaccount_agents (subaccount_id) WHERE parent_subaccount_agent_id IS NULL AND is_active = true` — **at most one** active root per subaccount (zero is allowed until a root is configured; the resolver falls back to the org-level Orchestrator in that case per §6.6). `hierarchyTemplateService.apply()` and `importToSubaccount()` gain same-transaction root rotation so re-applies don't split-brain.
+2. **Root-agent contract (Phase 2).** Partial unique index on `subaccount_agents (subaccount_id) WHERE parent_subaccount_agent_id IS NULL AND is_active = true` — exactly one active root per subaccount. `hierarchyTemplateService.apply()` and `importToSubaccount()` gain same-transaction root rotation so re-applies don't split-brain.
 
-3. **Scope-aware orchestrator routing (Phase 2).** New `hierarchyRouteResolverService.resolveRootForScope(orgId, subaccountId, scope)` becomes the canonical way to find the entry-point agent. `orchestratorFromTaskJob` replaces the hardcoded `'orchestrator'` slug with this resolver; `briefCreationService` passes the triage classifier's `scope` in. Graceful degradation paths (zero-roots, multi-roots) fall back with structured logs; the Phase 1 detectors surface these invariant violations on the next scheduled Workspace Health audit sweep (§10.5 — detectors are async, run on schedule).
+3. **Scope-aware orchestrator routing (Phase 2).** New `hierarchyRouteResolverService.resolveRootForScope(orgId, subaccountId, scope)` becomes the canonical way to find the entry-point agent. `orchestratorFromTaskJob` replaces the hardcoded `'orchestrator'` slug with this resolver; `briefCreationService` passes the triage classifier's `scope` in. Graceful degradation paths (zero-roots, multi-roots) fall back with structured logs that fire the Phase 1 detectors.
 
 4. **Hierarchy context (Phase 3).** `SkillExecutionContext` gains a read-only `hierarchy: { parentId, childIds, depth, rootId }` snapshot built once per run by `hierarchyContextBuilderService`. Three existing list skills (`config_list_agents`, `config_list_subaccounts`, `config_list_links`) gain an optional `scope: 'children' | 'descendants' | 'subaccount'` parameter with adaptive default (`children` if the caller has subordinates, otherwise `subaccount`).
 
-5. **Delegation execution enforcement (Phase 4).** `spawn_sub_agents` and `reassign_task` gain a `delegationScope` parameter with the same vocabulary. Validation runs at call time: `children` asserts `target.parentSubaccountAgentId === caller.agentId`; `descendants` asserts the target is in the caller's subtree; `subaccount` is root-agent-only. Two new structured error codes: `delegation_out_of_scope` and `cross_subtree_not_permitted`. `reassign_task` carries one narrow special case: any agent may reassign to `context.hierarchy.parentId` regardless of `delegationScope`, marked `delegationDirection: 'up'` (§6.4 "upward escalation").
+5. **Delegation execution enforcement (Phase 4).** `spawn_sub_agents` and `reassign_task` gain a `delegationScope` parameter with the same vocabulary. Validation runs at call time: `children` asserts `target.parentSubaccountAgentId === caller.agentId`; `descendants` asserts the target is in the caller's subtree; `subaccount` is root-agent-only. Two new structured error codes: `delegation_out_of_scope` and `cross_subtree_not_permitted`. Upward reassigns (non-root agent → its parent) are allowed and marked `delegationDirection: 'up'`.
 
-6. **Derived delegation skills (Phase 4).** The skill resolver unions the agent's attached skills with a graph-derived set: when `context.hierarchy.childIds.length > 0`, add `config_list_agents` + `spawn_sub_agents` + `reassign_task` to the available tools for this run. Managers become managers by having children; workers stop being managers by losing them. Derived resolution handles the normal case; explicit attachment remains a narrow escape hatch (see §6.5) and is never removed by the resolver, only added to. No role enum.
+6. **Derived delegation skills (Phase 4).** The skill resolver unions the agent's attached skills with a graph-derived set: when `context.hierarchy.childIds.length > 0`, add `config_list_agents` + `spawn_sub_agents` + `reassign_task` to the available tools for this run. Managers become managers by having children; workers stop being managers by losing them. No attachment, no role enum, no drift.
 
-7. **Partial slug removal (Phase 2).** `const ORCHESTRATOR_AGENT_SLUG = 'orchestrator'` in `server/jobs/orchestratorFromTaskJob.ts:21` is **no longer used for subaccount-scope routing**; the resolver replaces it for that path. Org-scope (`scope === 'org'`) still uses the hardcoded Orchestrator system agent per §6.6 / §13 — the slug reference stays present for that narrow fallback path until a second org-level root candidate is introduced (deferred, §13). Full slug deletion is NOT in this spec.
+7. **Slug removal (Phase 2).** `const ORCHESTRATOR_AGENT_SLUG = 'orchestrator'` in `server/jobs/orchestratorFromTaskJob.ts:21` is deleted. The resolver replaces it.
 
 8. **Subaccount template picker UX (Phase 2).** The subaccount creation form gains a "Starting team" dropdown that lists available hierarchy templates and calls `POST /api/hierarchy-templates/:id/apply` on submit. Backend verb already exists.
 
-9. **Run trace delegation graph (Phase 4).** `RunTraceViewerPage` gains a DAG view over `agent_runs.parentRunId` / `isSubAgent` / `handoffDepth` (existing) + `agent_runs.handoff_source_run_id` + `delegation_scope` + `delegation_direction` + `hierarchy_depth` (new in Phase 1 migration 0204, populated from Phase 4).
+9. **Run trace delegation graph (Phase 4).** `RunTraceViewerPage` gains a tree view that cross-references `agent_runs.parentRunId` / `isSubAgent` / `handoffDepth` / `handoffSourceRunId` and renders the full fan-out as a collapsible graph. Reads existing columns — no new persistence.
 
 **What this spec does NOT cover.** Reorganising the seeded 16-agent Automation OS company into a multi-tier org chart (separate track). Mesh / dynamic-team / task-based-grouping delegation patterns (out of scope per §3.2). Cost rollups per subtree or performance-attribution per manager (future capability surface — the hierarchy primitives this spec ships are designed to support those later without redesign). Changes to the Universal Brief UX itself — GlobalAskBar, conversations table, triage classifier, artefact contracts stay as they are; we augment how they route, not redesign the surface.
 
@@ -107,9 +136,7 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 - Shared `validateHierarchy()` in `server/services/hierarchyService.ts` enforces `MAX_DEPTH = 10` and cycle detection at write time.
 - `buildTree()` helper in the same service composes nested trees for template-preview rendering. No runtime consumer uses it for delegation.
 
-**Seeded company with flat hierarchy (current manifest).** `companies/automation-os/automation-os-manifest.json` now defines 16 agents with TWO `reportsTo: null` agents: the Orchestrator (historical root) and the `portfolio-health-agent` (added recently). The other 14 agents have `reportsTo: orchestrator`. There is no middle-management tier in the seeded data; the flat-with-two-roots shape is a transitional artefact of adding the portfolio-health agent before this spec's root-agent-contract ships — once Phase 2 lands, the seed reorg track (§3.2 out-of-scope) needs to decide which agent is the canonical root and whether `portfolio-health-agent` reparents under the Orchestrator or shifts to a separate subaccount. `scripts/seed.ts` resolves `reportsTo` strings into FK IDs at seed time — the seed script already handles arbitrary-depth trees; the flatness is a data choice, not a limitation.
-
-**Implication for the partial unique index (§5.1).** The seeded company runs on the org sentinel subaccount; the two `reportsTo: null` agents both land on that single subaccount during seed. This trips the at-most-one-active-root partial unique index in Phase 2 migration 0202. The audit script (§5.1 pre-migration audit, `scripts/audit-subaccount-roots.ts`) must call this out, and the seed-reorg track must resolve one of the two to non-root before migration 0202 applies. §13 pull-forward: "seeded company cleanup before Phase 2 migration" is now a concrete gate.
+**Seeded company with flat hierarchy.** `companies/automation-os/automation-os-manifest.json` defines 16 agents: the Orchestrator (root, `reportsTo: null`) and 15 direct reports. Every non-Orchestrator agent has `reportsTo: orchestrator`. There is no middle-management tier in the seeded data. `scripts/seed.ts` resolves `reportsTo` strings into FK IDs at seed time — the seed script already handles arbitrary-depth trees; the flatness is a data choice, not a limitation.
 
 **Delegation primitives (flat).**
 - `spawn_sub_agents` (`server/services/skillExecutor.ts:3410`+) — creates 2–3 sub-tasks and dispatches them in parallel. Validates `requireSubaccountContext()` and agent existence; does NOT filter targets by `parentSubaccountAgentId`. Hard-blocks nesting ("sub-agents cannot spawn sub-agents") at line ~3415.
@@ -130,7 +157,7 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 
 **Workspace Health Audit subsystem.** `server/services/workspaceHealth/` with `detectors/index.ts` as a plug-and-play registry. Each detector exports `{ name, severity, detect(orgId, db) }`. Existing detectors: `agentNoRecentRuns`, `processBrokenConnectionMapping`, `processNoEngine`, `subaccountAgentNoSchedule`, `subaccountAgentNoSkills`, `systemAgentLinkNeverSynced`. Three new detectors in this spec (§6.9) slot into this registry.
 
-**Run trace.** `agent_runs` already carries `parentRunId`, `isSubAgent`, `parentSpawnRunId`, `handoffDepth` (integer, default 0). The handoff source run id currently lives on `tasks.handoff_source_run_id`, NOT on `agent_runs`. This spec adds `agent_runs.handoff_source_run_id` in migration 0204 (§5.3) so the delegation graph can be built from `agent_runs` alone. `client/src/pages/RunTraceViewerPage.tsx` renders single-run detail. No cross-run tree view yet.
+**Run trace.** `agent_runs` already carries `parentRunId`, `isSubAgent`, `parentSpawnRunId`, `handoffDepth`, `handoffSourceRunId` — the data needed to reconstruct a delegation graph exists. `client/src/pages/RunTraceViewerPage.tsx` renders single-run detail. No cross-run tree view yet.
 
 ### 2.2 What does NOT exist
 
@@ -161,21 +188,21 @@ Without these, this spec would have had to build its own scope / template / obse
 **Schema (§5):**
 - `subaccount_agents` — partial unique index for root-agent contract (migration 0202).
 - `tasks` — new `delegation_direction` text column (migration 0203).
-- `agent_runs` — new `delegation_scope` text column, `hierarchy_depth` smallint column, `delegation_direction` text column, and `handoff_source_run_id` uuid column (migration 0204).
+- `agent_runs` — new `delegation_scope` text column + `hierarchy_depth` smallint column (migration 0204).
 - `delegation_outcomes` — new table with RLS policy + `rlsProtectedTables` manifest entry (migration 0205).
 
 **Services (§6):**
 - `hierarchyContextBuilderService` — new pure + impure service for building `context.hierarchy` snapshots.
 - `hierarchyRouteResolverService` — new service: `resolveRootForScope(orgId, subaccountId, scope) → agentId`.
 - Extensions to: `config_list_agents`, `config_list_subaccounts`, `config_list_links` (scope param + adaptive default); `spawn_sub_agents` and `reassign_task` (`delegationScope` param + validation + outcome logging); `orchestratorFromTaskJob` (scope-aware dispatch, slug removal); `briefCreationService` (pass `scope` into dispatch); `hierarchyTemplateService.apply()` + `importToSubaccount()` (same-transaction root rotation); skill resolver in `skillService` (derive delegation skills from `hierarchy.childIds`).
-- Three new Workspace Health detectors (phase-staggered per §6.9): `subaccountMultipleRoots` (Phase 1), `subaccountNoRoot` (Phase 1), `explicitDelegationSkillsWithoutChildren` (Phase 4).
+- Three new Workspace Health detectors: `subaccountMultipleRoots`, `subaccountNoRoot`, `managerWithoutDerivedSkills`.
 
 **Routes (§7):**
 - `GET /api/org/delegation-outcomes` — list outcomes with filters (admin only).
-- `GET /api/agent-runs/:id/delegation-graph` — returns the run's fan-out DAG for the trace-graph UI.
+- `GET /api/runs/:runId/delegation-graph` — returns the run's fan-out tree for the trace-graph UI.
 
 **Client (§8):**
-- `AdminSubaccountsPage` — new "Starting team" dropdown, calls `apply` after create. (The Layout quick-create flow is untouched in v1.)
+- `SubaccountCreatePage` — new "Starting team" dropdown, calls `apply` after create.
 - `RunTraceViewerPage` — new delegation-graph tab.
 - `AdminDelegationOutcomesPage` (optional v1 — see §13 Deferred items) — admin dashboard for outcome metrics.
 
@@ -193,9 +220,7 @@ Without these, this spec would have had to build its own scope / template / obse
 
 ### 3.3 Cross-branch dependencies
 
-No code dependencies outside `main`. All prerequisite primitives (hierarchy schema, Universal Brief, triage classifier, hierarchy templates, run-trace fields, Workspace Health framework, `rlsProtectedTables` manifest) are on main as of 2026-04-22.
-
-**One non-code prerequisite, BLOCKING for Phase 2:** the seeded Automation OS company currently has two `reportsTo: null` agents (§2.1 current state). Migration 0202's partial unique index will fail until the dual-root is resolved (re-seed with `portfolio-health-agent` reparented, moved to a separate subaccount, or marked inactive). This is a manifest edit + re-seed, not a code change — flagged in §13 as a Phase 2 gate.
+Nothing in this spec depends on work outside `main`. All prerequisite primitives (hierarchy schema, Universal Brief, triage classifier, hierarchy templates, run-trace fields, Workspace Health framework, `rlsProtectedTables` manifest) are on main as of 2026-04-22.
 
 ### 3.4 Primitive reuse decisions
 
@@ -205,7 +230,7 @@ Every new primitive has a justification for not-reusing:
 |---|---|---|
 | `HierarchyContext` object on `SkillExecutionContext` | **Extend** existing `SkillExecutionContext` | Brief §5.1: scalar `parentAgentId` is too thin for skill logic (skills need children + depth + root). A new field on the existing struct is cheaper than a parallel context object. |
 | `hierarchyContextBuilderService` | **New** | No existing builder composes parent + children + depth + root for a single agent. The shape is too specific to fit into `hierarchyService.ts` (which handles validation, not context construction). Pure shape-derivation logic lives in `*Pure.ts` per convention. |
-| `hierarchyRouteResolverService.resolveRootForScope()` | **New** | The closest existing logic is the hardcoded-slug lookup in `orchestratorFromTaskJob.ts:21`. For subaccount scope, the resolver replaces it; for org scope the slug is retained (§6.6 case 2, §13 deferred). Single caller: `orchestratorFromTaskJob` (§6.7). `briefCreationService` does not call the resolver directly; it passes `fastPathDecision.scope` into the pg-boss job payload via `enqueueOrchestratorRoutingIfEligible(task, { scope })`, and the job reads `job.data.scope` and performs the resolution. No task-column change — no `tasks.triggerContext`. |
+| `hierarchyRouteResolverService.resolveRootForScope()` | **New** | The closest existing logic is the hardcoded-slug lookup in `orchestratorFromTaskJob.ts:21`. That's being deleted — the new resolver replaces it. Not reusable from `orchestratorFromTaskJob` because `briefCreationService` also needs to call it (§6.7). |
 | `delegation_outcomes` table | **New** | Closest existing table is `routing_outcomes` (capability-routing observability, `architecture.md §Orchestrator Capability-Aware Routing`). Considered extending with a new `outcome_type` variant — rejected because the two have disjoint column sets (`required_capabilities` / `candidate_agents` for routing vs `caller_agent_id` / `target_agent_id` / `delegation_scope` for delegation) and conflating them creates a wide, sparse table. The two tables sit side-by-side under the same manifest. |
 | `DelegationScope` TypeScript enum | **New** | No existing enum has this shape. Defined in `shared/types/delegation.ts` (new file). |
 | `DelegationDirection` marker on `tasks` | **Extend** existing `tasks` table | `tasks` already has `handoffDepth`, `handoffSourceRunId`, `reviewRequired`. Adding a nullable text column `delegation_direction` is consistent with how the table records handoff metadata. |
@@ -229,13 +254,13 @@ All contracts live in `shared/types/delegation.ts` (new file) unless otherwise n
 
 ```ts
 export interface HierarchyContext {
-  /** The caller's parent agent id. Null iff the caller IS the subaccount root (the active row with `parent_subaccount_agent_id IS NULL` per §5.1 schema predicate). */
+  /** The caller's parent agent id. Null iff the caller is the subaccount root. */
   parentId: string | null;
-  /** Direct reports only. Empty array for leaf agents. Ordered by id asc for determinism. */
+  /** Direct reports only. Empty array for leaf agents. Ordered by createdAt asc for determinism. */
   childIds: string[];
   /** 0 at the root, incremented per level walking down. Bounded by MAX_DEPTH = 10. */
   depth: number;
-  /** The subaccount root's agent id. Equals `agentId` when the caller IS the root. Always populated for an executing agent (the builder throws if the caller's subaccount has no root — §6.1 `HierarchyContextBuildError`). */
+  /** The subaccount root's agent id. Equals `agentId` if the caller is the root. */
   rootId: string;
 }
 ```
@@ -251,28 +276,12 @@ export interface HierarchyContext {
 }
 ```
 
-**Example instance (subaccount root — the common "everyone routes through me" case):**
-
-```json
-{
-  "parentId": null,
-  "childIds": ["agt_dev_1", "agt_qa_2", "agt_sales_1"],
-  "depth": 0,
-  "rootId": "agt_orch_root"
-}
-```
-
-Note: `parentId === null` means "this agent IS the subaccount root" — by the §5.1 schema predicate, any active `subaccount_agents` row with `parent_subaccount_agent_id IS NULL` is a root. There is no other semantic. The `rootId` field is therefore always populated for any executing agent (it equals this agent's id when the caller is the root).
-
 **Nullability and defaults:**
-- `parentId` is `null` iff the caller IS the subaccount root (per §5.1's partial unique index: `parent_subaccount_agent_id IS NULL AND is_active = true`). Any active executing agent with `parentId === null` is therefore the configured root of its subaccount. There is no "rootless" state for a running agent — the builder never successfully constructs a context with no root.
-- `childIds` is always an array (empty for leaves, never null). Sorted by `id` ascending for determinism — the pure builder does this in a stable sort so two invocations over the same roster produce identical output.
-- `depth` is always present and non-negative. `0` for root callers.
-- `rootId` is always populated for an executing agent. It equals the id of the subaccount's active root (equals `context.agentId` when the caller IS the root). If the builder can't find a root during the upward walk (the agent's ancestor chain terminates at a row that is not `parent_subaccount_agent_id IS NULL`), it throws `HierarchyContextBuildError('agent_not_in_subaccount')` per §6.1.
-- **About "root-less subaccounts" in earlier prose:** when §6.6 refers to a subaccount having no root, that means no subaccount-level root; the Brief dispatches to the ORG-level Orchestrator instead. The org Orchestrator runs inside ITS own subaccount (the org sentinel), which does have a root — itself. So the executing agent always sees a well-formed `HierarchyContext` with a non-null `rootId`.
-- The entire `hierarchy` field on `SkillExecutionContext` is optional (`hierarchy?: HierarchyContext`). Skills that don't need it don't pay for it. Missing-hierarchy handling differs by skill type:
-  - **Write-side delegation skills** (`spawn_sub_agents`, `reassign_task` — §6.3, §6.4) MUST fail closed with `hierarchy_context_missing` (§4.3) if invoked without `context.hierarchy`. They cannot validate scope without it, and silent fallthrough would be a correctness hole.
-  - **Read-side list skills** (`config_list_agents`, `config_list_subaccounts`, `config_list_links` — §6.2) fall through to the subaccount-wide result with a WARN-level telemetry log. Read skills are not correctness-critical; falling through preserves behaviour for diagnostic / system runs where hierarchy wasn't built.
+- `parentId` is `null` iff the caller's `parentSubaccountAgentId IS NULL` (the subaccount root).
+- `childIds` is always an array (empty for leaves, never null).
+- `depth` is always present and non-negative. `0` for root.
+- `rootId` is always present. Equals `context.agentId` for the root.
+- The entire `hierarchy` field on `SkillExecutionContext` is optional (`hierarchy?: HierarchyContext`). Skills that don't need it don't pay for it. Missing `hierarchy` in a skill that needs it is a contract bug — the skill must fail closed with `hierarchy_context_missing` (a structured error, §4.3).
 
 **Producer:** `hierarchyContextBuilderService.buildForRun()` (§6.1), called by `agentExecutionService` when it constructs the `SkillExecutionContext` for a run.
 **Consumers:** `config_list_agents`, `config_list_subaccounts`, `config_list_links` (§6.2); `spawn_sub_agents` (§6.3); `reassign_task` (§6.4); skill resolver (§6.5). The resolver reads `hierarchy.childIds.length` to decide whether to union in the delegation skill set.
@@ -294,13 +303,11 @@ export const DelegationScopeSchema = z.enum(DELEGATION_SCOPE_VALUES);
 
 **Semantics (shared across §6.2 visibility and §6.3 / §6.4 execution layers):**
 
-| Value | Visibility layer — `config_list_agents` (§6.2) | `reassign_task` (§6.4) | `spawn_sub_agents` (§6.3) |
-|---|---|---|---|
-| `children` | Return agents where `parentSubaccountAgentId === caller.agentId`. | Assert `target.parentSubaccountAgentId === caller.agentId`; reject with `delegation_out_of_scope` if not. | Same as reassign. |
-| `descendants` | Return every agent in the caller's subtree (walk downward, bounded by `MAX_DEPTH`). | Assert the target is in the caller's subtree (upward walk from target → caller); reject with `delegation_out_of_scope` if not. | Same as reassign. |
-| `subaccount` | Return every active agent in the subaccount (current flat behaviour). | Accept any target in the subaccount. Only callable when `caller.hierarchy.rootId === caller.agentId && caller.hierarchy.rootId !== null` (caller IS the configured subaccount root); reject with `cross_subtree_not_permitted` otherwise. | **Always rejected for `spawn_sub_agents`** regardless of caller role. Spawn is descent-only; roots crossing subtrees use `reassign_task`. Rejected with `cross_subtree_not_permitted`. |
-
-**Note on `config_list_subaccounts` / `config_list_links`:** per §6.2, the `scope` vocabulary is accepted for signature consistency but has no filter effect on these container-level list skills.
+| Value | Visibility layer (§6.2) | Execution layer (§6.3 / §6.4) |
+|---|---|---|
+| `children` | Return agents where `parentSubaccountAgentId === caller.agentId`. | Assert `target.parentSubaccountAgentId === caller.agentId`; reject with `delegation_out_of_scope` if not. |
+| `descendants` | Return every agent in the caller's subtree (walk downward, bounded by `MAX_DEPTH`). | Assert the target is in the caller's subtree (upward walk from target → caller); reject with `delegation_out_of_scope` if not. |
+| `subaccount` | Return every active agent in the subaccount (current flat behaviour). | Accept any target in the subaccount. **Only callable when `caller.hierarchy.parentId === null`** (the caller is the subaccount root); reject with `cross_subtree_not_permitted` otherwise. |
 
 **Adaptive default.** When the caller does not pass a `scope` / `delegationScope`:
 - If `context.hierarchy.childIds.length > 0` → default is `children`.
@@ -350,15 +357,15 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
 }
 ```
 
-**`hierarchy_context_missing`** — emitted ONLY by the write-side delegation skills (`spawn_sub_agents`, `reassign_task`) when they are invoked without `context.hierarchy`. Read-side list skills fall through to subaccount-wide results (§4.1, §6.2) rather than failing closed. This error represents a construction-path bug in `agentExecutionService` — it should never fire in practice; fail-closed safety net for write skills where missing hierarchy means scope cannot be validated.
+**`hierarchy_context_missing`** — emitted when a skill that requires `context.hierarchy` is invoked without it. Represents a construction-path bug (should never happen in practice; fail-closed safety net).
 
 ```json
 {
   "success": false,
   "error": {
     "code": "hierarchy_context_missing",
-    "message": "Skill spawn_sub_agents requires context.hierarchy to validate delegation scope but it was not provided. This is a bug in context construction.",
-    "context": { "runId": "run_abc", "agentId": "agt_sales_mgr", "skillSlug": "spawn_sub_agents" }
+    "message": "Skill config_list_agents requires context.hierarchy but it was not provided. This is a bug in context construction.",
+    "context": { "runId": "run_abc", "agentId": "agt_sales_mgr" }
   }
 }
 ```
@@ -366,7 +373,7 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
 **Producer:** Skill handlers in `skillExecutor.ts`.
 **Consumer:** Caller's prompt (agent sees the error and adjusts). Also written to `agent_execution_events` per existing conventions so the error appears in the Live Execution Log.
 
-**Side-effect on rejection.** Scope-validation rejections with resolvable actors (both caller and target are valid `subaccount_agents` FKs) write one row to `delegation_outcomes` (§4.4) with `outcome = 'rejected'` and `reason = error.code`. Rejections where the target cannot be resolved at all (e.g. target agent id doesn't exist — a different error class from `delegation_out_of_scope`) are NOT written to `delegation_outcomes` because the FK would fail; they're visible only in `agent_execution_events` (the agent's execution log). Successful delegations write `outcome = 'accepted'`. This is the primary source of scope-validation telemetry (writes are best-effort per §10.3; under sustained DB pressure a small fraction of rows may be missed — acceptable for metrics, not accounting). Unresolvable-target errors + DB-write-failure gaps mean the table is not a complete audit record — pair with `agent_execution_events` for that.
+**Side-effect on rejection.** Every rejection writes a row to `delegation_outcomes` (§4.4) with `outcome = 'rejected'` and `reason = error.code`. Successful delegations write `outcome = 'accepted'`. This is the sole source of delegation telemetry — it supersedes ad-hoc log counters.
 
 ### 4.4 `DelegationOutcome` row shape
 
@@ -378,10 +385,10 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
 export interface DelegationOutcome {
   id: string;                      // uuid
   organisationId: string;          // RLS scope
-  subaccountId: string;            // RLS scope; NOT NULL — both actor FKs point at subaccount_agents so a subaccount is always derivable
+  subaccountId: string | null;     // RLS scope; null only if the run was org-scoped (rare)
   runId: string;                   // the run that invoked the skill
-  callerAgentId: string;           // the delegating agent (FK subaccount_agents.id)
-  targetAgentId: string;           // the proposed delegate (FK subaccount_agents.id)
+  callerAgentId: string;           // the delegating agent
+  targetAgentId: string;           // the proposed delegate
   delegationScope: DelegationScope;
   outcome: 'accepted' | 'rejected';
   reason: string | null;           // null when accepted; error code when rejected
@@ -409,17 +416,16 @@ export interface DelegationOutcome {
 ```
 
 **Nullability and defaults:**
-- `subaccountId` NOT NULL — the subaccount is derived at write time from `context.subaccountId` (the dispatching skill's run). The schema itself does not cross-check that `callerAgentId` and `targetAgentId` actually belong to `subaccountId`; that integrity is enforced in the SERVICE LAYER by `delegationOutcomeService.insertOutcomeSafe()` (§10.3), which (a) reads both actor rows inside the same org-scoped query, (b) asserts their `subaccount_id` matches the outcome's `subaccountId`, (c) refuses the insert otherwise and logs WARN. A composite FK/CHECK at the DB layer would require cross-table integrity that Postgres does not support cleanly; the service-layer check is the pragmatic equivalent.
-- `organisationId` always set and similarly cross-checked at service layer.
-- `reason` null iff `outcome = 'accepted'`. Zod check enforces this at write time (mirrors the DB CHECK constraint so callers don't surface Postgres errors).
-- `delegationDirection` always set — computed by the skill handler from `caller.hierarchy` + target position. **Spawn direction is always `'down'` by construction** (§6.3: spawn rejects `subaccount` scope; the only accepted targets are descendants of the caller). Reassign direction is one of:
+- `subaccountId` nullable (for org-scoped runs). `organisationId` always set.
+- `reason` null iff `outcome = 'accepted'`. Zod check enforces this at write time.
+- `delegationDirection` always set — derived by the skill handler from `caller.hierarchy` + target position:
   - `down` — target is a descendant of caller (including direct child).
-  - `up` — target is an ancestor of caller (typically the caller's parent; only reachable by `reassign_task`'s upward-escalation special case in §6.4 step 2, or by a root using `subaccount` scope to reassign to its own ancestor path — which is empty because roots have no ancestor; effectively only the step-2 special case produces `up`).
-  - `lateral` — target is neither (escape hatch path; root-only — only possible when `effectiveScope === 'subaccount'` in `reassign_task` and caller is the subaccount root).
+  - `up` — target is an ancestor of caller (typically the caller's parent).
+  - `lateral` — target is neither (escape hatch path; root-agent-only when accepted).
 
-**Producer:** `spawn_sub_agents` and `reassign_task` after validation decides accept/reject. Write is best-effort and non-blocking — a write failure logs at WARN and does not fail the skill call. The outcome table is the primary telemetry source for delegation behaviour; under DB-hiccup conditions a small fraction of writes may be missed. Metrics reading this table (§17) should be treated as best-effort signal, not accounting-grade audit data.
+**Producer:** `spawn_sub_agents` and `reassign_task` after validation decides accept/reject. Write is best-effort and non-blocking — a write failure logs at WARN and does not fail the skill call. (The primary function of these skills is delegation; outcome logging is telemetry.)
 **Consumers:**
-- Health detectors (§6.9) — `subaccountNoRoot` / `subaccountMultipleRoots` do not read this table; `explicitDelegationSkillsWithoutChildren` doesn't either — those detectors query the schema directly. But future detectors (e.g. "agent with sustained rejection rate") will read this table.
+- Health detectors (§6.9) — `subaccountNoRoot` / `subaccountMultipleRoots` do not read this table; `managerWithoutDerivedSkills` doesn't either — those detectors query the schema directly. But future detectors (e.g. "agent with sustained rejection rate") will read this table.
 - Admin UI (§7, §8.3) — `GET /api/org/delegation-outcomes` dashboards.
 
 ### 4.5 `DelegationDirection` marker on `tasks`
@@ -459,8 +465,6 @@ Four migrations total. Numbering assumes 0201 is the latest on main at spec merg
 ### 5.1 `subaccount_agents` — partial unique index for root enforcement
 
 **Migration:** `0202_subaccount_agents_root_unique.sql` (Phase 2).
-
-**Invariant enforced:** **at most one** active root per subaccount. Zero active roots is a valid state (unconfigured subaccount; resolver falls back to the org-level Orchestrator per §6.6). The partial unique index enforces the at-most-one bound; presence is not required.
 
 **Change:** Add a partial unique index enforcing at most one active root per subaccount.
 
@@ -504,44 +508,28 @@ ALTER TABLE tasks
 
 **Why nullable, not default.** Old rows (pre-migration) have no delegation context to infer a direction from. Defaulting them to `'down'` would be misleading; null is honest. New writes always set a value.
 
-### 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` + `delegation_direction` + `handoff_source_run_id` columns
+### 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` columns
 
-**Migration:** `0204_agent_runs_delegation_telemetry.sql` (Phase 1 — all columns ship nullable; populators land in later phases).
-
-**Context (repo-state fact).** `agent_runs` today has `parentRunId`, `parentSpawnRunId`, `isSubAgent`, `handoffDepth` — but NOT `handoffSourceRunId`. The handoff source run ID lives on `tasks.handoff_source_run_id` (via `handoffJson`) in the current schema. Because the delegation graph (§7.2) is a per-run view keyed on `agent_runs`, the spec adds `handoff_source_run_id` to `agent_runs` directly — single-table lookup, no join to `tasks` for graph construction.
+**Migration:** `0204_agent_runs_delegation_telemetry.sql` (Phase 1 — the values are written regardless of whether enforcement is on).
 
 **Change:**
 
 ```sql
 ALTER TABLE agent_runs
   ADD COLUMN delegation_scope text,
-  ADD COLUMN hierarchy_depth smallint,
-  ADD COLUMN delegation_direction text,
-  ADD COLUMN handoff_source_run_id uuid REFERENCES agent_runs(id) ON DELETE SET NULL;
+  ADD COLUMN hierarchy_depth smallint;
 
 ALTER TABLE agent_runs
   ADD CONSTRAINT agent_runs_delegation_scope_chk
-  CHECK (delegation_scope IS NULL OR delegation_scope IN ('children', 'descendants', 'subaccount')),
-  ADD CONSTRAINT agent_runs_delegation_direction_chk
-  CHECK (delegation_direction IS NULL OR delegation_direction IN ('down', 'up', 'lateral'));
+  CHECK (delegation_scope IS NULL OR delegation_scope IN ('children', 'descendants', 'subaccount'));
 
 CREATE INDEX agent_runs_hierarchy_depth_idx ON agent_runs (hierarchy_depth)
   WHERE hierarchy_depth IS NOT NULL;
-
-CREATE INDEX agent_runs_handoff_source_run_id_idx ON agent_runs (handoff_source_run_id)
-  WHERE handoff_source_run_id IS NOT NULL;
 ```
 
-**Drizzle reflection:** Add `delegationScope: text('delegation_scope')`, `hierarchyDepth: smallint('hierarchy_depth')`, `delegationDirection: text('delegation_direction')`, and `handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id)` to `server/db/schema/agentRuns.ts`.
+**Drizzle reflection:** Add `delegationScope: text('delegation_scope')` and `hierarchyDepth: smallint('hierarchy_depth')` to `server/db/schema/agentRuns.ts`.
 
-**Relationship to `tasks.handoff_source_run_id`.** The existing column on `tasks` remains unchanged. When `reassign_task` dispatches a handoff, the NEW run's `agent_runs.handoff_source_run_id` is set to the calling run's id (the run that invoked `reassign_task`). The task row also gets its `handoff_source_run_id` updated to the same value per current behaviour. Both are populated; the per-run column is the one the graph reads.
-
-**Population schedule (phase-staggered):**
-- Phase 1: columns exist; all three are null on every new `agent_runs` row.
-- Phase 3: `hierarchy_depth` starts being populated by `agentExecutionService` from `context.hierarchy.depth` at run start (built by `hierarchyContextBuilderService`).
-- Phase 4: `delegation_scope` and `delegation_direction` start being populated by the dispatching skill handler (`spawn_sub_agents` / `reassign_task`) at the moment the new run is created. For the ROOT run of a Brief fan-out (the first run, not dispatched by any skill), both are null. For dispatched runs (sub-agent or handoff), both are set and are immutable — they record the edge that created THIS run, not the current state of the dispatching task.
-
-**Why on `agent_runs`, not `tasks`:** `tasks.delegation_direction` (§5.2) is the current-task marker and is mutable (a task reassigned twice has its current direction overwritten). The delegation GRAPH (§7.2) needs the direction of the edge that CREATED each run, which is a per-run immutable fact. Storing it on `agent_runs` keeps it immutable and queryable without joining through `tasks`.
+**Populated by:** `agentExecutionService` at run start, via the new `hierarchyContextBuilderService` (§6.1). `hierarchyDepth` mirrors `hierarchy.depth`; `delegationScope` is set only for runs that were dispatched by `spawn_sub_agents` or `reassign_task` (i.e. sub-agent runs and handoff runs) — it records the scope under which the dispatching skill resolved the target.
 
 **Why these columns on `agent_runs` and not elsewhere:** they're read by the trace graph UI alongside the existing `parentRunId` / `isSubAgent` / `handoffDepth` fields. Putting them anywhere else forces the UI to join.
 
@@ -557,7 +545,7 @@ CREATE INDEX agent_runs_handoff_source_run_id_idx ON agent_runs (handoff_source_
 CREATE TABLE delegation_outcomes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id uuid NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-  subaccount_id uuid NOT NULL REFERENCES subaccounts(id) ON DELETE CASCADE,
+  subaccount_id uuid REFERENCES subaccounts(id) ON DELETE CASCADE,
   run_id uuid NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
   caller_agent_id uuid NOT NULL REFERENCES subaccount_agents(id) ON DELETE CASCADE,
   target_agent_id uuid NOT NULL REFERENCES subaccount_agents(id) ON DELETE CASCADE,
@@ -589,21 +577,12 @@ CREATE INDEX delegation_outcomes_caller_created_idx
 CREATE INDEX delegation_outcomes_run_idx
   ON delegation_outcomes (run_id);
 
--- RLS — uses app.organisation_id per the existing repo-wide RLS contract (see migrations 0080+).
+-- RLS
 ALTER TABLE delegation_outcomes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY delegation_outcomes_org_isolation
   ON delegation_outcomes
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
+  USING (organisation_id = current_setting('app.current_organisation_id')::uuid);
 ```
 
 **Drizzle reflection:** New file `server/db/schema/delegationOutcomes.ts`. Export from `server/db/schema/index.ts`.
@@ -624,7 +603,7 @@ For the self-consistency audit and Phase 1 planning, every schema change referen
 |---|---|---|
 | 0202 | Phase 2 | `migrations/0202_subaccount_agents_root_unique.sql`, `server/db/schema/subaccountAgents.ts` (add `uniqueIndex`), `scripts/audit-subaccount-roots.ts` (new) |
 | 0203 | Phase 4 | `migrations/0203_tasks_delegation_direction.sql`, `server/db/schema/tasks.ts` (add column) |
-| 0204 | Phase 1 | `migrations/0204_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable); `server/db/schema/agentRuns.ts` (add four columns) |
+| 0204 | Phase 1 | `migrations/0204_agent_runs_delegation_telemetry.sql`, `server/db/schema/agentRuns.ts` (add columns) |
 | 0205 | Phase 1 | `migrations/0205_delegation_outcomes.sql`, `server/db/schema/delegationOutcomes.ts` (new), `server/db/schema/index.ts` (export), `server/config/rlsProtectedTables.ts` (manifest entry) |
 
 All four migration files, all six schema file references, roll forward into §14 File inventory.
@@ -651,7 +630,7 @@ export function buildHierarchyContextPure(input: {
 }): HierarchyContext {
   // Pure derivation from the full subaccount agent roster:
   // 1. find caller in roster → parentId
-  // 2. filter roster where parentSubaccountAgentId === agentId → childIds (sorted by id asc for determinism)
+  // 2. filter roster where parentSubaccountAgentId === agentId → childIds (sorted)
   // 3. walk upward to root, counting depth
   // 4. return frozen object
 }
@@ -674,26 +653,9 @@ export async function buildForRun(params: {
 
 **Caller:** `agentExecutionService` at run construction. New code path that populates `ctx.hierarchy` before the skill executor is handed the context.
 
-**Error class:** `HierarchyContextBuildError` is declared in `server/services/hierarchyContextBuilderService.ts` (co-located with the impure wrapper):
-
-```ts
-export class HierarchyContextBuildError extends Error {
-  constructor(
-    public readonly code: 'agent_not_in_subaccount' | 'depth_exceeded' | 'cycle_detected',
-    message?: string
-  ) {
-    super(message ?? code);
-    this.name = 'HierarchyContextBuildError';
-  }
-}
-```
-
-Not exported from `shared/types/delegation.ts` — it is a server-side construction error, not a contract that crosses the shared boundary.
-
 **Error modes:**
-- Caller agent not found in roster → throw `new HierarchyContextBuildError('agent_not_in_subaccount')`. Caught by `agentExecutionService` and surfaced on the run as a hard failure (the agent cannot execute with a broken hierarchy context).
-- Roster walk exceeds `MAX_DEPTH = 10` → should be impossible (validated at write time by `hierarchyService.validateHierarchy`), but if it happens, throw `new HierarchyContextBuildError('depth_exceeded')`. Same fail-closed posture.
-- Cycle detected during upward walk → throw `new HierarchyContextBuildError('cycle_detected')`. Defence-in-depth — `validateHierarchy` already prevents cycles at write time.
+- Caller agent not found in roster → throw `HierarchyContextBuildError('agent_not_in_subaccount')`. Caught by `agentExecutionService` and surfaced on the run as a hard failure (the agent cannot execute with a broken hierarchy context).
+- Roster walk exceeds `MAX_DEPTH = 10` → should be impossible (validated at write time by `hierarchyService.validateHierarchy`), but if it happens, throw `HierarchyContextBuildError('depth_exceeded')`. Same fail-closed posture.
 
 **Depth bound + cycle-safety.** The upward walk is bounded by `MAX_DEPTH + 1 = 11` iterations before throwing. The pure function rejects cycles (if the walk revisits a node, throw) — this is a defence-in-depth check since `validateHierarchy` already prevents cycles at write time.
 
@@ -723,19 +685,11 @@ const effectiveScope = input.scope ?? (
 );
 ```
 
-**Scope → filter (applied to the base query). Semantics per skill:**
-
-**`config_list_agents`** — the scope vocabulary maps directly onto the agent hierarchy:
+**Scope → filter (applied to the base query):**
 
 - `children` → `WHERE parent_subaccount_agent_id = $callerAgentId AND is_active = true`
-- `descendants` → `WHERE id IN (walk downward from $callerAgentId)` — implemented via the pure hierarchy builder's downward walk over the active roster (§6.1). No recursive CTE; the pure function is cheap at expected sizes (<100 agents per subaccount).
+- `descendants` → `WHERE id IN (walk downward from $callerAgentId)` — implemented via recursive CTE bounded by `MAX_DEPTH`. Handler builds the set via the pure hierarchy builder's downward walk.
 - `subaccount` → existing behaviour (`WHERE subaccount_id = $subaccountId AND is_active = true`).
-
-**`config_list_subaccounts`** — subaccounts are container-level resources; the agent hierarchy vocabulary does not map cleanly onto them. For this skill, `children` and `descendants` are equivalent to `subaccount` (they return the full set of subaccounts the caller can see via `allowedSubaccountIds`). The `scope` parameter is accepted for vocabulary consistency across the three list skills but has no filter effect — documented in the tool definition so callers know not to rely on it narrowing the result. Future versions may tighten this (e.g. narrow to subaccounts where the caller has an active agent link), but v1 preserves current behaviour.
-
-**`config_list_links`** — links are the edges between system agents and subaccounts. For this skill, `scope` narrows the set to links touching the caller's subaccount (equivalent to the existing default). `children` / `descendants` / `subaccount` are all no-ops in v1 for the same container-level reason; again accepted for vocabulary consistency, future versions may distinguish them.
-
-**Rationale.** The three list skills share a tool-signature shape so callers don't have to remember which accepts `scope`. For `config_list_agents` the parameter is load-bearing; for the other two it is documentation-only in v1. The alternative — dropping `scope` from two of the three — produces three different signatures for "list X" skills and bleeds into prompt surface area.
 
 **Missing-context handling:** If `context.hierarchy` is undefined when the handler runs, the adaptive path falls through to `subaccount` (safe default). A telemetry log at WARN records this — it indicates a builder bug, not a caller bug.
 
@@ -762,19 +716,16 @@ interface SpawnSubAgentsInput {
 **Validation flow (per target):**
 
 1. Resolve `effectiveScope` (adaptive default as §6.2).
-2. If `effectiveScope === 'subaccount'` → reject the **entire call** with `cross_subtree_not_permitted`, regardless of whether the caller is root (spawn is always a descent operation — see step 6; roots crossing subtrees use `reassign_task`). Write one `delegation_outcomes` row per proposed target with `outcome: 'rejected'`, `reason: 'cross_subtree_not_permitted'`. Do not spawn anything.
-3. Per target, classify in-scope / out-of-scope:
+2. If `effectiveScope === 'subaccount'` AND `context.hierarchy?.parentId !== null` → reject the **entire call** with `cross_subtree_not_permitted`. (Do not reject per-target — the caller either has subaccount authority or they don't; mixed outcomes inside a single spawn call are a confusing UX.)
+3. Per target:
    - Look up target's `parentSubaccountAgentId` from the same roster used in §6.1.
-   - If `effectiveScope === 'children'` and `target.parentSubaccountAgentId !== context.agentId` → target is out-of-scope.
-   - If `effectiveScope === 'descendants'` and target is not in caller's subtree → out-of-scope.
-   - Otherwise → in-scope.
-4. If ANY target is out-of-scope, reject the entire call (atomic — don't spawn a partial set; the caller's prompt re-plans). Write rejection rows for the out-of-scope targets only, with `reason: 'delegation_out_of_scope'`. In-scope-but-not-executed siblings are NOT logged (no delegation happened for them; logging them as `accepted` would be false and logging them as `rejected` would be misleading).
-5. If all targets are in-scope, spawn the entire set. For each spawned sub-agent run, write `agent_runs.delegation_direction = 'down'` and `agent_runs.delegation_scope = effectiveScope` at run creation (immutable per-run fact, read by the graph in §7.2). Write one `delegation_outcomes` row per target with `outcome: 'accepted'`, `reason: null`, `delegationDirection: 'down'` via `insertOutcomeSafe()` (§10.3).
-6. **Direction for spawn is always `'down'` by construction.** The roots-can-use-`subaccount`-scope case from §4.2 does NOT apply to `spawn_sub_agents` — roots wanting to hand work across subtrees use `reassign_task`, not spawn. Concretely: for `spawn_sub_agents`, `effectiveScope === 'subaccount'` is rejected for every caller (including roots) with `cross_subtree_not_permitted`. The `subaccount` scope is a `reassign_task` / list-skill concept; spawning into another subtree is semantically wrong because sub-agents are children by definition. Roots who want to kick off work in another subtree either reassign the task to that subtree's manager (who then spawns within), or create the task via the brief path and let the router resolve.
+   - If `effectiveScope === 'children'` and `target.parentSubaccountAgentId !== context.agentId` → reject target with `delegation_out_of_scope`.
+   - If `effectiveScope === 'descendants'` and target is not in caller's subtree → reject target with `delegation_out_of_scope`.
+   - Otherwise → accept target.
+4. If any target was rejected, reject the entire call (atomic — don't spawn a partial set of sub-agents; the caller's prompt re-plans).
+5. For each target (accepted or rejected), write one row to `delegation_outcomes` with `delegationDirection: 'down'` (sub-agents are always down by construction).
 
-**Nesting block removal.** The existing "sub-agents cannot spawn sub-agents" hard-block at line ~3415 is **deleted**. Multi-level fan-out is allowed up to `MAX_HANDOFF_DEPTH = 5`.
-
-**Depth enforcement for spawn chains.** Re-use the existing `agent_runs.handoffDepth` integer column (default 0) for both handoff AND spawn chains — one shared counter, one limit. When `spawn_sub_agents` enqueues a new sub-agent run, the new run's `handoffDepth` is set to `context.handoffDepth + 1`. If `context.handoffDepth >= MAX_HANDOFF_DEPTH` (5) before the call, reject the entire spawn call with error code `max_handoff_depth_exceeded` (an existing error code in `skillExecutor.ts`; no new code needed). Same rule is already applied by `reassign_task` — spawn now aligns. Each nested spawn is also subject to its own scope validation per this section — a sub-agent with no children will have its adaptive default resolve to `subaccount`, which this skill rejects (§6.3 step 2), so sub-agent-without-children cannot spawn further. In practice, only managers (agents with children) can spawn; workers (no children) can't. This is the graph-position-grants-authority model in action.
+**Nesting block removal.** The existing "sub-agents cannot spawn sub-agents" hard-block at line ~3415 is **deleted**. Multi-level fan-out is allowed up to `MAX_HANDOFF_DEPTH = 5`. Each nested spawn is subject to its own scope validation per this section — a sub-agent with no children will have its adaptive default resolve to `subaccount`, which means it cannot spawn unless it's a root (rare in sub-agent context). In practice, only managers (agents with children) can spawn; workers (no children) can't. This is the graph-position-grants-authority model in action.
 
 **Context propagation.** The spawned sub-agent run's `SkillExecutionContext` is constructed by `agentExecutionService` independently — the sub-agent builds its own `hierarchy` from its own position. Parent's `hierarchy` is not propagated (the sub-agent has its own parent relationship).
 
@@ -799,21 +750,19 @@ interface ReassignTaskInput {
 **Validation flow:**
 
 1. Resolve `effectiveScope`.
-2. **Upward-escalation special case (committed per §16.1, option b).** If `target.subaccountAgentId === context.hierarchy.parentId` (the target IS the caller's immediate parent), skip scope validation; the call is accepted regardless of `effectiveScope`. Set `delegationDirection: 'up'`, proceed to step 5.
-3. Otherwise, if `effectiveScope === 'subaccount'`, assert the caller is the CONFIGURED subaccount root: `context.hierarchy.rootId === context.agentId && context.hierarchy.rootId !== null`. This is NOT equivalent to `parentId === null` — rootless subaccounts also have `parentId === null` on every agent (§4.1), and they must NOT be permitted to use `subaccount` scope. Reject with `cross_subtree_not_permitted` if the assertion fails.
-4. Apply the same target-in-scope rule.
-5. Compute `delegationDirection` (only for the non-special-case path):
+2. Apply the same `subaccount`-only-for-root rule as §6.3.
+3. Apply the same target-in-scope rule.
+4. Compute `delegationDirection`:
    - If `target.parentSubaccountAgentId === context.agentId` or target is in caller's subtree → `'down'`.
-   - If target is an ancestor of caller (walk caller upward; if target is on the path — this includes the `parentId` special case already handled in step 2, and any higher ancestor reached only by the root-using-`subaccount` scope) → `'up'`.
+   - If target is an ancestor of caller (walk caller upward; if target is on the path) → `'up'`.
    - Otherwise → `'lateral'` (only possible when `effectiveScope === 'subaccount'` and caller is root).
-6. Write `tasks.delegation_direction` to the resolved direction (the current-task marker — this reflects the LATEST reassignment; older directions are not preserved here). A failed write fails the skill call.
-7. When the handoff queue dispatches the new run, the dispatch carries the direction into the newly-created `agent_runs.delegation_direction` column. This is the IMMUTABLE per-run edge-direction that the trace graph reads (§7.2). Written once at run creation; never mutated.
-8. Write `delegation_outcomes` row via `insertOutcomeSafe()` (§10.3, best-effort).
-9. Dispatch completes via the existing handoff queue.
+5. Write `tasks.delegation_direction` to the resolved direction (this is a correctness-critical column; a failed write fails the skill call).
+6. Write `delegation_outcomes` row (best-effort).
+7. Dispatch handoff via the existing handoff queue.
 
-**Upward reassign (worker → parent) — supported via narrow special case.** The step-2 special case keeps the brief's "upward escalation allowed, logged" commitment without widening the `delegationScope` surface. Any agent can reassign to its own parent. Upward targets two or more levels up (grand-parent, etc.) remain gated behind `subaccount` scope (root-only) — there is no multi-level upward escape hatch in v1. The two-step "escalate to parent → parent escalates further" pattern covers deeper upward hops.
+**Upward reassign (worker → parent) — allowed but marked.** When `delegationDirection === 'up'`, the reassignment is accepted (subject to the same scope rules — `children` scope rejects all upward hops, `descendants` likewise, `subaccount` accepts only for root). A non-root agent targeting its own parent uses the adaptive default (`subaccount` for leaves, since leaf agents default to `subaccount`) — and rejects because leaves aren't roots. To upward-reassign, a non-root agent MUST be the subaccount root — but if they're the root, upward has no meaning. **This means upward reassign from a non-root agent is effectively blocked by construction, which contradicts the brief's "upward escalation allowed" rule.**
 
-**Why this shape (option b, per §16.1).** Considered and rejected: (a) "roots only" drops a brief commitment; (c) a fourth `delegationScope: 'parent'` adds vocabulary for a single-target case; (d) a separate `escalate_upward` skill adds platform surface. Option (b) is a one-line check in the validator.
+**Open question flagged to §16:** the brief resolved upward escalation as "allowed, logged." The strict interpretation of §6.3 / §6.4 blocks it in practice. Resolution options: (a) accept that only roots can upward-reassign (simpler, drops the feature); (b) add a special case — any agent can `reassign_task` to its own parent regardless of `effectiveScope`, with `delegationDirection: 'up'` (more permissive, keeps the brief promise); (c) introduce `delegationScope: 'parent'` as a fourth value (explicit, more surface area). **Spec author's recommendation: (b) — narrow special case, minimal surface.** Documented in §16 for `spec-reviewer` to confirm before implementation.
 
 ### 6.5 Skill resolver — derive delegation skills from graph position
 
@@ -825,32 +774,18 @@ interface ReassignTaskInput {
 
 ```ts
 // Inside resolveSkillsForAgent (simplified)
-// Hierarchy is already built once per run by agentExecutionService (§4.1 "built once per run" contract).
-// The skill resolver consumes the already-built snapshot from the same SkillExecutionContext it's
-// constructing for this run — it does NOT re-invoke hierarchyContextBuilderService.
 const attachedSlugs = await getAttachedSkillSlugs(agentId, subaccountId);
-const derivedSlugs = (context.hierarchy?.childIds.length ?? 0) > 0
+const hierarchy = await hierarchyContextBuilderService.buildForRun({...});
+const derivedSlugs = hierarchy.childIds.length > 0
   ? ['config_list_agents', 'spawn_sub_agents', 'reassign_task']
   : [];
 const effectiveSlugs = Array.from(new Set([...attachedSlugs, ...derivedSlugs]));
 return resolveSlugsToTools(effectiveSlugs);
 ```
 
-**Call-ordering note.** `agentExecutionService` builds `context.hierarchy` (via `hierarchyContextBuilderService.buildForRun()`) BEFORE it invokes the skill resolver. The resolver reads the already-built snapshot; no second build. This is the "built once per run" contract stated in §4.1.
-
-**Missing-hierarchy policy for the resolver.** If `context.hierarchy` is undefined at resolver time (a construction bug in `agentExecutionService`), the resolver does NOT fail the run. It logs WARN (`hierarchy_missing_at_resolver_time`) and returns the agent's explicitly-attached skill set only — derived delegation skills are dropped silently. This preserves behaviour for diagnostic / system runs that might legitimately bypass the builder. A Phase 4 integration check confirms the resolver always sees `context.hierarchy` on normal Brief-dispatched runs.
-
 **Why all three derived together:** the three skills form a coherent "can delegate" capability. Giving a manager any one without the others creates a half-working agent (e.g. `spawn_sub_agents` without `config_list_agents` forces the manager to guess target IDs). Always unioned together keeps prompts and behaviours consistent.
 
-**Interaction with explicit attachment (narrow escape hatch — realistic scope).** If an agent already has any of the three attached explicitly, the union is idempotent (de-duped via Set). The graph-derived logic only *adds*, never *removes*. **However, for agents with `childIds.length === 0`, the execution-side validation (§6.3, §6.4) sharply narrows what the attached skills can DO:**
-
-- `spawn_sub_agents` — unusable. With no children, `effectiveScope` resolves to `subaccount` (adaptive default §4.2), which §6.3 step 2 rejects for all callers. An explicit `delegationScope: 'children'` or `'descendants'` would also be rejected because `childIds` is empty, so every target is out-of-scope.
-- `reassign_task` — usable only for the upward-escalation special case (§6.4 step 2): a no-child agent can reassign to its own `parentId`. All other targets fail scope validation.
-- `config_list_agents` — fully usable (read-side; no scope validation blocks results per §6.2).
-
-**Effective practical use.** Explicit attachment for a no-child agent grants "see the list of org agents + escalate upward." This is a coherent narrow capability (an escalation-only role). The `explicitDelegationSkillsWithoutChildren` detector (§6.9) surfaces it as informational for operator awareness, not as drift.
-
-**If broader delegation capability is needed for a no-child agent,** the right approach is to give the agent children (restructure the hierarchy), not to rely on explicit attachment — the validation will block any broader use regardless.
+**Interaction with explicit attachment:** If an agent already has any of the three attached explicitly, the union is idempotent (de-duped via Set). Explicit attachment continues to work for any special case (e.g. an agent with no children that needs delegation for a narrow reason can have the skills explicitly attached; the graph-derived logic only *adds*, never *removes*).
 
 **When children change mid-session:** No mid-run effect (§4.1 immutability contract). Next run of the agent reads the updated roster and resolves accordingly. Transition is automatic, drift-free.
 
@@ -866,26 +801,23 @@ return resolveSlugsToTools(effectiveSlugs);
 export interface ResolveRootResult {
   subaccountAgentId: string;
   agentId: string;
-  fallback: 'none' | 'org_root';
+  fallback: 'none' | 'org_root' | 'hardcoded_slug';
 }
 
 export async function resolveRootForScope(params: {
   organisationId: string;
   subaccountId: string | null;
   scope: 'subaccount' | 'org' | 'system';
-}): Promise<ResolveRootResult | null>;
-// Returns null when the scope is unsupported (scope === 'system' in v1 — §13 deferred).
-// Callers surface a Brief error artefact on null (see §6.7).
+}): Promise<ResolveRootResult>;
 ```
 
 **Resolution logic:**
 
 1. **`scope === 'subaccount'`** (most common path, Brief scoped to a client subaccount):
-   - If `subaccountId` is null → fall through to the org-level Orchestrator link (§2.1 current behaviour). Return with `fallback: 'org_root'`. This happens for Brief enqueues that don't have a subaccount context (e.g. a task created at org level but routed with default scope); the fallback restores pre-spec behaviour.
-   - Otherwise, query `subaccount_agents WHERE subaccount_id = $subaccountId AND parent_subaccount_agent_id IS NULL AND is_active = true`.
+   - Query `subaccount_agents WHERE subaccount_id = $subaccountId AND parent_subaccount_agent_id IS NULL AND is_active = true`.
    - Expected: exactly one row (enforced by partial unique index §5.1). Return with `fallback: 'none'`.
-   - Zero rows: fall back to the org-level Orchestrator link. Log WARN with a structured event that the `subaccountNoRoot` detector picks up on the next audit sweep. Return with `fallback: 'org_root'`.
-   - Multiple rows: impossible post-migration. Pre-migration window: pick oldest by `createdAt`, log CRITICAL with a structured event that the `subaccountMultipleRoots` detector picks up on the next audit sweep. Return with `fallback: 'none'` but flagged.
+   - Zero rows: fall back to the org-level Orchestrator link (§2.1 current behaviour). Log WARN + fire `subaccountNoRoot` detector. Return with `fallback: 'org_root'`.
+   - Multiple rows: impossible post-migration. Pre-migration window: pick oldest by `createdAt`, log CRITICAL, fire `subaccountMultipleRoots`. Return with `fallback: 'none'` but flagged.
 
 2. **`scope === 'org'`:**
    - Query for the org-level Orchestrator link (existing behaviour — system agent with `slug = 'orchestrator'` linked to the org sentinel subaccount).
@@ -912,37 +844,20 @@ const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';
 
 **After:**
 ```ts
-// Slug constant retained — used ONLY by the org-scope branch of the resolver (§6.6 case 2)
-// pending §13 deferred work. Subaccount-scope routing no longer reads it.
-const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';  // unchanged
-
-// Scope comes from the pg-boss job payload — enqueue-time producer
-// (briefCreationService) reads fastPathDecision.scope and includes it in the job data.
-// orchestratorFromTaskJob reads job.data.scope (default 'subaccount' for backward compat
-// with any enqueue path that doesn't yet pass scope — chiefly the non-Brief trigger paths).
-const scope = job.data.scope ?? 'subaccount';
+// No slug constant. Scope comes from task.triggerContext (passed through by briefCreationService, §6.8).
+const scope = task.triggerContext?.scope ?? 'subaccount';
 const result = await hierarchyRouteResolverService.resolveRootForScope({
   organisationId: task.organisationId,
   subaccountId: task.subaccountId,
   scope,
 });
 if (!result) {
-  // System scope not yet supported, or unresolvable. Surface as a conversation-level
-  // error artefact via briefConversationWriter (the existing primitive) so the brief
-  // author sees "system-scope Briefs are not yet routable" in the conversation thread.
-  await briefConversationWriter.appendSystemErrorArtefact({
-    conversationId: task.conversationId,
-    message: 'system-scope Briefs are not yet routable (§13 deferred)',
-    organisationId: task.organisationId,
-  });
+  // System scope not yet supported, or unresolvable. Surface as a Brief error artefact.
+  await briefErrorArtefactService.emit({ ... });
   return;
 }
-// Dispatch to result.subaccountAgentId.
+// Dispatch to result.subaccountAgentId. Carry triggerContext.taskSubaccountId as before.
 ```
-
-**Why the job payload, not a task column.** Adding `tasks.trigger_context` would be a schema migration for no durable benefit — the scope is a one-time dispatch routing hint, consumed when `orchestratorFromTaskJob` runs, never read again. The pg-boss job payload is the natural carrier for transient dispatch metadata. No new column; no new file-inventory entry for `tasks`.
-
-**Enqueue-side change.** `briefCreationService` (existing) currently calls `enqueueOrchestratorRoutingIfEligible(task)`; Phase 2 widens the enqueue signature to `enqueueOrchestratorRoutingIfEligible(task, { scope })` and the job enqueue carries `scope` in the job data. Non-Brief trigger paths (the `org_task_created` DB trigger path) don't know scope; they enqueue without it and the job defaults to `'subaccount'`.
 
 **Fallback observability:** `result.fallback` is written to structured logs so ops can measure how often fallback paths fire. Phase 2 success criterion: after migration + template re-applies, `fallback !== 'none'` should be rare (<1% of dispatches after the first week).
 
@@ -977,21 +892,19 @@ await tx.update(subaccountAgents)
 
 **Verdict:** Use option (b) for v1 — audit trail on deactivation is nice-to-have, not required. §13 Deferred items lists "full deactivation audit columns" as a follow-up.
 
-### 6.9 Workspace Health detectors — three new (phase-staggered)
+### 6.9 Workspace Health detectors — three new
 
 **Directory:** `server/services/workspaceHealth/detectors/` (existing, extended).
 
-**New files — Phase 1 registration:**
+**New files:**
 
-1. **`subaccountMultipleRoots.ts`** — severity `critical`. Query: subaccounts where `COUNT(*) > 1` over active roots. Emit one finding per offending subaccount. Post-§5.1-index (Phase 2) this should never fire in normal operation; Phase 1 registers the detector so pre-index violations become visible. Message: *"Subaccount {id} has {n} active root agents. Partial unique index violation — investigate immediately."*
+1. **`subaccountMultipleRoots.ts`** — severity `critical`. Query: subaccounts where `COUNT(*) > 1` over active roots. Emit one finding per offending subaccount. Post-§5.1-index this should never fire in normal operation. Message: *"Subaccount {id} has {n} active root agents. Partial unique index violation — investigate immediately."*
 
-2. **`subaccountNoRoot.ts`** — severity `info` (steady-state verdict per §16.3: zero-root is a valid operator-opt-in state; the resolver's org-level fallback handles dispatch correctly in this case). The detector surfaces the state as informational — "this subaccount is using the org-level fallback; assign a subaccount-level root to unlock per-subaccount CEO semantics." Not elevated to `warning` or `critical` across phases. Query: subaccounts where `COUNT(*) = 0` over active roots. Emit one finding per offending subaccount (dedup by `(orgId, 'subaccountNoRoot', 'subaccount', subaccountId)`). Message: *"Subaccount {id} has no active root agent. Briefs route to the org-level fallback; assign a subaccount-level root (e.g. via hierarchy template) to enable per-subaccount routing."*
+2. **`subaccountNoRoot.ts`** — severity `critical`. Query: subaccounts where `COUNT(*) = 0` over active roots. Emit one finding per offending subaccount (dedup by `(orgId, 'subaccountNoRoot', 'subaccount', subaccountId)`). Message: *"Subaccount {id} has no active root agent. Briefs route to the org-level fallback; per-subaccount CEO model is disabled for this subaccount."*
 
-**New file — Phase 4 registration:**
+3. **`managerWithoutDerivedSkills.ts`** — severity `warning`. Query: agents with explicit `config_list_agents` + `spawn_sub_agents` + `reassign_task` attached but `childIds.length === 0`. Typically indicates a previously-managed team was migrated away and old explicit attachments remain. Message: *"Agent {id} has delegation skills attached but no active children. Consider detaching the skills; derived resolution handles managers automatically."*
 
-3. **`explicitDelegationSkillsWithoutChildren.ts`** — severity `info` (not `warning`). Query: agents with explicit `config_list_agents` + `spawn_sub_agents` + `reassign_task` attached but `childIds.length === 0`. This is a SUPPORTED state per §6.5 (explicit attachment is a narrow escape hatch — the resolver only adds, never removes). The detector surfaces it as informational — not as drift — so operators can confirm the state is still intentional after team restructures. Message: *"Agent {id} has delegation skills attached explicitly but no active children. This is a supported configuration (explicit attachment is an escape hatch — §6.5). Informational only: verify the explicit attachment is still intentional after recent team changes."* Ships in Phase 4 alongside the §6.5 derived resolver.
-
-**Registration:** Phase 1 adds two lines to `server/services/workspaceHealth/detectors/index.ts`; Phase 4 adds one more line.
+**Registration:** add three lines to `server/services/workspaceHealth/detectors/index.ts` exporting the new detectors.
 
 **No new endpoints, no new UI.** These surface through the existing `AdminHealthFindingsPage` which already groups by severity.
 
@@ -1033,80 +946,47 @@ router.get('/api/org/delegation-outcomes',
 
 **Response shape:** `DelegationOutcome[]` per §4.4, sorted by `created_at DESC`.
 
-### 7.2 `GET /api/agent-runs/:id/delegation-graph`
+### 7.2 `GET /api/runs/:runId/delegation-graph`
 
-**File:** `server/routes/agentRuns.ts` (existing, extended) — new sub-route in the existing `/api/agent-runs/:id` family.
+**File:** `server/routes/agentRuns.ts` (existing, extended) — new sub-route.
 
-**Purpose:** Return the delegation DAG rooted at this run, for the Run Trace Viewer's new tab (§8.2). Read-only, synchronous, no side effects.
+**Purpose:** Return the delegation tree rooted at this run, for the Run Trace Viewer's new tab (§8.2). Read-only, synchronous, no side effects.
 
-**Middleware chain:** matches the existing `/api/agent-runs/:id` pattern in the same file — `authenticate` plus service-layer org scoping (no `requireRunAccess` helper exists in the repo; the spec does not invent one).
+**Middleware chain:**
 
 ```ts
-router.get('/api/agent-runs/:id/delegation-graph',
+router.get('/api/runs/:runId/delegation-graph',
   authenticate,
+  requireRunAccess('view'),  // existing guard used by /api/runs/:runId
   asyncHandler(async (req, res) => {
-    // Service asserts the opened run belongs to req.orgId (mirrors agentActivityService.getRunDetail).
-    const graph = await delegationGraphService.buildForRun(req.params.id, req.orgId!);
+    const graph = await delegationGraphService.buildForRun(req.params.runId, req.orgId!);
     res.json(graph);
   }));
 ```
 
-**Access assertion at the service layer.** `delegationGraphService.buildForRun(runId, orgId)` does a single RLS-scoped lookup of the opened run (`orgScopedDb.select().from(agentRuns).where(eq(id, runId))`); if the row isn't visible (wrong org or missing), it throws `NotFoundError` which the route surfaces as 404. No separate per-run ACL check, matching the existing `/api/agent-runs/:id` pattern.
-
-**Response shape (graph / DAG — not a tree):**
+**Response shape:**
 
 ```ts
 interface DelegationGraphNode {
   runId: string;
   agentId: string;
   agentName: string;        // denormalised for UI convenience
+  parentRunId: string | null;
   isSubAgent: boolean;
-  delegationScope: DelegationScope | null;  // read from agent_runs.delegation_scope
+  handoffSourceRunId: string | null;
+  delegationScope: DelegationScope | null;
   hierarchyDepth: number | null;
-  delegationDirection: 'down' | 'up' | 'lateral' | null;  // read from agent_runs.delegation_direction; null for the opened root and for runs not dispatched by a skill
+  delegationDirection: 'down' | 'up' | 'lateral' | null;  // null for the root of the fan-out
   status: AgentRunStatus;
   startedAt: string;
   completedAt: string | null;
-}
-
-type DelegationEdgeKind = 'spawn' | 'handoff';
-
-interface DelegationGraphEdge {
-  parentRunId: string;
-  childRunId: string;
-  kind: DelegationEdgeKind;   // 'spawn' means parent→child via agent_runs.parentRunId; 'handoff' means parent→child via agent_runs.handoffSourceRunId
-}
-
-interface DelegationGraphResponse {
-  rootRunId: string;                  // the run the user opened
-  nodes: DelegationGraphNode[];       // unique by runId
-  edges: DelegationGraphEdge[];       // one edge per parent-child relationship; a run can appear as the child of at most two edges (spawn + handoff)
+  children: DelegationGraphNode[];
 }
 ```
 
-**Why graph, not tree.** A run can have both `parentRunId` (spawn parent) and `handoffSourceRunId` (handoff parent) set. A tree would force us to pick one parent as canonical and discard information; the graph response preserves both edges. The UI can render the DAG as a tree by picking spawn edges first and showing handoff edges as annotations, or as a full graph — either way, the data the route returns is lossless.
+**Service backing it:** `server/services/delegationGraphService.ts` (new). Loads the run's subtree using the existing `agentRuns.parentRunId` chain and the new `delegationScope` / `hierarchyDepth` columns from §5.3. Bounded by `MAX_HANDOFF_DEPTH + 1 = 6` levels for loop-safety.
 
-**Service backing it:** `server/services/delegationGraphService.ts` (new). Bounded by `MAX_HANDOFF_DEPTH + 1 = 6` levels for loop-safety.
-
-**Edge source of truth.** Two parent-pointer columns on `agent_runs` define edges in the graph. The direction of each edge is stored on the CHILD run (`agent_runs.delegation_direction`, §5.3), making it immutable and queryable without joining through mutable task state.
-
-1. **Spawn edges.** `agent_runs.parentRunId` + `isSubAgent = true` define spawn parentage (a sub-agent run's parent is the run that spawned it via `spawn_sub_agents`). `delegation_direction` on the child run is always `'down'` by spawn construction (§6.3).
-2. **Handoff edges.** `agent_runs.handoffSourceRunId` defines handoff parentage (a handoff run's parent is the run that called `reassign_task`). `delegation_direction` on the handoff run is `'down'` / `'up'` / `'lateral'` exactly as computed by `reassign_task` at dispatch time (§6.4 step 5).
-
-**Traversal algorithm:**
-
-- Start at `runId` (the opened run).
-- Recursively find all runs whose `parentRunId === current.id` OR `handoffSourceRunId === current.id` (children in either chain).
-- For each child node, read `delegation_direction` and `delegation_scope` directly from the child's own `agent_runs` row — no join to `tasks` needed.
-- Bounded by `MAX_HANDOFF_DEPTH + 1 = 6` levels.
-
-**Why two parent pointers, not one.** `parentRunId` and `handoffSourceRunId` are orthogonal — a sub-agent run has `parentRunId` set (spawn chain) but no `handoffSourceRunId`; a handoff run has `handoffSourceRunId` but no `parentRunId` (unless it was itself spawned, in which case both are set and the run appears once as the child of its spawn-parent, with a separate edge indicating the handoff).
-
-**Response is a graph, not a tree.** Because a run can have up to two parent edges (spawn + handoff), the response is a DAG, not a strict tree. Shape: `{ nodes: DelegationGraphNode[], edges: DelegationGraphEdge[] }` — see updated response shape below. The UI renders the DAG as a tree that may render a run node twice if it has two parents (once as spawn-child, once as handoff-child); deduplication is handled client-side by `runId`.
-
-**Null for the opened-run's own row.** The opened run is the graph root; its own `delegation_direction` and `delegation_scope` come directly from its `agent_runs` row (null if the opened run is a Brief's initial run that wasn't dispatched by any skill; populated if the opened run is itself a sub-agent or handoff run).
-
-**RLS:** Inherited — `agent_runs` is org-scoped. `authenticate` middleware + service-layer org-scoped lookup enforce access (same pattern as `/api/agent-runs/:id`); no separate per-run ACL helper is introduced.
+**RLS:** Inherited — `agent_runs` is org-scoped. `requireRunAccess('view')` guards on top.
 
 **No write path.** The graph is fully reconstructable from existing columns; nothing new is persisted.
 
@@ -1114,18 +994,13 @@ interface DelegationGraphResponse {
 
 ## 8. Client
 
-Three client-side changes, all scoped to existing pages except the optional `AdminDelegationOutcomesPage` (§8.3) which adds a new top-level route `/admin/delegation-outcomes` if it ships in v1. Two mandatory changes (§8.1, §8.2) extend existing pages.
+Three client-side changes, all scoped to existing pages. No new top-level routes.
 
 ### 8.1 Subaccount creation — "Starting team" picker (Phase 2)
 
-**Files:**
-- `client/src/pages/AdminSubaccountsPage.tsx` (existing — this is the actual create surface; `SubaccountCreatePage.tsx` does NOT exist in the repo, correcting an earlier spec draft error)
-- `client/src/components/Layout.tsx` (existing — carries a quick-create path for subaccount creation; add the picker here IF the quick-create flow is in scope for v1, otherwise document that Layout's quick-create skips the picker)
-- `client/src/components/subaccount/StartingTeamPicker.tsx` (new — the reusable dropdown component)
+**File:** `client/src/pages/SubaccountCreatePage.tsx` (existing) + `client/src/components/subaccount/StartingTeamPicker.tsx` (new).
 
-**Verdict:** v1 scope is the full-form create in `AdminSubaccountsPage.tsx`. The Layout quick-create flow stays unchanged (no picker in the compact quick-create UI); users who want to pick a starting team use the full form. §13 lists "picker in quick-create" as a minor pull-forward item.
-
-**Change:** Add a dropdown field labelled *"Starting team"* between the subaccount name field and the submit button in `AdminSubaccountsPage.tsx`'s create form. Options:
+**Change:** Add a dropdown field labelled *"Starting team"* between the subaccount name field and the submit button. Options:
 
 - **None / configure later** (default)
 - Available hierarchy templates — fetched from `GET /api/hierarchy-templates` (existing endpoint), sorted by name. Includes system-shipped templates and any templates saved by the org.
@@ -1145,13 +1020,11 @@ Three client-side changes, all scoped to existing pages except the optional `Adm
 
 ### 8.2 Run Trace Viewer — delegation graph tab (Phase 4)
 
-**File:** `client/src/pages/RunTraceViewerPage.tsx` (existing, extended) + `client/src/components/run-trace/DelegationGraphView.tsx` (new).
-
-**Testing note.** Per framing (`frontend_tests: none_for_now`), there is no `.test.tsx` alongside the component. Any tree-shaping logic that is worth testing lives in `delegationGraphServicePure.ts` (server-side pure helper, §7.2) and is covered by the pure unit test listed in §12.2. The component consumes the already-tested response shape and renders it; no client-side logic is load-bearing enough to require its own test.
+**File:** `client/src/pages/RunTraceViewerPage.tsx` (existing, extended) + `client/src/components/run-trace/DelegationGraphView.tsx` (new) + `client/src/components/run-trace/DelegationGraphView.test.tsx` (pure render test per §12).
 
 **Change:** Add a third tab to the run trace viewer. Existing tabs: *Trace* (single-run event list), *Payload* (LLM payload). New tab: *Delegation graph*.
 
-**Tab content:** Collapsible DAG rendered from the `{ nodes, edges }` response of `GET /api/agent-runs/:id/delegation-graph` (§7.2). The UI deduplicates nodes by `runId` and draws spawn edges as solid arrows, handoff edges as distinct arrows (see colour coding below). Node shape:
+**Tab content:** Collapsible tree rendered from the response of `GET /api/runs/:runId/delegation-graph` (§7.2). Node shape:
 
 - Agent name + avatar/icon.
 - Status badge (matches existing run-status vocabulary).
@@ -1193,7 +1066,7 @@ One new tenant-scoped table (§5.4):
 
 | Table | `organisation_id` | `subaccount_id` | RLS policy in migration? | `rlsProtectedTables.ts` entry? | Route guard? | Principal context? |
 |---|---|---|---|---|---|---|
-| `delegation_outcomes` | yes | yes (NOT NULL — §4.4) | yes — `delegation_outcomes_org_isolation` (USING + WITH CHECK) in 0205 | yes — added in same commit | yes — `requireOrgPermission` on `/api/org/delegation-outcomes` (§7.1) | yes — reads always via `orgScopedDb` / `withPrincipalContext` |
+| `delegation_outcomes` | yes | yes (nullable) | yes — `delegation_outcomes_org_isolation` in 0205 | yes — added in same commit | yes — `requireOrgPermission` on `/api/org/delegation-outcomes` (§7.1) | yes — reads always via `orgScopedDb` / `withPrincipalContext` |
 
 All four RLS requirements from the Spec Authoring Checklist §4 are met for the one new tenant-scoped table.
 
@@ -1215,15 +1088,9 @@ All four RLS requirements from the Spec Authoring Checklist §4 are met for the 
 
 ### 9.3 Run-access guard for delegation graph
 
-`GET /api/agent-runs/:id/delegation-graph` (§7.2) reuses the route-family pattern of `/api/agent-runs/:id`: `authenticate` middleware + service-layer org-scoped lookup. No separate per-run ACL helper is invented (none exists in the repo today).
+`GET /api/runs/:runId/delegation-graph` (§7.2) reuses the existing `requireRunAccess('view')` guard already attached to `/api/runs/:runId`. Same auth logic, same org / subaccount scoping rules. Because the graph response can reach up to `MAX_HANDOFF_DEPTH + 1` related runs, the service asserts every returned run is accessible to the caller under the same `view` scope before rendering.
 
-**Subtree access policy — root-grants-summary.** If the user can view the root run (the one they opened from the Brief), they see **summary-level** data for every run in the DAG returned by the graph route: `runId`, `agentId`, `agentName`, `isSubAgent`, `delegationScope`, `hierarchyDepth`, `delegationDirection`, `status`, `startedAt`, `completedAt`. These summary fields are not sensitive individually — the same data appears on the agent detail page anyone in the org can see. Cross-org jumps are impossible because the service runs under `orgScopedDb`; RLS on `agent_runs` prevents any row from a different org from being returned even if the service code drifts.
-
-**Under the current access model, same-org users can read both graph summaries and run details.** `authenticate` + service-layer org-scoping is the only access gate in v1 (there is no per-run ACL helper — see §7.2). A user in the org who can view the graph can also navigate to each child run's detail page. The graph is a summary rendering, not a stricter permission surface. If and when a finer-grained per-run ACL lands in a future spec, this section will need re-evaluation; for v1, same-org-reads-everything is the full policy.
-
-**What the graph response deliberately omits.** Per-run LLM payload, tool-call arguments, scratch-pad content, cost breakdowns — none appear in `DelegationGraphNode` shape (§7.2). Only the already-public summary fields ship, so per-node access checking is not required for correctness.
-
-**Why not per-node access check in the service.** That would require threading the principal into `delegationGraphService.buildForRun` and querying per-run ACLs for every subtree node on the hot path. Given that the summary shape is already public-within-org, the check adds cost without adding safety.
+**Edge case:** sub-agent runs may have been dispatched by agents the current user doesn't have direct permissions to see. The guard policy: if the user can view the *root* run of the subtree (which they opened from the Brief), they can view the whole delegation graph starting at that root. Cross-tree jumps that cross org boundaries are impossible by construction (`orgScopedDb` prevents it).
 
 ### 9.4 Opt-outs
 
@@ -1252,33 +1119,15 @@ This spec makes five execution-model decisions. Each is stated explicitly so goa
 
 ### 10.3 Delegation outcome writes — fire-and-forget, non-blocking
 
-Writes to `delegation_outcomes` (§5.4) are **best-effort, non-blocking** from the caller's perspective. The concrete mechanism is a single entry point on `delegationOutcomeService`:
-
-```ts
-// delegationOutcomeService.ts
-export async function insertOutcomeSafe(input: DelegationOutcome): Promise<void> {
-  try {
-    // Service-layer integrity check (§4.4, §5.4):
-    await assertActorsMatchSubaccount(input);
-    // Single INSERT, no transaction. Runs AFTER the parent skill's core mutation has committed.
-    await orgScopedDb.insert(delegationOutcomes).values(input).execute();
-  } catch (err) {
-    logger.warn({ err, outcome: input }, 'delegation_outcome_write_failed');
-    // Do not re-throw. Failure is absorbed.
-  }
-}
-```
-
-The calling skill handler invokes `insertOutcomeSafe` after its own mutation has committed (not inside the skill's transaction). This is a detached try/catch, not a post-commit hook — the hook concept was dropped as over-engineered for this volume.
+Writes to `delegation_outcomes` (§5.4) are **best-effort, non-blocking** from the caller's perspective. The skill handler schedules the write (inline, same transaction if cheap; otherwise a post-commit hook) and does not wait on its success.
 
 - A write failure logs at WARN and does NOT fail the skill call. The delegation itself succeeded or failed for its own reason; telemetry isn't allowed to block user work.
 - No job queue for outcome writes — the row is small (~100 bytes) and the volume is bounded by delegation attempts per run.
 - No batching — at expected volumes (5–10 delegations per Brief, a few hundred Briefs per day across a mature org), individual INSERTs are fine.
-- A `recordOutcomeStrict()` variant exists for test / backfill contexts where write failure should propagate; skill handlers never call it.
 
 ### 10.4 Orchestrator route resolution — inline / synchronous, per dispatch
 
-`hierarchyRouteResolverService.resolveRootForScope()` (§6.6) is called **synchronously** by `orchestratorFromTaskJob` (§6.7) only. `briefCreationService` does not call the resolver; it passes `fastPathDecision.scope` into the pg-boss job payload (`enqueueOrchestratorRoutingIfEligible(task, { scope })`) and the job reads it from `job.data.scope`. One indexed query per dispatch. No caching — freshness matters (a template apply changes the root mid-day).
+`hierarchyRouteResolverService.resolveRootForScope()` (§6.6) is called **synchronously** by `orchestratorFromTaskJob` (§6.7) and `briefCreationService`. One indexed query per dispatch. No caching — freshness matters (a template apply changes the root mid-day).
 
 - Fallback paths (zero-roots, multi-roots) return the fallback agent synchronously; the health detectors fire asynchronously via the existing Workspace Health Audit scheduled run.
 - The `orchestrator-from-task` pg-boss job itself is unchanged (still queued per today). The resolver runs *inside* that job's handler, not as a separate job.
@@ -1307,19 +1156,18 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 
 ### Phase 1 — Observability foundations
 
-**Ships:** Telemetry STORAGE (tables + columns), health detectors, and the schema to hold future telemetry. No write paths ship in Phase 1 — the `delegation_outcomes` table is empty until Phase 4 activates the write path in `spawn_sub_agents` / `reassign_task`. The `agent_runs` new columns are null on new rows until Phase 3 (hierarchy_depth) and Phase 4 (delegation_scope, delegation_direction, handoff_source_run_id) populate them. No behaviour change to delegation or routing in this phase.
+**Ships:** Telemetry writes, health detectors, run-trace data columns. No behaviour change to delegation or routing. The platform records what's happening under the flat model BEFORE any enforcement lands.
 
 **Schema (§5):**
-- Migration 0204 — `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable; populated in later phases per §5.3)
+- Migration 0204 — `agent_runs.delegation_scope`, `hierarchy_depth`
 - Migration 0205 — `delegation_outcomes` table + RLS + manifest entry
 
 **Services introduced (§6):**
-- `delegationOutcomeService` (new; thin wrapper over the new table, used for inserts and the admin list — writes start in Phase 4)
-- Two health detectors: `subaccountMultipleRoots` and `subaccountNoRoot`. `subaccountNoRoot` is expected to fire for most subaccounts pre-Phase-2 (every subaccount currently has zero subaccount-level roots); operators treat this as the "per-subaccount CEO not yet configured" signal.
-- `explicitDelegationSkillsWithoutChildren` detector is deferred to Phase 4 — it checks for agents with the delegation trio attached but no children, which is only meaningful once Phase 4's derived-skill resolution is active.
+- `delegationOutcomeService` (new; thin wrapper over the new table, used for inserts and the admin list)
+- Three health detectors: `subaccountMultipleRoots`, `subaccountNoRoot`, `managerWithoutDerivedSkills` (pre-registration — they'll observe "no-root" as the normal state until Phase 2 flips the expectation)
 
 **Services modified (§6):**
-- `agentExecutionService` — writes `delegation_scope` + `hierarchy_depth` columns on run rows. In Phase 1 both are null on every new row; Phase 3 starts populating `hierarchy_depth` from `context.hierarchy.depth`; Phase 4 starts populating `delegation_scope` from the dispatching skill (§5.3).
+- `agentExecutionService` — writes `delegation_scope` + `hierarchy_depth` columns on run rows (reads from trigger context; values are null before Phase 3 supplies a hierarchy)
 
 **Routes introduced (§7):**
 - `GET /api/org/delegation-outcomes` + the new permission `org.observability.view`
@@ -1327,13 +1175,12 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Client (§8):**
 - `AdminDelegationOutcomesPage` — optional; see §13
 
-**Columns referenced by code in this phase:** `agent_runs.delegation_scope`, `agent_runs.hierarchy_depth`, `agent_runs.delegation_direction`, `agent_runs.handoff_source_run_id`, `delegation_outcomes.*`. All introduced in this phase (schema only; values are null until later phases populate).
+**Columns referenced by code in this phase:** `agent_runs.delegation_scope`, `agent_runs.hierarchy_depth`, `delegation_outcomes.*`. All introduced in this phase.
 
 **Exit criteria:**
 - Migrations 0204 + 0205 applied cleanly.
 - `rlsProtectedTables` manifest covers `delegation_outcomes`; `verify-rls-coverage.sh` green.
-- `subaccountMultipleRoots` and `subaccountNoRoot` detectors registered and visible in `AdminHealthFindingsPage`. `explicitDelegationSkillsWithoutChildren` is NOT registered in this phase — it depends on Phase 4's derived-skill resolution and ships with Phase 4.
-- `delegation_outcomes` ships empty; `agent_runs.delegation_scope` / `hierarchy_depth` / `delegation_direction` / `handoff_source_run_id` columns exist but are null on new rows until later phases populate them.
+- Health detectors registered and visible in `AdminHealthFindingsPage`.
 - No-op for end users; no delegation behaviour changes.
 
 ### Phase 2 — Root contract + scope-aware routing + template picker
@@ -1348,14 +1195,14 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 - `hierarchyRouteResolverService` with `resolveRootForScope()`
 
 **Services modified (§6):**
-- `orchestratorFromTaskJob` — delete `ORCHESTRATOR_AGENT_SLUG` for subaccount scope; call the resolver; read `scope` from the pg-boss job payload (default `'subaccount'` for backward compat with trigger-path enqueues)
-- `briefCreationService` — pass `fastPathDecision.scope` into the `enqueueOrchestratorRoutingIfEligible` call so the job payload carries it
+- `orchestratorFromTaskJob` — delete `ORCHESTRATOR_AGENT_SLUG`; call the resolver; carry `scope` through `task.triggerContext`
+- `briefCreationService` — pass `fastPathDecision.scope` into the task's `triggerContext` so the dispatcher can resolve correctly
 - `hierarchyTemplateService.apply()` + `importToSubaccount()` — same-transaction root rotation (§6.8)
 
 **Routes:** No change. Existing `POST /api/hierarchy-templates/:id/apply` is the backend verb for the template picker.
 
 **Client (§8):**
-- `AdminSubaccountsPage` — add the Starting Team picker to the full create form
+- `SubaccountCreatePage` — add the Starting Team picker
 
 **Columns referenced by code in this phase:** `subaccount_agents.parent_subaccount_agent_id` (existing), `subaccount_agents.is_active` (existing). No new columns.
 
@@ -1363,8 +1210,8 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 - Migration 0202 applied cleanly; audit script shows zero violations.
 - A Brief filed against a subaccount with a configured root routes to that subaccount's root, observable in the Brief detail page's handling-agent display.
 - Template picker in subaccount creation successfully installs the chosen template.
-- Phase-1 detectors register zero `subaccountMultipleRoots` findings; `subaccountNoRoot` findings remain at their natural count (informational, not a failure — operators assign roots when they want per-subaccount routing, and the org-level fallback continues to work in the meantime).
-- Subaccount-scope routing no longer uses the hardcoded slug; `ORCHESTRATOR_AGENT_SLUG` constant retained for org-scope fallback only (§6.6 case 2). Full slug deletion deferred until §13's org-scope resolver lands.
+- Phase-1 detectors register zero `subaccountMultipleRoots` findings; `subaccountNoRoot` count decreases as users assign roots.
+- `ORCHESTRATOR_AGENT_SLUG` constant deleted from `orchestratorFromTaskJob.ts`.
 
 **Why this phase before Phase 3:** the routing layer doesn't depend on hierarchy context inside skills. Per-subaccount CEOs are a user-visible win that doesn't require enforcement to land first. Also proves the root-agent contract under real traffic before the enforcement layer depends on it.
 
@@ -1399,17 +1246,16 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Schema (§5):**
 - Migration 0203 — `tasks.delegation_direction` column
 
-**Services introduced (§6):**
-- `delegationGraphService` — composes subtree response for the new route
-- `explicitDelegationSkillsWithoutChildren` detector — registered now that derived-skill resolution is live (moved from Phase 1 per §6.9)
-
 **Services modified (§6):**
 - `spawn_sub_agents` — `delegationScope` param + validation + outcome writes + nesting-block removal
 - `reassign_task` — same, plus `delegation_direction` writes
 - `skillService` (resolver) — derive delegation skills from `hierarchy.childIds`
 
 **Routes introduced (§7):**
-- `GET /api/agent-runs/:id/delegation-graph`
+- `GET /api/runs/:runId/delegation-graph`
+
+**Services introduced (§6):**
+- `delegationGraphService` — composes subtree response for the new route
 
 **Client (§8):**
 - `RunTraceViewerPage` — new Delegation graph tab
@@ -1420,7 +1266,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 - Rejection-rate metrics show an initial spike that trends down over the first 1–2 weeks.
 - Trace graph UI renders fan-out correctly for sub-agent and handoff chains.
 - `config_list_agents` + `spawn_sub_agents` + `reassign_task` are automatically available to any agent with children (observable in the agent's resolved tool list, surfaced in `AgentExecutionLog` / run trace).
-- `delegation_outcomes` table is receiving accept + reject rows on a best-effort basis for resolvable actors (per §4.3 / §10.3). Unresolvable-target errors and any DB-write gaps remain visible in `agent_execution_events` — that table is the lossless companion for audit-grade rejection accounting.
+- `delegation_outcomes` table is receiving accept + reject rows with full fidelity.
 
 **Rollout posture (brief §6):**
 - 1–2 week adjustment period after Phase 4 lands is expected. Prompt tweaks surface during this window.
@@ -1445,7 +1291,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 
 | Column | Introduced in | First referenced in |
 |---|---|---|
-| `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` | Phase 1 | Phase 1 (schema); populated Phase 3 (`hierarchy_depth`) and Phase 4 (others) |
+| `agent_runs.delegation_scope`, `hierarchy_depth` | Phase 1 | Phase 1 |
 | `delegation_outcomes.*` | Phase 1 | Phase 1 |
 | partial unique index on `subaccount_agents` | Phase 2 | Phase 2 |
 | `tasks.delegation_direction` | Phase 4 | Phase 4 |
@@ -1478,6 +1324,7 @@ One test file per pure module. Each lives alongside its source under `__tests__/
 - `delegationOutcomeServicePure.test.ts` — insert-shape assembly, reason-when-rejected invariant (the CHECK constraint's logic replicated in a pure validator so callers don't surface a Postgres error). Covers: accepted-without-reason, rejected-with-reason, invalid-direction, invalid-scope.
 - `workspaceHealth/detectors/subaccountMultipleRoots.test.ts` — detector pure function: given a roster, return the finding set.
 - `workspaceHealth/detectors/subaccountNoRoot.test.ts` — same.
+- `workspaceHealth/detectors/managerWithoutDerivedSkills.test.ts` — same.
 
 **Phase 2:**
 - `hierarchyRouteResolverServicePure.test.ts` — decision tree given query results. Covers: exactly one root → none fallback; zero roots → org-root fallback; multiple roots → oldest-wins + flagged; scope=org → org-level path; scope=system → returns null.
@@ -1488,17 +1335,16 @@ One test file per pure module. Each lives alongside its source under `__tests__/
 - `config/configSkillHandlersPure.test.ts` (new or extend existing) — scope filter logic. Covers adaptive default (has-children → children, no-children → subaccount); explicit scope override; missing-context fallback.
 
 **Phase 4:**
-- `skillExecutor.spawnSubAgents.test.ts` — pure validation logic extracted from the handler. Covers: all-children-accepted with `delegationDirection: 'down'`; one-out-of-scope → whole call rejected with only out-of-scope targets logged as rejected; `cross_subtree_not_permitted` when `effectiveScope === 'subaccount'` regardless of caller role; `max_handoff_depth_exceeded` when `context.handoffDepth >= MAX_HANDOFF_DEPTH`. `up` and `lateral` directions are NOT valid outcomes for spawn — they're tested under `reassign_task` only.
-- `skillExecutor.reassignTask.test.ts` — same shape. Covers direction computation (down / up / lateral) and the upward-escalation special case (§6.4 step 2) committed in §16.1.
+- `skillExecutor.spawnSubAgents.test.ts` — pure validation logic extracted from the handler. Covers: all-children-accepted; one-out-of-scope → whole call rejected; cross_subtree_not_permitted when non-root uses subaccount scope; outcome row shape per target.
+- `skillExecutor.reassignTask.test.ts` — same shape. Covers direction computation (down / up / lateral) + the upward-reassign special case once resolved in §16.
 - `skillService.resolver.test.ts` — pure `computeDerivedSkills({ hierarchy })` returns `[]` when childIds is empty, returns the trio when non-empty.
-- `delegationGraphServicePure.test.ts` — given a flat run list, assemble the `{ nodes, edges }` graph. Covers MAX_HANDOFF_DEPTH bound, both edge types (spawn via `parentRunId`, handoff via `handoffSourceRunId`), direction sourcing (spawn→always down per §6.3; handoff→from `agent_runs.delegation_direction` on the child run, §5.3), and deduplication when a run has both a spawn-parent and a handoff-parent.
-- `workspaceHealth/detectors/explicitDelegationSkillsWithoutChildren.test.ts` — detector pure function: given a roster + skill attachments, return the finding set (moved from Phase 1 to match §6.9 staggered registration).
+- `delegationGraphServicePure.test.ts` — given a flat run list, assemble the tree. Covers MAX_DEPTH bound, orphan handling (a child with no accessible parent), and direction-colour coding.
 
 ### 12.3 Deliberate non-tests
 
 Documented per checklist §9 — flag deviations from framing ground truth, but do not add the tests:
 
-- **No API contract tests** for `GET /api/org/delegation-outcomes` or `GET /api/agent-runs/:id/delegation-graph`. `api_contract_tests: none_for_now`.
+- **No API contract tests** for `GET /api/org/delegation-outcomes` or `GET /api/runs/:runId/delegation-graph`. `api_contract_tests: none_for_now`.
 - **No E2E tests** for the subaccount-creation template picker. `e2e_tests_of_own_app: none_for_now`.
 - **No frontend component tests** for `DelegationGraphView` or the picker. `frontend_tests: none_for_now`.
 - **No performance baselines** for the hierarchy context builder or the resolver. `performance_baselines: defer_until_production`. Expected sub-5ms per run is stated as prose; we'll measure if it matters.
@@ -1509,7 +1355,7 @@ Documented per checklist §9 — flag deviations from framing ground truth, but 
 
 Static gates + pure tests validate correctness. The brief's success criteria (§17) are behavioural and require manual / observational verification during rollout:
 
-- **Phase 1:** Confirm migrations 0204 + 0205 apply cleanly and `rlsProtectedTables` manifest is green. `delegation_outcomes` ships empty — no writes until Phase 4 (§6.3 / §6.4 are the only producers). `agent_runs.delegation_scope` and `hierarchy_depth` ship null on new rows until Phase 3 populates `hierarchy_depth` from `context.hierarchy.depth` and Phase 4 populates `delegation_scope` from the dispatching skill. Health detectors register; `subaccountNoRoot` is expected to fire for most subaccounts pre-Phase-2 (intentional signal, not a bug).
+- **Phase 1:** Confirm `delegation_outcomes` rows appear for existing (flat) delegations during normal Brief fan-out. Expect `outcome: 'accepted'`, `delegationDirection: 'down'` for every row (flat world; nothing can be out-of-scope yet).
 - **Phase 2:** File a Brief scoped to a subaccount with a configured root; confirm it dispatches to the subaccount's root, not the global Orchestrator. Confirm the template picker installs a starting team.
 - **Phase 3:** Trigger a Brief that involves a manager calling `config_list_agents`; confirm the returned list is scoped to children by default.
 - **Phase 4:** Observe rejection-rate metrics over the first week post-rollout. Trend should be down; prompts should be updated as violations surface. Trace graph renders fan-out correctly for a multi-agent Brief.
@@ -1532,13 +1378,9 @@ Items mentioned in prose but intentionally not shipped in this spec. Each has a 
 
 - **`AdminDelegationOutcomesPage` dashboard.** §8.3 is flagged as optional for v1. **Reason:** the data is queryable via DB in the adjustment week; health detectors surface invariant violations without needing a dashboard. **Pull-forward condition:** operators triaging Phase 4 rollout ask for it more than twice in the first week.
 
-- **Scope-violation per-agent rate alerting.** §6.9 has detectors for invariant violations, but not for "agent X has 40% rejection rate over the last 24h" — which would be a prompt-drift signal, not a config issue. **Reason:** not mature enough to set thresholds. **Pull-forward condition:** after ~30 days of Phase 4 operation, threshold candidates become obvious from the data.
-
-- **Persist caller-hierarchy facts on `delegation_outcomes` rows.** v1 joins against current `subaccount_agents` for hierarchy facts (§17.1 caveat). If an agent changes position mid-week, historical metrics reflect the new position, not the position at write time. **Reason:** pre-production; roster-churn low enough that current-state joins are accurate enough. **Pull-forward condition:** roster changes become frequent enough that metric skew is misleading. Fix would add `caller_role_at_write` / `caller_parent_id_at_write` denormalised columns on the outcome row.
+- **Scope-violation per-agent rate alerting.** §5.9 has detectors for invariant violations, but not for "agent X has 40% rejection rate over the last 24h" — which would be a prompt-drift signal, not a config issue. **Reason:** not mature enough to set thresholds. **Pull-forward condition:** after ~30 days of Phase 4 operation, threshold candidates become obvious from the data.
 
 - **Multi-tier seeded Automation OS company.** §3.2 carries this explicitly. Restructuring `companies/automation-os/` into a 3-tier org chart (Orchestrator → department heads → specialists) is designed on a separate track. **Pull-forward condition:** this spec ships and the team wants a dogfood target for recursive delegation.
-
-- **Seed-company dual-root cleanup before Phase 2 migration.** Per §2.1 current state, the Automation OS manifest has two `reportsTo: null` agents (Orchestrator + portfolio-health-agent). Migration 0202's partial unique index will fail if both are active on the same subaccount. **Pull-forward status:** BLOCKING for Phase 2. The Phase 2 kickoff audit (§5.1 `scripts/audit-subaccount-roots.ts`) surfaces this; the fix is either reparenting `portfolio-health-agent` under Orchestrator, or moving it to a different subaccount, or marking it inactive pre-migration. Resolution is a one-manifest-edit + re-seed; not a code change.
 
 - **Cost rollups per subtree and performance attribution per manager.** Framing in §1 flagged these as future capabilities the primitives enable. Neither is built here. **Pull-forward condition:** the Cost / Observability working group picks up either as a first-class feature.
 
@@ -1546,6 +1388,7 @@ Items mentioned in prose but intentionally not shipped in this spec. Each has a 
 
 - **RLS-layer delegation enforcement.** §3.2 defers this. **Pull-forward condition:** sustained application-layer bypass attempts (caught via `delegation_out_of_scope` counters trending *up* over months).
 
+- **Upward-reassign implementation detail (§6.4 open issue).** The brief says "upward allowed, logged"; the strict reading of §6.3 / §6.4 blocks it for non-roots. Resolution is a §16 open question. **Pull-forward condition:** resolved by `spec-reviewer` before Phase 4 implementation begins — this is not really "deferred" but flagged in §16 pending a decision.
 
 ---
 
@@ -1556,15 +1399,15 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 ### 14.1 Phase 1 — Observability foundations
 
 **New:**
-- `migrations/0204_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` columns (all nullable; §5.3)
+- `migrations/0204_agent_runs_delegation_telemetry.sql` — adds `delegation_scope` + `hierarchy_depth` columns (§5.3)
 - `migrations/0205_delegation_outcomes.sql` — creates table + RLS policy + indexes (§5.4)
 - `server/db/schema/delegationOutcomes.ts` — Drizzle reflection (§5.4)
 - `server/services/delegationOutcomeService.ts` + `delegationOutcomeServicePure.ts` — insert + list helpers (§6, §7.1)
 - `server/services/__tests__/delegationOutcomeServicePure.test.ts` (§12.2)
 - `server/services/workspaceHealth/detectors/subaccountMultipleRoots.ts` (§6.9)
 - `server/services/workspaceHealth/detectors/subaccountNoRoot.ts` (§6.9)
-- `server/services/workspaceHealth/detectors/__tests__/subaccountMultipleRoots.test.ts`, `subaccountNoRoot.test.ts` (§12.2)
-- (`explicitDelegationSkillsWithoutChildren.ts` + its test move to Phase 4 — see §14.4)
+- `server/services/workspaceHealth/detectors/managerWithoutDerivedSkills.ts` (§6.9)
+- `server/services/workspaceHealth/detectors/__tests__/*.test.ts` — one per detector (§12.2)
 - `server/routes/delegationOutcomes.ts` (§7.1)
 - `shared/types/delegation.ts` — `DelegationScope`, `DelegationOutcome`, error-code constants, `HierarchyContext` (§4)
 - (Optional) `client/src/pages/AdminDelegationOutcomesPage.tsx` (§8.3)
@@ -1573,11 +1416,10 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 - `server/db/schema/agentRuns.ts` — new columns
 - `server/db/schema/index.ts` — export `delegationOutcomes`
 - `server/config/rlsProtectedTables.ts` — add `delegation_outcomes`
-- `server/services/agentExecutionService.ts` — writes new `agent_runs` columns at run construction (Phase 3 populates `hierarchy_depth`; Phase 4 populates `delegation_scope`, `delegation_direction`, `handoff_source_run_id`; Phase 1 values are null)
-- `server/services/workspaceHealth/detectors/index.ts` — register two new Phase-1 detectors (`subaccountMultipleRoots`, `subaccountNoRoot`); `explicitDelegationSkillsWithoutChildren` registered in Phase 4
+- `server/services/agentExecutionService.ts` — write new run-row columns (reads from trigger context initially; fully populated once Phase 3 ships the hierarchy builder)
+- `server/services/workspaceHealth/detectors/index.ts` — register three new detectors
 - `server/index.ts` — mount new route
-- `server/lib/permissions.ts` — add `ORG_OBSERVABILITY_VIEW` permission key to `ALL_PERMISSIONS`; add it to the `org_admin` entry in `DEFAULT_PERMISSION_SET_TEMPLATES` (the seed consumer is `server/services/permissionSeedService.ts` which loops `DEFAULT_PERMISSION_SET_TEMPLATES` — no change needed there)
-- **(Optional, if `AdminDelegationOutcomesPage` ships in Phase 1):** `client/src/App.tsx` — register `/admin/delegation-outcomes` route; `client/src/components/Layout.tsx` — add sidebar entry behind `org.observability.view` permission gate
+- Permission-set seeds — add `org.observability.view` to `org_admin` set
 
 ### 14.2 Phase 2 — Root contract + scope-aware routing + template picker
 
@@ -1590,10 +1432,10 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 
 **Modified:**
 - `server/db/schema/subaccountAgents.ts` — add `uniqueIndex` declaration matching the partial unique index
-- `server/jobs/orchestratorFromTaskJob.ts` — subaccount-scope routing now calls the resolver (reads `scope` from pg-boss job payload); `ORCHESTRATOR_AGENT_SLUG` constant retained for the org-scope fallback path (§6.6 case 2, §13). No `triggerContext` column change.
-- `server/services/briefCreationService.ts` — pass `fastPathDecision.scope` into the pg-boss job payload via `enqueueOrchestratorRoutingIfEligible(task, { scope })` (no task-column change)
+- `server/jobs/orchestratorFromTaskJob.ts` — delete `ORCHESTRATOR_AGENT_SLUG`, call the resolver, carry scope through trigger context
+- `server/services/briefCreationService.ts` — pass `fastPathDecision.scope` into task trigger context
 - `server/services/hierarchyTemplateService.ts` — same-transaction root rotation in `apply()` and `importToSubaccount()`
-- `client/src/pages/AdminSubaccountsPage.tsx` — add picker + apply-on-submit (the actual create surface in the repo; `SubaccountCreatePage.tsx` does not exist)
+- `client/src/pages/SubaccountCreatePage.tsx` — add picker + apply-on-submit
 
 ### 14.3 Phase 3 — Hierarchy context + visibility layer
 
@@ -1605,8 +1447,8 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 **Modified:**
 - `server/services/skillExecutor.ts` — add `hierarchy?: Readonly<HierarchyContext>` field to `SkillExecutionContext`
 - `server/services/agentExecutionService.ts` — populate `ctx.hierarchy` before passing to `skillExecutor`
-- `server/tools/config/configSkillHandlers.ts` — scope param + adaptive default in `executeConfigListAgents`, `executeConfigListSubaccounts`, `executeConfigListLinks` (actual implementation; the `skillExecutor.ts:1714` dispatcher thunks call these)
-- `server/skills/config_list_agents.md`, `config_list_subaccounts.md`, `config_list_links.md` — Parameters sections updated to document the optional `scope` parameter (the JSON-schema source of truth for LLM-visible tool definitions lives in these markdown skill files, NOT in `actionRegistry.ts` — which hosts a different action registry)
+- `server/tools/config/configSkillHandlers.ts` — scope param + adaptive default in the three list handlers
+- `server/config/actionRegistry.ts` — tool-definition updates for the three skills (add `scope` parameter to their JSON schemas)
 
 ### 14.4 Phase 4 — Execution enforcement + derived skill resolution + trace graph
 
@@ -1617,17 +1459,15 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 - `server/services/__tests__/skillExecutor.spawnSubAgents.test.ts` (§12.2)
 - `server/services/__tests__/skillExecutor.reassignTask.test.ts` (§12.2)
 - `server/services/__tests__/skillService.resolver.test.ts` (§12.2)
-- `server/services/workspaceHealth/detectors/explicitDelegationSkillsWithoutChildren.ts` (§6.9 — moved from Phase 1 because the detector's invariant depends on derived-skill resolution landing in this phase)
-- `server/services/workspaceHealth/detectors/__tests__/explicitDelegationSkillsWithoutChildren.test.ts` (§12.2)
-- `client/src/components/run-trace/DelegationGraphView.tsx` (§8.2) — no component test per framing; tree-shaping pure logic tested in `delegationGraphServicePure.test.ts`
+- `client/src/components/run-trace/DelegationGraphView.tsx` (§8.2)
+- `client/src/components/run-trace/DelegationGraphView.test.tsx` — pure render test (§12.2)
 
 **Modified:**
 - `server/db/schema/tasks.ts` — add `delegationDirection: text('delegation_direction')`
 - `server/services/skillExecutor.ts` — `spawn_sub_agents` + `reassign_task` validation, outcome writes, direction computation, remove nesting block (§6.3, §6.4)
 - `server/services/skillService.ts` — derive delegation skills in resolver (§6.5)
-- `server/skills/spawn_sub_agents.md`, `reassign_task.md` — Parameters sections updated to document the optional `delegationScope` parameter (tool definition source of truth lives in the skill markdown files)
-- `server/routes/agentRuns.ts` — mount `GET /api/agent-runs/:id/delegation-graph` sub-route
-- `server/services/workspaceHealth/detectors/index.ts` — register `explicitDelegationSkillsWithoutChildren`
+- `server/config/actionRegistry.ts` — tool-definition updates for `spawn_sub_agents` + `reassign_task` (add `delegationScope` parameter)
+- `server/routes/agentRuns.ts` — mount `GET /api/runs/:runId/delegation-graph` sub-route
 - `client/src/pages/RunTraceViewerPage.tsx` — new tab
 
 ### 14.5 Docs
@@ -1644,12 +1484,12 @@ Every prose reference in §2 through §11 is accounted for in this inventory:
 | Prose mention (sample) | Inventory line |
 |---|---|
 | "new `delegation_outcomes` table" (§1, §5.4) | §14.1 — `migrations/0205`, `server/db/schema/delegationOutcomes.ts` |
-| "partial slug removal (subaccount-scope only)" (§1, §6.7) | §14.2 — `server/jobs/orchestratorFromTaskJob.ts` modified; `ORCHESTRATOR_AGENT_SLUG` retained for org-scope fallback per §6.6 case 2 |
+| "remove `ORCHESTRATOR_AGENT_SLUG`" (§1, §6.7) | §14.2 — `server/jobs/orchestratorFromTaskJob.ts` modified |
 | "new `hierarchyContextBuilderService`" (§6.1) | §14.3 — two new files + test |
 | "`tasks.delegation_direction` column" (§5.2) | §14.4 — migration 0203 + schema change |
-| "three new detectors" (§6.9) | §14.1 — two new files (`subaccountMultipleRoots`, `subaccountNoRoot`) under `workspaceHealth/detectors/`. Third detector (`explicitDelegationSkillsWithoutChildren`) ships in Phase 4 — §14.4. |
+| "three new detectors" (§6.9) | §14.1 — three new files under `workspaceHealth/detectors/` |
 | "`GET /api/org/delegation-outcomes`" (§7.1) | §14.1 — `server/routes/delegationOutcomes.ts` |
-| "Starting team picker" (§8.1) | §14.2 — `StartingTeamPicker.tsx` new + `AdminSubaccountsPage.tsx` modified |
+| "Starting team picker" (§8.1) | §14.2 — `StartingTeamPicker.tsx` new + `SubaccountCreatePage.tsx` modified |
 | "delegation graph tab" (§8.2) | §14.4 — `DelegationGraphView.tsx` + `RunTraceViewerPage.tsx` |
 
 If a future prose mention is added that doesn't appear here, the spec-reviewer will raise a `file-inventory-drift` finding.
@@ -1665,8 +1505,8 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 **Likelihood:** High. **Impact:** Medium — agents appear broken until prompts adjust; user-facing failures are contained to Brief-handling regressions, not platform outages.
 
 **Mitigation:**
-- Phase 1 ships the observability storage (tables + columns + detectors) but NOT the write paths or graph UI (those ship in Phase 4, same commit as enforcement). So "observability" in Phase 1 means "storage and detectors exist"; the actual rows and graph rendering arrive together with the enforcement code that produces them. This is still a dependency-ordering win — the detectors for invariant violations register early, and the schema is ready so Phase 4's code change is all-runtime-no-DDL.
-- Brief §6 budgets 1–2 weeks of prompt tweaks as the intended Phase 4 rollout posture. During this window, the team reviews outcome rows directly from the database using the query patterns in §17.1 / §17.2 / §17.3 (ad-hoc SQL against `delegation_outcomes`) and from `agent_execution_events` for lossless rejection signals. The `AdminDelegationOutcomesPage` dashboard (§8.3) is a nicer surface but is optional — daily review does not depend on it. If the dashboard ships with Phase 4, it's the primary surface; otherwise the SQL queries in §17 are.
+- Phase 1 ships observability BEFORE Phase 4 — the trace graph, delegation outcome rows, and detectors are in place the moment enforcement bites. Per §6 dependency graph, Phase 1 MUST ship before Phase 4.
+- Brief §6 budgets 1–2 weeks of prompt tweaks as the intended Phase 4 rollout posture. The team reviews outcome rows in the dashboard daily during this window.
 - Rejections return structured errors with `suggestedScope` hints where possible (see §4.3) so the agent's next attempt is informed, not random.
 
 ### 15.2 Split-brain root window during template re-apply
@@ -1703,13 +1543,15 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 - Prompt tweaks are part of the Phase 3 exit criteria — the same team that drafts system prompts reviews outputs during Phase 3 rollout.
 - The escape hatch (explicit `scope: 'subaccount'`) keeps the old behaviour one parameter away.
 
-### 15.5 Upward-reassign resolution — contract now fixed
+### 15.5 Upward-reassign open question affecting Phase 4 implementation
 
-**Resolution:** §16.1 committed option (b). §6.4 step 2 implements the narrow special case.
+**Risk:** §6.4 flags that the strict scope model blocks a non-root agent from reassigning upward to its parent. The brief promised upward escalation was allowed. This is an unresolved spec gap that Phase 4 implementation will hit on day one.
 
-**Residual risk:** Implementation of §6.4 step 2 must compile the special-case check before the generic scope validation — order matters. A Phase 4 code review should confirm the validator orders the special case first; otherwise the upward-reassign path rejects before the special case fires. Covered by the §12.2 `skillExecutor.reassignTask.test.ts` unit test (direction computation must include the special-case path).
+**Likelihood:** 100% — implementation will encounter this. **Impact:** Medium — resolution direction changes the `reassign_task` handler's validation shape.
 
-**Impact:** Low — the contract is fixed; only a code-ordering bug could regress it.
+**Mitigation:**
+- Raised to `spec-reviewer` in §16. Resolution must land before Phase 4 implementation starts.
+- Spec author's recommendation: option (b) — narrow special case allowing any agent to reassign to its own parent regardless of `delegationScope`. Documented in §16 for review.
 
 ### 15.6 `delegation_outcomes` write failure cascading to skill failure
 
@@ -1718,8 +1560,9 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 **Likelihood:** Low. **Impact:** Medium — fails delegations that should succeed.
 
 **Mitigation:**
-- §10.3 pins the mechanism: skill handlers call `delegationOutcomeService.insertOutcomeSafe()` AFTER their own mutation commits. `insertOutcomeSafe` is a detached try/catch — the only entry point from skill handlers. Errors are swallowed and logged at WARN. The alternative `recordOutcomeStrict()` (for tests / backfills) is not called from skill handlers.
-- Monitored via platform-level DB error logs — if `delegation_outcome_write_failed` starts appearing at volume, it's a DB health issue, not a spec issue.
+- §10.3 explicitly says outcome writes are best-effort / non-blocking. Skill handler wraps the insert in a try/catch and logs WARN on failure.
+- Phase 1 `delegationOutcomeService` has a `recordOutcomeSafe()` variant that's the only entry point from skill handlers — it swallows errors and logs. The primary `recordOutcome()` is strict-mode, used only from contexts where write failure should propagate (batch backfills, tests).
+- Monitored via platform-level DB error logs — if this starts happening, it's a DB health issue, not a spec issue.
 
 ### 15.7 Seeded company stays flat after spec lands
 
@@ -1738,38 +1581,60 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 
 Open questions that must be resolved before or during implementation. Each is scoped so `spec-reviewer` or the implementing session can make the call without reopening design.
 
-### 16.1 Upward reassign for non-root agents — RESOLVED
+### 16.1 Upward reassign for non-root agents (BLOCKING for Phase 4)
 
-**Status:** Resolved by `spec-reviewer` in review round 1. Committed: **option (b)** — narrow special case. Implementation reflected in §6.4 step 2.
+**The question:** Brief §9 decision 4 said "upward escalation is allowed, logged." The strict reading of §6.3 / §6.4 blocks it for non-root agents because their adaptive default is `subaccount`-requires-root, and `children` / `descendants` scopes don't include the parent.
 
-**The question (historical, for context):** Brief §9 decision 4 said "upward escalation is allowed, logged." The strict reading of §6.3 / §6.4 blocked it for non-root agents because their adaptive default is `subaccount`-requires-root, and `children` / `descendants` scopes don't include the parent.
+**Resolution options:**
 
-**Resolution options considered:**
+- **(a) Drop it.** Only roots can upward-reassign. Upward hops between non-root agents happen via a two-step "escalate to root → root reassigns lateral" pattern. Simpler, drops a brief commitment.
+- **(b) Narrow special case (recommended by spec author).** `reassign_task` allows a target equal to `context.hierarchy.parentId` regardless of `delegationScope`. Separate `delegationDirection: 'up'` path, written with that direction. Minimal additional surface.
+- **(c) Introduce `delegationScope: 'parent'`.** Explicit fourth scope value. Wider surface area.
+- **(d) Introduce a separate `escalate_upward` skill.** Keeps `reassign_task` clean but adds a skill to the platform.
 
-- **(a) Drop it.** Only roots can upward-reassign. Dropped — contradicts brief's commitment.
-- **(b) Narrow special case — CHOSEN.** `reassign_task` allows a target equal to `context.hierarchy.parentId` regardless of `delegationScope`. Separate `delegationDirection: 'up'` path, written with that direction. Minimal additional surface.
-- **(c) Introduce `delegationScope: 'parent'`.** Rejected — adds vocabulary for a single-target case.
-- **(d) Introduce a separate `escalate_upward` skill.** Rejected — adds platform surface.
+**Spec author's recommendation:** (b). Single line in the `reassign_task` validator. Preserves brief's intent. §15.5 lists this as a risk to close before Phase 4 starts.
 
-**Rationale for (b):** Single line in the `reassign_task` validator (§6.4 step 2). Preserves brief's intent. Only the immediate parent is special-cased; deeper upward hops (grand-parent etc.) require the two-step "escalate to parent → parent escalates further" pattern.
+**Who decides:** `spec-reviewer` during review round 1, or explicit HITL from the project owner if the reviewer abstains.
 
-### 16.2 `org.observability.view` vs `org.health_audit.view` — RESOLVED
+### 16.2 `org.observability.view` vs `org.health_audit.view`
 
-**Status:** Resolved by `spec-reviewer` in review round 1. Committed: **option (a)** — new permission `org.observability.view`. §9.2 stands.
+**The question:** §9.2 introduces a new permission. Rejected alternative was reusing `org.health_audit.view`. Is the separation actually worth a new permission, or should delegation outcomes fold under health-audit?
 
-**Rationale:** Cheap to add one permission; expensive to split one later. Future observability features (trace-graph dashboards, metric drill-downs) will grant cleanly under the new key without retrofitting the health-audit permission.
+**Resolution options:**
 
-### 16.3 Seed organisations without any root agents during Phase 2 rollout — RESOLVED
+- **(a) New `org.observability.view` (recommended).** Keeps surfaces separable. Future observability features (trace-graph dashboards, metric drill-downs) grant cleanly.
+- **(b) Reuse `org.health_audit.view`.** Fewer permissions to manage.
 
-**Status:** Resolved by `spec-reviewer` in review round 1. Committed: **option (a)** — no auto-creation. Fallback is clean; let the operator opt in to per-subaccount CEOs by assigning a root when they want one.
+**Spec author's recommendation:** (a). Cheap to add one permission; expensive to split one later.
 
-**Rationale:** Auto-creating roots pollutes the data with placeholder links that operators will have to clean up. The fallback path (§6.6) is the intended behaviour pre-configuration; the `subaccountNoRoot` detector is the nudge for operators to set a root when they want one.
+**Who decides:** `spec-reviewer` (low-stakes call; default to recommended unless reviewer objects).
 
-### 16.4 Should `scope: 'descendants'` compute the subtree pure or via recursive CTE? — RESOLVED
+### 16.3 Seed organisations without any root agents during Phase 2 rollout
 
-**Status:** Resolved by `spec-reviewer` in review round 1. Committed: **option (a)** — pure function over the full roster. §6.2's "recursive CTE" language already updated to reflect this (no CTE; pure TS downward walk).
+**The question:** The current data state is "most subaccounts have zero subaccount-level roots." §6.6's zero-root fallback routes to the org-level Orchestrator. That's correct, but should we auto-create a subaccount-level root for every existing subaccount during the Phase 2 migration?
 
-**Rationale:** Reuses `hierarchyContextBuilderService`'s pure walk. Cheap at expected sizes (<100 agents per subaccount). Simpler to test (no DB in the unit test).
+**Resolution options:**
+
+- **(a) No auto-creation.** Let operators assign roots when they want per-subaccount CEOs. Fallback handles the rest. Chosen default.
+- **(b) Auto-create by cloning the org-Orchestrator into each subaccount.** Creates many subaccount-level root links with the same system agent behind them. Simplifies the mental model (every subaccount has a root) at the cost of proliferating links.
+- **(c) Auto-create only for subaccounts that have any linked agents.** Middle path.
+
+**Spec author's recommendation:** (a). No auto-creation. Fallback is clean; let the operator opt in to per-subaccount CEOs by assigning a root when they want one.
+
+**Who decides:** `spec-reviewer`, or the Phase 2 implementer if reviewer abstains.
+
+### 16.4 Should `scope: 'descendants'` compute the subtree pure or via recursive CTE?
+
+**The question:** §6.2 mentions a recursive CTE. §6.1's pure function walks from the full roster. Implementation choice: which does the runtime list-agents handler use?
+
+**Resolution options:**
+
+- **(a) Pure function over the full roster (recommended).** Already required by `hierarchyContextBuilderService`. Reuses existing code. Cost: one roster fetch per list call.
+- **(b) Recursive CTE in the DB.** Push traversal to Postgres. Cost: dedicated query path; more complex to test.
+
+**Spec author's recommendation:** (a). Subtree computation is cheap in pure TS at expected sizes (<100 agents per subaccount). Reuses the hierarchy builder. Simpler to test.
+
+**Who decides:** Phase 3 implementer; no external review needed.
 
 ### 16.5 `hierarchyDepth` column population for existing `agent_runs`
 
@@ -1788,31 +1653,25 @@ Open questions that must be resolved before or during implementation. Each is sc
 
 ## 17. Success criteria
 
-Behavioural success criteria from the brief (§8 of `docs/hierarchical-delegation-dev-brief.md`), promoted here with concrete measurements. Each is observable against `delegation_outcomes` + `agent_runs.delegation_direction` / `.delegation_scope` + run traces. `tasks.delegation_direction` is the current-task marker (§5.2); it answers "what direction was this task LAST reassigned" which is orthogonal to the per-delegation audit in `delegation_outcomes`.
+Behavioural success criteria from the brief (§8 of `docs/hierarchical-delegation-dev-brief.md`), promoted here with concrete measurements. Each is observable against `delegation_outcomes` + `tasks.delegation_direction` + run traces.
 
 ### 17.1 Managers predominantly delegate within their subtree
 
-**Measurement:** Post-Phase-4 adjustment period (day 14+), for each agent with children per the CURRENT `subaccount_agents` roster (join `delegation_outcomes.caller_agent_id → subaccount_agents.id` and filter to callers with any child `WHERE parent_subaccount_agent_id = caller.id AND is_active = true`), ratio of `delegation_outcomes` rows where `outcome = 'accepted'` AND `delegation_scope IN ('children', 'descendants')` AND `delegation_direction = 'down'` to total accepted outcomes for that caller.
+**Measurement:** Post-Phase-4 adjustment period (day 14+), for each agent with `hierarchy.childIds.length > 0`, ratio of `delegation_outcomes` rows where `outcome = 'accepted'` AND `delegation_scope IN ('children', 'descendants')` AND `delegation_direction = 'down'` to total accepted outcomes for that agent.
 
-**Important caveat.** This metric joins against CURRENT roster state, not write-time state. If an agent had children last week but doesn't today, its historical outcomes are excluded from "manager" aggregation even though the delegations happened under the managerial context. Acceptable in v1; §13 lists "persist caller-hierarchy facts at write time" as a future pull-forward if this skew matters.
-
-**Target:** ≥95% for every current manager agent over a rolling 7-day window.
+**Target:** ≥95% for every manager agent over a rolling 7-day window.
 
 **What a violation means:** an agent whose ratio stays below 95% after the adjustment period has a prompt bug (treating `'subaccount'` as normal operation, per brief §5.3 on escape-hatch intent). Flagged for prompt review.
-
-**Caveat:** `delegation_outcomes` writes are best-effort (§10.3). Metric is advisory — a sudden gap can be a DB-write blip, not a behaviour change. Cross-check against `agent_execution_events` rejection signals before concluding a prompt bug.
 
 **Query pattern:** `SELECT caller_agent_id, COUNT(*) FILTER (WHERE delegation_scope IN ('children', 'descendants') AND delegation_direction = 'down') * 100.0 / COUNT(*) FROM delegation_outcomes WHERE outcome = 'accepted' AND created_at > NOW() - INTERVAL '7 days' GROUP BY caller_agent_id HAVING COUNT(*) > 10;`
 
 ### 17.2 Cross-team hops happen via nearest common ancestor
 
-**Primary invariant (non-lossy enforcement):** The `skillExecutor.ts` validator for `reassign_task` rejects any call with `effectiveScope === 'subaccount'` where the caller is not the configured root (§6.4 step 3). This is a hard code path — every rejected call returns a structured error to the agent before any task state mutates. The invariant is enforced by code, not by the telemetry table.
+**Measurement:** Count of `delegation_outcomes` rows with `delegation_direction = 'lateral'` AND the caller is NOT the subaccount root (`hierarchy.parentId IS NOT NULL`). This should be zero by construction — the executor rejects such calls — but the metric is the forcing function that detects a bypass.
 
-**Advisory measurement (best-effort signal):** Count of `delegation_outcomes` rows with `delegation_direction = 'lateral'` where the caller is NOT the current subaccount root (join `delegation_outcomes.caller_agent_id → subaccount_agents.id` and filter `WHERE parent_subaccount_agent_id IS NOT NULL`). Join is against current roster for the same reason as §17.1. This count should be zero given the primary invariant; a non-zero count is a SIGNAL that something bypassed the validator (test harness gap, data edit, etc.).
+**Target:** Zero lateral delegations from non-root agents. Any non-zero count indicates the enforcement layer has a bug.
 
-**Advisory target:** Zero. Because outcome writes are best-effort (§10.3), a true zero count does not prove zero events; it just fails to disprove. Pair with: audit `agent_execution_events` for `delegation_out_of_scope` / `cross_subtree_not_permitted` rejections (these are lossless because they're in the agent's own execution log).
-
-**What a non-zero count means:** a code bug in `skillExecutor.ts` validation — NOT a prompt or data bug. Triggers immediate investigation, cross-checked against `agent_execution_events`.
+**What a violation means:** a code bug in `skillExecutor.ts` validation — NOT a prompt or data bug. Triggers immediate investigation.
 
 ### 17.3 Violation rates trend down after the adjustment period
 
@@ -1838,15 +1697,15 @@ Behavioural success criteria from the brief (§8 of `docs/hierarchical-delegatio
 **Measurement:** Post-launch health detector state:
 - `subaccountMultipleRoots` — zero findings (if any, partial unique index was violated or race occurred).
 - `subaccountNoRoot` — acceptable number (depends on operator choices; not a success threshold, just observable).
-- `explicitDelegationSkillsWithoutChildren` — informational count; not a target. Operators review when the count changes materially to verify the attachments are still intentional.
+- `managerWithoutDerivedSkills` — trending toward zero as operators clean up explicit attachments.
 
 **Target:** Zero `subaccountMultipleRoots` findings at steady state. Every other detector is informational.
 
 ### 17.6 Implementation efficiency
 
 **Measurement (vanity, for retrospective):**
-- Total LOC added across all four phases: target <3,500 lines including tests. (Revised up from an earlier 2,500-line estimate after §14 file inventory grew during review.)
-- Number of new files: the §14 inventory currently lists ~25 new files across all phases (including tests, pure-core pairs, detectors, client components, and the one new table + migrations). Target is not a strict cap — the file count reflects the pure+impure convention (each service doubles file count) and per-detector-test convention. Informational only.
+- Total LOC added across all four phases: target <2,500 lines including tests.
+- Number of new files: target <15.
 - Static gate passes first try rate: target ≥80% of commits (measures spec-to-code fidelity).
 
 **Not a launch gate.** Informational for the retrospective that feeds `KNOWLEDGE.md` entries.
@@ -1868,7 +1727,7 @@ Final pass over the spec before handing to `spec-reviewer`. Each question answer
 - §16 open questions have a recommendation + decision owner, not left abstract. ✓
 
 **Does every "single source of truth" claim survive?**
-- §4.3 / §4.4 frame `delegation_outcomes` as the **primary** source of delegation telemetry (best-effort; scope-validation rejections with resolvable actors). Unresolvable-target errors and any DB-write gaps surface via `agent_execution_events` (the lossless companion). Two-table model is consistent across §4.3, §10.3, §17.2-3 after iter3/iter4/iter5 clean-up. ✓
+- §4.4 claims `delegation_outcomes` is the sole source of delegation telemetry. Grep confirms: only `spawn_sub_agents` and `reassign_task` write to it; no other path logs delegations. ✓
 - §5.5 claims the Files-to-change table is the single source for schema changes. §14 mirrors and extends. ✓
 - §6.6 claims `hierarchyRouteResolverService` is the canonical root-finding path post-Phase-2. §6.7 confirms the only caller change is `orchestratorFromTaskJob`; §6.8 doesn't call it (template apply handles root-rotation directly on the table). ✓
 
