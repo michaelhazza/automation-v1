@@ -1469,6 +1469,37 @@ export const agentExecutionService = {
         }
       }
 
+      // Phase 8 / W3c — score applied memory_blocks against run output.
+      // Reads appliedMemoryBlockIds populated at injection time (line ~774).
+      // Best-effort: scoreRunBlocks swallows errors internally.
+      if (finalStatus === 'completed') {
+        try {
+          const [runRow] = await db
+            .select({ appliedMemoryBlockIds: agentRuns.appliedMemoryBlockIds })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, run.id))
+            .limit(1);
+          const appliedBlockIds = runRow?.appliedMemoryBlockIds ?? [];
+          if (appliedBlockIds.length > 0) {
+            const { scoreRunBlocks } = await import('./memoryCitationDetector.js');
+            const generatedText = typeof loopResult.summary === 'string'
+              ? loopResult.summary
+              : '';
+            await scoreRunBlocks({
+              runId: run.id,
+              organisationId: request.organisationId,
+              appliedBlockIds,
+              runOutputText: generatedText,
+            });
+          }
+        } catch (err) {
+          logger.warn('agent_runs.block_citation_score_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       // Universal Brief artefact emission hook (Phase 2+).
       // Phase 1 prep only: the import above makes validateArtefactForPersistence
       // available here. Capabilities that produce BriefChatArtefacts will call
