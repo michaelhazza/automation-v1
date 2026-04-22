@@ -1,6 +1,6 @@
 # Universal Brief — Development Brief
 
-**Status:** Draft development brief — revision 2, after first round of external LLM critique
+**Status:** Draft development brief — revision 3, after second round of external LLM critique
 **Author:** Design session on `claude/research-questioning-feature-ddKLi`
 **Audience:** architect, spec-reviewer, further external review rounds, then implementation session
 **Date:** 2026-04-22
@@ -13,16 +13,26 @@
 
 **Revision history:**
 - **rev 1** (initial draft) — captured full session's design thinking on Brief entity, COO persona, seven conversation scopes, triage classifier, clarifying/sparring skills, three-phase memory capture, retrieval audit.
-- **rev 2** (this version — post external review round 1) — incorporated external critique:
+- **rev 2** (post external review round 1) — incorporated external critique:
   1. Reframed W1 from "classifier in front of Orchestrator" to "Orchestrator's fast path" (triage + scope detection is architecturally part of the Orchestrator, not a separate concern).
   2. Reduced v1 conversation scopes from seven to four (Brief, Agent, Task, Agent run log).
   3. Tightened Brief framing as "control plane, not work plane" — Brief coordinates; surfaces attached to it (memory, approvals, execution) live in their own systems.
   4. Added new sub-phase §8.3.2 — rule precedence model + conflict detection + quality scoring + auto-deprecation — before the memory capture scales.
   5. Added classifier safety nets — shadow-eval logging, risk-aware second-look, confidence decay.
-  6. Added optional `confidence` field to `BriefStructuredResult` and `BriefApprovalCard` (contract amended on main) + §11.1 UX guidance.
-  7. Added §11.2 observability and failure visibility — instrumentation as a day-zero concern.
+  6. Added optional `confidence` field to `BriefStructuredResult` and `BriefApprovalCard` (contract amended on main) + §11.4 UX guidance.
+  7. Added §11.5 observability and failure visibility — instrumentation as a day-zero concern.
   8. Updated sequencing (§14) to reflect the new sub-phase and four-scope v1.
   9. Updated open questions (§15) — marked resolved items, reframed remaining ones.
+- **rev 3** (this version — post external review round 2) — contract extensions accepted pre-build rather than retrofitted later:
+  1. **Artefact lifecycle primitives.** Added `artefactId` (required), optional `status` (`final` / `pending` / `updated` / `invalidated`), `parentArtefactId`, `relatedArtefactIds`, per-artefact `contractVersion`. Enables streaming, refresh flows, and loose artefact relationships without contract churn later. See §11.1.
+  2. **Structured result — `columns` + `freshnessMs`.** Soft schema hint for deterministic UI rendering; data-freshness signal that disambiguates cached provider data (still `live`, non-zero `freshnessMs`) from true canonical reads. See §11.2.
+  3. **Approval card — `executionId` + `executionStatus`.** Execution linkage so approvals transition through pending → running → completed/failed on a single artefact chain. See §11.2.
+  4. **Error — `severity` + `retryable`.** Drives UX treatment (toast / banner / modal) and retry affordance. See §11.2.
+  5. **Budget context on structured + approval artefacts.** Optional `budgetContext` populated by the orchestrator for "you've used N% of your limit" UX. See §11.2.
+  6. **RLS defence in depth.** Added §11.3 recommending an orchestrator-level sanity-check backstop in addition to capability-layer primary enforcement. One mis-implemented capability shouldn't be able to leak tenant data.
+  7. **Tightened `source` semantics.** Cached provider data is `live` with non-zero `freshnessMs`, not mis-classified as canonical. Freshness is what users care about; classification is internal bookkeeping.
+  8. **Declined: per-filter confidence.** Feedback suggested per-filter confidence on `filtersApplied`. Rejected for v1 — artefact-level confidence from rev 2 is sufficient; per-filter granularity is over-engineering at this stage.
+  9. **Updated open questions and sequencing notes** to reflect contract expansion.
 
 ---
 
@@ -543,7 +553,44 @@ Key invariants the implementation spec must preserve:
 - **User-triggered rules still audit-trailed.** Even though they skip review, every save writes to `memoryBlockVersions` with `createdByUserId` — full audit trail preserved.
 - **The Orchestrator's capability-query budget (8 calls / run) is preserved.** Clarifying and sparring invocations count against this budget.
 
-### 11.1 Confidence surfaces — a trust mechanism
+### 11.1 Artefact lifecycle and relationships — why we added them now
+
+External review highlighted that the v1 artefact contract treated every artefact as a static snapshot. That works for a demo; it breaks the moment real usage introduces:
+
+- A long-running query that needs to refine its initial partial result (streaming precursor)
+- An approval card that needs to reflect execution state back into chat (approved → running → completed)
+- A result that becomes stale because underlying data changed
+- Multiple artefacts from a single turn that are semantically related (approval card → the result that spawned it)
+
+Rather than retrofit these concepts under production pressure, the contract now includes:
+
+- **`artefactId` (required)** — every artefact has an identity, so other artefacts can reference it.
+- **`status`, `parentArtefactId`** — lifecycle signalling. An artefact can be `'updated'` by another (supersedes in place) or `'invalidated'` (marks predecessor stale). Enables refresh flows and streaming precursors without contract breakage.
+- **`relatedArtefactIds`** — loose sibling relationships. Lets a turn's artefacts signal relatedness to the UI without inventing a rigid relationship graph.
+- **`contractVersion` (per-artefact)** — enables mixed-version rollouts where different capabilities are on different contract versions during migration.
+
+**The strategic framing that drove this:** the artefact contract is effectively the "UI protocol" for every capability and agent in the system. Getting lifecycle and relationship primitives right early is the difference between a clean long-term substrate and a bolted-on mess of ad-hoc updates. Pre-launch is the cheapest moment to fix it.
+
+Full field semantics live in `docs/brief-result-contract.md`; the dev brief only captures the rationale.
+
+### 11.2 Kind-specific contract extensions — also from review round 2
+
+Also added in response to external review:
+
+- **Structured result — `columns` hint + `freshnessMs`.** `columns` is a soft schema hint (key, label, optional type) that lets the UI render deterministically without per-`entityType` defensive logic. `freshnessMs` replaces an ambiguous `source` classification — a cached provider response reports `source: 'live'` with `freshnessMs: 60000` rather than being mis-classified as canonical.
+- **Approval card — `executionId`, `executionStatus`.** Approval cards are no longer dead-ends after the user clicks "approve." The card transitions through `'pending' → 'running' → 'completed' / 'failed'`, with the `executionId` providing the audit linkage back to the run. The UI shows approval → execution → outcome on one linked artefact chain.
+- **Error — `severity`, `retryable`.** Not every error is equal. `severity` drives UX treatment (toast / banner / modal). `retryable` drives whether the "Try again" button appears. Prevents the "every error looks the same" failure mode.
+- **Budget context on structured + approval.** Both artefact kinds can carry an optional `budgetContext` with `remainingCents` / `limitCents` — populated by the orchestrator post-capability. Enables "you've used 80% of your budget" UX.
+
+### 11.3 RLS — defence in depth, not single-point enforcement
+
+Review flagged that "every capability must enforce RLS correctly" is a risk, not a guarantee. One mis-implemented capability can leak data across tenants.
+
+**The contract preserves primary enforcement at the capability layer** (capabilities are the only place that knows the semantic meaning of "these rows"). But the orchestrator should implement a **lightweight backstop** that sanity-checks artefact outputs against the Brief's scope — e.g., verify all `organisationId` references in the output match the Brief's, flag unexpected `subaccountId` values.
+
+This isn't replacement; it's safety net. One mis-implemented capability shouldn't be able to leak. Implementation detail belongs in the spec; the principle belongs in every capability's review checklist.
+
+### 11.4 Confidence surfaces — a trust mechanism
 
 The contract (§8 and `docs/brief-result-contract.md`) carries an optional `confidence` field on structured results and approval cards. This is a deliberate UX and safety mechanism, not a debugging artifact.
 
@@ -561,7 +608,7 @@ The contract (§8 and `docs/brief-result-contract.md`) carries an optional `conf
 
 This makes risky interpretations hard to miss without spamming users on confident ones.
 
-### 11.2 Observability and failure visibility
+### 11.5 Observability and failure visibility
 
 Observability is a day-zero concern, not something that gets bolted on after things break. Without the following instrumentation, the system cannot be tuned, debugged, or safely iterated:
 
@@ -679,13 +726,20 @@ Each phase is independently shippable. Stop after any phase and the app remains 
 
 Some questions from the first review round have been resolved; remaining questions invite further critique.
 
-### Resolved after review round 1
+### Resolved after review rounds 1 + 2
 
-- **~~Is seven conversation scopes in v1 too many?~~** Resolved — v1 reduced to four (Brief, Agent, Task, Agent run log). Others become one-enum-value additions when demand surfaces.
-- **~~Does the "everything routes through the COO" framing hold?~~** Resolved — triage is the Orchestrator's own fast path (not a separate receptionist). Planning is the Orchestrator's LLM step. Executors are the existing specialist-agent fleet. The three-role separation exists in architecture; it doesn't need its own personas.
-- **~~Is Brief overloaded with six roles?~~** Resolved via reframing — Brief is a control plane, not a work plane. Surfaces *attached to* Brief (approvals, memory, execution) live in their own systems; Brief is the thin coordination record where they converge.
-- **~~Classifier worst-case: high-confidence wrong classification?~~** Addressed via the three safety nets in §8.1 — shadow-eval logging, risk-aware second-look, confidence decay + recalibration.
-- **~~Memory rule conflicts + precedence?~~** Addressed via new sub-phase §8.3.2 — rule precedence model, conflict detection at capture time, quality scoring + auto-deprecation.
+- **~~Is seven conversation scopes in v1 too many?~~** (rev 2) Resolved — v1 reduced to four. Others become one-enum-value additions when demand surfaces.
+- **~~Does the "everything routes through the COO" framing hold?~~** (rev 2) Resolved — triage is the Orchestrator's own fast path. The three-role separation (triage, plan, execute) exists in architecture already.
+- **~~Is Brief overloaded with six roles?~~** (rev 2) Resolved via reframing — Brief is a control plane, not a work plane.
+- **~~Classifier worst-case: high-confidence wrong classification?~~** (rev 2) Addressed via shadow-eval logging, risk-aware second-look, confidence decay.
+- **~~Memory rule conflicts + precedence?~~** (rev 2) Addressed via new sub-phase §8.3.2 — precedence model + conflict detection + quality scoring + auto-deprecation.
+- **~~Lifecycle for artefacts?~~** (rev 3) Addressed via `status` / `parentArtefactId` / `artefactId` / `relatedArtefactIds` on `BriefArtefactBase`. Enables streaming, refresh, invalidation, and artefact relationships.
+- **~~Loose schema for rows?~~** (rev 3) Addressed via optional `columns` hint on structured results. Prevents UI defensive logic sprawl.
+- **~~Approval execution linkage?~~** (rev 3) Addressed via `executionId` / `executionStatus` on approval cards — approval → execution → outcome chain.
+- **~~Error severity + retry?~~** (rev 3) Addressed via `severity` + `retryable` on error artefacts — drives UX treatment differentiation.
+- **~~Budget context on artefacts?~~** (rev 3) Addressed via optional `budgetContext` on structured + approval kinds.
+- **~~Source ambiguity (is cached API data canonical or live?)~~** (rev 3) Tightened semantics in the contract doc: cached provider data is `'live'` with non-zero `freshnessMs`. Freshness is the user-facing signal.
+- **~~RLS enforcement risk (one mis-implemented capability leaks)?~~** (rev 3) Added §11.3 — primary enforcement stays at capability layer; orchestrator adds a sanity-check backstop.
 
 ### Still open — invite critique
 
@@ -711,7 +765,7 @@ The existing context injection pipeline may not cleanly expose "which blocks wer
 Every free-text query becomes a Brief. Read-only queries ("what's my pipeline") create records that close with an answer. Will the Brief board get polluted with exploratory queries, making actionable Briefs hard to find? Is the `closed_with_answer` status + UI filtering enough, or does the UX need something stronger (e.g. "ephemeral" Briefs that don't show on the main board)?
 
 **15.8 Is the CRM Query Planner contract flexible enough?**
-`BriefStructuredResult` + `BriefApprovalCard` + `BriefErrorResult`. The CRM Planner will emit these. Is the contract missing anything obvious for complex query results (charts, time series, multi-entity joins)? Is `rows: Array<Record<string, unknown>>` too loose or appropriately flexible? Is `confidence` the only missing trust-affordance, or are there others?
+The contract now covers `BriefStructuredResult` + `BriefApprovalCard` + `BriefErrorResult` with lifecycle primitives (rev 3), execution linkage (rev 3), columns hints (rev 3), and confidence (rev 2). Is this flexible enough for complex CRM query results (charts, time series, multi-entity joins), or will we still need additions for those? Are there trust affordances beyond `confidence` and `freshnessMs` that warrant inclusion?
 
 **15.9 Is the sequencing realistic given everything else in flight?**
 Pre-launch context means ClientPulse is the active focus; this work waits. Ten to fourteen weeks of this work after ClientPulse stabilises — is that the right priority order given the product's launch runway? What should be descoped or deferred to v2?
