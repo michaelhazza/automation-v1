@@ -50,7 +50,8 @@ export const REGISTRY_META: Record<string, RegistryEntryMeta> = {
   'opportunities.pipeline_velocity': {
     key: 'opportunities.pipeline_velocity',
     primaryEntity: 'opportunities',
-    aliases: ['pipeline velocity', 'deal velocity', 'stage velocity', 'how fast deals moving'],
+    // 'deal velocity' omitted — 'deal'→'opportunities' makes it hash-identical to 'pipeline velocity'
+    aliases: ['pipeline velocity', 'stage velocity', 'how fast deals moving'],
     requiredCapabilities: ['canonical.opportunities.read'],
     description: 'Stage velocity metrics over a time window',
     allowedFields: {
@@ -73,7 +74,8 @@ export const REGISTRY_META: Record<string, RegistryEntryMeta> = {
   'appointments.upcoming': {
     key: 'appointments.upcoming',
     primaryEntity: 'appointments',
-    aliases: ['upcoming appointments', 'next appointments', 'future appointments', 'scheduled meetings'],
+    // 'future appointments' omitted — 'upcoming'→'future' makes it hash-identical to 'upcoming appointments'
+    aliases: ['upcoming appointments', 'next appointments', 'scheduled meetings'],
     requiredCapabilities: ['canonical.appointments.read'],
     description: 'Standard appointment list within a window',
     allowedFields: {
@@ -93,7 +95,9 @@ export const REGISTRY_META: Record<string, RegistryEntryMeta> = {
   'opportunities.count_by_stage': {
     key: 'opportunities.count_by_stage',
     primaryEntity: 'opportunities',
-    aliases: ['opportunities stage', 'deals stage', 'pipeline stage', 'stage breakdown'],
+    // 'deals stage', 'pipeline stage', 'opportunities by stage' omitted — all collapse to 'opportunities stage'
+    // via synonym substitution ('deal'/'pipeline'→'opportunities'). They match via synonym automatically.
+    aliases: ['opportunities stage', 'stage breakdown'],
     requiredCapabilities: ['canonical.opportunities.read'],
     description: 'Stage-partitioned opportunity counts',
     allowedFields: {

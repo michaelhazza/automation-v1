@@ -1,5 +1,5 @@
 // CRM Query Planner — orchestration layer (spec §3 / §19)
-// P1.1: Stage 1 golden path is wired. Stage 2 / Stage 3 throw NotImplementedError.
+// P1.2: Stage 1 + Stage 2 (cache read) wired. Stage 3 stubbed → unsupported_query.
 
 import { normaliseIntent } from './normaliseIntentPure.js';
 import { matchRegistryEntry } from './registryMatcherPure.js';
@@ -7,6 +7,7 @@ import { executeCanonical, MissingPermissionError } from './executors/canonicalE
 // canonicalQueryRegistry is lazily loaded so tests can inject a stub via deps.registry
 // without triggering the drizzle-orm import chain (canonicalQueryRegistry → canonicalDataService → drizzle).
 import { normaliseToArtefacts } from './resultNormaliserPure.js';
+import * as planCache from './planCache.js';
 import { emit } from './plannerEvents.js';
 import type { ExecutorContext } from '../../../shared/types/crmQueryPlanner.js';
 import type { BriefChatArtefact, BriefCostPreview } from '../../../shared/types/briefResultContract.js';
@@ -132,9 +133,74 @@ export async function runQuery(
   // ── Stage 1 miss ──────────────────────────────────────────────────────────
   await emit({ kind: 'planner.stage1_missed', ...envelope, intentHash });
 
-  // P1.1 guard — Stage 2 / Stage 3 not yet wired.
-  // Remove this guard in P1.2 and wire the cache read / LLM fallback.
-  throw new NotImplementedError(
-    'Only Stage 1 is enabled in P1.1 — add this intent to the registry or wait for P1.2',
-  );
+  // ── Stage 2 — plan cache read ─────────────────────────────────────────────
+  const cacheHit = planCache.get(intentHash, context.subaccountId, {
+    callerCapabilities: context.callerCapabilities,
+    registry: activeRegistry,
+  });
+
+  if (cacheHit !== null) {
+    await emit({
+      kind:      'planner.stage2_cache_hit',
+      ...envelope,
+      intentHash,
+      cachedAt:  cacheHit.entry.cachedAt,
+      hitCount:  cacheHit.entry.hits,
+    });
+
+    const { structured, approvalCards } = normaliseToArtefacts(
+      cacheHit.plan,
+      { rows: [], rowCount: 0, truncated: false, actualCostCents: 0, source: cacheHit.plan.source },
+      {
+        subaccountId:            context.subaccountId,
+        defaultSenderIdentifier: context.defaultSenderIdentifier,
+      },
+    );
+
+    const artefacts: BriefChatArtefact[] = [structured, ...approvalCards];
+
+    await emit({
+      kind:            'planner.result_emitted',
+      ...envelope,
+      intentHash,
+      artefactKind:    'structured',
+      rowCount:        0,
+      truncated:       false,
+      actualCostCents: { total: 0, stage3: 0, executor: 0 },
+      stageResolved:   2,
+    });
+
+    return {
+      artefacts,
+      costPreview: cacheHit.plan.costPreview,
+      stageResolved: 2,
+      intentHash,
+    };
+  }
+
+  await emit({
+    kind:       'planner.stage2_cache_miss',
+    ...envelope,
+    intentHash,
+    reason:     'not_present' as const,
+  });
+
+  // ── Stage 3 stub (P1.2) — LLM planner ships in P2 ────────────────────────
+  // Any intent that misses Stage 1 and Stage 2 gets an unsupported_query
+  // artefact. Remove this stub block in P2 and wire llmPlanner.
+  await emit({
+    kind:             'planner.error_emitted',
+    ...envelope,
+    intentHash,
+    errorCode:        'unsupported_query',
+    stageResolved:    1,
+    errorSubcategory: 'p1_stub',
+  });
+
+  return {
+    artefacts:    [makeUnsupportedError(intentHash)],
+    costPreview:  { predictedCostCents: 0, confidence: 'high', basedOn: 'static_heuristic' },
+    stageResolved: 1,
+    intentHash,
+  };
 }

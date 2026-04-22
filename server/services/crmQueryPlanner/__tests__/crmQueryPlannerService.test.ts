@@ -5,7 +5,7 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts
  */
-import { runQuery, NotImplementedError } from '../crmQueryPlannerService.js';
+import { runQuery } from '../crmQueryPlannerService.js';
 import type { RunQueryDeps } from '../crmQueryPlannerService.js';
 import type { ExecutorContext, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
 
@@ -97,14 +97,12 @@ test('Stage 1 canonical hit → predictedCostCents:0', async () => {
   assertEqual(output.costPreview.confidence, 'high', 'Stage 1 confidence is high');
 });
 
-// Stage 1 miss → NotImplementedError (P1.1 guard)
-test('unrecognised intent → NotImplementedError', async () => {
-  try {
-    await runQuery({ rawIntent: 'show me the weather forecast', subaccountId: 'sub-1' }, makeContext(), deps);
-    throw new Error('expected NotImplementedError');
-  } catch (err) {
-    assert(err instanceof NotImplementedError, `expected NotImplementedError, got ${err}`);
-  }
+// Stage 1 + Stage 2 miss → unsupported_query artefact (P1.2 stub, not throw)
+test('unrecognised intent → unsupported_query artefact (Stage 3 stub)', async () => {
+  const output = await runQuery({ rawIntent: 'show me the weather forecast', subaccountId: 'sub-1' }, makeContext(), deps);
+  assert(output.artefacts.length > 0, 'must have artefacts');
+  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
+  assertEqual((output.artefacts[0] as any).errorCode, 'unsupported_query', 'errorCode');
 });
 
 // forward-looking canonical.* capabilities are skipped — no MissingPermissionError
@@ -115,8 +113,9 @@ test('caller without canonical.contacts.read → succeeds (forward-looking skip)
   assert(output.artefacts[0]?.kind !== 'error', 'forward-looking cap must not block canonical dispatch');
 });
 
-// NotImplementedError is Error subclass
+// NotImplementedError is Error subclass (kept for P2/P3 use)
 test('NotImplementedError extends Error', async () => {
+  const { NotImplementedError } = await import('../crmQueryPlannerService.js');
   const e = new NotImplementedError('test message');
   assert(e instanceof Error, 'must be instanceof Error');
   assertEqual(e.name, 'NotImplementedError', 'name');
