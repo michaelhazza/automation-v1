@@ -228,6 +228,16 @@ export interface PlannerTrace {
   mutations: PlannerPlanMutation[];
   terminalOutcome: 'structured' | 'approval' | 'error';
   terminalErrorCode?: string;
+  /**
+   * Top-level observability flag (§17.1) making it unambiguous at a glance
+   * which path produced the terminal emission:
+   *   - 'stage1'       — registry match (Stage 1 hit)
+   *   - 'stage2_cache' — plan cache reuse (Stage 2 hit)
+   *   - 'stage3_live'  — Stage 3 (LLM) freshly produced + validated a plan
+   * Set at every terminal emission site in the orchestrator. Optional so the
+   * field is additive — older consumers that don't read it continue to work.
+   */
+  executionMode?: 'stage1' | 'stage2_cache' | 'stage3_live';
 }
 
 // ---------------------------------------------------------------------------

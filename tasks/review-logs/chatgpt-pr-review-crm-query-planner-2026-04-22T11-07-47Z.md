@@ -188,4 +188,93 @@ No deferred items from round 2 — all three accepted findings are applied in-se
 - No open architectural decisions.
 - Commit + push follows.
 
+---
+
+## Round 3 — 2026-04-22T11:50:37Z
+
+### ChatGPT Feedback (raw)
+
+> Reviewer's framing: "last 5 percent hardening, not structural issues". Baseline verdict: mergeable without hesitation.
+
+What's now solid (reviewer's words):
+- Terminal event forwarding is clean. One planner run → one agent completion.
+- Error taxonomy split (internal vs ambiguous) is the right tradeoff.
+- Cache behaviour now proven at service layer.
+
+Remaining edge-level observations (NOT BLOCKERS per reviewer):
+
+**#1 — Cache invalidation coupling to planner evolution.** `NORMALISER_VERSION` helps, but at orchestration level there's no clear guarantee that all plan-shaping changes bump cache keys. Cache correctness implicitly depends on planner logic, normaliser behaviour, filter translation semantics. If any evolve, cached plans may become subtly wrong while still "valid". Suggestion: ensure cache key includes normaliser version AND planner version (or shared PLANNER_CACHE_VERSION). Add one-line invariant comment: "Any change that affects plan shape must bump version". Enforced by convention if not by build check.
+
+**#2 — Stage 2 reuse vs Stage 3 recompute trace clarity.** Now that cache reuse is proven, is it unambiguously visible at the TOP LEVEL of `PlannerTrace` whether result came from Stage 2 reuse, Stage 3 fresh, or Stage 1? Or is it buried in nested trace fields? Matters for debugging "stale data" reports, explaining behaviour to operators, validating cache-hit-rate assumptions. Suggestion: top-level flag `executionMode: 'stage3_live' | 'stage2_cache' | 'stage1'` or equivalent explicit signal.
+
+**#3 — Rate-limit retry posture is implicit.** Orchestration now distinguishes `rate_limited` from `planner_internal_error` (round 2 fix). Good. But orchestration effectively does classify → emit → stop. No visible signal that this was retryable or intentionally not retried. Risk: future contributors read "rate limited" and either assume planner is flaky OR accidentally add retry loops in the wrong layer. Suggestion (doc-level, not code): single line near classification: "Rate-limited errors are not retried at planner layer by design; handled by upstream rate-limiter".
+
+**#4 — Cache write timing vs validation boundary (confirm-only).** Subtle edge worth confirming: cache write happens AFTER full plan validation, not before. If invariant holds, safe. If not, risk of caching structurally invalid plans.
+
+Final verdict (reviewer's words): "production-grade planner with clean orchestration boundaries. No blockers. No correctness issues. Only observability and future-proofing polish left. If you said 'done' here, I'd agree."
+
+Two optional polish items reviewer would prioritise if being obsessive:
+- explicit planner cache versioning contract
+- clearer execution mode signal in traces
+
+### Adjudication framing
+
+All four items are edge-level polish. All four are accept — three yield code (single-file surgical edits) and one is a code-free invariant confirmation:
+
+- **#1** — Spec §7.5 already establishes `NORMALISER_VERSION` as the single cache version knob, but its text is scoped narrowly ("behaviour that affects output hash": tokenisation, synonyms, stop-words, hash derivation). ChatGPT's concern is valid for a wider surface: validator rule-set changes (rules 8/9/10 re-shape plans), registry matcher semantics, filter-translation outputs. None of these are covered by the spec's literal enumeration, but cache re-validation on hit is principal-scoped only (§9.3.1 — `schemaContext: null`), so it can't catch shape drift. Fix: add a scoped invariant comment at `planCachePure.makeCacheKey` making the "bump `NORMALISER_VERSION` when plan shape changes" rule explicit. Zero code change; pure documentation. No separate `PLANNER_CACHE_VERSION` — two knobs is worse than one because it invites drift between them.
+- **#2** — `PlannerTrace` already carries per-stage nested slots (`stage1`, `stage2`, `stage3`) but no top-level summary. Adding `executionMode?: 'stage1' | 'stage2_cache' | 'stage3_live'` as an optional field, set once per branch entry in the orchestrator, gives the "one-glance" observability the reviewer is asking for. The field is optional → existing consumers keep working. Low-risk surgical addition.
+- **#3** — Single comment block above `isRateLimitedError` / `classifyStage3FallbackSubcategory` documenting the retry posture ("NOT retried at planner layer — future contributors do not add retry loops here"). Pure documentation. Zero behavioural change.
+- **#4** — Code inspection confirms the invariant holds: `validatePlanPure` runs at line 605, `ValidationError` short-circuits to the `validation_failed` terminal (~line 629), `planCache.set` at line 698 is reached only after validation returned a `QueryPlan`. `planCache.set` additionally guards on `plan.stageResolved === 3` as defence-in-depth. Reinforce with a short invariant comment at the cache-write site so future readers don't re-derive it.
+
+### Decisions
+
+| # | Finding | Decision | Severity | Rationale |
+|---|---------|----------|----------|-----------|
+| 1 | Cache versioning invariant unclear at orchestration level | accept | low | Pure-doc invariant comment at `planCachePure.makeCacheKey` makes the `NORMALISER_VERSION` single-knob contract explicit for the wider surface (validator rules, registry semantics, filter translation). No code change; no second version knob. |
+| 2 | No top-level `executionMode` on `PlannerTrace` | accept | medium | Optional `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` added to the trace type; set once at each branch entry in the orchestrator. Visible proof in Stage 2 / Stage 3 test logs: the principal_mismatch test flips `executionMode` from `stage2_cache` (cache populated by caller 1) to `stage3_live` (caller 2 falls back). Additive, optional field — no consumer breakage. |
+| 3 | Rate-limit retry-posture not documented at classification site | accept | low | Single comment block above `isRateLimitedError` documenting "NOT retried at planner layer by design — handled upstream. Future contributors do not add retry loops here." Pure documentation. |
+| 4 | Cache write timing vs validation boundary — confirm invariant holds | accept (verify + reinforce) | low | Code inspection confirms write at line 698 runs strictly AFTER `validatePlanPure` at line 605. Short invariant comment added at the cache-write site for future readers. |
+
+### Architectural checkpoint
+
+None trigger. All four items are single-file edits with no cross-service impact. The `PlannerTrace.executionMode` addition is an additive optional field — structurally identical to round 2's spec §17 enum extension.
+
+### Scope check
+
+Round 3 touches 3 files:
+- `shared/types/crmQueryPlanner.ts` — 12-line addition to `PlannerTrace` (optional `executionMode` field + JSDoc).
+- `server/services/crmQueryPlanner/planCachePure.ts` — 22-line invariant comment above `makeCacheKey`; key function body unchanged.
+- `server/services/crmQueryPlanner/crmQueryPlannerService.ts` — 4 small edits: (a) retry-posture comment above `isRateLimitedError`; (b) `trace.executionMode = 'stage1'` on stage-1 match; (c) `trace.executionMode = 'stage2_cache'` on cache hit; (d) `trace.executionMode = 'stage3_live'` on Stage 3 entry; (e) invariant comment at `planCache.set` site.
+
+Well under the +500-line / 20-file threshold.
+
+### Implemented
+
+- **`shared/types/crmQueryPlanner.ts`** — extended `PlannerTrace` with optional `executionMode?: 'stage1' | 'stage2_cache' | 'stage3_live'` and JSDoc explaining the top-level observability contract (§17.1). Additive only — field is optional.
+- **`server/services/crmQueryPlanner/planCachePure.ts`** — added a 20-line INVARIANT comment block above `makeCacheKey` codifying the rule: "`NORMALISER_VERSION` is the single knob that invalidates cached plans. Any change that can alter plan SHAPE for a given normalised intent must bump it." Enumerates the wider surface (normaliser hash, registry matcher, validator rule set, filter translation). Calls out that additive trace/analytics field changes do NOT require a bump. Quotes §9.3.1 (cache re-validation is principal-scoped, can't catch shape drift).
+- **`server/services/crmQueryPlanner/crmQueryPlannerService.ts`** —
+  - Added a RETRY POSTURE block above `isRateLimitedError` (per spec §13 / §14.3): "rate-limited errors are NOT retried at the planner layer by design. Retry / backoff belongs upstream in the rate-limiter itself. Future contributors: do NOT add retry loops here — they compound upstream reservation pressure."
+  - `trace.executionMode = 'stage1'` set on Stage 1 match (immediately after `trace.stage1 = { hit: true, ... }`). Comment explains the single-site setter pattern so each terminal emission inherits it without per-site plumbing.
+  - `trace.executionMode = 'stage2_cache'` set on cache hit (immediately after `trace.stage2 = { hit: true }`).
+  - `trace.executionMode = 'stage3_live'` set immediately after `stage2_cache_miss` emission — one site that dominates every subsequent terminal (success, parse failure, validation failure, executor failure).
+  - Added INVARIANT comment block above `planCache.set(...)` at line 698: "this write runs strictly AFTER `validatePlanPure` has returned `validatedPlan` above. `ValidationError` short-circuits the Stage 3 branch to the `validation_failed` terminal so unvalidated drafts can never reach this line. `planCache.set` additionally guards on `plan.stageResolved === 3` as defence-in-depth."
+
+### Verification
+
+- `npx tsc --noEmit` — zero planner-related errors. Pre-existing `ClarificationInbox.tsx` / `SkillAnalyzerExecuteStep.tsx` errors persist unchanged (round-2 baseline, unrelated to this PR).
+- `npx tsx server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts` — **13 / 13 tests pass**. Terminal emission logs visibly carry the new `executionMode` flag: `stage1` on registry-matched intents, `stage2_cache` on cache-hit reuse, `stage3_live` on fresh Stage 3 runs. The principal_mismatch test is particularly instructive — caller 1 populates the cache (`executionMode: 'stage2_cache'` on the reuse test), caller 2 falls back with a visible `executionMode: 'stage3_live'` after `stage2_cache_miss.reason: 'principal_mismatch'`.
+- `npx tsx server/services/crmQueryPlanner/__tests__/planCachePure.test.ts` — **11 / 11 pass** (no behavioural change; only a comment block added).
+- `npx tsx server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts` — **30 / 30 pass** (trace type extension is additive-optional; validator doesn't read trace).
+
+### Deferred
+
+No deferred items from round 3 — all four findings applied in-session.
+
+### Final status for round 3
+
+- Round 1 + 2 + 3 combined: 10 implemented / 4 rejected / 4 deferred.
+- All ChatGPT post-merge polish closed. Reviewer's explicit verdict at start of round: "mergeable without hesitation. No blockers. No correctness issues. Only observability and future-proofing polish left."
+- No open architectural decisions.
+- No unresolved items.
+- Commit + push follows.
 

@@ -133,6 +133,13 @@ function isBudgetExceededError(err: unknown): boolean {
 // but uses the `code` discriminator for the semantic. Rate-limit is transient
 // provider-side infrastructure failure, not user-side ambiguity or malformed
 // model output — it deserves its own internal subcategory for analytics.
+//
+// RETRY POSTURE (spec §13 / §14.3): rate-limited errors are NOT retried at the
+// planner layer by design. Retry / backoff belongs upstream in the rate-limiter
+// itself (budget + reservation windows). The planner classifies, emits a
+// terminal `planner.error_emitted` with `errorSubcategory: 'rate_limited'`,
+// and returns an `ambiguous_intent` artefact. Future contributors: do NOT add
+// retry loops here — they compound upstream reservation pressure.
 function isRateLimitedError(err: unknown): boolean {
   if (typeof err === 'object' && err !== null && 'statusCode' in err) {
     const shape = err as { statusCode?: unknown; code?: unknown };
@@ -256,6 +263,10 @@ async function runQueryPipeline(
   if (stage1Result !== null) {
     trace.stage1 = { hit: true, candidateKey: stage1Result.registryKey };
     trace.validator.passed = true;
+    // Top-level executionMode (§17.1 observability) — set immediately on Stage 1
+    // match so every terminal emission on this branch (success + permission
+    // error) carries the flag without needing per-site plumbing.
+    trace.executionMode = 'stage1';
     await emit({ kind: 'planner.stage1_matched', ...envelope, intentHash, registryKey: stage1Result.registryKey });
 
     try {
@@ -334,6 +345,11 @@ async function runQueryPipeline(
   if (cacheResult.hit) {
     trace.stage2 = { hit: true };
     trace.validator.passed = true;
+    // Top-level executionMode (§17.1 observability) — every terminal emission
+    // from the cache-hit branch (success, permission error, live call failed)
+    // carries this flag so operators can distinguish cache-reuse rows from
+    // fresh Stage 3 rows without digging into nested stage fields.
+    trace.executionMode = 'stage2_cache';
     await emit({
       kind:      'planner.stage2_cache_hit',
       ...envelope,
@@ -420,6 +436,13 @@ async function runQueryPipeline(
     intentHash,
     reason:     cacheResult.reason,
   });
+
+  // Top-level executionMode (§17.1 observability) — we've missed Stage 1 and
+  // Stage 2, so every terminal emission below (Stage 3 success path, parse
+  // failure, validation failure, executor failure) represents a freshly
+  // produced plan. Set once here so every subsequent emission in this branch
+  // inherits the flag.
+  trace.executionMode = 'stage3_live';
 
   // ── Stage 3 — LLM planner ─────────────────────────────────────────────────
   await emit({
@@ -670,6 +693,11 @@ async function runQueryPipeline(
   }
 
   // ── Cache write (§9.3 — only Stage 3 validated plans) ─────────────────────
+  // INVARIANT: this write runs strictly AFTER `validatePlanPure` has returned
+  // `validatedPlan` above. `ValidationError` short-circuits the Stage 3 branch
+  // to the `validation_failed` terminal (see the catch block ~90 lines up) so
+  // unvalidated drafts can never reach this line. `planCache.set` additionally
+  // guards on `plan.stageResolved === 3` as defence-in-depth.
   const cacheConfidence: 'high' | 'medium' | 'low' =
     escalated ? 'low' : draft.confidence >= 0.6 ? 'medium' : 'low';
   planCache.set(intentHash, context.subaccountId, validatedPlan, cacheConfidence);
