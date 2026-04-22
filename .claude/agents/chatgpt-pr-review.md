@@ -55,28 +55,61 @@ For each round:
    - finding_type is "architecture"
    - the finding changes a contract or interface
    - the finding touches more than 3 core services (routes/services/schema/jobs)
-   Auto-defer matching items — do NOT implement them. Reason per item:
-   "auto-deferred: architectural impact — needs separate architectural review".
-   Accumulate in a running auto-deferred list for this round.
-4. Diff gate — run `git diff main...HEAD --stat` before implementing. If the
-   cumulative diff already exceeds 20 files or +500 lines, auto-defer all
-   remaining accepted (non-deferred) items with reason: "auto-deferred: scope
-   limit — cumulative diff exceeds 500 LOC / 20 files". Skip to step 6.
-5. Implement the accepted non-deferred items using Edit, Write, Bash — follow
-   CLAUDE.md and architecture.md conventions. After each implemented item,
-   re-check `git diff main...HEAD --stat`. If the threshold is crossed
-   mid-round, stop and auto-defer remaining accepted items with the scope-limit
-   reason above.
+   For each matching item, apply a size filter:
+   - Small fix (≤30 LOC, single file, no contract break) → implement. Log:
+     "architectural signal but small fix — implementing".
+   - Larger → do NOT implement or silently defer. Print to screen immediately:
+
+       ⚠ Architectural item — decision required
+
+       Finding:
+       <one-line summary>
+
+       Impact:
+       - touches: <files / services affected>
+       - scope: <small / medium / large>
+       - risk: <low / medium / high>
+
+       Recommendation:
+       - Suggested action: <implement / defer / reject>
+       - Rationale: <1 sentence>
+
+       Reply with: "implement" | "defer" | "reject"
+
+   You are present — these are your calls to make. Continue with the other
+   accepted items while waiting for your response.
+4. Scope check — run `git diff main...HEAD --stat`. If cumulative diff exceeds
+   20 files or +500 lines, print a visible warning:
+
+     ⚠ Scope warning: +N lines across M files.
+     Remaining accepted items: [list]
+     Recommendation: stop here — carry the rest to a follow-up PR.
+
+   Then continue implementing. You are present to decide; this is advisory only.
+5. Implement the accepted items (excluding any flagged for your decision in step 3)
+   using Edit, Write, Bash — follow CLAUDE.md and architecture.md conventions.
 6. Run `npm run lint && npm run typecheck` — fix any issues before continuing
 7. Append the round to the session log with a Top themes line using finding_type
    vocabulary (e.g. null_check, naming, architecture) — not free-form text.
-   Include an Auto-deferred subsection listing any auto-deferred items and
-   their one-sentence reasons.
 8. Print the round summary and updated diff:
 
-  Round <N> done — <X> implemented, <Y> rejected, <Z> deferred, <A> auto-deferred.
-  Auto-deferred this round:
-  - <item> — <reason>
+  Round <N> done — <X> implemented, <Y> rejected, <Z> deferred.
+  [If architectural items were flagged for your decision, repeat each block:]
+  ⚠ Architectural item — decision required
+
+  Finding:
+  <one-line summary>
+
+  Impact:
+  - touches: <files / services affected>
+  - scope: <small / medium / large>
+  - risk: <low / medium / high>
+
+  Recommendation:
+  - Suggested action: <implement / defer / reject>
+  - Rationale: <1 sentence>
+
+  Reply with: "implement" | "defer" | "reject"
 
   --- UPDATED DIFF ---
   <git diff main...HEAD output>
@@ -139,10 +172,8 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    Silent failure: if write fails or JSON is invalid, increment a session-level
    `index_write_failures` counter (initialised to 0 at session start), log a
    one-line warning in the session log, and continue — do NOT block finalization.
-5. Deferred backlog: append all deferred and auto-deferred items to
-   tasks/todo.md under this structure — create the top-level heading if it
-   does not exist, create the subheading if it does not exist, append items
-   only (never overwrite existing content):
+5. Deferred backlog: append all deferred items (only those explicitly deferred
+   via the decision table — no auto-defer) to tasks/todo.md:
 
      ## PR Review deferred items
 
@@ -150,33 +181,28 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
 
      - [ ] <finding> — <one-sentence reason for deferral>
 
-   Reason format by type:
-   - Normal defer: the rationale from the Decisions table
-   - Architectural auto-defer: "auto-deferred: architectural impact — <one phrase>"
-   - Scope auto-defer: "auto-deferred: scope limit — cumulative diff exceeded threshold"
-
    Before each item scan for a similar existing entry (same finding_type OR
    same leading ~5 words) — skip if already present.
    Do NOT write to tasks/review-logs/_deferred.md.
 6. Check whether structural changes should update architecture.md or
    capabilities.md — update if yes, skip if no
-7. Print the deferred items summary so the user can review what was held back
-   and why:
+7. Print the full session summary to screen — this is the primary output since
+   you are present throughout:
 
-     Deferred to tasks/todo.md § PR Review deferred items / PR #<N> — <branch>:
-       (normal defers)
+     Session summary — PR #<N> — <branch>:
+
+     Deferred items (written to tasks/todo.md):
        - <item> — <reason>
-       Auto-deferred — architectural impact:
-       - <item> — needs separate architectural review
-       Auto-deferred — scope limit:
-       - <item> — cumulative diff exceeded threshold
 
-   If index_write_failures > 0, print:
-     ⚠ Index write failures: <N> — pattern tracking may be incomplete for this session.
+     Architectural items surfaced this session (your decisions still needed
+     if not yet resolved):
+       - <item> — Recommendation: <action>
+
+     If index_write_failures > 0:
+       ⚠ Index write failures: <N> — pattern tracking may be incomplete.
 
 8. Print: "Ready to merge — PR #<N>: <url>"
-9. Print: "Session complete: <N> rounds, <X> implemented, <Y> rejected,
-           <Z> deferred, <A> auto-deferred."
+9. Print: "Session complete: <N> rounds, <X> implemented, <Y> rejected, <Z> deferred."
 
 ## Future Hook
 
@@ -223,14 +249,12 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
 
   ## Final Summary
   - Rounds: <N>
-  - Implemented: <X> | Rejected: <Y> | Deferred: <Z> | Auto-deferred: <A>
+  - Implemented: <X> | Rejected: <Y> | Deferred: <Z>
   - Index write failures: <N> (0 = clean)
-  - Deferred to tasks/todo.md § PR Review deferred items / PR #<N> — <branch>:
+  - Deferred to tasks/todo.md § PR Review deferred items / PR #<N>:
     - <item> — <reason>
-  - Auto-deferred (architectural impact):
-    - <item> — <reason>
-  - Auto-deferred (scope limit):
-    - <item> — <reason>
+  - Architectural items surfaced to screen (user decisions):
+    - <item> — <recommendation>
   - KNOWLEDGE.md updated: yes (<N> entries) | no
   - architecture.md updated: yes | no
   - PR: #<N> — ready to merge at <url>
