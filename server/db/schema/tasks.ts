@@ -18,7 +18,7 @@ export const tasks = pgTable(
     title: text('title').notNull(),
     description: text('description'),
     brief: text('brief'),
-    status: text('status').notNull().default('inbox'),
+    status: text('status').notNull().default('inbox').$type<'inbox' | 'in_progress' | 'done' | 'cancelled' | 'awaiting_clarification' | 'awaiting_approval' | 'closed_with_answer' | 'closed_with_action' | 'closed_no_action'>(),
     priority: text('priority').notNull().default('normal').$type<'low' | 'normal' | 'high' | 'urgent'>(),
     assignedAgentId: uuid('assigned_agent_id')
       .references(() => agents.id),

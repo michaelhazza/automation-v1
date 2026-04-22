@@ -1,6 +1,7 @@
 import type { BriefApprovalCard as BriefApprovalCardType } from '../../../../shared/types/briefResultContract.js';
 import type { ChallengeItem } from '../../../../shared/types/briefSkills.js';
 import { ConfidenceBadge } from './ConfidenceBadge.js';
+import { deriveIsDisabled, deriveRiskContainerStyle, deriveAffectedLabel, RISK_BADGE_STYLES } from './ApprovalCardPure.js';
 
 interface ApprovalCardProps {
   artefact: BriefApprovalCardType;
@@ -9,11 +10,6 @@ interface ApprovalCardProps {
   onReject?: (artefactId: string) => void;
 }
 
-const RISK_STYLES: Record<string, string> = {
-  low: 'border-blue-200 bg-blue-50',
-  medium: 'border-yellow-200 bg-yellow-50',
-  high: 'border-red-200 bg-red-50',
-};
 
 const SEVERITY_STYLES: Record<ChallengeItem['severity'], string> = {
   low: 'text-blue-700 bg-blue-50',
@@ -22,8 +18,8 @@ const SEVERITY_STYLES: Record<ChallengeItem['severity'], string> = {
 };
 
 export function ApprovalCard({ artefact, isSuperseded, onApprove, onReject }: ApprovalCardProps) {
-  const isDisabled = isSuperseded || artefact.executionStatus === 'completed' || artefact.executionStatus === 'running';
-  const riskStyle = RISK_STYLES[artefact.riskLevel] ?? RISK_STYLES.medium;
+  const isDisabled = deriveIsDisabled(artefact, isSuperseded);
+  const riskStyle = deriveRiskContainerStyle(artefact.riskLevel);
 
   return (
     <div className={`rounded-lg border p-4 ${riskStyle} ${isSuperseded ? 'opacity-50' : ''}`}>
@@ -31,18 +27,14 @@ export function ApprovalCard({ artefact, isSuperseded, onApprove, onReject }: Ap
         <p className="text-sm font-medium text-gray-900">{artefact.summary}</p>
         <div className="flex items-center gap-1 shrink-0">
           {artefact.confidence !== undefined && <ConfidenceBadge confidence={artefact.confidence} />}
-          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
-            artefact.riskLevel === 'high' ? 'bg-red-100 text-red-700' :
-            artefact.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-            'bg-blue-100 text-blue-700'
-          }`}>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${RISK_BADGE_STYLES[artefact.riskLevel] ?? RISK_BADGE_STYLES.medium}`}>
             {artefact.riskLevel} risk
           </span>
         </div>
       </div>
 
-      {artefact.affectedRecordIds.length > 0 && (
-        <p className="text-xs text-gray-500 mb-3">Affects {artefact.affectedRecordIds.length} records</p>
+      {deriveAffectedLabel(artefact.affectedRecordIds.length) && (
+        <p className="text-xs text-gray-500 mb-3">{deriveAffectedLabel(artefact.affectedRecordIds.length)}</p>
       )}
 
       {artefact.executionStatus === 'completed' && (

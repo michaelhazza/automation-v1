@@ -2,10 +2,56 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { getBriefConversation, assertCanViewConversation } from '../services/briefConversationService.js';
+import {
+  getBriefConversation,
+  assertCanViewConversation,
+  findOrCreateBriefConversation,
+} from '../services/briefConversationService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
+import { db } from '../db/index.js';
+import { conversationMessages } from '../db/schema/index.js';
+import { eq, asc } from 'drizzle-orm';
 
 const router = Router();
+
+// ── Scope-level find-or-create helpers ───────────────────────────────────────
+
+async function handleScopedConversation(
+  scopeType: 'task' | 'agent_run',
+  scopeId: string,
+  orgId: string,
+  subaccountId?: string,
+) {
+  const conv = await findOrCreateBriefConversation({ organisationId: orgId, subaccountId, scopeType, scopeId });
+  const messages = await db
+    .select()
+    .from(conversationMessages)
+    .where(eq(conversationMessages.conversationId, conv.id))
+    .orderBy(asc(conversationMessages.createdAt));
+  return { conversationId: conv.id, messages };
+}
+
+// GET /api/conversations/task/:taskId — find-or-create conversation for a task
+router.get(
+  '/api/conversations/task/:taskId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const result = await handleScopedConversation('task', req.params.taskId, req.orgId!);
+    res.json(result);
+  }),
+);
+
+// GET /api/conversations/agent-run/:runId — find-or-create conversation for an agent run
+router.get(
+  '/api/conversations/agent-run/:runId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const result = await handleScopedConversation('agent_run', req.params.runId, req.orgId!);
+    res.json(result);
+  }),
+);
 
 // GET /api/conversations/:conversationId — metadata + paginated messages
 router.get(

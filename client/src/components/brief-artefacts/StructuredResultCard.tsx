@@ -1,6 +1,7 @@
 import type { BriefStructuredResult } from '../../../../shared/types/briefResultContract.js';
 import { ConfidenceBadge } from './ConfidenceBadge.js';
 import { BudgetContextStrip } from './BudgetContextStrip.js';
+import { deriveColumns, deriveTruncationNotice } from './StructuredResultCardPure.js';
 
 interface StructuredResultCardProps {
   artefact: BriefStructuredResult;
@@ -9,7 +10,8 @@ interface StructuredResultCardProps {
 }
 
 export function StructuredResultCard({ artefact, isSuperseded, onSuggestionClick }: StructuredResultCardProps) {
-  const columns = artefact.columns ?? (artefact.rows[0] ? Object.keys(artefact.rows[0]).map(k => ({ key: k, label: k })) : []);
+  const columns = deriveColumns(artefact);
+  const truncationNotice = deriveTruncationNotice(artefact);
 
   return (
     <div className={`rounded-lg border bg-white p-4 ${isSuperseded ? 'opacity-50' : ''}`}>
@@ -54,9 +56,9 @@ export function StructuredResultCard({ artefact, isSuperseded, onSuggestionClick
               ))}
             </tbody>
           </table>
-          {artefact.truncated && (
+          {truncationNotice && (
             <p className="px-3 py-1.5 text-xs text-gray-400 border-t border-gray-100">
-              Showing {artefact.rows.length} of {artefact.rowCount} results
+              {truncationNotice}
             </p>
           )}
         </div>

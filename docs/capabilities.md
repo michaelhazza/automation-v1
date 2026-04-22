@@ -225,6 +225,18 @@ Every user request for something the platform doesn't support today becomes stru
 - **Dogfood-ready** — the same task board the platform offers to end-users carries the request queue, so the platform team triages feature signal in the same UI they ship to customers
 - **Auditable lifecycle** — open → triaged → accepted/rejected/shipped/duplicate states with resolution notes, so every piece of user intent has a traceable outcome
 
+### Universal Brief
+
+A conversational intake surface that lets agency operators and clients describe what they want in natural language. The platform turns the conversation into structured work — clarifying before acting, challenging where needed, and presenting proposed actions for explicit approval.
+
+- **Chat-first entry point** — Operators open a Brief from the global sidebar; the AI starts the conversation, not a form
+- **Smart clarification** — Before acting, the AI asks targeted clarifying questions ranked by how much each answer changes the plan; simple requests proceed immediately without friction
+- **Assumption challenge** — For consequential actions, the AI surfaces potential risks and edge cases as concern cards before the operator approves — so known unknowns are surfaced, not buried
+- **Structured approvals** — Actions that write data, send messages, or modify records require explicit one-click approval before execution; risk level (low / medium / high) drives what's required
+- **Artefact trail** — Every Brief produces a structured output artefact (result table, approval card, clarification questions) that persists in the conversation for audit and replay
+- **Task conversation pane** — Every task on the task board has a built-in chat pane for async Q&A with the AI team; context is scoped to the individual task
+- **Learned Rules attribution** — When the AI's output is influenced by a Learned Rule, the rule is cited directly in the Brief output with a link to the rules library
+
 ### Configuration Assistant
 
 AI-powered conversational configuration for agents, skills, schedules, and data sources. Helps org admins set up and manage their platform through natural language.
@@ -793,7 +805,9 @@ Complete list of all 112 skills.
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
-| `ask_clarifying_question` | Pause run and ask user clarifying question | LLM | Universal |
+| `ask_clarifying_question` | Pause run and ask user clarifying question — surfaces a `ClarifyingQuestionsCard` artefact in the Brief conversation; run transitions to `awaiting_clarification` until the user replies | LLM | Universal |
+| `ask_clarifying_questions` | Structured multi-question clarification skill for complex Briefs — generates a scored question set ranked by informational value; rendered as a collapsible `ClarifyingQuestionsCard` in the Brief UI | LLM | Universal |
+| `challenge_assumptions` | Reviews a proposed action or plan and produces a `ChallengeOutput` listing potential concerns by severity (low/medium/high); surfaced on the `ApprovalCard` before the user approves | LLM | Universal |
 | `read_priority_feed` | Read, claim, or release prioritised work feed items | Deterministic | Universal |
 | `request_approval` | Escalate decision to human operator for review | LLM | — |
 | `spawn_sub_agents` | Split work into 2-3 parallel sub-tasks executed simultaneously | LLM | — |
