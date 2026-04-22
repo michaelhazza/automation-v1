@@ -294,3 +294,12 @@ All non-critical (graded-failure tier; drop + warn on transient DB failure, no r
 ### PR #171 — claude-md-updates (2026-04-22)
 
 - [ ] Add non-goals enforcement gate to spec-reviewer — valid improvement but requires spec-reviewer to reason about product strategy (not just structural spec quality); out of scope for this PR; revisit when spec-reviewer is next revised.
+
+---
+
+## Deferred spec decisions — crm-query-planner
+
+**Captured:** 2026-04-22
+**Source log:** `tasks/review-logs/spec-review-log-crm-query-planner-1-20260422T023318Z.md`
+
+- [ ] Finding #20 — §21.3 "Phased rollout per org" vs `staged_rollout: never_for_this_codebase_yet` framing — AUTO-DECIDED (accept clarifying sentence). Rationale: §21.3 describes per-org capability grants via the skill-permission system, not infrastructure-level traffic-shifted rollout. The framing assumption targets % traffic / feature flags / canary deploys; per-org permission grants are standard operational practice. Clarifying sentence added to §21.3 to pre-empt future confusion. Human to verify the distinction is still intentional at implementation time.

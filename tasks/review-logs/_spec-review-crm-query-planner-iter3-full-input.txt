@@ -1,3 +1,28 @@
+You are reviewing a Development Specification for the CRM Query Planner (v1) feature. The spec lives at `tasks/builds/crm-query-planner/spec.md`.
+
+This is the **third** review pass. Passes 1 and 2 surfaced 32 findings total, all applied. Pass 2 was heavy on contract-drift against existing repo primitives (`llmRouter.routeCall`, `getProviderRateLimiter`, `ghlReadHelpers`, `withPrincipalContext`, `ActionDefinition`). Please verify that the corrections landed cleanly and check for **new** structural, consistency, or readiness problems — including any inconsistencies introduced by the iter-2 edits themselves.
+
+Focus on:
+
+- Contradictions between sections (same concept described two different ways)
+- Stale retired language surviving in prose after a decision was reversed
+- Load-bearing claims without a named enforcement mechanism
+- File inventory drift (files referenced in prose but missing from the §5 layout, or vice versa)
+- Schema / type / event overlaps with no source-of-truth statement
+- Sequencing bugs (item A depends on item B, but B ships in a later phase)
+- Invariants stated in one section but violable elsewhere
+- Missing per-item verdicts
+- Unnamed new primitives ("a new service that ..." without a concrete file path / function name)
+- Type / contract drift against `shared/types/briefResultContract.ts`
+- Type / contract drift against existing service primitives
+- Any new inconsistencies introduced by the iter-2 edits themselves (e.g. did the new `allowedFields` map break anything? does the new `plannerCostPure` calculator's shape stay consistent with `BriefCostPreview`?)
+
+Framing assumptions (do NOT flag these — they are intentional for this codebase):
+- Pre-production, no staged infrastructure rollout, no feature flags
+- Rapid evolution, static gates primary, pure-function unit tests, limited integration tests
+- Prefer existing primitives over new abstractions
+
+Please produce free-form review feedback. Be specific about section numbers and line ranges when possible.
 # CRM Query Planner — Development Spec v1
 
 **Status:** Draft — handoff target is implementation after `spec-reviewer` pass.
@@ -154,21 +179,12 @@ User / agent emits intent → Brief chat surface
                               ↓
      ┌─────────────────────── Stage 3 ─────────────────────────┐
      │  schemaContext = buildSchemaContext(subaccountId, hints) │
-     │  response = await llmRouter.routeCall({                  │
-     │    messages: buildPrompt(intent, schemaContext),         │
-     │    context: {                                            │
-     │      organisationId, subaccountId, runId,                │
-     │      sourceType: 'system',                               │
-     │      taskType: 'crm_query_planner',                      │
-     │      featureTag: 'crm-query-planner',                    │
-     │      model: resolvePlannerTier(orgId, escalate:false),   │
-     │      systemCallerPolicy: 'bypass_routing',               │
-     │    },                                                    │
-     │    postProcess: (c) => DraftQueryPlanSchema.parse(       │
-     │      JSON.parse(c)),                                     │
+     │  llmRouter.routeCall({                                   │
+     │    task: 'crm_query_planner',                            │
+     │    model: resolvePlannerTier(orgId, escalate:false),     │
+     │    messages: [ promptWithSchemaAndIntent ],              │
+     │    schema: DraftQueryPlanSchema                          │
      │  })                                                      │
-     │  draft = DraftQueryPlanSchema.parse(                      │
-     │    JSON.parse(response.content))                         │
      │  → DraftQueryPlan { confidence, canonicalCandidateKey, … }│
      │  if confidence < ESCALATION_THRESHOLD → one retry at     │
      │  escalated tier; no further retries                      │
@@ -250,9 +266,7 @@ server/
 ├── services/
 │   ├── canonicalDataService.ts                 # [existing — extend] add non-metric reads
 │   ├── systemPnlService.ts                     # [existing — extend in P3] add planner metrics subsection
-│   ├── systemSettingsService.ts                # [existing — extend] add planner-related rows (§21.2) to the `SETTING_KEYS` allowlist so the new keys can be written/read through the existing settings path
-│   └── adapters/
-│       └── ghlReadHelpers.ts                   # [existing — extend in P2] add `listGhlOpportunities`, `listGhlAppointments`, `listGhlConversations`, `listGhlTasks` to cover the v1 live-query surface (§13.1 dispatcher). Current exports cover contacts / users / automations / from-addresses / from-numbers only; the additions land in P2 with the live executor
+│   └── systemSettingsService.ts                # [existing — extend] add planner-related rows (§21.2) to the `SETTING_KEYS` allowlist so the new keys can be written/read through the existing settings path
 ├── routes/
 │   └── crmQueryPlanner.ts                      # §18 — POST /api/crm-query-planner/query
 ├── config/
@@ -402,10 +416,8 @@ export interface QueryPlan {
   validated: true;                 // literal — present only after Stage 4
 }
 
-export interface DraftQueryPlan extends Omit<QueryPlan, 'validated' | 'stageResolved' | 'costPreview'> {
-  // Shape Stage 3 emits before validation. `costPreview` is NOT on the draft
-  // — the LLM must not emit planner-derived cost; `crmQueryPlannerService`
-  // fills it post-parse via `computePlannerCostPreview` (§16.2.1).
+export interface DraftQueryPlan extends Omit<QueryPlan, 'validated' | 'stageResolved'> {
+  // Shape Stage 3 emits before validation
   clarificationNeeded?: boolean;
   clarificationPrompt?: string;
 }
@@ -596,7 +608,7 @@ The synonym map is the primary lever for Stage 1 hit rate. The pressure test in 
 ## 8. Stage 1 — Registry-backed matcher
 
 **File:** `server/services/crmQueryPlanner/registryMatcherPure.ts`
-**Stage contract:** given a `NormalisedIntent` + the `canonicalQueryRegistry` + the caller's `PrincipalContext`, return a `QueryPlan` or `null`. The principal context is required because the Stage 1 reduced validator subset (§8.3) runs Rule 9 (projection overlap) and Rule 10 (per-entry capability check), both of which are caller-specific. Stage 1 cannot be pure over `(intent, registry)` alone.
+**Stage contract:** given a `NormalisedIntent` + the `canonicalQueryRegistry`, return a `QueryPlan` or `null`.
 
 ### 8.1 Algorithm
 
@@ -702,7 +714,7 @@ Plan cache is keyed on `(subaccountId, intentHash)` only; it is **not** scoped p
 On every cache hit the service reruns the subset of validator rules that depend on the caller's principal (not on the plan's shape):
 
 1. **Rule 9 — projection overlap** — every `plan.projection[]` field must be permitted for `plan.primaryEntity` under the caller's principal context (same check Stage 4 runs post-LLM).
-2. **Rule 10 — per-entry capability check** — caller must still possess every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities` (canonical / hybrid plans).
+2. **Rule 11 — per-entry capability check** — caller must still possess every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities` (canonical / hybrid plans).
 
 If either fails, the cache hit is **discarded** (not evicted — the entry remains for other principals) and the caller falls through to Stage 3. The plan itself is not mutated. The two rules are pure functions over `(plan, principalContext, registry)`; no extra LLM cost and no extra DB round-trip beyond what §16.4's `withPrincipalContext` nesting already incurs.
 
@@ -795,26 +807,24 @@ Prompt is assembled as a single system + user message pair. No few-shot examples
 
 ### 10.3 Tier resolution
 
-`resolvePlannerTier` returns a **concrete provider/model string** (e.g. `'claude-haiku-4-5'`, `'claude-sonnet-4-6'`) — not an abstract tier name. `llmRouter.routeCall` in `bypass_routing` mode expects a concrete model identifier in `context.model`; it does not resolve tiers.
-
 ```ts
-function resolvePlannerTier(orgId: string, escalate: boolean): string {
+function resolvePlannerTier(orgId: string, escalate: boolean): ModelTier {
   const config = loadOrgPlannerConfig(orgId);  // org-level override, else system default
-  return escalate ? config.escalation_model : config.default_model;
+  return escalate ? config.escalation_tier : config.default_tier;
 }
 ```
 
-**System defaults** (in `systemSettings` table; the values stored are the same provider/model strings the router passes to the adapter registry — `claude-haiku-4-5` and `claude-sonnet-4-6` are the current v1 defaults; the key names retain the legacy `_tier` suffix to match the rows already planned for `SETTING_KEYS` in §21.2):
+**System defaults** (in `systemSettings` table or hardcoded constants for v1):
 
 ```ts
 {
-  crm_query_planner_default_tier:       'claude-haiku-4-5',
-  crm_query_planner_escalation_tier:    'claude-sonnet-4-6',
+  crm_query_planner_default_tier: 'haiku',
+  crm_query_planner_escalation_tier: 'sonnet',
   crm_query_planner_confidence_threshold: 0.6,
 }
 ```
 
-Per-org overrides live in `organisation_hierarchies.operational_config.crm_query_planner` if present. Values are always concrete model strings, never abstract tier tokens.
+Per-org overrides live in `organisation_hierarchies.operational_config.crm_query_planner` if present.
 
 ### 10.4 Escalation (single retry, never a loop)
 
@@ -858,7 +868,7 @@ Integration tests for `llmPlanner.ts` mock `llmRouter.routeCall` and assert:
 ## 11. Stage 4 — Validator
 
 **File:** `server/services/crmQueryPlanner/validatePlanPure.ts`
-**Stage contract:** given a `DraftQueryPlan` + `SchemaContext` + `CanonicalQueryRegistry` + the caller's `PrincipalContext`, return a validated `QueryPlan` or `ValidationError`. The principal context is required for Rule 9 (projection overlap, read-permission check) and Rule 10 (per-entry capability check); validator purity holds over the extended argument tuple. `validatePlanPure` is pure over its full input — same inputs always produce the same result, no hidden state.
+**Stage contract:** given a `DraftQueryPlan` + `SchemaContext` + `CanonicalQueryRegistry`, return a validated `QueryPlan` or `ValidationError`.
 
 ### 11.1 Authority
 
@@ -887,7 +897,6 @@ Per brief §11.4, in order:
 
    The rule never silently strips filters. Dropping a user-specified filter would change query semantics — which is a correctness bug, not a tie-breaker. Promotion keeps `canonicalCandidateKey` populated because both canonical and hybrid executors dereference it to find the registry handler.
 9. **Projection overlap** — `projection` fields must be a subset of fields permitted for `primaryEntity` on the caller's principal context (read-permission check).
-10. **Per-entry capability check** — for canonical and hybrid plans (`source !== 'live'`), the caller's `capabilityMap` must contain every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities`. This rule enforces the per-entry gate that the canonical executor otherwise runs at dispatch (§12.1); running it in the validator means cache hits and Stage 3 drafts are caught before executor dispatch. For v1, `requiredCapabilities` is forward-looking metadata (see §12.1 note) — the rule executes against whatever capabilities the caller's `capabilityMap` actually exposes, treating missing entries as absent.
 
 ### 11.3 Validation failure
 
@@ -970,10 +979,6 @@ export async function executeCanonical(
 ```
 
 `MissingPermissionError` is a small service-layer error thrown by the executor and caught by `crmQueryPlannerService.ts` → emitted as `BriefErrorResult { errorCode: 'missing_permission', message }`.
-
-**Capability taxonomy note for v1.** Per-entry `requiredCapabilities` slugs (`canonical.contacts.read`, `canonical.opportunities.read`, `canonical.revenue.read`, `clientpulse.health_snapshots.read`, etc.) describe the read scope each registry handler logically needs; the repo does **not** currently own a canonical-data integration or a `canonical.*` capability catalogue. For v1 the per-entry check executes against the caller's `capabilityMap.read_capabilities` (existing `CapabilityMap` shape from `server/services/capabilityMapService.ts`) and treats any slug not yet registered anywhere as absent. The only capability actually granted via the skill system in v1 is `crm.query` (the `actionType: 'crm.query'` registered in §18.2) — that is the v1 gate. The per-entry slugs stay on the registry as forward-looking metadata; they become live gates in a v2 follow-up that declares the canonical-data capability surface concretely. Consequently, a v1 agent granted `crm.query` passes the route gate but can hit the per-entry block for any entry whose `requiredCapabilities` include a not-yet-granted `canonical.*` slug — until v2 ships, treat the per-entry list on each entry as aspirational: the concrete v1 enforcement path is `crm.query` route gate → canonical dispatch, with per-entry blocks firing only when the caller's `capabilityMap` actually grants the listed slugs (none in v1 unless the org has grafted `canonical.*` onto its reference manually).
-
-This is tracked explicitly in Deferred Items so the per-entry enforcement becomes a real gate the moment the capability source-of-truth file lands.
 
 ### 12.2 Registry — 8 v1 entries
 
@@ -1170,7 +1175,7 @@ export async function executeLive(
 }
 ```
 
-`dispatchGhlRead` is a small pure-ish helper (lives alongside `liveExecutor.ts`) that maps `translated.endpoint` (a discriminated union — one of `'listContacts' | 'listOpportunities' | 'listAppointments' | 'listConversations' | 'listTasks' | 'listUsers'`) to the correct `ghlReadHelpers` export. Current exports of `server/services/adapters/ghlReadHelpers.ts` cover contacts / users / automations / from-addresses / from-numbers only — P2 extends the file with `listGhlOpportunities`, `listGhlAppointments`, `listGhlConversations`, `listGhlTasks` (see §5 file inventory for the `[existing — extend in P2]` marker). `ghlReadHelpers` does **not** expose a generic `.query()`; the planner calls the specific per-resource helpers and the dispatcher is the mapping layer. P1 cannot dispatch live reads because the v1 planner skips live entirely in P1 (Stage 3 stub → `unsupported_query`); the helper additions land alongside the live executor in P2.
+`dispatchGhlRead` is a small pure-ish helper (lives alongside `liveExecutor.ts`) that maps `translated.endpoint` (a discriminated union — one of `'listContacts' | 'listOpportunities' | 'listAppointments' | 'listConversations' | 'listTasks' | 'listUsers'` — each entry tied to the corresponding `listGhl*` helper) to the correct `ghlReadHelpers` export: `listGhlContacts`, `listGhlAutomations`, `listGhlUsers`, `listGhlFromAddresses`, `listGhlFromNumbers`, and any further read helpers added to `server/services/adapters/ghlReadHelpers.ts` to cover the v1 live-query surface. `ghlReadHelpers` does **not** expose a generic `.query()`; the planner calls the specific per-resource helpers and the dispatcher is the mapping layer.
 
 ### 13.2 Plan-to-provider translation
 
@@ -1357,7 +1362,7 @@ export function generateApprovalCards(
 }
 ```
 
-`context.defaultSenderIdentifier` is a **new** field on the planner-local `NormaliserContext` type (declared in `server/services/crmQueryPlanner/resultNormaliser.ts` — it is not an existing repo primitive). The planner populates it at runQuery entry by resolving the subaccount's default sender identifier from `subaccount_crm_connections` (existing table used by the shipped `crm.send_email` dispatch path — check that path for the canonical resolution query; the planner reuses that lookup, it does not reinvent it). If the lookup returns no connected sender, the card generator skips email-card emission. The `NormaliserContext` type is added in P1 alongside the rest of the planner's local types.
+`context.defaultSenderIdentifier` is a new `NormaliserContext` field populated from the caller's permission context (see §16.4) — it's the CRM-connected sender identifier for the subaccount (existing convention in `crm.send_email` dispatch paths). If the subaccount has no connected sender, the card generator skips email-card emission.
 
 Approval cards are **suggestions only** — the chat surface renders them; the user fills `subject`/`body` and approves; the approval creates a normal review-gated action via `actionService`. The planner does not execute the action. The `actionArgs` emitted by the generator MUST satisfy the registered action's `parameterSchema` — the registered schema is the source of truth, this generator follows it.
 
@@ -1409,49 +1414,32 @@ The call parameters lock:
 
 ### 16.2 `runCostBreaker`
 
-Per-run cost enforcement is **not called from the planner directly**. `runCostBreaker.assertWithinRunBudgetFromLedger` (`server/lib/runCostBreaker.ts`) is a post-ledger helper — it requires an already-inserted `llm_requests` row id — and it is invoked by `llmRouter` internally on every `routeCall` that carries a `runId`. The planner therefore gets per-run budget enforcement for free, as a side-effect of every Stage 3 call: if the run's ledger sum exceeds the ceiling when the Stage 3 call completes, the router surfaces a `BudgetExceededError`; `crmQueryPlannerService` catches it and emits `BriefErrorResult { errorCode: 'cost_exceeded' }`.
-
-When the caller is a human-initiated Brief (no `runId`), per-run enforcement does not apply — there is no run to accumulate against. The per-query cent ceiling below is the only planner-local cost gate in that case; the router's own budget checks (per-subaccount, per-day) still apply.
-
-Live-executor dispatch does NOT make a new `routeCall`, so `runCostBreaker` does not re-fire pre-dispatch for live. The per-query cent ceiling (below) is the planner's gate before live dispatch when Stage 3 ran.
+Every planner invocation runs inside a `runId` context (provided by the caller). `runCostBreaker`'s existing `assertWithinRunBudgetFromLedger` is called before Stage 3 and before live-executor dispatch — the planner does not need new budget logic. If the run's ledger sum exceeds the ceiling, the call throws and the planner surfaces `BriefErrorResult { errorCode: 'cost_exceeded' }`.
 
 **Per-query cent ceiling (new — local to planner):** independent of per-run. System default `100` cents (configurable via `systemSettings.crm_query_planner_per_query_cents`). The check fires **after Stage 3 completes** (including any escalation retry, per §10.3), before the validator dispatches to the executor: if the accumulated planner cost for this invocation exceeds the ceiling, short-circuit with `BriefErrorResult { errorCode: 'cost_exceeded' }` without executor dispatch. Pre-Stage-3 there is zero accumulated planner cost — the ceiling is inherently a post-escalation guard. This prevents one exploratory query that escalates to the high tier from burning its entire share of the run's ceiling.
 
 ### 16.2.1 Cost attribution — one calculator, one source-of-truth field
 
-There is exactly one planner-side cost calculator (`plannerCostPure.ts`) and exactly one source-of-truth field (`QueryPlan.costPreview: BriefCostPreview`, §6.2). The wire contract's `BriefCostPreview` (`shared/types/briefResultContract.ts`) is the final shape — `{ predictedCostCents, confidence, basedOn }`, no actual-cost slot. Actual cost is a separate observability signal, carried only on `planner.result_emitted.actualCostCents` and not on the plan or the wire response.
+There is exactly one planner-side cost calculator (`plannerCostPure.ts`) and exactly one source-of-truth field (`QueryPlan.costPreview: BriefCostPreview`, §6.2). Every other cost surface — the API response's top-level `costPreview` (§18.1), the `planner.executor_dispatched.predictedCostCents` event payload, the `planner.result_emitted.actualCostCents` event payload, the per-query ceiling check above — derives from that field, or from the post-execution `actualCostCents` that the calculator also emits.
 
 The calculator is a pure function:
 
 ```ts
 // server/services/crmQueryPlanner/plannerCostPure.ts
-export function computePlannerCostPreview(input: {
-  stage3ParseUsage?:      { inputTokens: number; outputTokens: number; model: string };
+export function computePlannerCost(input: {
+  stage3ParseUsage?:    { inputTokens: number; outputTokens: number; model: string };
   stage3EscalationUsage?: { inputTokens: number; outputTokens: number; model: string };
-  liveCallCountEstimate?:   number;
-  hybridLiveCallCountEstimate?: number;
-}): BriefCostPreview {
-  /* pure — token×price derivation via pricingService rates; returns
-     { predictedCostCents, confidence: 'low'|'medium'|'high',
-       basedOn: 'planner_estimate' | 'cached_similar_query' | 'static_heuristic' } */
-}
-
-export function computeActualCostCents(input: {
-  stage3ParseUsage?:      { inputTokens: number; outputTokens: number; model: string };
-  stage3EscalationUsage?: { inputTokens: number; outputTokens: number; model: string };
-  liveCallCount?:         number;
-  hybridLiveCallCount?:   number;
-}): number { /* pure — sum of token×price + per-live-call cost from pricingService */ }
+  liveCallCount?:       number;
+  hybridLiveCallCount?: number;
+}): BriefCostPreview { /* pure — token×price derivation via pricingService rates */ }
 ```
 
-- `computePlannerCostPreview` runs **pre-dispatch** and fills `QueryPlan.costPreview`. `confidence` reflects source reliability (static_heuristic for Stage 1, cached_similar_query for Stage 2, planner_estimate for Stage 3). `basedOn` is picked by the caller at call-site.
-- `computeActualCostCents` runs **post-dispatch** to populate `planner.result_emitted.actualCostCents` and to feed the per-query ceiling check described in §16.2.
-- Stage 3 token counts come from the `ProviderResponse.usage` returned by `llmRouter.routeCall` (the router does NOT return ledger rows — ledger persistence is its internal side-effect; the `usage` object is the caller-visible cost signal). `crmQueryPlannerService` captures the `usage` object from each Stage 3 call (initial parse + optional escalation retry) and feeds it to the calculator.
-- Live-call / hybrid-call counts come from the executor layer (each executor increments a local counter as it dispatches).
+- Inputs:
+  - Stage 3 token counts come from the `ProviderResponse.usage` returned by `llmRouter.routeCall` (the router does NOT return ledger rows — ledger persistence is its internal side-effect; the `usage` object is the caller-visible cost signal). `crmQueryPlannerService` captures the `usage` object from each Stage 3 call (initial parse + optional escalation retry) and feeds it to the calculator.
+  - Live-call / hybrid-call counts come from the executor layer (each executor increments a local counter as it dispatches).
+- Outputs: a fully-populated `BriefCostPreview` with both `predicted` and `actual` slots. Pre-dispatch callers read `predicted`; post-dispatch callers read `actual`.
 
-The per-query ceiling check reads `computeActualCostCents(...)` (after Stage 3, before executor dispatch) and compares to `systemSettings.crm_query_planner_per_query_cents`. Per-run ceiling is enforced by `runCostBreaker` inside the router, post-ledger — see §16.2 for the primitive boundary.
-
-Because `BriefCostPreview` carries only predicted cost and `DraftQueryPlan` must not force the LLM to emit planner-derived values, `DraftQueryPlan` is **`Omit<QueryPlan, 'validated' | 'stageResolved' | 'costPreview'>`**. The planner fills `costPreview` after the Stage 3 parse succeeds, using `computePlannerCostPreview`. Stage 1 / Stage 2 hits fill `costPreview` the same way on their own code paths (with `basedOn: 'static_heuristic'` and `'cached_similar_query'` respectively).
+The per-query ceiling check reads `computePlannerCost(...).actual.cents` (after Stage 3, before executor dispatch) and compares to `systemSettings.crm_query_planner_per_query_cents`. `runCostBreaker.assertWithinRunBudgetFromLedger` handles per-run; the planner never reads the ledger directly.
 
 ### 16.3 Rate limiter
 
@@ -1502,13 +1490,9 @@ These are independent — a regression in one does not open a hole in the other.
 
 All events emitted via `plannerEvents.emit(event)` which:
 
-1. Writes a structured log line at `info` level (or `warn` for errors). Always fires.
-2. Increments in-memory metrics counters (for the derived metrics in §17.2). Always fires.
-3. **Conditionally** calls `agentExecutionEventService.appendEvent` (`server/services/agentExecutionEventService.ts`) so the event surfaces in Agent Live Execution Logs (Phase 1). Gated on two conditions:
-   - `event.runId` is present (agent-initiated invocations); human-initiated Briefs without a run do not forward (the log requires `runId`).
-   - The emitted event kind maps into the closed `AgentExecutionEventType` union declared in `shared/types/agentExecutionLog.ts`. For v1 the planner kinds route through a narrow set of existing event types: stage transitions map to `'skill_start' | 'skill_complete' | 'skill_error'` (or the closest `AgentExecutionEventType` by semantics), keyed by `sourceService: 'crm-query-planner'`. The raw `planner.*` kind is preserved in the event payload. **No changes to `shared/types/agentExecutionLog.ts` or `agentExecutionEventService.ts` ship in this spec** — if the mapping turns out to need a new event type, that is a separate follow-up (tracked in Deferred Items).
-
-Emissions via (1) and (2) are unconditional — structured logging and in-memory metrics work for every caller including humans. Only the agent-log forwarding path (3) is runId-gated.
+1. Writes a structured log line at `info` level (or `warn` for errors).
+2. Calls `tryEmitAgentEvent` (from `server/services/agentExecutionEventEmitter.ts`) so the event surfaces in Agent Live Execution Logs (Phase 1 just shipped).
+3. Increments in-memory metrics counters (for the derived metrics in §17.2).
 
 ### 17.1 Event payloads
 
@@ -1535,7 +1519,7 @@ Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as s
 Computed from the event stream (batch, not per-event):
 
 - **`planner.llm_skipped_rate`** = `(stage1_matched + stage2_cache_hit) / total_queries`. North-star metric for deterministic-coverage optimisation.
-- **`planner.canonical_hit_rate`** = `count(planner.classified where payload.source === 'canonical') / count(planner.classified)`. Derived from the `planner.classified` event's `source` payload field (§17.1).
+- **`planner.canonical_hit_rate`** = `canonical_classified / total_queries`.
 - **`planner.hybrid_unsupported_rate`** = `count(classified.source === 'hybrid' AND error_emitted.errorCode === 'unsupported_query' for the same intentHash) / count(total classified events)`. Numerator uses the `planner.classified` → `planner.error_emitted` pairing on the shared `intentHash`; denominator is total `planner.classified` events in the batch window. **Only meaningful after P3.** During P2 every hybrid plan is rewritten to `unsupported_query` by `crmQueryPlannerService` before executor dispatch (§19.1 P2 — hybrid executor doesn't ship until P3), so this metric would read 100 % during P2 and signal "executor not shipped" rather than "pattern gap". The metric chart suppresses rendering until the first run sees a non-rewritten hybrid dispatch (`planner.executor_dispatched.executor === 'hybrid'`) — that is the P2 → P3 crossover marker. When the post-P3 rate climbs, add a new hybrid pattern.
 - **`planner.avg_query_cost_cents`** — mean `actualCostCents`, segmented by `stageResolved` (1, 2, 3).
 - **`planner.avg_stage3_latency_ms`** — mean LLM Stage 3 `latencyMs`.
@@ -1575,7 +1559,7 @@ Request body:
 }
 ```
 
-`organisationId`, `userId`, and `runId` are **not** accepted from the request body. They come from the authenticated session: `organisationId` + `userId` from the `authenticate` middleware's principal context. `runId` is resolved by a small new helper `resolveAmbientRunId(principal)` (ships in `server/services/crmQueryPlanner/crmQueryPlannerService.ts` as a file-local utility — not a new cross-service primitive). For v1 the helper returns `principal.runId` if the middleware's principal carries one, otherwise `undefined`. An alternative mechanism — reading an AsyncLocalStorage-propagated run context on the server — is deferred until a concrete need arises (`getOrgTxContext` in `server/instrumentation.ts` is the pattern to mirror if v2 needs to discover `runId` outside the principal). Allowing the client to supply any of these three fields would let an attacker bypass RLS by claiming to be in a different org or impersonating a different user. The route handler reads them from the principal, not the payload.
+`organisationId`, `userId`, and `runId` are **not** accepted from the request body. They come from the authenticated session: `organisationId` + `userId` from the `authenticate` middleware's principal context, `runId` from the ambient run context (if the caller is an agent running inside `agentExecutionService` — resolved via the existing `requireAgentRunContext()` helper; absent for human callers). Allowing the client to spoof them would let an attacker bypass RLS by claiming to be in a different org or impersonating a different user. The route handler reads them from the principal, not the payload.
 
 Response body:
 
@@ -1589,7 +1573,7 @@ Response body:
 ```
 
 Authentication: `authenticate` middleware (existing).
-Permission gate at the route level: caller must have the `crm.query` capability on the target subaccount. This matches the skill registered in §18.2 and the rollout model in §21 — one access gate, not two. For v1 this is the only **enforced** gate — per-entry `canonical.*` capability checks (§12.1) fire against whatever slugs the caller's `capabilityMap` actually declares, with missing-slugs treated as absent; see §12.1's taxonomy note. `crm.query` is granted by listing the skill slug in `subaccount_agents.skill_slugs`, which the capability-map service maps into `capabilityMap.skills` on the next recompute (`server/services/capabilityMapService.ts`).
+Permission gate at the route level: caller must have the `crm.query` capability on the target subaccount. This matches the skill registered in §18.2 and the rollout model in §21 — one access gate, not two. The coarse `crm.query` check rejects unauthorised callers at the edge; per-entry capability enforcement (`canonical.contacts.read`, `canonical.revenue.read`, etc.) still happens inside the canonical executor (§12.1) once the plan resolves, because `crm.query` grants "ability to invoke the planner" — not blanket access to every canonical read.
 
 The edge check is scoped to the target subaccount via `resolveSubaccount(subaccountId, organisationId)` (existing convention); `organisationId` comes from the authenticated principal, NOT the request body.
 
@@ -1603,8 +1587,8 @@ The entry matches the real `ActionDefinition` shape declared in `server/config/a
   actionType: 'crm.query',
   description: 'Answer a free-text CRM question using the CRM Query Planner.',
   actionCategory: 'api',                         // planner is HTTP-like; not worker/browser/devops/mcp
-  isExternal: false,                             // planner lives in-app; the handler itself does not directly call external systems (live fallback goes through ghlReadHelpers, already scoped)
-  defaultGateLevel: 'auto',                      // read-only — no review gate
+  isExternal: false,                             // planner lives in-app; does not call external systems from the handler itself
+  defaultGateLevel: 'auto',                      // read-only path — no review gate; matches `readPath: 'canonical'` skills
   createsBoardTask: false,
   payloadFields: ['rawIntent', 'subaccountId'],  // legacy field, kept for backward compat per actionRegistry.ts doc-comment
   parameterSchema: z.object({
@@ -1613,8 +1597,7 @@ The entry matches the real `ActionDefinition` shape declared in `server/config/a
   }),
   retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
   idempotencyStrategy: 'read_only',
-  readPath: 'liveFetch',                         // planner can fall through to GHL live reads when canonical doesn't cover the intent; marking 'canonical' would misrepresent the action to `verify-skill-read-paths.sh` and to read-path reporting
-  liveFetchRationale: 'CRM Query Planner dispatches Stage 1/2 canonical reads when the intent matches a canonical registry entry (preferred path), and Stage 3 LLM-planned live reads through `ghlReadHelpers` when the intent requires a live-only field or entity. The canonical path is preferred and measured via `planner.llm_skipped_rate` (§17.2); the live path is the fallback. This is a genuinely mixed path, correctly classified as `liveFetch` until every supported intent is canonicalised.',
+  readPath: 'canonical',                         // planner's primary path is canonical; live/hybrid fall-through is still read-only
   scopeRequirements: {
     validateSubaccountFields: ['subaccountId'],  // P1.1 Layer 3 — auth hook verifies the caller owns the subaccount
     requiresUserContext: false,                  // system-initiated invocations allowed (e.g. scheduled Briefs)
@@ -1701,7 +1684,7 @@ The spec ships in three phases on this branch. Each phase is its own commit clus
 - Validator accepts valid plans and rejects invalid ones
 - Escalation fires on low confidence and on hybrid detection
 - Live executor returns correct `ExecutorResult` for at least 5 long-tail queries
-- Rate limiter `acquire(locationId)` awaited on every live dispatch (no release — token-bucket refill is timer-driven per §13.5); the acquire fires on both the happy path and the adapter-error path before the executor propagates the error
+- Rate limiter acquired + released correctly in all success + error paths
 - Per-query cent ceiling enforced
 
 ### Phase P3 — Hybrid + observability surfacing
@@ -1765,7 +1748,7 @@ The previously-listed end-to-end, cost-breaker, and rate-limiter cases move to p
 
 - End-to-end (registry-matched + fall-through) → covered by `crmQueryPlannerService.test.ts` (pure, with mocked registry / cache / llmRouter / executors).
 - Cost breaker behaviour → covered by `validatePlanPure.test.ts` + `crmQueryPlannerService.test.ts` with a mocked `runCostBreaker` returning a ledger-exceeded signal; asserts `cost_exceeded` surfaces without executor dispatch.
-- Rate limiter `acquire(locationId)` behaviour (no release — token-bucket) → covered by `liveExecutor.test.ts` with a mocked `getProviderRateLimiter('ghl')`; asserts the mock's `acquire` is awaited exactly once before every live dispatch, on both the happy path and the adapter-error path.
+- Rate limiter acquire/release lifecycle → covered by `liveExecutor.test.ts` with a mocked `getProviderRateLimiter('ghl')`; asserts acquire on entry and release on both success and error paths.
 
 ### 20.3 Pressure test (manual — brief §13)
 
@@ -1874,8 +1857,6 @@ Verdict legend:
 | Dependency-cruiser rule for read-only enforcement (§22.2) | WON'T-DO (closed) | Replaced by `scripts/verify-crm-query-planner-read-only.sh` static gate; no dependency-cruiser adoption required |
 | Stopgap "Ask CRM" standalone panel (§3 context) | WON'T-DO | Brief surface is the CRM question UX; no second entry point |
 | Per-subaccount rate-limit budget (§2.1 brief §11.5) | BUILD-WHEN-SIGNAL | Real traffic surfaces cross-subaccount starvation on `getProviderRateLimiter('ghl')` |
-| Native planner event types in `AgentExecutionEventType` (§17) | BUILD-WHEN-SIGNAL | Agent Live Execution Log rendering is confusing because planner stages get squashed into generic `skill_start`/`skill_complete`. If that happens, add `planner.*` event types to `shared/types/agentExecutionLog.ts` and teach `agentExecutionEventService` about them |
-| Canonical-data capability source of truth (§12.1) | DEFER-V2 | v1 leaves `canonical.contacts.read`, `canonical.opportunities.read`, `canonical.appointments.read`, `canonical.conversations.read`, `canonical.revenue.read`, `canonical.tasks.read`, `clientpulse.health_snapshots.read` as forward-looking per-entry metadata on `CanonicalQueryRegistryEntry.requiredCapabilities`. v2 declares the concrete source of truth (likely an integration-reference addition for a synthetic `canonical` integration, or a dedicated capability-catalogue file) and activates per-entry enforcement; v1 relies on the `crm.query` route gate |
 
 Each entry has a verdict and a trigger or reason. Items with `BUILD-WHEN-SIGNAL` include the specific metric or condition that would unblock them — absence of that signal is the reason not to ship now.
 
@@ -1910,7 +1891,7 @@ A senior reviewer can answer yes to all of:
 8. **Rate-limit fair-queueing holds.** ClientPulse polling and planner live queries both use `getProviderRateLimiter('ghl')`; neither starves the other.
 9. **Observability feeds the future learning loop.** Event payloads include `stageResolved`, `canonicalCandidateKey`, `intentHash`, `hitCount` — the data a Query Memory Layer needs to identify promotion candidates.
 10. **Pressure test run and documented.** Results written to `tasks/builds/crm-query-planner/pressure-test-results.md` before P2 ships; any alias / synonym / prompt tunings committed alongside the code.
-11. **No DB-level schema changes.** No new tables, no new columns, no migrations — migration count unchanged. The one change to `server/db/schema/llmRequests.ts` is a TypeScript-const extension (`TASK_TYPES` adds `'crm_query_planner'`); the `llmRequests` table and its `task_type` column remain unchanged at the database level.
+11. **No schema changes.** `db/schema/` unchanged; migration count unchanged.
 12. **No new governance primitives.** `llmRouter`, `runCostBreaker`, `getProviderRateLimiter`, `withPrincipalContext` all reused as-is.
 
 If yes to all twelve, P3 is ready for `pr-reviewer` and PR to main.

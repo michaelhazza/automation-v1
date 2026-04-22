@@ -1,0 +1,22 @@
+You are reviewing a Development Specification for the CRM Query Planner (v1) feature. The spec lives at `tasks/builds/crm-query-planner/spec.md`.
+
+This is the **second** review pass. The first pass surfaced 20 findings which have all been applied. Your job is to find **remaining** structural, consistency, and readiness problems. Focus on:
+
+- Contradictions between sections (same concept described two different ways)
+- Stale retired language surviving in prose after a decision was reversed
+- Load-bearing claims without a named enforcement mechanism
+- File inventory drift (files referenced in prose but missing from the §5 layout, or vice versa)
+- Schema / type / event overlaps with no source-of-truth statement
+- Sequencing bugs (item A depends on item B, but B ships in a later phase)
+- Invariants stated in one section but violable elsewhere
+- Missing per-item verdicts
+- Unnamed new primitives ("a new service that ..." without a concrete file path / function name)
+- Type / contract drift against `shared/types/briefResultContract.ts`
+- Any new inconsistencies introduced by the iteration-1 edits themselves
+
+Framing assumptions (do NOT flag these — they are intentional for this codebase):
+- Pre-production, no staged infrastructure rollout, no feature flags
+- Rapid evolution, static gates primary, pure-function unit tests, limited integration tests
+- Prefer existing primitives over new abstractions
+
+Please produce free-form review feedback. Be specific about section numbers and line ranges when possible.
