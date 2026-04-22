@@ -45,13 +45,63 @@ Top themes: architecture, scope, other
 
 ---
 
+## Round 2 — 2026-04-22T06:00:00Z
+
+### ChatGPT Feedback (raw)
+Executive summary: You fixed the only true blocker cleanly. The PR is now functionally safe. The remaining gaps are not correctness bugs — they're design fragility points. 2 worth calling out because they will come back as edge cases later.
+
+✅ What's now solid
+
+1. Spec auto-detection bug — properly resolved. Exclusion list now covers all known non-spec task files. Captured in KNOWLEDGE.md as a rule. Closes the original failure mode completely.
+
+2. CLAUDE.md → architecture.md authority clarified. Change removes ambiguity instead of just documenting it. Correct pattern: CLAUDE.md = entrypoint/navigation, architecture.md = canonical. No drift risk unless someone actively ignores the rule.
+
+🟠 Remaining risks (non-blocking, but real)
+
+1. Exclusion list is now a maintenance surface. Minimal hardening: add guard — if candidate_path contains "tasks/builds/" OR "tasks/review-logs/" → reject. Reduces future surface area by ~80%.
+
+2. Fallback chain is slightly redundant now. Current chain has a dead step — CLAUDE.md has no canonical references, so step 2 (read from CLAUDE.md) is effectively dead. Recommendation: collapse to — If none: read tasks/current-focus.md → confirm with user.
+
+3. Plan gate rejection is rational, but there's still a UX hole. User says "proceed" without switching model → cost leakage not system failure. No change required, just being explicit.
+
+4. Resume detection heuristic could collide. Branch feature-x and feature-x-refactor both match under substring logic. Minimal fix: use exact slug match instead of substring.
+
+🟡 Minor observations
+
+5. _index.jsonl rule is now consistent with behavior. Acceptable at this stage.
+
+6. Spec-review loop structure is getting strong. Positive observation.
+
+🧠 Strategic note: rejected "positive signal" approach tradeoff noted as permanent unless revisited.
+
+✅ Final verdict: Merge-ready.
+
+### Decisions
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| Exclusion list maintenance surface — add tasks/builds/ and tasks/review-logs/ guard to detection | accept | medium | Clear immediate value — ~80% surface reduction; ≤2 LOC, single file, no contract break |
+| Fallback chain dead step — collapse "read from CLAUDE.md" step since CLAUDE.md holds no canonical refs | accept | low | Architectural signal but small fix — implementing; removes misleading dead branch from documented flow |
+| Plan gate UX hole — cost leakage when user proceeds on Opus without switching | reject | low | ChatGPT explicitly says "no change required"; informational finding, not an action item |
+| Resume detection substring collision — tighten to exact slug match | accept | low | Real edge case; ≤5 LOC, single file fix; feature-x matching feature-x-refactor is a concrete failure mode |
+| _index.jsonl rule consistency — acceptable at this stage | reject | low | Informational observation; ChatGPT says acceptable; nothing to implement |
+| Spec-review loop structure is strong — positive observation | n/a | low | No action — positive confirmation only |
+
+Top themes: other, architecture
+
+### Implemented
+- `.claude/agents/chatgpt-spec-review.md`: added `tasks/builds/**` to detection exclusion list alongside existing `tasks/review-logs/**`
+- `.claude/agents/chatgpt-spec-review.md`: collapsed fallback chain — removed dead "read from CLAUDE.md" step; fallback now goes directly to `tasks/current-focus.md`
+- `.claude/agents/chatgpt-pr-review.md`: tightened resume detection from substring to exact slug match with explicit rule (branch `feature/foo` → slug `feature-foo`; log for `feature-foo-bar` does NOT match)
+
+---
+
 ## Final Summary
-- Rounds: 1
-- Implemented: 2 | Rejected: 4 | Deferred: 1
+- Rounds: 2
+- Implemented: 5 total (2 Round 1, 3 Round 2) | Rejected: 5 total (4 Round 1, 1 Round 2) | Deferred: 1 (Round 1)
 - Index write failures: 0 (0 = clean)
 - Deferred to tasks/todo.md § PR Review deferred items / PR #171:
   - Non-goals gate for spec-reviewer — valid but out of scope; requires spec-reviewer to reason about product strategy
 - Architectural items surfaced to screen (user decisions): none
-- KNOWLEDGE.md updated: yes (1 entry — spec auto-detection exclusion list gotcha)
+- KNOWLEDGE.md updated: yes (1 entry Round 1 — spec auto-detection exclusion list gotcha; no new entries Round 2 — no systematic gap across 2+ rounds for new findings)
 - architecture.md updated: no
 - PR: #171 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/171

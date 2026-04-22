@@ -30,12 +30,12 @@ Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1
    - Filter for files matching tasks/**/*.md or docs/**/*.md (recursive —
      includes nested paths like docs/superpowers/specs/*.md), excluding:
      CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**,
-     tasks/current-focus.md, tasks/todo.md, tasks/**/progress.md,
-     tasks/**/lessons.md
+     tasks/builds/**, tasks/current-focus.md, tasks/todo.md,
+     tasks/**/progress.md, tasks/**/lessons.md
    - If exactly one candidate: use it
    - If multiple candidates: list them and ask the user which one
-   - If none: read `tasks/current-focus.md` (the line starting with
-     "**In-flight spec:**") and ask the user to confirm
+   - If none: read `tasks/current-focus.md` and ask the user to confirm
+     which spec to review
 
 2. Read the detected spec file in full
 
