@@ -11,6 +11,7 @@ import type {
   TopCallRow,
   CallDetail,
   OverheadRow,
+  PlannerMetrics,
 } from '../../shared/types/systemPnl.js';
 import {
   computeMarginPct,
@@ -671,6 +672,54 @@ export async function getCallDetail(id: string): Promise<CallDetail | null> {
   });
 }
 
+// ── CRM Query Planner metrics subsection (P3 — spec §17.2 + §19 P3) ──────────
+// Queries llm_requests filtered by feature_tag='crm-query-planner' to surface
+// Stage 3 cost and escalation signals. PlannerMetrics shape lives in
+// shared/types/systemPnl.ts so both server and client share the same contract.
+
+export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
+  return adminRead('getPlannerMetrics', async (tx) => {
+    const rows = await tx.execute<{
+      total_calls:     number;
+      escalated_calls: number;
+      avg_cost_cents:  number | null;
+      total_cost_cents: number;
+      avg_latency_ms:  number | null;
+    }>(sql`
+      SELECT
+        COUNT(*)::int                                              AS total_calls,
+        COUNT(*) FILTER (WHERE was_escalated = TRUE)::int         AS escalated_calls,
+        AVG(ROUND(cost_raw * 100))                                AS avg_cost_cents,
+        COALESCE(ROUND(SUM(cost_raw * 100)), 0)                   AS total_cost_cents,
+        AVG(provider_latency_ms)                                  AS avg_latency_ms
+      FROM llm_requests_all
+      WHERE feature_tag = 'crm-query-planner'
+        AND task_type   = 'crm_query_planner'
+        AND created_at >= NOW() - INTERVAL '1 day' * ${days}
+        AND status IN ('success', 'partial')
+    `);
+
+    const r = rows.rows?.[0] ?? (rows as unknown as { rows: unknown[] }).rows?.[0] ?? rows[0];
+    const totalCalls     = r ? Number((r as Record<string, unknown>).total_calls)      || 0 : 0;
+    const escalatedCalls = r ? Number((r as Record<string, unknown>).escalated_calls)  || 0 : 0;
+    const avgCostCents   = r ? (Number((r as Record<string, unknown>).avg_cost_cents)  || null) : null;
+    const totalCostCents = r ? Number((r as Record<string, unknown>).total_cost_cents) || 0 : 0;
+    const avgLatencyMs   = r ? (Number((r as Record<string, unknown>).avg_latency_ms)  || null) : null;
+
+    return {
+      totalStage3Calls:    totalCalls,
+      escalatedCalls,
+      escalationRate:      totalCalls > 0 ? Math.round((escalatedCalls / totalCalls) * 10000) / 100 : null,
+      avgCostCentsPerCall: avgCostCents !== null ? Math.round(avgCostCents) : null,
+      avgLatencyMs:        avgLatencyMs !== null ? Math.round(avgLatencyMs) : null,
+      totalCostCents:      Math.round(totalCostCents),
+      llmSkippedRate:      null,
+      briefRefinementRate: null,
+      periodDays:          days,
+    };
+  });
+}
+
 export const systemPnlService = {
   getPnlSummary,
   getByOrganisation,
@@ -680,4 +729,5 @@ export const systemPnlService = {
   getDailyTrend,
   getTopCalls,
   getCallDetail,
+  getPlannerMetrics,
 };

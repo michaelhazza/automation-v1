@@ -1369,6 +1369,76 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'crm.create_task': async (input, context) => {
     return proposeReviewGatedAction('crm.create_task', input, context);
   },
+
+  // ── CRM Query Planner (read-only, not review-gated) ─────────────────────
+  // Agent-facing tool per spec §18.2 — dispatches through the planner
+  // pipeline (Stage 1 registry / Stage 2 cache / Stage 3 LLM fallback /
+  // canonical + live + hybrid executors) and returns the BriefResultContract
+  // artefact set. The route at /api/crm-query-planner/query is the user
+  // surface; this handler is the agent surface.
+  'crm.query': async (input, context) => {
+    // Resolve target subaccount — prefer the explicit tool-input value,
+    // falling back to the agent's bound subaccount context.
+    const suppliedSubaccountId = typeof input.subaccountId === 'string' && input.subaccountId.length > 0
+      ? input.subaccountId
+      : null;
+    const targetSubaccountId = suppliedSubaccountId ?? context.subaccountId;
+
+    if (!targetSubaccountId) {
+      return {
+        success: false,
+        error:   'missing_permission',
+        message: 'crm.query requires a subaccount — supply input.subaccountId or bind the agent to a subaccount.',
+      };
+    }
+
+    // Horizontal-access guard (mirrors intelligenceSkillExecutor.executeQuerySubaccountCohort):
+    // a regular subaccount agent may only read its own subaccount. Only
+    // org-subaccount agents (allowedSubaccountIds === null) may cross
+    // boundaries, and even then only to subaccounts in their allowlist if
+    // the array form is present. Skip when the caller made no explicit
+    // cross-subaccount request (input.subaccountId matches context or was omitted).
+    if (suppliedSubaccountId && suppliedSubaccountId !== context.subaccountId) {
+      const allowed = context.allowedSubaccountIds;
+      const isOrgScope = allowed === null || allowed === undefined;
+      const inAllowlist = Array.isArray(allowed) && allowed.includes(suppliedSubaccountId);
+      if (!isOrgScope && !inAllowlist) {
+        return {
+          success: false,
+          error:   'missing_permission',
+          message: 'Agent is not authorised to read the specified subaccount.',
+        };
+      }
+    }
+
+    const { runQuery } = await import('./crmQueryPlanner/index.js');
+    const result = await runQuery(
+      {
+        rawIntent:    String(input.rawIntent ?? ''),
+        subaccountId: targetSubaccountId,
+        briefId:      typeof input.briefId === 'string' ? input.briefId : undefined,
+      },
+      {
+        orgId:                  context.organisationId,
+        organisationId:         context.organisationId,
+        subaccountId:           targetSubaccountId,
+        runId:                  context.runId,
+        briefId:                typeof input.briefId === 'string' ? input.briefId : undefined,
+        principalType:          'agent',
+        principalId:            context.agentId,
+        teamIds:                [],
+        // Agent-invoked — the agent's own capabilityMap gated the skill
+        // dispatch upstream (skillExecutor.execute). The planner's
+        // validator treats unknown `canonical.*` slugs as skipped per
+        // §12.1, so the route's subaccount-capability union is not
+        // required here — `crm.query` is the only hard-gated slug.
+        callerCapabilities:     new Set<string>(['crm.query']),
+        defaultSenderIdentifier: undefined,
+      },
+    );
+    return { success: true, ...result };
+  },
+
   notify_operator: async (input, context) => {
     return proposeReviewGatedAction('notify_operator', input, context);
   },

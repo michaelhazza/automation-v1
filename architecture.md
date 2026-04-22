@@ -550,6 +550,60 @@ Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTH
 
 ---
 
+## CRM Query Planner (spec: `tasks/builds/crm-query-planner/spec.md`)
+
+A deterministic-first natural-language CRM read layer shipped as PR #177. Staged pipeline: registry match → plan cache → LLM fallback → validator → canonical / live / hybrid executor. Read-only by structural import restriction (CI guard `scripts/verify-crm-query-planner-read-only.sh`) — the planner cannot reach the write-side of `canonicalDataService` or any write helper.
+
+### Pipeline stages
+
+1. **Stage 1 (`registryMatcherPure.ts`)** — normalised intent tokens are matched against a curated canonical query registry (`executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`). Zero AI cost, sub-second latency, returns `null` on miss. Aliases are normalised + collision-detected at module load.
+
+2. **Stage 2 (`planCache.ts` + `planCachePure.ts`)** — LRU in-process cache keyed on `(intentHash, subaccountId)`. TTL tiers per `cacheConfidence` — high/medium = 60s, low = 15s. Cache key prefix includes `NORMALISER_VERSION` so any change to intent normalisation bumps cached entries automatically. Only `stageResolved === 3` plans are cached — Stage 1 hits never write cache. `.get()` returns a discriminated `{ hit: true, plan, entry } | { hit: false, reason: 'not_present' | 'expired' | 'principal_mismatch' }` so `planner.stage2_cache_miss` carries the specific miss reason.
+
+3. **Stage 3 (`llmPlanner.ts` + `llmPlannerPromptPure.ts`)** — LLM fallback with single-escalation retry. Hybrid-detection heuristic short-circuits directly to escalation tier (spec §10.4). Both escalation branches pass `wasEscalated: true` + `escalationReason` ('hybrid_detected' | 'low_confidence') on the router context so `getPlannerMetrics.escalationRate` populates correctly. Prompt packing is pure — schema context truncated at `schemaTokensDefault` / `schemaTokensEscalated` from `systemSettingsService`.
+
+4. **Stage 4 (`validatePlanPure.ts`)** — 10-rule validator. Rule 8 (canonical precedence) has three cases: promote `live → canonical` when no live-only filters present; promote `live → hybrid canonical_base_with_live_filter` when exactly one live-only filter present; stay `live` otherwise. The promotion guard additionally requires every non-live-only filter, sort, projection, and aggregation field to exist in the registry entry's `allowedFields` — otherwise `FieldOutOfScopeError` would escape canonical dispatch as a 500.
+
+5. **Executor dispatch** — `canonicalExecutor.ts` (routes through `canonicalDataService` with principal session context), `liveExecutor.ts` (rate-limiter keyed on real GHL `locationId` resolved via `resolveGhlContext` — **NOT** `context.subaccountLocationId` which is deprecated), `hybridExecutor.ts` (row-count guard before live dispatch; warn-logs `hybrid_base_at_plan_limit` when base hits the plan's row limit).
+
+### Key invariants
+
+- **RLS wrapping (§16.4).** `runQuery` wraps its pipeline in `withPrincipalContext(toPrincipalContext(context), …)` when an outer `withOrgTx` is active (HTTP auth middleware provides it). Programmatic callers without an outer org-tx skip the wrap (`getOrgTxContext()` guard) rather than triggering the primitive's throw. `withPrincipalContext` itself snapshots prior `app.current_*` values and restores in `finally` so the planner's nested context does not leak forward into a longer-lived parent transaction (the agent-run → `crm.query` → `runQuery` path).
+
+- **One terminal event per run.** `plannerEvents.ts` forwards `planner.result_emitted` / `planner.error_emitted` to `agentExecutionEventService` exactly once — `planner.classified` is NOT terminal for agent-log purposes. This prevents double-counting `skill.completed` when a run emits both classification and result/error.
+
+- **Budget-error classification.** `isBudgetExceededError` discriminates on `code === 'BUDGET_EXCEEDED'` for the plain-object 402 shape — `{ statusCode: 402, code: 'RATE_LIMITED' }` (router reservation-side rate limiting) falls through to `ambiguous_intent`. Also matches `BudgetExceededError` instance (legacy) and `FailureError` with `failureDetail === 'cost_limit_exceeded'` (post-ledger `runCostBreaker`).
+
+- **Error subcategory split (§16.2).** External artefact stays `ambiguous_intent` for UX stability, but `planner.error_emitted` payload carries `errorSubcategory: 'parse_failure' | 'rate_limited' | 'planner_internal_error' | 'validation_failed'` — operators distinguish internal failures from true user ambiguity without touching the user-facing copy.
+
+- **PlannerTrace accumulator (§6.7 + §17.1).** Every terminal emit carries a deep-frozen `PlannerTrace` snapshot with top-level `executionMode: 'stage1' | 'stage2_cache' | 'stage3_live'` + per-stage slots + `mutations[]` + `terminalOutcome` + `terminalErrorCode`. `freezeTrace()` + `finaliseTracePlan()` live in the service. Cache-reuse vs fresh-dispatch is unambiguously visible at the trace top level.
+
+- **Capability gate.** Route-level via `listAgentCapabilityMaps(orgId, subaccountId)` — unions `capabilityMap.skills + read_capabilities` across all enabled subaccount agents; missing `crm.query` returns `403 { error: 'missing_permission', requires: 'crm.query' }`. Skill-executor surface adds `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort` so agents cannot escalate horizontally via `input.subaccountId`. Forward-looking `canonical.*` slugs are skipped at the validator per §12.1 with a `canonical.capability_skipped` debug log for observability.
+
+- **Cache-write AFTER validation.** `planCache.set` is only called after `validatePlanPure` resolves successfully — structurally invalid plans never enter the cache.
+
+### Observability surfaces
+
+- Structured logs from `plannerEvents.ts` (13 event kinds).
+- Agent execution log — exactly one `skill.completed` per planner run, via `planner.result_emitted` or `planner.error_emitted` only.
+- `PlannerTrace` on every terminal event payload — top-level `executionMode` + per-stage slots.
+- Dashboard: `getPlannerMetrics` in `systemPnlService.ts` + `/api/admin/llm-pnl/planner-metrics` + `SystemPnlPage.tsx` panel.
+- `cost_prediction_drift` warn log when `actualCostCents.total > costPreview.predictedCostCents * 2`.
+
+### Dual invocation surface
+
+- **HTTP**: `POST /api/crm-query-planner/query` (`routes/crmQueryPlanner.ts`) — user-facing, goes through `authenticate` → `resolveSubaccount` → subaccount-capability gate → `runQuery`.
+- **Agent skill**: `'crm.query'` in `SKILL_HANDLERS` (`server/services/skillExecutor.ts`) — agent-facing, gated upstream by the agent's own `capabilityMap`, with `allowedSubaccountIds` enforcement in-handler. `principalType: 'agent'`, `principalId: context.agentId`, `runId: context.runId` (so per-run cost breaker binds).
+
+### Deferred (in `tasks/todo.md`)
+
+- ID-scoped live fetch for hybrid execution (current: canonical base → full-limit live list → in-memory intersect; future: pass canonical IDs into live query)
+- Runtime read-only enforcement at the adapter layer (complements the structural CI guard)
+- Live executor retry taxonomy (retryable vs terminal error classification, cross-provider primitive)
+- Principal `teamIds` resolution (all HTTP call-sites currently pass `[]` — zero production impact today since canonical rows default to `shared_subaccount`, but a proper resolver is cross-cutting and belongs with auth middleware)
+
+---
+
 ## Skill System
 
 ### File-based definitions
@@ -2861,6 +2915,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the ClientPulse drilldown | `server/routes/clientpulseDrilldown.ts` (4 routes) + `server/services/drilldownService.ts` + `server/services/drilldownOutcomeBadgePure.ts` (badge rules) + `client/src/pages/ClientPulseDrilldownPage.tsx` + `client/src/components/clientpulse/drilldown/` — always scope reads by `organisationId` + `subaccountId` |
 | Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
 | Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
+| Modify the CRM Query Planner | Spec: `tasks/builds/crm-query-planner/spec.md`. Orchestration: `server/services/crmQueryPlanner/crmQueryPlannerService.ts` (§3 / §19; wraps pipeline in `withPrincipalContext` per §16.4 when outer `withOrgTx` is active; `runLlmStage3` seam on `RunQueryDeps` for test stubbing). Pure layer: `normaliseIntentPure.ts`, `registryMatcherPure.ts`, `validatePlanPure.ts` (10-rule validator + three-case canonical-precedence — case b uses `isLiveOnlyField` from `liveExecutorPure.ts`), `planCachePure.ts`, `approvalCardGeneratorPure.ts`, `plannerCostPure.ts`, `resultNormaliserPure.ts`, `schemaContextPure.ts`, `llmPlannerPromptPure.ts`. Executors: `executors/canonicalExecutor.ts` (skip-unknown-capability rule §12.1 + debug `canonical.capability_skipped`), `executors/liveExecutor.ts` + `liveExecutorPure.ts` (rate-limiter keyed on real GHL `locationId` from `resolveGhlContext`, NOT `context.subaccountLocationId`), `executors/hybridExecutor.ts` + `hybridExecutorPure.ts` (row-count guard before live dispatch), `executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`. LLM fallback: `llmPlanner.ts` (single-escalation retry; passes `wasEscalated: true` + `escalationReason` on router context so `getPlannerMetrics.escalationRate` populates). Cache: `planCache.ts` (LRU with discriminated `{ hit, plan, entry } \| { hit: false, reason }` result). Events: `plannerEvents.ts` (forwards ONLY `planner.result_emitted` / `planner.error_emitted` to agent execution log — exactly one `skill.completed` per planner run). Budget classification: `isBudgetExceededError` helper discriminates `{statusCode: 402, code: 'BUDGET_EXCEEDED'}` vs `RATE_LIMITED`; `classifyStage3FallbackSubcategory` splits `parse_failure` / `rate_limited` / `planner_internal_error` / `validation_failed` on `errorSubcategory` (external `ambiguous_intent` unchanged). Route: `server/routes/crmQueryPlanner.ts` (authenticate → `resolveSubaccount` → `listAgentCapabilityMaps` union for `crm.query` gate). Skill surface: `'crm.query'` handler in `server/services/skillExecutor.ts` with `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort`. Observability: `getPlannerMetrics` in `server/services/systemPnlService.ts` + route in `server/routes/systemPnl.ts` + `SystemPnlPage.tsx` panel. Trace: `PlannerTrace` accumulator threaded through pipeline with top-level `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` + deep-frozen at terminal emission. CI guard: `scripts/verify-crm-query-planner-read-only.sh` (import-restriction enforcement; read-only is structural). |
 
 ---
 

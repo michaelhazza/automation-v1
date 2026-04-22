@@ -118,6 +118,9 @@ run_gate "$SCRIPT_DIR/verify-connection-shape.sh"
 # ── P3B: Canonical Data Platform — RLS + Visibility Parity ──
 run_gate "$SCRIPT_DIR/verify-visibility-parity.sh"
 
+# ── CRM Query Planner — read-only executor enforcement (spec §13.3 / §16.6) ──
+run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

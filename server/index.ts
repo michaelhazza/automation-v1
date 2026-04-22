@@ -129,6 +129,7 @@ import clientpulseDrilldownRouter from './routes/clientpulseDrilldown.js';
 import organisationConfigRouter from './routes/organisationConfig.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
+import crmQueryPlannerRouter from './routes/crmQueryPlanner.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 // Memory & Briefings Phase 1 — delivery channels route (S22)
 import deliveryChannelsRouter from './routes/deliveryChannels.js';
@@ -343,6 +344,7 @@ app.use(geoAuditsRouter);
 app.use(briefsRouter);
 app.use(briefConversationsRouter);
 app.use('/api/rules', rulesRouter);
+app.use(crmQueryPlannerRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
