@@ -54,6 +54,19 @@ function makeUnsupportedError(intentHash: string): BriefChatArtefact {
   };
 }
 
+/**
+ * §18.1 helper — resolves `runId` for the planner execution context from the
+ * authenticated principal. Returns `principal.runId` if the middleware's
+ * principal carries one, otherwise `undefined`.
+ *
+ * v2 may switch to an AsyncLocalStorage-propagated run context, mirroring
+ * `getOrgTxContext` in `server/instrumentation.ts`. For now the principal-
+ * carried value is sufficient.
+ */
+export function resolveAmbientRunId(principal: { runId?: string } | null | undefined): string | undefined {
+  return principal?.runId;
+}
+
 // ── runQuery ──────────────────────────────────────────────────────────────────
 
 export async function runQuery(

@@ -6,6 +6,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { validateBody } from '../middleware/validate.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { runQuery } from '../services/crmQueryPlanner/index.js';
+import { resolveAmbientRunId } from '../services/crmQueryPlanner/crmQueryPlannerService.js';
 import type { ExecutorContext } from '../../shared/types/crmQueryPlanner.js';
 
 const router = Router();
@@ -33,7 +34,7 @@ router.post(
       organisationId,
       subaccountId,
       subaccountLocationId:   (subaccount as any).locationId ?? subaccountId,
-      runId:                  undefined, // populated in P1.1+ via ambient run context
+      runId:                  resolveAmbientRunId(user as { runId?: string } | null),
       briefId,
       principalType:          'user',
       principalId:            user.id,
