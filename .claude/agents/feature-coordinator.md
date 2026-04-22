@@ -96,6 +96,17 @@ Process chunks from the plan **one at a time**. For each chunk:
 2. Re-attempt implementation with the revised plan.
 3. **Max 2 plan-gap rounds.** On the third gap, stop and escalate to the user.
 
+**C1b. Spec conformance** — After the main session reports chunk implementation complete, and BEFORE handing off to `pr-reviewer`, delegate to `spec-conformance`:
+
+> "Verify the current branch implements chunk '{chunk name}' from the plan at `tasks/builds/{slug}/plan.md`. Auto-detect changed files. Scope to this chunk only — the plan may have later chunks not yet implemented."
+
+`spec-conformance` self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` and returns the path. Record the path in `progress.md` under the chunk's Notes column.
+
+Process the log's Next-step verdict:
+- **CONFORMANT** — proceed to C2 (`pr-reviewer`).
+- **CONFORMANT_AFTER_FIXES** — `spec-conformance` applied mechanical fixes in-session. Proceed to C2 (`pr-reviewer`) on the **expanded** changed-code set; the reviewer needs to see the fixed state.
+- **NON_CONFORMANT** — directional gaps were routed to `tasks/todo.md`. Ask the main session to resolve them first (same contract as C3 fix-review rounds). Re-invoke `spec-conformance` after the fixes land. **Max 2 spec-conformance rounds.** On the third, stop and escalate to the user — the chunk's spec is likely under-specified and needs human judgment.
+
 **C2. Review** — Delegate to `pr-reviewer`:
 > "Review the changes just implemented for chunk '{chunk name}'. Read the plan at `tasks/builds/{slug}/plan.md` for context. Review the following files: [list changed files]."
 

@@ -242,7 +242,8 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 |-------|---------|----------------|
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
-| `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
+| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug present for per-chunk invocations from `feature-coordinator`). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
+| `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done. For spec-driven tasks, run `spec-conformance` first. |
 | `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
@@ -270,9 +271,9 @@ Classify every task before starting:
 | Class | Definition | Action |
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
-| **Standard** | 2–4 files, clear approach, no new patterns | Implement, then invoke pr-reviewer |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
-| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline; pr-reviewer before PR. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Standard** | 2–4 files, clear approach, no new patterns | Implement, then `spec-conformance` (if spec-driven), then `pr-reviewer` |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then `spec-conformance` (if spec-driven), then `pr-reviewer`. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → `spec-conformance` → `pr-reviewer`). `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
 
 ### Invoking agents
 
@@ -285,6 +286,13 @@ Classify every task before starting:
 
 # Get an architecture plan before implementing
 "architect: [feature description]"
+
+# Verify the code matches the spec — runs BEFORE pr-reviewer on spec-driven tasks
+# Auto-detects the spec and changed files. Auto-fixes mechanical gaps.
+# Routes directional gaps to tasks/todo.md. Never edits the spec.
+"spec-conformance: verify the current branch against its spec"
+# (optionally scope to a phase/chunk if a long plan is only partially implemented)
+"spec-conformance: verify phase 1 of [spec path]"
 
 # Independent review after implementation
 "pr-reviewer: review the changes I just made to [file list]"
@@ -306,7 +314,11 @@ Classify every task before starting:
 
 For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done. The main session has implementation bias. The reviewer eliminates it.
 
-**Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request.
+**For spec-driven tasks, run `spec-conformance` before `pr-reviewer`.** The development session can silently miss spec items (missed files, missed exports, missed columns, missed error codes) while claiming completion. `spec-conformance` catches those gaps: it auto-fixes the mechanical ones (where the spec explicitly names the missing item) and routes directional gaps to `tasks/todo.md` for human resolution. If `spec-conformance` applied any mechanical fixes, re-run `pr-reviewer` on the expanded changed-code set — the reviewer needs to see the final state, not the pre-fix state.
+
+If no spec was the source of truth for the task (ad-hoc bug fix, small refactor), `spec-conformance` is not applicable — skip it.
+
+**Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request. For spec-driven work, that means: `spec-conformance` → `pr-reviewer` → (optionally `dual-reviewer`) → PR.
 
 ### `dual-reviewer` is a local-development-only optional add-on
 
@@ -326,6 +338,7 @@ The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking 
 Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/review-logs/spec-review-log-*`). All review logs live in `tasks/review-logs/` to keep the main `tasks/` directory uncluttered. The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
 
 - **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context. **After persisting**, process findings in this order: (1) Blocking non-architectural findings → implement in-session; (2) Blocking findings that are architectural in nature (significant redesign, contract change, multi-service impact) → route to `tasks/todo.md` under `## PR Review deferred items / ### <slug>` rather than attempting in-place; (3) Strong Recommendations → implement if in-scope, otherwise defer to the same backlog section.
+- **`spec-conformance` self-writes.** `spec-conformance` writes its own log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` per its agent spec. `<chunk-slug>` is present when the agent is invoked by `feature-coordinator` per-chunk (matches the `pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` precedent), and omitted for manual whole-branch invocations. The caller does not need to persist anything — just read the log path the agent returns. If the log's Next-step verdict is `CONFORMANT_AFTER_FIXES`, the agent modified files in-session and the caller must re-run `pr-reviewer` on the expanded changed-code set.
 - **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
 - **`chatgpt-pr-review` and `chatgpt-spec-review` self-write.** Both agents write their own session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md` and `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md` respectively. The caller does not need to persist anything.
 
@@ -333,7 +346,7 @@ If a reviewer ran, the log must exist. This applies regardless of task classific
 
 ### Deferred actions route to `tasks/todo.md` — single source of truth
 
-Every review loop — `pr-reviewer`, `dual-reviewer`, `spec-reviewer`, the upcoming `chatgpt-pr-review` / `chatgpt-spec-review` — that produces deferred action items writes them to **`tasks/todo.md`**, not to per-session side files. The review log in `tasks/review-logs/` keeps the raw finding-by-finding record; `tasks/todo.md` carries the curated backlog.
+Every review loop — `pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review` — that produces deferred action items writes them to **`tasks/todo.md`**, not to per-session side files. The review log in `tasks/review-logs/` keeps the raw finding-by-finding record; `tasks/todo.md` carries the curated backlog.
 
 Why one file: a future session picking up deferred work needs to grep one place, not scan a directory of session logs. Existing sections (Hermes Tier 1, Live Agent Execution Log) already use this pattern.
 
