@@ -77,6 +77,11 @@ For each round:
     Log: "Integrity check: <N> issues found this round."
     This pass runs once only — do NOT re-run integrity-check on findings
     introduced by integrity-check fixes. That recursion guard is absolute.
+    Post-integrity sanity: if integrity-check applied ≥1 mechanical fix, run
+    a lightweight validation — confirm no heading is referenced that no longer
+    exists, and no section was left empty by the fix. Log any issues as
+    warnings; apply if trivial (broken link → remove reference), defer if
+    directional. This is not a second integrity pass — just a quick break-check.
 4. Append the round to the session log including a Top themes line
 5. Print the round summary and the changed sections only (not the full spec):
 

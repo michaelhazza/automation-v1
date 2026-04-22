@@ -45,7 +45,18 @@ If the pasted content is ambiguous (ChatGPT asked a clarifying question, the
 response is cut off, or there are no distinct findings): say so and ask the user
 to paste again or clarify. Do not guess at intent.
 
+Session state: maintain a `pending_architectural_items` list (starts empty).
+This persists across rounds — items are added when surfaced, removed when you
+respond. It is the authoritative record of unresolved architectural decisions.
+
 For each round:
+- If `pending_architectural_items` is non-empty, re-print each unresolved block
+  before processing new feedback:
+
+    ⚠ Unresolved architectural decisions from previous round(s) — reply still
+    needed:
+    [repeat each pending block]
+
 1. Parse every distinct finding — each bullet, numbered item, or paragraph-level
    suggestion is a separate finding
 2. For each finding assign accept / reject / defer + severity (critical/high/
@@ -58,7 +69,8 @@ For each round:
    For each matching item, apply a size filter:
    - Small fix (≤30 LOC, single file, no contract break) → implement. Log:
      "architectural signal but small fix — implementing".
-   - Larger → do NOT implement or silently defer. Print to screen immediately:
+   - Larger → do NOT implement or silently defer. Add to
+     `pending_architectural_items` and print to screen immediately:
 
        ⚠ Architectural item — decision required
 
@@ -76,7 +88,21 @@ For each round:
 
        Reply with: "implement" | "defer" | "reject"
 
-   You are present — these are your calls to make. Continue with the other
+   Overlap guard: check whether any other accepted items in this round touch the
+   same files or services as a flagged architectural item. Pause those overlapping
+   items (hold them pending alongside the architectural decision) and implement
+   only truly independent items. This prevents implementing changes that assume a
+   boundary you haven't decided yet.
+
+   When you reply to a pending architectural item ("implement" / "defer" /
+   "reject"):
+   - Remove it (and its overlapping dependents) from `pending_architectural_items`
+   - Record the decision in the current round's Decisions table:
+     "implement" → accept | "defer" → defer | "reject" → reject
+   - Then execute: accepted items implement as normal; deferred route to
+     tasks/todo.md under § PR Review deferred items; rejected stop here
+
+   You are present — these are your calls to make. Continue with independent
    accepted items while waiting for your response.
 4. Scope check — run `git diff main...HEAD --stat`. If cumulative diff exceeds
    20 files or +500 lines, print a visible warning:
@@ -84,6 +110,8 @@ For each round:
      ⚠ Scope warning: +N lines across M files.
      Remaining accepted items: [list]
      Recommendation: stop here — carry the rest to a follow-up PR.
+
+     Reply with: "continue" | "stop" | "split"
 
    Then continue implementing. You are present to decide; this is advisory only.
 5. Implement the accepted items (excluding any flagged for your decision in step 3)
