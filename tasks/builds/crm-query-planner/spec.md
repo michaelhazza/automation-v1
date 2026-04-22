@@ -708,6 +708,8 @@ If either fails, the cache hit is **discarded** (not evicted — the entry remai
 
 The checks are co-located on `planCache.get(...)` — callers never receive a plan they aren't authorised for, and the service's Stage 2 hit path emits `planner.stage2_cache_hit` only after the post-hit rules pass (a discarded hit emits `planner.stage2_cache_miss` with a `reason: 'principal_mismatch'` payload field).
 
+**Invariant — cache never bypasses validation.** Any validator rule whose output depends on the caller's principal reruns on every cache hit. Non-principal rules (field existence against the plan's own shape, operator sanity, entity-relation validity, aggregation compatibility, hybrid-pattern shape, canonical-precedence tie-breaker) are safe to skip because their inputs were fully captured at cache-write time and cannot change between put and get — the plan's shape is frozen once cached. **Future validator rules must be classified as principal-dependent or plan-dependent at the time they are added; principal-dependent rules join the rerun list in §9.3.1. This classification is mandatory when any new rule is added to §11.2** — the spec update that adds the rule also updates §9.3.1 and §8.3 to reflect whether the rule runs on cache hit and in Stage 1's reduced subset.
+
 ### 9.4 Future alignment with Query Memory Layer (brief §11.12)
 
 The `PlanCacheEntry` includes a `hits` counter incremented on every cache hit. Combined with eviction, this forms the dataset the Query Memory Layer will consume for "top N live queries → canonical promotion candidates" analytics (brief §11.12). No v1 surfacing — the counter exists solely so v2 has the data.
@@ -837,6 +839,8 @@ if (detectLikelyHybrid(intent, schemaContext)) {
 
 `detectLikelyHybrid` is a simple heuristic (intent references both a canonical-known entity and a live-only field). Cheap pre-check; avoids an escalation round-trip.
 
+**Retry contract — explicit invariant.** Stage 3 issues **at most two LLM calls per request**: one initial parse at the default tier, plus at most one escalation retry at the escalated tier. Escalation is triggered only by (a) `confidence < threshold` on the initial parse, (b) the `detectLikelyHybrid` heuristic firing (which skips the default-tier call entirely and replaces it with a single escalated call), or (c) large-schema trigger (§11.11 / brief §5.3). There are no further retries on parse failure, adapter timeout, rate-limit rejection, or validation failure — any of those surfaces as a `BriefErrorResult` on the first occurrence. There is no multi-model escalation chain beyond the single default-tier → escalation-tier step. This invariant is the cost envelope for Stage 3: worst case per request is `default_tier_tokens + escalation_tier_tokens`, never more.
+
 ### 10.5 Test plan
 
 Pure tests in `llmPlannerPromptPure.test.ts`:
@@ -863,6 +867,10 @@ Integration tests for `llmPlanner.ts` mock `llmRouter.routeCall` and assert:
 ### 11.1 Authority
 
 The validator is **authoritative**. LLM output is advisory. This is not enforced by convention — it's enforced by the TypeScript literal `validated: true` on `QueryPlan` (§6.2). A `DraftQueryPlan` cannot reach any executor without passing through `validatePlan`.
+
+**Single-plan invariant (reiterated from §3).** The planner produces exactly one validated `QueryPlan` per request. No parallel or competing plans are constructed, ranked, or compared. Stage resolution is linear: the first stage to produce a passing plan is the answer; later stages never run. This keeps cost attribution, event correlation, and cache semantics one-to-one with the request.
+
+**Stage 1's reduced validator subset (§8.3) is a scoped application of this authority, not an exemption.** The rules Stage 1 skips are structurally guaranteed by the deterministic registry match — the registry entry fixes `primaryEntity`, operator compatibility on registry-declared fields, entity-relation validity, aggregation compatibility, hybrid-shape non-applicability, and canonical-precedence non-applicability. The rules Stage 1 **runs** (field existence, operator sanity, projection overlap) are the ones whose inputs come from `parseArgs` (user-derived free text) or from caller-specific principal context, and those always run. In every other stage, the full rule set (§11.2) runs.
 
 ### 11.2 Validation rules
 
@@ -1251,6 +1259,13 @@ Executor does not re-validate; if any of these invariants are violated, it throw
 
 **Hard cap:** if a hybrid query would require more than 10 live calls (after batching), the executor returns `BriefErrorResult { errorCode: 'cost_exceeded' }` with a suggestion to narrow the canonical base first. This is the circuit breaker for the combinatorial-work risk the brief's §6.3 warned about.
 
+**Cap enforcement is two-layered, never post-hoc.** The 10-call cap holds defensively at both pre-dispatch and mid-iteration:
+
+1. **Pre-dispatch estimate.** The executor computes `ceil(canonicalBase.rowCount / batch_size)` and rejects immediately with `cost_exceeded` if that exceeds 10. The canonical base's row count is known at this point because it has already run (§14.1 step 2).
+2. **Mid-iteration short-circuit.** If the true fan-out is only discoverable after the first live call (e.g. tags-per-contact where some contacts return more IDs than the batch schema anticipated), the executor maintains a running call counter and short-circuits the moment the count reaches 10. The partial canonical base is surfaced as a `BriefErrorResult { errorCode: 'cost_exceeded', suggestions: [...] }` — not a partial structured result, because mixing cap-truncated and cap-complete rows would mislead the user.
+
+This guarantees the cap holds even when call count cannot be fully determined pre-execution.
+
 ### 14.4 Test plan
 
 `hybridExecutor.test.ts`:
@@ -1417,6 +1432,13 @@ Live-executor dispatch does NOT make a new `routeCall`, so `runCostBreaker` does
 
 **Per-query cent ceiling (new — local to planner):** independent of per-run. System default `100` cents (configurable via `systemSettings.crm_query_planner_per_query_cents`). The check fires **after Stage 3 completes** (including any escalation retry, per §10.3), before the validator dispatches to the executor: if the accumulated planner cost for this invocation exceeds the ceiling, short-circuit with `BriefErrorResult { errorCode: 'cost_exceeded' }` without executor dispatch. Pre-Stage-3 there is zero accumulated planner cost — the ceiling is inherently a post-escalation guard. This prevents one exploratory query that escalates to the high tier from burning its entire share of the run's ceiling.
 
+**Executor cost boundary (explicit invariant).** The per-query cent ceiling is a **Stage 3 cost guard only**. Executor runtime cost — canonical executor DB work, live executor provider calls, hybrid executor live-filter calls — is **not pre-bounded** in v1 beyond these two existing guards:
+
+- **Hybrid 10-call cap** (§14.3) — hybrid executor short-circuits at 10 live calls, enforced pre-dispatch and mid-iteration.
+- **Per-run ledger check** via `runCostBreaker` — fires on any `runId`-carrying Stage 3 call; catches runaway cost at run scope.
+
+No additional planner-local budget is imposed on canonical DB queries or on non-hybrid live calls because (a) canonical reads are bounded by `LIMIT`-capped queries, (b) single live reads are a single provider call, and (c) the brief's §11.5 explicitly defers per-subaccount rate-budget enforcement until signal justifies it. Callers with strict per-query cost requirements must rely on the run-level ceiling (`runCostBreaker`), not a planner-local cap.
+
 ### 16.2.1 Cost attribution — one calculator, one source-of-truth field
 
 There is exactly one planner-side cost calculator (`plannerCostPure.ts`) and exactly one source-of-truth field (`QueryPlan.costPreview: BriefCostPreview`, §6.2). The wire contract's `BriefCostPreview` (`shared/types/briefResultContract.ts`) is the final shape — `{ predictedCostCents, confidence, basedOn }`, no actual-cost slot. Actual cost is a separate observability signal, carried only on `planner.result_emitted.actualCostCents` and not on the plan or the wire response.
@@ -1526,9 +1548,15 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
 | `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents, stageResolved }` |
-| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule? }` |
+| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
+
+**Invariant — every request emits exactly one `stageResolved`-bearing event.** On the success path that is `planner.classified` (with `stageResolved: 1 | 2 | 3`). On every error path — validation failure, cost-exceeded pre-dispatch, executor error, unsupported intent, parse failure at Stage 3 — the service emits `planner.error_emitted` with `stageResolved` populated to the last stage the request reached. The only case the value is `null` is an error raised before any stage runs (e.g. a route-level precondition failure that shortcuts to an error without invoking `runQuery`'s pipeline); inside the planner itself this cannot happen — intent normalisation is Stage 0 and raises its own `ambiguous_intent` error with `stageResolved: 1` (the first matching-stage the request would have entered). The `null` slot exists as an explicit escape hatch for future route-layer errors, not as a missing-field signal.
+
+Dashboards filter on `stageResolved` including error events; silent drop-off (an error path missing the field) is a spec violation and should be caught by `crmQueryPlannerService.test.ts`.
+
+The standard envelope `{ kind, at, orgId, subaccountId, runId?, intentHash }` is extended with an optional `briefId?: string` — same pass-through as the request-body field (§18.1). `briefId` is what powers the `planner.brief_refinement_rate` correlation metric in §17.2; without it, per-session re-query detection is not possible.
 
 ### 17.2 Derived metrics
 
@@ -1541,6 +1569,7 @@ Computed from the event stream (batch, not per-event):
 - **`planner.avg_stage3_latency_ms`** — mean LLM Stage 3 `latencyMs`.
 - **`planner.escalation_rate`** — `stage3_escalated / stage3_parse_completed`.
 - **`planner.validation_failure_rate`** — `validation_failed / stage3_parse_completed`.
+- **`planner.brief_refinement_rate`** — correctness proxy. For each `briefId` the planner saw within a 10-minute window, count as "refined" if the brief either (a) emitted `planner.error_emitted` with `errorCode: 'ambiguous_intent' | 'unsupported_query'`, or (b) was followed within the same `briefId` by another `planner.classified` event (re-query). `brief_refinement_rate = refined_briefIds / total_briefIds`. Without this metric, efficiency optimisation (lower cost, higher `llm_skipped_rate`) could bias toward cheap-but-wrong plans users have to refine. The correlation uses the new `briefId` envelope field (§17.1). **Dashboard surfacing is P3+**; event data is captured in v1 so the metric is computable without further schema changes, but the system-pnl subsection only adds a visual in P3 once there is enough traffic to distinguish signal from noise. Metric name and derivation are locked in v1.
 
 Metrics surface through the existing system-pnl admin route (`/system/llm-pnl`) with a new subsection under "Task-class breakdown." No new dashboard.
 
@@ -1633,6 +1662,8 @@ The entry matches the real `ActionDefinition` shape declared in `server/config/a
 
 Handler registration follows the existing `ACTION_HANDLERS` pattern (see `server/config/actionRegistry.ts` for how `actionType` keys map to handlers in the registry module — the handler is NOT inlined on `ActionDefinition`). The handler calls `crmQueryPlannerService.runQuery` with the authenticated principal, not payload-supplied identifiers.
 
+**Semantics note — `crm.query` is a routing action.** Unlike most entries in `actionRegistry.ts`, `crm.query` does not execute a single discrete operation. It dispatches through the planner pipeline, which may in turn call the canonical executor, the live executor, the hybrid executor, or short-circuit to an error — each with its own cost and latency profile. Action-level attributes (`readPath: 'liveFetch'`, `actionCategory: 'api'`, `defaultGateLevel: 'auto'`) describe the **entry-point contract**, not the execution path. Downstream cost attribution, latency attribution, and observability reflect the resolved execution path (`stageResolved`, `executor`, `source`) and must not be collapsed into the action-level attributes. This is the same pattern the Orchestrator uses above the planner — a router whose action-level registration names the entry point, not the branch it takes.
+
 Agent-facing tool. Exposed to any agent whose `capabilityMap` grants `crm.query`. The MCP server's tool catalogue auto-picks this up via the `mcp.annotations` block (existing pattern from `server/mcp/mcpServer.ts`).
 
 ### 18.3 No client-side route
@@ -1703,6 +1734,8 @@ The spec ships in three phases on this branch. Each phase is its own commit clus
 - Live executor returns correct `ExecutorResult` for at least 5 long-tail queries
 - Rate limiter `acquire(locationId)` awaited on every live dispatch (no release — token-bucket refill is timer-driven per §13.5); the acquire fires on both the happy path and the adapter-error path before the executor propagates the error
 - Per-query cent ceiling enforced
+
+**Cache effectiveness is NOT a P2 exit criterion.** Stage 2 cache hit rate (`planner.llm_skipped_rate` contribution from cache) depends on a stable validator AND stable `schemaContext`. During P2, schemaContext is newly introduced and its compression heuristics are still being tuned; cache churn from schemaContext version drift is expected and does not indicate a defect. Cache hit-rate becomes a real signal only after P3 when schemaContext stabilises and hybrid dispatches populate additional cache entries. The metric is still **measured** in P2 (§17.2), just not gated on.
 
 ### Phase P3 — Hybrid + observability surfacing
 
@@ -1803,6 +1836,8 @@ Must pass before merge to main:
 Per `CLAUDE.md` rule: "No feature flags or backwards-compatibility shims when you can just change the code." The planner is a new subsystem; there's no prior shape to toggle off.
 
 Access is gated by the existing skill-permission system: agents need `crm.query` in their `capabilityMap` to invoke. Orgs not yet onboarded to the planner simply don't grant the capability.
+
+**Capability gate applies to both user-initiated and system-initiated invocations.** The `crm.query` check is enforced at the route layer (§18.1) — every HTTP caller passes through it. Any **in-process caller** that invokes `crmQueryPlannerService.runQuery` directly (scheduled Briefs, orchestrator paths, future internal agents) is responsible for performing the equivalent `capabilityMap` check **before** invoking the service — the route layer's check does not fire on direct service calls, and the service itself does not re-check (it trusts its caller on capability, matching the rest of the repo's service-layer convention). To prevent drift, `crmQueryPlannerService.runQuery` takes an explicit `callerCapabilities: Set<string>` on `ExecutorContext` that downstream executor dispatch reads for the per-entry `canonical.*` capability checks (§12.1); a caller that invokes `runQuery` without populating `callerCapabilities` gets a deterministic `MissingPermissionError` on the first canonical dispatch, not silent bypass. No exemption path ships in v1; the "internal system caller" concept is deferred until a concrete internal caller needs it, at which point the exemption is a typed field on `ExecutorContext`, not an implicit bypass.
 
 ### 21.2 System-settings for tier config
 
@@ -1912,8 +1947,9 @@ A senior reviewer can answer yes to all of:
 10. **Pressure test run and documented.** Results written to `tasks/builds/crm-query-planner/pressure-test-results.md` before P2 ships; any alias / synonym / prompt tunings committed alongside the code.
 11. **No DB-level schema changes.** No new tables, no new columns, no migrations — migration count unchanged. The one change to `server/db/schema/llmRequests.ts` is a TypeScript-const extension (`TASK_TYPES` adds `'crm_query_planner'`); the `llmRequests` table and its `task_type` column remain unchanged at the database level.
 12. **No new governance primitives.** `llmRouter`, `runCostBreaker`, `getProviderRateLimiter`, `withPrincipalContext` all reused as-is.
+13. **Correctness proxy is measurable, not just efficiency.** The `planner.brief_refinement_rate` metric (§17.2) is computable from v1 events — `briefId` correlation across `planner.classified` and `planner.error_emitted`. Efficiency metrics (`llm_skipped_rate`, cost) cannot be the only success signals, because they can both improve while correctness degrades (cheap wrong plans). Rendering the metric in a dashboard is P3+; computability on v1 data is the P1 gate.
 
-If yes to all twelve, P3 is ready for `pr-reviewer` and PR to main.
+If yes to all thirteen, P3 is ready for `pr-reviewer` and PR to main.
 
 ---
 
