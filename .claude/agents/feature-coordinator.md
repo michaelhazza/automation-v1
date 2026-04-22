@@ -1,6 +1,6 @@
 ---
 name: feature-coordinator
-description: Orchestrates end-to-end feature delivery for planned, multi-card features. Delegates to architect, main session (builder), and pr-reviewer. Use for features that span multiple implementation chunks or need upfront architecture validation.
+description: Orchestrates end-to-end feature delivery for planned, multi-card features. Delegates to architect, main session (builder), spec-conformance, and pr-reviewer. Use for features that span multiple implementation chunks or need upfront architecture validation.
 tools: Read, Glob, Grep, Write, Edit, Agent
 model: opus
 ---
@@ -38,7 +38,7 @@ tasks/builds/{slug}/
   plan.md            — implementation plan (architect produces)
 ```
 
-PR review logs for each chunk live in `tasks/review-logs/` as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` (same convention as `review-logs/spec-review-log-*`), not nested under the build. This keeps all review logs discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
+Review logs for each chunk live in `tasks/review-logs/` — pr-review logs as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` and spec-conformance logs as `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` — not nested under the build. All follow the canonical filename shape in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Keeping every review log in a single directory keeps them discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
 
 The feature description or card lives wherever the user keeps it — reference it in place, don't copy it.
 
