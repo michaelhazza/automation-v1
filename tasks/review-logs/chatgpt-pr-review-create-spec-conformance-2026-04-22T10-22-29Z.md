@@ -131,3 +131,65 @@ architecture (standalone contract clarity), naming (filename-convention hoist), 
 ### Top themes
 
 scope (chunk-to-spec mapping source-of-truth tightening), false-positive-rejections (5 of 6 findings already-addressed from round 1 or prior)
+
+---
+
+## Round 3 — 2026-04-22T10:49:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary: You're effectively done. This is now production-grade for its intended use. Round 3 is not about fixes. It's about eliminating edge-case ambiguity and future misuse. There are no blockers left. Only one optional tightening remains that meaningfully improves long-term reliability.
+>
+> 1. Only meaningful remaining gap: chunk fallback still has a blind spot (edge-case, not structural).
+> The reviewer's round 2 S1 finding is still technically valid in one narrow case. Current behaviour has mandatory STOP if scope unclear, plan = source of truth, mapping required for chunk scoping. But you also allow: "if mapping exists but is incomplete, proceed with partial extraction." That's where the edge case lives.
+> Exact failure mode: Plan maps chunk → spec section A. Spec section A implicitly requires File X (explicitly mentioned in section A) and File Y (logically required but defined elsewhere in spec, section B). Mapping only includes section A. File Y lives in section B. Agent never sees section B → File Y is never evaluated.
+> This is no longer a "fallback bug" — it's a mapping completeness assumption. Your system assumes plan mapping is correct and complete. This is now the weakest link in the system.
+> Recommended fix (light, optional, high leverage): Add one rule — if chunk → spec mapping is provided: assume mapping is authoritative BUT if a requirement in mapped sections references entities outside those sections, include those referenced requirements in scope.
+> Why this is the right level: does NOT reintroduce full-spec scanning, does NOT require plan validation (already deferred correctly), preserves fail-closed philosophy, covers cross-section dependencies.
+> If you choose NOT to fix this, still acceptable — feature-coordinator is the primary caller, plans should be correct, plan validation is in backlog. So: resilience improvement, not a correctness requirement.
+>
+> 2. Spec-conformance vs plan-validation boundary (clarity only)
+> You've implicitly drawn this line: spec-conformance verifies implementation vs spec, future system verifies plan vs spec. Correct, but not explicitly stated. Add one clarifying sentence (optional):
+>   "spec-conformance assumes the plan → spec mapping is correct. Validation of plan completeness against the spec is out of scope."
+> Why: prevents future agents from trying to "helpfully expand scope" or reintroducing full-spec validation indirectly.
+>
+> 3. Strong design validation (what you got very right — no action)
+> A. Avoided biggest failure mode: no silent full-spec validation, no silent partial validation fallback. Eliminates 90% of risk.
+> B. Classification gate now correct: "100% sure mechanical?" first, fail-closed behaviour. Right pattern for mixed-mode agents.
+> C. Separated responsibilities cleanly: spec-conformance → correctness vs spec, plan validation → separate concern, reviewer → quality not spec alignment. Keeps system scalable.
+> D. Coordinator loop stable: bounded retries, no churn loops, architectural vs non-architectural split. Where most agent systems break — yours doesn't.
+>
+> 4. Things NOT to change (no action)
+> Do not: add heuristics to guess missing spec sections, reintroduce "verify entire spec if unsure", add implicit cross-phase scanning, add plan inference logic. All undo the discipline you've built.
+>
+> Final verdict: Approve — system complete. No blockers, no correctness issues, only one optional resilience improvement.
+
+### Decisions
+
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| 1. Cross-section dependency inclusion — follow explicit references from a mapped section into another spec section | accept | medium | Resilience improvement that fits the existing fail-closed posture. Key tightening vs ChatGPT's looser framing: restrict to **explicitly named** cross-references (named section, heading, or §-number in the spec itself) — not implicit mentions ("a column name that happens to be defined elsewhere"). Explicit cross-references are the spec's own structure, not agent inference, so the rule doesn't blur the "plan is source of truth" boundary (item 2). If a named reference is ambiguous, STOP — same posture as ambiguous plan mapping. Added as a new sub-paragraph inside `spec-conformance.md:105`. |
+| 2. Spec-conformance vs plan-validation boundary — one clarifying sentence | accept | low | Pure doc-clarity win. Prevents future agents from reintroducing full-spec scanning under the guise of "helpful" scope expansion. Added as a new top-level Rule ("You are not a plan validator") just below the "You are not a code reviewer" rule — parallel structure makes the boundary scannable. Naming `tasks/todo.md`'s future "automated plan validation" backlog item ties it to the round-1 strategic deferral. |
+| 3A–D. Design validation (avoided biggest failure modes, classification gate correct, responsibilities separated, coordinator loop stable) | acknowledged — no action | — | Recognition-only items. Recorded here for session continuity; no implementation required. |
+| 4. Things NOT to change (heuristics / full-spec fallback / cross-phase scanning / plan inference) | acknowledged — no action | — | Guardrails already observed. No change needed; recorded so the constraint is captured explicitly in the log. |
+
+### Implemented
+
+- `.claude/agents/spec-conformance.md:105` — appended a new sub-paragraph inside the caller-provided-chunk scoping rule: "Follow explicit, named cross-section references." Rule states that when a requirement in a mapped section explicitly points at another section (named section, heading, or §-number), include that referenced requirement in scope. Explicitly forbids following implicit mentions. Ambiguous-but-named references → STOP and ask (same posture as ambiguous plan mapping). Framing emphasizes "follows the spec's own structure; does not infer missing plan mappings" so a future reader does not misread this as a loophole for scope expansion.
+- `.claude/agents/spec-conformance.md:339` — new Rule: "You are not a plan validator." States that the agent assumes the plan→spec mapping is correct, names plan-completeness validation as out of scope (tracked in `tasks/todo.md` as future automated plan validation), and forbids "helpful" scope expansion. Placed immediately below "You are not a code reviewer" so the two boundary rules read together.
+
+### Rejected
+
+_None this round._
+
+### Deferred
+
+_None this round._
+
+### Architectural items surfaced
+
+_None — both accepted items are doc-level surgical edits inside a single agent file. Both pass the architectural-signal size filter (≤30 LOC, single file, no contract break)._
+
+### Top themes
+
+architecture (plan-validation boundary), scope (cross-section reference rule)
