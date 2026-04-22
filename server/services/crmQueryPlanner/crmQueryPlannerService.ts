@@ -17,8 +17,15 @@ import { runLlmStage3 } from './llmPlanner.js';
 import { validatePlanPure, ValidationError } from './validatePlanPure.js';
 import { computePlannerCostPreview, computeActualCostCents } from './plannerCostPure.js';
 import { systemSettingsService, SETTING_KEYS } from '../systemSettingsService.js';
-import type { ExecutorContext } from '../../../shared/types/crmQueryPlanner.js';
+import { BudgetExceededError } from '../budgetService.js';
+import { FailureError } from '../../../shared/iee/failure.js';
+import { withPrincipalContext } from '../../db/withPrincipalContext.js';
+import { getOrgTxContext } from '../../instrumentation.js';
+import { logger } from '../../lib/logger.js';
+import type { ExecutorContext, PlannerTrace, QueryPlan, PlannerPlanMutation } from '../../../shared/types/crmQueryPlanner.js';
+import { NORMALISER_VERSION } from '../../../shared/types/crmQueryPlanner.js';
 import type { BriefChatArtefact, BriefCostPreview, BriefResultSuggestion } from '../../../shared/types/briefResultContract.js';
+import type { PrincipalContext } from '../principal/types.js';
 import { FALLBACK_SUGGESTIONS } from './resultNormaliserPure.js';
 
 // ── NotImplementedError ───────────────────────────────────────────────────────
@@ -48,6 +55,10 @@ export interface RunQueryOutput {
 // Optional dependency injection for testing — production callers omit this.
 export interface RunQueryDeps {
   registry?: import('../../../shared/types/crmQueryPlanner.js').CanonicalQueryRegistry;
+  // Stage 3 seam so unit tests can stub the LLM call without needing real
+  // provider credentials or a live DB. Production omits this and the real
+  // `runLlmStage3` (imported statically above) is used.
+  runLlmStage3?: typeof runLlmStage3;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,6 +103,30 @@ function makeLiveCallFailedError(intentHash: string, message: string): BriefChat
   };
 }
 
+// Recognises every shape `llmRouter` uses to signal budget exhaustion:
+//   1. `BudgetExceededError` — original typed error from `budgetService` (not
+//      thrown by the router in production, but safe to support).
+//   2. Plain-object `{ statusCode: 402, code: 'BUDGET_EXCEEDED' }` — thrown
+//      pre-call after the router writes its `budget_blocked` ledger row.
+//      NOTE: llmRouter also throws `statusCode: 402` with
+//      `code: 'RATE_LIMITED'` for reservation-side rate limiting — that is a
+//      transient failure, not a budget overrun, so the `code` discriminator
+//      matters. Only `BUDGET_EXCEEDED` matches here; `RATE_LIMITED` falls
+//      through to the parse-failure / ambiguous_intent path downstream.
+//   3. `FailureError` with `failureDetail === 'cost_limit_exceeded'` — thrown
+//      post-call by the `runCostBreaker.assertWithinRunBudgetFromLedger` guard.
+function isBudgetExceededError(err: unknown): boolean {
+  if (err instanceof BudgetExceededError) return true;
+  // FailureError.failure is required and readonly per shared/iee/failure.ts —
+  // no optional chain needed.
+  if (err instanceof FailureError && err.failure.failureDetail === 'cost_limit_exceeded') return true;
+  if (typeof err === 'object' && err !== null && 'statusCode' in err) {
+    const shape = err as { statusCode?: unknown; code?: unknown };
+    if (shape.statusCode === 402 && shape.code === 'BUDGET_EXCEEDED') return true;
+  }
+  return false;
+}
+
 /**
  * §18.1 helper — resolves `runId` for the planner execution context from the
  * authenticated principal. Returns `principal.runId` if the middleware's
@@ -108,11 +143,54 @@ export async function runQuery(
   context: ExecutorContext,
   deps: RunQueryDeps = {},
 ): Promise<RunQueryOutput> {
+  // §16.4 — Wrap the pipeline in withPrincipalContext so every canonical read
+  // (Stage 2 cache-hit re-validation, Stage 4 validator projection check,
+  // canonical / hybrid executor dispatch) inherits the principal session
+  // variables RLS policies consume. If no outer withOrgTx() is active (test
+  // harness, programmatic caller outside HTTP middleware), skip the wrap —
+  // the guard inside withPrincipalContext would otherwise throw.
+  const runBody = () => runQueryPipeline(input, context, deps);
+  if (getOrgTxContext()) {
+    return withPrincipalContext(toPrincipalContext(context), runBody);
+  }
+  return runBody();
+}
+
+// PrincipalContext.type is 'user' | 'service' | 'delegated'; ExecutorContext's
+// planner-internal principalType widens this to 'user' | 'agent' | 'system'.
+// Non-user callers collapse to 'service' because a programmatic agent/system
+// invocation is semantically a service principal at the DB layer.
+function toPrincipalContext(context: ExecutorContext): PrincipalContext {
+  if (context.principalType === 'user') {
+    return {
+      type:           'user',
+      id:             context.principalId,
+      organisationId: context.organisationId,
+      subaccountId:   context.subaccountId,
+      teamIds:        context.teamIds,
+    };
+  }
+  return {
+    type:           'service',
+    id:             context.principalId,
+    organisationId: context.organisationId,
+    subaccountId:   context.subaccountId,
+    serviceId:      context.principalId,
+    teamIds:        context.teamIds,
+  };
+}
+
+async function runQueryPipeline(
+  input: RunQueryInput,
+  context: ExecutorContext,
+  deps: RunQueryDeps,
+): Promise<RunQueryOutput> {
   const activeRegistry = deps.registry ??
     (await import('./executors/canonicalQueryRegistry.js')).canonicalQueryRegistry;
-  const now = new Date().toISOString();
+  // Envelope timestamp is epoch ms to match the documented contract at
+  // shared/types/crmQueryPlanner.ts §6.6 PlannerEvent.at.
   const envelope = {
-    at:           now,
+    at:           Date.now(),
     orgId:        context.orgId,
     subaccountId: context.subaccountId,
     runId:        context.runId,
@@ -123,12 +201,30 @@ export async function runQuery(
   const intent = normaliseIntent(input.rawIntent);
   const intentHash = intent.hash;
 
+  // ── PlannerTrace accumulator (spec §6.7 / §17.1) ──────────────────────────
+  // Built progressively through the pipeline and attached to every terminal
+  // `planner.result_emitted` / `planner.error_emitted` emission so the log
+  // stream carries a flat trace view collated by `intentHash`.
+  const trace: PlannerTrace = {
+    intentHash,
+    briefId: input.briefId,
+    normaliserVersion: NORMALISER_VERSION,
+    normalisedIntentTokens: intent.tokens,
+    stage1: { hit: false },
+    stage2: { hit: false },
+    validator: { passed: false },
+    mutations: [],
+    terminalOutcome: 'error',
+  };
+
   // ── Stage 1 — registry matcher ────────────────────────────────────────────
   const stage1Result = matchRegistryEntry(intent, activeRegistry, {
     callerCapabilities: context.callerCapabilities,
   });
 
   if (stage1Result !== null) {
+    trace.stage1 = { hit: true, candidateKey: stage1Result.registryKey };
+    trace.validator.passed = true;
     await emit({ kind: 'planner.stage1_matched', ...envelope, intentHash, registryKey: stage1Result.registryKey });
 
     try {
@@ -144,6 +240,10 @@ export async function runQuery(
       );
 
       const artefacts: BriefChatArtefact[] = [structured, ...approvalCards];
+
+      trace.executor = { kind: 'canonical' };
+      trace.finalPlan = finaliseTracePlan(stage1Result.plan);
+      trace.terminalOutcome = approvalCards.length > 0 ? 'approval' : 'structured';
 
       await emit({
         kind:             'planner.classified',
@@ -165,6 +265,7 @@ export async function runQuery(
         truncated:        execResult.truncated,
         actualCostCents:  { total: execResult.actualCostCents, stage3: 0, executor: execResult.actualCostCents },
         stageResolved:    1,
+        trace:            freezeTrace(trace),
       });
 
       return {
@@ -181,7 +282,9 @@ export async function runQuery(
           errorCode:  'missing_permission',
           message:    err.message,
         };
-        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 1 });
+        trace.terminalOutcome = 'error';
+        trace.terminalErrorCode = 'missing_permission';
+        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 1, trace: freezeTrace(trace) });
         return { artefacts: [artefact], costPreview: { predictedCostCents: 0, confidence: 'high', basedOn: 'static_heuristic' }, stageResolved: 1, intentHash };
       }
       throw err;
@@ -192,25 +295,27 @@ export async function runQuery(
   await emit({ kind: 'planner.stage1_missed', ...envelope, intentHash });
 
   // ── Stage 2 — plan cache read ─────────────────────────────────────────────
-  const cacheHit = planCache.get(intentHash, context.subaccountId, {
+  const cacheResult = planCache.get(intentHash, context.subaccountId, {
     callerCapabilities: context.callerCapabilities,
     registry: activeRegistry,
   });
 
-  if (cacheHit !== null) {
+  if (cacheResult.hit) {
+    trace.stage2 = { hit: true };
+    trace.validator.passed = true;
     await emit({
       kind:      'planner.stage2_cache_hit',
       ...envelope,
       intentHash,
-      cachedAt:  cacheHit.entry.cachedAt,
-      hitCount:  cacheHit.entry.hits,
+      cachedAt:  cacheResult.entry.cachedAt,
+      hitCount:  cacheResult.entry.hits,
     });
 
     try {
-      const execResult = await dispatchBySource(cacheHit.plan, context, activeRegistry, intentHash, envelope);
+      const execResult = await dispatchBySource(cacheResult.plan, context, activeRegistry, intentHash, envelope);
 
       const { structured, approvalCards } = normaliseToArtefacts(
-        cacheHit.plan,
+        cacheResult.plan,
         execResult,
         {
           subaccountId:            context.subaccountId,
@@ -220,15 +325,19 @@ export async function runQuery(
 
       const artefacts: BriefChatArtefact[] = [structured, ...approvalCards];
 
+      trace.executor = { kind: cacheResult.plan.source };
+      trace.finalPlan = finaliseTracePlan(cacheResult.plan);
+      trace.terminalOutcome = approvalCards.length > 0 ? 'approval' : 'structured';
+
       await emit({
         kind:            'planner.classified',
         ...envelope,
         intentHash,
-        source:          cacheHit.plan.source,
-        intentClass:     cacheHit.plan.intentClass,
-        confidence:      cacheHit.plan.confidence,
+        source:          cacheResult.plan.source,
+        intentClass:     cacheResult.plan.intentClass,
+        confidence:      cacheResult.plan.confidence,
         stageResolved:   2,
-        canonicalCandidateKey: cacheHit.plan.canonicalCandidateKey,
+        canonicalCandidateKey: cacheResult.plan.canonicalCandidateKey,
       });
 
       await emit({
@@ -240,11 +349,12 @@ export async function runQuery(
         truncated:       execResult.truncated,
         actualCostCents: { total: execResult.actualCostCents, stage3: 0, executor: execResult.actualCostCents },
         stageResolved:   2,
+        trace:           freezeTrace(trace),
       });
 
       return {
         artefacts,
-        costPreview: cacheHit.plan.costPreview,
+        costPreview: cacheResult.plan.costPreview,
         stageResolved: 2,
         intentHash,
       };
@@ -256,23 +366,28 @@ export async function runQuery(
           errorCode:  'missing_permission',
           message:    err.message,
         };
-        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 2 });
+        trace.terminalOutcome = 'error';
+        trace.terminalErrorCode = 'missing_permission';
+        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 2, trace: freezeTrace(trace) });
         return { artefacts: [artefact], costPreview: { predictedCostCents: 0, confidence: 'high', basedOn: 'static_heuristic' }, stageResolved: 2, intentHash };
       }
       if (err instanceof LiveExecutorError) {
         const artefact = makeLiveCallFailedError(intentHash, err.message);
-        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: err.errorCode, stageResolved: 2 });
+        trace.terminalOutcome = 'error';
+        trace.terminalErrorCode = err.errorCode;
+        await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: err.errorCode, stageResolved: 2, trace: freezeTrace(trace) });
         return { artefacts: [artefact], costPreview: { predictedCostCents: 0, confidence: 'high', basedOn: 'cached_similar_query' }, stageResolved: 2, intentHash };
       }
       throw err;
     }
   }
 
+  trace.stage2 = { hit: false, reason: cacheResult.reason };
   await emit({
     kind:       'planner.stage2_cache_miss',
     ...envelope,
     intentHash,
-    reason:     'not_present' as const,
+    reason:     cacheResult.reason,
   });
 
   // ── Stage 3 — LLM planner ─────────────────────────────────────────────────
@@ -284,9 +399,10 @@ export async function runQuery(
     schemaTokens: 2000,
   });
 
+  const stage3 = deps.runLlmStage3 ?? runLlmStage3;
   let stage3Output: Awaited<ReturnType<typeof runLlmStage3>>;
   try {
-    stage3Output = await runLlmStage3({
+    stage3Output = await stage3({
       intent,
       registry:       activeRegistry,
       organisationId: context.organisationId,
@@ -294,8 +410,36 @@ export async function runQuery(
       runId:          context.runId,
     });
   } catch (err) {
+    // Per-run ledger budget exceeded inside llmRouter → cost_exceeded (spec §16.2).
+    // Router surfaces three shapes (see `isBudgetExceededError`): the typed
+    // `BudgetExceededError`, a plain `{ statusCode: 402 }` pre-call, and a
+    // `FailureError` with `cost_limit_exceeded` post-ledger via runCostBreaker.
+    if (isBudgetExceededError(err)) {
+      const artefact = makeCostExceededError(intentHash);
+      trace.stage3 = { used: true, parseFailure: true };
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = 'cost_exceeded';
+      await emit({
+        kind:             'planner.error_emitted',
+        ...envelope,
+        intentHash,
+        errorCode:        'cost_exceeded',
+        stageResolved:    3,
+        errorSubcategory: 'cost_exceeded_stage3',
+        trace:            freezeTrace(trace),
+      });
+      return {
+        artefacts:    [artefact],
+        costPreview:  { predictedCostCents: 0, confidence: 'low', basedOn: 'planner_estimate' },
+        stageResolved: 3,
+        intentHash,
+      };
+    }
     // Parse failure or router error → ambiguous_intent
     const artefact = makeAmbiguousIntentError(intentHash, (err as Error).message);
+    trace.stage3 = { used: true, parseFailure: true };
+    trace.terminalOutcome = 'error';
+    trace.terminalErrorCode = 'ambiguous_intent';
     await emit({
       kind:             'planner.error_emitted',
       ...envelope,
@@ -303,6 +447,7 @@ export async function runQuery(
       errorCode:        'ambiguous_intent',
       stageResolved:    3,
       errorSubcategory: 'parse_failure',
+      trace:            freezeTrace(trace),
     });
     return {
       artefacts:    [artefact],
@@ -313,6 +458,12 @@ export async function runQuery(
   }
 
   const { draft, defaultTierUsage, escalationTierUsage, escalated, escalationReason } = stage3Output;
+  trace.stage3 = {
+    used: true,
+    defaultTierTokens:    defaultTierUsage    ? { input: defaultTierUsage.inputTokens,    output: defaultTierUsage.outputTokens }    : undefined,
+    escalationTierTokens: escalationTierUsage ? { input: escalationTierUsage.inputTokens, output: escalationTierUsage.outputTokens } : undefined,
+    escalationReason:     escalated ? (escalationReason ?? 'low_confidence') : undefined,
+  };
 
   await emit({
     kind:         'planner.stage3_parse_completed',
@@ -342,11 +493,31 @@ export async function runQuery(
     stage3EscalationUsage: escalationTierUsage,
   }).stage3;
 
-  const perQueryCentsStr = await systemSettingsService.get(SETTING_KEYS.CRM_QUERY_PLANNER_PER_QUERY_CENTS);
-  const perQueryCentsCeiling = parseInt(perQueryCentsStr) || 100;
+  // Default ceiling (100¢ / $1 per query) is applied when the settings row
+  // is absent OR when the DB round-trip fails (unit tests, degraded primary).
+  // Fail-open to the default rather than surface a generic 500 — spec §16.2
+  // designates the per-query ceiling as observability, not a hard cost gate
+  // (the real per-run enforcement lives in `runCostBreaker`, which runs
+  // independently of this value). The warn log below is the canary operators
+  // watch for a degraded settings fetch path so a genuine DB regression
+  // doesn't silently revert the ceiling to the default indefinitely.
+  let perQueryCentsCeiling = 100;
+  try {
+    const perQueryCentsStr = await systemSettingsService.get(SETTING_KEYS.CRM_QUERY_PLANNER_PER_QUERY_CENTS);
+    const parsed = parseInt(perQueryCentsStr, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) perQueryCentsCeiling = parsed;
+  } catch (err) {
+    logger.warn('crm_query_planner.settings_fetch_failed', {
+      setting: SETTING_KEYS.CRM_QUERY_PLANNER_PER_QUERY_CENTS,
+      fallbackCents: perQueryCentsCeiling,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   if (stage3CostCents > perQueryCentsCeiling) {
     const artefact = makeCostExceededError(intentHash);
+    trace.terminalOutcome = 'error';
+    trace.terminalErrorCode = 'cost_exceeded';
     await emit({
       kind:             'planner.error_emitted',
       ...envelope,
@@ -354,6 +525,7 @@ export async function runQuery(
       errorCode:        'cost_exceeded',
       stageResolved:    3,
       errorSubcategory: 'cost_exceeded_stage3',
+      trace:            freezeTrace(trace),
     });
     return {
       artefacts:    [artefact],
@@ -383,6 +555,13 @@ export async function runQuery(
     });
   } catch (err) {
     if (err instanceof ValidationError) {
+      trace.validator = {
+        passed:        false,
+        failedRule:    ruleNumberForRejection(err.rejectedRule),
+        rejectedValue: err.rejectedValue,
+      };
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = 'ambiguous_intent';
       await emit({
         kind:          'planner.validation_failed',
         ...envelope,
@@ -398,6 +577,7 @@ export async function runQuery(
         errorCode:        'ambiguous_intent',
         stageResolved:    3,
         errorSubcategory: 'validation_failed',
+        trace:            freezeTrace(trace),
       });
       return {
         artefacts:    [artefact],
@@ -409,8 +589,12 @@ export async function runQuery(
     throw err;
   }
 
+  trace.validator.passed = true;
+
   // ── unsupported intent class — never dispatched ────────────────────────────
   if (validatedPlan.intentClass === 'unsupported') {
+    trace.terminalOutcome = 'error';
+    trace.terminalErrorCode = 'unsupported_query';
     await emit({
       kind:             'planner.error_emitted',
       ...envelope,
@@ -418,6 +602,7 @@ export async function runQuery(
       errorCode:        'unsupported_query',
       stageResolved:    3,
       errorSubcategory: 'no_pattern_match',
+      trace:            freezeTrace(trace),
     });
     return {
       artefacts:    [makeUnsupportedError(intentHash)],
@@ -429,6 +614,17 @@ export async function runQuery(
 
   // ── Canonical promotion event (if rule 8 fired) ────────────────────────────
   if (draft.source === 'live' && validatedPlan.source !== 'live') {
+    trace.canonicalPromoted = {
+      fromSource: 'live',
+      toSource:   validatedPlan.source as 'canonical' | 'hybrid',
+    };
+    trace.mutations.push({
+      stage:  'canonical_precedence_promotion',
+      field:  'source',
+      before: 'live',
+      after:  validatedPlan.source,
+      reason: 'rule_8_canonical_precedence',
+    });
     await emit({
       kind:       'planner.canonical_promoted',
       ...envelope,
@@ -485,6 +681,25 @@ export async function runQuery(
       liveCallCount:         validatedPlan.source === 'live' ? 1 : 0,
     });
 
+    // Prediction drift signal (spec §16.2.1) — warn when actual cost more than
+    // 2× the predicted. Non-blocking; the response still returns normally.
+    if (
+      costPreview.predictedCostCents > 0 &&
+      actualCostCents.total > costPreview.predictedCostCents * 2
+    ) {
+      logger.warn('cost_prediction_drift', {
+        intentHash,
+        predicted:      costPreview.predictedCostCents,
+        actual:         actualCostCents.total,
+        stageResolved:  3,
+        source:         validatedPlan.source,
+      });
+    }
+
+    trace.executor = { kind: validatedPlan.source };
+    trace.finalPlan = finaliseTracePlan(validatedPlan);
+    trace.terminalOutcome = approvalCards.length > 0 ? 'approval' : 'structured';
+
     await emit({
       kind:            'planner.result_emitted',
       ...envelope,
@@ -494,6 +709,7 @@ export async function runQuery(
       truncated:       execResult.truncated,
       actualCostCents,
       stageResolved:   3,
+      trace:           freezeTrace(trace),
     });
 
     return {
@@ -503,6 +719,8 @@ export async function runQuery(
       intentHash,
     };
   } catch (err) {
+    trace.executor = trace.executor ?? { kind: validatedPlan.source };
+    trace.finalPlan = trace.finalPlan ?? finaliseTracePlan(validatedPlan);
     if (err instanceof MissingPermissionError) {
       const artefact: BriefChatArtefact = {
         artefactId: `crm-perm-${intentHash}`,
@@ -510,11 +728,15 @@ export async function runQuery(
         errorCode:  'missing_permission',
         message:    err.message,
       };
-      await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 3 });
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = 'missing_permission';
+      await emit({ kind: 'planner.error_emitted', ...envelope, intentHash, errorCode: 'missing_permission', stageResolved: 3, trace: freezeTrace(trace) });
       return { artefacts: [artefact], costPreview, stageResolved: 3, intentHash };
     }
     if (err instanceof LiveExecutorError) {
       const artefact = makeLiveCallFailedError(intentHash, err.message);
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = err.errorCode;
       await emit({
         kind:             'planner.error_emitted',
         ...envelope,
@@ -522,11 +744,15 @@ export async function runQuery(
         errorCode:        err.errorCode,
         stageResolved:    3,
         errorSubcategory: 'live_call_failed',
+        trace:            freezeTrace(trace),
       });
       return { artefacts: [artefact], costPreview, stageResolved: 3, intentHash };
     }
     if (err instanceof HybridCapError) {
       const artefact = makeCostExceededError(intentHash);
+      trace.executor = { kind: 'hybrid', capShortCircuited: true };
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = 'cost_exceeded';
       await emit({
         kind:             'planner.error_emitted',
         ...envelope,
@@ -534,11 +760,14 @@ export async function runQuery(
         errorCode:        'cost_exceeded',
         stageResolved:    3,
         errorSubcategory: 'cost_exceeded_executor',
+        trace:            freezeTrace(trace),
       });
       return { artefacts: [artefact], costPreview, stageResolved: 3, intentHash };
     }
     if (err instanceof HybridLiveCallError) {
       const artefact = makeLiveCallFailedError(intentHash, err.message);
+      trace.terminalOutcome = 'error';
+      trace.terminalErrorCode = 'live_call_failed';
       await emit({
         kind:             'planner.error_emitted',
         ...envelope,
@@ -546,10 +775,54 @@ export async function runQuery(
         errorCode:        'live_call_failed',
         stageResolved:    3,
         errorSubcategory: 'live_call_failed',
+        trace:            freezeTrace(trace),
       });
       return { artefacts: [artefact], costPreview, stageResolved: 3, intentHash };
     }
     throw err;
+  }
+}
+
+// Snapshot + deep-freeze the accumulator so downstream consumers can't mutate
+// the trace after terminal emission (§6.7: trace is frozen at terminal emit).
+function freezeTrace(trace: PlannerTrace): PlannerTrace {
+  return Object.freeze({
+    ...trace,
+    stage1:     Object.freeze({ ...trace.stage1 }),
+    stage2:     Object.freeze({ ...trace.stage2 }),
+    stage3:     trace.stage3 ? Object.freeze({ ...trace.stage3 }) : undefined,
+    validator:  Object.freeze({ ...trace.validator }),
+    canonicalPromoted: trace.canonicalPromoted ? Object.freeze({ ...trace.canonicalPromoted }) : undefined,
+    executor:   trace.executor ? Object.freeze({ ...trace.executor }) : undefined,
+    finalPlan:  trace.finalPlan ? Object.freeze({ ...trace.finalPlan }) : undefined,
+    mutations:  Object.freeze([...trace.mutations]) as unknown as PlannerPlanMutation[],
+    normalisedIntentTokens: Object.freeze([...trace.normalisedIntentTokens]) as unknown as string[],
+  }) as PlannerTrace;
+}
+
+function finaliseTracePlan(plan: QueryPlan): PlannerTrace['finalPlan'] {
+  return {
+    source:        plan.source,
+    primaryEntity: plan.primaryEntity,
+    filterCount:   (plan.filters ?? []).length,
+  };
+}
+
+// Maps the ValidationError.rejectedRule string to the numeric rule number used
+// in PlannerTrace.validator.failedRule (1..10, spec §11.2).
+function ruleNumberForRejection(rule: string): number {
+  switch (rule) {
+    case 'entity_existence':         return 1;
+    case 'field_existence':          return 2;
+    case 'operator_sanity':          return 3;
+    case 'date_range_sanity':        return 4;
+    case 'entity_relation_validity': return 5;
+    case 'aggregation_compatibility':return 6;
+    case 'hybrid_pattern_check':     return 7;
+    case 'canonical_precedence':     return 8;
+    case 'projection_overlap':       return 9;
+    case 'capability_check':         return 10;
+    default: return 0;
   }
 }
 

@@ -7,6 +7,7 @@
  */
 import { runQuery } from '../crmQueryPlannerService.js';
 import type { RunQueryDeps } from '../crmQueryPlannerService.js';
+import type { RunLlmStage3Output } from '../llmPlanner.js';
 import type { ExecutorContext, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
 
 let passed = 0;
@@ -65,13 +66,33 @@ function makeContext(overrides: Partial<ExecutorContext> = {}): ExecutorContext 
     orgId:                'org-1',
     organisationId:       'org-1',
     subaccountId:         'sub-1',
-    subaccountLocationId: 'loc-1',
     principalType:        'user',
     principalId:          'user-1',
     teamIds:              [],
     callerCapabilities:   new Set(['crm.query']),
     ...overrides,
   };
+}
+
+// Stage 3 stubs — route Stage 3 outcomes without hitting llmRouter / provider.
+function stage3Throws(err: unknown): RunQueryDeps['runLlmStage3'] {
+  return async () => { throw err; };
+}
+
+function stage3Returns(partial: Partial<RunLlmStage3Output>): RunQueryDeps['runLlmStage3'] {
+  return async () => ({
+    draft: {
+      source:                'live',
+      intentClass:           'unsupported',
+      primaryEntity:         'contacts',
+      filters:               [],
+      limit:                 50,
+      canonicalCandidateKey: null,
+      confidence:            0.9,
+    } as RunLlmStage3Output['draft'],
+    escalated: false,
+    ...partial,
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -97,12 +118,73 @@ test('Stage 1 canonical hit → predictedCostCents:0', async () => {
   assertEqual(output.costPreview.confidence, 'high', 'Stage 1 confidence is high');
 });
 
-// Stage 1 + Stage 2 miss → unsupported_query artefact (P1.2 stub, not throw)
-test('unrecognised intent → unsupported_query artefact (Stage 3 stub)', async () => {
-  const output = await runQuery({ rawIntent: 'show me the weather forecast', subaccountId: 'sub-1' }, makeContext(), deps);
+// Stage 3 stub that returns intentClass: 'unsupported' → unsupported_query error
+test('Stage 3 returns unsupported intentClass → unsupported_query artefact', async () => {
+  const output = await runQuery(
+    { rawIntent: 'show me the weather forecast', subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stage3Returns({}) },
+  );
   assert(output.artefacts.length > 0, 'must have artefacts');
   assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
   assertEqual((output.artefacts[0] as any).errorCode, 'unsupported_query', 'errorCode');
+  assertEqual(output.stageResolved, 3, 'Stage 3 path');
+});
+
+// Stage 3 throws a plain parse error → ambiguous_intent
+test('Stage 3 parse failure → ambiguous_intent artefact', async () => {
+  const output = await runQuery(
+    { rawIntent: 'something gibberish', subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stage3Throws(new Error('parse failed')) },
+  );
+  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
+  assertEqual((output.artefacts[0] as any).errorCode, 'ambiguous_intent', 'errorCode');
+});
+
+// Stage 3 throws plain object { statusCode: 402 } → cost_exceeded (B1 coverage)
+test('Stage 3 budget exceeded (plain statusCode: 402) → cost_exceeded artefact', async () => {
+  const budgetErr = { statusCode: 402, code: 'BUDGET_EXCEEDED', message: 'over budget' };
+  const output = await runQuery(
+    { rawIntent: 'anything', subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stage3Throws(budgetErr) },
+  );
+  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
+  assertEqual((output.artefacts[0] as any).errorCode, 'cost_exceeded', 'errorCode');
+});
+
+// Stage 3 throws FailureError with cost_limit_exceeded → cost_exceeded (B1 coverage)
+test('Stage 3 budget exceeded (FailureError cost_limit_exceeded) → cost_exceeded artefact', async () => {
+  const { FailureError } = await import('../../../../shared/iee/failure.js');
+  const failure = new FailureError({
+    failureReason: 'internal_error',
+    failureDetail: 'cost_limit_exceeded',
+  });
+  const output = await runQuery(
+    { rawIntent: 'anything', subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stage3Throws(failure) },
+  );
+  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
+  assertEqual((output.artefacts[0] as any).errorCode, 'cost_exceeded', 'errorCode');
+});
+
+// llmRouter also throws `statusCode: 402` with `code: 'RATE_LIMITED'` for
+// reservation-side rate-limit rejections (a transient failure, not a budget
+// overrun). The isBudgetExceededError discriminator must gate on
+// `code === 'BUDGET_EXCEEDED'` so rate-limited 402s fall through to the
+// generic parse-failure → ambiguous_intent path rather than being surfaced
+// as a final cost_exceeded terminal.
+test('Stage 3 rate-limited (statusCode: 402, code: RATE_LIMITED) → ambiguous_intent, not cost_exceeded', async () => {
+  const rateLimitErr = { statusCode: 402, code: 'RATE_LIMITED', message: 'reservation rate-limited' };
+  const output = await runQuery(
+    { rawIntent: 'anything', subaccountId: 'sub-1' },
+    makeContext(),
+    { ...deps, runLlmStage3: stage3Throws(rateLimitErr) },
+  );
+  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
+  assertEqual((output.artefacts[0] as any).errorCode, 'ambiguous_intent', 'rate-limited must not map to cost_exceeded');
 });
 
 // forward-looking canonical.* capabilities are skipped — no MissingPermissionError

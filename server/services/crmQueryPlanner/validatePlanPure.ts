@@ -12,6 +12,7 @@ import type {
   StageResolved,
 } from '../../../shared/types/crmQueryPlanner.js';
 import type { BriefCostPreview } from '../../../shared/types/briefResultContract.js';
+import { isLiveOnlyField } from './executors/liveExecutorPure.js';
 
 // ── ValidationError ───────────────────────────────────────────────────────────
 
@@ -193,20 +194,80 @@ function checkHybridPattern(
   // v1: basic shape check (exactly one live filter would be verified here in P2)
 }
 
-// Rule 8 [plan-dependent]: canonical-precedence tie-breaker
-// Mutates draft in place to promote source when applicable.
-// Returns the (possibly mutated) draft.
+// Rule 8 [plan-dependent]: canonical-precedence tie-breaker (spec §11.2)
+// Three cases when the plan's source is 'live' and a canonicalCandidateKey
+// points at a real registry entry:
+//   (a) no live-only filters present          → promote to 'canonical'
+//   (b) live-only filters present AND plan
+//       matches canonical_base_with_live_filter → promote to 'hybrid'
+//   (c) live-only filters present AND no
+//       hybrid shape match                    → stay 'live'
+//
+// Hybrid shape (spec §11.2 rule 7 / §14.2): exactly one live filter, and
+// "other filters are canonical-resolvable". A promoted plan with a non-
+// live-only filter the registry entry doesn't know about would otherwise
+// escape `canonicalExecutor.assertFieldsSubset` as a `FieldOutOfScopeError`
+// (uncaught → 500) or silently slip into the hybrid executor's live-filter
+// intersection. Stay on the live plan in that case — the user's filters
+// are preserved and the live executor handles them.
 function applyCanonicalPrecedence(
   draft: DraftQueryPlan,
   registry: CanonicalQueryRegistry,
 ): DraftQueryPlan {
   if (draft.source !== 'live') return draft;
   if (!draft.canonicalCandidateKey) return draft;
-  if (!registry[draft.canonicalCandidateKey]) return draft;
+  const entry = registry[draft.canonicalCandidateKey];
+  if (!entry) return draft;
 
-  // No live-only filters — promote to canonical
-  const promoted = { ...draft, source: 'canonical' as const };
-  return promoted;
+  const filters = draft.filters ?? [];
+  const hasLiveOnlyFilter = filters.some(f => isLiveOnlyField(f.field));
+
+  // Canonical-resolvable check: every non-live-only filter AND every sort /
+  // projection / aggregation field referenced by the draft must be a field
+  // the registry entry's `allowedFields` lists. The canonical executor's
+  // `assertFieldsSubset` (§12.1) enforces this same subset across filters,
+  // sort, projection, and aggregation; promoting a draft with any out-of-
+  // scope field would escape that check as `FieldOutOfScopeError` → 500.
+  // Stay on live when any of those fields is not canonical-resolvable —
+  // the live executor handles the user's request without this constraint.
+  const nonLiveFilters = filters.filter(f => !isLiveOnlyField(f.field));
+  const allNonLiveFiltersCanonical = nonLiveFilters.every(f => f.field in entry.allowedFields);
+  const allSortCanonical = (draft.sort ?? []).every(s => s.field in entry.allowedFields);
+  const allProjectionCanonical = (draft.projection ?? []).every(p => p in entry.allowedFields);
+  const aggregation = draft.aggregation;
+  const allAggregationFieldsCanonical =
+    (!aggregation?.field    || aggregation.field   in entry.allowedFields) &&
+    (aggregation?.groupBy  ?? []).every(g => g in entry.allowedFields);
+
+  if (
+    !allNonLiveFiltersCanonical ||
+    !allSortCanonical ||
+    !allProjectionCanonical ||
+    !allAggregationFieldsCanonical
+  ) {
+    // Case (c'): base isn't canonical-resolvable — keep as live (spec §11.2 rule 7 shape).
+    return draft;
+  }
+
+  if (!hasLiveOnlyFilter) {
+    // Case (a): no live-only filters — promote to canonical
+    return { ...draft, source: 'canonical' as const };
+  }
+
+  // v1 hybrid shape: exactly one live-only filter on top of an otherwise
+  // canonical-compatible plan (spec §14 canonical_base_with_live_filter).
+  const liveOnlyCount = filters.filter(f => isLiveOnlyField(f.field)).length;
+  if (liveOnlyCount === 1) {
+    // Case (b): hybrid shape match — promote to hybrid
+    return {
+      ...draft,
+      source: 'hybrid' as const,
+      hybridPattern: 'canonical_base_with_live_filter',
+    };
+  }
+
+  // Case (c): live-only filters present but doesn't fit hybrid shape — stay live
+  return draft;
 }
 
 // Rule 9 [principal-dependent] [stage1-subset]: projection overlap

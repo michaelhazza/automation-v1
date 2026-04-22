@@ -30,9 +30,15 @@ function touch(key: string, entry: PlanCacheEntry): void {
 
 // ── Public interface ──────────────────────────────────────────────────────────
 
+export type PlanCacheMissReason = 'not_present' | 'expired' | 'principal_mismatch';
+
+export type PlanCacheGetResult =
+  | { hit: true; plan: QueryPlan; entry: PlanCacheEntry }
+  | { hit: false; reason: PlanCacheMissReason };
+
 /**
- * Retrieve a cached plan. Returns null on miss, expiry, or principal mismatch
- * (Rules 9 and 10 rerun on every cache hit per §9.3.1).
+ * Retrieve a cached plan. Returns a discriminated result so `stage2_cache_miss`
+ * can distinguish not-present / expired / principal-mismatch per §9.3.1.
  */
 export function get(
   hash: string,
@@ -41,14 +47,14 @@ export function get(
     callerCapabilities: Set<string>;
     registry: CanonicalQueryRegistry;
   },
-): { plan: QueryPlan; entry: PlanCacheEntry } | null {
+): PlanCacheGetResult {
   const key = makeCacheKey(hash, subaccountId);
   const entry = cache.get(key);
-  if (!entry) return null;
+  if (!entry) return { hit: false, reason: 'not_present' };
 
   if (isExpired(entry, Date.now())) {
     cache.delete(key);
-    return null;
+    return { hit: false, reason: 'expired' };
   }
 
   // Rerun principal-dependent rules (§9.3.1)
@@ -62,14 +68,16 @@ export function get(
       callerCapabilities: context.callerCapabilities,
     });
   } catch (e) {
-    if (e instanceof ValidationError) return null; // principal mismatch — discard
+    if (e instanceof ValidationError) {
+      return { hit: false, reason: 'principal_mismatch' };
+    }
     throw e;
   }
 
   // Increment hits + touch for LRU
   const updated = { ...entry, hits: entry.hits + 1 };
   touch(key, updated);
-  return { plan: entry.plan, entry: updated };
+  return { hit: true, plan: entry.plan, entry: updated };
 }
 
 /**

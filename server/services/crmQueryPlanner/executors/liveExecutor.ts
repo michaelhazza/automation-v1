@@ -107,9 +107,10 @@ export async function executeLive(
     throw new LiveExecutorError('no_ghl_connection', 'No active GHL connection for this subaccount');
   }
 
-  // Acquire rate-limiter token (keyed on locationId — shared with ClientPulse polling)
-  const limiterKey = context.subaccountLocationId ?? context.subaccountId;
-  await getProviderRateLimiter('ghl').acquire(limiterKey);
+  // Acquire rate-limiter token keyed on the real GHL locationId (resolved from
+  // integration_connections.configJson) so the planner shares a bucket with
+  // ClientPulse polling and any other ghlAdapter consumer. §13.5 / §16.3.
+  await getProviderRateLimiter('ghl').acquire(ghlCtx.locationId);
 
   const translated = translateToProviderQuery(plan);
   const startedAt = Date.now();

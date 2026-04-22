@@ -94,15 +94,18 @@ test('set + get round-trip returns identical plan', () => {
   const plan = makePlan();
   set('hash1', 'sub-1', plan, 'high');
   const result = get('hash1', 'sub-1', ctx);
-  assert(result !== null, 'cache hit expected');
-  assertEqual(result!.plan.source, plan.source, 'source matches');
-  assertEqual(result!.plan.primaryEntity, plan.primaryEntity, 'primaryEntity matches');
+  assert(result.hit === true, 'cache hit expected');
+  if (!result.hit) return;
+  assertEqual(result.plan.source, plan.source, 'source matches');
+  assertEqual(result.plan.primaryEntity, plan.primaryEntity, 'primaryEntity matches');
 });
 
-test('miss on unknown key returns null', () => {
+test('miss on unknown key returns not_present reason', () => {
   _clear();
   const result = get('unknown-hash', 'sub-1', ctx);
-  assertEqual(result, null, 'miss returns null');
+  assert(result.hit === false, 'miss expected');
+  if (result.hit) return;
+  assertEqual(result.reason, 'not_present', 'reason');
 });
 
 test('cross-subaccount isolation: same hash, different subaccounts → two entries, no collision', () => {
@@ -113,10 +116,11 @@ test('cross-subaccount isolation: same hash, different subaccounts → two entri
   set('hash99', 'sub-B', planB, 'high');
   const resultA = get('hash99', 'sub-A', ctx);
   const resultB = get('hash99', 'sub-B', ctx);
-  assert(resultA !== null, 'sub-A hit');
-  assert(resultB !== null, 'sub-B hit');
-  assertEqual(resultA!.plan.source, 'canonical', 'sub-A plan');
-  assertEqual(resultB!.plan.source, 'live', 'sub-B plan');
+  assert(resultA.hit === true, 'sub-A hit');
+  assert(resultB.hit === true, 'sub-B hit');
+  if (!resultA.hit || !resultB.hit) return;
+  assertEqual(resultA.plan.source, 'canonical', 'sub-A plan');
+  assertEqual(resultB.plan.source, 'live', 'sub-B plan');
 });
 
 test('entry expiry at cachedAt + TTL returns null', () => {
@@ -139,7 +143,9 @@ test('stage1 plan (stageResolved:1) is not cached', () => {
   const plan = makePlan({ stageResolved: 1 });
   set('hashS1', 'sub-1', plan, 'high');
   const result = get('hashS1', 'sub-1', ctx);
-  assertEqual(result, null, 'stage1 plan must not be cached');
+  assert(result.hit === false, 'stage1 plan must not be cached');
+  if (result.hit) return;
+  assertEqual(result.reason, 'not_present', 'reason');
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────

@@ -244,18 +244,119 @@ test('full mode Rule 7: hybrid with unknown key throws hybrid_pattern_check', ()
   assertThrows(() => validatePlanPure(draft, fullOpts()), 'hybrid_pattern_check');
 });
 
-// Rule 8 — canonical-precedence tie-breaker
-test('full mode Rule 8: live plan with valid canonicalCandidateKey promotes to canonical', () => {
+// Rule 8 — canonical-precedence tie-breaker (three cases)
+test('full mode Rule 8 case (a): live plan with no live-only filters promotes to canonical', () => {
   const draft = makeDraft({ source: 'live', canonicalCandidateKey: 'contacts.inactive_over_days' });
   const plan = validatePlanPure(draft, fullOpts());
   assertEqual(plan.source, 'canonical', 'source promoted to canonical');
   assert(plan.validated, 'validated');
 });
 
+test('full mode Rule 8 case (b): live plan with exactly one live-only filter promotes to hybrid', () => {
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    filters: [{ field: 'city', operator: 'eq', value: 'Austin', humanLabel: 'City is Austin' }],
+  });
+  // schemaContext: null — skip field-existence so the precedence rule is the only gate under test
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'hybrid', 'source promoted to hybrid');
+  assertEqual(plan.hybridPattern, 'canonical_base_with_live_filter', 'hybrid pattern pinned');
+  assert(plan.validated, 'validated');
+});
+
+test('full mode Rule 8 case (c): live plan with multiple live-only filters stays live', () => {
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    filters: [
+      { field: 'city', operator: 'eq', value: 'Austin', humanLabel: 'City is Austin' },
+      { field: 'country', operator: 'eq', value: 'US', humanLabel: 'Country is US' },
+    ],
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live when hybrid shape does not match');
+});
+
 test('full mode Rule 8: live plan without canonicalCandidateKey stays live', () => {
   const draft = makeDraft({ source: 'live', canonicalCandidateKey: null });
   const plan = validatePlanPure(draft, fullOpts());
   assertEqual(plan.source, 'live', 'source stays live when no candidate key');
+});
+
+test('full mode Rule 8: non-canonical-resolvable filter blocks promotion to canonical — stays live', () => {
+  // Zero live-only filters, but one non-live-only filter that is NOT in the
+  // registry entry's allowedFields. Case (a) would promote to canonical and
+  // the canonical executor would throw FieldOutOfScopeError → 500. Stay live.
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    filters: [{ field: 'bogus_field', operator: 'eq', value: 'x', humanLabel: 'bogus' }],
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — base not canonical-resolvable');
+});
+
+test('full mode Rule 8: non-canonical-resolvable base + one live-only filter blocks promotion to hybrid — stays live', () => {
+  // Exactly one live-only filter would normally promote to hybrid, but an
+  // extra non-live-only filter not in allowedFields would escape the hybrid
+  // executor's canonical base as FieldOutOfScopeError. Stay live.
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    filters: [
+      { field: 'city', operator: 'eq', value: 'Austin', humanLabel: 'City is Austin' },
+      { field: 'bogus_field', operator: 'eq', value: 'x', humanLabel: 'bogus' },
+    ],
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — hybrid base not canonical-resolvable');
+});
+
+test('full mode Rule 8: non-canonical projection field blocks promotion — stays live', () => {
+  // Projection references a field not in allowedFields; canonicalExecutor
+  // would throw FieldOutOfScopeError on projection. Stay live.
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    projection: ['bogus_projection_field'],
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — projection not canonical-resolvable');
+});
+
+test('full mode Rule 8: non-canonical sort field blocks promotion — stays live', () => {
+  // Sort references a field not in allowedFields; canonicalExecutor would
+  // throw FieldOutOfScopeError on sort. Stay live.
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    sort: [{ field: 'bogus_sort_field', direction: 'asc' }],
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — sort not canonical-resolvable');
+});
+
+test('full mode Rule 8: non-canonical aggregation field blocks promotion — stays live', () => {
+  // Aggregation field not in allowedFields; canonicalExecutor would throw
+  // FieldOutOfScopeError on aggregation.field. Stay live.
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    aggregation: { type: 'sum', field: 'bogus_agg_field' },
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — aggregation field not canonical-resolvable');
+});
+
+test('full mode Rule 8: non-canonical aggregation groupBy blocks promotion — stays live', () => {
+  const draft = makeDraft({
+    source: 'live',
+    canonicalCandidateKey: 'contacts.inactive_over_days',
+    aggregation: { type: 'group_by', groupBy: ['bogus_groupby_field'] },
+  });
+  const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
+  assertEqual(plan.source, 'live', 'source stays live — groupBy not canonical-resolvable');
 });
 
 // Rule 10 — capability check

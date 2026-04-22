@@ -108,6 +108,10 @@ interface LlmCallInput {
   model:         string;
   tokenBudget:   number;
   abortSignal?:  AbortSignal;
+  // Escalation attribution — passed through to router context so ledger
+  // rows populate `was_escalated` + `escalation_reason` (spec §17.2).
+  wasEscalated?:   boolean;
+  escalationReason?: 'low_confidence' | 'hybrid_detected' | 'large_schema';
 }
 
 interface LlmCallOutput {
@@ -117,7 +121,7 @@ interface LlmCallOutput {
 }
 
 async function singleLlmCall(input: LlmCallInput): Promise<LlmCallOutput> {
-  const { intent, registry, organisationId, subaccountId, runId, model, tokenBudget, abortSignal } = input;
+  const { intent, registry, organisationId, subaccountId, runId, model, tokenBudget, abortSignal, wasEscalated, escalationReason } = input;
 
   const schemaContextText = getSchemaContextText({ subaccountId, intent, tokenBudget });
   const messages = buildPrompt({ intent, registry, schemaContextText });
@@ -139,6 +143,8 @@ async function singleLlmCall(input: LlmCallInput): Promise<LlmCallOutput> {
       featureTag:         'crm-query-planner',
       model,
       systemCallerPolicy: 'bypass_routing',
+      wasEscalated,
+      escalationReason,
     },
     abortSignal,
     postProcess: (content: string) => {
@@ -203,6 +209,8 @@ export async function runLlmStage3(input: RunLlmStage3Input): Promise<RunLlmStag
       model:       config.escalationModel,
       tokenBudget: config.schemaTokensEscalated,
       abortSignal,
+      wasEscalated:    true,
+      escalationReason: 'hybrid_detected',
     });
     return {
       draft:                  result.draft,
@@ -237,6 +245,8 @@ export async function runLlmStage3(input: RunLlmStage3Input): Promise<RunLlmStag
     model:       config.escalationModel,
     tokenBudget: config.schemaTokensEscalated,
     abortSignal,
+    wasEscalated:     true,
+    escalationReason: 'low_confidence',
   });
 
   return {

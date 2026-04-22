@@ -7,7 +7,7 @@ import { logger } from '../../lib/logger.js';
 
 interface PlannerEventEnvelope {
   kind: string;
-  at: string;
+  at: number; // epoch ms — matches shared PlannerEvent.at in shared/types/crmQueryPlanner.ts
   orgId: string;
   subaccountId: string;
   runId?: string;

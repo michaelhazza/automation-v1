@@ -238,7 +238,14 @@ export interface ExecutorContext {
   orgId: string;
   organisationId: string;
   subaccountId: string;
-  subaccountLocationId: string;
+  /**
+   * @deprecated The real GHL locationId lives on `integration_connections.configJson`
+   * and is resolved at dispatch time by the live executor (`ghlCtx.locationId`
+   * from `resolveGhlContext`). This field is retained for backwards compatibility
+   * with existing callers but the rate-limiter no longer consults it — keeping
+   * it would bucket planner calls separately from ClientPulse polling.
+   */
+  subaccountLocationId?: string;
   runId?: string;
   briefId?: string;
   principalType: 'user' | 'agent' | 'system';
