@@ -147,3 +147,71 @@ Surfaced from this 2-round pass — patterns worth lifting into `docs/spec-autho
 6. **Correctness-proxy metrics ship event-data in v1, dashboard later.** Event shape locked in v1 so v2/v3 dashboards consume without schema migrations. Separates "instrumentation is in place" from "visualization is in place" as two distinct exit criteria.
 
 These are the candidates; final KNOWLEDGE.md entries to be written when the user decides the spec is locked.
+
+---
+
+## Round 3 — Pre-build execution safeguards
+
+ChatGPT pivoted explicitly: "You're ready to build. What's left is making the build phase deterministic and low-friction." 7 findings, all about **execution safeguards**, not spec gaps. ChatGPT also said plainly: "Do not add more invariants, expand spec scope, introduce new abstractions, optimise performance yet."
+
+Given that, the adjudicator was selective about what landed in the spec vs what was advice for the build phase.
+
+### Finding-by-finding decisions
+
+| # | Finding | Verdict | Rationale |
+|---|---------|---------|-----------|
+| 1 | Golden path (first-build target) | **APPLY** | P1 sub-sequencing is spec-level; added §19 P1.0 / P1.1 / P1.2 intra-phase milestones |
+| 2 | Linear execution mode for early testing | **SKIP** | Spec is already linear — no retries in parallel, no streaming, no concurrent executors. Adding "be linear" as an invariant when there's nothing to disable adds noise without value |
+| 3 | Trace object | **APPLY** | Real debugging win. Added `PlannerTrace` type in §6.7 + embedded on `planner.result_emitted` payload. Explicitly framed as a view over existing events, not a new source of truth |
+| 4 | Failure injection flags | **SKIP** | Pure tests + mocks in §20 already cover every branch at integration level. Runtime fault-injection env flags are scope-add without signal |
+| 5 | Explicit build sequence | **PARTIAL** (folded into #1) | §19 phase plan (P1 / P2 / P3) already exists; ChatGPT wanted finer-grained ordering within P1. That's what the P1.0 / P1.1 / P1.2 sub-milestones deliver. Duplicating §19 into a longer linear Phase-0-through-5 list would bloat the spec |
+| 6 | Spec-drift guard / PR-must-reference-§ rule | **SKIP** | Already covered by CLAUDE.md §11 ("Docs Stay In Sync With Code") — repeating repo-wide workflow rules inside a per-feature spec is redundant |
+| 7 | Non-empty-suggestions fallback for `unsupported_query` | **APPLY** | One-line addition to §15.3 — closes a real behaviour gap where an empty Stage 3 `clarificationPrompt` could produce a dead-end error |
+
+### ChatGPT's "if you do nothing else, do these three"
+
+ChatGPT's top three were: (1) golden path, (3) trace object, (5) linear execution mode.
+The adjudicator applied (1) and (3). (5) was rejected on the basis that the spec already enforces linear execution structurally — there is no concurrent code path to disable.
+
+### Net changes Round 3
+
+- Lines: +39 / -1 in `spec.md`
+- New types: `PlannerTrace` in §6.7
+- New payload field: `trace: PlannerTrace` on `planner.result_emitted`
+- New sub-sequencing: P1.0 (skeleton) / P1.1 (golden path) / P1.2 (rest of P1) in §19
+- New behaviour contract: non-empty suggestions guarantee for error results, with a concrete fallback string
+
+### What did NOT land in the spec (intentionally)
+
+Everything ChatGPT framed as a **build-phase practice**:
+
+- Linear execution mode during bring-up — good dev discipline, not a product requirement
+- Failure injection flags — testability tooling, not spec surface
+- PR-must-reference-§ workflow rule — already in CLAUDE.md
+
+These are real good ideas; they'll inform the **implementation plan** (architect agent / execute-plan skill), not the spec. Keeping the spec surgical is itself a spec-authoring discipline ChatGPT would have flagged had it bloated.
+
+Applied 3 of 7, skipped 3, folded 1.
+
+---
+
+## Final state after Round 3
+
+- Codex spec-reviewer: 3 iterations, closed clean
+- ChatGPT spec review: 3 rounds, 26 findings total (11 + 8 + 7), 22 applied (11 + 8 + 3)
+- Skipped: 4 (all from Round 3, all build-phase not spec-phase)
+- Remaining open questions: unchanged (§22)
+- Deferred Items: unchanged
+- Length: ~2,038 lines
+
+**Verdict:** Spec is implementation-proof AND the P1 build has a clear golden-path first-commit target. The next agent (architect or direct implementation) can start on P1.0 skeleton with confidence.
+
+### Updated pattern candidates for KNOWLEDGE.md
+
+Adding to the earlier list:
+
+7. **Golden-path sub-sequencing within phases.** For any multi-feature phase (e.g. P1 ships 8 registry entries), ship ONE end-to-end path first (skeleton → golden path → replication). This proves cross-cutting wiring before taking on breadth, and gives the UI integration surface a real target within hours.
+8. **Trace object derived from existing events.** Where debugging requires cross-event correlation (`intentHash` grouping), add a flat trace type embedded on the terminal event. Frame it explicitly as a view over existing events, not a new source of truth — avoids the ambiguity of "is the trace or the event stream authoritative?"
+9. **Non-empty-result guarantees on error shapes.** When a contract requires "every error carries suggestions", specify the fallback path concretely (e.g. "inject a static list of supported phrasings if the LLM produced no clarification"). An empty-array technically satisfies a `suggestions: string[]` field type but violates the UX intent.
+
+These join the 6 from Rounds 1-2 for the eventual KNOWLEDGE.md pass.

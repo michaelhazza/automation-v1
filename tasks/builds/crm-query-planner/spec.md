@@ -523,6 +523,35 @@ export interface PlannerEvent<K extends PlannerEventKind = PlannerEventKind> {
 
 All emitted through `plannerEvents.emit(event)` which forwards to structured logs and the run-trace event stream (§17).
 
+### 6.7 Planner trace
+
+One aggregated debugging object per request, built up during the pipeline and embedded on `planner.result_emitted` (§17.1). This is **not a new source of truth** — every field is already emitted as a discrete event in §17.1. The trace is a flat view over those events, collated by `intentHash`, so debugging a single request is one object lookup instead of reassembling from an event stream.
+
+```ts
+export interface PlannerTrace {
+  intentHash: string;
+  briefId?: string;
+  normalisedIntentTokens: string[];           // from §7 — helps diagnose alias misses
+  stage1: { hit: boolean; candidateKey?: string; rejectedBy?: 'rule_2' | 'rule_3' | 'rule_9' };
+  stage2: { hit: boolean; reason?: 'not_present' | 'expired' | 'principal_mismatch' };
+  stage3?: {
+    used: boolean;
+    defaultTierTokens?: { input: number; output: number };
+    escalationTierTokens?: { input: number; output: number };
+    escalationReason?: 'low_confidence' | 'hybrid_detected' | 'large_schema';
+    parseFailure?: boolean;
+  };
+  validator: { passed: boolean; failedRule?: number; rejectedValue?: unknown };
+  canonicalPromoted?: { fromSource: 'live'; toSource: 'canonical' | 'hybrid' };
+  executor?: { kind: 'canonical' | 'live' | 'hybrid'; callCount?: number; capShortCircuited?: boolean };
+  finalPlan?: { source: QuerySource; primaryEntity: PrimaryEntity; filterCount: number };
+  terminalOutcome: 'structured' | 'approval' | 'error';
+  terminalErrorCode?: string;
+}
+```
+
+The trace is built by `crmQueryPlannerService.ts` in a local accumulator passed through the pipeline; each stage writes its slot before moving to the next. On terminal resolution, the accumulator is frozen and attached to the `planner.result_emitted` event. Building it is free — the data is already being captured for individual events — so this is a view concern, not a compute concern.
+
 ---
 
 ## 7. Intent normalisation
@@ -1331,6 +1360,7 @@ Follows the committed contract (`shared/types/briefResultContract.ts`) verbatim.
 - **If rowCount > 50:** suggest sort by a relevant field (last activity, created date, amount).
 - **If entity has common follow-ups:** suggest those (e.g. contacts → "Email these contacts").
 - **All suggestions must be re-parseable as a new Brief** — full instruction strings, not fragments. Per brief §7 rule.
+- **Non-empty guarantee for `unsupported_query` / `ambiguous_intent` errors.** If the error path would otherwise emit zero suggestions (e.g. Stage 3 returned an empty `clarificationPrompt`, or validation failed with no rule-specific hint), the service injects a fallback suggestion drawn from the registry of shipped canonical queries — `"Try one of the supported phrasings: 'contacts inactive 30 days', 'opportunities closing this month', 'appointments this week'"`. Error results MUST carry at least one suggestion; a dead-end error is a spec violation. This matches §24 criterion 7 ("Failure is a first-class state").
 
 Suggestions are a pure function of plan + result; no LLM call.
 
@@ -1558,7 +1588,7 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.classified` | `{ intentHash, source, intentClass, confidence, stageResolved, canonicalCandidateKey }` |
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
-| `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved }` |
+| `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved, trace: PlannerTrace }` |
 | `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
@@ -1698,6 +1728,14 @@ The spec ships in three phases on this branch. Each phase is its own commit clus
 **What ships:** the deterministic part of the planner. Stages 1, 2, 4; canonical executor; canonical registry with all 8 entries; result normaliser; API route; skill registration. **Stage 3 is stubbed** — on any intent that misses Stage 1 and Stage 2, the stub short-circuits to a `BriefErrorResult { errorCode: 'unsupported_query', suggestions: [...] }` **before** Stage 4 runs. The cache module (§9) is shipped but its write path is never exercised in P1 because only Stage 3 successes are cached and Stage 3 produces none. Stage 2 reads are wired so P2's first successful Stage 3 can populate the cache without further plumbing.
 
 **Why this phase first:** the hardest-to-get-right pieces are the deterministic paths (registry matching, validation, normalisation). Proving them work without LLM noise in the loop is the highest-leverage way to start. Any user-visible failure at this phase is deterministic and fixable.
+
+**Intra-P1 build sequence — golden path first.** P1 is **not** a single-commit burst; land it in three sub-milestones so the simplest end-to-end flow is provable before the rest of P1 lights up:
+
+1. **P1.0 — Skeleton.** Types (`shared/types/crmQueryPlanner.ts`) + entry service (`crmQueryPlannerService.ts` with an empty pipeline that throws `unsupported_query` for every input) + route wiring (`server/routes/crmQueryPlanner.ts`) + skill registration (`crm.query` in `actionRegistry.ts`). No stages run. Smoke test: the route returns an error artefact end-to-end.
+2. **P1.1 — Golden path.** **One** registry entry (pick `contacts.list_inactive_30d` as the canonical example), its aliases, Stage 1 matcher with the reduced validator subset, canonical executor handler, result normaliser producing `BriefStructuredResult`. Smoke test: POST the alias → returns a real structured result with `stageResolved: 1`. This proves every cross-cutting wire (route, principal context, RLS nesting, event emission, trace object) **before** adding more surface.
+3. **P1.2 — Rest of P1.** Remaining 7 registry entries + their aliases + handlers, Stage 2 cache (read-wired, write-dark per §19 P1 note), Stage 4 validator full rule set, approval-card generator, all remaining events in §17.1.
+
+Each sub-milestone is one commit cluster. P1.1 is the single highest-leverage milestone — everything after it is replication across registry keys rather than new cross-cutting plumbing.
 
 **Files:**
 - `shared/types/crmQueryPlanner.ts`
