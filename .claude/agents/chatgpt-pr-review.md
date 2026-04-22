@@ -97,6 +97,9 @@ For each round:
    When you reply to a pending architectural item ("implement" / "defer" /
    "reject"):
    - Remove it (and its overlapping dependents) from `pending_architectural_items`
+   - Re-activate all paused dependent items — process them immediately in the
+     current round if the decision allows it (i.e. if you said "implement" or if
+     the architectural change doesn't invalidate them)
    - Record the decision in the current round's Decisions table:
      "implement" → accept | "defer" → defer | "reject" → reject
    - Then execute: accepted items implement as normal; deferred route to
@@ -113,12 +116,19 @@ For each round:
 
      Reply with: "continue" | "stop" | "split"
 
-   Then continue implementing. You are present to decide; this is advisory only.
+   Wait for response before continuing:
+   - "continue" → proceed with remaining items
+   - "stop" → halt implementation; remaining accepted items are deferred to
+     tasks/todo.md under § PR Review deferred items
+   - "split" → halt implementation; list remaining items for a follow-up PR
 5. Implement the accepted items (excluding any flagged for your decision in step 3)
    using Edit, Write, Bash — follow CLAUDE.md and architecture.md conventions.
 6. Run `npm run lint && npm run typecheck` — fix any issues before continuing
 7. Append the round to the session log with a Top themes line using finding_type
    vocabulary (e.g. null_check, naming, architecture) — not free-form text.
+   If `pending_architectural_items` is still non-empty at end of round, add each
+   to the Decisions table as: "pending (architectural — awaiting your decision)"
+   so the log is structurally complete even before you reply.
 8. Print the round summary and updated diff:
 
   Round <N> done — <X> implemented, <Y> rejected, <Z> deferred.
@@ -229,7 +239,14 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
      If index_write_failures > 0:
        ⚠ Index write failures: <N> — pattern tracking may be incomplete.
 
-8. Print: "Ready to merge — PR #<N>: <url>"
+8. If `pending_architectural_items` is non-empty, print instead of "Ready to merge":
+
+     ⚠ Unresolved architectural decisions — not yet merge-ready:
+       - <item> — Recommendation: <action>
+     Resolve each above, or explicitly defer to tasks/todo.md, before merging.
+     PR: #<N> — <url>
+
+   If empty, print: "Ready to merge — PR #<N>: <url>"
 9. Print: "Session complete: <N> rounds, <X> implemented, <Y> rejected, <Z> deferred."
 
 ## Future Hook
