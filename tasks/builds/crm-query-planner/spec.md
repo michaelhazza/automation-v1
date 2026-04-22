@@ -126,6 +126,8 @@ The planner is deterministic-first: Stages 1 and 2 never consult the LLM. The LL
 
 **Input-shape invariant — raw intent only.** The planner always receives **raw, unclassified user intent** via `rawIntent: string`. Callers (Orchestrator, Brief surface, scheduled Briefs, future internal callers) MUST NOT pre-classify, pre-tokenize, or partially-plan the intent before handing it to the planner. The planner is the single source of truth for intent → plan classification; any upstream attempt to short-circuit that (e.g. "Orchestrator decided this is canonical, skip Stage 1") is a boundary violation and a KNOWLEDGE.md rule. The request shape at §18.1 has no slot for pre-classified data, so this is structurally enforced — but the invariant is stated here explicitly so the Orchestrator's future evolution doesn't quietly grow such a slot.
 
+**Idempotency contract — deterministic pre-Stage-3.** For any pair of requests with identical `(NORMALISER_VERSION, normalisedIntent.hash, subaccountId, principalContext)`, the planner is **guaranteed** to produce the same `QueryPlan` if the pipeline resolves at Stage 1 or Stage 2. Stage 1 is a pure function of `(intent, registry)` — same inputs, same output, registry changes aside (which bump the effective inputs). Stage 2 returns a cached plan; identical cache-key lookups return identical plans within the same cache generation. At Stage 3, determinism is **not guaranteed** — the LLM is inherently non-deterministic, so two same-input Stage-3 invocations may produce different valid plans. This asymmetry is by design: deterministic-first means the deterministic stages are contractually stable; the LLM fallback is explicitly the non-deterministic escape hatch. Callers that need end-to-end determinism must rely on Stage 1 / Stage 2 resolution (i.e. get the query into the registry or let the cache warm). No `planner.idempotency_miss` event is emitted in v1 — detecting it would require shadow-copying prior plans for comparison, which is a Query Memory Layer concern, not v1 scope.
+
 See §6 for type contracts and §7–§11 for per-stage behaviour.
 
 ---
@@ -493,7 +495,14 @@ export interface PlanCacheEntry {
   cachedAt: number;                // epoch ms
   subaccountId: string;            // part of cache key
   hits: number;                    // for Query Memory Layer later
+  cacheConfidence: 'high' | 'medium' | 'low';   // §9.2 TTL tiering
+  normaliserVersion: number;       // §7.5 cache-segregation on normaliser upgrades
 }
+
+// `NORMALISER_VERSION` is a module-level constant in normaliseIntentPure.ts.
+// Bump on any normaliser behaviour change (new stopword, algorithm change,
+// tokenisation fix). See §7.5.
+export const NORMALISER_VERSION = 1;
 ```
 
 ### 6.6 Planner events
@@ -535,6 +544,7 @@ One aggregated debugging object per request, built up during the pipeline and em
 export interface PlannerTrace {
   intentHash: string;
   briefId?: string;
+  normaliserVersion: number;                  // from §7.5 — cache-key segregation marker
   normalisedIntentTokens: string[];           // from §7 — helps diagnose alias misses
   stage1: { hit: boolean; candidateKey?: string; rejectedBy?: 'rule_2' | 'rule_3' | 'rule_9' };
   stage2: { hit: boolean; reason?: 'not_present' | 'expired' | 'principal_mismatch' };
@@ -630,7 +640,23 @@ The synonym map is the primary lever for Stage 1 hit rate. The pressure test in 
 - Pure function. No side effects. No external state. Enables full unit-test coverage.
 - Order of synonym application is deterministic (single pass in insertion order). No rule can override a prior rule within the same call.
 
-### 7.5 Test plan (pure)
+### 7.5 Versioning (safe-upgrade contract)
+
+`NORMALISER_VERSION` (module-level constant, exported from `normaliseIntentPure.ts`; see §6.5) starts at **`1`** and MUST be bumped whenever **any** behaviour that affects output hash changes:
+
+- New or removed stop word (§7.2)
+- New or removed synonym, or synonym-map rewrite (§7.3)
+- Tokenisation algorithm change (lowercase/punctuation/whitespace handling in §7.1)
+- Hash derivation change (e.g. length, encoding — §6.1)
+
+The version is included in:
+
+- **Cache key** (§9.1 — `v${NORMALISER_VERSION}:${subaccountId}:${hash}`) — old entries are unreachable under the new key, so bumping the version is a safe, automatic cache invalidation.
+- **`PlannerTrace.normaliserVersion`** (§6.7 — field added to the trace) — debugging "why did this query miss cache?" is answerable by diffing the trace's normaliser version against the cached entry's.
+
+Bumping the version is a one-line code change (`export const NORMALISER_VERSION = 2;`) plus a spec note in §7 listing what changed. Existing cache entries expire naturally within one TTL cycle; there is no explicit flush. Bumping is a deliberate action — changes that don't affect output hash (e.g. adding a comment, renaming a helper) MUST NOT bump the version.
+
+### 7.6 Test plan (pure)
 
 `normaliseIntentPure.test.ts` — minimum 15 cases:
 
@@ -689,6 +715,8 @@ function buildAliasIndex(
 
 Built once at module load and cached in a module-level `WeakMap<CanonicalQueryRegistry, Map<string, string>>`. Collision throw at build prevents two entries claiming the same normalised alias (caught at startup, not runtime).
 
+**Single-match invariant.** Stage 1 returns **at most one** registry entry per normalised intent. Two-entry matches are structurally impossible because `buildAliasIndex` throws at build time on any alias hash collision (snippet above) — a growing registry cannot produce ambiguous runtime matches without first failing CI at module load. At lookup time, `Map.get(intent.hash)` is a single-key read returning one or zero values. Runtime defence-in-depth: `registryMatcherPure.matchRegistryEntry` asserts the lookup returns at most one key; receiving anything else is a `RegistryConflictError` (module-load failure should have prevented the state, so the runtime throw is a sentinel for "the index was mutated externally" — which must not happen). The test plan (§8.4) includes a collision-detection case asserting this behaviour.
+
 ### 8.3 Stage 1 hits run a reduced validator subset
 
 A Stage 1 match is mostly structurally valid — the registry entry names the `primaryEntity`, the handler is typed, and the intent was deterministically matched. Most of Stage 4's rules (entity existence, operator sanity on registry-fixed filters, entity-relation validity, aggregation compatibility, hybrid-pattern check, canonical-precedence tie-breaker) are trivially satisfied and skipped.
@@ -727,17 +755,29 @@ Total: ~40 cases (35 alias hits + ~5 edge cases). The §20.1 summary row uses th
 In-process `Map<string /* cacheKey */, PlanCacheEntry>`. Key format:
 
 ```ts
-const cacheKey = (hash: string, subaccountId: string) => `${subaccountId}:${hash}`;
+const cacheKey = (hash: string, subaccountId: string) =>
+  `v${NORMALISER_VERSION}:${subaccountId}:${hash}`;
 ```
 
-Subaccount scoping prevents cross-subaccount cache pollution (two subaccounts with identical intents may have different schema shapes, so plans differ).
+Subaccount scoping prevents cross-subaccount cache pollution (two subaccounts with identical intents may have different schema shapes, so plans differ). The `v${NORMALISER_VERSION}` prefix makes normaliser upgrades safe: bumping the version (§7.5) invalidates all prior entries by making them unreachable via the new key, without needing an explicit flush.
 
 ### 9.2 Eviction policy
 
-- **TTL:** 60 seconds from `cachedAt`. Mirrors `crmLiveDataService` picker cache convention.
+- **TTL (tiered by `cacheConfidence`):**
+  - `high` (Stage 1 hits — canonical-registry match, deterministic) — 60 s.
+  - `medium` (Stage 3 hits with Stage-3 `confidence` ≥ `confidence_threshold` AND no escalation retry fired) — 60 s.
+  - `low` (Stage 3 hits where either the escalation retry fired, or `confidence` was below `confidence_threshold` but the validator still accepted the plan) — **15 s.**
+  Mirrors `crmLiveDataService` picker cache convention for the high/medium tier; the shorter low-tier TTL is the anti-poisoning guard from §9.2.1.
 - **Max entries:** 500 per process. LRU eviction on overflow. Matches picker cache.
-- **Overwrite:** most-recent-wins. A successful validation always overwrites any prior entry for the same key.
-- **Invalidation on schema change:** **not in v1.** The 60s TTL is short enough that schema-drift will flush through within one cache generation. Schema-change-driven flush (listening for `canonical_subaccount_mutations` version bumps) is tracked in the Deferred Items section as a v2 concern.
+- **Overwrite:** most-recent-wins. A successful validation always overwrites any prior entry for the same key; overwrite may promote confidence (e.g. a second Stage 3 hit that didn't escalate upgrades `low` → `medium` for the same normalised intent).
+- **Invalidation on schema change:** **not in v1.** The 60 s TTL is short enough that schema-drift will flush through within one cache generation. Schema-change-driven flush (listening for `canonical_subaccount_mutations` version bumps) is tracked in the Deferred Items section as a v2 concern.
+- **Invalidation on normaliser upgrade:** automatic. The cache key includes `NORMALISER_VERSION` (§6.5 / §7.5), so bumping the version makes all prior entries unreachable by the new lookup without explicit flush.
+
+### 9.2.1 Anti-poisoning (cache confidence tiering)
+
+A bad-but-valid Stage 3 plan (passes validator, but is subtly wrong for the user's actual intent) could otherwise become sticky at the 60 s TTL, dominating responses for that normalised intent until eviction. The short-TTL `low` tier prevents this: plans the planner has any reason to doubt (LLM escalated, or initial confidence below threshold) live 15 s maximum, so a wrong plan has ≤ 15 s to produce user-visible impact before being re-planned. High-confidence plans (Stage 1 hits, clean Stage 3 hits) keep the full 60 s because the pipeline already produced strong signals they were right.
+
+`cacheConfidence` is set at cache-write time by the service, from `plan.costPreview.confidence` for Stage 1 and from Stage 3 outcome flags (escalation fired / initial confidence vs threshold) for Stage 3. The validator does not set it — it's a pipeline-outcome signal, not a plan-shape signal.
 
 ### 9.3 Cache-write rules
 
@@ -1330,6 +1370,8 @@ This guarantees the cap holds even when call count cannot be fully determined pr
 
 **Short-circuit result shape (explicit invariant).** When the cap fires — at pre-dispatch estimate or mid-iteration — the executor returns `BriefErrorResult { errorCode: 'cost_exceeded', suggestions: [...] }`. **No partial `BriefStructuredResult` is returned in v1**, even if some rows have been live-filtered before short-circuit. Mixing cap-truncated and cap-complete rows in a structured result would mislead the user about query completeness; the error-plus-suggestions shape forces a refinement instead. Partial-result return is explicitly out of scope for v1 (see Deferred Items if it ever becomes signal-driven).
 
+**Individual live-call failure — fail-fast in v1.** If any single live-filter call fails during hybrid execution (adapter error, provider 5xx, network timeout, rate-limit rejection, etc.), the entire hybrid query fails fast: the executor stops dispatching further calls and returns `BriefErrorResult { errorCode: 'live_call_failed', message, suggestions: [...] }`. Partial results (N successful calls of M total) are **not** returned — mixing canonical-base rows that got live-filtered against rows that didn't would produce a silently-inconsistent result set that the user has no way to tell is incomplete. `errorSubcategory: 'partial_failure'` is reserved on `planner.error_emitted` for a future partial-mode (Deferred Items) but fires in v1 as a transient-failure marker, not as a success signal. A "return partial with `partial: true` marker" mode is an opt-in future feature gated on real-world signal that transient live-call failures are both common and tolerable — not v1 scope.
+
 ### 14.4 Test plan
 
 `hybridExecutor.test.ts`:
@@ -1620,7 +1662,7 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
 | `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved, trace: PlannerTrace }` |
-| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null, errorSubcategory?: 'no_pattern_match' \| 'p1_stub' \| 'p2_hybrid_rewrite' \| 'validation_failed' \| 'capability_missing' \| 'cost_exceeded_stage3' \| 'cost_exceeded_executor' \| 'parse_failure' }` |
+| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null, errorSubcategory?: 'no_pattern_match' \| 'p1_stub' \| 'p2_hybrid_rewrite' \| 'validation_failed' \| 'capability_missing' \| 'cost_exceeded_stage3' \| 'cost_exceeded_executor' \| 'parse_failure' \| 'live_call_failed' \| 'partial_failure' }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
 
@@ -1645,6 +1687,7 @@ Computed from the event stream (batch, not per-event):
 - **`planner.avg_stage3_latency_ms`** — mean LLM Stage 3 `latencyMs`.
 - **`planner.escalation_rate`** — `stage3_escalated / stage3_parse_completed`.
 - **`planner.validation_failure_rate`** — `validation_failed / stage3_parse_completed`.
+- **`planner.registry_gap_rate`** — roadmap signal. Counts requests where (a) `planner.stage1_missed` fired, AND (b) Stage 3 completed with `confidence ≥ confidence_threshold` (the LLM felt the intent was clearly expressible), AND (c) the terminal outcome was `errorCode: 'unsupported_query'`. That combination means "the LLM understood what the user wanted, but no canonical or live path could serve it." These are the strongest candidates for registry expansion (new canonical entry) or hybrid-pattern expansion (new shape). Computed from existing events (`stage1_missed`, `stage3_parse_completed`, `error_emitted` correlated by `intentHash`); no new emissions needed. Dashboard surfacing P3+ alongside `brief_refinement_rate`. The metric is the direct input to the Query Memory Layer's v2 promotion workflow (§17.3).
 - **`planner.brief_refinement_rate`** — correctness proxy. **Session boundary:** one `briefId` = one chat session (per §18.1 request body); all queries carrying the same `briefId` are one session. **Per-session classification window:** 10 minutes rolling from the first query in the `briefId`; queries arriving after that count as a new session even if the `briefId` is reused. A `briefId` is classified as "refined" if within its 10-minute window it either (a) emitted `planner.error_emitted` with `errorCode: 'ambiguous_intent' | 'unsupported_query'`, or (b) was followed within the same `briefId` by another `planner.classified` event (re-query). **Aggregation window:** `brief_refinement_rate = refined_briefIds / total_briefIds` is rolled up **daily** (UTC calendar day, matching the system-pnl dashboard convention). No sub-daily aggregation in v1 — noise floor is too high under low traffic. Without this metric, efficiency optimisation (lower cost, higher `llm_skipped_rate`) could bias toward cheap-but-wrong plans users have to refine. The correlation uses the `briefId` envelope field (§17.1). **Dashboard surfacing is P3+**; event data is captured in v1 so the metric is computable without further schema changes, but the system-pnl subsection only adds a visual in P3 once there is enough traffic to distinguish signal from noise. Metric name, session boundary, per-session window, and aggregation window are locked in v1.
 
 Metrics surface through the existing system-pnl admin route (`/system/llm-pnl`) with a new subsection under "Task-class breakdown." No new dashboard.
@@ -2010,6 +2053,7 @@ Verdict legend:
 | Per-subaccount rate-limit budget (§2.1 brief §11.5) | BUILD-WHEN-SIGNAL | Real traffic surfaces cross-subaccount starvation on `getProviderRateLimiter('ghl')` |
 | Native planner event types in `AgentExecutionEventType` (§17) | BUILD-WHEN-SIGNAL | Agent Live Execution Log rendering is confusing because planner stages get squashed into generic `skill_start`/`skill_complete`. If that happens, add `planner.*` event types to `shared/types/agentExecutionLog.ts` and teach `agentExecutionEventService` about them |
 | Canonical-data capability source of truth (§12.1) | DEFER-V2 | v1 leaves `canonical.contacts.read`, `canonical.opportunities.read`, `canonical.appointments.read`, `canonical.conversations.read`, `canonical.revenue.read`, `canonical.tasks.read`, `clientpulse.health_snapshots.read` as forward-looking per-entry metadata on `CanonicalQueryRegistryEntry.requiredCapabilities`. v2 declares the concrete source of truth (likely an integration-reference addition for a synthetic `canonical` integration, or a dedicated capability-catalogue file) and activates per-entry enforcement; v1 relies on the `crm.query` route gate |
+| Hybrid partial-result mode (§14.3) | BUILD-WHEN-SIGNAL | Real-world signal shows live-call transient failures are both common AND tolerable for hybrid queries — i.e. `errorCode: 'live_call_failed'` rate is high enough to be annoying but failures are non-systemic (transient provider glitches, not broken adapters). Ships as an opt-in `allowPartial: true` request flag that returns `BriefStructuredResult { partial: true, missingRowIds: [...] }`; default stays fail-fast |
 
 Each entry has a verdict and a trigger or reason. Items with `BUILD-WHEN-SIGNAL` include the specific metric or condition that would unblock them — absence of that signal is the reason not to ship now.
 

@@ -297,3 +297,60 @@ Carrying forward from Rounds 1–3 + Round 4 additions:
 Ready for extraction into `docs/spec-authoring-checklist.md` and/or `KNOWLEDGE.md` when the user signals the spec is locked.
 
 ChatGPT's suggested next step: *"turning this into a Claude Code execution plan (task-by-task build order with guardrails)"* — i.e. invoke the `architect` agent next to decompose the spec into implementation chunks.
+
+---
+
+## Round 5 — "Edge integrity under real-usage pressure"
+
+ChatGPT's own end-note: *"Do not review again. Do this: → Generate the Claude Code execution plan."* Treating this as genuinely the last review round — 7 findings that surface only under real-usage pressure.
+
+6 applied, 1 skipped.
+
+### Finding-by-finding decisions
+
+| # | Finding | Verdict | Notes |
+|---|---------|---------|-------|
+| 1 | Plan cache confidence / short-TTL | **APPLY** (narrow) | Added `cacheConfidence: 'high' \| 'medium' \| 'low'` on `PlanCacheEntry`. Tiered TTL: high/medium = 60s (existing), low = 15s. Plan confidence sourced from Stage 1 (always high) and Stage 3 outcome (low if escalation fired or confidence < threshold). Prevents bad Stage 3 plans from going sticky |
+| 2 | Idempotency contract | **APPLY** (invariant only) | Added to §3. Deterministic at Stage 1 / Stage 2, non-deterministic at Stage 3 (by design — LLM is the escape hatch). Skipped the `planner.idempotency_miss` log — detecting it requires shadow-copying prior plans, which is Query Memory Layer v2 territory |
+| 3 | Hybrid partial-success semantics | **APPLY** (as fail-fast + deferred partial) | v1 is **fail-fast** on individual live-call failures: `errorCode: 'live_call_failed'`. No partial `BriefStructuredResult` returns because partial mixes in an inconsistent set the user can't tell is incomplete. Partial-result mode added to Deferred Items as a BUILD-WHEN-SIGNAL item, gated on transient-failure rate |
+| 4 | Cost back-pressure loop (auto-downgrade) | **SKIP** | Per-run `cost_prediction_drift` log already exists (§16.2.1). Aggregate "sustained drift" detection is a dashboard concern, not a service concern. Auto-tier-downgrade is out of scope for v1 — no automation infrastructure to plug into |
+| 5 | Dead-end detection metric | **APPLY** (light) | Added `planner.registry_gap_rate` derived metric to §17.2. Computed from existing events (stage1_missed + high-confidence Stage 3 parse + unsupported_query terminal). Direct input to Query Memory Layer v2 promotion workflow |
+| 6 | Registry conflict detection | **APPLY** (statement only) | Single-match invariant added to §8.2. Structural guard already exists via the build-time alias collision throw. Added runtime defence-in-depth assertion (`RegistryConflictError`) as a sentinel — module-load failure should always prevent the state, so the runtime throw catches "the index was mutated externally" |
+| 7 | Normaliser versioning | **APPLY** | `NORMALISER_VERSION = 1` constant in §6.5. Included in cache key (§9.1) and `PlannerTrace` (§6.7). New §7.5 documents the safe-upgrade contract: bump on any behaviour change that affects output hash. Makes normaliser upgrades automatic cache-invalidation events without explicit flush |
+
+### Adjudication notes
+
+- **ChatGPT's anti-poisoning insight (finding 1) is the highest-leverage Round 5 find.** The problem is real: a subtly-wrong-but-valid Stage 3 plan cached at 60s TTL would dominate responses for up to a minute. Tiered TTL is a 15-second blast radius maximum.
+- **Fail-fast + defer partial (finding 3) is the opposite of ChatGPT's suggestion.** ChatGPT wanted partial-success with `partial: true`. The adjudicator chose fail-fast for v1 because "mixing canonical-base rows that got live-filtered against rows that didn't" is a silently-inconsistent result — the user has no visual cue. Fail-fast produces clear signal; partial mode is opt-in via future `allowPartial: true` request flag, signal-gated in Deferred Items
+- **Skipping finding 4 (back-pressure loop) is the one place the adjudicator disagreed with ChatGPT's direct suggestion.** The per-run drift log was already accepted in Round 4; adding a sustained-drift aggregate log without consumers is speculative. Dashboards exist for this; adding service-side aggregation would duplicate work
+
+### Net changes Round 5
+
+- Lines: +51 / -7 in `spec.md`
+- New constants: `NORMALISER_VERSION = 1`
+- New type fields: `cacheConfidence` + `normaliserVersion` on `PlanCacheEntry`; `normaliserVersion` on `PlannerTrace`
+- New errorSubcategory values: `live_call_failed`, `partial_failure`
+- New cache behaviour: tiered TTL, version-scoped cache keys
+- New metric: `planner.registry_gap_rate`
+- New invariants: idempotency contract (§3), single-match (§8.2), fail-fast hybrid (§14.3)
+- New deferred item: hybrid partial-result mode (BUILD-WHEN-SIGNAL)
+
+---
+
+## Final state after 5 rounds
+
+- Codex spec-reviewer: 3 iterations, closed clean
+- ChatGPT spec review: **5 rounds**, **41 findings total** (11 + 8 + 7 + 8 + 7), **36 applied, 5 skipped**
+- Length: ~2,115 lines (from starting ~1,936)
+
+ChatGPT's directive after Round 5: *"Do not review again. → Generate the Claude Code execution plan."* Aligning with that — the spec is locked; the next action is `architect` agent decomposition into P1.0 / P1.1 / P1.2 tasks.
+
+### Full KNOWLEDGE.md pattern candidates (15 total across 5 rounds)
+
+Adding Round 5:
+
+13. **Tiered TTL on plan caches by plan confidence.** When an LLM can produce "valid-looking but subtly wrong" outputs, tier the cache TTL by plan confidence so bad plans have small blast radius. Don't rely on validator acceptance alone — a cache entry's TTL is a second defence against silent plan poisoning.
+14. **Versioned pure functions whose output affects cache keys.** Any pure transformation used in a cache key (tokenisation, hashing, normalisation) needs a version constant. Bumping the version becomes a safe, automatic cache invalidation mechanism — no explicit flush, no stale-entry bugs.
+15. **Fail-fast vs partial in multi-call executors.** When an executor dispatches N sub-calls, state explicitly whether individual failures are fail-fast (one failure kills the query) or partial (return successes with a `partial: true` marker). Mixing modes silently is the real bug; stating the default is the fix. Partial-mode belongs in Deferred Items unless real-usage signal justifies it.
+
+15 patterns total ready for extraction into `docs/spec-authoring-checklist.md` / `KNOWLEDGE.md` when the user gives the signal.
