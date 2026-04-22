@@ -14,6 +14,8 @@
 
 **Authored:** 2026-04-22
 
+> **Deterministic-first, no implicit behaviour.** This system is deterministic-first. Any behaviour not explicitly defined in a stage must not be inferred or implemented implicitly. If the implementation needs a behaviour the spec doesn't describe, update the spec first and adjudicate the edit — don't ship the behaviour and retrofit the spec later.
+
 ---
 
 ## Contents
@@ -121,6 +123,8 @@ These do not block implementation; they are settled inside the first test pass.
 The planner is a single service with four internal stages, three executors, and one normaliser. It sits below the Orchestrator in the capability hierarchy (Orchestrator owns capability routing; Planner owns data-query routing for CRM reads). Every surface that reads CRM data — Brief chat, agent tool call, stopgap Ask CRM panel — calls the planner; no surface calls the provider adapters directly.
 
 The planner is deterministic-first: Stages 1 and 2 never consult the LLM. The LLM is the Stage 3 fallback, invoked only when pattern matching and cache both miss. The validator is Stage 4 and is authoritative — LLM output is advisory. Each query resolves to exactly one validated QueryPlan; no parallel candidate plans.
+
+**Input-shape invariant — raw intent only.** The planner always receives **raw, unclassified user intent** via `rawIntent: string`. Callers (Orchestrator, Brief surface, scheduled Briefs, future internal callers) MUST NOT pre-classify, pre-tokenize, or partially-plan the intent before handing it to the planner. The planner is the single source of truth for intent → plan classification; any upstream attempt to short-circuit that (e.g. "Orchestrator decided this is canonical, skip Stage 1") is a boundary violation and a KNOWLEDGE.md rule. The request shape at §18.1 has no slot for pre-classified data, so this is structurally enforced — but the invariant is stated here explicitly so the Orchestrator's future evolution doesn't quietly grow such a slot.
 
 See §6 for type contracts and §7–§11 for per-stage behaviour.
 
@@ -545,10 +549,26 @@ export interface PlannerTrace {
   canonicalPromoted?: { fromSource: 'live'; toSource: 'canonical' | 'hybrid' };
   executor?: { kind: 'canonical' | 'live' | 'hybrid'; callCount?: number; capShortCircuited?: boolean };
   finalPlan?: { source: QuerySource; primaryEntity: PrimaryEntity; filterCount: number };
+  mutations: PlannerPlanMutation[];           // every stage that mutated the plan (see below)
   terminalOutcome: 'structured' | 'approval' | 'error';
   terminalErrorCode?: string;
 }
+
+export interface PlannerPlanMutation {
+  stage: 'canonical_precedence_promotion' | 'p2_hybrid_rewrite';
+  field: 'source' | 'intentClass';
+  before: unknown;
+  after: unknown;
+  reason: string;                             // human-readable context
+}
 ```
+
+**Mutation enumeration — closed set in v1.** Only two pipeline steps mutate a plan after it's constructed, and both are tracked:
+
+1. **`canonical_precedence_promotion`** — §11.2 rule 8 promotes `source: 'live'` to `'canonical'` or `'hybrid'` when a canonical candidate is registry-valid. This is the only validator-stage mutation.
+2. **`p2_hybrid_rewrite`** — §19 P2 rewrites `source: 'hybrid'` plans into `intentClass: 'unsupported'` + `errorCode: 'unsupported_query'` before executor dispatch, because the hybrid executor ships in P3.
+
+No other stage mutates the plan. The validator does not strip filters, rewrite projections, or change entity — per §11.2 rule 8 ("The rule never silently strips filters"). Stage 1 and Stage 3 construct plans, they don't mutate them. Any future mutation added to the pipeline MUST extend `PlannerPlanMutation.stage` and be logged in the trace — silent mutation is a spec violation.
 
 The trace is built by `crmQueryPlannerService.ts` in a local accumulator passed through the pipeline; each stage writes its slot before moving to the next. On terminal resolution, the accumulator is frozen and attached to the `planner.result_emitted` event. Building it is free — the data is already being captured for individual events — so this is a view concern, not a compute concern.
 
@@ -928,7 +948,7 @@ Per brief §11.4, in order:
 
    The rule never silently strips filters. Dropping a user-specified filter would change query semantics — which is a correctness bug, not a tie-breaker. Promotion keeps `canonicalCandidateKey` populated because both canonical and hybrid executors dereference it to find the registry handler.
 9. **Projection overlap** `[principal-dependent]` `[stage1-subset]` — `projection` fields must be a subset of fields permitted for `primaryEntity` on the caller's principal context (read-permission check).
-10. **Per-entry capability check** `[principal-dependent]` — for canonical and hybrid plans (`source !== 'live'`), the caller's `capabilityMap` must contain every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities`. This rule enforces the per-entry gate that the canonical executor otherwise runs at dispatch (§12.1); running it in the validator means cache hits and Stage 3 drafts are caught before executor dispatch. For v1, `requiredCapabilities` is forward-looking metadata (see §12.1 note) — the rule executes against whatever capabilities the caller's `capabilityMap` actually exposes, treating missing entries as absent.
+10. **Per-entry capability check** `[principal-dependent]` — for canonical and hybrid plans (`source !== 'live'`), the caller's `capabilityMap` must contain every capability in `registry[plan.canonicalCandidateKey].requiredCapabilities`. This rule enforces the per-entry gate that the canonical executor otherwise runs at dispatch (§12.1); running it in the validator means cache hits and Stage 3 drafts are caught before executor dispatch. **Per the skip-unknown-capability rule (§12.1):** a required slug that is not yet a known registered capability anywhere in the repo is **skipped** (logged as `skipped_unknown_capability`); a known slug the caller lacks **fails** the check. This two-state behaviour is the single source of truth for per-entry capability semantics — it applies identically here (at cache/validator time) and at executor dispatch.
 
 ### 11.3 Validation failure
 
@@ -998,6 +1018,13 @@ export async function executeCanonical(
       throw new MissingPermissionError(cap);
     }
   }
+  // Stage 1 / executor alignment check — hard assertion against drift.
+  // `entry.allowedFields` is the single source of truth for which fields
+  // this registry entry can serve; Stage 1's reduced validator subset
+  // checks against the same map (§8.3), and the executor asserts it again
+  // here so a plan that somehow bypassed Stage 4 (e.g. direct service
+  // call with a hand-built plan) still can't reference out-of-scope fields.
+  assertFieldsSubset(plan, entry.allowedFields);  // throws on violation
   return entry.handler({
     orgId: context.orgId,
     subaccountId: context.subaccountId,
@@ -1012,7 +1039,9 @@ export async function executeCanonical(
 
 `MissingPermissionError` is a small service-layer error thrown by the executor and caught by `crmQueryPlannerService.ts` → emitted as `BriefErrorResult { errorCode: 'missing_permission', message }`.
 
-**Capability taxonomy note for v1.** Per-entry `requiredCapabilities` slugs (`canonical.contacts.read`, `canonical.opportunities.read`, `canonical.revenue.read`, `clientpulse.health_snapshots.read`, etc.) describe the read scope each registry handler logically needs; the repo does **not** currently own a canonical-data integration or a `canonical.*` capability catalogue. For v1 the per-entry check executes against the caller's `capabilityMap.read_capabilities` (existing `CapabilityMap` shape from `server/services/capabilityMapService.ts`) and treats any slug not yet registered anywhere as absent. The only capability actually granted via the skill system in v1 is `crm.query` (the `actionType: 'crm.query'` registered in §18.2) — that is the v1 gate. The per-entry slugs stay on the registry as forward-looking metadata; they become live gates in a v2 follow-up that declares the canonical-data capability surface concretely. Consequently, a v1 agent granted `crm.query` passes the route gate but can hit the per-entry block for any entry whose `requiredCapabilities` include a not-yet-granted `canonical.*` slug — until v2 ships, treat the per-entry list on each entry as aspirational: the concrete v1 enforcement path is `crm.query` route gate → canonical dispatch, with per-entry blocks firing only when the caller's `capabilityMap` actually grants the listed slugs (none in v1 unless the org has grafted `canonical.*` onto its reference manually).
+`assertFieldsSubset(plan, entry.allowedFields)` is a small pure helper: it walks `plan.filters[].field`, `plan.sort[].field`, `plan.projection[]`, `plan.aggregation?.field`, and `plan.aggregation?.groupBy[]` and throws `Error('field out of registry scope: <field> not in ' + entry.key + '.allowedFields')` on any miss. It duplicates Stage 1's and Stage 4's field-existence checks intentionally — defence in depth against a plan reaching the executor that was never validated (direct service-call bypass, or a future stage regression).
+
+**Capability taxonomy note for v1.** Per-entry `requiredCapabilities` slugs (`canonical.contacts.read`, `canonical.opportunities.read`, `canonical.revenue.read`, `clientpulse.health_snapshots.read`, etc.) describe the read scope each registry handler logically needs; the repo does **not** currently own a canonical-data integration or a `canonical.*` capability catalogue. For v1 the per-entry check executes against the caller's `capabilityMap.read_capabilities` (existing `CapabilityMap` shape from `server/services/capabilityMapService.ts`). **Skip-unknown-capability rule (explicit):** if a required capability slug is not present in *any* registered integration or capability surface (i.e. it is a forward-looking slug not yet live in the repo — check via the capability-catalogue primitive `isKnownCapability(slug)` on `capabilityMapService`), the per-entry check is **skipped** and the executor logs `capabilityCheck: 'skipped_unknown_capability'` with the slug name. If the slug IS known but the caller lacks it, the check **fires normally** and raises `MissingPermissionError`. This two-state rule prevents v1 callers from being unilaterally blocked on forward-looking slugs no one grants, while keeping the door open for v2 enforcement to light up the moment those slugs become live. The only capability actually granted via the skill system in v1 is `crm.query` (the `actionType: 'crm.query'` registered in §18.2) — that is the v1 gate. The per-entry slugs stay on the registry as forward-looking metadata; they become live gates in a v2 follow-up that declares the canonical-data capability surface concretely.
 
 This is tracked explicitly in Deferred Items so the per-entry enforcement becomes a real gate the moment the capability source-of-truth file lands.
 
@@ -1514,6 +1543,8 @@ export function computeActualCostCents(input: {
 
 The per-query ceiling check reads `computeActualCostCents(...).stage3` (after Stage 3, before executor dispatch — only the Stage 3 component matters at this point since executor has not run) and compares to `systemSettings.crm_query_planner_per_query_cents`. Per-run ceiling is enforced by `runCostBreaker` inside the router, post-ledger — see §16.2 for the primitive boundary.
 
+**Prediction drift signal.** On terminal resolution, if `actualCostCents.total > plan.costPreview.predictedCostCents * 2`, the service emits a structured `warn`-level log line `cost_prediction_drift` with `{ intentHash, predicted: plan.costPreview.predictedCostCents, actual: actualCostCents.total, stageResolved, source }`. Non-blocking — the response still returns normally. The signal exists so we notice when the cost model decays (new provider, new pricing, new query class) instead of discovering it months later via ledger analysis. Threshold `2×` is deliberately loose to avoid noise on short low-cost queries; tighten via `systemSettings.crm_query_planner_cost_drift_multiplier` if needed.
+
 Because `BriefCostPreview` carries only predicted cost and `DraftQueryPlan` must not force the LLM to emit planner-derived values, `DraftQueryPlan` is **`Omit<QueryPlan, 'validated' | 'stageResolved' | 'costPreview'>`**. The planner fills `costPreview` after the Stage 3 parse succeeds, using `computePlannerCostPreview`. Stage 1 / Stage 2 hits fill `costPreview` the same way on their own code paths (with `basedOn: 'static_heuristic'` and `'cached_similar_query'` respectively).
 
 ### 16.3 Rate limiter
@@ -1589,7 +1620,7 @@ Emissions via (1) and (2) are unconditional — structured logging and in-memory
 | `planner.executor_dispatched` | `{ intentHash, executor: 'canonical'\|'live'\|'hybrid', predictedCostCents }` |
 | `planner.canonical_promoted` | `{ intentHash, fromSource: 'live', toSource: 'canonical' \| 'hybrid', registryKey }` |
 | `planner.result_emitted` | `{ intentHash, artefactKind: 'structured'\|'approval'\|'error', rowCount, truncated, actualCostCents: { total: number, stage3: number, executor: number }, stageResolved, trace: PlannerTrace }` |
-| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null }` |
+| `planner.error_emitted` | `{ intentHash, errorCode, rejectedRule?, stageResolved: 1 \| 2 \| 3 \| null, errorSubcategory?: 'no_pattern_match' \| 'p1_stub' \| 'p2_hybrid_rewrite' \| 'validation_failed' \| 'capability_missing' \| 'cost_exceeded_stage3' \| 'cost_exceeded_executor' \| 'parse_failure' }` |
 
 Every event carries `{ kind, at, orgId, subaccountId, runId?, intentHash }` as standard envelope.
 
@@ -1600,6 +1631,8 @@ Dashboards filter on `stageResolved` including error events; silent drop-off (an
 **Terminal-emission rule.** The `stageResolved`-bearing event (`planner.classified` or `planner.error_emitted`) is emitted **only at terminal resolution** of the request — the moment the service has decided "this request is done, here is the outcome." Pre-terminal events (`planner.stage3_parse_started`, `planner.stage3_parse_completed`, `planner.stage3_escalated`, `planner.validation_failed`, `planner.canonical_promoted`, `planner.executor_dispatched`) are status transitions and MUST NOT carry `stageResolved`. This prevents a future async/streaming path from double-emitting (early success event followed by a late error) — the terminal event fires exactly once, after the pipeline has committed to an outcome.
 
 The standard envelope `{ kind, at, orgId, subaccountId, runId?, intentHash }` is extended with an optional `briefId?: string` — same pass-through as the request-body field (§18.1). `briefId` is what powers the `planner.brief_refinement_rate` correlation metric in §17.2; without it, per-session re-query detection is not possible.
+
+**`errorSubcategory` — analytics-only refinement.** The user-facing `errorCode` on `BriefErrorResult` is a small closed set (per `shared/types/briefResultContract.ts`). The `errorSubcategory` field on `planner.error_emitted` is a **planner-internal finer-grained label** for analytics: it tells us *why* an `unsupported_query` fired (no registry match in P3 vs P1 stub during bring-up vs P2 hybrid rewrite), or *which cost boundary* tripped (Stage 3 ceiling vs executor hybrid cap). This is never exposed on the wire to users — it's event-stream only, for driving the brief-refinement-rate and cost-drift diagnostics. When an error path emits, the subcategory MUST be populated if applicable; the field is only optional because not every error code has a meaningful subcategory (e.g. `missing_permission` is self-describing).
 
 ### 17.2 Derived metrics
 
@@ -1733,6 +1766,17 @@ The spec ships in three phases on this branch. Each phase is its own commit clus
 
 1. **P1.0 — Skeleton.** Types (`shared/types/crmQueryPlanner.ts`) + entry service (`crmQueryPlannerService.ts` with an empty pipeline that throws `unsupported_query` for every input) + route wiring (`server/routes/crmQueryPlanner.ts`) + skill registration (`crm.query` in `actionRegistry.ts`). No stages run. Smoke test: the route returns an error artefact end-to-end.
 2. **P1.1 — Golden path.** **One** registry entry (pick `contacts.list_inactive_30d` as the canonical example), its aliases, Stage 1 matcher with the reduced validator subset, canonical executor handler, result normaliser producing `BriefStructuredResult`. Smoke test: POST the alias → returns a real structured result with `stageResolved: 1`. This proves every cross-cutting wire (route, principal context, RLS nesting, event emission, trace object) **before** adding more surface.
+
+   **Golden-path enforcement (hard guard).** During P1.1, any code path not required for the golden path must throw `NotImplementedError` — not a stub that returns, not a TODO comment, not a scaffold. The orchestrator checks the resolved stage and throws for anything other than Stage 1:
+
+   ```ts
+   // In crmQueryPlannerService.runQuery, post Stage 1 miss:
+   if (stage1Result === null) {
+     throw new NotImplementedError('Only Stage 1 enabled in P1.1 — add this intent to the registry or wait for P1.2');
+   }
+   ```
+
+   Applies to Stage 2 cache reads, Stage 3 stub, Stage 4 full validator (the reduced subset is fine), approval-card generation, hybrid-pattern detection, and cost-prediction for non-canonical paths. This prevents speculative scaffolding during the golden-path milestone — the vertical slice is proven first, then breadth lights up in P1.2. Remove the `NotImplementedError` guards as their code paths come online in P1.2.
 3. **P1.2 — Rest of P1.** Remaining 7 registry entries + their aliases + handlers, Stage 2 cache (read-wired, write-dark per §19 P1 note), Stage 4 validator full rule set, approval-card generator, all remaining events in §17.1.
 
 Each sub-milestone is one commit cluster. P1.1 is the single highest-leverage milestone — everything after it is replication across registry keys rather than new cross-cutting plumbing.

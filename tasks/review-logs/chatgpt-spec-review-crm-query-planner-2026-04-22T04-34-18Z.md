@@ -215,3 +215,85 @@ Adding to the earlier list:
 9. **Non-empty-result guarantees on error shapes.** When a contract requires "every error carries suggestions", specify the fallback path concretely (e.g. "inject a static list of supported phrasings if the LLM produced no clarification"). An empty-array technically satisfies a `suggestions: string[]` field type but violates the UX intent.
 
 These join the 6 from Rounds 1-2 for the eventual KNOWLEDGE.md pass.
+
+---
+
+## Round 4 — "Last 2-3% tightening" pass
+
+ChatGPT explicitly confirmed all 4 of Round 3's skips as correct calls. Then returned one more high-signal pass — labelled "last 2-3% tightening, not a structural review."
+
+8 findings + one "perfect addition" (a deterministic-first preamble sentence). Adjudicated: 8 applied, 1 skipped.
+
+### Finding-by-finding decisions
+
+| # | Finding | Verdict | Notes |
+|---|---------|---------|-------|
+| 1 | `NotImplementedError` for non-golden-path during P1.1 | **APPLY** | Put teeth on the golden-path guidance. `throw new NotImplementedError` beats stub-returning. Documented in §19 with explicit code sketch; guards come off in P1.2 |
+| 2 | Trace mutations[] for decision deltas | **APPLY** (scoped) | Added `PlannerPlanMutation` + closed-set enumeration. Only two mutation stages exist in v1 (canonical-precedence promotion, P2 hybrid→unsupported rewrite). Future mutations MUST extend the enum — silent mutation is a spec violation |
+| 3 | Canonical executor `assertFieldsSubset` | **APPLY** | Added to §12.1 executor contract. Defence in depth against Stage 1 / Stage 4 / executor drift on `allowedFields`. Specified the helper's purity and throw shape |
+| 4 | Cost prediction drift warning | **APPLY** | Added to §16.2.1: `warn`-level `cost_prediction_drift` log when actual > predicted × 2. Non-blocking, threshold configurable via `systemSettings` |
+| 5 | Cache miss categorization refinement | **SKIP** | Existing `not_present \| expired \| principal_mismatch` already covers avoidability signal. `evicted` is indistinguishable from `expired` at lookup time without tracking-on-evict. Defer unless cache debugging becomes a real concern |
+| 6 | Unsupported query subcategory | **APPLY** (narrow) | Added `errorSubcategory` to `planner.error_emitted` with closed set covering P1/P2/P3 distinctions + cost-boundary splits. Explicitly planner-internal; never surfaces on wire `errorCode` |
+| 7 | Capability skip-unknown-capability rule | **APPLY** | Real disambiguation fix — existing §11.2 rule 10 wording ("treating missing entries as absent") was genuinely ambiguous. Added two-state rule: unknown slug → skipped + logged; known slug + caller lacks it → fails. Cross-referenced from §11.2 rule 10 to §12.1 so there's one source of truth |
+| 8 | Planner ↔ Orchestrator boundary invariant | **APPLY** (invariant only) | Added to §3. Skipped the `assert(!input.preclassifiedSource)` — the request type (§18.1) has no such field, so assertion is structurally redundant. The invariant is worth stating so the Orchestrator's future evolution doesn't quietly grow such a slot |
+| Final | "Deterministic-first" preamble sentence | **APPLY** | Added verbatim as a blockquote at the top of the spec, above §1. One-liner ChatGPT called out explicitly as the final perfect addition |
+
+### Self-check against "don't add more invariants" (Round 3 warning)
+
+ChatGPT itself said this round is 2-3% tightening, which inherently involves more invariants. The applied edits are narrow:
+
+- Finding 1 is a build-phase guard, not a product invariant
+- Finding 2 is a data model addition with a closed set (two mutations in v1)
+- Finding 3 is a defensive assertion co-located with existing capability check
+- Finding 4 is a log line, not a runtime check
+- Finding 6 is a payload field, not a new decision branch
+- Finding 7 disambiguates existing ambiguous wording — net invariant count unchanged
+- Finding 8 is a one-liner describing an already-structurally-enforced property
+- Final is a 1-sentence preamble
+
+None of these add new abstractions or new execution paths. Consistent with Round 3's "don't bloat" guidance.
+
+### Net changes Round 4
+
+- Lines: +47 / -3 in `spec.md`
+- New types: `PlannerPlanMutation`
+- New payload field: `errorSubcategory` on `planner.error_emitted`
+- New observability: `cost_prediction_drift` warn log
+- New executor assertion: `assertFieldsSubset`
+- New build-phase guard: `NotImplementedError` pattern during P1.1
+- New preamble invariant: "Deterministic-first, no implicit behaviour"
+- New boundary invariant: planner receives raw intent only
+
+---
+
+## Final state after Round 4
+
+- Codex spec-reviewer: 3 iterations, closed clean
+- ChatGPT spec review: 4 rounds, 34 findings total (11 + 8 + 7 + 8), 30 applied
+- Skipped: 4 (3 from Round 3 build-phase practices + 1 from Round 4 cache-refinement)
+- Length: ~2,071 lines (from starting point ~1,936)
+- Remaining open questions: unchanged (§22)
+- Deferred Items: unchanged
+
+**Verdict:** ChatGPT's framing — "past 'ready to build', now at 'safe to build without rework risk'." Ready to move to implementation planning.
+
+### Full KNOWLEDGE.md pattern candidates (12 total across 4 rounds)
+
+Carrying forward from Rounds 1–3 + Round 4 additions:
+
+1. **Inline classification tags on validator rules** (R2)
+2. **Terminal-emission invariants for observability** (R2)
+3. **Retry-tie-break clause for any LLM retry** (R2)
+4. **Cost-attribution split for routing actions** (R2)
+5. **Cap semantics are count-bound unless stated otherwise** (R2)
+6. **Correctness-proxy metrics ship event-data in v1, dashboard later** (R2)
+7. **Golden-path sub-sequencing within phases** (R3)
+8. **Trace object derived from existing events** (R3)
+9. **Non-empty-result guarantees on error shapes** (R3)
+10. **Hard build-phase guards (`NotImplementedError`) on non-golden-path code during vertical slice** (R4)
+11. **Closed-set mutation enumeration in trace objects** (R4)
+12. **Two-state capability rule: skipped_unknown vs enforced_known** (R4)
+
+Ready for extraction into `docs/spec-authoring-checklist.md` and/or `KNOWLEDGE.md` when the user signals the spec is locked.
+
+ChatGPT's suggested next step: *"turning this into a Claude Code execution plan (task-by-task build order with guardrails)"* — i.e. invoke the `architect` agent next to decompose the spec into implementation chunks.
