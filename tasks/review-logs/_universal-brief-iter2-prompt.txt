@@ -1,0 +1,60 @@
+You are reviewing a markdown spec document for the Automation OS codebase. This is iteration 2 of a structured review loop. Iteration 1 applied the following fixes — **do not re-raise if they now read correctly**:
+
+**Iteration 1 summary:**
+- `conversation_messages` column `artefactIds` renamed to `artefacts` (stores full `BriefChatArtefact[]` blobs); §7.2 no longer says "joins to actual artefact records"; §9.7 and §13 cascaded.
+- `paused_at` column + partial index added to §5.3 migration; precedence algorithm now 7-step (paused filter → deprecated filter → authoritative tier → scope specificity → priority → recency). Derived `status` helper (`'active' | 'paused' | 'deprecated'`) added to `memoryBlockRetrievalServicePure.ts`.
+- §15.2 mitigation text aligned to §5.3 ordering (authoritative > scope > priority > recency).
+- `briefs.read` / `briefs.write` permissions moved from Phase 5 to Phase 2 in both §14.2 and the Phase 2 scope list.
+- `conversation_messages` schema got a `subaccountId` denormalised column + supplementary subaccount RLS policy; §5.1 added a "Denormalisation invariant" paragraph naming `briefConversationWriter` as the single write path.
+- Two new named primitives introduced: `server/services/briefSimpleReplyGeneratorPure.ts` (Phase 3) and `server/services/briefConversationWriter.ts` (Phase 2). §6.1, §7.1, §14.1, and the Phase 2/3 scope lists all reference them.
+- "System rules" language removed from §9.5; `RuleScope` remains `subaccount | agent | org`. A new Deferred item in §13 covers system-scoped user-captured rules.
+- §1 item 2 and §8.7 reconciled: schema admits four scopes, but v1 populates the new tables for Brief / Task / Agent-run-log only; Agent-scope chat stays on `agent_conversations`.
+- Migration `0TTT_user_settings_suggestion_frequency.sql` added to §14.1; existing Drizzle schema-file edits (`tasks.ts`, `memoryBlocks.ts`, `agentRuns.ts`, `orgSettings.ts`, `userSettings.ts`) added to §14.2.
+- Backstop split into `briefArtefactBackstop.ts` (async wrapper) + `briefArtefactBackstopPure.ts` (pure module); both inventoried; pure-test file added.
+- §7.11 "and `briefArtefactBackstop`" removed.
+- §6.3.2 step 2 clarifies Phase 5 uses a named no-op `ruleConflictDetectorService.check()` stub, replaced in Phase 6; §17 criterion rewritten accordingly.
+- `shared/types/briefFastPath.ts` advanced to Phase 2 (types only). §6.3.1 adds a "Phase-2 vs Phase-3 behaviour" paragraph stating Phase 2 returns a stub `FastPathDecision` with `route: 'needs_orchestrator'`.
+- §10 execution-model table gained three rows: Brief creation, conversation message persistence, Brief artefact websocket emission.
+- `server/lib/briefVisibility.ts` inventoried (Phase 2).
+- `server/db/schema/conversations.ts` annotated as exporting both `conversations` and `conversationMessages`.
+- §7.10 approval-route corrected from `/api/actions/:actionId/approve` to `/api/review-items/:id/approve` (verified against `server/routes/reviewItems.ts`).
+- Two new Deferred items in §13: system-scoped user-captured rules; `verify-conversation-message-denorm.sh` static gate.
+
+Project framing (unchanged from iteration 1, per `docs/spec-context.md`):
+
+```yaml
+pre_production: yes
+live_users: no
+stage: rapid_evolution
+testing_posture: static_gates_primary
+runtime_tests: pure_function_only
+rollout_model: commit_and_revert
+feature_flags: only_for_behaviour_modes
+staged_rollout: never_for_this_codebase_yet
+prefer_existing_primitives_over_new_ones: yes
+```
+
+Do NOT raise findings about:
+- Adding frontend unit tests, E2E tests, API contract tests, supertest, playwright, vitest-for-own-app, composition tests.
+- Adding feature flags or staged rollouts.
+- Adding production-readiness items (monitoring, compliance, multi-region, rate limiting, circuit breaking, chaos engineering).
+- Introducing new service layers where existing `accepted_primitives` already fit (policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, failure()/FailureReason, createWorker, agentExecutionEventService, agentRunPromptService, agentRunPayloadWriter, redaction, agentRunVisibility, RLS_PROTECTED_TABLES, withOrgTx, withPrincipalContext).
+- Any of the iteration-1 summary items above.
+
+Focus this pass on:
+
+1. **New or residual contradictions** introduced by iteration-1 edits. Specifically: (a) Phase-2 `briefFastPath.ts` types shipping without classifier — are all downstream references consistent? (b) the `briefConversationWriter` / `briefSimpleReplyGeneratorPure` split — are all Orchestrator-output paths also routed through the writer, or only fast-path inline responses? (c) the new `paused_at` column — does any other section still describe a missing pause mechanism?
+2. **Sequencing / dependency bugs** across Phases 0–9 that survived iteration 1. Especially dependencies on the new Phase-2 primitives that inadvertently got pushed earlier than they should be.
+3. **Load-bearing claims without a named mechanism** — every "must be idempotent", "source of truth", "fail-closed", "authoritative" claim should have a concrete mechanism pinned.
+4. **File-inventory drift** — prose references not reflected in §14, or inventory entries not explained in prose.
+5. **Contract / type surface** — §4 new types are fully specified, producers + consumers named, examples match shapes.
+6. **RLS coverage gaps** remaining on any tenant-scoped table or column.
+7. **Unnamed primitives** that the spec introduces by narrative only.
+8. **Self-consistency** between §1 / §17 end-to-end behaviours and §6/§7/§8 implementation + §11 phasing.
+
+For each finding: (a) section/line reference, (b) one-sentence description, (c) concrete recommendation. Severities: **P1** must-fix, **P2** should-fix, **P3** nit.
+
+The updated spec follows.
+
+---
+

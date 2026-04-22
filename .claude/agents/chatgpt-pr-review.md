@@ -68,8 +68,38 @@ For each round:
    suggestion is a separate finding
 2. For each finding assign accept / reject / defer + severity (critical/high/
    medium/low) + a one-line rationale
-3. Architectural checkpoint — before implementing, scan accepted items for any
-   of these signals:
+2a. Inline deferral confirmation — before implementing anything, surface every
+    item classified as `defer` to the user as a batched block and WAIT for a
+    response. No silent deferrals. This is a hard rule, not a default.
+
+    Format (one block per round, even if only one item):
+
+      ⚠ Review decisions required — <N> items
+
+      Before finalising, please confirm each deferral:
+
+      1. Finding: <one-line summary>
+         Current: defer
+         Defer rationale: <one sentence — why I classified it as defer>
+         Suggested action: implement | reject | defer
+         Why suggested: <one sentence>
+
+      2. Finding: ...
+
+      Reply per-item (e.g. "1: implement, 2: defer, 3: reject") or single reply
+      if all items take the same decision ("all: defer").
+
+    On user reply:
+    - "implement" → promote to accept; include in step 5 implementation
+    - "reject" → record as reject with rationale "user-rejected inline"
+    - "defer" → keep as defer (but now explicitly user-approved, not silent)
+
+    Record the final decision for each item in the round's Decisions table.
+    Do NOT proceed to step 3 until every deferral-candidate has a reply.
+    If the user's reply is ambiguous (item missing, unclear verb) — ask once,
+    then proceed with the user's re-clarified answer.
+3. Architectural checkpoint — before implementing, scan accepted items (including
+   any promoted from step 2a) for any of these signals:
    - finding_type is "architecture"
    - the finding changes a contract or interface
    - the finding touches more than 3 core services (routes/services/schema/jobs)
@@ -140,23 +170,38 @@ For each round:
 5. Implement the accepted items (excluding any flagged for your decision in step 3)
    using Edit, Write, Bash — follow CLAUDE.md and architecture.md conventions.
 6. Run `npm run lint && npm run typecheck` — fix any issues before continuing
-6a. Commit and push — after lint/typecheck passes, commit all changes from this round
-    and push so the PR reflects the latest state (required for the next ChatGPT round):
-    ```
-    git add -A
-    git commit -m "chatgpt-review(round <N>): implement <X> finding(s) from ChatGPT feedback"
-    git push
-    ```
-    If there are no file changes this round (all findings rejected/deferred), skip the commit.
-    Print the commit SHA after pushing.
 7. Append the round to the session log with a Top themes line using finding_type
    vocabulary (e.g. null_check, naming, architecture) — not free-form text.
    If `pending_architectural_items` is still non-empty at end of round, add each
    to the Decisions table as: "pending (architectural — awaiting your decision)"
    so the log is structurally complete even before you reply.
+7a. Auto-commit-and-push this round. This step OVERRIDES the CLAUDE.md
+    "no auto-commits" user preference within this flow only — the user has
+    explicitly opted in for ChatGPT review sessions so ChatGPT sees the
+    updated diff on the PR for the next round.
+
+    If no files changed this round (all items rejected or deferred), skip
+    this step. Otherwise:
+    - `git add <changed files> tasks/review-logs/<session log>`
+      Stage only files actually modified this round — do NOT `git add -A`.
+    - `git commit -m "chore(review): PR #<N> round <N> — <short summary>\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"`
+      where `<short summary>` is a 5-10 word description of what was
+      implemented (e.g. "null guard on agentExecutionService + retry classifier fix")
+    - `git push`
+    - If the commit fails (pre-commit hook, etc.), fix the underlying issue
+      and re-commit with a NEW commit — never `--amend` or `--no-verify`.
+      If you cannot fix it in one attempt, stop and surface the error to the
+      user rather than blocking progress.
+
+    Do NOT auto-commit while `pending_architectural_items` is non-empty — those
+    decisions may still change implementation scope. Commit only the
+    independent accepted items you DID implement this round; carry any
+    held-pending items into the next round.
 8. Print the round summary and updated diff:
 
   Round <N> done — <X> implemented, <Y> rejected, <Z> deferred.
+  Committed as <short sha> and pushed to <branch>. (omit this line if no files
+  changed this round)
   [If architectural items were flagged for your decision, repeat each block:]
   ⚠ Architectural item — decision required
 
@@ -200,12 +245,18 @@ Reject if any of:
 When rejecting because a convention is missing from CLAUDE.md or architecture.md,
 prefix the rationale with [missing-doc].
 
-Defer if:
+Defer (candidate) if:
 - Valid but out of scope for this PR — better as a follow-up
 - Requires architectural discussion before implementation
-- Uncertain — default to defer rather than accept or reject
+- Uncertain
 
-Every finding gets a rationale. Never accept, reject, or defer silently.
+IMPORTANT: `defer` is a *candidate* classification, not a final decision.
+Every defer candidate MUST be surfaced to the user via the step 2a inline
+block before it becomes final. No silent deferrals — the user approves each
+defer (or overrides to implement / reject) in real time.
+
+Every finding gets a rationale. Never accept, reject, or finalise a defer
+silently.
 
 ---
 
@@ -283,7 +334,22 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
      PR: #<N> — <url>
 
    If empty, print: "Ready to merge — PR #<N>: <url>"
-9. Print: "Session complete: <N> rounds, <X> implemented, <Y> rejected, <Z> deferred."
+9. Auto-commit-and-push finalization artifacts. Same override of the
+   CLAUDE.md "no auto-commits" default as per-round commits. Stage any of
+   the following that changed during finalization:
+   - tasks/review-logs/<session log>.md (Final Summary block)
+   - tasks/review-logs/_index.jsonl
+   - tasks/todo.md (deferred items)
+   - KNOWLEDGE.md (if new/updated entries)
+   - CLAUDE.md / architecture.md (if [missing-doc] >2 or structural
+     changes triggered an update)
+
+   Commit message: `chore(review): finalize PR #<N> ChatGPT review session`
+   followed by a short body summarising rounds + final counts + deferred
+   count + KNOWLEDGE.md entry count. Push after commit. If nothing changed
+   (rare — only if finalize produced zero edits), skip.
+
+10. Print: "Session complete: <N> rounds, <X> implemented, <Y> rejected, <Z> deferred."
 
 ## Future Hook
 
@@ -345,7 +411,12 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
 ## Rules
 
 - Read CLAUDE.md and architecture.md before your first decision
-- Never accept, reject, or defer without a one-line rationale
+- Never accept, reject, or finalise a defer without a one-line rationale
 - Always run npm run lint && npm run typecheck after implementing
 - Never modify files outside this PR scope during a round
-- When unsure: default to defer
+- When unsure: classify as defer candidate, then surface inline (step 2a) and
+  let the user decide — do NOT silently defer
+- Auto-commit-and-push after each round and at finalization. This overrides
+  the CLAUDE.md "no auto-commits or auto-pushes" user preference within this
+  flow only. The user has explicitly opted in for ChatGPT review sessions so
+  each round's state lands on the PR before the next round starts.

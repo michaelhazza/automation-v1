@@ -72,17 +72,39 @@ For each round:
 1. Parse every distinct finding from the paste
 2. For each finding assign accept / reject / defer + severity (critical/high/
    medium/low) + a one-line rationale
-3. Apply all accepted items as edits to the spec document using the Edit tool
-3a. Commit and push — after applying all accepted edits, commit and push so the PR
-    reflects the latest spec state (required for the next ChatGPT round):
-    ```
-    git add -A
-    git commit -m "chatgpt-spec-review(round <N>): implement <X> finding(s) from ChatGPT feedback"
-    git push
-    ```
-    If there are no changes this round (all findings rejected/deferred), skip the commit.
-    Print the commit SHA after pushing.
-3b. Post-edit integrity check — after applying all edits this round, run
+2a. Inline deferral confirmation — before applying any edits, surface every
+    item classified as `defer` to the user as a batched block and WAIT for a
+    response. No silent deferrals. This is a hard rule, not a default.
+
+    Format (one block per round, even if only one item):
+
+      ⚠ Review decisions required — <N> items
+
+      Before finalising, please confirm each deferral:
+
+      1. Finding: <one-line summary>
+         Current: defer
+         Defer rationale: <one sentence — why I classified it as defer>
+         Suggested action: apply | reject | defer
+         Why suggested: <one sentence>
+
+      2. Finding: ...
+
+      Reply per-item (e.g. "1: apply, 2: defer, 3: reject") or single reply
+      if all items take the same decision ("all: defer").
+
+    On user reply:
+    - "apply" → promote to accept; include in step 3 edits
+    - "reject" → record as reject with rationale "user-rejected inline"
+    - "defer" → keep as defer (but now explicitly user-approved, not silent)
+
+    Record the final decision for each item in the round's Decisions table.
+    Do NOT proceed to step 3 until every deferral-candidate has a reply.
+    If the user's reply is ambiguous (item missing, unclear verb) — ask once,
+    then proceed with the user's re-clarified answer.
+3. Apply all accepted items (including any promoted from deferral) as edits to
+   the spec document using the Edit tool
+3a. Post-edit integrity check — after applying all edits this round, run
     exactly one pass over the spec for:
     - Forward references: sections that reference headings, tables, or items
       that no longer exist or were renamed by this round's edits
@@ -100,9 +122,26 @@ For each round:
     warnings; apply if trivial (broken link → remove reference), defer if
     directional. This is not a second integrity pass — just a quick break-check.
 4. Append the round to the session log including a Top themes line
-5. Print the round summary and the changed sections only (not the full spec):
+5. Auto-commit-and-push this round. This step OVERRIDES the CLAUDE.md
+   "no auto-commits" user preference within this flow only — the user has
+   explicitly opted in for ChatGPT review sessions so ChatGPT sees the
+   updated spec on the PR for the next round.
+
+   If no files changed this round (all items rejected or deferred), skip
+   this step. Otherwise:
+   - `git add <spec file> tasks/review-logs/<session log>`
+   - `git commit -m "docs(<spec-slug>): round <N> — <short summary>\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"`
+     where `<short summary>` is a 5-10 word description of what was applied
+     (e.g. "partial-knowledge resolver + source-surfacing rule")
+   - `git push`
+   - If the commit fails (pre-commit hook, etc.), fix the underlying issue
+     and re-commit with a NEW commit — never `--amend` or `--no-verify`.
+     If you cannot fix it in one attempt, stop and surface the error to the
+     user rather than blocking progress.
+6. Print the round summary and the changed sections only (not the full spec):
 
   Round <N> done — <X> accepted and applied, <Y> rejected, <Z> deferred.
+  Committed as <short sha> and pushed to <branch>.
 
   --- CHANGED SECTIONS ---
   <only the edited sections, with their headings for context>
@@ -130,12 +169,18 @@ Reject if any of:
 - Contradicts a decision in CLAUDE.md, architecture.md, or docs/spec-context.md
 - Adds complexity without necessity (YAGNI)
 
-Defer if:
+Defer (candidate) if:
 - Valid but better in a follow-up spec or phase
 - Requires stakeholder or architectural discussion first
-- Uncertain — default to defer over reject
+- Uncertain
 
-Every finding gets a rationale. Never apply, reject, or defer silently.
+IMPORTANT: `defer` is a *candidate* classification, not a final decision.
+Every defer candidate MUST be surfaced to the user via the step 2a inline
+block before it becomes final. No silent deferrals — the user approves each
+defer (or overrides to apply / reject) in real time.
+
+Every finding gets a rationale. Never apply, reject, or finalise a defer
+silently.
 
 ---
 
@@ -186,7 +231,21 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    If index_write_failures > 0, print:
      ⚠ Index write failures: <N> — pattern tracking may be incomplete for this session.
 
-7. Print: "Spec review complete. PR #<N>: <url>. Hand off to architect or
+7. Auto-commit-and-push finalization artifacts. Same override of the
+   CLAUDE.md "no auto-commits" default as per-round commits. Stage any of
+   the following that changed during finalization:
+   - tasks/review-logs/<session log>.md (Final Summary block)
+   - tasks/review-logs/_index.jsonl
+   - tasks/todo.md (deferred items)
+   - KNOWLEDGE.md (if new/updated entries)
+   - CLAUDE.md / architecture.md (if [missing-doc] >2 triggered an update)
+
+   Commit message: `docs(<spec-slug>): finalize ChatGPT spec review session`
+   followed by a short body summarising rounds + final counts + deferred
+   count + KNOWLEDGE.md entry count. Push after commit. If nothing changed
+   (rare — only if finalize produced zero edits), skip.
+
+8. Print: "Spec review complete. PR #<N>: <url>. Hand off to architect or
    invoke writing-plans when ready to implement."
 
 ## Future Hook
@@ -248,5 +307,10 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
 
 - Read CLAUDE.md and docs/spec-context.md before your first decision
 - Only edit the spec file — do not touch code files during a spec review session
-- Never apply, reject, or defer without a one-line rationale
-- When unsure: default to defer
+- Never apply, reject, or finalise a defer without a one-line rationale
+- When unsure: classify as defer candidate, then surface inline (step 2a) and
+  let the user decide — do NOT silently defer
+- Auto-commit-and-push after each round and at finalization. This overrides
+  the CLAUDE.md "no auto-commits or auto-pushes" user preference within this
+  flow only. The user has explicitly opted in for ChatGPT review sessions so
+  each round's state lands on the PR before the next round starts.

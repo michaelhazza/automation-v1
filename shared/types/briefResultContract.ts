@@ -20,7 +20,64 @@
 export const BRIEF_RESULT_CONTRACT_VERSION = 1 as const;
 
 // ---------------------------------------------------------------------------
-// Shared primitives
+// Shared primitives — common to all artefact kinds
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle status for an artefact. 'final' means this artefact is authoritative
+ * and won't change. 'pending' means a refinement is expected (e.g., long-running
+ * query). 'updated' means this artefact supersedes a previous one
+ * (parentArtefactId points to the predecessor). 'invalidated' means this artefact
+ * is no longer accurate (e.g., underlying data changed) and the UI should
+ * visually mark it as stale. Default interpretation when omitted: 'final'.
+ */
+export type BriefArtefactStatus = 'final' | 'pending' | 'updated' | 'invalidated';
+
+/**
+ * Budget context for "you've used N% of your limit" UX messaging.
+ * All fields optional — capabilities may report remaining, limit, window,
+ * or any combination depending on what budget layer is active (per-Brief,
+ * per-run, per-day, per-month). When `window` is set, it disambiguates
+ * which budget layer the `remainingCents` / `limitCents` refer to —
+ * essential once multiple overlapping budgets exist.
+ */
+export interface BriefBudgetContext {
+  remainingCents?: number;
+  limitCents?: number;
+  window?: 'per_run' | 'per_day' | 'per_month' | 'unknown';
+}
+
+/**
+ * Soft schema hint for UI rendering of structured results. Capabilities
+ * producing tabular data may include this so the UI renders deterministically
+ * without per-entityType defensive logic. Keys match field names in the
+ * corresponding `rows` entries.
+ */
+export interface BriefColumnHint {
+  key: string;
+  label: string;
+  type?: 'string' | 'number' | 'date' | 'currency' | 'boolean';
+}
+
+/**
+ * Fields common to every artefact kind. The discriminated union below
+ * extends this base to add kind-specific fields.
+ */
+export interface BriefArtefactBase {
+  /** Unique identifier for this artefact. Required so artefacts can reference each other. */
+  artefactId: string;
+  /** Lifecycle status. Defaults to 'final' when omitted. */
+  status?: BriefArtefactStatus;
+  /** When status is 'updated' or 'invalidated', the previous artefact this supersedes. */
+  parentArtefactId?: string;
+  /** Loose relationships to other artefacts (e.g., approval card → result that spawned it). */
+  relatedArtefactIds?: string[];
+  /** Per-artefact contract version. Defaults to BRIEF_RESULT_CONTRACT_VERSION when omitted. */
+  contractVersion?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Result-specific primitives
 // ---------------------------------------------------------------------------
 
 /**
@@ -88,7 +145,7 @@ export interface BriefResultSuggestion {
 // Structured result — the common "here's what you asked for" artefact
 // ---------------------------------------------------------------------------
 
-export interface BriefStructuredResult {
+export interface BriefStructuredResult extends BriefArtefactBase {
   kind: 'structured';
   /** One-sentence human summary, e.g. "18 VIP contacts inactive 30d". */
   summary: string;
@@ -96,6 +153,12 @@ export interface BriefStructuredResult {
   filtersApplied: BriefResultFilter[];
   /** Rows rendered in the UI table. Schema is entity-dependent — consumers render by entityType. */
   rows: Array<Record<string, unknown>>;
+  /**
+   * Soft schema hint for deterministic UI rendering. Capabilities may omit when
+   * the UI can infer columns from `entityType` alone. When present, UI renders
+   * exactly these columns in this order with these labels.
+   */
+  columns?: BriefColumnHint[];
   /** Total matching count — may exceed rows.length when truncated. */
   rowCount: number;
   truncated: boolean;
@@ -105,6 +168,34 @@ export interface BriefStructuredResult {
   /** Actual spend for this result, in cents. Always present. */
   costCents: number;
   source: BriefResultSource;
+  /**
+   * Age of the underlying data in milliseconds at the moment this result
+   * was produced. Complements `source` — a 'canonical' read with
+   * freshnessMs=90000 (1.5min old) is meaningfully different from
+   * freshnessMs=7200000 (2h old). Optional; capabilities that can't
+   * estimate (e.g., hybrid aggregations) may omit.
+   */
+  freshnessMs?: number;
+  /**
+   * System's self-assessed confidence in the interpretation, 0.0–1.0.
+   * Optional: capabilities that can't meaningfully estimate confidence may omit.
+   * When present, the UI surfaces a confidence indicator for values below a
+   * threshold (e.g. < 0.8) so users can spot-check borderline results.
+   * See docs/brief-result-contract.md §"Confidence surfaces" for rendering guidance.
+   */
+  confidence?: number;
+  /**
+   * Provenance of the confidence score. Debugging + tuning aid — lets
+   * downstream consumers weigh LLM-derived confidence differently from
+   * deterministic confidence. Optional.
+   */
+  confidenceSource?: 'llm' | 'heuristic' | 'deterministic';
+  /**
+   * Budget context for "you've used N% of your limit" UX.
+   * Typically populated by the orchestrator after the capability returns, not
+   * by the capability itself. Optional.
+   */
+  budgetContext?: BriefBudgetContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +204,9 @@ export interface BriefStructuredResult {
 
 export type BriefApprovalRiskLevel = 'low' | 'medium' | 'high';
 
-export interface BriefApprovalCard {
+export type BriefExecutionStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface BriefApprovalCard extends BriefArtefactBase {
   kind: 'approval';
   /** Human summary of the proposed action, e.g. "Send follow-up email to 14 contacts". */
   summary: string;
@@ -131,6 +224,34 @@ export interface BriefApprovalCard {
    * the scope/blast-radius of the args.
    */
   riskLevel: BriefApprovalRiskLevel;
+  /**
+   * System's self-assessed confidence that this action matches user intent, 0.0–1.0.
+   * Optional. When present and below a threshold, the UI surfaces an uncertainty
+   * indicator prompting explicit user scrutiny before approval. See
+   * docs/brief-result-contract.md §"Confidence surfaces" for rendering guidance.
+   */
+  confidence?: number;
+  /**
+   * Provenance of the confidence score. See BriefStructuredResult.confidenceSource.
+   */
+  confidenceSource?: 'llm' | 'heuristic' | 'deterministic';
+  /**
+   * Execution linkage — populated after the user approves and the action dispatches.
+   * Links this approval card to the run / action-execution record for audit trail
+   * and UI post-dispatch state (e.g., "✓ Completed" / "✗ Failed — retry").
+   *
+   * Reuse rule: `executionId` always refers to the LATEST execution. If the user
+   * retries a failed action or re-runs a completed one, a new approval artefact
+   * is emitted (via `parentArtefactId` chain) with the new `executionId`. The
+   * chain preserves history; this field always points at the current attempt.
+   */
+  executionId?: string;
+  executionStatus?: BriefExecutionStatus;
+  /**
+   * Budget context for "this action will take you to N% of limit" UX.
+   * Populated by the orchestrator when the action is priced. Optional.
+   */
+  budgetContext?: BriefBudgetContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,13 +267,27 @@ export type BriefErrorCode =
   | 'provider_error'
   | 'internal_error';
 
-export interface BriefErrorResult {
+export type BriefErrorSeverity = 'low' | 'medium' | 'high';
+
+export interface BriefErrorResult extends BriefArtefactBase {
   kind: 'error';
   errorCode: BriefErrorCode;
   /** Plain-English explanation suitable for rendering in chat. */
   message: string;
   /** Optional refinement suggestions — what the user could try instead. */
   suggestions?: BriefResultSuggestion[];
+  /**
+   * How critical is this error to the user's flow? Drives UX treatment —
+   * 'low' = inline toast, 'medium' = banner in chat, 'high' = modal or
+   * blocking state. Optional; defaults to 'medium' behaviour when omitted.
+   */
+  severity?: BriefErrorSeverity;
+  /**
+   * Whether the user should be offered a retry action. True for transient
+   * failures (rate_limited, provider_error), typically false for
+   * unsupported_query or missing_permission. Optional.
+   */
+  retryable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
