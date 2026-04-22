@@ -267,7 +267,7 @@ If any re-verification fails, reclassify the affected REQ as DIRECTIONAL_GAP, re
 
 Write the consolidated review log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` with this structure.
 
-**Filename convention:** `<slug>` is the feature/spec slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name derived from the spec path otherwise. `<chunk-slug>` is included ONLY when the caller named a specific plan chunk (e.g. `feature-coordinator` per-chunk invocations) — omit it for manual whole-branch invocations. `<timestamp>` is ISO 8601 UTC with seconds (e.g. `2026-04-22T07-08-30Z`). Use the same slug/chunk-slug in the scratch filename (Step 1) and in the `tasks/todo.md` source-log reference (Step 4b) — all three must match.
+**Filename convention:** follows the canonical review-log shape defined in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Summary: `<slug>` is the feature/spec slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name derived from the spec path otherwise; `<chunk-slug>` is included ONLY when the caller named a specific plan chunk (e.g. `feature-coordinator` per-chunk invocations) — omit it for manual whole-branch invocations — and is derived deterministically as kebab-case of the chunk name (lowercase, ASCII, hyphen-separated, no spaces/underscores/duplicate hyphens); `<timestamp>` is ISO 8601 UTC with seconds (e.g. `2026-04-22T07-08-30Z`). Use the same slug/chunk-slug in the scratch filename (Step 1) and in the `tasks/todo.md` source-log reference (Step 4b) — all three must match.
 
 ```markdown
 # Spec Conformance Log

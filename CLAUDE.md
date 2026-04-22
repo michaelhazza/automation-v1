@@ -316,6 +316,8 @@ For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marki
 
 **For spec-driven tasks, run `spec-conformance` before `pr-reviewer`.** The development session can silently miss spec items (missed files, missed exports, missed columns, missed error codes) while claiming completion. `spec-conformance` catches those gaps: it auto-fixes the mechanical ones (where the spec explicitly names the missing item) and routes directional gaps to `tasks/todo.md` for human resolution. If `spec-conformance` applied any mechanical fixes, re-run `pr-reviewer` on the expanded changed-code set — the reviewer needs to see the final state, not the pre-fix state.
 
+**Processing `spec-conformance` NON_CONFORMANT findings — standalone contract.** When `spec-conformance` returns `NON_CONFORMANT` (directional/ambiguous gaps routed to `tasks/todo.md`), the caller — whether `feature-coordinator` or a manual invocation by the main session — processes the dated section the same way `pr-reviewer` findings are processed: (1) non-architectural gaps → fix in-session, then re-invoke `spec-conformance` to confirm closure (max 2 re-invocations); (2) architectural gaps (significant redesign, contract change, multi-service impact) → leave in the dated section as the raw record AND promote into `## PR Review deferred items / ### <slug>` so they survive across review cycles — do not re-invoke `spec-conformance`, escalate instead. This rule applies identically regardless of whether `spec-conformance` was invoked by `feature-coordinator` per-chunk or manually via `spec-conformance: verify the current branch against its spec`.
+
 If no spec was the source of truth for the task (ad-hoc bug fix, small refactor), `spec-conformance` is not applicable — skip it.
 
 **Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request. For spec-driven work, that means: `spec-conformance` → `pr-reviewer` (re-run after any mechanical fixes `spec-conformance` applied) → (optionally `dual-reviewer`) → PR.
@@ -343,6 +345,20 @@ Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on dis
 - **`chatgpt-pr-review` and `chatgpt-spec-review` self-write.** Both agents write their own session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md` and `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md` respectively. The caller does not need to persist anything.
 
 If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
+
+### Review-log filename convention — canonical definition
+
+All review-log filenames use the shape:
+
+```
+tasks/review-logs/<agent>-log-<slug>[-<chunk-slug>]-<timestamp>.md
+```
+
+- **`<slug>`** — the feature/spec slug when working under `tasks/builds/<slug>/`, otherwise a short kebab-case name derived from the branch or spec path.
+- **`<chunk-slug>`** — present ONLY when the review is scoped to a single plan chunk (e.g. `feature-coordinator` per-chunk invocations of `spec-conformance` or `pr-reviewer`); omitted for manual whole-branch invocations. **Format: kebab-case of the chunk name — lower-case, ASCII, hyphen-separated, no spaces or underscores, no duplicate hyphens.** Derive deterministically: lowercase the chunk name, replace any run of non-alphanumeric characters with a single hyphen, trim leading/trailing hyphens. Example: chunk name `"DB schema — agent_runs"` → `db-schema-agent-runs`.
+- **`<timestamp>`** — ISO 8601 UTC with seconds and hyphens between time fields (e.g. `2026-04-22T07-08-30Z`).
+
+Every agent that writes a review log (`pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review`) uses this shape. When referencing the review log from another artifact (`tasks/todo.md` source-log field, `progress.md` Notes column, a scratch file), use the same slug and chunk-slug so all three match.
 
 ### Deferred actions route to `tasks/todo.md` — single source of truth
 
