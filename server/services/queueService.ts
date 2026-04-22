@@ -595,6 +595,42 @@ export const queueService = {
           throw err;
         }
       });
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
+      await (boss as any).work('maintenance:fast-path-decisions-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { pruneFastPathDecisions } = await import('../jobs/fastPathDecisionsPruneJob.js');
+          await withTimeout(pruneFastPathDecisions().then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-decisions-prune', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 6 — nightly rule quality decay + auto-deprecation.
+      await (boss as any).work('maintenance:rule-auto-deprecate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runRuleAutoDeprecate } = await import('../jobs/ruleAutoDeprecateJob.js');
+          await withTimeout(runRuleAutoDeprecate().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:rule-auto-deprecate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 3 — nightly recalibration log for classifier drift detection.
+      await (boss as any).work('maintenance:fast-path-recalibrate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFastPathRecalibrate } = await import('../jobs/fastPathRecalibrateJob.js');
+          await withTimeout(runFastPathRecalibrate().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-recalibrate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
       // LLM observability spec §12 — nightly llm_requests retention sweep.
       // Moves rows older than env.LLM_LEDGER_RETENTION_MONTHS (default 12)
       // to llm_requests_archive in 10k-row chunks. Bounded transaction size;
@@ -978,6 +1014,10 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner + recalibrator
+      await boss.schedule('maintenance:fast-path-decisions-prune', '30 3 * * *', {}); // 3:30am UTC daily
+      await boss.schedule('maintenance:fast-path-recalibrate', '0 4 * * *', {}); // 4am UTC daily
+      await boss.schedule('maintenance:rule-auto-deprecate', '0 3 * * *', {}); // 3am UTC daily
       // LLM observability spec §12 — retention archival at 03:45 UTC so it
       // runs after the 03:00 memory-decay and 03:30 security-events sweeps
       // without contending on the same connection pool.

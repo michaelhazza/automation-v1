@@ -203,3 +203,12 @@ export * from './teams.js';
 export * from './teamMembers.js';
 export * from './delegationGrants.js';
 export * from './canonicalRowSubaccountScopes.js';
+
+// Universal Brief — polymorphic conversation tables (migration 0194)
+export * from './conversations.js';
+
+// Universal Brief — classifier shadow-eval logging (migration 0195)
+export * from './fastPathDecisions.js';
+
+// Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
+export * from './userSettings.js';

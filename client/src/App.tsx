@@ -86,6 +86,10 @@ const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPa
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
+// Universal Brief — detail page (Phase 2)
+const BriefDetailPage = lazy(() => import('./pages/BriefDetailPage'));
+// Learned Rules library (Phase 5)
+const LearnedRulesPage = lazy(() => import('./pages/LearnedRulesPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
@@ -348,6 +352,11 @@ export default function App() {
             {/* Configuration Assistant */}
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
+            {/* Universal Brief detail page (Phase 2) */}
+            <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
+            {/* Learned Rules library (Phase 5) */}
+            <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
+            <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
           </Route>
 
           {/* ClientPulse routes */}

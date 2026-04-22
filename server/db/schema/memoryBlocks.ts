@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -26,6 +26,10 @@ const vector = customType<{ data: number[] | null }>({
 // Typed enums for migration 0129 columns
 export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejected';
 export type MemoryBlockSource = 'manual' | 'auto_synthesised';
+// Phase 5 / W3a types
+export type MemoryBlockPriority = 'low' | 'medium' | 'high';
+export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion';
+export type MemoryBlockDeprecationReason = 'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted';
 
 // ---------------------------------------------------------------------------
 // Memory Blocks — shared named context blocks attached to multiple agents.
@@ -97,6 +101,15 @@ export const memoryBlocks = pgTable(
     // workspaceMemories.ts (Drizzle cannot represent partial indexes on nullable
     // FK columns where the referenced table cannot be imported here).
     activeVersionId: uuid('active_version_id'),
+
+    // Phase 5 / W3a — Learned Rules precedence + deprecation (migration 0197)
+    priority: text('priority').default('medium').$type<MemoryBlockPriority>(),
+    isAuthoritative: boolean('is_authoritative').notNull().default(false),
+    pausedAt: timestamp('paused_at', { withTimezone: true }),
+    deprecatedAt: timestamp('deprecated_at', { withTimezone: true }),
+    deprecationReason: text('deprecation_reason').$type<MemoryBlockDeprecationReason>(),
+    qualityScore: numeric('quality_score', { precision: 3, scale: 2 }).notNull().default('0.50'),
+    capturedVia: text('captured_via').notNull().default('manual_edit').$type<MemoryBlockCapturedVia>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

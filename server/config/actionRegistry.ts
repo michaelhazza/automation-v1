@@ -2766,6 +2766,52 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
+  // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ─────────
+  ask_clarifying_questions: {
+    actionType: 'ask_clarifying_questions',
+    description: 'Draft up to 5 ranked questions to resolve brief ambiguity when Orchestrator confidence < 0.85.',
+    actionCategory: 'api',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['briefId', 'briefText', 'orchestratorConfidence', 'ambiguityDimensions'],
+    parameterSchema: z.object({
+      briefId: z.string().uuid().describe('Brief task ID'),
+      briefText: z.string().min(1).max(2000).describe('Original brief text'),
+      conversationContext: z.array(z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      })).optional().describe('Prior conversation turns for context'),
+      orchestratorConfidence: z.number().min(0).max(1).describe('Current orchestrator confidence score'),
+      ambiguityDimensions: z.array(z.enum(['scope', 'target', 'action', 'timing', 'content', 'other']))
+        .min(1).describe('Dimensions flagged as ambiguous'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  challenge_assumptions: {
+    actionType: 'challenge_assumptions',
+    description: 'Adversarial analysis identifying weakest assumptions in a proposed action when stakes are high.',
+    actionCategory: 'api',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['briefId', 'runtimeConfidence', 'stakesDimensions'],
+    parameterSchema: z.object({
+      briefId: z.string().uuid().describe('Brief task ID'),
+      runtimeConfidence: z.number().min(0).max(1).describe('Runtime confidence at time of challenge'),
+      stakesDimensions: z.array(z.enum(['irreversibility', 'cost', 'scope', 'compliance']))
+        .min(1).describe('Stakes dimensions that triggered the challenge'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
   'crm.query': {
     actionType: 'crm.query',
     description: 'Answer a free-text CRM question using the CRM Query Planner.',

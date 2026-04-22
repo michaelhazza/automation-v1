@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import api from '../lib/api';
 import Modal from './Modal';
+import { TaskChatPane } from './task-chat/TaskChatPane.js';
 
 interface Agent {
   id: string;
@@ -131,7 +132,7 @@ const labelCls = 'text-xs font-semibold text-slate-500';
 export default function TaskModal({ subaccountId, itemId, agents, columns, onClose, onSaved }: Props) {
   const [task, setTask] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'details' | 'activity' | 'deliverables' | 'attachments'>('details');
+  const [tab, setTab] = useState<'details' | 'activity' | 'deliverables' | 'attachments' | 'conversation'>('details');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -344,6 +345,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     { key: 'activity', label: `Activity (${task.activities.length})` },
     { key: 'deliverables', label: `Deliverables (${task.deliverables.length})` },
     { key: 'attachments', label: `Attachments (${attachments.length})` },
+    { key: 'conversation', label: 'Conversation' },
   ];
 
   return (
@@ -607,6 +609,12 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'conversation' && (
+        <div className="px-1">
+          <TaskChatPane taskId={itemId} />
         </div>
       )}
     </Modal>
