@@ -184,6 +184,8 @@ export const TASK_TYPES = [
   'context_enrichment',
   // Agent beliefs extraction — LLM call to extract/merge discrete facts after a run.
   'belief_extraction',
+  // CRM Query Planner Stage 3 LLM calls (spec §10.1)
+  'crm_query_planner',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];

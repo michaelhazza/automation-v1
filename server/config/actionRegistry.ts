@@ -2765,6 +2765,37 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+
+  'crm.query': {
+    actionType: 'crm.query',
+    description: 'Answer a free-text CRM question using the CRM Query Planner.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['rawIntent', 'subaccountId'],
+    parameterSchema: z.object({
+      rawIntent:    z.string().min(3).max(2000),
+      subaccountId: z.string().uuid(),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    idempotencyStrategy: 'read_only',
+    readPath: 'liveFetch',
+    liveFetchRationale: 'CRM Query Planner dispatches Stage 1/2 canonical reads when the intent matches a canonical registry entry (preferred path), and Stage 3 LLM-planned live reads through ghlReadHelpers when the intent requires a live-only field or entity. The canonical path is preferred and measured via planner.llm_skipped_rate; the live path is the fallback.',
+    scopeRequirements: {
+      validateSubaccountFields: ['subaccountId'],
+      requiresUserContext: false,
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint:    true,
+        destructiveHint: false,
+        idempotentHint:  true,
+        openWorldHint:   true,
+      },
+    },
+    onFailure: 'skip',
+  },
 };
 
 /**

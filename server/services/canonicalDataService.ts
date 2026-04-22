@@ -1,4 +1,4 @@
-import { eq, and, gte, sql, count, desc, lt } from 'drizzle-orm';
+import { eq, and, gte, lte, sql, count, desc, lt, asc, avg, sum } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   canonicalAccounts,
@@ -483,5 +483,267 @@ export const canonicalDataService = {
       .from(canonicalMetricHistory)
       .where(and(...conditions));
     return Number(result?.count ?? 0);
+  },
+
+  // ── CRM Query Planner extensions (spec §12.3) ────────────────────────────
+
+  // Contacts with no recorded update since N days ago, scoped to a subaccount.
+  // Uses `updatedAt` as the activity proxy — TODO(spec-open-1): confirm column
+  // once a dedicated lastActivityAt is added to the schema.
+  async listInactiveContacts(args: {
+    orgId: string;
+    subaccountId: string;
+    sinceDaysAgo: number;
+    limit: number;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    const cutoff = new Date(Date.now() - args.sinceDaysAgo * 24 * 60 * 60 * 1000);
+    const rows = await db
+      .select({
+        id:        canonicalContacts.id,
+        firstName: canonicalContacts.firstName,
+        lastName:  canonicalContacts.lastName,
+        email:     canonicalContacts.email,
+        phone:     canonicalContacts.phone,
+        tags:      canonicalContacts.tags,
+        updatedAt: canonicalContacts.updatedAt,
+      })
+      .from(canonicalContacts)
+      .innerJoin(canonicalAccounts, eq(canonicalContacts.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(canonicalContacts.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          lt(canonicalContacts.updatedAt, cutoff),
+        ),
+      )
+      .orderBy(asc(canonicalContacts.updatedAt))
+      .limit(args.limit + 1);
+
+    const truncated = rows.length > args.limit;
+    return {
+      rows: (truncated ? rows.slice(0, args.limit) : rows) as Record<string, unknown>[],
+      rowCount: truncated ? args.limit : rows.length,
+      truncated,
+    };
+  },
+
+  async listStaleOpportunities(args: {
+    orgId: string;
+    subaccountId: string;
+    stageKey?: string;
+    staleSince: Date;
+    limit: number;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    const conditions = [
+      eq(canonicalOpportunities.organisationId, args.orgId),
+      eq(canonicalAccounts.subaccountId, args.subaccountId),
+      lt(canonicalOpportunities.updatedAt, args.staleSince),
+    ];
+    if (args.stageKey) conditions.push(eq(canonicalOpportunities.stage, args.stageKey));
+
+    const rows = await db
+      .select({
+        id:             canonicalOpportunities.id,
+        name:           canonicalOpportunities.name,
+        stage:          canonicalOpportunities.stage,
+        value:          canonicalOpportunities.value,
+        status:         canonicalOpportunities.status,
+        stageEnteredAt: canonicalOpportunities.stageEnteredAt,
+        updatedAt:      canonicalOpportunities.updatedAt,
+      })
+      .from(canonicalOpportunities)
+      .innerJoin(canonicalAccounts, eq(canonicalOpportunities.accountId, canonicalAccounts.id))
+      .where(and(...conditions))
+      .orderBy(asc(canonicalOpportunities.updatedAt))
+      .limit(args.limit + 1);
+
+    const truncated = rows.length > args.limit;
+    return {
+      rows: (truncated ? rows.slice(0, args.limit) : rows) as Record<string, unknown>[],
+      rowCount: truncated ? args.limit : rows.length,
+      truncated,
+    };
+  },
+
+  async listUpcomingAppointments(args: {
+    orgId: string;
+    subaccountId: string;
+    from: Date;
+    to: Date;
+    limit: number;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    // Appointments are sourced from GHL live in v1; canonical table may not exist.
+    // This stub ensures the handler compiles. The live executor handles real data.
+    return { rows: [], rowCount: 0, truncated: false };
+  },
+
+  async countContactsByTag(args: {
+    orgId: string;
+    subaccountId: string;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    // Tag-partitioned counts — needs unnest(tags). Simplified v1 implementation.
+    const rows = await db
+      .select({
+        id:   canonicalContacts.id,
+        tags: canonicalContacts.tags,
+      })
+      .from(canonicalContacts)
+      .innerJoin(canonicalAccounts, eq(canonicalContacts.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(canonicalContacts.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+        ),
+      )
+      .limit(1000);
+
+    // Tally tags in-process (acceptable for v1 low-traffic; SQL unnest in v2)
+    const tally: Record<string, number> = {};
+    for (const r of rows) {
+      for (const tag of (r.tags ?? [])) {
+        tally[tag] = (tally[tag] ?? 0) + 1;
+      }
+    }
+    const tagRows = Object.entries(tally)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag, contactCount]) => ({ tag, contactCount })) as Record<string, unknown>[];
+
+    return { rows: tagRows, rowCount: tagRows.length, truncated: false };
+  },
+
+  async countOpportunitiesByStage(args: {
+    orgId: string;
+    subaccountId: string;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    const rows = await db
+      .select({
+        stage: canonicalOpportunities.stage,
+        count: count(),
+      })
+      .from(canonicalOpportunities)
+      .innerJoin(canonicalAccounts, eq(canonicalOpportunities.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(canonicalOpportunities.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalOpportunities.status, 'open'),
+        ),
+      )
+      .groupBy(canonicalOpportunities.stage)
+      .orderBy(desc(count()));
+
+    return {
+      rows: rows as Record<string, unknown>[],
+      rowCount: rows.length,
+      truncated: false,
+    };
+  },
+
+  async getRevenueTrend(args: {
+    orgId: string;
+    subaccountId: string;
+    from: Date;
+    to: Date;
+    limit: number;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    const rows = await db
+      .select({
+        transactionDate: canonicalRevenue.transactionDate,
+        amount:          canonicalRevenue.amount,
+        currency:        canonicalRevenue.currency,
+        type:            canonicalRevenue.type,
+      })
+      .from(canonicalRevenue)
+      .innerJoin(canonicalAccounts, eq(canonicalRevenue.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(canonicalRevenue.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalRevenue.status, 'completed'),
+          gte(canonicalRevenue.transactionDate, args.from),
+          lte(canonicalRevenue.transactionDate, args.to),
+        ),
+      )
+      .orderBy(asc(canonicalRevenue.transactionDate))
+      .limit(args.limit + 1);
+
+    const truncated = rows.length > args.limit;
+    return {
+      rows: (truncated ? rows.slice(0, args.limit) : rows) as Record<string, unknown>[],
+      rowCount: truncated ? args.limit : rows.length,
+      truncated,
+    };
+  },
+
+  async getAccountsAtRiskBand(args: {
+    orgId: string;
+    subaccountId: string;
+    band: 'red' | 'yellow' | 'green';
+    limit: number;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    const bandRanges: Record<string, [number, number]> = {
+      red:    [0, 40],
+      yellow: [41, 70],
+      green:  [71, 100],
+    };
+    const [minScore, maxScore] = bandRanges[args.band]!;
+
+    const rows = await db
+      .select({
+        accountId:  healthSnapshots.accountId,
+        score:      healthSnapshots.score,
+        trend:      healthSnapshots.trend,
+      })
+      .from(healthSnapshots)
+      .innerJoin(canonicalAccounts, eq(healthSnapshots.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(healthSnapshots.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          gte(healthSnapshots.score, minScore),
+          lte(healthSnapshots.score, maxScore),
+        ),
+      )
+      .orderBy(asc(healthSnapshots.score))
+      .limit(args.limit + 1);
+
+    const truncated = rows.length > args.limit;
+    return {
+      rows: (truncated ? rows.slice(0, args.limit) : rows) as Record<string, unknown>[],
+      rowCount: truncated ? args.limit : rows.length,
+      truncated,
+    };
+  },
+
+  async getPipelineVelocity(args: {
+    orgId: string;
+    subaccountId: string;
+    from: Date;
+    to: Date;
+  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    // Stage velocity: count opportunities that entered each stage in the window
+    const rows = await db
+      .select({
+        stage: canonicalOpportunities.stage,
+        count: count(),
+      })
+      .from(canonicalOpportunities)
+      .innerJoin(canonicalAccounts, eq(canonicalOpportunities.accountId, canonicalAccounts.id))
+      .where(
+        and(
+          eq(canonicalOpportunities.organisationId, args.orgId),
+          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          gte(canonicalOpportunities.stageEnteredAt, args.from),
+          lte(canonicalOpportunities.stageEnteredAt, args.to),
+        ),
+      )
+      .groupBy(canonicalOpportunities.stage)
+      .orderBy(desc(count()));
+
+    return {
+      rows: rows as Record<string, unknown>[],
+      rowCount: rows.length,
+      truncated: false,
+    };
   },
 };

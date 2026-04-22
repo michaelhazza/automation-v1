@@ -309,6 +309,22 @@ export interface InFlightActiveCountPayload {
   byProvider:  Record<string, number>;
 }
 
+// ── CRM Query Planner metrics (spec §17.2 / §19 P3) ──────────────────────
+// Stage 3 LLM call signals surfaced in the System P&L page.
+// Event-derived metrics (llmSkippedRate, briefRefinementRate) are null until
+// the structured-log aggregation layer ships.
+export interface PlannerMetrics {
+  totalStage3Calls:    number;
+  escalatedCalls:      number;
+  escalationRate:      number | null;  // escalatedCalls / totalStage3Calls (%)
+  avgCostCentsPerCall: number | null;
+  avgLatencyMs:        number | null;
+  totalCostCents:      number;
+  llmSkippedRate:      null;
+  briefRefinementRate: null;
+  periodDays:          number;
+}
+
 // ── Token-level streaming progress (deferred-items brief §5) ──────────────
 //
 // Emitted on the socket room `system:llm-inflight` via the event
