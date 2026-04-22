@@ -219,3 +219,53 @@ Final verdict: merge-ready, production-safe, architecturally coherent. Four opti
 All actionable Round 4 items landed. ChatGPT's "merge-ready" assessment stands. Ready to finalize on user signal.
 
 ---
+
+## Round 5 — 2026-04-22T22-20-00Z — leverage polish, no correctness gaps
+
+### Context
+
+ChatGPT round 5 explicitly stated "you are done" and offered five optional leverage upgrades. User replied "all as recommended" — three implemented, two rejected.
+
+### ChatGPT Feedback (condensed)
+
+Final-layer improvements only — no correctness gaps remain:
+1. Add rejection-reason count metric (aggregate counter for lifecycle conflicts).
+2. Hard upper bound on artefacts per write (safety valve against runaway emission).
+3. Add `source` field to `LifecycleConflictSignal` (future-proof for multi-stage pipelines).
+4. Rename `shouldAutoPauseRulePure` → `shouldAutoActivateRulePure` (clarity).
+5. Add explicit mixed valid + invalid artefacts test.
+
+### Decisions (per-finding)
+
+| Finding | Recommendation | User Decision | Rationale |
+|---------|----------------|---------------|-----------|
+| R5 item 1 — lifecycle conflict metrics counter | implement | implement | Used codebase-native pattern (in-memory counters + getter), not ChatGPT's `metrics.increment` style which doesn't exist in this project |
+| R5 item 2 — MAX_ARTEFACTS_PER_WRITE cap | implement | implement | Explicit rejection (not silent truncation) so overflow surfaces in `artefactsRejected` + logs; cap = 25 |
+| R5 item 3 — source field on LifecycleConflictSignal | reject | reject | Always one value today (`write_guard`); premature abstraction |
+| R5 item 4 — rename policy function | reject | reject | "Pause" matches `pending_review` status literal; avoid naming-pref churn |
+| R5 item 5 — mixed valid + invalid test | implement | implement | Real edge case; 2-minute add; confirms partial-success behaviour |
+
+### Implemented (Round 5)
+
+- **`server/services/briefConversationWriter.ts`**
+  - New exported `MAX_ARTEFACTS_PER_WRITE = 25` constant. Overflow artefacts are rejected explicitly via the existing rejection pattern (logged under `briefConversationWriter.artefacts_over_limit`, counted in `artefactsRejected`). No silent truncation.
+  - Module-level in-memory counters: `lifecycleConflictsTotal`, `artefactsOverLimitTotal`, `artefactsValidationRejectedTotal`. Exposed via `getBriefConversationWriterMetrics()`. Follows the exact pattern established by `getAgentExecutionLogMetrics` in `server/services/agentExecutionEventService.ts` — structured log events remain the source of truth; counters give dashboards a cheap aggregate.
+  - Counter increments threaded alongside each existing `logger.warn(...)` emission so both observability paths stay in sync.
+
+- **`server/services/__tests__/briefArtefactValidatorPure.test.ts`**
+  - New test: `write guard: mixed valid + invalid in one batch → partial success, only invalid flagged`. Covers `[valid-chain-Y, invalid-C, standalone-Z]` input and asserts only C is flagged; Y and Z remain unflagged and persistable.
+  - 41/41 tests pass (was 40).
+
+### Deferred (Round 5)
+
+- None.
+
+### Rejected (Round 5)
+
+- R5 item 3 (source field) and R5 item 4 (rename). Logged; no residual work.
+
+### Verdict
+
+ChatGPT's "merge-ready / production-safe / architecturally coherent" verdict now carries three additional polish items. No further rounds planned unless user has specific concerns.
+
+---

@@ -24,6 +24,38 @@ export interface WriteMessageInput {
 
 export type LifecycleConflictReason = 'duplicate_supersession';
 
+/**
+ * Defensive cap on artefacts per write — stops runaway capabilities from
+ * emitting hundreds of artefacts in a single message. The cap is generous
+ * enough that legitimate multi-artefact output fits; overflow is rejected
+ * explicitly (logged + counted in `artefactsRejected`) rather than silently
+ * truncated.
+ */
+export const MAX_ARTEFACTS_PER_WRITE = 25;
+
+// ---------------------------------------------------------------------------
+// In-memory operational counters — scraped by `getBriefConversationWriterMetrics`.
+// Follows the pattern used in `agentExecutionEventService.ts`:
+// structured log events remain the source of truth; counters give dashboards
+// a cheap aggregate without re-parsing logs.
+// ---------------------------------------------------------------------------
+
+let lifecycleConflictsTotal = 0;
+let artefactsOverLimitTotal = 0;
+let artefactsValidationRejectedTotal = 0;
+
+export function getBriefConversationWriterMetrics(): {
+  lifecycleConflictsTotal: number;
+  artefactsOverLimitTotal: number;
+  artefactsValidationRejectedTotal: number;
+} {
+  return {
+    lifecycleConflictsTotal,
+    artefactsOverLimitTotal,
+    artefactsValidationRejectedTotal,
+  };
+}
+
 export interface LifecycleConflictSignal {
   artefactId: string;
   parentArtefactId: string;
@@ -66,11 +98,29 @@ export async function writeConversationMessage(
     throw { statusCode: 404, message: 'Conversation not found' };
   }
 
+  // Defensive cap — reject overflow artefacts explicitly rather than silently
+  // truncating, so runaway emission surfaces in artefactsRejected + logs.
+  const rawArtefacts = input.artefacts ?? [];
+  const artefactsUnderCap = rawArtefacts.slice(0, MAX_ARTEFACTS_PER_WRITE);
+  const overflowArtefacts = rawArtefacts.slice(MAX_ARTEFACTS_PER_WRITE);
+
   // Validate artefacts
   const perArtefactAccepted: BriefChatArtefact[] = [];
   let artefactsRejected = 0;
 
-  for (const artefact of (input.artefacts ?? [])) {
+  for (const overflow of overflowArtefacts) {
+    artefactsRejected++;
+    artefactsOverLimitTotal++;
+    logger.warn('briefConversationWriter.artefacts_over_limit', {
+      artefactId: overflow.artefactId,
+      rejectedCount: overflowArtefacts.length,
+      limit: MAX_ARTEFACTS_PER_WRITE,
+      conversationId: input.conversationId,
+      briefId: input.briefId,
+    });
+  }
+
+  for (const artefact of artefactsUnderCap) {
     const result = await validateArtefactForPersistence(artefact, {
       capabilityName: 'brief_conversation_writer',
       briefId: input.briefId,
@@ -79,6 +129,7 @@ export async function writeConversationMessage(
       perArtefactAccepted.push(artefact);
     } else {
       artefactsRejected++;
+      artefactsValidationRejectedTotal++;
       logger.warn('briefConversationWriter.artefact_rejected', {
         artefactId: artefact.artefactId,
         errors: result.errors,
@@ -99,6 +150,7 @@ export async function writeConversationMessage(
   const lifecycleConflicts: LifecycleConflictSignal[] = [];
   for (const conflict of writeGuard.conflicts) {
     artefactsRejected++;
+    lifecycleConflictsTotal++;
     lifecycleConflicts.push({
       artefactId: conflict.artefactId,
       parentArtefactId: conflict.error.parentArtefactId,

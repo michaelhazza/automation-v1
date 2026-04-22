@@ -424,6 +424,31 @@ test('write guard: independent chains both valid in one batch', () => {
   assert(result.valid, 'expected valid — two distinct chains, one supersession each');
 });
 
+test('write guard: mixed valid + invalid in one batch → partial success, only invalid flagged', () => {
+  // Scenario: one artefact in the new batch duplicates an existing supersession;
+  // the rest are valid. The guard must flag ONLY the duplicate and leave the
+  // others untouched so the caller can persist the valid ones.
+  const A = makeStructured({ artefactId: 'A' }) as unknown as BriefChatArtefact;
+  const X = makeStructured({ artefactId: 'X' }) as unknown as BriefChatArtefact;
+  const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+
+  // New batch: [valid new chain Y→X, invalid duplicate supersession C→A, valid standalone Z]
+  const Y = makeStructured({ artefactId: 'Y', parentArtefactId: 'X', status: 'updated' }) as unknown as BriefChatArtefact;
+  const C = makeStructured({ artefactId: 'C', parentArtefactId: 'A', status: 'updated' }) as unknown as BriefChatArtefact;
+  const Z = makeStructured({ artefactId: 'Z' }) as unknown as BriefChatArtefact;
+
+  const result = validateLifecycleWriteGuardPure([A, X, B], [Y, C, Z]);
+
+  assert(!result.valid, 'expected invalid overall — one conflict present');
+  assertEqual(result.conflicts.length, 1, 'exactly one conflict reported');
+  assertEqual(result.conflicts[0]!.artefactId, 'C', 'only C is flagged');
+  assertEqual(result.conflicts[0]!.error.conflictingArtefactId, 'B', 'existing B blocks C');
+  // Y and Z must NOT appear in conflicts — they are valid and should persist.
+  const conflictingIds = new Set(result.conflicts.map((c) => c.artefactId));
+  assert(!conflictingIds.has('Y'), 'Y should not be flagged');
+  assert(!conflictingIds.has('Z'), 'Z should not be flagged');
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 
 console.log('');
