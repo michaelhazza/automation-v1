@@ -1,6 +1,6 @@
 # Hierarchical Agent Delegation — Development Brief
 
-> **Status:** Rev 2 — incorporates external review. Ready for internal spec-reviewer pass.
+> **Status:** Rev 3 — incorporates second external review. Ready for internal spec-reviewer pass.
 > **Date:** 2026-04-22
 > **Audience:** Internal engineering, plus LLM reviewers without prior context on this codebase.
 > **Related work (out of scope here):** Restructuring the seeded 16-agent company into a multi-tier org chart is being designed on a separate track. This brief assumes multi-tier hierarchies are desired and focuses on the runtime, routing, and observability primitives needed to make them *meaningful*.
@@ -39,7 +39,9 @@ We've studied how a popular open-source product called Paperclip achieves this, 
 
 This is a brief, not a spec. It's deliberately short. Each recommendation is sized as a small, independently-shippable change. An external reviewer is asked to stress-test the proposals, flag gaps, and suggest better alternatives where appropriate.
 
-A note on framing: what we're designing here is more than hierarchy enforcement. The hierarchy context becomes the foundation for later work on budget rollups per subtree, performance attribution per manager, delegation learning, and automatic org-chart optimisation. We're not building those capabilities now — but the decisions in this brief should leave room for them rather than foreclose them.
+**What v1 is and isn't.** v1 enforces *tree-based* delegation with controlled escape hatches — not a canonical model of how all agent delegation must work forever. Real agent work is often messier than a tree: temporary lateral collaboration, cross-functional tasks, emergent graph-like patterns. Those patterns are intentionally out of scope here (§7). The decisions in this brief aim to make tree delegation work well, while leaving the door open to relax into mesh or task-based grouping later without redesigning primitives.
+
+**Strategic framing.** The work in this brief quietly moves Automation OS from an *agent execution platform* (runs agents, one at a time, with tools) to an *agent organisation system* (coordinates a team of agents with role, scope, and reporting structure). That shift is what makes the hierarchy become a routing layer, a control surface, and later an optimisation surface (budget rollups per subtree, performance attribution per manager, delegation learning, automatic org-chart optimisation). We're not building those capabilities now — but the decisions in this brief should leave room for them rather than foreclose them.
 
 ## 2. The Paperclip model — what we're trying to match
 
@@ -139,6 +141,8 @@ Populate it once at context construction from `subaccountAgents.parentSubaccount
 
 **Why this is the right shape.** Four fields cover ~95% of hierarchy-aware skill logic. Skills that need the entire subtree (rare — budget rollups, for instance) can call a separate repository helper rather than paying the lookup cost on every run. The object is small, cacheable, and stable for the lifetime of a run.
 
+**Contract boundary — read-only snapshot, not dynamic source of truth.** The `hierarchy` object is built once at context construction and is immutable for the rest of the run. Skill handlers treat it as a read-only snapshot: they do not mutate it, they do not re-query mid-run, they do not reinterpret it against their own view of the graph. If the graph changes during a run (an agent is re-linked, a manager gains a new subordinate), those changes apply from the *next* run forward, not the current one. This keeps the object a stable contract boundary — future changes to how hierarchy is computed can land in one place without rippling through every skill.
+
 **Footprint.** One field, one populate site, a small repository helper for the upward walk. Zero behaviour change until §5.2 onward consumes it.
 
 ---
@@ -200,11 +204,13 @@ Apply the same parameter to `config_list_subaccounts` and `config_list_links` fo
 
 ---
 
-### 5.5 Root-agent contract — exactly one root per subaccount
+### 5.5 Root-agent contract — exactly one *primary entry point* per subaccount
 
-**Why.** Routing in §5.6 depends on "find the root agent for this subaccount." If that lookup can return zero, one, or many agents depending on data state, routing becomes non-deterministic and produces hard-to-debug "wrong CEO" bugs. We need a clear contract at the database level.
+**Why.** Routing in §5.6 depends on "find the entry-point agent for this subaccount." If that lookup can return zero, one, or many agents depending on data state, routing becomes non-deterministic and produces hard-to-debug "wrong CEO" bugs. We need a clear contract.
 
-**What.** Enforce exactly one root per subaccount via a partial unique index:
+**Framing — primary entry point, not single source of truth.** The root is the conventional front door for Briefs submitted to a subaccount — the agent that the GlobalAskBar routes to by default. It is not the only agent in the subaccount, not the only agent the user can talk to (§5.8 keeps direct-to-specialist chat available), and not the only path a task can take. Framing it as the *primary entry point* keeps the design honest about what the invariant actually buys us: deterministic default routing, not exclusive authority.
+
+**What.** Enforce exactly one active root per subaccount via a partial unique index:
 
 ```sql
 CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount
@@ -213,15 +219,15 @@ CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount
     AND is_active = true;
 ```
 
-Semantics:
+**Graceful degradation as first-class behaviour.** Operational reality will occasionally violate the invariant — migrations, partial failures, template re-applies, manual DB edits. The resolver's degradation paths are part of the contract, not a fallback hack:
 
-- **Exactly one active root per subaccount.** The partial index enforces uniqueness only over active links, so soft-deleted or inactive rows don't block a future re-root.
-- **Zero roots is also invalid at runtime.** The routing resolver in §5.6 treats a subaccount with no active root as a configuration error and falls back to the org-level root (historically the Orchestrator via hardcoded slug) with a loud warning — never silently fails.
-- **Template import and template apply must maintain the invariant.** `hierarchyTemplateService.apply()` and `importToSubaccount()` deactivate the prior root in the same transaction as activating the new one. This prevents a split-brain "two CEOs" window during re-applies.
+- **Zero roots at runtime.** The routing resolver (§5.6) falls back to the org-level root (historically the hardcoded Orchestrator slug, §5.7), dispatches the Brief, and emits a `subaccountNoRoot` health finding (§5.9) plus a structured log. The Brief still gets handled — the user does not see a broken product — while ops gets a loud, targeted signal.
+- **Multiple roots at runtime.** Impossible during normal operation because of the index, but possible during a migration window before the index is in place. Resolver picks the oldest by `createdAt` for determinism and emits `subaccountMultipleRoots` (critical severity). Same posture: dispatch continues, ops is notified immediately.
+- **Template apply window.** `hierarchyTemplateService.apply()` and `importToSubaccount()` deactivate the prior root in the same transaction as activating the new one. This closes the split-brain "two CEOs" window during re-applies without requiring the resolver to reason about it.
 
 **Migration.** Audit existing subaccounts before adding the index. Any subaccount with zero or multiple active roots needs manual resolution first (there shouldn't be many — the hardcoded Orchestrator model has produced one-root-per-org, not one-root-per-subaccount, so most existing subaccounts are likely to have zero subaccount-roots rather than multiple).
 
-**Footprint.** One partial unique index, migration script, one transaction-boundary audit on two existing service methods. Enables 5.6 and 5.7.
+**Footprint.** One partial unique index, migration script, one transaction-boundary audit on two existing service methods, two health detectors already covered by §5.9. Enables 5.6 and 5.7.
 
 ---
 
@@ -267,7 +273,7 @@ If the lookup finds nothing, fall back to current behaviour (hardcoded slug) so 
 
 ### 5.9 Observability — delegation trace graph, violation metrics, hierarchy health
 
-**Why.** A hierarchical delegation system is much harder to debug than a flat one. A single Brief can fan out through three or four agents before producing the final artefact, and when something goes wrong "which agent did what, and why" has to be answerable in seconds, not minutes. The existing Run Trace Viewer handles the single-run case but doesn't stitch cross-agent chains into a visible graph.
+**Why — required for safe rollout, not a post-feature enhancement.** A hierarchical delegation system is much harder to debug than a flat one. A single Brief can fan out through three or four agents before producing the final artefact, and when something goes wrong "which agent did what, and why" has to be answerable in seconds, not minutes. The first week after enforcement lands, expect a measurable spike in rejection-rate metrics as existing prompts hit scoping they previously ignored — triaging that spike without the trace graph and violation counters is guesswork. The existing Run Trace Viewer handles the single-run case but doesn't stitch cross-agent chains into a visible graph. **This section is not optional for rollout.** If 5.9 isn't ready, 5.1–5.4 aren't ready to ship either.
 
 **What.** Three additions, none of them large:
 
@@ -298,6 +304,11 @@ Groups A and B don't depend on each other. You can ship B alone and get per-suba
 
 If we had to pick the single highest-leverage first step, it would be **5.5 + 5.6 together** — the root-agent contract plus scope-aware routing. Small change, unblocks per-subaccount CEOs immediately, and establishes the contract that the rest of the work rests on.
 
+**Rollout friction — plan for it.** Once Group A enforcement lands, expect a short period where delegation rejection rates spike, existing agent prompts need small edits to respect scope, and runs that previously succeeded now fail fast with structured errors. This is the intended outcome — the system is now telling us what was quietly wrong before — but it needs to be planned for, not survived. Two implications:
+
+1. **Group D is not optional for rollout of Group A.** The trace graph, violation metrics, and health detectors in §5.9 are how the team triages the friction. Rolling A without D turns every surprising failure into a one-off investigation. Ship them together, or ship D first.
+2. **Expect an "adjustment phase" window of 1–2 weeks after A lands.** Reserve time for prompt tweaks and scope calibration. The failures during this window are intended behaviour, not regressions — label them that way in the review log so the team calibrates expectations.
+
 ## 7. Out of scope
 
 **Multi-tier seeded company.** We currently seed a flat 16-agent company (Orchestrator plus 15 direct reports). Restructuring that into a genuine 3-tier org chart (COO → department heads → specialists) is being designed on a separate track and is *not* part of this brief. The recommendations here are what that restructure will rely on to be functionally different from today's flat setup; without them, promoting four agents to "manager" titles would be theatre.
@@ -307,6 +318,8 @@ If we had to pick the single highest-leverage first step, it would be **5.5 + 5.
 **Permission and RLS changes.** Hierarchy-scoped delegation is enforced at the *skill execution* layer, not at the database row-level-security layer. RLS stays where it is. If a reviewer sees a reason to push enforcement down to RLS instead (or in addition), that's a conversation worth having but isn't assumed here.
 
 **Multi-user threads on Briefs.** A colleague picking up another user's Brief chat is a known future need and schema-compatible, but nothing in this brief depends on or blocks it.
+
+**Mesh, dynamic teams, and task-based grouping.** Real agent work isn't always tree-shaped. Temporary lateral collaboration (two specialists pairing on a problem), task-scoped ad-hoc teams, and graph-like delegation patterns are real needs that will surface as usage grows. They're intentionally out of scope for v1 — a tree with controlled escape hatches is the right starting point because it's simpler to reason about, observe, and enforce. The primitives in §5.1–§5.3 (hierarchy context, scoped visibility, scoped execution) are designed to relax into those patterns later without being redesigned: `'descendants'` is already graph-shaped inside a subtree, the `'subaccount'` escape hatch already supports lateral jumps from the root, and nothing in the enforcement model forbids a future `delegationScope: 'pair'` or task-scoped membership primitive.
 
 ## 8. Decisions made (resolving prior open questions)
 
