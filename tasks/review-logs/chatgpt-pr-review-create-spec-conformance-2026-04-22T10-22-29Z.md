@@ -65,3 +65,69 @@
 ### Top themes
 
 architecture (standalone contract clarity), naming (filename-convention hoist), scope (strategic deferrals)
+
+---
+
+## Round 2 — 2026-04-22T10:36:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> Round 1 fixes landed cleanly and you've removed all true blockers. This is now mergeable from a correctness standpoint. Round 2 is about tightening one remaining real-world failure mode and a few precision gaps that will only show up under messy usage, not ideal flows.
+>
+> What changed since round 1 (quick validation)
+>
+> You correctly: killed the filename drift problem with a canonical definition, made NON_CONFORMANT handling explicit and consistent, confirmed STOP guards and contradiction handling already exist, avoided over-engineering the system. No blocking issues remain.
+>
+> Round 2 feedback
+>
+> 1. Chunk fallback still drops missing files (HIGHEST PRIORITY)
+> You have: STOP if scope is unclear, scoped extraction if mapping exists, fallback → "files in changed-code set". That fallback is the problem.
+> Scenario: Spec requires migration file (implemented) + service file (not yet created). Plan chunk maps loosely to spec. Mapping doesn't explicitly include service file. Fallback = only check changed files. → service file never evaluated, agent returns CONFORMANT incorrectly. Not theoretical — will happen.
+> Core issue: you solved "don't verify full spec silently" but still have "verify partial spec silently". Correct fix: replace fallback logic. If mapping is incomplete or ambiguous, STOP. Never reduce scope to changed files. Or more precise: if plan→spec mapping exists, extract ALL requirements from mapped sections (including files not yet created). If mapping is missing or incomplete, STOP and ask. Never restrict to changed-code-set-only validation.
+>
+> 2. Spec reference handling (quiet correctness bug)
+> If spec says "must follow schema in shared/types/foo.ts", agent may see file not changed and flag it as missing/gap. But intent is: conform to it, not modify it. Fix: if spec references an existing file, validate conformance but do NOT require modification unless explicitly stated. Without this, false positives in shared-schema/contract-heavy systems.
+>
+> 3. Classification bias (mechanical vs directional)
+> Structure still subtly biases toward mechanical classification first. Ordering matters for LLM behaviour. Fix: at the top of classification step, ask first — "Am I 100% certain this is mechanical?" If NO → classify as DIRECTIONAL. If YES → continue mechanical checks. Prevents accidental auto-scaffolding, scope creep, "LLM being helpful" in the wrong way. Reinforces fail-closed philosophy.
+>
+> 4. Plan → spec mapping contract (clarity gap)
+> Feature-coordinator passes chunk name, spec-conformance tries to infer mapping. Mapping contract is implicit. Risk: different sessions interpret chunk differently, map to different spec sections, inconsistent validation. Fix (one sentence): when chunk is provided, use plan.md as source of truth for mapping. If plan does not explicitly map chunk → spec sections, STOP and ask.
+>
+> 5. Minor but worth fixing
+> A. Stale cross-reference — pointing to wrong section in spec-reviewer → just remove or point to CLAUDE.md instead
+> B. Re-run clarity — make explicit in summary flow: spec-conformance → pr-reviewer (re-run if fixes) → ...
+>
+> What you should NOT change
+> Do NOT add more automation around plan validation (correctly deferred), schema-diff or coverage systems yet, heuristics for partial matching. Current philosophy is right: deterministic, explicit, fail-closed.
+>
+> Final verdict: Approve with 1 recommended fix. Can merge as-is, but to hold up under real usage, fix the chunk fallback. Everything else is correctness polish or future-proofing.
+
+### Decisions
+
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| 1. Chunk fallback drops missing files — replace fallback with STOP, never narrow to changed-code-set only | reject | high | Already-done in round 1. `spec-conformance.md:105` explicitly extracts **all** concrete requirements from mapped sections "including new-file requirements whose files are not yet in the changed-code set", and includes the sentence "Do not silently narrow scope to 'only items corresponding to files in the changed-code set' — that shortcut defeats the agent's primary purpose." `:109` STOPs and asks when no scope rule yields a clear answer — there is no changed-code-set-only fallback path. ChatGPT's prescribed fix is the current text. Cited lines verified line-by-line. |
+| 2. Spec reference to existing unchanged file — verify conformance, do not require modification | reject | medium | Already-done. `spec-conformance.md:152` has a dedicated "Referenced existing files" paragraph inside Step 2: *"If a requirement references an existing file or contract … verify only that the implementation conforms to that contract. Do not flag the referenced file itself as a gap unless the spec explicitly says to modify it. The spec's intent in these cases is 'the new code conforms to this existing boundary', not 'the existing boundary needs changes.'"* This is the exact fix ChatGPT prescribes. |
+| 3. Classification ordering bias — ask "100% sure it's mechanical?" FIRST | reject | medium | Already-done in round 1 (was fixed prior to the round 1 review session). `spec-conformance.md:175` opens Step 3 with: *"Decision order — fail-closed. Start every classification with one question: 'Am I 100% sure this is mechanical?' If the answer is anything short of 100% — 'probably', 'likely', 'most likely', 'the fix looks obvious' — classify as DIRECTIONAL_GAP and move on. Do not read the MECHANICAL_GAP criteria below until you have passed this check."* The question is now the first instruction in Step 3, above MECHANICAL_GAP criteria. ChatGPT's prescribed fix is verbatim the current text. |
+| 4. Plan → spec mapping contract — state plan.md as single source of truth, STOP if not explicit | accept | low | Functionally-equivalent guard already at `spec-conformance.md:105` (read plan.md, STOP on ambiguity). But the source-of-truth framing was implicit — a reader could still try to infer mapping from the chunk name or spec headings when plan.md is silent. Tightened `:105` to explicitly name plan.md as the single source of truth for chunk-to-spec-section mapping, forbid inference from other sources, and broaden the STOP trigger to "missing, silent, or ambiguous." One-sentence edit. |
+| 5A. Stale cross-reference to spec-reviewer | reject | low | Already-done. The pre-round-1 "see `spec-reviewer.md` Step A" cite that the pr-reviewer round identified was removed. Remaining mentions of `spec-reviewer` in `spec-conformance.md` (lines 10, 339, 340) are all legitimate cross-references to `spec-reviewer` as the agent to defer to when the spec itself has issues — those are correct and should stay. ChatGPT appears to be reviewing a stale version for this item. |
+| 5B. Re-run clarity in summary flow | reject | low | Already-done. `CLAUDE.md:323`: *"For spec-driven work, that means: `spec-conformance` → `pr-reviewer` (re-run after any mechanical fixes `spec-conformance` applied) → (optionally `dual-reviewer`) → PR."* This is the explicit re-run clarity ChatGPT is asking for. |
+
+### Implemented
+
+- `.claude/agents/spec-conformance.md:105` — tightened the caller-provided-chunk scoping paragraph. Added explicit "`tasks/builds/<slug>/plan.md` is the single source of truth for chunk-to-spec-section mapping — do not infer the mapping from the chunk name, spec headings, or any other source." Broadened the STOP trigger wording from "ambiguous or silent" to "missing, silent, or ambiguous" to cover the case where the plan makes no mention of the chunk-to-section mapping at all. One-sentence semantic change, same paragraph.
+
+### Rejected (already-done)
+
+- Finding 1 (chunk fallback) — no changed-code-set-only fallback exists. `:105`, `:109` already enforce STOP-on-ambiguity plus extract-all-including-not-yet-created-files. ChatGPT's round-2 feedback appears to describe a pre-round-1 version of the file.
+- Finding 2 (spec reference to existing file) — `:152` has the exact rule ChatGPT prescribes, inside Step 2 "Referenced existing files."
+- Finding 3 (classification ordering) — `:175` opens Step 3 with the exact 100%-sure gate ChatGPT prescribes, ahead of MECHANICAL_GAP criteria.
+- Finding 5A (stale cross-reference) — already resolved in the pr-reviewer round prior to the chatgpt-pr-review session. Remaining `spec-reviewer` mentions are legitimate cross-references, not stale cites.
+- Finding 5B (re-run clarity) — CLAUDE.md:323 already has the explicit re-run-after-fixes parenthetical in the summary flow.
+
+### Top themes
+
+scope (chunk-to-spec mapping source-of-truth tightening), false-positive-rejections (5 of 6 findings already-addressed from round 1 or prior)
