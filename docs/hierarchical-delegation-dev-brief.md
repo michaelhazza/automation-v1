@@ -1,6 +1,6 @@
 # Hierarchical Agent Delegation — Development Brief
 
-> **Status:** Rev 4 — incorporates third external review (tightening only; no design changes). Ready for internal spec-reviewer pass.
+> **Status:** Rev 5 — final pre-spec pass. Ready for internal spec-reviewer.
 > **Date:** 2026-04-22
 > **Audience:** Internal engineering, plus LLM reviewers without prior context on this codebase.
 > **Related work (out of scope here):** Restructuring the seeded 16-agent company into a multi-tier org chart is being designed on a separate track. This brief assumes multi-tier hierarchies are desired and focuses on the runtime, routing, and observability primitives needed to make them *meaningful*.
@@ -113,6 +113,8 @@ These four problems, taken together, are why we can *describe* a 32-agent hierar
 ## 5. Recommendations
 
 ### 5.0 Enforcement model — visibility and execution
+
+**Scope of enforcement — one-line contract.** Hierarchy enforcement is intentionally minimal: it constrains *delegation*, not agent cognition, planning, or capability selection. If a proposed spec item touches prompting, reasoning, planning context, or capability routing, it is outside the scope of this system.
 
 The hierarchy must be enforced at two layers, not one. This framing underpins the rest of §5.
 
