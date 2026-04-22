@@ -19,6 +19,10 @@
 
 export const BRIEF_RESULT_CONTRACT_VERSION = 1 as const;
 
+// Phase 4: ChallengeAssumptionsPayload imported for inline attachment on ApprovalCard
+import type { ChallengeAssumptionsPayload } from './briefSkills.js';
+export type { ChallengeAssumptionsPayload };
+
 // ---------------------------------------------------------------------------
 // Shared primitives — common to all artefact kinds
 // ---------------------------------------------------------------------------
@@ -252,6 +256,13 @@ export interface BriefApprovalCard extends BriefArtefactBase {
    * Populated by the orchestrator when the action is priced. Optional.
    */
   budgetContext?: BriefBudgetContext;
+  /**
+   * Phase 4: Challenge-assumptions output. Present when the Orchestrator invoked
+   * the `challenge_assumptions` skill before emitting this card (high riskLevel,
+   * high estimated cost, many affected records, or external write). Rendered
+   * inline by `ApprovalCard` as advisory concerns — never blocking.
+   */
+  challengeOutput?: ChallengeAssumptionsPayload;
 }
 
 // ---------------------------------------------------------------------------

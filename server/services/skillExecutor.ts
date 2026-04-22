@@ -1452,6 +1452,23 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     );
   },
 
+  // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ──────────
+  ask_clarifying_questions: async (input, context) => {
+    const { executeAskClarifyingQuestions } = await import('../tools/capabilities/askClarifyingQuestionsHandler.js');
+    return executeAskClarifyingQuestions(
+      context,
+      input as Parameters<typeof executeAskClarifyingQuestions>[1],
+    );
+  },
+
+  challenge_assumptions: async (input, context) => {
+    const { executeChallengeAssumptions } = await import('../tools/capabilities/challengeAssumptionsHandler.js');
+    return executeChallengeAssumptions(
+      context,
+      input as Parameters<typeof executeChallengeAssumptions>[1],
+    );
+  },
+
   // ── Sprint 5 P4.1: Clarification escape hatch ──────────────────
   ask_clarifying_question: async (input, context) => {
     const { executeAskClarifyingQuestion } = await import('../tools/internal/askClarifyingQuestion.js');

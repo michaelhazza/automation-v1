@@ -2814,6 +2814,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 
 | Task | Start here |
 |------|------------|
+| Modify the Universal Brief (chat-first COO entry) | `server/services/briefCreationService.ts` (create/update briefs) + `server/services/briefConversationWriter.ts` (persist artefacts) + `server/routes/briefs.ts` + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/pages/BriefDetailPage.tsx` + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Artefact lifecycle: `client/src/lib/briefArtefactLifecyclePure.ts`. Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). |
 | Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
 | Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
 | Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |

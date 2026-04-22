@@ -113,6 +113,14 @@ export const agentRuns = pgTable(
     citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
     hadUncertainty: boolean('had_uncertainty').notNull().default(false),
 
+    // Phase 8 / W3c — memory_block provenance trail (migration 0199)
+    appliedMemoryBlockIds: jsonb('applied_memory_block_ids').notNull().default([]).$type<string[]>(),
+    appliedMemoryBlockCitations: jsonb('applied_memory_block_citations').notNull().default([]).$type<Array<{
+      memoryBlockId: string;
+      citedSnippet?: string;
+      citationScore: number;
+    }>>(),
+
     // Impact counters
     tasksCreated: integer('tasks_created').notNull().default(0),
     tasksUpdated: integer('tasks_updated').notNull().default(0),

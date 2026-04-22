@@ -89,6 +89,8 @@ import {
   type FinalStatus, type ErrorType,
 } from '../lib/tracing.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
+// Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
+import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -767,6 +769,15 @@ export const agentExecutionService = {
       const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
+      }
+      // Phase 8 / W3c — log injected block IDs for provenance trail
+      const injectedBlockIds = memoryBlocksForPrompt.map((b: { id: string }) => b.id);
+      if (injectedBlockIds.length > 0) {
+        void db
+          .update(agentRuns)
+          .set({ appliedMemoryBlockIds: injectedBlockIds })
+          .where(eq(agentRuns.id, run.id))
+          .catch(() => {});
       }
 
       // Layer 2b: Org skill instructions
@@ -1457,6 +1468,13 @@ export const agentExecutionService = {
           });
         }
       }
+
+      // Universal Brief artefact emission hook (Phase 2+).
+      // Phase 1 prep only: the import above makes validateArtefactForPersistence
+      // available here. Capabilities that produce BriefChatArtefacts will call
+      // validateArtefactForPersistence() and persist to conversation_messages
+      // once Phase 2 tables are in place.
+      void validateArtefactForPersistence; // reference prevents dead-import lint removal
 
       // H-5: upsert toolCallsLog into the snapshot table
       await db.insert(agentRunSnapshots)

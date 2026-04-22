@@ -51,6 +51,12 @@ export const organisations = pgTable(
     // ── Session 1 (migration 0182) — onboarding wizard gate ────────────
     // NULL → wizard auto-opens on first sign-in. Set → wizard skipped.
     onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
+    // ── Universal Brief (migration 0193) ────────────────────────────────
+    // User-facing label for the virtual COO agent. Default 'COO'.
+    agentPersonaLabel: text('agent_persona_label').notNull().default('COO'),
+    // Per-org toggles for clarifying + sparring skills (Phase 4).
+    clarifyingEnabled: boolean('clarifying_enabled').notNull().default(true),
+    sparringEnabled: boolean('sparring_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

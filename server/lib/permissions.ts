@@ -80,6 +80,12 @@ export const ORG_PERMISSIONS = {
   // ── GEO audits (Generative Engine Optimisation) ─────────────────────────
   GEO_AUDIT_VIEW: 'org.geo_audit.view',
   GEO_AUDIT_RUN: 'org.geo_audit.run',
+  // ── Universal Brief (Phase 2) ────────────────────────────────────────────
+  BRIEFS_READ: 'org.briefs.read',
+  BRIEFS_WRITE: 'org.briefs.write',
+  RULES_READ: 'org.rules.read',
+  RULES_WRITE: 'org.rules.write',
+  RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────

@@ -175,6 +175,22 @@ export function emitAgentRunPlan(
   emitToRoom(`agent-run:${runId}`, 'agent:run:plan', runId, data);
 }
 
+// ─── Universal Brief events ───────────────────────────────────────────────────
+
+export function emitBriefArtefactNew(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:new', briefId, data);
+}
+
+export function emitBriefArtefactUpdated(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
+}
+
 // ─── Observability exports (for health endpoint or admin) ─────────────────────
 
 export function getWebSocketStats(): { totalEventsEmitted: number; connectionCount: number } {

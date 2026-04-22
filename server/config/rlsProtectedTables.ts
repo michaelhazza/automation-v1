@@ -433,6 +433,26 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0192_agent_execution_log.sql',
     rationale: 'Full request + response body per LLM ledger row — post-redaction, but still carries message history, tool inputs, and provider responses. Payload-read is gated tighter than view-log (AGENTS_EDIT), but RLS is still the last-resort tenant boundary.',
   },
+  // 0195 — Universal Brief classifier shadow-eval logging
+  {
+    tableName: 'fast_path_decisions',
+    schemaFile: 'fastPathDecisions.ts',
+    policyMigration: '0195_fast_path_decisions.sql',
+    rationale: 'Classifier triage decisions per Brief — contains routing intent, confidence scores, and downstream outcomes. Cross-tenant leak reveals org behavioural patterns and intent signals.',
+  },
+  // 0194 — Universal Brief polymorphic conversation tables
+  {
+    tableName: 'conversations',
+    schemaFile: 'conversations.ts',
+    policyMigration: '0194_conversations_polymorphic.sql',
+    rationale: 'Polymorphic conversation container for Briefs, Tasks, and Agent-run logs — contains user chat turns which can include PII, business objectives, and operational intent.',
+  },
+  {
+    tableName: 'conversation_messages',
+    schemaFile: 'conversations.ts',
+    policyMigration: '0194_conversations_polymorphic.sql',
+    rationale: 'Individual messages within conversations — includes BriefChatArtefact JSONB blobs with query results, approval payloads, and error diagnostics. Same sensitivity as the parent conversation.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import CommandPalette from './CommandPalette';
+import { GlobalAskBar } from './global-ask-bar/GlobalAskBar';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
@@ -75,7 +76,7 @@ const SEG: Record<string, string | null> = {
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
-  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals',
+  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Briefs',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
   'agent-templates': 'Subaccount Blueprints',
   'admin-settings': 'Settings',
@@ -677,7 +678,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
               >
                 <span><Icons.bolt /></span>
-                <span className="flex-1">New Issue</span>
+                <span className="flex-1">New Brief</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
                 <NavItem to={activeClientId ? `/admin/subaccounts/${activeClientId}/pulse` : '/admin/pulse'} icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
@@ -875,6 +876,10 @@ export default function Layout({ user, children }: LayoutProps) {
               ))
             }
           </div>
+          {/* Global Ask Bar — always visible when org context exists */}
+          {hasOrgContext && (
+            <GlobalAskBar currentSubaccountId={activeClientId ?? undefined} />
+          )}
           {/* Cmd+K trigger */}
           <button
             onClick={() => setCmdOpen(true)}
@@ -1174,12 +1179,12 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
       )}
 
-      {/* ── New Issue modal ───────────────────────────────────────────── */}
+      {/* ── New Brief modal ───────────────────────────────────────────── */}
       {showNewIssue && activeClientId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Issue</h2>
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
               <button onClick={() => setShowNewIssue(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
             <form onSubmit={async (e) => {
