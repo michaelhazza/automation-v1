@@ -1,6 +1,6 @@
 ---
 name: feature-coordinator
-description: Orchestrates end-to-end feature delivery for planned, multi-card features. Delegates to architect, main session (builder), and pr-reviewer. Use for features that span multiple implementation chunks or need upfront architecture validation.
+description: Orchestrates end-to-end feature delivery for planned, multi-card features. Delegates to architect, main session (builder), spec-conformance, and pr-reviewer. Use for features that span multiple implementation chunks or need upfront architecture validation.
 tools: Read, Glob, Grep, Write, Edit, Agent
 model: opus
 ---
@@ -38,7 +38,7 @@ tasks/builds/{slug}/
   plan.md            — implementation plan (architect produces)
 ```
 
-PR review logs for each chunk live in `tasks/review-logs/` as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` (same convention as `review-logs/spec-review-log-*`), not nested under the build. This keeps all review logs discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
+Review logs for each chunk live in `tasks/review-logs/` — pr-review logs as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` and spec-conformance logs as `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` — not nested under the build. All follow the canonical filename shape in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Keeping every review log in a single directory keeps them discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
 
 The feature description or card lives wherever the user keeps it — reference it in place, don't copy it.
 
@@ -96,10 +96,23 @@ Process chunks from the plan **one at a time**. For each chunk:
 2. Re-attempt implementation with the revised plan.
 3. **Max 2 plan-gap rounds.** On the third gap, stop and escalate to the user.
 
+**C1b. Spec conformance** — After the main session reports chunk implementation complete, and BEFORE handing off to `pr-reviewer`, delegate to `spec-conformance`:
+
+> "Verify the current branch implements chunk '{chunk name}' from the plan at `tasks/builds/{slug}/plan.md`. Auto-detect changed files. Scope to this chunk only — the plan may have later chunks not yet implemented."
+
+`spec-conformance` self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` and returns the path. Chunk-slug, slug, and timestamp all follow the canonical shape in `CLAUDE.md` § *Review-log filename convention — canonical definition* — same convention as C2's pr-review-log. Record the path in `progress.md` under the chunk's Notes column.
+
+Process the log's Next-step verdict:
+- **CONFORMANT** — proceed to C2 (`pr-reviewer`).
+- **CONFORMANT_AFTER_FIXES** — `spec-conformance` applied mechanical fixes in-session. Proceed to C2 (`pr-reviewer`) on the **expanded** changed-code set; the reviewer needs to see the fixed state.
+- **NON_CONFORMANT** — directional and/or ambiguous gaps were routed by `spec-conformance` to `tasks/todo.md` under its own section (`## Deferred from spec-conformance review — <spec-slug>`). Triage the section the agent just appended: for each gap, decide whether it is non-architectural (resolvable in-session by the main session — same contract as C3 fix-review rounds) or architectural (significant redesign, contract change, multi-service impact — stays deferred per `CLAUDE.md` § *Review logs must be persisted*, do not force into the execution loop). After triage:
+    - If any non-architectural gaps were resolved in-session, re-invoke `spec-conformance` to confirm closure. **Max 2 spec-conformance rounds.** On the third, stop and escalate.
+    - If the gap set is architectural-only (nothing to resolve in-session) or contains only ambiguous items that need human judgment, do not re-invoke `spec-conformance` — that would only churn. Stop and escalate to the user with the deferred items still open.
+
 **C2. Review** — Delegate to `pr-reviewer`:
 > "Review the changes just implemented for chunk '{chunk name}'. Read the plan at `tasks/builds/{slug}/plan.md` for context. Review the following files: [list changed files]."
 
-`pr-reviewer` emits its review inside a fenced markdown block tagged `pr-review-log`. **Before asking the main session to fix any issues**, extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` (where `<chunk-slug>` is a kebab-case version of the chunk name and `<timestamp>` is ISO 8601 UTC with seconds). Add the log path to `progress.md` under the chunk's Notes column. This persists the raw reviewer voice before code changes overwrite context — same convention as `review-logs/spec-review-log-*`.
+`pr-reviewer` emits its review inside a fenced markdown block tagged `pr-review-log`. **Before asking the main session to fix any issues**, extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md`. Slug, chunk-slug, and timestamp all follow the canonical shape in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Add the log path to `progress.md` under the chunk's Notes column. This persists the raw reviewer voice before code changes overwrite context — same convention as `review-logs/spec-review-log-*`.
 
 **C3. Fix** — If blocking issues exist, ask the main session to fix them. Re-review. **Max 3 fix-review rounds.** On the fourth, stop and escalate with the unresolved issues.
 
