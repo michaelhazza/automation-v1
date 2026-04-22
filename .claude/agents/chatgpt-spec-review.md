@@ -21,8 +21,9 @@ When the user says "run chatgpt-spec-review" (or equivalent):
 
 1. Auto-detect the spec file:
    - Run `git diff main...HEAD --name-only` to list changed files
-   - Filter for files matching tasks/*.md or docs/*.md, excluding:
-     CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/*
+   - Filter for files matching tasks/**/*.md or docs/**/*.md (recursive —
+     includes nested paths like docs/superpowers/specs/*.md), excluding:
+     CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**
    - If exactly one candidate: use it
    - If multiple candidates: list them and ask the user which one
    - If none: read the "In-flight spec" pointer from CLAUDE.md (the line
@@ -64,8 +65,8 @@ For each round:
 2. For each finding assign accept / reject / defer + severity (critical/high/
    medium/low) + a one-line rationale
 3. Apply all accepted items as edits to the spec document using the Edit tool
-3a. Post-edit integrity check — after applying all edits this round, scan the
-    spec for:
+3a. Post-edit integrity check — after applying all edits this round, run
+    exactly one pass over the spec for:
     - Forward references: sections that reference headings, tables, or items
       that no longer exist or were renamed by this round's edits
     - Contradictions: the same concept described differently in two sections
@@ -74,6 +75,8 @@ For each round:
     For each issue found, add it as a new finding in this round's Decisions
     table (Source: integrity-check). Apply if mechanical, defer if directional.
     Log: "Integrity check: <N> issues found this round."
+    This pass runs once only — do NOT re-run integrity-check on findings
+    introduced by integrity-check fixes. That recursion guard is absolute.
 4. Append the round to the session log including a Top themes line
 5. Print the round summary and the changed sections only (not the full spec):
 
