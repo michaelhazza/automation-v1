@@ -58,6 +58,12 @@ accepted_primitives:
   - scheduleCalendarServicePure (server/services/scheduleCalendarServicePure.ts) — cron-parser / rrule / heartbeat-offset projection math; SOURCE_PRIORITY + computeNextHeartbeatAt
   - agent_runs.is_test_run + testRunIdempotency + testRunRateLimit (server/lib/) — test-run dual-bucket idempotency and rate limiting
   - shared/runStatus.ts — TERMINAL_RUN_STATUSES / IN_FLIGHT_RUN_STATUSES / AWAITING_RUN_STATUSES sets, single source of truth for run-status semantics
+  - agentExecutionEventService + agentExecutionEventServicePure (server/services/) — live per-run execution event emission with atomic sequence allocation, critical-tier retry, cap-signal atomic claim; discriminated-union validator + AGENT_EXECUTION_EVENT_CRITICALITY registry at shared/types/agentExecutionLog.ts (Phase 1 of tasks/live-agent-execution-log-spec.md)
+  - agentRunPromptService (server/services/agentRunPromptService.ts) — persists fully-assembled run prompts + layer attributions; per-run `agent_run_prompts` rows keyed on `(run_id, assembly_number)` with surrogate UUID
+  - agentRunPayloadWriter (server/services/agentRunPayloadWriter.ts) — redaction → tool-policy → greatest-first truncation pipeline for full LLM payload persistence with traceable `redacted_fields` + `modifications` columns
+  - redaction (server/lib/redaction.ts) — default pattern bundle (bearer / openai / anthropic / github / slack / aws / google) + cycle-safe JSON walker; used by payload writer and extensible by consumers
+  - agentRunVisibility + agentRunEditPermissionMask(Pure) (server/lib/) — single source of truth for the three-tier canView / canViewPayload / per-entity mask rules; mask is computed at read time only and never persisted (closes the privilege-drift class)
+  - RLS_PROTECTED_TABLES entries: agent_execution_events, agent_run_prompts, agent_run_llm_payloads (migration 0192)
 
 # Conventions the spec-reviewer should reject findings against
 convention_rejections:

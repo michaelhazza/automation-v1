@@ -307,6 +307,18 @@ Single-screen operational command centre that replaces the legacy inbox, dashboa
 - **Per-subaccount retention** — Override the default run data retention period on a per-client basis
 - **409 concurrency guard** — Prevents double-approval of already-resolved items with graceful UI recovery
 
+### Live Execution Log — Per-Run Timeline
+
+Every material agent decision — prompt composition, memory retrieval, rule matching, skill invocation, call start/end, handoff — streamed live and retained as a durable, replayable record. Operators get mid-run visibility and months-later forensics on the same surface.
+
+- **Live timeline** — Watch a run unfold as it happens: which memories the agent pulled, which policies matched, which skills fired, and what the model saw at each step. Refreshes sub-second; buffers on reconnect so nothing is missed.
+- **Deep-link to the source** — Every event in the timeline links to the entity that caused it. Stale memory? Click through to edit it. Wrong rule firing? Open the rule editor in place. Edits affect future runs only — the live run keeps its original state.
+- **Prompt replay** — The fully-assembled prompt for every run (and every re-assembly after a handoff) is persisted in full. Click any prompt event to see exactly what the model was reading — no more guesswork about "what did the agent actually see".
+- **Full call payload** — Request and response bodies per model call, stored with automatic secret redaction. Gated by a stricter permission than the timeline itself so only agent editors see raw payloads.
+- **Long-term retention** — Timelines persist indefinitely with tiered storage: full fidelity for recent runs, summarised for older ones, archived for long-term audit. Compliance teams can answer "what did the agent do on April 3?" years after the fact.
+- **Per-tenant isolation** — Every event row is tenant-scoped at the database level; cross-client leakage is structurally impossible.
+- **Runaway-loop protection** — Hard cap on events per run with a one-shot "limit reached" signal, so an infinite-loop agent is still observable but never exhausts storage.
+
 ### Memory & Knowledge System
 
 Multi-layered memory architecture enabling agents to learn, share context, and build institutional knowledge — with provenance, quality controls, and drift detection so memory stays trustworthy as it accumulates.

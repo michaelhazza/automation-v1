@@ -829,6 +829,18 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         temperature: params.temperature,
       });
 
+      // TODO(live-agent-execution-log): emit llm.requested + llm.completed
+      // critical events and write the agent_run_llm_payloads row inside the
+      // terminal ledger transaction. Scaffolding lives in
+      // server/services/agentRunPayloadWriter.ts + agentExecutionEventService.
+      // Wiring here needs the provisional `started` ledger row's id which
+      // is currently local to the upsert block below — either thread the id
+      // up, or move the emission to the same transaction that writes the
+      // terminal row. When wiring, populate agent_run_llm_payloads.run_id
+      // from ctx.runId (spec §5.7 + post-review hardening — denormalised
+      // FK closes the "payload not run-scoped" finding). Spec:
+      // tasks/live-agent-execution-log-spec.md §4.5, §5.3.
+
       try {
         providerResponse = await callWithTimeout(
           `${provider}/${mappedModel}`,

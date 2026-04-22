@@ -85,6 +85,7 @@ const SystemOrganisationTemplatesPage = lazy(() => import('./pages/SystemOrganis
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
+const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
@@ -389,6 +390,10 @@ export default function App() {
 
           {/* Run trace viewer — org-level (admin agent and skill test runs) */}
           <Route path="/admin/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+
+          {/* Live Agent Execution Log — per-run live + historical timeline.
+              Spec: tasks/live-agent-execution-log-spec.md §6.5. */}
+          <Route path="/runs/:runId/live" element={<AgentRunLivePage user={user!} />} />
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
