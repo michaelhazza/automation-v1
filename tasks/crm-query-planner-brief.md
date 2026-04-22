@@ -33,10 +33,13 @@ Automation OS should absorb the category of natural-language CRM exploration, bu
 
 The planner is the durable, reusable primitive. Any individual executor — including the live-GHL-query path that triggered this work — is subordinate to it.
 
-**Two durable principles carried from the reviewer's upgrade:**
+**Durable principles carried from the reviewer's upgrades:**
 
 - **Discovery can be free-text; execution stays structured.** Users and agents can ask free-text CRM questions. The system plans and routes those questions deterministically. Any follow-up mutations remain existing typed, review-gated, auditable actions.
 - **The user never chooses the data source.** The planner decides canonical vs live vs hybrid. The user just asks a question. "Query planner" is an internal concept, never a UI label.
+- **Planner owns data-query routing; Orchestrator owns capability routing.** These are two layers, not one. The Orchestrator classifies *what kind of capability* a Brief needs (Path A/B/C/D — see `architecture.md` §Orchestrator Capability-Aware Routing). The Planner classifies *how to execute a CRM data query* once the Orchestrator has routed to it (canonical / live / hybrid / unsupported). Every surface that reads CRM data goes through the Planner — chat never calls provider skills directly.
+- **Deterministic-first, LLM-last.** The pipeline tries free paths (pattern match → plan cache) before paying for intent parsing. LLM use is the fallback, not the default. See §4.
+- **The system is designed so high-frequency live queries become candidates for canonical promotion.** Plan-cache hits, live-executor usage frequency, and hybrid-unsupported signals all feed a future Query Memory Layer that identifies which live queries deserve canonicalisation. This is the compounding loop — the planner gets cheaper, faster, and more accurate over time as popular queries migrate from live to canonical. §11.12 settles v1 posture.
 
 **One planner, many surfaces.** The planner is UI-agnostic. It ships callable from the Brief chat thread (the universal surface being built on the other branch), from agents, and from a stopgap "Ask CRM" panel if that ships first. The result contract (`BriefStructuredResult` / `BriefApprovalCard` / `BriefErrorResult` from `shared/types/briefResultContract.ts`) guarantees every surface renders the same artefacts.
 
@@ -83,15 +86,20 @@ The gap is not "we should stop canonicalising." Canonical remains the record of 
 Brief chat intent (free text)
         │
         ▼
-  ┌─ Stage 1 — Pattern matcher (deterministic, free) ───────────┐
-  │  Known query patterns → direct canonical handler            │
-  │  → QueryPlan emitted without LLM                            │
+  ┌─ Stage 1 — Registry-backed intent matcher (deterministic)──┐
+  │  Normalised intent → canonicalQueryRegistry.aliases lookup  │
+  │  Hit → direct canonical handler, QueryPlan emitted free     │
+  │  NOT a regex layer, NOT a mini-LLM — it IS the registry's   │
+  │  alias index. No duplicate matching logic.                  │
   └─────────────────────────────────────────────────────────────┘
         │ miss
         ▼
   ┌─ Stage 2 — Plan cache (deterministic, free) ────────────────┐
   │  Normalised-intent hash → cached QueryPlan (60s TTL)        │
   │  → QueryPlan emitted without LLM                            │
+  │  Performance-first in v1, but structurally aligned with the │
+  │  future Query Memory Layer (§11.12) — same key shape, same  │
+  │  payload shape, so promotion is a cache-read, not a rewrite │
   └─────────────────────────────────────────────────────────────┘
         │ miss
         ▼
@@ -317,6 +325,8 @@ Some questions span both surfaces — e.g. "VIP contacts (live tag lookup) who h
 - Live filter must be a simple equality or set-membership test — no nested conditions
 - Result size bounded by the canonical base's limit — live filter reduces, never expands
 
+**Why these constraints exist:** hybrid execution is fundamentally a join across two data surfaces with different latency, rate-limit, and cost profiles. Unbounded hybrid (N live filters, nested conditions, result expansion) produces combinatorial work that is impossible to predict at plan time — a single query could fan out into hundreds of live calls. The v1 constraints keep hybrid predictable in cost, latency, and failure mode. Architect can relax constraints later as real traffic shows which patterns are worth the complexity; tightening after launch is far harder than loosening.
+
 **Hybrid queries outside this pattern in v1** return a `BriefErrorResult` with `errorCode: 'unsupported_query'` and a `suggestions[]` array explaining how to reframe as canonical-only or live-only. The validator catches these before executor dispatch.
 
 **The contract must reserve `source: 'hybrid'` as a first-class value regardless.** Future patterns (canonical + canonical join, live + canonical composition, multi-step aggregation) layer in as new hybrid sub-patterns without reshaping the envelope. Architect settles the v1 pattern list — the recommendation is exactly one, not "zero or more."
@@ -337,6 +347,16 @@ Some questions span both surfaces — e.g. "VIP contacts (live tag lookup) who h
 
 - `filtersApplied[]` is **not optional**. Every interpreted filter surfaces as a chip so the user can see (and correct) how their intent was parsed. Silent filter application erodes trust — this was explicit in the contract doc.
 - `suggestions[].intent` must be **re-parseable as a new Brief**. Phrase suggestions as full instructions ("Narrow to last 7 days and show VIP contacts"), not fragments ("last 7 days"). Clicking a suggestion fires a new Brief, not a refinement-only sub-call — which keeps the model simple.
+
+### 7.1 Failure is part of iterative refinement, not a terminal state
+
+`BriefErrorResult` is not the end of the conversation — it's a handoff back to the user with a constructive next step. Every error the planner emits should:
+
+- Carry `suggestions[]` that are themselves valid follow-up Briefs (same re-parseable-as-a-new-Brief rule as `BriefStructuredResult`). An `unsupported_query` error for a multi-filter hybrid offers suggestions like "Show VIP contacts inactive 30d (canonical-only)" — a rephrasing the planner *can* execute.
+- Be specific. `ambiguous_intent` names the axis of ambiguity ("activity" vs "engagement"); `missing_permission` names which permission; `cost_exceeded` names which ceiling and what a narrower query might cost.
+- Preserve the user's original intent string so the chat surface can show "what I tried to do" next to "why it didn't work" next to "what to try instead."
+
+**Architectural consequence:** a session of Brief chats is a refinement loop, not a question-answer transaction. Errors exist to tighten the next Brief, not to block the thread. The Brief-surface branch renders error artefacts so users treat them as "turns," not "failures."
 
 ---
 

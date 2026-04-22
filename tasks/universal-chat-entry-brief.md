@@ -105,17 +105,19 @@ Original context: external guides teach users to run Claude Code + GHL MCP in a 
 
 Concrete flow:
 
+> **Superseded flow (2026-04-22).** This section originally described the chat routing CRM reads directly to a `crm.live_query` skill. That shape was replaced by the CRM Query Planner layer — see `tasks/crm-query-planner-brief.md`. The corrected flow is below.
+
 1. User in subaccount `acme-main` types: *"Show me contacts active in the last 60 days who haven't been assigned to anyone yet."*
-2. Orchestrator decomposition extracts capabilities: `contact_list` (read, CRM) + filter predicates.
-3. `check_capability_gap` → Path A (connected agent `Revenue Ops` has `contact_list` on the `ghl` integration, token active, scopes sufficient).
-4. Orchestrator routes to a helper skill — call it `crm.live_query` — backed by `ghlAdapter` under the existing per-location rate limiter. **No structured canonical schema is needed for this query.** The free-text surface is specifically for long-tail reads canonical doesn't cover.
-5. Results stream into the chat as a table.
+2. Orchestrator identifies the intent as a CRM data query → invokes the **CRM Query Planner** as one of its capabilities. (Orchestrator owns capability routing; Planner owns data-query routing.)
+3. Planner runs its 4-stage pipeline (pattern matcher → plan cache → LLM fallback → validator), classifies as canonical / live / hybrid, dispatches to the matching executor.
+4. Executor runs under the subaccount's RLS scope, against the `ghlAdapter` per-location rate limiter when live.
+5. Results stream into the chat as a `BriefStructuredResult` table — same contract any other capability emits into.
 6. User clicks a row → drills into the canonical contact page (canonical data is still the record of truth for anything we've ingested).
 7. User types follow-up: *"Email them a check-in."* → Orchestrator proposes the structured `crm.send_email` action with the template picker filled in. **This is a write, so the review gate is mandatory.** User approves inline.
 
-**What this demonstrates:** live-query is a read-only escape hatch. Writes stay structured, stay review-gated, stay auditable. The chat layer just makes them conversational.
+**What this demonstrates:** the Planner handles CRM-shaped reads for every provider we connect; it is never bypassed by chat. Writes stay structured, stay review-gated, stay auditable.
 
-This pattern generalises to every CRM we integrate — one `crm.live_query` action dispatches to whichever adapter matches the subaccount's connected provider.
+**Key architectural rule:** chat calls the Planner (for CRM reads) or other capabilities (for other intents) — chat never calls provider skills directly. This keeps deterministic-first routing intact and prevents surfaces from drifting away from the canonical-first story.
 
 ---
 
@@ -184,4 +186,4 @@ What the smart-router team should build with from day one:
 
 ## 11. Suggested next step
 
-The smart-router team runs this through `architect` + `spec-reviewer` before starting implementation. The GHL MCP work on `claude/gohighlevel-mcp-integration-9SRII` will land `crm.live_query` as a concrete downstream capability for the chat layer to exercise on day one. The two branches should coordinate on the contract between the chat front-end and the `crm.live_query` action so one isn't blocked on the other.
+The smart-router team runs this through `architect` + `spec-reviewer` before starting implementation. The CRM Query Planner work on `claude/crm-query-planner` (renamed from the earlier `gohighlevel-mcp-integration-9SRII` branch) will land the Planner layer as a concrete downstream capability for the chat to invoke on day one. The two branches should coordinate on the contract between the chat surface and the Planner (already pinned by `shared/types/briefResultContract.ts` on main) so neither is blocked on the other.
