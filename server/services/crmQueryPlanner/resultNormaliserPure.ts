@@ -1,5 +1,5 @@
-// Result normaliser — pure functions (spec §15.2, §15.3, §15.4)
-// No DB, no I/O. Takes plan + execResult and returns structured Brief artefacts.
+// Result normaliser — pure functions (spec §15.2, §15.3)
+// Approval card generation is in approvalCardGeneratorPure.ts (§15.4).
 
 import { randomUUID } from 'crypto';
 import type { QueryPlan, ExecutorResult } from '../../../shared/types/crmQueryPlanner.js';
@@ -10,6 +10,7 @@ import type {
   BriefResultSuggestion,
 } from '../../../shared/types/briefResultContract.js';
 import { mapOperatorForWire } from '../../../shared/types/crmQueryPlanner.js';
+import { generateApprovalCards as _generateApprovalCards } from './approvalCardGeneratorPure.js';
 
 // ── NormaliserContext ─────────────────────────────────────────────────────────
 
@@ -132,42 +133,14 @@ export function buildStructuredResult(
   };
 }
 
-// ── Approval card generation (§15.4) ──────────────────────────────────────────
+// ── Approval card generation (§15.4) — delegates to approvalCardGeneratorPure ─
 
 export function generateApprovalCards(
   plan: QueryPlan,
   execResult: ExecutorResult,
   context: NormaliserContext,
 ): BriefApprovalCard[] {
-  const cards: BriefApprovalCard[] = [];
-
-  if (
-    plan.primaryEntity === 'contacts' &&
-    execResult.rows.length > 0 &&
-    context.defaultSenderIdentifier
-  ) {
-    const top = execResult.rows[0]!;
-    const toContactId = String(top['id'] ?? '');
-    if (!toContactId) return cards;
-
-    cards.push({
-      artefactId:        randomUUID(),
-      kind:              'approval',
-      summary:           `Send email to ${top['displayName'] ?? toContactId}`,
-      actionSlug:        'crm.send_email',
-      actionArgs: {
-        from:         context.defaultSenderIdentifier,
-        toContactId,
-        subject:      '',
-        body:         '',
-        scheduleHint: 'immediate',
-      },
-      affectedRecordIds: [toContactId],
-      riskLevel:         'low',
-    });
-  }
-
-  return cards;
+  return _generateApprovalCards(plan, execResult, context);
 }
 
 // ── Top-level normalise (§15.1) ───────────────────────────────────────────────

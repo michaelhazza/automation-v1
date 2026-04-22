@@ -2,11 +2,13 @@
 // Alias index is memoised per registry object (WeakMap).
 
 import { normaliseIntent } from './normaliseIntentPure.js';
+import { validatePlanPure, ValidationError } from './validatePlanPure.js';
 import type {
   CanonicalQueryRegistry,
   NormalisedIntent,
   QueryPlan,
   ExecutorContext,
+  DraftQueryPlan,
 } from '../../../shared/types/crmQueryPlanner.js';
 
 // ── Errors ────────────────────────────────────────────────────────────────
@@ -69,54 +71,41 @@ export function matchRegistryEntry(
   const parsedArgs = entry.parseArgs ? entry.parseArgs(intent) : {};
   if (parsedArgs === null) return null; // parseArgs couldn't extract args — fall through
 
-  const filters    = parsedArgs?.filters    ?? [];
+  const filters     = parsedArgs?.filters    ?? [];
   const dateContext = parsedArgs?.dateContext;
-  const limit      = parsedArgs?.limit      ?? 100;
-  const sort       = parsedArgs?.sort;
-  const projection = parsedArgs?.projection;
+  const limit       = parsedArgs?.limit      ?? 100;
+  const sort        = parsedArgs?.sort;
+  const projection  = parsedArgs?.projection;
 
-  // Reduced validator subset — Rule 2: field existence against allowedFields
-  for (const f of filters) {
-    if (!(f.field in entry.allowedFields)) return null;
-  }
-  if (sort) {
-    for (const s of sort) {
-      if (!(s.field in entry.allowedFields) || !entry.allowedFields[s.field]!.sortable) {
-        return null;
-      }
-    }
-  }
-
-  // Reduced validator subset — Rule 3: operator sanity
-  for (const f of filters) {
-    const allowed = entry.allowedFields[f.field]?.operators ?? [];
-    if (!(allowed as string[]).includes(f.operator)) return null;
-  }
-
-  // Reduced validator subset — Rule 9: projection overlap (caller capability check)
-  if (projection) {
-    for (const field of projection) {
-      if (!(field in entry.allowedFields)) return null;
-      if (!entry.allowedFields[field]!.projectable) return null;
-    }
-  }
-
-  // Build the validated QueryPlan (Stage 1 hits carry validated: true, stageResolved: 1)
-  const plan: QueryPlan = {
-    source: 'canonical',
-    intentClass: 'list_entities',
-    primaryEntity: entry.primaryEntity,
+  // Build a draft plan
+  const draft: DraftQueryPlan = {
+    source:                'canonical',
+    intentClass:           'list_entities',
+    primaryEntity:         entry.primaryEntity,
     filters,
     limit,
     sort,
     projection,
     dateContext,
     canonicalCandidateKey: registryKey,
-    confidence: 1.0,
-    stageResolved: 1,
-    costPreview: { predictedCostCents: 0, confidence: 'high', basedOn: 'static_heuristic' },
-    validated: true,
+    confidence:            1.0,
   };
+
+  // Run reduced validator subset (Rules 2, 3, 9) via validatePlanPure §8.3
+  let plan: QueryPlan;
+  try {
+    plan = validatePlanPure(draft, {
+      mode:               'stage1',
+      stageResolved:      1,
+      costPreview:        { predictedCostCents: 0, confidence: 'high', basedOn: 'static_heuristic' },
+      entry,
+      registry,
+      callerCapabilities: context.callerCapabilities,
+    });
+  } catch (e) {
+    if (e instanceof ValidationError) return null; // rule failure → fall through
+    throw e;
+  }
 
   return { plan, registryKey };
 }

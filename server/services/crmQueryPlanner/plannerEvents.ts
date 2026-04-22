@@ -2,7 +2,6 @@
 // Writes structured logs; conditionally forwards to agent execution log.
 
 import { logger } from '../../lib/logger.js';
-import { appendEvent } from '../agentExecutionEventService.js';
 
 // ── Envelope ──────────────────────────────────────────────────────────────────
 
@@ -27,11 +26,15 @@ export async function emit(event: PlannerEvent): Promise<void> {
   const level = kind === 'planner.error_emitted' ? 'warn' : 'info';
   logger[level](kind, rest as Record<string, unknown>);
 
-  // 2. Agent execution log (runId-gated)
+  // 2. Agent execution log (runId-gated; lazy import avoids drizzle-orm at module load)
   if (event.runId) {
     try {
-      const isTerminal = kind === 'planner.result_emitted' || kind === 'planner.classified' || kind === 'planner.error_emitted';
+      const isTerminal =
+        kind === 'planner.result_emitted' ||
+        kind === 'planner.classified' ||
+        kind === 'planner.error_emitted';
       if (isTerminal) {
+        const { appendEvent } = await import('../agentExecutionEventService.js');
         const status = kind === 'planner.error_emitted' ? 'error' : 'ok';
         await appendEvent({
           runId:          event.runId,
@@ -39,12 +42,12 @@ export async function emit(event: PlannerEvent): Promise<void> {
           subaccountId:   event.subaccountId,
           sourceService:  'skillExecutor',
           payload: {
-            eventType:     'skill.completed',
-            critical:       false,
-            skillSlug:      'crm.query',
-            durationMs:     0,
+            eventType:    'skill.completed',
+            critical:      false,
+            skillSlug:     'crm.query',
+            durationMs:    0,
             status,
-            resultSummary:  kind,
+            resultSummary: kind,
           },
         });
       }

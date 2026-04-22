@@ -3,8 +3,9 @@
 
 import { normaliseIntent } from './normaliseIntentPure.js';
 import { matchRegistryEntry } from './registryMatcherPure.js';
-import { canonicalQueryRegistry } from './executors/canonicalQueryRegistry.js';
 import { executeCanonical, MissingPermissionError } from './executors/canonicalExecutor.js';
+// canonicalQueryRegistry is lazily loaded so tests can inject a stub via deps.registry
+// without triggering the drizzle-orm import chain (canonicalQueryRegistry → canonicalDataService → drizzle).
 import { normaliseToArtefacts } from './resultNormaliserPure.js';
 import { emit } from './plannerEvents.js';
 import type { ExecutorContext } from '../../../shared/types/crmQueryPlanner.js';
@@ -35,6 +36,11 @@ export interface RunQueryOutput {
   intentHash: string;
 }
 
+// Optional dependency injection for testing — production callers omit this.
+export interface RunQueryDeps {
+  registry?: import('../../../shared/types/crmQueryPlanner.js').CanonicalQueryRegistry;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeUnsupportedError(intentHash: string): BriefChatArtefact {
@@ -52,7 +58,10 @@ function makeUnsupportedError(intentHash: string): BriefChatArtefact {
 export async function runQuery(
   input: RunQueryInput,
   context: ExecutorContext,
+  deps: RunQueryDeps = {},
 ): Promise<RunQueryOutput> {
+  const activeRegistry = deps.registry ??
+    (await import('./executors/canonicalQueryRegistry.js')).canonicalQueryRegistry;
   const now = new Date().toISOString();
   const envelope = {
     at:           now,
@@ -67,7 +76,7 @@ export async function runQuery(
   const intentHash = intent.hash;
 
   // ── Stage 1 — registry matcher ────────────────────────────────────────────
-  const stage1Result = matchRegistryEntry(intent, canonicalQueryRegistry, {
+  const stage1Result = matchRegistryEntry(intent, activeRegistry, {
     callerCapabilities: context.callerCapabilities,
   });
 
@@ -75,7 +84,7 @@ export async function runQuery(
     await emit({ kind: 'planner.stage1_matched', ...envelope, intentHash, registryKey: stage1Result.registryKey });
 
     try {
-      const execResult = await executeCanonical(stage1Result.plan, context);
+      const execResult = await executeCanonical(stage1Result.plan, context, activeRegistry);
 
       const { structured, approvalCards } = normaliseToArtefacts(
         stage1Result.plan,

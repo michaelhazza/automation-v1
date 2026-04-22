@@ -1,11 +1,13 @@
 // Canonical executor — spec §12.1
 // Dispatches a validated canonical QueryPlan to the matching registry handler.
+// Registry is passed as a parameter so the executor can be used without importing
+// the real canonicalQueryRegistry (which pulls in drizzle-orm).
 
-import { canonicalQueryRegistry } from './canonicalQueryRegistry.js';
 import type {
   QueryPlan,
   ExecutorContext,
   ExecutorResult,
+  CanonicalQueryRegistry,
 } from '../../../../shared/types/crmQueryPlanner.js';
 
 export class MissingPermissionError extends Error {
@@ -44,6 +46,7 @@ function assertFieldsSubset(
 export async function executeCanonical(
   plan: QueryPlan,
   context: ExecutorContext,
+  registry: CanonicalQueryRegistry,
 ): Promise<ExecutorResult> {
   if (plan.source !== 'canonical') {
     throw new Error('canonicalExecutor dispatched with non-canonical plan');
@@ -52,7 +55,7 @@ export async function executeCanonical(
     throw new Error('canonical plan missing canonicalCandidateKey');
   }
 
-  const entry = canonicalQueryRegistry[plan.canonicalCandidateKey];
+  const entry = registry[plan.canonicalCandidateKey];
   if (!entry) {
     throw new Error(`registry key not found: ${plan.canonicalCandidateKey}`);
   }
@@ -61,11 +64,9 @@ export async function executeCanonical(
   // v1: all canonical.* slugs are forward-looking, so they are always skipped.
   // The only enforced gate in v1 is `crm.query` at the route layer.
   for (const cap of entry.requiredCapabilities) {
-    if (context.callerCapabilities.has(cap)) continue; // caller has it — fine
-    // Skip unknown / forward-looking capability slugs (no source of truth yet).
-    // A concrete capability catalogue will light these up in v2.
+    if (context.callerCapabilities.has(cap)) continue;
     const isForwardLooking = cap.startsWith('canonical.') || cap.startsWith('clientpulse.');
-    if (isForwardLooking) continue; // skipped_unknown_capability
+    if (isForwardLooking) continue;
     throw new MissingPermissionError(cap);
   }
 
