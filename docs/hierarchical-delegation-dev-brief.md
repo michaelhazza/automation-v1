@@ -1,6 +1,6 @@
 # Hierarchical Agent Delegation — Development Brief
 
-> **Status:** Rev 3 — incorporates second external review. Ready for internal spec-reviewer pass.
+> **Status:** Rev 4 — incorporates third external review (tightening only; no design changes). Ready for internal spec-reviewer pass.
 > **Date:** 2026-04-22
 > **Audience:** Internal engineering, plus LLM reviewers without prior context on this codebase.
 > **Related work (out of scope here):** Restructuring the seeded 16-agent company into a multi-tier org chart is being designed on a separate track. This brief assumes multi-tier hierarchies are desired and focuses on the runtime, routing, and observability primitives needed to make them *meaningful*.
@@ -26,8 +26,9 @@
    - 5.9 Observability — delegation trace graph, violation metrics, hierarchy health
 6. Dependencies and suggested ordering
 7. Out of scope
-8. Decisions made (resolving prior open questions)
-9. Alternatives considered and rejected
+8. Success criteria for v1
+9. Decisions made (resolving prior open questions)
+10. Alternatives considered and rejected
 
 ---
 
@@ -118,7 +119,11 @@ The hierarchy must be enforced at two layers, not one. This framing underpins th
 - **Visibility layer.** What an agent can *see* when it lists the roster. A manager's default world view should be "my direct reports," not "every agent in the org." This prevents the agent from even reasoning about invalid delegations in the first place, which saves tokens, reduces noisy failures, and keeps prompt context focused.
 - **Execution layer.** What an agent can *do* when it calls a delegation skill. Even if the agent somehow names a target outside its subtree, the executor validates at call time and rejects the call.
 
+**Mental model — advisory for reasoning, authoritative for execution.** The visibility layer *shapes the reasoning space* an agent operates in; it is not itself the enforcement mechanism. The execution layer is where hierarchy becomes hard constraint. Getting this distinction right matters: future contributors must not treat scoped listings as enforcement, and enforcement logic stays centralised in the executor rather than scattered across skill handlers or prompts.
+
 Enforcement at only one layer doesn't work. Visibility without execution enforcement is a suggestion; execution without visibility enforcement produces repeated illegal-move failures as agents see targets they can't actually reach. Both layers are required, and both are small.
+
+**Orthogonal to capability-aware routing.** Hierarchy enforcement is a separate concern from the Path A / B / C / D capability-routing system documented in `architecture.md`. Capability routing answers *which skill or agent can satisfy the capability requirements of this task*; hierarchy enforcement answers *who in the graph is permitted to delegate to whom*. A task still classifies A/B/C/D for capability routing; hierarchy scoping is then applied to whoever ends up handling the run. The two systems compose — don't merge them in the spec phase.
 
 The visibility layer is §5.2. The execution layer is §5.3. They share the same `scope` vocabulary and the same context object from §5.1.
 
@@ -179,7 +184,11 @@ Apply the same parameter to `config_list_subaccounts` and `config_list_links` fo
 
 **Adaptive default.** Same shape as §5.2. Default to `'children'` when the caller has children, `'subaccount'` when they don't. Managers tighten automatically, workers are unaffected.
 
+**Delegation scope is a runtime constraint, not a planning constraint.** Important distinction for prompt authors: `delegationScope` restricts *who the agent can invoke at call time*, not *what the agent is allowed to reason about, plan, or consider*. Agents should still think broadly — reason across the whole org, consider cross-team implications, draft plans that reference agents they can't directly call. Execution is where the constraint bites. If we narrow the reasoning space (e.g. by pruning planning prompts to the agent's subtree), we lose the broader judgement that makes managers useful. Keep the system cognitively flexible and operationally constrained.
+
 **Who can use the `'subaccount'` escape hatch.** This is important. `'subaccount'` must remain available — real orgs have cross-subtree handoffs, exceptional escalations, and "this landed in the wrong team" cases. But it should only be callable by **root agents** (agents where `parentSubaccountAgentId IS NULL`). A mid-tree agent passing `delegationScope: 'subaccount'` is either a prompt bug or an attempt to bypass the hierarchy; the executor rejects it with the same error as an out-of-subtree target. Position in the graph grants the authority — no new authority enum, no hardcoded roles.
+
+**Escape hatches are for exceptions, not normal operation.** The `'subaccount'` scope exists for exception handling, recovery, and misrouting correction — "this task landed in the wrong team, route it elsewhere." It is not the way normal work gets done. If an agent's prompt starts defaulting to `'subaccount'` scope for routine delegations, the hierarchy has quietly collapsed back into flat mode. The violation metrics in §5.9 track this: a sustained high ratio of `'subaccount'`-scoped calls from a single agent is a prompt-drift signal, not an operational norm. Normal delegation stays within subtree; escape hatches stay exceptional.
 
 **Upward escalation.** A non-root agent reassigning *upward* to its parent is allowed but logged with a distinct marker (`delegation_direction: 'up'`) so it's rare-by-observation. Cross-subtree reassignments happen by escalating to the nearest common ancestor (typically the Orchestrator), which then reassigns downward into the target subtree — the cleanest mental model and the one that keeps every hop legible in the trace.
 
@@ -321,7 +330,23 @@ If we had to pick the single highest-leverage first step, it would be **5.5 + 5.
 
 **Mesh, dynamic teams, and task-based grouping.** Real agent work isn't always tree-shaped. Temporary lateral collaboration (two specialists pairing on a problem), task-scoped ad-hoc teams, and graph-like delegation patterns are real needs that will surface as usage grows. They're intentionally out of scope for v1 — a tree with controlled escape hatches is the right starting point because it's simpler to reason about, observe, and enforce. The primitives in §5.1–§5.3 (hierarchy context, scoped visibility, scoped execution) are designed to relax into those patterns later without being redesigned: `'descendants'` is already graph-shaped inside a subtree, the `'subaccount'` escape hatch already supports lateral jumps from the root, and nothing in the enforcement model forbids a future `delegationScope: 'pair'` or task-scoped membership primitive.
 
-## 8. Decisions made (resolving prior open questions)
+## 8. Success criteria for v1
+
+Intent, not metrics — the spec phase will turn these into measurable thresholds. These are how the team knows v1 has worked, not just shipped.
+
+1. **Managers predominantly delegate within their subtree.** Sustained observation (post-adjustment-phase): the overwhelming majority of `spawn_sub_agents` and `reassign_task` calls from any manager agent resolve to targets where `target.parentSubaccountAgentId === caller.agentId`. Frequent subtree violations by a specific agent indicate a prompt bug, not a design bug.
+
+2. **Cross-subtree hops happen via root (or the nearest common ancestor).** When work moves between teams, the trace shows an upward hop to a common ancestor followed by a downward hop into the target subtree — not a direct lateral jump. Direct lateral jumps require the root-only `'subaccount'` escape, and violation metrics flag sustained use of it.
+
+3. **Violation rates trend down after the adjustment period.** The week or two after Group A lands will show elevated `delegation_out_of_scope` and `cross_subtree_not_permitted` counters as existing prompts adjust. After that window, both counters should trend steadily downward and plateau near zero. A rising or stubborn curve indicates prompt debt, not enforcement bugs.
+
+4. **Delegation traces are explainable in one pass.** For any Brief that fans out through multiple agents, an engineer or operator opening the trace graph (§5.9) should be able to answer "why did X delegate to Y" in a single read, without cross-referencing logs, prompts, or DB state. If the trace graph makes multi-agent runs legible at a glance, the observability layer is doing its job.
+
+These criteria are orthogonal to capability-routing success — the Path A/B/C/D system has its own criteria documented in `architecture.md`. Hierarchy enforcement is passing if managers-stay-in-subtree, cross-team-goes-via-ancestor, violations-decay, and traces-are-legible.
+
+---
+
+## 9. Decisions made (resolving prior open questions)
 
 The first draft of this brief left eight questions open. External review plus internal adjudication resolves them as follows. Each is now a design decision — reviewers can still disagree, but the default is to proceed with these answers unless challenged.
 
@@ -341,7 +366,7 @@ The first draft of this brief left eight questions open. External review plus in
 
 8. **Hierarchy is collapsed by default in the user chat, expandable via trace.** The user sees a single voice from the subaccount root — they don't need to know that three sub-delegations happened. The full delegation trace graph (§5.9) is one click away for anyone investigating a run. This matches Paperclip's posture and keeps the "talk to one CEO" UX intact.
 
-## 9. Alternatives considered and rejected
+## 10. Alternatives considered and rejected
 
 Documenting the paths we explored and chose not to take, because "what we're not doing" is often more informative than "what we are."
 
@@ -351,7 +376,7 @@ Documenting the paths we explored and chose not to take, because "what we're not
 
 **Single-field `parentAgentId` in `SkillExecutionContext`.** Rejected in favour of the four-field `hierarchy` object. See §5.1. Skills commonly need more than "who is my parent" — they need children, depth, and root.
 
-**Default delegation scope of `'subaccount'` for backward compatibility.** Rejected in favour of adaptive. See §8, decision 1.
+**Default delegation scope of `'subaccount'` for backward compatibility.** Rejected in favour of adaptive. See §9, decision 1.
 
 **Enforcement at only the execution layer (skill validation, no visibility scoping).** Rejected in favour of dual-layer enforcement. See §5.0. Execution-only enforcement produces a pathology where managers repeatedly try illegal delegations (because they can see invalid targets) and fail noisily. Visibility scoping prevents the attempt; execution enforcement catches the rare miss.
 
