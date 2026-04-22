@@ -359,6 +359,8 @@ Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checkl
 
 See [`tasks/current-focus.md`](./tasks/current-focus.md). Update it whenever the sprint, spec, or active branch changes. A stale pointer misleads future sessions — keep it current or set it to `none`.
 
+> **Authoritative references live in `architecture.md`, not here.** CLAUDE.md intentionally contains no canonical file mappings, route patterns, or service contracts. Do not duplicate that content here — update `architecture.md` directly. If you find a mapping in both files that differs, `architecture.md` wins.
+
 ---
 
 ## Key files per domain

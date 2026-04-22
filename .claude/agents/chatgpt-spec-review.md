@@ -19,11 +19,19 @@ the spec based on accepted feedback and logging every round.
 
 When the user says "run chatgpt-spec-review" (or equivalent):
 
+**First: check for an existing session log (resume detection)**
+Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1`
+
+- If a log exists for the current spec (spec slug appears in the filename): **skip steps 1–6 below**. Read the log, identify the last round number, and proceed directly to Per-Round Loop as round N+1. Print: "Resuming session from [log path] — on round N+1. Paste the next ChatGPT feedback."
+- If no log exists: run the full On Start sequence below.
+
 1. Auto-detect the spec file:
    - Run `git diff main...HEAD --name-only` to list changed files
    - Filter for files matching tasks/**/*.md or docs/**/*.md (recursive —
      includes nested paths like docs/superpowers/specs/*.md), excluding:
-     CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**
+     CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**,
+     tasks/current-focus.md, tasks/todo.md, tasks/**/progress.md,
+     tasks/**/lessons.md
    - If exactly one candidate: use it
    - If multiple candidates: list them and ask the user which one
    - If none: read `tasks/current-focus.md` (the line starting with
@@ -65,7 +73,16 @@ For each round:
 2. For each finding assign accept / reject / defer + severity (critical/high/
    medium/low) + a one-line rationale
 3. Apply all accepted items as edits to the spec document using the Edit tool
-3a. Post-edit integrity check — after applying all edits this round, run
+3a. Commit and push — after applying all accepted edits, commit and push so the PR
+    reflects the latest spec state (required for the next ChatGPT round):
+    ```
+    git add -A
+    git commit -m "chatgpt-spec-review(round <N>): implement <X> finding(s) from ChatGPT feedback"
+    git push
+    ```
+    If there are no changes this round (all findings rejected/deferred), skip the commit.
+    Print the commit SHA after pushing.
+3b. Post-edit integrity check — after applying all edits this round, run
     exactly one pass over the spec for:
     - Forward references: sections that reference headings, tables, or items
       that no longer exist or were renamed by this round's edits
@@ -77,7 +94,7 @@ For each round:
     Log: "Integrity check: <N> issues found this round."
     This pass runs once only — do NOT re-run integrity-check on findings
     introduced by integrity-check fixes. That recursion guard is absolute.
-    Post-integrity sanity: if integrity-check applied ≥1 mechanical fix, run
+    Post-integrity sanity (3c): if integrity-check applied ≥1 mechanical fix, run
     a lightweight validation — confirm no heading is referenced that no longer
     exists, and no section was left empty by the fix. Log any issues as
     warnings; apply if trivial (broken link → remove reference), defer if
@@ -89,6 +106,14 @@ For each round:
 
   --- CHANGED SECTIONS ---
   <only the edited sections, with their headings for context>
+
+**After printing the round summary: WAIT. Do not finalize.**
+Every round ends with this line:
+  "Paste the next round of ChatGPT feedback when ready, or say 'done' to finalise."
+
+Finalization ONLY triggers when the user explicitly says "done", "finished",
+"we're done", "that's it", or equivalent. Never auto-finalize after a round,
+even if there is only one round of feedback.
 
 Decision Criteria
 -----------------
