@@ -162,10 +162,10 @@ test('operator key DOES NOT dedup distinct nested fields (operator_alert recipie
     channels: ['in_app'],
   };
   const k1 = buildOperatorIdempotencyKey({
-    subaccountId: 'sub-1', actionType: 'clientpulse.operator_alert', payload: payloadA,
+    subaccountId: 'sub-1', actionType: 'notify_operator', payload: payloadA,
   });
   const k2 = buildOperatorIdempotencyKey({
-    subaccountId: 'sub-1', actionType: 'clientpulse.operator_alert', payload: payloadB,
+    subaccountId: 'sub-1', actionType: 'notify_operator', payload: payloadB,
   });
   assert(k1 !== k2, 'distinct recipient choices must produce distinct keys');
 });

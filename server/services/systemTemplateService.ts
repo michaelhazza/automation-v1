@@ -9,6 +9,7 @@ import {
   subaccountAgents,
   hierarchyTemplates,
   orgAgentConfigs,
+  organisations,
 } from '../db/schema/index.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { orgMemoryService } from './orgMemoryService.js';
@@ -772,7 +773,7 @@ export const systemTemplateService = {
       await db
         .update(hierarchyTemplates)
         .set({
-          operationalConfig: operationalDefaults ?? null,
+          operationalConfigSeed: operationalDefaults ?? null,
           name: template.name,
           description: template.description,
           updatedAt: new Date(),
@@ -787,12 +788,21 @@ export const systemTemplateService = {
           name: template.name,
           description: template.description,
           systemTemplateId: template.id,
-          operationalConfig: operationalDefaults ?? null,
+          operationalConfigSeed: operationalDefaults ?? null,
           status: 'published' as const,
         } as typeof hierarchyTemplates.$inferInsert)
         .returning();
       orgTemplateId = newOrgTemplate.id;
     }
+
+    // Spec §4.8 — set the explicit FK so orgConfigService.getOperationalConfig
+    // resolves systemDefaults against the adopted template for newly adopted
+    // orgs. Migration 0180 backfills existing rows; this write handles new
+    // adoptions going through loadToOrg.
+    await db
+      .update(organisations)
+      .set({ appliedSystemTemplateId: template.id, updatedAt: new Date() })
+      .where(eq(organisations.id, organisationId));
 
     let agentsProvisioned = 0;
     let orgAgentConfigsCreated = 0;

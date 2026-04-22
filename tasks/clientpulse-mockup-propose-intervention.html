@@ -221,7 +221,7 @@
 </style>
 </head>
 <body>
-<div class="annot-banner">📐 MOCKUP · Modal opened by clicking <strong>Propose intervention</strong> on the per-client drill-down · Operator can auto-suggest from current signals or pick from the template library · Customise + preview before submitting to the review queue</div>
+<div class="annot-banner">📐 MOCKUP v2 · Propose intervention modal · <strong>Phase 8</strong> polish — RECOMMENDED badge now backed by outcome-weighted signal (was: highest-priority eligible template; now: weights by historical band-change attribution from B2 outcome rows) · "improved 3/5 times for similar accounts last quarter" hint shown next to the recommendation · Modal opened from drilldown high-risk widget · Operator picks specifics at the moment (no pre-setup per subaccount)</div>
 
 <!-- Simulated drill-down behind the modal -->
 <div class="bg-context"></div>
@@ -303,6 +303,10 @@
           <div class="title">Fire automation <span class="badge">RECOMMENDED</span></div>
           <div class="desc">Enrol Dr. Marcia into an existing automation in the client's connected CRM. Proposer suggests this because 0 funnels + 26d silence is a classic funnel-nurture scenario. You pick which automation at the moment.</div>
           <span class="runs-in ghl-workflow">▪ Runs in: client's CRM (Smith Dental → GHL)</span>
+          <!-- Phase 8 outcome-weighted hint (Phase 4.5 just picked highest-priority eligible template; Phase 8 weights by historical attribution) -->
+          <div style="margin-top: 6px; padding: 5px 8px; background: #ecfdf5; border-left: 3px solid #10b981; border-radius: 3px; font-size: 10.5px; color: #065f46;">
+            <strong>📊 Why this is recommended:</strong> across your portfolio, the "funnel-nurture" template improved band <strong>3 of 5 times</strong> for at-risk accounts in the last quarter (avg health-score delta: +14). Last similar firing for Smith Dental: 29 Mar 2026 (atRisk → watch).
+          </div>
         </div>
         <div class="action-icon">⚙️</div>
       </div>

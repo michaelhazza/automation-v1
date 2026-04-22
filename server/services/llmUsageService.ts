@@ -227,7 +227,10 @@ export async function getRoutingDistribution(
   }
 
   const byPhase: Record<string, number> = {};
-  for (const r of phaseRows) byPhase[r.phase] = r.count;
+  for (const r of phaseRows) {
+    // executionPhase is nullable post-migration 0185; skip unattributed rows.
+    if (r.phase) byPhase[r.phase] = r.count;
+  }
 
   const byStatus: Record<string, number> = {};
   for (const r of statusRows) byStatus[r.status] = r.count;

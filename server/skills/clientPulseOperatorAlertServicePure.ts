@@ -1,5 +1,7 @@
 /**
- * clientpulse.operator_alert — internal operator-facing alert.
+ * notify_operator — internal operator-facing alert (renamed from
+ * clientpulse.operator_alert in Session 1 per contract (i) — platform
+ * primitives are module-agnostic).
  *
  * Unlike the 4 CRM primitives, this does not hit an external provider. On
  * approval, the execution path writes a notification row (in-app) and defers
@@ -44,7 +46,7 @@ export function operatorAlertIdempotencyKey(p: {
   severity: string;
 }): string {
   return [
-    'clientpulse.operator_alert',
+    'notify_operator',
     p.subaccountId ?? p.orgId,
     hashString(p.title),
     p.severity,

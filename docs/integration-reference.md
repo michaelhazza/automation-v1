@@ -64,10 +64,10 @@ read_capabilities:
   - slug: subaccount_read
     aliases: [read_subaccount, location_read]
     description: Read subaccount/location metadata from a multi-tenant CRM
-  - slug: clientpulse.config.read
+  - slug: organisation.config.read
     aliases: [pulse_config_read, clientpulse_config_list]
     description: Read ClientPulse operational_config values (scoring factors, churn bands, intervention defaults, alert limits)
-  - slug: clientpulse.config.history
+  - slug: organisation.config.history
     aliases: [pulse_config_history, config_audit_trail]
     description: Browse the config_history audit trail for ClientPulse operational_config changes
 
@@ -102,12 +102,21 @@ write_capabilities:
   - slug: update_database_record
     aliases: [record_update, row_update, upsert_record]
     description: Create or update a record in a structured database
-  - slug: clientpulse.config.update
+  - slug: organisation.config.update
     aliases: [pulse_config_update, config_patch, operational_config_update]
     description: Apply a single dot-path patch to ClientPulse operational_config (sensitive paths route through the review queue)
-  - slug: clientpulse.config.reset
+  - slug: organisation.config.reset
     aliases: [pulse_config_reset, config_factory_reset]
     description: Revert ClientPulse operational_config (or a specific path) to hierarchy template defaults
+  - slug: fire_automation
+    aliases: [trigger_workflow, run_automation, start_workflow]
+    description: Fire a CRM workflow / automation on a contact (ClientPulse Session 2 intervention primitive)
+  - slug: send_sms
+    aliases: [text_message, sms_send, compose_sms]
+    description: Send an SMS message via a CRM's messaging surface (ClientPulse Session 2 intervention primitive)
+  - slug: create_task
+    aliases: [task_create, add_task, assign_task]
+    description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
 
 skills:
   - slug: classify_email
@@ -125,9 +134,21 @@ skills:
   - slug: compute_health_score
     aliases: [health_score, account_health]
     description: Compute a health score for an account or workspace
-  - slug: config_update_hierarchy_template
+  - slug: config_update_organisation_config
     aliases: [pulse_config_update_skill, clientpulse_config_skill]
     description: Configuration Agent skill — apply a single dot-path patch to a hierarchy template's operational_config JSONB with sensitive-path gating (Phase 4.5)
+  - slug: crm.fire_automation
+    aliases: [fire_automation_skill, trigger_workflow_skill]
+    description: ClientPulse intervention primitive — fire a CRM workflow on a contact (Session 2; review-gated; idempotent)
+  - slug: crm.send_email
+    aliases: [crm_send_email_skill, client_email_skill]
+    description: ClientPulse intervention primitive — send an email via the client's CRM with merge-field resolution (Session 2; review-gated; idempotent)
+  - slug: crm.send_sms
+    aliases: [crm_send_sms_skill, client_sms_skill]
+    description: ClientPulse intervention primitive — send an SMS via the client's CRM with merge-field resolution + segment counting (Session 2; review-gated; idempotent)
+  - slug: crm.create_task
+    aliases: [crm_create_task_skill, client_task_skill]
+    description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
 
 primitives:
   - slug: scheduled_run
@@ -424,7 +445,15 @@ read_capabilities:
 write_capabilities:
   - create_contact
   - update_contact
-skills_enabled: []
+  - fire_automation
+  - send_email
+  - send_sms
+  - create_task
+skills_enabled:
+  - crm.fire_automation
+  - crm.send_email
+  - crm.send_sms
+  - crm.create_task
 primitives_required:
   - oauth_connection
   - webhook_receiver
@@ -597,19 +626,19 @@ owner: platform-team
 ### ClientPulse Configuration (pseudo-integration)
 
 ```yaml integration
-slug: clientpulse-configuration
+slug: organisation-configuration
 name: ClientPulse Configuration
 provider_type: native
 status: fully_supported
 visibility: public
 read_capabilities:
-  - clientpulse.config.read
-  - clientpulse.config.history
+  - organisation.config.read
+  - organisation.config.history
 write_capabilities:
-  - clientpulse.config.update
-  - clientpulse.config.reset
+  - organisation.config.update
+  - organisation.config.reset
 skills_enabled:
-  - config_update_hierarchy_template
+  - config_update_organisation_config
 primitives_required:
   - hierarchy_templates
   - config_history

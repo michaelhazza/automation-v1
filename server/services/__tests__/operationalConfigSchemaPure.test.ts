@@ -6,10 +6,15 @@
  *   npx tsx server/services/__tests__/operationalConfigSchemaPure.test.ts
  */
 
+// Session 1: side-effect import populates the sensitive-paths registry with
+// ClientPulse's paths before any isSensitiveConfigPath assertion runs. See
+// spec §3.6 + the module-composable registry pattern.
+import '../../modules/clientpulse/registerSensitivePaths.js';
+
 import {
   validateOperationalConfig,
   isSensitiveConfigPath,
-  SENSITIVE_CONFIG_PATHS,
+  getSensitiveConfigPaths,
   staffActivityDefinitionSchema,
   churnBandsSchema,
   interventionDefaultsSchema,
@@ -143,22 +148,25 @@ test('validateOperationalConfig passes through unknown top-level keys (loose bas
   assert(r.ok, 'expected ok');
 });
 
-// ── Tests: SENSITIVE_CONFIG_PATHS ──────────────────────────────────────────
+// ── Tests: sensitive paths registry ────────────────────────────────────────
+//
+// Session 1: sensitive paths moved to the module-composable registry per
+// spec §3.6. The deprecated SENSITIVE_CONFIG_PATHS frozen-array export was
+// replaced by getSensitiveConfigPaths() (function-backed alias returning a
+// snapshot of the current registry state).
 
-test('SENSITIVE_CONFIG_PATHS includes interventionDefaults.defaultGateLevel', () => {
-  assert(SENSITIVE_CONFIG_PATHS.includes('interventionDefaults.defaultGateLevel'), 'missing path');
+test('getSensitiveConfigPaths includes interventionDefaults.defaultGateLevel', () => {
+  assert(
+    getSensitiveConfigPaths().includes('interventionDefaults.defaultGateLevel'),
+    'missing path',
+  );
 });
 
-test('SENSITIVE_CONFIG_PATHS is frozen (immutable at runtime)', () => {
-  // Object.freeze makes the array immutable; attempting to mutate throws in strict mode.
-  let threw = false;
-  try {
-    (SENSITIVE_CONFIG_PATHS as unknown as string[]).push('bogus');
-  } catch {
-    threw = true;
-  }
-  // In Node strict mode the push throws; in loose mode it silently no-ops. Either way the array stays unchanged.
-  assert(threw || !SENSITIVE_CONFIG_PATHS.includes('bogus'), 'frozen array was mutated');
+test('getSensitiveConfigPaths returns a snapshot (mutations do not leak into registry)', () => {
+  const snapshot = getSensitiveConfigPaths() as unknown as string[];
+  snapshot.push('bogus-caller-mutation');
+  const fresh = getSensitiveConfigPaths();
+  assert(!fresh.includes('bogus-caller-mutation'), 'caller mutation leaked into registry');
 });
 
 test('isSensitiveConfigPath matches exact sensitive path', () => {

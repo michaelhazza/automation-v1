@@ -9,12 +9,16 @@
  *   Stage 5: Classify (60% → 90%)
  *   Stage 6: Write    (90% → 100%)
  *
- * Idempotent: deletes existing results before re-processing on retry.
- * Max 1 retry with 5-minute delay on crash.
+ * Crash-resume: on pg-boss retry (worker died mid-pipeline) this handler
+ * PRESERVES any rows already written to skill_analyzer_results and skips
+ * re-running their LLM classifications. Without this, a single dev-server
+ * restart mid-import costs 2× the LLM budget on every skill already done.
+ * See Stage 1 (preserves job.parsedCandidates to stabilise candidateIndex)
+ * and Stage 5 (skips slugs with existing rows). Max 1 retry with 5-minute
+ * delay on crash.
  */
 
 import { generateEmbeddings } from '../lib/embeddings.js';
-import { withBackoff } from '../lib/withBackoff.js';
 import { env } from '../lib/env.js';
 import { skillParserService } from '../services/skillParserService.js';
 import { skillEmbeddingService } from '../services/skillEmbeddingService.js';
@@ -27,9 +31,9 @@ import { systemSkillService } from '../services/systemSkillService.js';
 import {
   updateJobProgress,
   getJobById,
-  clearResultsForJob,
   insertResults,
   insertSingleResult,
+  listResultIndicesForJob,
   markSkillInFlight,
   unmarkSkillInFlight,
   updateResultAgentProposals,
@@ -55,7 +59,9 @@ import {
   skillParserServicePure,
   ParsedSkill,
 } from '../services/skillParserServicePure.js';
-import anthropicAdapter from '../services/providers/anthropicAdapter.js';
+import { routeCall } from '../services/llmRouter.js';
+import { ParseFailureError } from '../lib/parseFailureError.js';
+import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { logger } from '../lib/logger.js';
 
 // p-limit is ESM; import dynamically to avoid CommonJS issues
@@ -87,8 +93,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     tierMap: effectiveTierMap(configSnapshot),
   };
 
-  // Idempotent: clear any prior results (support for retries)
-  await clearResultsForJob(jobId);
+  // Note: we do NOT clear skill_analyzer_results here. On pg-boss retry
+  // (e.g. worker died mid-classification) Stage 5 reads existing rows and
+  // skips their LLM calls — wiping would force every completed slug to be
+  // re-classified, doubling LLM spend on each restart.
 
   // -------------------------------------------------------------------------
   // Stage 1: Parse (0% → 10%)
@@ -102,9 +110,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   let candidates: ParsedSkill[];
 
   try {
-    if (job.sourceType === 'paste' || job.sourceType === 'upload') {
-      // Candidates were parsed at job creation and stored as JSONB
-      candidates = (job.parsedCandidates as ParsedSkill[]) || [];
+    // Two distinct signals that collapse into "use stored / re-parse / fail":
+    //   • Array.isArray(parsedCandidates) === true  → authoritative list from
+    //     a prior run (possibly empty, e.g. valid paste that yielded zero
+    //     skills). Use it as-is; the "no valid skill definitions" check
+    //     below handles the empty case with a user-friendly error.
+    //   • Array.isArray(parsedCandidates) === false → null / undefined / a
+    //     non-array JSONB value. For paste/upload this signals a corrupt
+    //     row (the create path always writes an array before enqueueing);
+    //     for github/download it's the expected first-run state, so we
+    //     re-parse from the remote URL.
+    // Collapsing "empty array" and "not-an-array" into the same check was
+    // a real regression — it misreported a zero-skill paste as DB corruption.
+    if (Array.isArray(job.parsedCandidates)) {
+      candidates = job.parsedCandidates as ParsedSkill[];
+    } else if (job.sourceType === 'paste' || job.sourceType === 'upload') {
+      await updateJobProgress(jobId, {
+        status: 'failed',
+        errorMessage: 'parsedCandidates is missing on this job row — re-submit the analysis.',
+      });
+      return;
     } else if (job.sourceType === 'github') {
       const githubMeta = job.sourceMetadata as { url: string };
       candidates = await skillParserService.parseFromGitHub(githubMeta.url);
@@ -463,6 +488,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // embedding stage above.
   const classificationFallback = !env.ANTHROPIC_API_KEY;
 
+  // Crash-resume: read any result rows already written by a prior worker run.
+  // Each existing row represents a classification that has already been paid
+  // for at the provider and persisted locally — we must not re-call for it.
+  const existingResultRows = await listResultIndicesForJob(jobId);
+  const completedCandidateIndices = new Set<number>(
+    existingResultRows.map((r) => r.candidateIndex),
+  );
+  const resumedLlmQueue = llmQueue.filter(
+    (m) => !completedCandidateIndices.has(m.candidateIndex),
+  );
+  const resumedSkippedCount = llmQueue.length - resumedLlmQueue.length;
+  if (resumedSkippedCount > 0) {
+    logger.info('skill_analyzer.stage5_resume', {
+      jobId,
+      alreadyClassified: resumedSkippedCount,
+      remainingToClassify: resumedLlmQueue.length,
+      totalLlmQueue: llmQueue.length,
+    });
+  }
+
   await updateJobProgress(jobId, {
     status: 'classifying',
     progressPct: 60,
@@ -470,7 +515,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
     classifyState: {
-      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
+      // Only the remaining (un-classified) slugs belong in the live queue; the
+      // inFlight map is always reset — any entries from a prior crashed
+      // process refer to calls that are definitively dead.
+      queue: resumedLlmQueue.map((m) => candidates[m.candidateIndex].slug),
       inFlight: {},
     },
   });
@@ -499,6 +547,62 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   const classifiedResults: ClassifiedResult[] = [];
 
+  // On resume, seed classifiedResults with minimal entries for rows that
+  // were written by an earlier run — Stages 7, 7b, and 8 read classifiedResults
+  // to pick DISTINCT candidates for agent-propose / Haiku enrichment and to
+  // backfill agentProposals onto existing rows. Entries here only carry the
+  // fields those stages actually use (candidateIndex + classification); other
+  // fields are filled with neutral defaults.
+  //
+  // IMPORTANT — RESUME RECONSTRUCTION CONTRACT:
+  //   The neutral defaults below (confidence=0, similarityScore=null,
+  //   libraryId=null, proposedMerge=null, …) are safe ONLY because the
+  //   downstream consumers of classifiedResults read exclusively:
+  //     • r.candidateIndex (Stage 7 agent-propose lookup, Stage 7b enrich set,
+  //       Stage 8 updateResultAgentProposals target)
+  //     • r.classification (Stage 7 DISTINCT filter, Stage 8 classifiedDistinct
+  //       filter)
+  //   If a future change introduces a consumer that reads ANY other field
+  //   from classifiedResults (e.g. r.confidence, r.proposedMerge,
+  //   r.similarityScore, r.libraryId), the resumed entries will deliver the
+  //   neutral default — NOT the real value from the prior run — and crash-
+  //   resume behaviour will silently diverge from a fresh run. When adding
+  //   such a consumer, either:
+  //     (a) extend listResultIndicesForJob + this seeding block to hydrate
+  //         the new field from the DB row, or
+  //     (b) have the consumer re-query skill_analyzer_results directly
+  //         instead of reading through classifiedResults.
+  //   Test: server/services/__tests__/skillAnalyzerJobResumePure.test.ts
+  //   should assert that every field consumed by Stages 6+ is either
+  //   hydrated or explicitly defaulted.
+  if (completedCandidateIndices.size > 0) {
+    const llmQueueIndices = new Set(llmQueue.map((m) => m.candidateIndex));
+    for (const existing of existingResultRows) {
+      // Only replay rows that represent a Stage-5 LLM classification — i.e.
+      // rows whose candidateIndex was in the llmQueue this run. Rows for
+      // exactDuplicates (Stage 2) and Stage-4 distinctResults are written in
+      // Stage 8; they'll be re-added to resultRows below and deduped there.
+      if (!llmQueueIndices.has(existing.candidateIndex)) continue;
+      const candidate = candidates[existing.candidateIndex];
+      if (!candidate) continue;
+      classifiedResults.push({
+        candidateIndex:                existing.candidateIndex,
+        candidate,
+        classification:                existing.classification,
+        confidence:                    0,
+        similarityScore:               null,
+        classificationReasoning:       null,
+        libraryId:                     null,
+        librarySlug:                   null,
+        libraryName:                   null,
+        diffSummary:                   null,
+        proposedMerge:                 null,
+        classificationFailed:          false,
+        classificationFailureReason:   null,
+      });
+    }
+  }
+
   // Build a lookup for library skills by slug
   const libraryBySlug = new Map<string, LibrarySkillSummary>(
     librarySkills.map((lib) => [lib.slug, lib])
@@ -509,7 +613,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       '[SkillAnalyzerJob] ANTHROPIC_API_KEY not set - skipping LLM classification; all ambiguous pairs routed to PARTIAL_OVERLAP for human review'
     );
 
-    for (const match of llmQueue) {
+    for (const match of resumedLlmQueue) {
       const candidate = candidates[match.candidateIndex];
       const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
@@ -660,14 +764,19 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
     });
   } else {
-    // Concurrency 3: reduces Anthropic API rate-limit pressure. Each call
-    // may generate a large proposedMerge response; 5 concurrent requests
-    // was causing sustained rate limiting and cascading timeouts.
-    const limit = await getPLimit(3);
-    let classifiedCount = 0;
+    // Concurrency 2: even 3 concurrent PARTIAL_OVERLAP/IMPROVEMENT calls
+    // can exhaust the rolling TPM budget on the current Anthropic tier,
+    // causing all in-flight calls to stall together on 429 backoff. 2 keeps
+    // meaningful parallelism while halving peak token draw; drop to 1 if
+    // stalls still occur on marketing-heavy imports.
+    const limit = await getPLimit(2);
+    // Resume-aware progress: start the counter at the number of candidates
+    // that were already classified by a prior run so the UI percentage doesn't
+    // regress after a worker restart.
+    let classifiedCount = resumedSkippedCount;
 
     await Promise.all(
-      llmQueue.map((match) =>
+      resumedLlmQueue.map((match) =>
         limit(async () => {
           const candidate = candidates[match.candidateIndex];
           const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
@@ -726,13 +835,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           });
           await markSkillInFlight(jobId, candidate.slug, startMs);
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
-              SKILL_CLASSIFY_TIMEOUT_MS,
-            )
-          );
-
           // Phase 3: use the merge-aware prompt + parser. The system prompt
           // is a superset of the base classifier — it adds instructions for
           // producing a proposedMerge object on PARTIAL_OVERLAP / IMPROVEMENT.
@@ -745,64 +847,87 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
           let classificationApiError: unknown = undefined;
 
-          // Sentinel thrown inside withBackoff when the LLM response is
-          // structurally valid JSON but fails our schema check. Marked
-          // retryable so the model gets another attempt.
-          const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
+          // One-shot retry on outer timeout. The timeout fires an
+          // AbortController that actually terminates the underlying fetch —
+          // unlike the previous Promise.race pattern which abandoned the
+          // fetch and eventually surfaced as an unexplained 499 on the
+          // provider side. A stuck generation often finishes fast on a
+          // second attempt; doubling the worst-case wall clock is worth
+          // trading for an LLM merge over a rule-based one.
+          const MAX_CLASSIFY_TIMEOUT_RETRIES = 1;
+          let timeoutRetries = 0;
 
-          try {
-            classificationResult = await Promise.race([
-              withBackoff(
-                async () => {
-                  const response = await anthropicAdapter.call({
-                    model: 'claude-sonnet-4-6',
-                    system,
-                    messages: [{ role: 'user', content: userMessage }],
-                    // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
-                    // with long instructions can never be truncated.
-                    maxTokens: 8192,
-                    temperature: 0.1,
-                  });
-                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+          while (true) {
+            const abortController = new AbortController();
+            // Pass 'caller_timeout' as the reason so the adapter can
+            // distinguish analyzer-side timeout from user-initiated cancel
+            // (see spec §8.1).
+            const timeoutId = setTimeout(
+              () => abortController.abort('caller_timeout'),
+              SKILL_CLASSIFY_TIMEOUT_MS,
+            );
+
+            try {
+              const response = await routeCall({
+                system,
+                messages: [{ role: 'user', content: userMessage }],
+                // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                // with long instructions can never be truncated.
+                maxTokens: 8192,
+                temperature: 0.1,
+                context: {
+                  organisationId:     job.organisationId,
+                  sourceType:         'analyzer',
+                  sourceId:           jobId,
+                  featureTag:         'skill-analyzer-classify',
+                  taskType:           'general',
+                  systemCallerPolicy: 'bypass_routing',
+                  provider:           'anthropic',
+                  model:              'claude-sonnet-4-6',
+                },
+                abortSignal: abortController.signal,
+                postProcess: (content: string) => {
+                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(content);
                   if (parsed === null) {
                     logger.warn('skill_classify_parse_failure', {
                       jobId,
                       slug: candidate.slug,
-                      rawLength: response.content.length,
+                      rawLength: content.length,
                       // Full raw response so we can see exactly what the LLM produced
-                      raw: response.content,
+                      raw: content,
                     });
-                    throw PARSE_FAILURE;
+                    throw new ParseFailureError({ rawExcerpt: truncateUtf8Safe(content, 2048) });
                   }
-                  return parsed;
                 },
-                {
-                  label: `skill-classify-${match.candidateIndex}`,
-                  maxAttempts: 3,
-                  correlationId: jobId,
-                  runId: jobId,
-                  isRetryable: (err: unknown) => {
-                    // Parse failures: model produced unparseable output — worth retrying.
-                    if (err === PARSE_FAILURE) return true;
-                    // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                    // cannot change between attempts, so retrying just wastes time.
-                    const e = err as { statusCode?: number; code?: string };
-                    if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-                    if (e?.code === 'CLASSIFY_TIMEOUT') return false;
-                    return (
-                      e?.statusCode === 429 ||
-                      e?.statusCode === 503 ||
-                      e?.statusCode === 529 ||
-                      e?.code === 'PROVIDER_UNAVAILABLE'
-                    );
-                  },
-                }
-              ),
-              timeoutPromise,
-            ]);
-          } catch (err) {
-            classificationResult = null;
-            classificationApiError = err === PARSE_FAILURE ? undefined : err;
+              });
+              // Parse once more to get the typed result. `postProcess` already
+              // validated; this call is cheap (plain JSON.parse + schema map).
+              classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+              break;
+            } catch (err) {
+              const code = (err as { code?: string })?.code;
+              const abortReason = (err as { abortReason?: string })?.abortReason;
+              const wasTimeout = code === 'CLIENT_DISCONNECTED' && abortReason === 'caller_timeout';
+              if (wasTimeout && timeoutRetries < MAX_CLASSIFY_TIMEOUT_RETRIES) {
+                timeoutRetries++;
+                logger.warn('skill_classify_timeout_retry', {
+                  jobId,
+                  slug: candidate.slug,
+                  attempt: timeoutRetries + 1,
+                  timeoutMs: SKILL_CLASSIFY_TIMEOUT_MS,
+                });
+                continue;
+              }
+              classificationResult = null;
+              // Parse failures are not "API errors" from the analyzer's
+              // perspective — the rule-based fallback should fire, not the
+              // API-error branch. The router has already recorded the row
+              // with status='parse_failure' + rawExcerpt.
+              classificationApiError = code === 'CLASSIFICATION_PARSE_FAILURE' ? undefined : err;
+              break;
+            } finally {
+              clearTimeout(timeoutId);
+            }
           }
 
           // null result = either API error (classificationApiError set) or parse failure
@@ -1230,8 +1355,19 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     });
   }
 
+  // On crash-resume, Stage 2 exactDuplicate rows and Stage 4 distinctResults
+  // rows that were already written by a prior run must not be re-inserted —
+  // skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint,
+  // so a plain insert would silently duplicate every such row. Filter against
+  // the indices we observed at the start of Stage 5. candidateIndex is
+  // `integer().notNull()` with no default, so $inferInsert types it as number;
+  // no nullability guard needed.
+  const resultRowsToWrite = resultRows.filter(
+    (row) => !completedCandidateIndices.has(row.candidateIndex),
+  );
+
   // Insert via service (avoids direct db import in jobs)
-  await insertResults(resultRows);
+  await insertResults(resultRowsToWrite);
 
   // Backfill agentProposals onto classified-DISTINCT rows. These rows were
   // written incrementally in Stage 5 (before Stage 7 ran), so their
@@ -1292,13 +1428,22 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
             );
 
-            const response = await anthropicAdapter.call({
+            const response = await routeCall({
               system,
               messages: [{ role: 'user', content: userMessage }],
-              // Haiku: cheaper model for simple routing task
-              model: 'claude-haiku-4-5-20251001',
               maxTokens: 256,
               temperature: 0.1,
+              context: {
+                organisationId:     job.organisationId,
+                sourceType:         'analyzer',
+                sourceId:           jobId,
+                featureTag:         'skill-analyzer-agent-match',
+                taskType:           'general',
+                systemCallerPolicy: 'bypass_routing',
+                provider:           'anthropic',
+                // Haiku: cheaper model for simple routing task
+                model:              'claude-haiku-4-5-20251001',
+              },
             });
 
             const suggestion = skillAnalyzerServicePure.parseAgentSuggestionResponse(response.content);
@@ -1430,12 +1575,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
         );
 
-        const response = await anthropicAdapter.call({
+        const response = await routeCall({
           system,
           messages: [{ role: 'user', content: userMessage }],
-          model: 'claude-sonnet-4-6',
           maxTokens: 512,
           temperature: 0.2,
+          context: {
+            organisationId:     job.organisationId,
+            sourceType:         'analyzer',
+            sourceId:           jobId,
+            featureTag:         'skill-analyzer-cluster-recommend',
+            taskType:           'general',
+            systemCallerPolicy: 'bypass_routing',
+            provider:           'anthropic',
+            model:              'claude-sonnet-4-6',
+          },
         });
 
         const recommendation = skillAnalyzerServicePure.parseAgentClusterRecommendationResponse(response.content);

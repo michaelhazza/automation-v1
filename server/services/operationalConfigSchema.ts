@@ -120,6 +120,10 @@ export const interventionDefaultsSchema = z.object({
   defaultGateLevel: z.enum(['auto', 'review']),
   maxProposalsPerDayPerSubaccount: z.number().int().positive(),
   maxProposalsPerDayPerOrg: z.number().int().positive(),
+  // Session 2 §5.5 — outcome-weighted recommendation trial floor. Below this
+  // count, clientPulseInterventionContextService.buildInterventionContext
+  // falls back to priority. Non-sensitive leaf; operators tune freely.
+  minTrialsForOutcomeWeight: z.number().int().positive().optional(),
 });
 
 export const onboardingMilestoneDefSchema = z.object({
@@ -162,45 +166,34 @@ export type OperationalConfigValidated = z.infer<typeof operationalConfigSchema>
 
 // ── Sensitive paths — B5 routing consumes this list (Phase 4.5) ────────────
 //
-// Dot-paths into `operational_config` that MUST route through the action→review
-// queue rather than write directly. Per §17.6.2, these are paths where a
-// misconfiguration would have meaningful business or trust impact on the org.
+// Session 1: the single source of truth is now
+// `server/config/sensitiveConfigPathsRegistry.ts`; ClientPulse registers its
+// paths via `server/modules/clientpulse/registerSensitivePaths.ts` at boot.
+// The exports below are thin shims that delegate to the registry so existing
+// callers keep working without code change.
 
-export const SENSITIVE_CONFIG_PATHS: readonly string[] = Object.freeze([
-  // Intervention governance — changes affect every subsequent proposal
-  'interventionDefaults.defaultGateLevel',
-  'interventionDefaults.cooldownHours',
-  'interventionDefaults.maxProposalsPerDayPerSubaccount',
-  'interventionDefaults.maxProposalsPerDayPerOrg',
-  'interventionTemplates', // Phase 4.5+ — templates themselves are sensitive
-  // Scoring / band definitions — changing these reshapes every client's view
-  'healthScoreFactors',
-  'churnRiskSignals',
-  'churnBands',
-  // Staff-activity classification — excluding a user kind hides activity signals
-  'staffActivity.excludedUserKinds',
-  'staffActivity.automationUserResolution',
-  'staffActivity.churnFlagThresholds',
-  // Alert limits — lowering these can mask incidents
-  'alertLimits.maxAlertsPerRun',
-  'alertLimits.maxAlertsPerAccountPerDay',
-  // Data retention — shortening destroys history
-  'dataRetention',
-]);
+import {
+  getAllSensitiveConfigPaths as _getAllSensitivePaths,
+  isSensitiveConfigPath as _isSensitivePathFromRegistry,
+} from '../config/sensitiveConfigPathsRegistry.js';
+
+/**
+ * @deprecated Use
+ *   `import { getAllSensitiveConfigPaths } from '../config/sensitiveConfigPathsRegistry.js'`
+ * directly. Kept as a function-backed alias (not an empty frozen array) so any
+ * remaining direct consumer receives the live registry contents, not a
+ * permanently-empty snapshot. Eligible for deletion after Session 1 grep
+ * confirms zero imports.
+ */
+export const getSensitiveConfigPaths = (): readonly string[] => _getAllSensitivePaths();
 
 /**
  * Is the given dot-path considered sensitive and thus required to route through
- * the action→review queue (B5)?
- *
- * Matches prefix: `interventionDefaults.cooldownHours` matches input
- * `interventionDefaults.cooldownHours` and also any deeper sub-path
- * `interventionDefaults.cooldownHours.anything`.
+ * the action→review queue (B5)? Delegates to the registry — the locked-registry
+ * pattern from spec §3.6 / contract (n).
  */
 export function isSensitiveConfigPath(path: string): boolean {
-  for (const sensitive of SENSITIVE_CONFIG_PATHS) {
-    if (path === sensitive || path.startsWith(sensitive + '.')) return true;
-  }
-  return false;
+  return _isSensitivePathFromRegistry(path);
 }
 
 /**

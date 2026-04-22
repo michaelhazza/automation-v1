@@ -27,13 +27,19 @@ import {
   buildScenarioDetectorIdempotencyKey,
   buildOperatorIdempotencyKey,
 } from './clientPulseInterventionIdempotencyPure.js';
+import { interventionOutcomes } from '../db/schema/interventionOutcomes.js';
+import {
+  pickRecommendedTemplate,
+  type OutcomeAggregate,
+  type RecommendationReason,
+} from './recommendedInterventionPure.js';
 
 export const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
   'crm.send_email',
   'crm.send_sms',
   'crm.create_task',
-  'clientpulse.operator_alert',
+  'notify_operator',
 ] as const;
 
 export type InterventionActionType = typeof INTERVENTION_ACTION_TYPES[number];
@@ -55,6 +61,7 @@ export interface InterventionContext {
   }>;
   cooldownState: { blocked: boolean; reason?: string };
   recommendedActionType: InterventionActionType | null;
+  recommendedReason: 'outcome_weighted' | 'priority_fallback' | 'no_candidates' | null;
 }
 
 export async function buildInterventionContext(params: {
@@ -140,13 +147,48 @@ export async function buildInterventionContext(params: {
     }
   }
 
-  // Derive recommendedActionType: pick the highest-priority template whose
-  // `targets` includes the current band AND has a registered actionType.
-  // Mirrors the proposer's eligibility filter (read-only). Null when the
-  // band is unknown or no template applies — the UI hides the "Recommended"
-  // badge in that case.
-  const recommendedActionType =
-    assessment?.band != null ? pickRecommendedActionType(templates, assessment.band) : null;
+  // Derive recommendedActionType — outcome-weighted when trial data supports it,
+  // priority fallback otherwise. Spec §5.2 pure decision function; this service
+  // performs the DB aggregation and passes the result in.
+  let recommendedActionType: InterventionActionType | null = null;
+  let recommendedReason: RecommendationReason | null = null;
+  if (assessment?.band != null) {
+    const currentBand = assessment.band;
+    const eligibleTemplates = templates.filter((t) => {
+      if (!t.actionType) return false;
+      if (!INTERVENTION_ACTION_TYPES.includes(t.actionType as InterventionActionType)) return false;
+      const targets = t.targets;
+      return (
+        !targets ||
+        targets.length === 0 ||
+        targets.includes(currentBand as 'healthy' | 'watch' | 'atRisk' | 'critical')
+      );
+    });
+    const outcomes = await aggregateOutcomesByTemplate(params.organisationId, currentBand);
+    // Session 2 §5.5 — operators tune via interventionDefaults.minTrialsForOutcomeWeight.
+    const interventionDefaults = await orgConfigService.getInterventionDefaults(params.organisationId);
+    const minTrials = interventionDefaults?.minTrialsForOutcomeWeight ?? 5;
+    const picked = pickRecommendedTemplate({
+      candidates: eligibleTemplates.map((t) => ({
+        slug: t.slug,
+        // Config priority: higher = more important (operator intuition).
+        // Pure fn sort key: lower = first. Negate to bridge.
+        priority: -(t.priority ?? 0),
+        actionType: t.actionType ?? '',
+      })),
+      outcomes,
+      currentBand,
+      minTrialsForOutcomeWeight: minTrials,
+    });
+    recommendedReason = picked.reason;
+    if (picked.pickedSlug) {
+      const matched = eligibleTemplates.find((t) => t.slug === picked.pickedSlug);
+      const chosenActionType = matched?.actionType;
+      if (chosenActionType && INTERVENTION_ACTION_TYPES.includes(chosenActionType as InterventionActionType)) {
+        recommendedActionType = chosenActionType as InterventionActionType;
+      }
+    }
+  }
 
   return {
     subaccount: { id: subaccountId, name: subaccountName },
@@ -165,28 +207,56 @@ export async function buildInterventionContext(params: {
     })),
     cooldownState,
     recommendedActionType,
+    recommendedReason,
   };
 }
 
-function pickRecommendedActionType(
-  templates: Awaited<ReturnType<typeof orgConfigService.getInterventionTemplates>>,
-  band: string,
-): InterventionActionType | null {
-  const eligible = templates
-    .filter((t) => {
-      if (!t.actionType) return false;
-      if (!INTERVENTION_ACTION_TYPES.includes(t.actionType as InterventionActionType)) return false;
-      const targets = t.targets;
-      return !targets || targets.length === 0 || targets.includes(band as 'healthy' | 'watch' | 'atRisk' | 'critical');
+/**
+ * Aggregate `intervention_outcomes` rows by (template_slug, band_before) scoped
+ * to the org and the current band. Drives the outcome-weighted recommendation
+ * per spec §5.3. Templates with no rows return no entry — the pure function
+ * then treats them as sparse and falls back to priority.
+ */
+async function aggregateOutcomesByTemplate(
+  organisationId: string,
+  currentBand: string,
+): Promise<OutcomeAggregate[]> {
+  const rows = await db
+    .select({
+      templateSlug: interventionOutcomes.interventionTypeSlug,
+      bandBefore: interventionOutcomes.bandBefore,
+      bandChanged: interventionOutcomes.bandChanged,
+      executionFailed: interventionOutcomes.executionFailed,
+      deltaHealthScore: interventionOutcomes.deltaHealthScore,
     })
-    .sort((a, b) => {
-      const pa = a.priority ?? 0;
-      const pb = b.priority ?? 0;
-      if (pa !== pb) return pb - pa;
-      return a.slug.localeCompare(b.slug);
-    });
-  const top = eligible[0];
-  return top?.actionType ? (top.actionType as InterventionActionType) : null;
+    .from(interventionOutcomes)
+    .where(
+      and(
+        eq(interventionOutcomes.organisationId, organisationId),
+        eq(interventionOutcomes.bandBefore, currentBand),
+      ),
+    );
+
+  const byKey = new Map<string, { trials: number; improved: number; deltaSum: number; deltaCount: number }>();
+  for (const r of rows) {
+    const key = r.templateSlug;
+    const entry = byKey.get(key) ?? { trials: 0, improved: 0, deltaSum: 0, deltaCount: 0 };
+    entry.trials += 1;
+    if (r.bandChanged && !r.executionFailed) entry.improved += 1;
+    if (typeof r.deltaHealthScore === 'number') {
+      entry.deltaSum += r.deltaHealthScore;
+      entry.deltaCount += 1;
+    }
+    byKey.set(key, entry);
+  }
+
+  return Array.from(byKey.entries()).map(([templateSlug, e]) => ({
+    templateSlug,
+    bandBefore: currentBand,
+    trials: e.trials,
+    improvedCount: e.improved,
+    avgScoreDelta: e.deltaCount > 0 ? e.deltaSum / e.deltaCount : 0,
+  }));
 }
 
 export interface OperatorProposalInput {

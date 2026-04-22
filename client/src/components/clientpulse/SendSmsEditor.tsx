@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../lib/api';
 import type { InterventionContext } from './ProposeInterventionModal';
+import LiveDataPicker from './pickers/LiveDataPicker';
+
+type Contact = { id: string; firstName: string; lastName: string; email: string | null; phone: string | null };
+type FromNumber = { phoneE164: string; capabilities: Array<'sms' | 'voice'>; label: string | null };
 
 interface Props {
   subaccountId: string;
@@ -21,7 +25,9 @@ function segmentCount(body: string): number {
 
 export default function SendSmsEditor({ subaccountId, onCancel, onSubmit }: Props) {
   const [fromNumber, setFromNumber] = useState('');
+  const [fromLabel, setFromLabel] = useState('');
   const [toContactId, setToContactId] = useState('');
+  const [contactLabel, setContactLabel] = useState('');
   const [body, setBody] = useState('');
   const [rationale, setRationale] = useState('');
   const [preview, setPreview] = useState<{ body?: string; unresolved: string[] } | null>(null);
@@ -50,11 +56,41 @@ export default function SendSmsEditor({ subaccountId, onCancel, onSubmit }: Prop
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">From number</label>
-          <input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+61400000000" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px]" />
+          <LiveDataPicker<FromNumber>
+            endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/from-numbers`}
+            preloadOnFocus
+            renderItem={(n) => (
+              <div>
+                <div className="font-semibold text-slate-900">{n.phoneE164}</div>
+                <div className="text-[11px] text-slate-500">{n.label ?? n.capabilities.join(', ')}</div>
+              </div>
+            )}
+            itemKey={(n) => n.phoneE164}
+            itemLabel={(n) => n.phoneE164}
+            onSelect={(n) => { setFromNumber(n.phoneE164); setFromLabel(n.phoneE164); }}
+            placeholder="Pick a from-number…"
+            selectedLabel={fromLabel}
+          />
         </div>
         <div>
-          <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">To (contact ID)</label>
-          <input value={toContactId} onChange={(e) => setToContactId(e.target.value)} placeholder="ct_…" className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px]" />
+          <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">To (contact)</label>
+          <LiveDataPicker<Contact>
+            endpoint={`/api/clientpulse/subaccounts/${subaccountId}/crm/contacts`}
+            renderItem={(c) => (
+              <div>
+                <div className="font-semibold text-slate-900">{c.firstName} {c.lastName}</div>
+                <div className="text-[11px] text-slate-500">{c.phone ?? c.email ?? c.id}</div>
+              </div>
+            )}
+            itemKey={(c) => c.id}
+            itemLabel={(c) => `${c.firstName} ${c.lastName}`.trim()}
+            onSelect={(c) => {
+              setToContactId(c.id);
+              setContactLabel(`${c.firstName} ${c.lastName}`.trim());
+            }}
+            placeholder="Search contacts…"
+            selectedLabel={contactLabel}
+          />
         </div>
       </div>
       <div>

@@ -7,7 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
 import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
-import ConfigAssistantChatPopup from '../components/clientpulse/ConfigAssistantChatPopup';
+import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 
 interface Props { user: User; }
 
@@ -48,7 +48,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   const [subscription, setSubscription] = useState<OrgSubscription | null>(null);
   const [ghlConnected, setGhlConnected] = useState<boolean | null>(null);
   const [proposingFor, setProposingFor] = useState<{ id: string; name: string } | null>(null);
-  const [configAssistantOpen, setConfigAssistantOpen] = useState(false);
+  const { openConfigAssistant } = useConfigAssistantPopup();
 
   useEffect(() => {
     Promise.all([
@@ -81,7 +81,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <GuidedTour />
-      <ConfigAssistantChatPopup open={configAssistantOpen} onClose={() => setConfigAssistantOpen(false)} />
       {proposingFor && (
         <ProposeInterventionModal
           subaccountId={proposingFor.id}
@@ -122,10 +121,10 @@ export default function ClientPulseDashboardPage({ user }: Props) {
           </p>
         </div>
         <button
-          onClick={() => setConfigAssistantOpen(true)}
+          onClick={() => openConfigAssistant()}
           className="shrink-0 px-3 py-1.5 rounded-md text-[12.5px] font-semibold bg-white border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50"
         >
-          Config Assistant
+          Configuration Assistant
         </button>
       </div>
 
@@ -191,25 +190,31 @@ export default function ClientPulseDashboardPage({ user }: Props) {
           ) : (
             <div className="space-y-3">
               {highRisk.slice(0, 5).map((client) => (
-                <button
-                  key={client.id}
-                  onClick={() => setProposingFor({ id: client.id, name: client.name })}
-                  className="w-full flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition"
-                  aria-label={`Propose intervention for ${client.name}`}
-                >
+                <div key={client.id} className="flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition">
                   <div className={`shrink-0 mt-0.5 w-2 h-2 rounded-full mt-1.5 ${
                     client.score >= 80 ? 'bg-red-500' : client.score >= 60 ? 'bg-amber-500' : 'bg-yellow-400'
                   }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13.5px] font-medium text-slate-800 truncate">{client.name}</p>
+                  <Link
+                    to={`/clientpulse/clients/${client.id}`}
+                    className="flex-1 min-w-0"
+                    aria-label={`Open drilldown for ${client.name}`}
+                  >
+                    <p className="text-[13.5px] font-medium text-slate-800 truncate underline-offset-2 hover:underline">{client.name}</p>
                     {client.issues.length > 0 && (
                       <p className="text-[12px] text-slate-400 truncate">{client.issues.slice(0, 2).join(' · ')}</p>
                     )}
-                  </div>
+                  </Link>
                   <span className={`text-[12px] font-bold shrink-0 ${
                     client.score >= 80 ? 'text-red-500' : client.score >= 60 ? 'text-amber-500' : 'text-yellow-500'
                   }`}>{client.score}</span>
-                </button>
+                  <button
+                    onClick={() => setProposingFor({ id: client.id, name: client.name })}
+                    className="shrink-0 text-[11px] text-indigo-600 hover:underline"
+                    aria-label={`Propose intervention for ${client.name}`}
+                  >
+                    Propose
+                  </button>
+                </div>
               ))}
             </div>
           )}

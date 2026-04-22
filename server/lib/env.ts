@@ -62,6 +62,22 @@ const envSchema = z.object({
   PLATFORM_MAX_REQUESTS_PER_MINUTE: z.coerce.number().optional().default(60),
   // Platform default margin multiplier (e.g. 1.30 = 30% markup)
   PLATFORM_MARGIN_MULTIPLIER: z.coerce.number().optional().default(1.30),
+  // llm_requests retention (months). Rows older than this cutoff are moved
+  // to llm_requests_archive by the nightly llm-ledger-archive pg-boss job
+  // (see server/jobs/llmLedgerArchiveJob.ts). Infrastructure tunable, not
+  // a per-org business decision.
+  LLM_LEDGER_RETENTION_MONTHS: z.coerce.number().int().positive().optional().default(12),
+  // llm_inflight_history fire-and-forget persistence (deferred-items brief §6).
+  // Defaults to true; set to 'false' to disable writes without a deploy if the
+  // history table becomes temporarily unhealthy.
+  LLM_INFLIGHT_HISTORY_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .default(true)
+    .transform((v) => v === true || v === 'true' || v === '1'),
+  // Retention window (days) for llm_inflight_history rows. Short by design —
+  // the archive is for recent-incident forensics, not long-term storage.
+  LLM_INFLIGHT_HISTORY_RETENTION_DAYS: z.coerce.number().int().positive().optional().default(7),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill
@@ -106,6 +122,39 @@ const envSchema = z.object({
   PLAYBOOK_STUDIO_GITHUB_TOKEN: z.string().optional(),
   PLAYBOOK_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
   PLAYBOOK_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
+
+  // ── Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md) ──
+  // Retention tiers. P1 ships with rotation disabled; P3 adds the archive job.
+  AGENT_EXECUTION_LOG_HOT_MONTHS: z.coerce.number().int().positive().optional().default(6),
+  AGENT_EXECUTION_LOG_WARM_MONTHS: z.coerce.number().int().positive().optional().default(12),
+  AGENT_EXECUTION_LOG_COLD_YEARS: z.coerce.number().int().positive().optional().default(7),
+  AGENT_EXECUTION_LOG_ARCHIVE_BATCH_SIZE: z.coerce.number().int().positive().optional().default(500),
+  // Per-row hard cap on agent_run_llm_payloads (bytes). Fields truncated
+  // greatest-first; every truncation is recorded in the modifications column.
+  AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(1_048_576),
+  // Per-run hard cap on agent_execution_events. Above cap, non-critical events
+  // drop + the one-shot run.event_limit_reached signal is emitted. Critical
+  // events (run lifecycle, LLM call bookends, handoff) bypass.
+  AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(10_000),
+  // Grace window (days) after a run's archive is restored during which the
+  // rotation job skips re-rotation. P3.1 wires this in when the restore
+  // trigger endpoint lands.
+  AGENT_EXECUTION_LOG_RESTORE_GRACE_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(30),
 });
 
 export const env = envSchema.parse(process.env);

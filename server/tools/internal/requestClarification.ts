@@ -18,6 +18,7 @@ import { db } from '../../db/index.js';
 import { agentRuns } from '../../db/schema/index.js';
 import { emitAgentRunUpdate } from '../../websocket/emitters.js';
 import { requestClarification } from '../../services/clarificationService.js';
+import { tryEmitAgentEvent } from '../../services/agentExecutionEventEmitter.js';
 
 interface RequestClarificationInput {
   question: string;
@@ -61,6 +62,21 @@ export async function executeRequestClarification(
     contextSnippet: parsed.contextSnippet ?? null,
     urgency: parsed.urgency,
     suggestedAnswers: parsed.suggestedAnswers,
+  });
+
+  // Live Agent Execution Log — emit clarification.requested event. Fire-
+  // and-forget; the log-table write must never block the agent loop.
+  tryEmitAgentEvent({
+    runId: context.runId,
+    organisationId: context.organisationId,
+    subaccountId: context.subaccountId ?? null,
+    sourceService: 'requestClarification',
+    payload: {
+      eventType: 'clarification.requested',
+      critical: false,
+      question: parsed.question,
+      awaitingSince: new Date().toISOString(),
+    },
   });
 
   // 2. For blocking urgency, pause the run. The agent-run status enum does

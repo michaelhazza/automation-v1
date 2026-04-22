@@ -2,12 +2,15 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import api from '../../lib/api';
 import Modal from '../Modal';
 import MergeReviewBlock from './MergeReviewBlock';
+import RestoreBackupControl, { type RestoreOutcome } from './RestoreBackupControl';
+import RestoreOutcomeBanner from './RestoreOutcomeBanner';
 import type {
   AnalysisJob,
   AnalysisResult,
   AgentProposal,
   AvailableSystemAgent,
   ParsedCandidate,
+  BackupMetadata,
 } from './SkillAnalyzerWizard';
 import { evaluateApprovalState } from './mergeTypes';
 
@@ -16,6 +19,10 @@ interface Props {
   results: AnalysisResult[];
   onResultsUpdated: (results: AnalysisResult[]) => void;
   onContinue: () => void;
+  backup: BackupMetadata | null;
+  onRestoreOutcome: (outcome: RestoreOutcome) => void;
+  restoreOutcome: RestoreOutcome | null;
+  onDismissRestoreOutcome: () => void;
 }
 
 type Classification = 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
@@ -698,7 +705,7 @@ function ResultSection({
   );
 }
 
-export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdated, onContinue }: Props) {
+export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdated, onContinue, backup, onRestoreOutcome, restoreOutcome, onDismissRestoreOutcome }: Props) {
   const CLASSIFICATIONS: Classification[] = ['PARTIAL_OVERLAP', 'IMPROVEMENT', 'DISTINCT', 'DUPLICATE'];
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkInfo, setBulkInfo] = useState<string | null>(null);
@@ -852,6 +859,14 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           Continue to Execute →{approvedCount > 0 && ` (${approvedCount})`}
         </button>
       </div>
+
+      {restoreOutcome && (
+        <RestoreOutcomeBanner outcome={restoreOutcome} onDismiss={onDismissRestoreOutcome} />
+      )}
+
+      {backup?.status === 'active' && (
+        <RestoreBackupControl jobId={job.id} onOutcome={onRestoreOutcome} variant="header" />
+      )}
 
       {bulkError && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">

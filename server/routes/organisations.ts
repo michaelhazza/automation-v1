@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
-import { organisationService } from '../services/organisationService.js';
+import {
+  organisationService,
+  createOrganisationFromTemplate,
+} from '../services/organisationService.js';
 import { parsePositiveInt, validateBody } from '../middleware/validate.js';
 import { createOrganisationBody, updateOrganisationBody } from '../schemas/organisations.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -17,9 +20,26 @@ router.get('/api/organisations', authenticate, requireSystemAdmin, asyncHandler(
 }));
 
 router.post('/api/organisations', authenticate, requireSystemAdmin, validateBody(createOrganisationBody, 'warn'), asyncHandler(async (req, res) => {
-  const { name, slug, plan, adminEmail, adminFirstName, adminLastName } = req.body;
+  const { name, slug, plan, adminEmail, adminFirstName, adminLastName, systemTemplateId, templateSlug } = req.body;
   if (!name || !slug || !plan || !adminEmail || !adminFirstName || !adminLastName) {
     res.status(400).json({ error: 'Validation failed' });
+    return;
+  }
+  // Session 2 §11.1.4 — when the caller supplies a systemTemplateId, route
+  // through createOrganisationFromTemplate so the applied_system_template_id
+  // stamp + config_history creation-event audit row land atomically.
+  if (typeof systemTemplateId === 'string' && systemTemplateId.length > 0) {
+    const { organisationId } = await createOrganisationFromTemplate({
+      name,
+      slug,
+      plan,
+      orgAdminEmail: adminEmail,
+      orgAdminFirstName: adminFirstName,
+      orgAdminLastName: adminLastName,
+      systemTemplateId,
+      templateSlug: typeof templateSlug === 'string' ? templateSlug : undefined,
+    });
+    res.status(201).json({ id: organisationId, systemTemplateId });
     return;
   }
   const result = await organisationService.createOrganisation({ name, slug, plan, adminEmail, adminFirstName, adminLastName });

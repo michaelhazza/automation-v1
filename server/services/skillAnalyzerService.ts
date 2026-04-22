@@ -4,8 +4,9 @@ import { db } from '../db/index.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
-import { withBackoff } from '../lib/withBackoff.js';
-import anthropicAdapter from './providers/anthropicAdapter.js';
+import { routeCall } from './llmRouter.js';
+import { ParseFailureError } from '../lib/parseFailureError.js';
+import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
 import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
@@ -1850,11 +1851,6 @@ export async function getJobById(
   return rows[0] ?? null;
 }
 
-/** Delete all results for a job (idempotent retry support). */
-export async function clearResultsForJob(jobId: string): Promise<void> {
-  await db.delete(skillAnalyzerResults).where(eq(skillAnalyzerResults.jobId, jobId));
-}
-
 /** Batch insert results for a job. Splits into 100-row batches. */
 export async function insertResults(
   rows: (typeof skillAnalyzerResults.$inferInsert)[]
@@ -1870,6 +1866,53 @@ export async function insertSingleResult(
   row: typeof skillAnalyzerResults.$inferInsert,
 ): Promise<void> {
   await db.insert(skillAnalyzerResults).values(row);
+}
+
+/** List already-written result rows for a job as a minimal projection.
+ *  Returned for crash-resume in Stage 5: the job handler re-invokes after a
+ *  worker crash, and any candidate_index already present in this list has had
+ *  its LLM classification paid for and persisted — we must not re-call the
+ *  provider for it. Only the fields downstream stages actually read are
+ *  selected (candidateIndex + classification drive Stage 7 agent-propose and
+ *  Stage 8 agent-proposal backfill).
+ *
+ *  Deduplicated by candidateIndex at the query boundary because
+ *  skill_analyzer_results has no UNIQUE(job_id, candidate_index) constraint.
+ *  Pre-PR (when Stage 1 called clearResultsForJob on every retry) a single
+ *  jobId could end up with two rows for the same index; callers that iterate
+ *  this list must see each index exactly once so downstream reconstruction
+ *  produces a single deterministic classifiedResults entry per candidate.
+ *
+ *  Ordering matters for determinism. We sort by candidate_index ASC, then
+ *  created_at DESC, then id DESC as a final tiebreaker — the first row
+ *  encountered for each candidate_index wins, so "latest write wins" semantics
+ *  apply. Without ORDER BY, Postgres returns rows in storage order, which is
+ *  not stable across vacuum / hot-update boundaries and can flip the chosen
+ *  row between runs. */
+export async function listResultIndicesForJob(
+  jobId: string,
+): Promise<Array<{ candidateIndex: number; classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT' }>> {
+  const rows = await db
+    .select({
+      candidateIndex: skillAnalyzerResults.candidateIndex,
+      classification: skillAnalyzerResults.classification,
+    })
+    .from(skillAnalyzerResults)
+    .where(eq(skillAnalyzerResults.jobId, jobId))
+    .orderBy(
+      skillAnalyzerResults.candidateIndex,
+      desc(skillAnalyzerResults.createdAt),
+      desc(skillAnalyzerResults.id),
+    );
+
+  const seen = new Set<number>();
+  const deduped: typeof rows = [];
+  for (const row of rows) {
+    if (seen.has(row.candidateIndex)) continue;
+    seen.add(row.candidateIndex);
+    deduped.push(row);
+  }
+  return deduped;
 }
 
 /** Record that a slug's LLM classification is in-flight.
@@ -2040,6 +2083,7 @@ async function classifySingleCandidate(
   matchedLib: LibrarySkillSummary,
   similarityScore: number,
   jobId: string,
+  organisationId: string,
 ): Promise<{
   result: ClassificationOutcome;
   classificationFailed: boolean;
@@ -2055,43 +2099,39 @@ async function classifySingleCandidate(
   let parsed: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
   let apiError: unknown = undefined;
 
-  const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
-
   try {
-    parsed = await withBackoff(
-      async () => {
-        const response = await anthropicAdapter.call({
-          model: 'claude-sonnet-4-6',
-          system,
-          messages: [{ role: 'user', content: userMessage }],
-          maxTokens: 8192,
-          temperature: 0.1,
-        });
-        const result = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-        if (result === null) throw PARSE_FAILURE;
-        return result;
+    // Route through llmRouter so this service-layer classify call shows up
+    // in llm_requests alongside the job-layer sites. The router handles
+    // retries on provider errors + parse failures (via postProcess) via
+    // its fallback loop; the outer withBackoff from before is retired.
+    const response = await routeCall({
+      system,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 8192,
+      temperature: 0.1,
+      context: {
+        organisationId,
+        sourceType:         'analyzer',
+        sourceId:           jobId,
+        featureTag:         'skill-analyzer-service-classify',
+        taskType:           'general',
+        systemCallerPolicy: 'bypass_routing',
+        provider:           'anthropic',
+        model:              'claude-sonnet-4-6',
       },
-      {
-        label: 'skill-classify-retry',
-        maxAttempts: 3,
-        correlationId: jobId,
-        runId: jobId,
-        isRetryable: (err: unknown) => {
-          if (err === PARSE_FAILURE) return true;
-          const e = err as { statusCode?: number; code?: string };
-          if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-          return (
-            e?.statusCode === 429 ||
-            e?.statusCode === 503 ||
-            e?.statusCode === 529 ||
-            e?.code === 'PROVIDER_UNAVAILABLE'
-          );
-        },
+      postProcess: (content: string) => {
+        const res = skillAnalyzerServicePure.parseClassificationResponseWithMerge(content);
+        if (res === null) {
+          throw new ParseFailureError({ rawExcerpt: truncateUtf8Safe(content, 2048) });
+        }
       },
-    );
+    });
+    parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
   } catch (err) {
     parsed = null;
-    apiError = err === PARSE_FAILURE ? undefined : err;
+    // Parse failures are not "API errors" for the failure-reason derivation;
+    // the router has already recorded the ledger row with status='parse_failure'.
+    apiError = (err as { code?: string })?.code === 'CLASSIFICATION_PARSE_FAILURE' ? undefined : err;
   }
 
   const classificationFailed = parsed === null;
@@ -2161,7 +2201,7 @@ export async function retryClassification(
   };
 
   const { result: classification, classificationFailed, classificationFailureReason } =
-    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId);
+    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId, organisationId);
 
   const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
@@ -2259,9 +2299,9 @@ export const skillAnalyzerService = {
   bulkRetryFailedClassifications,
   // Internal — used by job handler only
   getJobById,
-  clearResultsForJob,
   insertResults,
   insertSingleResult,
+  listResultIndicesForJob,
   markSkillInFlight,
   unmarkSkillInFlight,
   updateResultAgentProposals,

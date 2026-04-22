@@ -1,15 +1,28 @@
 import { env } from '../../lib/env.js';
 import type { LLMProviderAdapter, ProviderCallParams, ProviderResponse } from './types.js';
+import { assertCalledFromRouter } from './callerAssert.js';
+import { mapAbortError, mapHttp499, isAbortError } from './adapterErrors.js';
 
 // ---------------------------------------------------------------------------
 // Anthropic provider adapter
 // Wraps the existing fetch-based call pattern from llmService.ts
+//
+// Rev §6 observability:
+//   - `params.signal` is threaded through fetch so AbortController from the
+//     caller actually terminates the underlying HTTP request (previously a
+//     Promise.race() abandoned the fetch but didn't cancel it — see §2.3).
+//   - AbortError is mapped to 499 CLIENT_DISCONNECTED with abortReason
+//     preserved (caller_timeout vs caller_cancel per AbortSignal.reason).
+//   - HTTP 499 from upstream (rare for direct Anthropic, possible via proxies)
+//     maps to the same error shape with abortReason = null.
 // ---------------------------------------------------------------------------
 
 const anthropicAdapter: LLMProviderAdapter = {
   provider: 'anthropic',
 
   async call(params: ProviderCallParams): Promise<ProviderResponse> {
+    assertCalledFromRouter();
+
     const apiKey = env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'anthropic', message: 'ANTHROPIC_API_KEY is not set' };
@@ -48,15 +61,22 @@ const anthropicAdapter: LLMProviderAdapter = {
       body.tools = toolsCopy;
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+        signal: params.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) throw mapAbortError('anthropic', params.signal);
+      throw err;
+    }
 
     // Extract provider request ID from headers (invaluable for Anthropic support tickets)
     const providerRequestId = response.headers.get('request-id') ?? response.headers.get('x-request-id') ?? '';
@@ -68,6 +88,10 @@ const anthropicAdapter: LLMProviderAdapter = {
         errorDetail = err?.error?.message ?? response.statusText;
       } catch {
         errorDetail = response.statusText;
+      }
+
+      if (response.status === 499) {
+        throw mapHttp499('anthropic', errorDetail);
       }
 
       if (response.status === 503 || response.status === 529) {

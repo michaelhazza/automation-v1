@@ -184,6 +184,15 @@ export const agentRuns = pgTable(
     actingAsUserId: uuid('acting_as_user_id').references(() => users.id),
     delegationGrantId: uuid('delegation_grant_id'),
 
+    // Live Agent Execution Log (migration 0192). `nextEventSeq` is the
+    // atomic per-run counter for agent_execution_events; allocation is a
+    // single `UPDATE ... RETURNING next_event_seq` so there's no MAX scan
+    // or lock on the events table. `eventLimitReachedEmitted` is the
+    // one-shot flag that gates the exactly-once `run.event_limit_reached`
+    // signal event — see spec §4.1.
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+    eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

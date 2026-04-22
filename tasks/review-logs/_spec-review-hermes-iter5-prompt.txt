@@ -1,0 +1,31 @@
+You are reviewing a markdown spec document for the Automation OS codebase. This is iteration 5 — the FINAL iteration per the lifetime cap. Iterations 1-4 have applied cumulative improvements. Key cumulative state entering iteration 5:
+
+- PlaybookRunDetailPage dropped from Phase A entirely (deferred to §11.4 #10).
+- `extractRunInsights` signature now: `(runId, agentId, organisationId, subaccountId, runSummary, outcome, options?)` where `options = { taskSlug?, overrides? }`.
+- `outcomeLearningService` passes `runResultStatus='partial'` + `overrides={ isUnverified: false, provenanceConfidence: 0.7 }` to preserve pre-Phase-B retrieval behaviour for human-curated lessons.
+- `runCostBreaker` now exports two sibling pairs: `assertWithinRunBudget` + `getRunCostCents` (unchanged, used by Slack/Whisper) and new `assertWithinRunBudgetFromLedger` + `getRunCostCentsFromLedger` (new, used by LLM router; reads `llm_requests` directly to avoid `cost_aggregates` rollup lag).
+- `runResultStatus` write-once enforced by SQL-level `WHERE run_result_status IS NULL` on each atomic UPDATE; no service-boundary helper.
+- §4 inventory lock exempts generated artifacts under `tasks/`.
+- Frontend + API-contract test framing deviations (`RunCostPanel.test.tsx`, `llmUsage.test.ts`) are explicitly HITL-approved with a documented acknowledgement section at §9 lines ~891-896.
+- `trajectoryPassed` is a reserved forward-compatible slot, always `null` in Phase B; §11.4 #6 is the deferred verdict-persistence spec.
+
+This is the final review pass. Do not raise:
+- Findings already applied in iterations 1-4 (if the spec now reads correctly, don't re-raise).
+- Framing-posture suggestions (feature flags, staged rollouts, more frontend/E2E tests beyond the already-HITL-approved two surfaces, new abstractions that duplicate existing primitives).
+- Directional changes (scope adjustments, phase re-ordering, architecture pivots) — those would pause for HITL and the cap is exhausted after this iteration.
+
+Focus on finding any remaining MECHANICAL issues only:
+1. New contradictions introduced by the iteration-4 edits.
+2. File-inventory drift from the latest additions (new impure test file added, new `runCostBreaker` sibling exports added).
+3. Load-bearing claims without contracts.
+4. Stale language / cross-reference drift.
+5. Last-pass polish: is the spec internally self-consistent and implementation-ready?
+
+For each finding: (a) spec section or line range, (b) one-sentence description, (c) concrete mechanical fix. Severity P1 / P2 / P3.
+
+If the spec is clean, say so explicitly.
+
+Spec contents follow.
+
+---
+

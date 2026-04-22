@@ -12,6 +12,12 @@ export interface ExecutionResult {
   error?: string;
   errorCode?: string;
   durationMs?: number;
+  /**
+   * When `false` (or omitted) the execution engine marks the action terminally failed.
+   * When `true` the engine re-enqueues per `action.maxRetries` with exponential backoff.
+   * Populated by `apiAdapter` after classifying the provider response (ClientPulse Session 2).
+   */
+  retryable?: boolean;
 }
 
 export interface ExecutionAdapter {

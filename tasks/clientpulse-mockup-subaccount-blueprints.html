@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Subaccount Blueprints — org admin (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif; background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55; }
+  .annot-banner { background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%); color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 34px); }
+  .sidebar { background: #1e1f24; color: #cbd5e1; padding: 20px 0; }
+  .sidebar .brand { padding: 0 20px 20px; border-bottom: 1px solid #2d3038; }
+  .sidebar .brand .name { font-size: 14px; font-weight: 700; color: #fff; }
+  .sidebar .brand .role { font-size: 11px; color: #6366f1; margin-top: 3px; }
+  .sidebar .nav-group { padding: 14px 12px 6px; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+  .sidebar .nav-item { padding: 8px 20px; font-size: 13px; color: #cbd5e1; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+  .sidebar .nav-item:hover { background: #2a2c33; color: #fff; }
+  .sidebar .nav-item.active { background: #4338ca; color: #fff; }
+  .main { padding: 28px 36px; overflow-y: auto; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; gap: 16px; }
+  .page-header h1 { font-size: 22px; font-weight: 700; color: #111827; }
+  .page-header .subtitle { font-size: 13px; color: #6b7280; margin-top: 4px; max-width: 720px; }
+  .btn-primary { background: #4338ca; color: #fff; border: 0; padding: 9px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary { background: #fff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+  .info-banner { background: #eef2ff; border: 1px solid #c7d2fe; padding: 14px 18px; border-radius: 8px; margin-bottom: 22px; display: flex; gap: 14px; }
+  .info-banner .icon { font-size: 22px; }
+  .info-banner h4 { font-size: 13px; font-weight: 700; color: #1e1b4b; margin-bottom: 4px; }
+  .info-banner p { font-size: 12px; color: #4338ca; line-height: 1.55; }
+  .actions-row { display: flex; gap: 10px; margin-bottom: 18px; align-items: center; }
+  .search-input { padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 13px; width: 280px; }
+  .table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f9fafb; text-align: left; padding: 10px 16px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 14px 16px; font-size: 13px; color: #374151; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: 0; }
+  tr.default-row td { background: #fef9c3; }
+  tr.default-row td:first-child::before { content: '⭐ '; }
+  .name-cell { font-weight: 600; color: #111827; }
+  .name-cell .desc { display: block; font-weight: 400; color: #9ca3af; font-size: 11.5px; margin-top: 2px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10.5px; font-weight: 600; }
+  .badge-system { background: #ede9fe; color: #5b21b6; }
+  .badge-paperclip { background: #ffedd5; color: #9a3412; }
+  .badge-manual { background: #e0e7ff; color: #3730a3; }
+  .badge-default { background: #fde68a; color: #78350f; }
+  .row-actions { display: flex; gap: 8px; }
+  .link-btn { background: transparent; color: #4338ca; border: 0; padding: 0; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .link-btn:hover { text-decoration: underline; }
+  .link-btn.danger { color: #dc2626; }
+  .empty-state { padding: 60px 20px; text-align: center; color: #9ca3af; }
+  .footer-explainer { margin-top: 22px; padding: 14px 18px; background: #fff; border: 1px dashed #d1d5db; border-radius: 8px; font-size: 12.5px; color: #6b7280; line-height: 1.6; }
+  .footer-explainer strong { color: #374151; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · /agents/blueprints (was /agents/templates) · <strong>Phase A rename</strong> "Subaccount Blueprints" · Org-admin facing · Per-org reusable agent-hierarchy setups for new subaccounts · After Phase A, blueprints carry ONLY the agent hierarchy (the operational config moves to a separate org-level entity edited via ClientPulse Settings + Configuration Assistant)</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="name">Smith Dental Agency</div>
+      <div class="role">Organisation Admin</div>
+    </div>
+    <div class="nav-group">Workspace</div>
+    <div class="nav-item">📊 ClientPulse</div>
+    <div class="nav-item">⚙️ ClientPulse Settings</div>
+    <div class="nav-item">🤖 Agents</div>
+    <div class="nav-item active">🧱 Subaccount Blueprints</div>
+    <div class="nav-item">🛠️ Skills</div>
+    <div class="nav-item">📦 Subaccounts</div>
+    <div class="nav-item">🔗 Integrations</div>
+    <div class="nav-item">📜 Config History</div>
+    <div class="nav-item">⚙️ Settings</div>
+    <div class="nav-group">Tools</div>
+    <div class="nav-item">🤖 Configuration Assistant</div>
+  </aside>
+
+  <main class="main">
+    <div class="breadcrumb">Workspace · <strong style="color:#111827;">Subaccount Blueprints</strong></div>
+    <div class="page-header">
+      <div>
+        <h1>Subaccount Blueprints</h1>
+        <p class="subtitle">Reusable agent-hierarchy setups for your subaccounts. When you create a new subaccount, the default blueprint is applied — its agents, links, schedules, and skill assignments are seeded automatically. Pick from a system-admin-published Organisation Template to bootstrap, or author your own from scratch.</p>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-secondary">＋ Adopt from Organisation Template</button>
+        <button class="btn-primary">＋ New blueprint</button>
+      </div>
+    </div>
+
+    <div class="info-banner">
+      <div class="icon">💡</div>
+      <div>
+        <h4>What changed in Phase A</h4>
+        <p>Blueprints used to also carry your org-level operational config (scoring weights, churn bands, intervention defaults). After the platform cleanup, those settings live on the <strong>organisation</strong> itself — edit them under <em>ClientPulse Settings</em> or via the <em>Configuration Assistant</em>. Blueprints are now strictly about agent hierarchy + which operational defaults to seed when a new subaccount is created.</p>
+      </div>
+    </div>
+
+    <div class="actions-row">
+      <input class="search-input" placeholder="Search blueprints…" />
+      <span style="font-size:12px;color:#6b7280;margin-left:auto;">3 blueprints · 1 default</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Source</th>
+            <th>Agents</th>
+            <th>Default for new subaccounts</th>
+            <th>Last used</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="default-row">
+            <td class="name-cell">Standard ClientPulse blueprint
+              <span class="desc">Adopted from "GHL Agency Intelligence" v3 · Portfolio Health agent + 10 sub-agents</span></td>
+            <td><span class="badge badge-system">From system</span></td>
+            <td>11</td>
+            <td><span class="badge badge-default">Default</span></td>
+            <td>2 days ago</td>
+            <td class="row-actions">
+              <button class="link-btn">View</button>
+              <button class="link-btn">Duplicate</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="name-cell">Lightweight onboarding blueprint
+              <span class="desc">For 1-3 staff sub-accounts · skips the staff-activity classifier · Custom-authored</span></td>
+            <td><span class="badge badge-manual">Manual</span></td>
+            <td>5</td>
+            <td><button class="link-btn">Set as default</button></td>
+            <td>3 weeks ago</td>
+            <td class="row-actions">
+              <button class="link-btn">View</button>
+              <button class="link-btn">Duplicate</button>
+              <button class="link-btn danger">Archive</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="name-cell">Restaurant pilot v2 (paperclip)
+              <span class="desc">Imported from a Paperclip manifest · for restaurant-vertical sub-accounts</span></td>
+            <td><span class="badge badge-paperclip">Paperclip</span></td>
+            <td>7</td>
+            <td><button class="link-btn">Set as default</button></td>
+            <td>Never used</td>
+            <td class="row-actions">
+              <button class="link-btn">View</button>
+              <button class="link-btn">Duplicate</button>
+              <button class="link-btn danger">Archive</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer-explainer">
+      <strong>Mental model.</strong> Three levels of templating, all separate after the Phase A cleanup:
+      <br>① <strong>Organisation Template</strong> (system admin) — defines the archetype of an org. Adopted once at signup.
+      <br>② <strong>Subaccount Blueprint</strong> (this page) — defines how a new subaccount's agents are wired up. Per-org, reusable.
+      <br>③ <strong>ClientPulse Settings</strong> (org admin) — the runtime operational config (weights, bands, intervention defaults, alert limits) that applies across all subaccounts in your org. Edited via typed editors or the Configuration Assistant.
+    </div>
+
+  </main>
+</div>
+</body>
+</html>

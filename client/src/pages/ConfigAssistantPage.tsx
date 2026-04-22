@@ -4,6 +4,9 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import ConfigPlanPreview, { type ConfigPlan } from '../components/ConfigPlanPreview';
+import ConfigUpdateToolResult, {
+  parseConfigUpdateToolResult,
+} from '../components/config-assistant/toolResultRenderers/ConfigUpdateToolResult';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -258,7 +261,17 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
 
         setAgent(configAgent);
 
-        const { data: convs } = await api.get<Conversation[]>(`/api/agents/${configAgent.id}/conversations`);
+        // Spec contract (k) — when the page loads inside the popup iframe,
+        // the popup appends `updatedAfter=<iso>` to enforce the 15-minute
+        // resume window. Forward it to the listing endpoint; the full-page
+        // route (no popup) omits it and sees all conversations as before.
+        const urlParams = new URLSearchParams(window.location.search);
+        const updatedAfter = urlParams.get('updatedAfter');
+        const listUrl = updatedAfter
+          ? `/api/agents/${configAgent.id}/conversations?updatedAfter=${encodeURIComponent(updatedAfter)}&order=updated_desc&limit=1`
+          : `/api/agents/${configAgent.id}/conversations`;
+
+        const { data: convs } = await api.get<Conversation[]>(listUrl);
         setConversations(convs);
         if (convs.length > 0) {
           setActiveConvId(convs[0].id);
@@ -418,6 +431,25 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
 
   const visibleMessages = messages.filter((m) => m.role !== 'tool_result');
 
+  // Session 2 §6.3 — surface the latest config_update_organisation_config
+  // tool result inline with dual-path UX copy (applied inline vs queued for
+  // review vs error). Non-matching tool_result shapes stay filtered.
+  const latestConfigUpdateResult = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== 'tool_result' || !m.content) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(m.content);
+      } catch {
+        continue;
+      }
+      const kind = parseConfigUpdateToolResult(parsed).kind;
+      if (kind !== 'unknown') return { id: m.id, result: parsed };
+    }
+    return null;
+  })();
+
   return (
     <div className="flex flex-col bg-slate-50 overflow-hidden h-[calc(100vh-64px)]">
       {/* Header */}
@@ -545,6 +577,14 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
                     </div>
                   </div>
                 ))}
+
+                {/* Session 2 §6.3 — dual-path UX renderer for the latest
+                    config_update_organisation_config tool result. */}
+                {latestConfigUpdateResult && (
+                  <div key={latestConfigUpdateResult.id} className="self-start max-w-[75%]">
+                    <ConfigUpdateToolResult result={latestConfigUpdateResult.result} />
+                  </div>
+                )}
 
                 {/* Plan preview overlay */}
                 {activePlan && (

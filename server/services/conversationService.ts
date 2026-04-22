@@ -1,4 +1,4 @@
-import { eq, and, desc, asc } from 'drizzle-orm';
+import { eq, and, desc, asc, gte } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agents, agentConversations, agentMessages } from '../db/schema/index.js';
 import { isNull } from 'drizzle-orm';
@@ -19,7 +19,17 @@ import { emitConversationUpdate } from '../websocket/emitters.js';
 // ---------------------------------------------------------------------------
 
 export const conversationService = {
-  async listConversations(agentId: string, userId: string, organisationId: string, subaccountId?: string | null) {
+  async listConversations(
+    agentId: string,
+    userId: string,
+    organisationId: string,
+    subaccountId?: string | null,
+    options: {
+      updatedAfter?: Date;
+      order?: 'updated_desc' | 'updated_asc' | 'created_desc' | 'created_asc';
+      limit?: number;
+    } = {},
+  ) {
     // Verify agent
     const [agent] = await db
       .select()
@@ -33,13 +43,25 @@ export const conversationService = {
     ];
     // M-8: filter by subaccountId when provided (new conversations always have it set)
     if (subaccountId) filters.push(eq(agentConversations.subaccountId, subaccountId));
+    // Session 1 / spec §5.10 — optional filter for the Configuration Assistant
+    // popup's 15-minute resume window.
+    if (options.updatedAfter) filters.push(gte(agentConversations.updatedAt, options.updatedAfter));
 
-    const rows = await db
-      .select()
-      .from(agentConversations)
-      .where(and(...filters))
-      .orderBy(desc(agentConversations.updatedAt));
+    // Session 1 / spec §5.10 — optional ordering + limit. Default matches the
+    // pre-Session-1 behaviour (updated_desc, no limit).
+    const order = options.order ?? 'updated_desc';
+    const orderByExpr =
+      order === 'updated_desc' ? desc(agentConversations.updatedAt) :
+      order === 'updated_asc' ? asc(agentConversations.updatedAt) :
+      order === 'created_desc' ? desc(agentConversations.createdAt) :
+      asc(agentConversations.createdAt);
+    // Defence-in-depth cap matching spec §5.10 — 50.
+    const limit = options.limit ? Math.min(Math.max(1, options.limit), 50) : undefined;
 
+    let q = db.select().from(agentConversations).where(and(...filters)).orderBy(orderByExpr).$dynamic();
+    if (limit !== undefined) q = q.limit(limit);
+
+    const rows = await q;
     return rows;
   },
 

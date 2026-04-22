@@ -87,6 +87,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'LLM request/response records — includes full prompts and completions.',
   },
   {
+    tableName: 'llm_requests_archive',
+    schemaFile: 'llmRequestsArchive.ts',
+    policyMigration: '0188_llm_requests_archive.sql',
+    rationale: 'Retention archive for llm_requests — same tenant-isolation policy; rows move in from the nightly llm-ledger-archive job.',
+  },
+  {
     tableName: 'audit_events',
     schemaFile: 'auditEvents.ts',
     policyMigration: '0081_rls_llm_requests_audit.sql',
@@ -407,6 +413,25 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'clientPulseCanonicalTables.ts',
     policyMigration: '0177_clientpulse_integration_fingerprints.sql',
     rationale: 'Novel fingerprint observations awaiting operator triage — leak reveals unclassified third-party activity per sub-account.',
+  },
+  // 0192 — Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md)
+  {
+    tableName: 'agent_execution_events',
+    schemaFile: 'agentExecutionEvents.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Durable per-run agent execution timeline — prompt assembly, memory retrieval, rule evaluation, LLM call start/complete, skill invocation. Payload contains reasoning excerpts, memory excerpts, and tool inputs that can hold PII + operational secrets.',
+  },
+  {
+    tableName: 'agent_run_prompts',
+    schemaFile: 'agentRunPrompts.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Fully-assembled system + user prompt per run assembly — contains the client knowledge base, memory-block composition, and task context that the LLM saw. Leak reveals an org\'s entire agent prompt surface.',
+  },
+  {
+    tableName: 'agent_run_llm_payloads',
+    schemaFile: 'agentRunLlmPayloads.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Full request + response body per LLM ledger row — post-redaction, but still carries message history, tool inputs, and provider responses. Payload-read is gated tighter than view-log (AGENTS_EDIT), but RLS is still the last-resort tenant boundary.',
   },
 ];
 

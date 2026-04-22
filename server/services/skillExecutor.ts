@@ -18,7 +18,7 @@ import { actionService, buildActionIdempotencyKey } from './actionService.js';
 import { executionLayerService, registerAdapter } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
-import { getActionDefinition } from '../config/actionRegistry.js';
+import { getActionDefinition, resolveActionSlug } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
@@ -48,8 +48,14 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 
-registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) => {
+registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
+  // actionRegistry §1.3: every inbound action-slug surface MUST normalise via
+  // resolveActionSlug so legacy slugs (e.g. config_update_hierarchy_template,
+  // clientpulse.operator_alert) route to the current canonical handler. Without
+  // this call, any review-gated action queued before the Session 1 renames is
+  // silently dropped at the worker dispatch switch.
+  const actionType = resolveActionSlug(rawActionType);
   switch (actionType) {
     case 'create_page': return executeCreatePage(payload, context);
     case 'update_page': return executeUpdatePage(payload, context);
@@ -68,13 +74,13 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'propose_doc_update': return executeDocProposalApproved(payload, context);
     case 'write_docs': return executeWriteDocsApproved(payload, context);
 
-    // ── Phase 4.5 — config_update_hierarchy_template approval-execute ──────
+    // ── Phase 4.5 — config_update_organisation_config approval-execute ─────
     // When the operator approves a sensitive-path config change, re-validate
     // (drift check) and commit the merge + config_history row (B5 ship gate).
-    case 'config_update_hierarchy_template': {
-      const { executeApprovedHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
+    case 'config_update_organisation_config': {
+      const { executeApprovedOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
       const actionId = (ctx as unknown as { actionId?: string }).actionId ?? '';
-      const result = await executeApprovedHierarchyTemplateConfigUpdate({
+      const result = await executeApprovedOrganisationConfigUpdate({
         actionId,
         organisationId: context.organisationId,
       });
@@ -84,12 +90,23 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
       return result;
     }
 
-    // ── Phase 4 — clientpulse.operator_alert approval-execute ──────────────
-    // Fanout (in-app, email, slack) is a future phase. For now, acknowledge
-    // successful approval so the action reaches status=completed and cooldown
-    // semantics are preserved. The payload is validated at proposal time.
-    case 'clientpulse.operator_alert':
-      return { queued: true, channels: payload.channels };
+    // ── Session 2 — notify_operator fan-out (spec §7.3) ──────────────────
+    case 'notify_operator': {
+      const fanoutModule = await import('./notifyOperatorFanoutService.js');
+      const alertPayload = payload as unknown as import('./notifyOperatorFanoutService.js').OperatorAlertPayload;
+      const actionId = (context as unknown as { actionId?: string }).actionId ?? '';
+      const fanoutResults = await fanoutModule.fanoutOperatorAlert({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        actionId,
+        payload: alertPayload,
+      });
+      return {
+        queued: true,
+        channels: alertPayload.channels,
+        fanoutResults,
+      };
+    }
 
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
@@ -1352,19 +1369,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'crm.create_task': async (input, context) => {
     return proposeReviewGatedAction('crm.create_task', input, context);
   },
-  'clientpulse.operator_alert': async (input, context) => {
-    return proposeReviewGatedAction('clientpulse.operator_alert', input, context);
+  notify_operator: async (input, context) => {
+    return proposeReviewGatedAction('notify_operator', input, context);
   },
 
   // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
-  // The skill calls applyHierarchyTemplateConfigUpdate directly rather than
+  // The skill calls applyOrganisationConfigUpdate directly rather than
   // routing through proposeReviewGatedAction — the service itself owns the
   // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
-  config_update_hierarchy_template: async (input, context) => {
-    const { applyHierarchyTemplateConfigUpdate } = await import('./configUpdateHierarchyTemplateService.js');
-    return applyHierarchyTemplateConfigUpdate({
+  config_update_organisation_config: async (input, context) => {
+    const { applyOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
+    return applyOrganisationConfigUpdate({
       organisationId: context.organisationId,
-      templateId: input.templateId as string,
       path: input.path as string,
       value: input.value,
       reason: (input.reason as string) ?? 'config_agent write',
@@ -3831,7 +3847,6 @@ ${htmlForLlm}`;
       sourceType: 'system',
       agentName: 'scrape_structured',
       taskType: 'general',
-      executionPhase: 'execution',
       routingMode: 'ceiling',
     },
   });

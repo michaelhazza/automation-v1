@@ -267,6 +267,13 @@ DROP INDEX IF EXISTS canonical_metric_history_dedup_idx;
 -- statements in the transaction are unaffected. `SET LOCAL` scopes the
 -- role change to the current transaction (the migration runner opens
 -- one transaction per SQL file).
+--
+-- `admin_role` was declared BYPASSRLS in 0079 but never granted
+-- table-level privileges, so SET LOCAL ROLE would succeed and the
+-- subsequent DELETE would fail with "permission denied". Grant the
+-- minimum privileges needed for the dedup cleanup before switching.
+GRANT SELECT, DELETE ON canonical_metric_history TO admin_role;
+
 SET LOCAL ROLE admin_role;
 
 DELETE FROM canonical_metric_history a

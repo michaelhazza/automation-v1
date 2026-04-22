@@ -540,3 +540,54 @@ export function isComplexRun(params: {
   if (params.skillCount > 15) return true;
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Hermes Tier 1 Phase B — run-result-status derivation (§6.3).
+// ---------------------------------------------------------------------------
+//
+// `agent_runs.runResultStatus` is a three-value classification — success /
+// partial / failed — derived from the terminal execution `status` plus a
+// few run-level boolean signals. Declared on the schema for several
+// releases but never written; Phase B finally populates it at the three
+// terminal write sites (spec §6.3.1):
+//
+//   1. `agentExecutionService.ts::finishLoop` — normal terminal write
+//   2. `agentExecutionService.ts`             — outer catch-path write
+//   3. `agentRunFinalizationService.ts`       — IEE-delegated write
+//
+// The full truth table lives in `agentExecutionServicePure.test.ts`.
+// Returns `null` for non-terminal statuses (the caller must not write
+// `runResultStatus` until the status reaches a terminal state).
+
+export type RunResultStatus = 'success' | 'partial' | 'failed';
+
+export function computeRunResultStatus(
+  finalStatus: string,
+  hasError: boolean,
+  hadUncertainty: boolean,
+  hasSummary: boolean,
+): RunResultStatus | null {
+  switch (finalStatus) {
+    case 'completed':
+      if (hasError || hadUncertainty || !hasSummary) return 'partial';
+      return 'success';
+    case 'completed_with_uncertainty':
+      return 'partial';
+    case 'failed':
+    case 'timeout':
+    case 'loop_detected':
+    case 'budget_exceeded':
+    case 'cancelled':
+      return 'failed';
+    case 'pending':
+    case 'running':
+    case 'delegated':
+    case 'awaiting_clarification':
+    case 'waiting_on_clarification':
+      return null;
+    default:
+      // Unknown statuses are treated as non-terminal. If a new status is
+      // added to the agentRuns enum, update this switch + §6.3 truth table.
+      return null;
+  }
+}
