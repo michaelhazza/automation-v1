@@ -149,3 +149,74 @@ None. No spec edits this round — DONE verdict with no new actionable findings.
   - Add execution terminal-state guarantee — contract territory
 - KNOWLEDGE.md updated: yes (1 entry)
 - PR: #172 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/172
+
+---
+
+## Addendum — Round 4 (post-finalization)
+
+ChatGPT delivered one additional optional round after the round 3 DONE verdict — top-line verdict unchanged ("ship it"), but flagged 2 minor polish items. Session was re-opened briefly to adjudicate both.
+
+### ChatGPT feedback (raw, summarised)
+
+1. Subtle UX gap: can an `invalidated` artefact be the tip of a chain? Optional clarification requested — "An invalidated artefact MAY be the tip but MUST NOT be rendered as authoritative content."
+2. Subtle consistency edge: can `rowCount` change across artefact updates in the same chain (e.g. pending → final refinement)? Optional clarification requested.
+
+### Decisions
+
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| Invalidated artefact as tip — clarify rendering rule | reject | low | Already covered — docs/universal-brief-dev-spec.md:1111 (§6.5 rendering consequences) already states: "`status: 'invalidated'` at the tip renders its parent as stale; the invalidation artefact is not rendered as primary content." ChatGPT missed the existing prose. |
+| `rowCount` MAY change across artefact updates within a chain | defer (user-approved inline) | low | Contract territory — `BriefStructuredResult.rowCount` is defined in `shared/types/briefResultContract.ts:163`. Same family as the 7 other round 1–2 contract deferrals; routes to the existing contract-revision backlog in tasks/todo.md. |
+
+### Applied
+
+None. No spec edits this round.
+
+### Addendum summary (pre-deferred-review)
+
+- Round 4 findings: 2 (1 rejected, 1 deferred user-approved)
+- Totals after round 4: 17 findings (Round 1: 10 | Round 2: 5 | Round 3: 0 | Round 4: 2) — 4 accepted, 5 rejected, 8 deferred
+
+---
+
+## Addendum — Deferred-items review (post-round-4)
+
+User reviewed all 9 accumulated deferrals and asked whether any should be promoted into this spec before finalisation. Assessment re-classified each item as:
+
+- (a) pure contract-schema change → stay deferred (but out of active backlog)
+- (b) spec-level behavioural rule → candidate for promotion
+
+**1 item promoted, 8 archived.**
+
+### Decisions
+
+| Finding | Previous | New decision | Rationale |
+|---------|----------|--------------|-----------|
+| `budgetContext` is descriptive-only + enforcement ownership | deferred (R1-F5, R2-F3) | **accept (promoted)** | Spec-level behavioural rule, not a contract schema change. Applied as a new paragraph at the end of §6.4 stating: capabilities MUST NOT read `budgetContext` for enforcement; orchestrator owns enforcement via `runCostBreaker`; over-budget emits synthesised `BriefErrorResult`; capabilities consume `budgetContext` only for UI rendering intent. Prevents capability drift from day 1. |
+| `relatedArtefactType` hint enum | deferred | archived (contract territory) | Pure contract field addition — lives in `shared/types/briefResultContract.ts`. No spec action. |
+| Approval execution edge cases (timeout / orphan / heartbeat) | deferred | archived (IEE subsystem) | IEE-owned behaviour, not this spec's scope. |
+| `filtersApplied: []` must-emit guard | deferred | archived (contract semantic) | `BriefStructuredResult.filtersApplied` semantics live in the contract. |
+| Canonical `errorCode` enum | deferred | archived (contract field) | Already covered by §6.4 sync note pointing implementers at the canonical enum. |
+| `BriefColumnHint` minimum shape | deferred | archived (contract field) | Pure contract schema. |
+| Duplicate `v1/v1` changelog | deferred | archived (contract doc) | Lives in `docs/brief-result-contract.md`, not this spec. |
+| Execution terminal-state guarantee | deferred | archived (IEE subsystem) | IEE lifecycle ownership. |
+| `rowCount` MAY change across updates | deferred (R4) | archived (contract semantic) | `BriefStructuredResult.rowCount` semantics live in the contract. |
+
+### Applied
+
+- **§6.4 budget enforcement ownership** — new paragraph added between "capability test harness" block and the `---` separator before §6.5. Enforces ownership separation (capabilities descriptive-only; orchestrator authoritative via `runCostBreaker`). Prevents capability drift without modifying the contract.
+
+### Backlog action
+
+All 8 archived items removed from `tasks/todo.md § Spec Review deferred items / universal-brief-dev-spec (2026-04-22)`. Historical record preserved in this log and in `tasks/review-logs/_index.jsonl`. If any archived item later matters, it will be filed under a dedicated contract-revision spec or PR against main — not as a deferred line on this review.
+
+### Final totals (post-addendum)
+
+- Rounds: 4 (plus post-round deferred-items review)
+- Total findings classified: 17
+- **Accepted:** 5 (was 4; +1 from promotion)
+- **Rejected:** 5
+- **Deferred (active backlog):** 0 (was 8; all archived)
+- **Archived (contract-territory, logged only):** 8
+- Spec final state: `docs/universal-brief-dev-spec.md` implementation-ready — latest commit will include the §6.4 budget enforcement paragraph.
+- PR: #172

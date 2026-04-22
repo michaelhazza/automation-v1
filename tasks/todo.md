@@ -285,23 +285,6 @@ All non-critical (graded-failure tier; drop + warn on transient DB failure, no r
 
 ## Spec Review deferred items
 
-### universal-brief-dev-spec (2026-04-22)
-
-**Captured:** 2026-04-22
-**Source log:** tasks/review-logs/chatgpt-spec-review-universal-brief-dev-spec-2026-04-22T00-00-00Z.md
-**Target:** shared/types/briefResultContract.ts + docs/brief-result-contract.md (separate contract-revision task on main)
-
-- [ ] Add optional `relatedArtefactType` hint enum to artefact contract (`spawned_from` / `refines` / `error_of` / `approval_for`). Keeps `relatedArtefactIds` flexibility while preventing capability drift.
-- [ ] Specify approval execution edge cases: timeout → `failed` transition, orphaned-execution detection, optional heartbeat expectation. Prevents stuck `running` UI states.
-- [ ] Specify budget enforcement rule: `budgetContext` is descriptive-only; enforcement is orchestrator-owned; capabilities MUST NOT read `budgetContext` for enforcement. Over-budget emits error artefact.
-- [ ] Guard: `filtersApplied: []` is valid and MUST be emitted when no filters apply (prevents omission-vs-empty-array inconsistency).
-- [ ] Standardise canonical `errorCode` enum in `BriefErrorResult` (at minimum document the current set: `internal_error`, `unsupported_query`, `provider_error`).
-- [ ] Define minimum shape expectation for `BriefColumnHint` (name + type at minimum).
-- [ ] Clean up duplicate `v1 (this version)` / `v1 (initial)` changelog entries in `docs/brief-result-contract.md`.
-- [ ] Add execution terminal-state guarantee: every execution MUST eventually emit a terminal state (`completed` or `failed`); orchestrator/worker MUST ensure eventual resolution under timeout or crash recovery.
-
----
-
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
 
 **Not a LAEL deliverable.** Extract the pattern from `llmRouter.ts` — `intent-record → external-side-effect → single-terminal-transition → ghost-arrival-detection → caller-owned-retry → observable-in-flight → best-effort-history` — into a reusable platform primitive so payments, webhook dispatch, integration adapters, and long-running agent tasks can all inherit it without reintroducing unsafe retry logic.

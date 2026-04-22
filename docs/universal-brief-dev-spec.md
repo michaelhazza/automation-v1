@@ -1061,6 +1061,8 @@ export async function assertCanonicalFlowCoverage(
 
 Capability tests import these helpers and assert every emitted artefact satisfies them. Phase 0 task: produce the harness + a single example test demonstrating each assertion.
 
+**Budget enforcement ownership.** `budgetContext` on any artefact is **descriptive only**. Capabilities MUST NOT read `budgetContext` to make enforcement decisions (dispatch gating, skill selection, cost-based branching). Budget enforcement is orchestrator-owned via `runCostBreaker` (per `architecture.md`); over-budget conditions fire before the capability dispatches and produce a synthesised `BriefErrorResult` with `errorCode: 'internal_error'` and a budget-block marker in the error `message`. Capabilities consume `budgetContext` only to populate rendering intent for the client (e.g. surfacing `remainingCents` / `limitCents` via §8.3). This separation of concerns prevents drift between capabilities that would otherwise each reimplement budget logic.
+
 ---
 
 ### 6.5 Lifecycle resolver (client)
