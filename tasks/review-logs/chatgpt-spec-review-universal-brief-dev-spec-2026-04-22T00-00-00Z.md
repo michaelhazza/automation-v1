@@ -94,3 +94,58 @@ Executive summary: solid shape after round 1. Round 2 focuses on eliminating amb
 **Top themes:** Round 2 feedback was narrower and more production-focused than round 1. 2 accepted / 2 deferred / 1 deferred (contract). Both accepted edits are in-spec behavioural obligations for the client-side lifecycle resolver and the artefact rendering layer — neither touches the contract. The 3 deferred items (terminal guarantee, budgetContext ownership, changelog duplicate) all target the cross-branch contract doc, consistent with the round 1 deferral pattern.
 
 ---
+
+## Round 3 — 2026-04-22T02-00-00Z
+
+### ChatGPT Feedback (raw)
+
+Done.
+
+Round 3 verdict: finalize the spec. The remaining items are correctly classified as contract-level follow-up, not reasons to keep iterating on docs/universal-brief-dev-spec.md.
+
+What I'd lock in as the final position:
+
+Your applied round 2 changes were the right last-mile hardening. Partial-knowledge chain resolution and mandatory surfacing of materially trust-affecting source/freshness are exactly the kinds of things that stop real UX drift later.
+The three deferred items should stay deferred. They are shared contract concerns, not spec-specific gaps.
+There is no meaningful spec-level hole left that justifies another review pass.
+
+One small confirmation only: the duplicate v1 changelog issue really does live in the contract doc rather than this spec, so leaving it out of this review was the correct call.
+
+Final status: docs/universal-brief-dev-spec.md is review-complete and implementation-ready.
+
+### Decisions
+
+| Finding | Decision | Severity | Rationale |
+|---------|----------|----------|-----------|
+| Session closure — no new findings; DONE verdict issued | n/a | n/a | ChatGPT confirmed spec is implementation-ready; all prior deferrals are correctly classified as contract-revision work; no additional edits warranted. |
+
+### Applied
+
+None. No spec edits this round — DONE verdict with no new actionable findings.
+
+### Integrity check
+
+0 issues found this round. No edits applied; no forward references or contradictions to check.
+
+**Top themes:** ChatGPT confirmed finalization. The two rounds of accepted edits (ordering guarantee in §6.5, errorCode sync note in §6.4, partial-knowledge behaviour in §6.5, source trust-surfacing in §8.3) represent the complete set of in-spec improvements. All remaining deferred items are contract-territory and route to a separate contract-revision task.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Total findings classified: 15 (Round 1: 10 | Round 2: 5 | Round 3: 0)
+- Accepted: 4 | Rejected: 4 | Deferred: 7
+  - Note: Round 2 findings 2 + 3 (execution terminal guarantee, budgetContext ownership) are the same family as Round 1 findings 4 + 5 — consistently deferred both rounds; counted as distinct findings but map to the same contract-revision tasks.
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § Spec Review deferred items / universal-brief-dev-spec (2026-04-22):
+  - Add optional `relatedArtefactType` hint enum to artefact contract — contract territory, separate PR against main
+  - Specify approval execution edge cases (timeout, orphaned-execution, heartbeat) — contract territory
+  - Specify budget enforcement rule (`budgetContext` descriptive-only, enforcement orchestrator-owned) — contract territory
+  - Guard: `filtersApplied: []` MUST be emitted when no filters apply — contract territory
+  - Standardise canonical `errorCode` enum in `BriefErrorResult` — contract territory
+  - Define minimum shape expectation for `BriefColumnHint` — contract territory
+  - Clean up duplicate `v1 (this version)` / `v1 (initial)` changelog entries in `docs/brief-result-contract.md` — contract territory
+  - Add execution terminal-state guarantee — contract territory
+- KNOWLEDGE.md updated: yes (1 entry)
+- PR: #172 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/172
