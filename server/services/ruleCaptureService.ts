@@ -57,7 +57,8 @@ export async function saveRule(
       capturedVia: request.originatingArtefactId ? 'approval_suggestion' : 'user_triggered',
       priority: request.priority ?? 'medium',
       isAuthoritative: request.isAuthoritative ?? false,
-      status: 'active',
+      // Auto-suggested rules start paused for human review; user-triggered rules go active immediately.
+      status: request.originatingArtefactId ? 'pending_review' : 'active',
       isReadOnly: false,
     })
     .returning({ id: memoryBlocks.id, content: memoryBlocks.content });

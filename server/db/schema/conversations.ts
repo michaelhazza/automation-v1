@@ -2,6 +2,12 @@ import {
   pgTable, uuid, text, timestamp, jsonb, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
+/**
+ * BOUNDARY: conversations are transport only.
+ * Domain logic must not depend on conversation structure.
+ * scopeType/scopeId are routing keys — not semantic domain identifiers.
+ * Business rules belong in their respective domain services, not here.
+ */
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   organisationId: uuid('organisation_id').notNull(),

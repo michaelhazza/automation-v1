@@ -350,3 +350,15 @@ Strategic follow-ons surfaced by the ChatGPT PR review of the `spec-conformance`
 - [ ] **Spec coverage metrics** — surface % of spec requirements implemented, with a breakdown by category (files / exports / schema / contracts / behavior). Output of `spec-conformance` already enumerates every REQ and its verdict; an aggregator could roll these up across a slug's review logs to produce a coverage dashboard. Gate on: first production use where a reviewer asks "how much of the spec did this PR land?".
 - [ ] **Drift detection over time** — periodic re-verification of merged features against their original specs to catch post-merge implementation drift (refactor silently changes behavior the spec named). Would require a durable mapping from spec → merged branch/PR plus a scheduled re-run. Gate on: first confirmed drift incident.
 - [ ] **Automated plan validation (plan → spec mismatch detection)** — before a chunked implementation starts, verify that `tasks/builds/<slug>/plan.md`'s chunk decomposition actually covers every REQ in the spec. Would close the "plans are loosely mapped to specs" gap ChatGPT flagged. Lighter lift than drift detection — can reuse the REQ-extraction pass from `spec-conformance`. Gate on: next feature where `feature-coordinator` + `spec-conformance` are run end-to-end on a multi-chunk plan.
+
+---
+
+## Deferred from chatgpt-pr-review — Universal Brief (round 1)
+
+**Captured:** 2026-04-22T11:13:14Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-universal-brief-2026-04-22T11-13-14Z.md`
+**PR:** #176 — https://github.com/michaelhazza/automation-v1/pull/176
+
+- [ ] **CGF1 — backend lifecycle write-time enforcement.** `resolveLifecyclePure` handles chains/superseded/orphans/out-of-order on client only; backend has no write-time invariant enforcement. Implementing requires a DB read inside `briefArtefactValidator.ts` plus changes to the artefact persistence pathway — non-trivial scope. Follow-up after this PR merges.
+- [ ] **CGF4 — extract `useConversation(scopeType, scopeId)` hook + `ConversationPane` component.** `TaskChatPane` and `AgentRunChatPane` are near-identical; a shared hook + configurable pane component would eliminate the duplication. UI refactor only, no bug. Low priority — revisit when a third chat pane pattern emerges.
+- [ ] **CGF5 — return `assistantPending: true` in POST `/messages` response.** Current response returns `{ messageId }` only; UI relies on websocket/refetch to show the pending assistant turn. Returning `{ messageId, assistantPending: true }` would reduce fragile timing dependency. API contract change — defer to a dedicated UX hardening pass.
