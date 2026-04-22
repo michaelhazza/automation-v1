@@ -51,7 +51,7 @@ The "invent new" path is the expensive one. Choosing it without justification is
 ### Reference
 
 - `docs/spec-context.md` → `accepted_primitives` block. Any primitive listed there is the preferred extension point for its category.
-- `CLAUDE.md` → "Key files per domain" table. Start-here file for every common task.
+- `architecture.md` → "Key files per domain" table. Start-here file for every common task.
 
 ### Reviewer signal this prevents
 

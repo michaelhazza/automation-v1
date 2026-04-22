@@ -26,8 +26,8 @@ When the user says "run chatgpt-spec-review" (or equivalent):
      CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**
    - If exactly one candidate: use it
    - If multiple candidates: list them and ask the user which one
-   - If none: read the "In-flight spec" pointer from CLAUDE.md (the line
-     starting with "**In-flight spec:**") and ask the user to confirm
+   - If none: read `tasks/current-focus.md` (the line starting with
+     "**In-flight spec:**") and ask the user to confirm
 
 2. Read the detected spec file in full
 

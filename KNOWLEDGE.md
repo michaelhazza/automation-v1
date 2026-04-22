@@ -190,6 +190,12 @@ When an interactive agent surfaces a decision for human resolution, re-stating i
 
 `tasks/review-logs/_index.jsonl` uses a strict enum for the `decision` field: `accept / reject / defer`. Writing a "pending" architectural item before the user has responded introduces an invalid enum value and pollutes downstream analytics. Rule: skip `_index.jsonl` writes for items still in `pending_architectural_items`. Write them only after the user resolves each item — at that point the decision is final and the correct enum value is known. The session log's Decisions table can carry "pending (architectural — awaiting your decision)" as a placeholder; the JSONL index should never see it.
 
+### 2026-04-22 Correction — "Key files per domain" table moved from CLAUDE.md to architecture.md
+
+Prior entries referencing "CLAUDE.md 'Key files per domain' table" (e.g. the update rule in the 2026-04-13 capabilities.md entry at line 70) are stale. The table now lives in `architecture.md § Key files per domain`. CLAUDE.md contains only a one-line pointer. Future entries referencing this table should cite `architecture.md`.
+
+Similarly, the "Current focus" sprint state moved from CLAUDE.md to `tasks/current-focus.md`. Historical plans that say "update CLAUDE.md §'Current focus'" should now target `tasks/current-focus.md`.
+
 ### 2026-04-21 Gotcha — `AsyncIterable & { done: Promise<...> }` leaks UnhandledPromiseRejection if the for-await throws
 
 The streaming adapter contract (`server/services/providers/types.ts::LLMProviderAdapter.stream?()`) returns `AsyncIterable<StreamTokenChunk> & { done: Promise<ProviderResponse> }`. Shipping code in `llmRouter.ts` iterated via `for await (const chunk of iterable)` and then `return iterable.done`. If the for-await loop exits via exception (network error, AbortSignal, timeout), the outer try/catch propagates the thrown error — but `iterable.done` is still an unobserved rejected Promise, so Node.js emits UnhandledPromiseRejection when the event loop drains. No adapter implements `stream()` yet so this is latent; it would bite the first adapter implementer. Fix: install a no-op `.catch(() => {})` on `iterable.done` *before* the for-await loop, then `return await iterable.done` at the end — both branches observe the same Promise and the pre-installed catch silences the abandoned-observation path. Rule: whenever a contract ships an "awaitable handle alongside an iterator", the caller must install the observation handler before the iterator can throw, or wrap the whole thing in a helper that owns the lifecycle.

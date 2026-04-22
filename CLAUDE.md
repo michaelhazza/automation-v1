@@ -176,6 +176,29 @@ Each skill should have a single clear responsibility.
 
 ---
 
+## 12. Context Management
+
+Keep context lean so Claude stays sharp across long sessions.
+
+**Compact protocol** — When context usage reaches ~50–60% (visible in the VS Code status line or via `/context`):
+1. If working under a build slug, update `tasks/builds/<slug>/progress.md` with current session state: what was done, what's next, any decisions made.
+2. Run `/compact`
+
+Do not wait until the context is full — quality degrades before the hard limit.
+
+**Pre-break protocol** — Before stepping away from a session:
+1. If working under a build slug, save current progress to `tasks/builds/<slug>/progress.md`.
+2. Run `/compact`
+
+This reduces reprocessing cost when the session resumes and prevents the 5-minute prompt-cache expiry from triggering a full context reread at full cost.
+
+**Session isolation for concurrent work** — When running multiple sessions in parallel on different features:
+- Each session writes to its own `tasks/builds/<slug>/progress.md` — never to a shared file
+- `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
+- Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
+
+---
+
 ## Long Document Writing
 
 Large single-shot `Write` calls to long documentation files can freeze Claude Code. Any time you are about to produce a documentation file (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, or an extensionless `README`/`CHANGELOG`/`LICENSE`) that will exceed **~10,000 characters** (roughly 250–300 lines of typical markdown), use the chunked workflow — no exceptions.
@@ -225,6 +248,20 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
 | `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
+
+### Model guidance per phase
+
+Use the most capable model where reasoning matters; switch to Sonnet once decisions are made and execution is the task.
+
+| Phase | Model | What happens |
+|-------|-------|--------------|
+| Spec authoring | Opus | Writing specs, architecture decisions, `chatgpt-spec-review` passes |
+| Plan breakdown | Opus | Invoking `architect` to decompose a finalised spec into implementation chunks |
+| **Plan gate** | — | `feature-coordinator` presents the finalised plan and **stops**. Review it at `tasks/builds/{slug}/plan.md`, then manually switch to Sonnet before proceeding. |
+| Execution | Sonnet | Running `superpowers:executing-plans` / `subagent-driven-development` against the plan |
+| Mid-build decision | Opus | If a hard architectural choice surfaces during implementation, switch back to Opus for that question only, then return to Sonnet |
+
+The plan gate is a deliberate checkpoint. Do not proceed to execution on Opus — the execution phase is token-intensive and Sonnet handles a clear plan equally well at lower cost.
 
 ### Task Classification
 
@@ -320,71 +357,13 @@ Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checkl
 
 ## Current focus
 
-**In-flight spec:** `tasks/live-agent-execution-log-spec.md` — Phase 1 (MVP) ready to merge on `claude/build-agent-execution-spec-6p1nC` after four external-review passes (pr-reviewer blockers, dual-reviewer, and two iterative hardening passes; logs under `tasks/review-logs/`). Delivered: migration 0192 (three new tables + two `agent_runs` columns + DB CHECK for linked-entity null-together + denormalised `run_id` FK on the payload table), shared wire types with single-source criticality registry, `agentExecutionEventService` with awaited-at-seq-1 lifecycle bookends + one-retry critical tier + atomic-tx cap-signal + event-cap atomic claim, `agentRunPromptService`, `agentRunPayloadWriter` (redaction → tool-policy → truncation pipeline), `agentRunVisibility` + `agentRunEditPermissionMask(Pure)` (read-time-only mask, never persisted), three GET routes on `/api/agent-runs/:runId/` with tier-aware view + stricter payload gate, socket `join:agent-run` hardened with full AGENTS_VIEW check, new `AgentRunLivePage` + timeline + detail drawer with sliding-window cap + cap-reached banner + sequence-gap/collision counters, five pure-test files (62 tests). Emission sites wired at `run.started` (awaited so it always claims seq 1), `prompt.assembled` + persistence of the fully-assembled prompt, `context.source_loaded`, `orchestrator.routing_decided` (emitted inside executeRun at seq 2 — not after `run.completed`), `clarification.requested`, `run.completed` (with real `totalCostCents` from the ledger + real `eventCount` from `next_event_seq`). Non-shipping in P1: `llm.requested`/`llm.completed` emission + `agent_run_llm_payloads` writer integration inside `llmRouter` (scaffolded with TODO — requires provisional-ledger-id plumbing through the terminal-write transaction); `memory.retrieved`, `rule.evaluated`, `skill.invoked`/`skill.completed` emission; `handoff.decided` emission. P2 (edit audit trail, migration 0194) and P3 (retention tiering, migration 0193) deferred to follow-up branches per spec §8.
-**Pick-next queue:** See `tasks/todo.md` § "Live Agent Execution Log — deferred items" for the full list. Most operationally valuable item: LAEL-P1-1 (llmRouter `llm.requested`/`llm.completed` emission + `agent_run_llm_payloads` writer integration — without it the timeline shows no "doing" phase). Then LAEL-P1-2 (memory / rule / skill / handoff emission), then P2 (edit audit trail), then P3 (retention tiering). Six FUTURE items captured in `tasks/todo.md` so they don't drift; the `External Call Safety Contract` abstraction lives in `tasks/todo.md` too (LAEL-RELATED, cross-feature + unscoped).
-**Completed on this branch (review log trail under `tasks/review-logs/`):**
-  1. **Partial-external-success protection** — provisional `'started'` ledger row, `ReconciliationRequiredError`, 2-min sweep job, `WHERE status = 'started'` hard invariant on every terminal write with ghost-arrival logging. **The exact double-bill window closed.**
-  2. **Idempotency-key versioning** (`v1:` prefix) on both `llmRouter`'s `generateIdempotencyKey` (now in `server/services/llmRouterIdempotencyPure.ts`) and `actionService`'s `buildActionIdempotencyKey`. Runtime `/^v\d+$/` assert at module load in `server/lib/idempotencyVersion.ts`.
-  3. **Queueing-delay visibility** — `queuedAt` + `dispatchDelayMs` on `InFlightEntry`; colour-coded UI column.
-  4. **Provider fallback visibility** — `attemptSequence` + `fallbackIndex` on `InFlightEntry`; UI shows the logical sequence when it diverges from the per-provider counter.
-  5. **Token-level streaming progress** — infrastructure shipped: optional `stream?(): AsyncIterable<StreamTokenChunk> & { done }` adapter hook, `RouterCallParams.stream`, server-side 1 Hz `emitProgress()` throttle, `llm-inflight:progress` socket event, client renders inline tokens-so-far. **No adapter wiring yet** — that's the next-session handoff.
-  6. **Historical in-flight archive** — `llm_inflight_history` (migration 0191) with fire-and-forget writes behind a 50-sample/50%-fail soft circuit breaker in `server/lib/softBreakerPure.ts`; retention sweep at 04:15 UTC daily; `GET /api/admin/llm-pnl/in-flight/history` admin route.
-  7. **Per-caller detail drawer mid-flight** — LRU in-memory payload store (100 entries / 200 KB/each) with `originalSizeBytes` metadata on truncation; `GET /api/admin/llm-pnl/in-flight/:runtimeKey/payload` admin route; `PnlInFlightPayloadDrawer` opens on row-click.
-  8. **Mobile-responsive In-Flight tab** — card layout below `md:` breakpoint with feature parity for token progress.
-**Also live / recently merged:** Hermes Tier 1 shipped to main via PR #162 on 2026-04-21 — Phase A (per-run cost panel on `SessionLogCardList` / `RunTraceView` / `AdminAgentEditPage`, extended `/api/runs/:runId/cost` response), Phase B (`runResultStatus` written at 3 terminal sites, `workspaceMemoryServicePure` decision matrix in `extractRunInsights`, per-entryType half-life decay in `memoryEntryQualityServicePure`, `outcomeLearningService` override escape hatch), Phase C (breaker wire-up on `llmRouter.routeCall` with new `getRunCostCentsFromLedger` / `assertWithinRunBudgetFromLedger` siblings on `runCostBreaker.ts`; hard-ceiling `>=` semantics; merged visibility+SUM atomic aggregate). Hermes Tier 1 deferred follow-ups tracked in `tasks/todo.md` (H1 `successfulCostCents` field, H2 rollup-vs-ledger breaker asymmetry for Slack/Whisper, H3 `runResultStatus='partial'` summary-coupling review); spec at `tasks/hermes-audit-tier-1-spec.md`. ClientPulse Session 3 active (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). ClientPulse Session 2 shipped to main 2026-04-20 with durable primitives: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log.
-
-This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
+See [`tasks/current-focus.md`](./tasks/current-focus.md). Update it whenever the sprint, spec, or active branch changes. A stale pointer misleads future sessions — keep it current or set it to `none`.
 
 ---
 
 ## Key files per domain
 
-Quick reference for "where do I start when adding X". This is the index, not the deep reference — `architecture.md` is the deep reference for everything below.
-
-| Task | Start here |
-|------|------------|
-| Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
-| Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
-| Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |
-| Modify the ClientPulse intervention proposer | `server/jobs/proposeClientPulseInterventionsJob.ts` (orchestration) + `server/services/clientPulseInterventionProposerPure.ts` (matcher logic) — never bypass `enqueueInterventionProposal()` |
-| Modify the outcome measurement job | `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` (decision pure fn) — band attribution + cooldown integrity hinge on the args passed to `interventionService.recordOutcome()` |
-| Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
-| Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
-| Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
-| Add an LLM consumer (non-agent) | `llmRouter.routeCall({ context: { sourceType: 'system' \| 'analyzer', sourceId, featureTag, systemCallerPolicy, ... } })` — NEVER import a provider adapter directly (the `verify-no-direct-adapter-calls.sh` gate + runtime `assertCalledFromRouter()` block this). Use `postProcess` + `ParseFailureError` for schema-validation failures; AbortController for cancellation. Callers must also handle `ReconciliationRequiredError` (`server/lib/reconciliationRequiredError.ts`, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`) — thrown when a retry under an `idempotencyKey` finds a provisional `'started'` row. The router never auto-retries this; the caller decides (surface banner, poll, fail). |
-| Touch the idempotency-key derivation | Single version constant in `server/lib/idempotencyVersion.ts` (`IDEMPOTENCY_KEY_VERSION = 'v1'`) prepends every key from `llmRouter.generateIdempotencyKey` (pure at `server/services/llmRouterIdempotencyPure.ts`) and `actionService.buildActionIdempotencyKey`. Any change to hash inputs, ordering, or canonicalisation MUST bump the version in the same commit. Load-time assert enforces `/^v\d+$/`. Pure tests in `llmRouterIdempotencyPure.test.ts` + `actionServiceCanonicalisationPure.test.ts` pin the current shape. |
-| Modify the partial-external-success guard | `server/services/llmRouter.ts` §4+7 (idempotency-check transaction atomically writes provisional `'started'` row + throws `ReconciliationRequiredError` on retry). All three terminal writes (success, failure, budget-blocked) use `where: status = 'started'` — a mismatch fires `llm_router.{budget_block,failure,success}_upsert_ghost` at warn level. DB-side sweep: `server/jobs/llmStartedRowSweepJob.ts` + `llmStartedRowSweepJobPure.ts` reap aged-out rows at `PROVIDER_CALL_TIMEOUT_MS + 60s` (constant `STARTED_ROW_SWEEP_BUFFER_MS`); registered in `queueService.ts` as `maintenance:llm-started-row-sweep` every 2 min. Migration 0190 adds partial index on `created_at WHERE status = 'started'`. |
-| Modify the in-flight registry or its UI | In-memory registry at `server/services/llmInflightRegistry.ts` + `llmInflightRegistryPure.ts`. Router wiring in `llmRouter.ts` captures `queuedAt`, `attemptSequence`, `fallbackIndex` on every add; payload snapshot in `server/services/llmInflightPayloadStore.ts` (LRU 100 / 200 KB cap with `originalSizeBytes` metadata on truncation); history fire-and-forget into `llm_inflight_history` (migration 0191) gated by a soft circuit breaker from `server/lib/softBreakerPure.ts` (50-sample window, 50% threshold, 5-min open). Client at `client/src/components/system-pnl/PnlInFlightTable.tsx` + `PnlInFlightPayloadDrawer.tsx` (row-click opens live payload; mobile card layout under `md:` breakpoint). Admin routes: snapshot + history + payload all on `server/routes/systemPnl.ts`. |
-| Add a fire-and-forget persistence path | Use `server/lib/softBreakerPure.ts` — pure sliding-window breaker (config: `windowSize`, `minSamples`, `failThreshold`, `openDurationMs`). Pattern: wrap the write with `shouldAttempt(state, now)` before + `recordOutcome(state, success, now, config)` after; log exactly once on `trippedNow: true`. Example: `persistHistoryEvent` in `llmInflightRegistry.ts`. Never block the primary path on the breaker — it only gates the write, not the caller. |
-| Stream tokens from a provider adapter | Adapter contract in `server/services/providers/types.ts` — optional `stream?(): AsyncIterable<StreamTokenChunk> & { done: Promise<ProviderResponse> }`. Router opt-in via `RouterCallParams.stream: true`. Server-side 1 Hz throttle per runtimeKey in `llmInflightRegistry.emitProgress()`; socket event `llm-inflight:progress`. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution. No provider ships `stream()` yet — adding it is the hand-off from this branch. |
-| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
-| Modify the per-run cost panel | `client/src/components/run-cost/RunCostPanel.tsx` (thin shell) + `RunCostPanelPure.ts` (branch decisions + formatters) + `shared/types/runCost.ts` (response type) + `server/routes/llmUsage.ts` (`/api/runs/:runId/cost` handler). Panel is hosted on `SessionLogCardList`, `RunTraceView`, and `AdminAgentEditPage`. Pure module covers the full §9.1 rendering matrix. |
-| Modify the per-run cost breaker | `server/lib/runCostBreaker.ts` — five exports: `resolveRunCostCeiling`, `getRunCostCents` / `assertWithinRunBudget` (rollup-based; Slack + Whisper), `getRunCostCentsFromLedger` / `assertWithinRunBudgetFromLedger` (ledger-based; LLM router). Ledger helper uses a **merged visibility + SUM aggregate** (single scan returning both) — do not split; see `tasks/hermes-audit-tier-1-spec.md` §7.3.1. Hard-ceiling `>=` semantics (not `>`). |
-| Modify outcome-gated entry-type promotion | `server/services/workspaceMemoryServicePure.ts` (`selectPromotedEntryType` / `scoreForOutcome` / `computeProvenanceConfidence` / `applyOutcomeDefaults`) + `workspaceMemoryService.ts::extractRunInsights` (wires outcome through). `runResultStatus` is derived by `agentExecutionServicePure.ts::computeRunResultStatus` and written exactly once at 3 terminal sites (normal + catch in `agentExecutionService.ts`; IEE in `agentRunFinalizationService.ts`) with `AND run_result_status IS NULL` guard. Per-entryType half-life decay lives in `memoryEntryQualityServicePure.ts::computeDecayFactor`. |
-| Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
-| Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |
-| Modify the Live Agent Execution Log read path | `server/routes/agentExecutionLog.ts` (3 GETs) + `server/services/agentExecutionEventService.ts` (`streamEvents` / `getPrompt` / `getLlmPayload`) + `server/lib/agentRunVisibility.ts` (canView / canViewPayload rules) + `server/lib/agentRunPermissionContext.ts` (user-context hydration). Migration 0192 carries the three new tables (`agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads`) + adds `next_event_seq` + `event_limit_reached_emitted` to `agent_runs`. |
-| Modify the Live Agent Execution Log payload writer | `server/services/agentRunPayloadWriter.ts::buildPayloadRow` — redaction → tool-policy → greatest-first truncation pipeline. Patterns in `server/lib/redaction.ts` (bearer / openai / anthropic / github / slack / aws / google). Per-tool opt-in via `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'`. Size cap: `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB). Pure tests in `server/services/__tests__/agentRunPayloadWriterPure.test.ts`. Modifications recorded in `agent_run_llm_payloads.modifications` + `redacted_fields` (separate columns — never overloaded). |
-| Modify the Live Agent Execution Log client timeline | `client/src/pages/AgentRunLivePage.tsx` (snapshot+live merge, sliding-window cap `TIMELINE_WINDOW_SIZE = 2000`, cap-reached banner, sequence-gap + collision counters via `getAgentRunLiveClientMetrics()`) + `client/src/components/agentRunLog/{Timeline,EventRow,EventDetailDrawer}.tsx`. Socket hookup via `useSocketRoom('agent-run', runId, ...)`; server emitter `emitAgentExecutionEvent` in `server/websocket/emitters.ts`; room-join gate in `server/websocket/rooms.ts` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check. |
-| Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
-| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
-| Add a new permission key | `server/lib/permissions.ts` |
-| Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
-| Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
-| Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
-| Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
-| Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
-| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
-| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
-| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
-| Add a canonical data table | `server/db/schema/`, migration with `UNIQUE(organisation_id, provider_type, external_id)`, add to `rlsProtectedTables.ts`, add RLS policy, update `server/config/canonicalDictionary.ts` |
-| Add a connector adapter | `server/services/connectorPollingService.ts` (adapter wiring), `server/config/connectorPollingConfig.ts` (intervals) |
-| Modify principal/RLS context | `server/db/withPrincipalContext.ts`, `server/config/rlsProtectedTables.ts`, migration for new policies |
-| Modify a ClientPulse adapter dispatch path | `server/services/adapters/apiAdapter.ts` (dispatch) + `apiAdapterClassifierPure.ts` (retry classifier) + `ghlEndpoints.ts` (5 endpoint mappings) + `executionLayerService.ts` (precondition gate + per-subaccount advisory lock) |
-| Modify canonical-JSON or idempotency-key derivation | `server/services/actionService.ts` — `canonicaliseJson`, `hashActionArgs`, `buildActionIdempotencyKey`, `computeValidationDigest`. Pinned by `actionServiceCanonicalisationPure.test.ts` — nested-key sort + present-vs-absent collapse + null-distinction + array-positional semantics. Retry-vs-replay contract is non-negotiable (see `buildActionIdempotencyKey` header comment) |
-| Modify the ClientPulse drilldown | `server/routes/clientpulseDrilldown.ts` (4 routes) + `server/services/drilldownService.ts` + `server/services/drilldownOutcomeBadgePure.ts` (badge rules) + `client/src/pages/ClientPulseDrilldownPage.tsx` + `client/src/components/clientpulse/drilldown/` — always scope reads by `organisationId` + `subaccountId` |
-| Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
-| Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
+See [`architecture.md` § Key files per domain](./architecture.md). This is the index for domain entry points — update it when adding new domain areas.
 
 ---
 
@@ -403,30 +382,7 @@ Ideas that seem valuable in isolation may be low priority in context. Let triage
 
 ## Architecture Rules (Automation OS specific)
 
-These are non-negotiable. Violations are blocking issues in any code review.
-
-### Server
-- **Routes** call services only — never access `db` directly in a route
-- **`asyncHandler`** wraps every async handler — no manual try/catch in routes
-- **Service errors** throw as `{ statusCode, message, errorCode? }` — never raw strings
-- **`resolveSubaccount(subaccountId, orgId)`** called in every route with `:subaccountId`
-- **Auth middleware** — `authenticate` always first, then permission guards as needed
-- **Org scoping** — all queries filter by `organisationId` using `req.orgId` (not `req.user.organisationId`)
-- **Soft deletes** — always filter with `isNull(table.deletedAt)` on soft-delete tables
-- **Schema changes** — Drizzle migration files only; never raw SQL schema changes
-
-### Agent system
-- **Three-tier model** (System → Org → Subaccount) must be respected in all agent-related changes
-- **System-managed agents** — `isSystemManaged: true` means masterPrompt is not editable; only additionalPrompt
-- **Idempotency keys** — all new agent run creation paths must support deduplication
-- **Heartbeat changes** — account for `heartbeatOffsetMinutes` (minute-level precision)
-- **Handoff depth** — check `MAX_HANDOFF_DEPTH` (5) in `server/config/limits.ts`
-
-### Client
-- **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
-- **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
-- **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
-- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
+See [`architecture.md` § Architecture Rules](./architecture.md). Violations are blocking issues in any code review.
 
 ---
 
@@ -443,17 +399,7 @@ These are non-negotiable. Violations are blocking issues in any code review.
 
 ## Non-goals: what Automation OS is NOT
 
-These are durable product stances. When an LLM provider or horizontal agent platform ships a new primitive (routines, agent SDKs, skills, memory, hosted managed agents, team chat), the reflex should be to **absorb the category into `docs/capabilities.md` positioning, ship any UX polish that closes a demo gap, and never drift the pitch toward parity with the provider's primitive.** The moat is the operations layer, not any one feature.
-
-- **Not a better agent SDK.** Consume LLM-provider primitives under the hood rather than competing with them.
-- **Not a hosted routines / scheduled-prompt product.** We build the operations layer on top of supply from every provider — multi-tenant isolation, approval workflows, client portals, per-client P&L, model-agnostic routing — surfaces an LLM provider's hosted-agent or routine product structurally cannot ship, because their buyer is an individual or an internal team, not an agency serving many clients.
-- **Not a general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
-- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for org-level extensibility — not as a competitor to general-purpose coding assistants.
-- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
-- **Not a public skill or playbook marketplace.** Anthropic-scale distribution isn't the agency play.
-- **Not a bidirectional bridge to no-code workflow tools.** We import from them (supervised-migration wedge); we do not export back.
-
-If a PR, marketing asset, or sales deck drifts toward a non-goal, push back. The right response to a provider shipping a new primitive is never "we have that too" — it is "we're the operations system you use on top of that."
+See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are durable product stances — review before proposing features that compete with provider primitives.
 
 ---
 
