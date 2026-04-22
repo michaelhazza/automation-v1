@@ -550,6 +550,88 @@ Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTH
 
 ---
 
+## Universal Brief (spec: `docs/universal-brief-dev-spec.md`)
+
+The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
+
+### Mutation-path skeleton (applies to every write-class feature in this subsystem)
+
+Every write that lands user-or-capability content follows the same six layers — documented at length in `KNOWLEDGE.md` under *"Mutation-path skeleton for any write that lands user or capability content"*. In order:
+
+1. **Pure** — `*Pure.ts` module with no I/O. Pure decisions, plain inputs, plain outputs. Examples: `briefArtefactValidatorPure.ts`, `briefArtefactLifecyclePure.ts` (client), `ruleCapturePolicyPure.ts`.
+2. **Validate** — per-item schema + enum check independent of state. `validateArtefactForPersistence` wraps the pure validator and substitutes a `BriefErrorResult` on failure so the caller never sees raw contract violations.
+3. **Guard** — state-dependent invariant at write time. Pure core + async fetch wrapper. Scoped narrowly to invariants unambiguous regardless of arrival order. Reference: `validateLifecycleWriteGuardPure` + `validateLifecycleChainForWrite` enforce "a parent artefact can only be superseded once"; orphan parents stay an eventual-consistency case the UI's `resolveLifecyclePure` resolves.
+4. **Write** — single insertion point. Every caller goes through `writeConversationMessage` in `briefConversationWriter.ts`. No bypass routes. Validate → guard run in order; rejects drop via the existing log+counter pattern before the DB is touched.
+5. **Signal** — structured return shape + in-memory counters. `WriteMessageResult` carries `messageId`, `artefactsAccepted`, `artefactsRejected`, `assistantPending`, and (optional) `lifecycleConflicts: LifecycleConflictSignal[]`. Counters via `getBriefConversationWriterMetrics()` follow the `getAgentExecutionLogMetrics` pattern — structured log events remain source of truth; counters give dashboards a cheap aggregate.
+6. **Test** — per-layer, not per-integration. Pure tests run directly (`server/services/__tests__/briefArtefactValidatorPure.test.ts` — 41 tests; `ruleCapturePolicyPure.test.ts` — 10 tests). A dedicated *mixed valid + invalid in the same batch* test pins the partial-success contract so the write path is never accidentally all-or-nothing.
+
+Any new mutation-class feature (approval dispatch, rule idempotency keys, CRM writes) starts from this skeleton. If a feature cannot slot into all six layers cleanly, that is a design smell worth pausing on.
+
+### Conversation model
+
+Polymorphic `conversations` table (`server/db/schema/conversations.ts`, migration 0194) with `scopeType ∈ {'agent' | 'brief' | 'task' | 'agent_run'}` and unique `(scope_type, scope_id)`. Hard boundary — **conversations are transport only; domain logic must not depend on conversation structure**. The boundary comment lives at the table declaration; violations are blocking at code review. `findOrCreateBriefConversation` in `server/services/briefConversationService.ts` is the single create/read primitive. `conversation_messages` denormalises `organisation_id` + `subaccount_id` onto every row for RLS — message writes never need to re-read the parent conversation to establish scope.
+
+### Fast-path classifier
+
+`server/services/briefFastPathClassifier.ts` short-circuits obvious cases before the Orchestrator runs:
+
+- `simple_reply` — canned responses for conversational chatter that do not require a capability (greetings, acks).
+- `cheap_answer` — deterministic low-cost reply paths (see `briefSimpleReplyGeneratorPure.ts`). Note S4 in deferred items — current generator emits `source: 'canonical'` placeholder rows; this is a known pre-production gap.
+- `needs_clarification` — ambiguous intent dimensions; escalates to the `ask_clarifying_questions` skill at Orchestrator time.
+- `needs_orchestrator` — normal path; Orchestrator capability-aware routing handles everything.
+
+Classifier confidence + route are persisted to `fast_path_decisions` (migration 0195). `fastPathDecisionsPruneJob.ts` ages out old rows; `fastPathRecalibrateJob.ts` is scaffolded for future threshold tuning.
+
+### Artefact contract + lifecycle
+
+`shared/types/briefResultContract.ts` defines the discriminated union (`structured` / `approval` / `error`) every capability emits. Base shape carries `artefactId`, `status`, `parentArtefactId`, `confidenceSource`, `budgetContext`. Client-side lifecycle resolution (`client/src/lib/briefArtefactLifecyclePure.ts`) handles superseded chains, orphans, out-of-order arrival so the UI always renders the correct tip. Backend chain-integrity enforced at write time by the write-guard above — see also §"Key files per domain" for the full file inventory.
+
+**Defensive cap.** `MAX_ARTEFACTS_PER_WRITE = 25` in `briefConversationWriter.ts` rejects overflow explicitly via the existing rejection pattern (log `artefacts_over_limit` + increment `artefactsOverLimitTotal`). No silent truncation — runaway capability emission surfaces as an observable signal.
+
+### Orchestrator integration + Phase 4 gates
+
+The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Universal Brief skills land in the action registry:
+
+- `ask_clarifying_questions` — drafts up to 5 ranked questions when Orchestrator confidence `< 0.85`. Read-only; `idempotencyStrategy: 'read_only'`.
+- `challenge_assumptions` — adversarial analysis for high-stakes actions. Read-only; `idempotencyStrategy: 'read_only'`.
+
+Both are wired in `SKILL_HANDLERS`. Note S2 in deferred items — the file-based skill definition markdown (`server/skills/*.md` with frontmatter) for these two has not yet been authored; handlers run but the skills are invisible to the config assistant and Skill Studio UIs until the `.md` files land.
+
+### Rule capture + conflict detection + auto-pause policy
+
+`server/services/ruleCaptureService.ts::saveRule` is the single insertion point for rules harvested from approvals (or drafted manually). Conflict detection runs first via `ruleConflictDetectorServicePure.ts`; rules with conflicts return `saved: false` unless the caller passes `options.allowConflicts`. Status on insert is governed by `ruleCapturePolicyPure.ts::shouldAutoPauseRulePure`:
+
+- Approval-suggestion origin (`originatingArtefactId` set) → `pending_review` (pause for human review).
+- Explicit confidence `< AUTO_PAUSE_CONFIDENCE_THRESHOLD` (0.8) → `pending_review`.
+- Everything else → `active`.
+
+The policy module isolates the thresholds so future dimensions (source type, per-org overrides) land in one place instead of growing inline conditions in `saveRule`. `ruleAutoDeprecateJob.ts` handles decay of stale rules. Note B10 in deferred items — this job plus `fastPathDecisionsPruneJob` and `fastPathRecalibrateJob` currently read `memory_blocks`/`fast_path_decisions` outside the `withAdminConnection` / `withOrgTx` contract, so they are silent no-ops until the wrap lands; the feature paths still work end-to-end.
+
+### Client entry points
+
+- **Hook**: `client/src/hooks/useConversation.ts::useConversation(scopeType, scopeId)` is the single abstraction for every chat pane. Manages `conversationId`, `messages`, `sending`, `assistantPending` state. Includes a synchronous `useRef` lock that closes the double-send race React state cannot cover. `assistantPending` flips true on user POST, auto-clears when the next assistant message arrives, and has a 15s timeout fallback to prevent stuck-forever UI.
+- **Panes**: `TaskChatPane.tsx` + `AgentRunChatPane.tsx` consume the hook. Extracting a shared `ConversationPane` shell component is deferred as CGF4b — revisit when a third pane emerges.
+- **Brief detail page**: `client/src/pages/BriefDetailPage.tsx` renders the conversation stream + per-artefact cards (`ApprovalCard.tsx`, `StructuredResultCard.tsx`, `ErrorCard.tsx`, `ClarifyingQuestionsCard.tsx` — all with `*Pure.ts` companions so render logic is testable).
+- **Budget context**: `client/src/components/brief-artefacts/BudgetContextStrip.tsx` + `BudgetContextStripPure.ts` — centralised `shouldShowSource` trust logic so multiple surfaces cannot disagree.
+
+### Deferred (tracked in `tasks/todo.md`)
+
+- **B10** — admin/org-tx wrap for `ruleAutoDeprecateJob` / `fastPathDecisionsPruneJob` / `fastPathRecalibrateJob`.
+- **S2** — skill definition `.md` files for `ask_clarifying_questions` + `challenge_assumptions`.
+- **S3** — stronger tests for `ruleConflictDetectorServicePure.parseConflictReportPure` malformed-input cases.
+- **S4** — remove or re-label `cheap_answer` canned replies currently emitting `source: 'canonical'` placeholder rows.
+- **S6** — trajectory tests for Phase 4 orchestrator gates (clarify / challenge).
+- **S8** — move conversation-message websocket emits to a post-commit boundary (tx-outbox).
+- **N1–N7** — nit-level polish: UUID validation on artefactId, org-scoped index on `conversations_unique_scope`, clock injection in pure modules, `GET /api/briefs/:briefId/artefacts` pagination, etc.
+- **DR1** — `POST /api/rules/draft-candidates` route to wire `ApprovalSuggestionPanel` to `ruleCandidateDrafter.draftCandidates`; panel exists but is currently dark.
+- **DR2** — re-invoke fast path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).
+- **DR3** — wire `onApprove` / `onReject` on `ApprovalCard` artefacts; approvals currently render but the buttons are no-ops.
+- **CGF4b** — extract shared `ConversationPane` shell component.
+- **CGF6** — idempotency key for `saveRule` to dedupe retries (separate from the existing semantic-conflict path).
+- **CGF1** — *closed* in the final review pass via the write-guard shipped in this PR.
+
+---
+
 ## CRM Query Planner (spec: `tasks/builds/crm-query-planner/spec.md`)
 
 A deterministic-first natural-language CRM read layer shipped as PR #177. Staged pipeline: registry match → plan cache → LLM fallback → validator → canonical / live / hybrid executor. Read-only by structural import restriction (CI guard `scripts/verify-crm-query-planner-read-only.sh`) — the planner cannot reach the write-side of `canonicalDataService` or any write helper.
