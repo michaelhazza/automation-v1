@@ -333,6 +333,44 @@ Clean up the scratch file at `tasks/review-logs/spec-conformance-scratch-<slug>[
 
 ---
 
+## Auto-commit-and-push on finish
+
+This step OVERRIDES the CLAUDE.md "no auto-commits or auto-pushes" user preference within this flow only. The user has explicitly opted in: review-agent work must persist to the remote so subsequent review cycles and other sessions see the current state of the branch.
+
+Run this step ONCE, after the final log has been written. If no files changed during the run (verdict was `CONFORMANT` with zero mechanical fixes AND no `tasks/todo.md` updates), skip this step — do not create an empty commit. Otherwise:
+
+```bash
+# Stage only the files touched by this run. Never `git add -A`.
+# The set to stage is:
+#   1. Every file listed under "Files modified by this run" in the final log
+#      (mechanical-fix targets)
+#   2. The final log itself at tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md
+#   3. tasks/todo.md IF the run appended a "## Deferred from spec-conformance review" section
+git add <files-modified-list> \
+        "tasks/review-logs/spec-conformance-log-${SLUG}${CHUNK_SUFFIX}-${TIMESTAMP}.md"
+if git status --porcelain -- tasks/todo.md | grep -q .; then
+  git add tasks/todo.md
+fi
+
+# Commit message encodes the verdict so a future reader can grep the branch history.
+# <verdict> is one of: CONFORMANT_AFTER_FIXES, NON_CONFORMANT
+# (CONFORMANT with zero changes was already skipped above)
+git commit -m "$(cat <<'EOF'
+chore(spec-conformance): <spec-slug> — <verdict>
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+
+git push
+```
+
+If the commit fails (pre-commit hook, signing issue, etc.), fix the underlying issue and create a NEW commit — never `--amend` or `--no-verify`. If `git push` fails because the remote has diverged, do NOT force-push — surface the exact error to the caller.
+
+Record the resulting commit hash in the final log under a new line `**Commit at finish:** <hash>` at the top of the log metadata block.
+
+---
+
 ## Rules
 
 - **You are not a code reviewer.** Do not flag style, naming, refactor opportunities, or "better ways to do this" unless the spec explicitly prescribes the approach. Those belong to `pr-reviewer`.

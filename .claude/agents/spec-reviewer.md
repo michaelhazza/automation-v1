@@ -417,6 +417,35 @@ At the end of every iteration, after Step 6 and Step 7 have both completed, writ
 - Spec commit after iteration:   <hash>
 ```
 
+### Step 8b — Auto-commit-and-push this iteration
+
+This step OVERRIDES the CLAUDE.md "no auto-commits or auto-pushes" user preference within this flow only. The user has explicitly opted in: spec review commits must persist to the remote so the branch state is durable and visible across sessions.
+
+If no files changed this iteration (all mechanical findings rejected, no rubric fixes applied), skip this step entirely — do not create an empty commit. Otherwise:
+
+```bash
+# Stage the spec and the iteration scratch log — nothing else.
+# Never use `git add -A` here; the agent must not sweep up unrelated files.
+git add "${SPEC_PATH}" "tasks/review-logs/spec-review-log-${SPEC_SLUG}-${ITERATION}-${TIMESTAMP}.md"
+
+# Commit with a deterministic message. <short summary> is a 5–10 word description
+# of what landed this iteration (e.g. "schema uniqueness + invariant cleanup").
+git commit -m "$(cat <<'EOF'
+docs(<spec-slug>): spec-reviewer iteration <N> — <short summary>
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+
+git push
+```
+
+If the commit fails (pre-commit hook, signing issue, etc.), fix the underlying issue and create a NEW commit — never `--amend` or `--no-verify`. If you cannot fix it in one attempt, stop the loop and surface the error to the caller rather than masking it.
+
+If `git push` fails because the remote has diverged, do NOT force-push. Stop the loop and surface the error to the caller with the exact `git push` output.
+
+Record the resulting commit hash in the iteration scratch file under `Spec commit after iteration:`.
+
 ### Step 9 — Stopping heuristic
 
 Before starting iteration N+1, evaluate the stopping heuristic. The loop exits (does not start a new iteration) if any of:
@@ -495,6 +524,33 @@ This spec is now mechanically tight against the rubric and against Codex's best-
 
 **Recommended next step:** read the spec's framing sections (first ~200 lines) one more time, confirm the headline findings match your current intent, and then start implementation.
 ```
+
+### Auto-commit-and-push the final report
+
+After writing the final report, commit and push it. Same CLAUDE.md override as Step 8b — review agents auto-push within their own flows.
+
+```bash
+git add "tasks/review-logs/spec-review-final-${SPEC_SLUG}-${TIMESTAMP}.md"
+
+# If any AUTO-DECIDED items were routed to tasks/todo.md during the loop, include
+# that file in the commit as well so the deferred backlog lands on the remote.
+if git status --porcelain -- tasks/todo.md | grep -q .; then
+  git add tasks/todo.md
+fi
+
+git commit -m "$(cat <<'EOF'
+docs(<spec-slug>): spec-reviewer final report
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+
+git push
+```
+
+Same failure rules as Step 8b: no `--amend`, no `--no-verify`, no force-push. If the commit or push fails, surface the exact error to the caller.
+
+If the final report write did not produce any new changes (e.g. the run aborted and only scratch files exist), skip this commit rather than creating an empty one.
 
 ---
 

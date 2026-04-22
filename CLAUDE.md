@@ -438,5 +438,5 @@ See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are dur
 ## User Preferences
 
 - Concise communication, no emojis
-- No auto-commits or auto-pushes — the user commits explicitly after reviewing changes
+- No auto-commits or auto-pushes from the main session — the user commits explicitly after reviewing changes. **Exception:** review agents (`spec-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`, `chatgpt-spec-review`) auto-commit and auto-push within their own flows; the user has explicitly opted in so review output persists to the remote and is visible across sessions. Read-only reviewers (`pr-reviewer`) never commit.
 - Stop and ask when requirements are ambiguous enough to affect architecture
