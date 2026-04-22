@@ -171,3 +171,51 @@ Orphan-parent remains an eventual-consistency case (UI resolves). Duplicate-tip 
 - None.
 
 ---
+
+## Round 4 — 2026-04-22T22-00-00Z — final polish round
+
+### Context
+
+User asked "anything we should implement from here?" on ChatGPT's round 4 feedback, which explicitly marked the PR as merge-ready and suggested only high-leverage polish items. Agent produced recommendations per the updated per-finding approval rule; user replied "go with your recommendations".
+
+### ChatGPT Feedback (condensed)
+
+Final verdict: merge-ready, production-safe, architecturally coherent. Four optional items:
+1. CGF3-tweak: implement with a policy function instead of hardcoded threshold.
+2. Promote lifecycle conflicts to a first-class structured signal in write responses.
+3. Add idempotency key to rule creation to dedupe on retry.
+4. Distinguish `fork_conflict` vs `already_superseded` in the lifecycle guard.
+
+### Decisions (per-finding)
+
+| Finding | Recommendation | User Decision | Rationale |
+|---------|----------------|---------------|-----------|
+| Round 4 item 1 — CGF3-tweak with policy function | implement | implement | Reinforces Finding 3; policy function keeps future dimensions (source type, org overrides) in one place |
+| Round 4 item 2 — lifecycle conflicts as structured signal | implement | implement | Additive `lifecycleConflicts?: LifecycleConflictSignal[]` on write response; no breaking change; unblocks operator + UI debugging |
+| Round 4 item 3 — idempotency key for rule creation | defer | defer | Scope creep — overlaps with existing conflict detector; needs design on key derivation + interaction with conflicts + whether to enforce at DB layer |
+| Round 4 item 4 — fork vs already_superseded reason | reject | reject | At write time the guard cannot reliably distinguish concurrent fork from sequential already-superseded write; would be heuristic noise without actionable difference |
+
+### Implemented (Round 4)
+
+- **`shared/types/briefRules.ts`**: added optional `confidence?: number` on `RuleCaptureRequest`.
+- **`server/services/ruleCapturePolicyPure.ts`** (new): pure policy module. Exports `AUTO_PAUSE_CONFIDENCE_THRESHOLD = 0.8` and `shouldAutoPauseRulePure({ originatingArtefactId, confidence })`. Pause dimensions: (1) approval-suggestion origin, (2) explicit confidence below threshold. Empty-string/null origin treated as absent.
+- **`server/services/ruleCaptureService.ts`**: replaces inline ternary with `shouldAutoPauseRulePure` call; `status` derivation now lives in the policy module.
+- **`server/services/__tests__/ruleCapturePolicyPure.test.ts`** (new): 10 tests covering origin-only pause, confidence-only pause, threshold boundary (exclusive lower bound), both signals combined, null and empty-string edge cases. 10/10 pass.
+- **`server/services/briefConversationWriter.ts`**:
+  - New exported types `LifecycleConflictReason` and `LifecycleConflictSignal`.
+  - `WriteMessageResult.lifecycleConflicts?: LifecycleConflictSignal[]` — additive, non-breaking, present only when conflicts occurred so successful writes stay terse.
+  - Conflicts populated alongside existing `logger.warn('lifecycle_conflict')` emission so both observability paths stay in sync.
+
+### Deferred (Round 4)
+
+- **CGF6 — idempotency key for rule creation** (new entry in `tasks/todo.md`).
+
+### Rejected (Round 4)
+
+- Round 4 item 4 — fork vs already_superseded distinction. Not logged as todo; no residual work.
+
+### Verdict
+
+All actionable Round 4 items landed. ChatGPT's "merge-ready" assessment stands. Ready to finalize on user signal.
+
+---

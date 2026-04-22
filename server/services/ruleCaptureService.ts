@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { memoryBlocks } from '../db/schema/index.js';
 import { writeVersionRow } from './memoryBlockVersionService.js';
 import { check as checkConflicts } from './ruleConflictDetectorService.js';
+import { shouldAutoPauseRulePure } from './ruleCapturePolicyPure.js';
 import type {
   RuleCaptureRequest,
   RuleScope,
@@ -45,6 +46,11 @@ export async function saveRule(
 
   const { subaccountId, ownerAgentId } = scopeToFields(request.scope);
 
+  const autoPause = shouldAutoPauseRulePure({
+    originatingArtefactId: request.originatingArtefactId,
+    confidence: request.confidence,
+  });
+
   const [inserted] = await db
     .insert(memoryBlocks)
     .values({
@@ -57,8 +63,9 @@ export async function saveRule(
       capturedVia: request.originatingArtefactId ? 'approval_suggestion' : 'user_triggered',
       priority: request.priority ?? 'medium',
       isAuthoritative: request.isAuthoritative ?? false,
-      // Auto-suggested rules start paused for human review; user-triggered rules go active immediately.
-      status: request.originatingArtefactId ? 'pending_review' : 'active',
+      // Policy-driven pause: approval-suggested rules or low-confidence captures
+      // start in pending_review; everything else goes active immediately.
+      status: autoPause ? 'pending_review' : 'active',
       isReadOnly: false,
     })
     .returning({ id: memoryBlocks.id, content: memoryBlocks.content });

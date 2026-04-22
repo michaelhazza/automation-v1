@@ -14,6 +14,11 @@ export interface RuleCaptureRequest {
   originatingBriefId?: string;
   priority?: 'low' | 'medium' | 'high';
   isAuthoritative?: boolean;
+  // Optional [0..1] confidence score carried forward from the producing source
+  // (LLM-drafted suggestion, heuristic, etc.). Used by the auto-pause policy
+  // to keep low-confidence rules out of the active decision path until a human
+  // reviews them. Absent for pure user-triggered captures.
+  confidence?: number;
 }
 
 export interface SaveRuleResult {

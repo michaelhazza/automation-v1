@@ -22,6 +22,18 @@ export interface WriteMessageInput {
   triggeredRunId?: string;
 }
 
+export type LifecycleConflictReason = 'duplicate_supersession';
+
+export interface LifecycleConflictSignal {
+  artefactId: string;
+  parentArtefactId: string;
+  // ID of the existing (or earlier-in-batch) artefact that already supersedes
+  // the same parent. Lets operators and future UI trace which chain tip blocked
+  // the new write.
+  conflictingArtefactId: string;
+  reason: LifecycleConflictReason;
+}
+
 export interface WriteMessageResult {
   messageId: string;
   artefactsAccepted: number;
@@ -30,6 +42,9 @@ export interface WriteMessageResult {
   // (role === 'user'). Lets the client show a deterministic "Thinking…" state
   // without relying on websocket or refetch timing.
   assistantPending: boolean;
+  // Structured per-artefact breakdown of write-time lifecycle rejections.
+  // Omitted when no conflicts occurred so successful writes stay terse.
+  lifecycleConflicts?: LifecycleConflictSignal[];
 }
 
 /**
@@ -81,8 +96,15 @@ export async function writeConversationMessage(
   );
   const conflictingIds = new Set(writeGuard.conflicts.map((c) => c.artefactId));
   const acceptedArtefacts = perArtefactAccepted.filter((a) => !conflictingIds.has(a.artefactId));
+  const lifecycleConflicts: LifecycleConflictSignal[] = [];
   for (const conflict of writeGuard.conflicts) {
     artefactsRejected++;
+    lifecycleConflicts.push({
+      artefactId: conflict.artefactId,
+      parentArtefactId: conflict.error.parentArtefactId,
+      conflictingArtefactId: conflict.error.conflictingArtefactId,
+      reason: 'duplicate_supersession',
+    });
     logger.warn('briefConversationWriter.lifecycle_conflict', {
       artefactId: conflict.artefactId,
       parentArtefactId: conflict.error.parentArtefactId,
@@ -132,5 +154,6 @@ export async function writeConversationMessage(
     artefactsAccepted: acceptedArtefacts.length,
     artefactsRejected,
     assistantPending: input.role === 'user',
+    ...(lifecycleConflicts.length > 0 ? { lifecycleConflicts } : {}),
   };
 }
