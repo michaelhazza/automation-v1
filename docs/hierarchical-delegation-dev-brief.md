@@ -1,9 +1,9 @@
 # Hierarchical Agent Delegation — Development Brief
 
-> **Status:** Draft dev brief. Not yet a spec. Intended for external review before we commit to a spec pass.
+> **Status:** Rev 2 — incorporates external review. Ready for internal spec-reviewer pass.
 > **Date:** 2026-04-22
-> **Audience:** LLM reviewer without prior context on this codebase, plus internal engineering.
-> **Related work (out of scope here):** Restructuring the seeded 16-agent company into a multi-tier org chart is being designed on a separate track. This brief assumes multi-tier hierarchies are desired and focuses on the runtime and routing primitives needed to make them *meaningful*.
+> **Audience:** Internal engineering, plus LLM reviewers without prior context on this codebase.
+> **Related work (out of scope here):** Restructuring the seeded 16-agent company into a multi-tier org chart is being designed on a separate track. This brief assumes multi-tier hierarchies are desired and focuses on the runtime, routing, and observability primitives needed to make them *meaningful*.
 
 ---
 
@@ -14,16 +14,20 @@
 3. Where we are today (the good parts)
 4. The problems we're solving
 5. Recommendations
-   - 5.1 Plumb `parentAgentId` through `SkillExecutionContext`
-   - 5.2 Add a `scope` parameter to `config_list_agents`
-   - 5.3 Parent-scope `spawn_sub_agents` and `reassign_task`
-   - 5.4 Bundle delegation skills into a reusable `delegation_kit`
-   - 5.5 Use the triage classifier's `scope` to route Briefs
-   - 5.6 Remove the hardcoded orchestrator slug
-   - 5.7 Team-template picker in subaccount creation
+   - 5.0 Enforcement model — visibility and execution
+   - 5.1 Introduce a hierarchy context object
+   - 5.2 Visibility layer — scope-aware `config_list_agents`
+   - 5.3 Execution layer — parent-scope `spawn_sub_agents` and `reassign_task`
+   - 5.4 Derive delegation skills from graph position (don't attach)
+   - 5.5 Root-agent contract — exactly one root per subaccount
+   - 5.6 Use the triage classifier's `scope` to route Briefs
+   - 5.7 Remove the hardcoded orchestrator slug
+   - 5.8 Team-template picker in subaccount creation
+   - 5.9 Observability — delegation trace graph, violation metrics, hierarchy health
 6. Dependencies and suggested ordering
 7. Out of scope
-8. Open questions for the reviewer
+8. Decisions made (resolving prior open questions)
+9. Alternatives considered and rejected
 
 ---
 
@@ -34,6 +38,8 @@ Automation OS is a multi-tenant platform where agencies run AI agents on behalf 
 We've studied how a popular open-source product called Paperclip achieves this, and we have most of the schema and UX primitives needed to match it. What we don't have is the handful of runtime enforcements that turn the org chart from decoration into a real delegation graph. This brief proposes those enforcements.
 
 This is a brief, not a spec. It's deliberately short. Each recommendation is sized as a small, independently-shippable change. An external reviewer is asked to stress-test the proposals, flag gaps, and suggest better alternatives where appropriate.
+
+A note on framing: what we're designing here is more than hierarchy enforcement. The hierarchy context becomes the foundation for later work on budget rollups per subtree, performance attribution per manager, delegation learning, and automatic org-chart optimisation. We're not building those capabilities now — but the decisions in this brief should leave room for them rather than foreclose them.
 
 ## 2. The Paperclip model — what we're trying to match
 
@@ -103,57 +109,123 @@ These four problems, taken together, are why we can *describe* a 32-agent hierar
 
 ## 5. Recommendations
 
-### 5.1 Plumb `parentAgentId` through `SkillExecutionContext`
+### 5.0 Enforcement model — visibility and execution
 
-**Why.** This is the foundational change. Every downstream recommendation that filters by hierarchy depends on the caller's parent ID being visible inside skill handlers. Today it isn't.
+The hierarchy must be enforced at two layers, not one. This framing underpins the rest of §5.
 
-**What.** Add `parentAgentId: string | null` to the `SkillExecutionContext` interface in `server/services/skillExecutor.ts`. Populate it when the context is constructed — the caller's parent can be read from `subaccountAgents.parentSubaccountAgentId` (for subaccount-scoped runs) or `agents.parentAgentId` (for org-scoped runs). It should be `null` for the root agent of a subaccount.
+- **Visibility layer.** What an agent can *see* when it lists the roster. A manager's default world view should be "my direct reports," not "every agent in the org." This prevents the agent from even reasoning about invalid delegations in the first place, which saves tokens, reduces noisy failures, and keeps prompt context focused.
+- **Execution layer.** What an agent can *do* when it calls a delegation skill. Even if the agent somehow names a target outside its subtree, the executor validates at call time and rejects the call.
 
-**Why this is the right shape.** A single nullable field keeps the context lean. We considered passing the whole ancestor chain but decided against it — most skills only need "am I a root?" and "who is my direct parent?" questions. For the rare case where a skill needs the whole chain, it can walk upward one query at a time.
+Enforcement at only one layer doesn't work. Visibility without execution enforcement is a suggestion; execution without visibility enforcement produces repeated illegal-move failures as agents see targets they can't actually reach. Both layers are required, and both are small.
 
-**Footprint.** One field, one populate-site, zero behaviour change. Enables 5.2 / 5.3 / 5.4.
+The visibility layer is §5.2. The execution layer is §5.3. They share the same `scope` vocabulary and the same context object from §5.1.
 
----
+### 5.1 Introduce a hierarchy context object
 
-### 5.2 Add a `scope` parameter to `config_list_agents`
+**Why.** Every downstream recommendation that filters by hierarchy needs the caller's position in the graph visible inside skill handlers. A bare `parentAgentId` field is not enough — delegation decisions usually require knowing direct children, the root of the current subtree, and the agent's depth. Making every skill walk the tree itself duplicates queries and creates inconsistent logic.
 
-**Why.** A middle manager needs to know its team. Today the only way to enumerate agents is "give me every agent in the org," which defeats the purpose.
+**What.** Add a `hierarchy` field to the `SkillExecutionContext` interface in `server/services/skillExecutor.ts`:
 
-**What.** Add an optional parameter `scope: 'subaccount' | 'children' | 'descendants'` defaulting to `'subaccount'` (preserving current behaviour). When `'children'`, filter to agents where `parentSubaccountAgentId === context.agentId`. When `'descendants'`, recurse (bounded by `MAX_DEPTH = 10`). Apply the same parameter to `config_list_subaccounts` and `config_list_links` for consistency.
+```ts
+hierarchy: {
+  parentId: string | null    // null iff this agent is a subaccount root
+  childIds: string[]         // direct reports only; empty for workers
+  depth: number              // 0 at the root
+  rootId: string             // the subaccount root's agent id (this agent's own id if root)
+}
+```
 
-**Why not just filter on the client side.** Two reasons. First, it avoids returning a potentially large list just to filter it down — a 32-agent firm would return 32 rows every time a manager enumerates its 5 direct reports. Second, it makes the skill's intent explicit in the tool call, which is readable in run traces and easier to reason about when debugging delegation chains.
+Populate it once at context construction from `subaccountAgents.parentSubaccountAgentId` (for subaccount-scoped runs) or `agents.parentAgentId` (for org-scoped runs). `childIds` comes from the same table, filtered to active links. `depth` and `rootId` are computed by walking upward once at construction — bounded by `MAX_DEPTH = 10`.
 
-**Footprint.** Parameter addition, three handlers, backward-compatible default.
+**Why this is the right shape.** Four fields cover ~95% of hierarchy-aware skill logic. Skills that need the entire subtree (rare — budget rollups, for instance) can call a separate repository helper rather than paying the lookup cost on every run. The object is small, cacheable, and stable for the lifetime of a run.
 
----
-
-### 5.3 Parent-scope `spawn_sub_agents` and `reassign_task`
-
-**Why.** This is the enforcement half. Without it, a middle manager's "list my children" skill returns a filtered list, but the manager could still hand work to any agent it names — the hierarchy is opt-in by good behaviour rather than enforced.
-
-**What.** Add a `delegationScope: 'children' | 'descendants' | 'subaccount'` parameter to both skills. When the scope is `'children'`, validate at call time that `target.parentSubaccountAgentId === caller.agentId` and fail the call with a clear error if not. When `'descendants'`, allow any agent in the caller's subtree. When `'subaccount'`, preserve today's flat behaviour.
-
-**What the default should be.** Open question. See §8. One view: default to `'children'` for any agent that has children, and `'subaccount'` for leaf agents (preserves current behaviour for agents that aren't managers). Another view: default stays `'subaccount'` for backward compatibility, and managers opt in. The second is safer but relies on prompt discipline.
-
-**Escape hatch.** Keep `'subaccount'` mode available. Real orgs have exceptional cases — a task lands with the wrong team, a cross-functional handoff is needed, the Orchestrator needs to reassign from one department to another. Making the hierarchy a strict cage would fight those cases instead of supporting them. The hierarchy should be a guard rail, not a wall.
-
-**Footprint.** New parameter on both skills, validation logic in the executor, new error code.
+**Footprint.** One field, one populate site, a small repository helper for the upward walk. Zero behaviour change until §5.2 onward consumes it.
 
 ---
 
-### 5.4 Bundle delegation skills into a reusable `delegation_kit`
+### 5.2 Visibility layer — scope-aware `config_list_agents`
 
-**Why.** Once 5.1–5.3 land, any agent with children needs the same small bundle of skills — list your team, spawn parallel work, reassign sequential work. Attaching them individually everywhere is error-prone; bundling them makes the pattern explicit.
+**Why.** A middle manager should see its team, not the whole org. Today the only way to enumerate agents is "every active agent in the org," which both wastes tokens and invites the agent to reason about delegations it can't legally execute.
 
-**What.** Define a named skill bundle — either as a new concept in the skill system, or as a convention in agent templates. When a new manager-tier agent is created (via template apply, via manual creation, whenever), automatically attach the kit. When the agent has no children (i.e. it's a worker), don't attach it.
+**What.** Add an optional parameter `scope: 'children' | 'descendants' | 'subaccount'` to `config_list_agents`. Meaning:
 
-**Why this makes role emergent.** With a `delegation_kit` auto-attached to any agent with children and withheld from agents without, "manager" stops being a hardcoded role and becomes a property of position in the graph. Add a child to a worker and it becomes a manager; remove all children and it becomes a worker again. No enum fields, no role table, no manual configuration — the graph is the source of truth.
+- `'children'` — agents where `parentSubaccountAgentId === context.agentId` (the default for any agent with children; see below).
+- `'descendants'` — the caller's full subtree, bounded by `MAX_DEPTH = 10`.
+- `'subaccount'` — every agent in the current subaccount (today's behaviour).
 
-**Footprint.** Either a new concept (skill bundles) or a convention in the existing skill-attachment code. The convention path is smaller and probably enough for v1.
+Apply the same parameter to `config_list_subaccounts` and `config_list_links` for vocabulary consistency.
+
+**Adaptive default.** The default depends on the caller's position in the graph, not a caller-supplied flag: if `context.hierarchy.childIds.length > 0`, default to `'children'`; otherwise default to `'subaccount'`. Workers (no children) see the subaccount as before — nothing changes for them. Managers (have children) see their team by default. This makes hierarchy the default world view the moment an agent gains a subordinate, without forcing existing prompts to be rewritten.
+
+**Why not just filter client-side.** Two reasons. First, returning a 32-agent roster every time a 5-agent team is enumerated wastes tokens and widens the LLM's attention surface. Second, making the scope explicit in the tool call is a readability win — run traces show "I asked for my direct reports" instead of "I asked for everyone and then picked three."
+
+**Footprint.** Parameter addition, three handlers, adaptive-default logic driven by `context.hierarchy`.
 
 ---
 
-### 5.5 Use the triage classifier's `scope` to route Briefs
+### 5.3 Execution layer — parent-scope `spawn_sub_agents` and `reassign_task`
+
+**Why.** Visibility scoping alone isn't enough. An agent could still name a target outside its subtree (via prompt leakage, hallucination, or an older stored agent ID). The executor has to validate. This is the enforcement half of §5.0.
+
+**What.** Add a `delegationScope: 'children' | 'descendants' | 'subaccount'` parameter to both `spawn_sub_agents` and `reassign_task`. Validation runs at call time, inside the executor:
+
+- `'children'` — assert `target.parentSubaccountAgentId === caller.agentId`. Fail with a structured error if not.
+- `'descendants'` — assert the target is somewhere in the caller's subtree. Reuse the walk from §5.1's `rootId` computation.
+- `'subaccount'` — no subtree restriction, today's behaviour.
+
+**Adaptive default.** Same shape as §5.2. Default to `'children'` when the caller has children, `'subaccount'` when they don't. Managers tighten automatically, workers are unaffected.
+
+**Who can use the `'subaccount'` escape hatch.** This is important. `'subaccount'` must remain available — real orgs have cross-subtree handoffs, exceptional escalations, and "this landed in the wrong team" cases. But it should only be callable by **root agents** (agents where `parentSubaccountAgentId IS NULL`). A mid-tree agent passing `delegationScope: 'subaccount'` is either a prompt bug or an attempt to bypass the hierarchy; the executor rejects it with the same error as an out-of-subtree target. Position in the graph grants the authority — no new authority enum, no hardcoded roles.
+
+**Upward escalation.** A non-root agent reassigning *upward* to its parent is allowed but logged with a distinct marker (`delegation_direction: 'up'`) so it's rare-by-observation. Cross-subtree reassignments happen by escalating to the nearest common ancestor (typically the Orchestrator), which then reassigns downward into the target subtree — the cleanest mental model and the one that keeps every hop legible in the trace.
+
+**Footprint.** New parameter on both skills, validation logic in the executor, two new structured error codes (`delegation_out_of_scope`, `cross_subtree_not_permitted`).
+
+---
+
+### 5.4 Derive delegation skills from graph position (don't attach)
+
+**Why.** Any agent with children needs the same small set of delegation skills — list the team, spawn parallel work, reassign sequential work. The obvious approach is to attach those skills to managers at creation time. That approach quietly breaks: children change over time. An agent promoted to manager by gaining a subordinate would need its skill list updated. An agent demoted by losing all children would have delegation skills it shouldn't use. Sync logic is easy to forget and hard to audit.
+
+**What.** Resolve the delegation skills at runtime, based on `context.hierarchy.childIds.length > 0`, not at skill-attachment time. Concretely: when the skill resolver assembles the tool list for a run, it unions the agent's attached skills with a graph-derived set:
+
+- If the agent has at least one active child, add `config_list_agents`, `spawn_sub_agents`, and `reassign_task` to the available tool list for this run (if not already attached).
+- If the agent has no children, the derived set is empty — the agent's own attached skills are unchanged.
+
+**Why this makes role emergent.** With delegation skills derived from position, "manager" stops being a hardcoded role and becomes a property of position in the graph. Add a child to a worker and it becomes a manager on its next run; remove all children and it becomes a worker again. No enum fields, no role table, no sync job, no drift. The FK graph is the single source of truth for who delegates.
+
+**What this avoids.** We deliberately don't introduce a new "skill bundle" first-class concept (with storage, versioning, management UI) just for this case. The derived-resolution path is smaller, drift-free, and enough for v1. If we later find ourselves wanting to version skill kits independently, that's a separate conversation.
+
+**Footprint.** One addition to the skill resolver — roughly "if `hierarchy.childIds.length > 0`, union with the delegation skill set." No schema, no storage, no migration.
+
+---
+
+### 5.5 Root-agent contract — exactly one root per subaccount
+
+**Why.** Routing in §5.6 depends on "find the root agent for this subaccount." If that lookup can return zero, one, or many agents depending on data state, routing becomes non-deterministic and produces hard-to-debug "wrong CEO" bugs. We need a clear contract at the database level.
+
+**What.** Enforce exactly one root per subaccount via a partial unique index:
+
+```sql
+CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount
+  ON subaccount_agents (subaccount_id)
+  WHERE parent_subaccount_agent_id IS NULL
+    AND is_active = true;
+```
+
+Semantics:
+
+- **Exactly one active root per subaccount.** The partial index enforces uniqueness only over active links, so soft-deleted or inactive rows don't block a future re-root.
+- **Zero roots is also invalid at runtime.** The routing resolver in §5.6 treats a subaccount with no active root as a configuration error and falls back to the org-level root (historically the Orchestrator via hardcoded slug) with a loud warning — never silently fails.
+- **Template import and template apply must maintain the invariant.** `hierarchyTemplateService.apply()` and `importToSubaccount()` deactivate the prior root in the same transaction as activating the new one. This prevents a split-brain "two CEOs" window during re-applies.
+
+**Migration.** Audit existing subaccounts before adding the index. Any subaccount with zero or multiple active roots needs manual resolution first (there shouldn't be many — the hardcoded Orchestrator model has produced one-root-per-org, not one-root-per-subaccount, so most existing subaccounts are likely to have zero subaccount-roots rather than multiple).
+
+**Footprint.** One partial unique index, migration script, one transaction-boundary audit on two existing service methods. Enables 5.6 and 5.7.
+
+---
+
+### 5.6 Use the triage classifier's `scope` to route Briefs
 
 **Why.** The Universal Brief feature already classifies every incoming user query into a `scope` of `subaccount` / `org` / `system`. It writes that scope to `fast_path_decisions.decidedScope` for observability. Then it throws it away. Nothing in `briefCreationService` branches on it. This is the single cheapest routing improvement on the table.
 
@@ -171,17 +243,17 @@ If the lookup finds nothing, fall back to current behaviour (hardcoded slug) so 
 
 ---
 
-### 5.6 Remove the hardcoded orchestrator slug
+### 5.7 Remove the hardcoded orchestrator slug
 
-**Why.** Recommendation 5.5 makes this cleanup obvious. Once scope-aware routing can find the right root agent from the graph, there's no reason to keep `ORCHESTRATOR_AGENT_SLUG = 'orchestrator'` as a literal string. It's the last place in the codebase where we say "the CEO is this specific slug" instead of "the CEO is whoever sits at the top of this subtree."
+**Why.** Recommendation 5.6 makes this cleanup obvious. Once scope-aware routing can find the right root agent from the graph, there's no reason to keep `ORCHESTRATOR_AGENT_SLUG = 'orchestrator'` as a literal string. It's the last place in the codebase where we say "the CEO is this specific slug" instead of "the CEO is whoever sits at the top of this subtree."
 
-**What.** Replace the slug lookup in `server/jobs/orchestratorFromTaskJob.ts:21` with the scope resolver from 5.5. The resolver becomes the single canonical way to find the top agent for a given scope.
+**What.** Replace the slug lookup in `server/jobs/orchestratorFromTaskJob.ts:21` with the scope resolver from 5.6. The resolver becomes the single canonical way to find the top agent for a given scope.
 
-**Footprint.** Two-line change if 5.5 is in. Essentially a cleanup pass.
+**Footprint.** Two-line change if 5.6 is in. Essentially a cleanup pass.
 
 ---
 
-### 5.7 Team-template picker in subaccount creation
+### 5.8 Team-template picker in subaccount creation
 
 **Why.** The whole Paperclip moment — "pick a 6-agent preset and spin up the firm" — is one UI pattern away. All the backend verbs exist. We just don't offer the user a choice when creating a subaccount.
 
@@ -191,17 +263,40 @@ If the lookup finds nothing, fall back to current behaviour (hardcoded slug) so 
 
 **Footprint.** One form field, one extra API call on submit, template list endpoint already exists.
 
+---
+
+### 5.9 Observability — delegation trace graph, violation metrics, hierarchy health
+
+**Why.** A hierarchical delegation system is much harder to debug than a flat one. A single Brief can fan out through three or four agents before producing the final artefact, and when something goes wrong "which agent did what, and why" has to be answerable in seconds, not minutes. The existing Run Trace Viewer handles the single-run case but doesn't stitch cross-agent chains into a visible graph.
+
+**What.** Three additions, none of them large:
+
+**1. Delegation trace graph (UI).** Extend the run trace view to render the delegation tree: who called whom, with which `delegationScope`, which `handoffContext`, and the outcome. For a Brief that fans out through three levels, the trace should be one collapsible tree, not three disconnected run pages. The graph reads from existing `agentRuns` fields (`parentRunId`, `isSubAgent`, `handoffDepth`, `handoffSourceRunId`) — no new storage.
+
+**2. Scope violation metrics.** The executor's rejection path (the `delegation_out_of_scope` and `cross_subtree_not_permitted` errors from §5.3) increments structured counters by `callerAgentId` and `attemptedTargetAgentId`. Sustained violations by a single agent indicate a prompt bug — its manifest says "manager of team X" but it's trying to delegate to team Y. A simple dashboard query surfaces the offenders.
+
+**3. Hierarchy health detectors.** Two new detectors in the existing Workspace Health Audit subsystem (`server/services/workspaceHealth/detectors/`):
+
+- `subaccountMultipleRoots` (critical) — fires if §5.5's invariant is violated for any reason (race, bad migration, direct DB edit). Should never fire in normal operation.
+- `subaccountNoRoot` (critical) — fires if a subaccount has zero active roots. Blocks Brief dispatch for that subaccount; surfaces to ops.
+- `managerWithoutChildren` (warning) — fires if an agent has delegation skills attached directly (not derived) but has no active children. Usually means a previously-managed team was migrated away and the old attachments were never cleaned up.
+
+The existing detector framework is plug-and-play, so each detector is a ~30-line file.
+
+**Footprint.** UI extension for the trace graph, two structured error codes already added in §5.3, three detectors. No new tables.
+
 ## 6. Dependencies and suggested ordering
 
-The recommendations split cleanly into three independently-shippable groups, with dependencies flowing in one direction:
+The recommendations split cleanly into four independently-shippable groups, with dependencies flowing in one direction:
 
-- **Group A — runtime enforcement:** 5.1 → 5.2 → 5.3 → 5.4. Must be done in this order because 5.2 depends on 5.1, 5.3 depends on both, 5.4 depends on all three.
-- **Group B — routing:** 5.5 → 5.6. 5.6 is a cleanup of 5.5.
-- **Group C — UX:** 5.7. Independent of A and B once the backend verbs exist.
+- **Group A — runtime enforcement:** 5.1 → 5.2 → 5.3 → 5.4. Must be done in this order — 5.2 and 5.3 depend on 5.1's hierarchy context, and 5.4 depends on all three.
+- **Group B — routing:** 5.5 → 5.6 → 5.7. 5.5 is a DB-contract prerequisite for 5.6's resolver; 5.7 is the cleanup that retires the hardcoded slug.
+- **Group C — UX:** 5.8. Independent of A and B once the backend verbs exist.
+- **Group D — observability:** 5.9. Depends on A and B having landed (the error codes and the root-agent contract are what the detectors and the trace graph check against), but otherwise standalone.
 
-A and B don't depend on each other. You could ship Group B on its own and get per-subaccount CEOs without any changes to delegation. You could ship Group A on its own and get proper manager-scoped delegation inside the existing single-orchestrator routing. Both are valuable independently.
+Groups A and B don't depend on each other. You can ship B alone and get per-subaccount CEOs without changing delegation. You can ship A alone and get proper manager-scoped delegation inside the existing single-orchestrator routing. Both are valuable independently.
 
-If we had to pick the single highest-leverage first step, it would be **5.5**. It's a small change, it unblocks per-subaccount CEOs immediately, and it creates the pressure that makes the rest of the work feel necessary rather than optional.
+If we had to pick the single highest-leverage first step, it would be **5.5 + 5.6 together** — the root-agent contract plus scope-aware routing. Small change, unblocks per-subaccount CEOs immediately, and establishes the contract that the rest of the work rests on.
 
 ## 7. Out of scope
 
@@ -213,21 +308,38 @@ If we had to pick the single highest-leverage first step, it would be **5.5**. I
 
 **Multi-user threads on Briefs.** A colleague picking up another user's Brief chat is a known future need and schema-compatible, but nothing in this brief depends on or blocks it.
 
-## 8. Open questions for the reviewer
+## 8. Decisions made (resolving prior open questions)
 
-1. **Default delegation scope.** For `spawn_sub_agents` and `reassign_task`, should the default be `'children'` (safer, tighter, may break existing prompts that assume flat delegation) or `'subaccount'` (backward-compatible, relies on prompt discipline to actually constrain managers to their subtree)? We lean `'subaccount'` for v1 but welcome a second opinion.
+The first draft of this brief left eight questions open. External review plus internal adjudication resolves them as follows. Each is now a design decision — reviewers can still disagree, but the default is to proceed with these answers unless challenged.
 
-2. **Skill bundle as a first-class concept.** Is a named `delegation_kit` worth modelling as a new concept in the skill system — with storage, versioning, and template-style application — or is "auto-attach these three slugs by convention" enough? We lean convention for v1.
+1. **Default delegation scope is adaptive.** Default to `'children'` when `context.hierarchy.childIds.length > 0`, otherwise `'subaccount'`. Position in the graph drives the default — no caller flag, no global toggle. Workers are unaffected; managers tighten automatically. Rationale: a global `'subaccount'` default would let the system drift back to flat behaviour indefinitely, even with enforcement available. Adaptive defaults make hierarchy the path of least resistance.
 
-3. **Root-agent discovery.** Should there be exactly one root agent per subaccount (enforced by a partial unique index) or zero-or-more with a fallback? A strict "exactly one" rule is cleaner but forces migration of any currently-leafless subaccounts; zero-or-more is softer but opens ambiguity.
+2. **No first-class skill-bundle concept.** Delegation skills are *derived at runtime* from `context.hierarchy.childIds`, not stored as a named bundle. See §5.4. We do not introduce skill bundles as a versioned entity. If a future use case needs versioned kits, that's a separate spec.
 
-4. **Upward escalation.** If a worker receives a task it can't handle, should it be able to reassign *upward* to its parent, or only sideways / downward? Paperclip doesn't appear to formalise this. We'd default to "allowed, but rare, and visible in the run trace."
+3. **Exactly one active root per subaccount.** Enforced by a partial unique index — see §5.5. Zero-roots or multiple-roots at runtime are treated as config errors and surfaced via the `subaccountNoRoot` / `subaccountMultipleRoots` health detectors.
 
-5. **Cross-subtree delegation.** When the Orchestrator decides a task filed under the Sales team actually belongs to Marketing, it needs to cross subtrees. Is that cleanly handled by reassigning at the Orchestrator level (parent of both), or does it warrant a distinct skill?
+4. **Upward escalation is allowed.** A non-root agent can reassign upward to its parent. The executor records `delegation_direction: 'up'` in the run trace so upward hops are visible and quantifiable. Expected to be rare; the metric exists so we can confirm that assumption.
 
-6. **Manager schedule.** Should manager agents run on the same heartbeat cadence as workers, or only on-demand when delegated to? (We lean "on-demand" — a manager with a schedule mostly burns tokens.)
+5. **Cross-subtree delegation goes through the nearest common ancestor.** Typically the Orchestrator (the subaccount root). The executor does not introduce a new "cross-subtree delegate" skill; instead, mid-tree agents escalate upward (via upward reassign) and the ancestor reassigns downward into the target subtree. Two hops, both legitimate under the enforcement rules, and both legible in the trace. The only agent with direct cross-subtree authority is the subaccount root — and that's granted by position (§5.3), not by an enum.
 
-7. **Token budget shape for managers.** Manager runs should be short (decompose + delegate). Do we set a default lower `tokenBudgetPerRun` for manager-tier agents, or let operators tune per-agent? Cheap default would be ~30% of a worker's budget.
+6. **Manager agents run on-demand, not on a heartbeat.** A manager's job is to decompose and delegate when asked; between asks it has no work to do. Scheduled manager runs mostly burn tokens on no-op runs.
 
-8. **Hierarchy exposure to the user.** When a user talks to the CEO through the GlobalAskBar, should the chat ever surface intermediate delegations ("I asked the Head of Growth, who asked the Content agent, here's what came back")? Paperclip collapses this into a single CEO voice. We could go either way; we lean "collapsed by default, expandable for debugging."
+7. **Manager token budget is configurable, not a hardcoded ratio.** We set a sensible default (starting point: the same as worker agents — don't optimise before we have data) and let operators tune per-agent via the existing `tokenBudgetPerRun` override. We will revisit with real usage data; choosing a ratio today based on a guess foreclosed flexibility for no benefit.
 
+8. **Hierarchy is collapsed by default in the user chat, expandable via trace.** The user sees a single voice from the subaccount root — they don't need to know that three sub-delegations happened. The full delegation trace graph (§5.9) is one click away for anyone investigating a run. This matches Paperclip's posture and keeps the "talk to one CEO" UX intact.
+
+## 9. Alternatives considered and rejected
+
+Documenting the paths we explored and chose not to take, because "what we're not doing" is often more informative than "what we are."
+
+**A `delegationAuthority: 'strict' | 'cross_subtree' | 'global'` enum on agents.** Rejected. It solves the cross-subtree-authority question but reintroduces hardcoded role fields — the exact pattern this brief is designed to eliminate. Position in the graph already answers the authority question: root agents can use `'subaccount'` scope, non-root agents cannot. No new field, no drift between role and graph.
+
+**Attach delegation skills to manager agents at creation time.** Rejected. See §5.4. Attachment creates drift when children change; derivation doesn't.
+
+**Single-field `parentAgentId` in `SkillExecutionContext`.** Rejected in favour of the four-field `hierarchy` object. See §5.1. Skills commonly need more than "who is my parent" — they need children, depth, and root.
+
+**Default delegation scope of `'subaccount'` for backward compatibility.** Rejected in favour of adaptive. See §8, decision 1.
+
+**Enforcement at only the execution layer (skill validation, no visibility scoping).** Rejected in favour of dual-layer enforcement. See §5.0. Execution-only enforcement produces a pathology where managers repeatedly try illegal delegations (because they can see invalid targets) and fail noisily. Visibility scoping prevents the attempt; execution enforcement catches the rare miss.
+
+**Push hierarchy enforcement down to Postgres row-level security.** Deferred, not rejected. RLS is about data access (can agent A read row B), not workflow control (can agent A delegate to agent B). The two are adjacent but not the same. RLS-layer delegation enforcement might be worth revisiting if we see sustained bypass attempts at the application layer, but it's not the v1 mechanism.
