@@ -176,6 +176,8 @@ Three fields, not one — conflating them loses signal. Universal Brief's attrib
 
 **Cache cost attribution captures both writes and reads.** `cache_creation_input_tokens` (cost of writing the cache on the first run in a TTL) and `cache_read_input_tokens` (savings on subsequent runs). True hit rate = reads / (reads + writes). Derived metrics (hit type: full / partial / miss, cache efficiency ratio, estimated cost saved) surface in the Usage Explorer as query-time calculations — no extra storage required.
 
+**Run identity is prefix identity + variable input identity.** The `prefix_hash` covers the cached reference block. It does not cover the variable input (today's transcript, the email thread, the report being ingested). For full run traceability — "why did this run produce that output?" — both identities must be logged on the run row. One hash tells us whether the cache was valid; the other tells us what the model was actually asked about. Conflating them hides real variation.
+
 **Pack utilization as a progressive signal, not just a cliff.** A scheduled background metric (`pack_utilization = estimated_prefix_tokens / max_input_tokens`) is computed per pack per model-tier and surfaced in the Pack UI and Usage Explorer. Thresholds: 70% → warning ("approaching limit"), 90% → urgent ("one more document may block"), 100% → block at run time. Without this, packs grow silently and users only learn they've breached the limit when a scheduled task fires at 3am and blocks at the HITL gate. With it, users see the ramp and prune proactively.
 
 **6. The safety valve, with a concrete block payload.** If a task would exceed `ExecutionBudget`, it does not silently run expensive and it does not silently fail. It stops at the existing HITL gate as `block`. The structured payload the operator sees:
@@ -191,6 +193,8 @@ Three fields, not one — conflating them loses signal. Universal Brief's attrib
 ```
 
 Soft-warn breaches (above warn threshold, below hard limit) log and proceed, flagged in the run row for later review in the Usage Explorer.
+
+**Run outcomes are classified, not binary.** A run is not simply "succeeded" or "failed." Three outcomes matter distinctly for observability and retry logic: **completed** (ran cleanly within the budget), **degraded** (ran but with a soft-warn breach, estimate-vs-actual drift above threshold, or an unexpected cache miss against a prefix that should have hit), and **failed** (HITL-blocked, API error, or hard failure). Collapsing degraded into either completed or failed loses operational signal — we lose visibility into runs that "worked but shouldn't have" and we get false alarms on runs that failed for infrastructure reasons versus runs that failed because the task was mis-configured.
 
 ---
 
@@ -209,6 +213,8 @@ Soft-warn breaches (above warn threshold, below hard limit) log and proceed, fla
 **Thresholds in the database, not code.** Per the platform's "configured behaviour in the database" principle. If tuning a limit requires a code deploy, we've put it in the wrong place.
 
 **Sonnet 4.6 default.** Standard tier, 1M context, good enough for synthesis tasks. Opus for the narrow set of tasks that explicitly need it. Haiku for simple cases. Per-tenant override via task config.
+
+**Pack quality is not only measured in tokens.** Token count is the necessary budget signal but not a sufficient quality signal. A pack that stays inside the limit but contains contradictory documents, deeply nested metadata, or heterogeneous formats can still degrade output — the model spreads attention across low-signal material. v1 measures tokens and blocks on that; we do not prescribe a composition metric yet, but the spec author should leave room for one. Pathological pack compositions show up as output-quality regressions despite token budgets being green — the signal to watch for.
 
 ---
 
@@ -265,6 +271,7 @@ The infrastructure is validated when:
 - Running the same task twice within the 1-hour TTL produces a cache hit on the second run, confirmed by the `cache_read_input_tokens` field on the response.
 - A task configured with a pack that exceeds the hard limit is blocked at the HITL gate with a structured error, and no API credits are consumed.
 - The Usage Explorer shows actual cache-hit rate and cache-attributed cost per tenant per task — measured, not estimated.
+- The Usage Explorer exposes the *cost delta* between first-run (cache-write) and subsequent-run (cache-read) executions of the same pack, so the business value of caching is visible per task and per tenant — not just the raw hit rate.
 - The pilot macro-report task runs end-to-end on this infrastructure for a week without surprises.
 
 ---
@@ -279,4 +286,7 @@ The infrastructure is validated when:
 - **One canonical budget at the enforcement boundary.** Many inputs resolve into one `ExecutionBudget`; no parallel enforcement paths.
 - Fail fast and loud at the HITL gate; never silently burn credits.
 - Capture actual cache attribution per run (reads *and* writes), not estimated.
+- **Idempotent by contract.** A single logical task run produces exactly one billed LLM execution, even under retry, scheduler duplication, or worker restart. The router is where this invariant is enforced; cached-context inherits it.
+- **Reconstructable from persisted state.** Any run can be replayed end-to-end from the snapshot, budget, and prefix-hash components on the row — never from the live document or pack tables. Mutable state must not be load-bearing for reproducibility.
+- **Resilient to upstream drift.** Tokenisers, model versions, cache semantics, and provider pricing will all change under us. Token-count drift is tracked (§4.2); assembly is versioned (§4.4). The principle generalises: no code path may silently depend on an upstream invariant we do not ourselves validate.
 - Defer complexity; v1 must be boring and observable before it is clever.
