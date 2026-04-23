@@ -12,6 +12,7 @@
   - `server/services/skillService.ts` (modified — `resolveSkillsForAgent`)
   - `server/services/agentExecutionService.ts` (modified — call site at L681)
 **Run at:** 2026-04-24T00:00:00Z
+**Commit at finish:** `512ca52aac9ca544807ff5035d6bdc8c6947ed9f`
 
 ---
 
