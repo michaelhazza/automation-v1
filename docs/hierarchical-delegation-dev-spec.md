@@ -319,7 +319,8 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
 - `code` is one of the string literals enumerated below. The enum is closed for v1 — adding a new code requires a spec update.
 - `message` is human-readable, intended for the agent's prompt context. It may include runtime identifiers but MUST NOT include values that can drift between spec revisions (e.g. do not embed schema version numbers in the message).
 - `context` is an object with a stable minimum shape: it MUST include `runId` (the `SkillExecutionContext.runId` the skill was called with) and `callerAgentId` (the `SkillExecutionContext.agentId`). Additional per-code fields listed in each example below are also required when the relevant identifier is resolvable at validation time (e.g. `targetAgentId` for `delegation_out_of_scope`). Extra diagnostic fields MAY be added by the skill handler without a spec update, but MUST be additive — never rename or remove a field that has already shipped. This is the stability contract the Brief prompt scaffolding and `agent_execution_events` consumers rely on.
-- Every error emitted by these skills is also written to `agent_execution_events` with the same `{ code, context }` payload so the Live Execution Log stays lossless even when `delegation_outcomes` writes are dropped (§10.3).
+- `context` size bound: the serialised `context` object MUST NOT exceed 4 KiB. Array-valued diagnostic fields (e.g. `callerChildIds`) are truncated to the first 50 elements with a `truncated: true` sibling flag when the full list would breach the cap. This bound keeps the payload agent-prompt-friendly (fits in a single tool-result message without blowing the context window) and prevents a misbehaving caller with thousands of children from producing multi-megabyte error rows in `agent_execution_events`.
+- Every error emitted by these skills is also written to `agent_execution_events` with the same `{ code, context }` payload so the Live Execution Log stays lossless even when `delegation_outcomes` writes are dropped (§10.3). The event-log write is itself best-effort — failure-mode contract in §15.8.
 
 **`delegation_out_of_scope`** — target is not within the resolved scope for this call.
 
@@ -1761,6 +1762,18 @@ If a future prose mention is added that doesn't appear here, the spec-reviewer w
 - §3.2 states this explicitly. Seed reorg is a separate track.
 - The four phases are each shippable standalone — they deliver value (observability, per-subaccount CEOs, visibility scoping, enforcement) regardless of whether a tree exists to enforce against.
 - Phase-1 detectors fire `subaccountNoRoot` findings for every subaccount until someone assigns roots — this is the intended signal, not a bug. The findings tell operators "you haven't configured a team yet."
+
+### 15.8 `agent_execution_events` dual-write failure for delegation errors
+
+**Risk:** §4.3 specifies that every delegation skill error is *also* written to `agent_execution_events` with the same `{ code, context }` payload — this is the "lossless Live Execution Log" guarantee that backstops `delegation_outcomes` drops (§10.3). If the event-log write itself throws inside the skill handler (DB hiccup, RLS mismatch, transaction isolation, etc.), a naive implementation either (a) fails the skill call — converting a telemetry problem into a user-facing delegation failure — or (b) silently swallows the error and the Live Execution Log loses the one signal §10.3 promised would always be present.
+
+**Likelihood:** Low. **Impact:** Medium — depending on the naive branch, either fails delegations that should succeed, or creates a blind spot in the lossless-log contract that `delegation_outcomes`-drop tolerance depends on.
+
+**Mitigation:**
+- The event-log write mirrors §10.3's pattern: skill handlers call an `insertExecutionEventSafe()` entry point on the existing `agentExecutionEventService`, which is a detached try/catch — errors are swallowed and logged at WARN under a distinct tag (`delegation_event_write_failed`) so they are distinguishable from `delegation_outcome_write_failed`. The skill call does not fail on event-log write failure.
+- The error is still returned to the caller (the agent's prompt) with the full `{ code, message, context }` payload, so even in the degenerate case where both `delegation_outcomes` AND `agent_execution_events` writes are dropped, the agent itself sees the rejection and adjusts. The log surfaces are telemetry, not enforcement.
+- Monitored via platform-level DB error logs — sustained `delegation_event_write_failed` volume is a DB health issue, not a spec issue. If it trends with `delegation_outcome_write_failed`, it's shared infra (connection pool, RLS, tenant-scope config); if it trends alone, the event-log write site needs investigation.
+- The dual-write is sequenced AFTER the parent skill's core mutation commits (same discipline as `delegationOutcomeService.insertOutcomeSafe()` in §10.3). Neither telemetry write is ever in the skill's critical-path transaction.
 
 ---
 

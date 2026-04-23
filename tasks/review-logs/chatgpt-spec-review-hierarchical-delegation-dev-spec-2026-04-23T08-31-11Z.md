@@ -70,3 +70,73 @@ Eight findings surfaced in the ChatGPT review pass:
 
 ---
 
+## Round 2 — 2026-04-23T08-50-48Z
+
+### ChatGPT Feedback (raw)
+
+Three findings surfaced in the second ChatGPT pass:
+
+1. **Error `context` size bound missing** — the uniform contract added in round 1 pins shape and extensibility but not a byte budget. An agent with thousands of children could produce a multi-megabyte `callerChildIds` payload that blows the prompt context window and creates oversized `agent_execution_events` rows.
+2. **`runId` propagation enforcement** — ChatGPT asked whether the new §10.6 trace-continuity invariant has a runtime check or is only a call-site discipline.
+3. **`agent_execution_events` dual-write failure handling** — §4.3 promises the event-log write is "lossless" as a backstop for `delegation_outcomes` drops, but there's no corresponding §15 risk entry describing what happens if the event-log write itself fails. §15.6 covers the outcomes table; the event-log table has no mirror entry.
+
+### Recommendations and Decisions
+
+| # | Finding | Agent Recommendation | User Decision | Severity | Rationale |
+|---|---------|----------------------|---------------|----------|-----------|
+| 1 | Error context size bound | apply | apply | medium | Real gap — the contract pinned shape but not size. One-line addition to the uniform-contract block in §4.3 prevents prompt-blowup and outsized event rows. |
+| 2 | `runId` propagation enforcement | reject | reject | low | §10.6 explicitly states "invariant holds by construction at write time, or the row is broken and must be investigated as a bug — not auto-repaired." §10.6 + §6.3 + §6.4 + §4.3 already enumerate every write-site. No runtime reconciliation is the point of the contract. |
+| 3 | Event-log dual-write failure | apply | apply | high | Genuine asymmetry — §15.6 covers `delegation_outcomes` but `agent_execution_events` is equally best-effort under load and has no failure-mode contract. New §15.8 mirrors §15.6's structure, names `insertExecutionEventSafe()` as the detached try/catch entry point, and pins the distinct WARN tag (`delegation_event_write_failed`) so operators can distinguish the two telemetry failures. |
+
+### Applied (only items the user approved as "apply")
+
+- **§4.3 — Error `context` size bound (new bullet in uniform contract).** 4 KiB cap on serialised `context`; array-valued diagnostic fields truncated to first 50 elements with a `truncated: true` sibling flag. Rationale pinned inline — prompt-window fit + prevents multi-megabyte event rows.
+- **§4.3 — Cross-reference to §15.8.** Last uniform-contract bullet now reads "The event-log write is itself best-effort — failure-mode contract in §15.8." so the dual-write risk is discoverable from the contract page.
+- **§15.8 — `agent_execution_events` dual-write failure (new).** Mirrors §15.6's structure. Names `insertExecutionEventSafe()` on `agentExecutionEventService` as the detached try/catch entry point, swallowed + WARN-tagged with `delegation_event_write_failed` to distinguish from `delegation_outcome_write_failed`. Reinforces that the error is always returned to the caller's prompt — telemetry writes never fail the skill call and the agent sees the rejection regardless.
+
+### Rejected (no edits — spec already addresses the concern)
+
+- #2 `runId` propagation enforcement — §10.6 is explicit that the invariant holds by construction; no reconciliation job is the deliberate design, not a gap.
+
+### Integrity Check
+
+- Forward references: §15.8 references §4.3, §10.3, §15.6 — all exist. §4.3's new cross-ref to §15.8 — target exists. Clean.
+- Contradictions: `agent_execution_events` was previously described as "lossless" in §4.3 without a failure-mode clause. §15.8 qualifies that as "best-effort under DB pressure" — refinement, not contradiction. §4.3 updated to cross-reference §15.8 so the two statements reconcile (lossless discipline, best-effort implementation). The 4 KiB cap + 50-element truncation in §4.3 is consistent with existing examples (the `callerChildIds` example has 3 ids, well under the cap).
+- Missing inputs/outputs: §15.8 names producer (`agentExecutionEventService.insertExecutionEventSafe()`), consumers (Live Execution Log, platform DB error logs under `delegation_event_write_failed` tag), and swallow-and-return-the-error contract. §4.3 size-bound names a truncation mechanism (`truncated: true` flag) + 50-element cap; producer is already pinned in §4.3 (skill handlers in `skillExecutor.ts`). Complete.
+- Integrity check: 0 issues found this round.
+
+### Top themes
+
+- **Mirrored telemetry failure-modes.** Every best-effort telemetry write needs a risks-and-mitigations entry naming its swallow point and WARN tag. §15.6 pattern now mirrored in §15.8 — future best-effort writes should follow the same template.
+- **Contract bytes-budget.** Stable payload shapes need a serialised-size bound if they can include unbounded array fields. `callerChildIds` is the realistic offender; 4 KiB + 50-element cap is the mitigation.
+
+---
+
+## Final Summary
+
+- **Rounds:** 2
+- **Total findings:** 11 (8 in round 1, 3 in round 2)
+- **Accepted:** 4 | **Rejected:** 5 | **Deferred:** 2
+- **Index write failures:** 0
+- **Deferred to tasks/todo.md § Spec Review deferred items / hierarchical-delegation-dev-spec:**
+  - Nearest-common-ancestor routing for cross-subtree reassigns — requires algorithmic design + UX decision for how NCA is surfaced to the caller; pulls in prompt-engineering work; out of scope for v1 where root-only is the deliberate simplification.
+  - Violation sampling / alerting tier above the rejection-rate metric — valid ops tooling improvement but observability concern, not delegation-contract concern; belongs in a post-launch ops playbook or a dedicated monitoring spec.
+- **KNOWLEDGE.md updated:** yes (2 entries — see §Pattern extraction below)
+- **Consistency check across rounds:** no contradictions. Round 1's uniform-contract block was extended (not rewritten) by round 2's size-bound addition. Round 2's §15.8 reuses the §10.3 "detached try/catch, swallow, WARN" pattern established by §15.6. No cross-round drift.
+- **Implementation-readiness checklist:**
+  - All inputs defined ✓
+  - All outputs defined ✓
+  - Failure modes covered ✓ (§15.1–§15.8 cover rollout friction, split-brain, staleness, adaptive default, upward-reassign, outcome-write failure, seed flatness, event-write failure)
+  - Ordering guarantees explicit ✓ (§10.6 trace-continuity invariant; §11 phase graph; §15.5 validator ordering call-out)
+  - No unresolved forward references ✓ (integrity checks both rounds clean)
+- **PR:** #181 — https://github.com/michaelhazza/automation-v1/pull/181
+
+### Pattern extraction (→ KNOWLEDGE.md candidates)
+
+1. **Best-effort telemetry writes need a named swallow point + distinct WARN tag.** Every dual-write that backs up a best-effort primary (e.g. `delegation_outcomes` + `agent_execution_events` in this spec) needs its OWN §15-style failure-mode entry — not just the primary's. The swallow point has to be a named service method (not inline try/catch) so tests and runbooks can target it; the WARN tag has to be distinct per surface so operators can tell which dual-write failed. Mirror of §15.6 ↔ §15.8.
+2. **Stable contract payloads need a serialised-size bound when they admit array-valued diagnostic fields.** Shape + extensibility alone don't prevent prompt-blowup or multi-megabyte log rows. 4 KiB + first-N-elements truncation with a `truncated: true` sibling flag is the pattern. Caught by round 2 when round 1's uniform contract pinned shape but left size implicit.
+
+### Consistency Warnings
+
+None. Round 2 refines round 1's contract without contradicting it.
+
