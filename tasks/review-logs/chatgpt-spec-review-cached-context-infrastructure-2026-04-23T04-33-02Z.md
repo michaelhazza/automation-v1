@@ -213,6 +213,71 @@ ChatGPT's round-5 verdict: *"Ready for implementation."* The spec has been throu
 
 Spec is ready for implementation sign-off.
 
+---
+
+## Round 6 — 2026-04-23 (close) — session finalisation
+
+### ChatGPT Feedback (raw)
+
+Final explicit sign-off from ChatGPT, reproduced verbatim:
+
+> *"This is properly done. There's nothing left that would block implementation. You've moved from 'tight spec' to 'production-grade contract,' which is a different bar entirely, and this clears it."*
+
+Sanity-check categories ChatGPT explicitly cleared:
+1. Cross-layer contradictions — testing posture now explicitly resolved with carve-outs
+2. Identity / determinism leaks — prefix-hash model consistent at both levels, versioning explicit and non-destructive, order-independence enforced to UX
+3. Snapshot integrity + concurrency — immutability + FK locked, REPEATABLE READ + version-lock defined, idempotent insert named
+4. UX ↔ backend contract alignment — docs-first locked, unnamed bundles fully invisible, bundle-chip-as-single-unit invariant, suggestion deterministic
+5. Observability without UX pollution — degraded clean, `degraded_reason` internal-only with precedence, cache identity vs provider behaviour separated
+
+**One optional polish item offered:** a one-line mental-model summary at the top of the spec (*"Documents → (implicit bundle) → Snapshot → Assembly → Router → Ledger"*). Explicitly labelled "not a blocker, not even a recommendation, just something to consider later."
+
+### User decision
+
+**"Implement anything important and then close down this review."** The polish item was marginal but low-cost and worth applying. Applied.
+
+### Recommendations and Decisions (round 6)
+
+| # | Finding | Classification | Disposition | Spec/artefact changes |
+|---|---------|----------------|-------------|----------------------|
+| R6-P1 | One-line mental-model summary at top of spec | optional polish | **applied** | New `## Mental model — one-line` section added between the existing `## Revision history` and `## Related artefacts`. Captures the pipeline: Documents → implicit bundle → Snapshot → Assembly → Router → Ledger |
+
+**Schema / mockup / route changes:** 0.
+
+**Commit:** round-6 changes committed alongside the session closeout.
+
+### Review arc summary
+
+| Round | Findings | Applied | Rejected | Deferred | Notable outputs |
+|-------|----------|---------|----------|----------|-----------------|
+| brief external reviews (×4) | — | — | — | — | Finalised brief before spec drafting |
+| `spec-reviewer` (Codex) iterations (×2) | 35 mechanical | 35 | 0 | 0 | Exit on two-consecutive-mechanical-only |
+| UX revision | — | — | — | — | Docs-first UX, 4 locked mockups, new §3.6 contract, new `is_auto_created` flag, new `bundle_suggestion_dismissals` table |
+| ChatGPT round 1 | 13 | 13 | 0 | 0 | 11 invariants + 1 clarification + 1 mockup UI-copy edit |
+| Vocabulary unification | — | — | — | — | Full pack → bundle rename across schema, services, routes, types, error codes |
+| ChatGPT round 3 | 10 | 10 | 0 | 0 | 9 invariants + 1 schema addition (`degraded_reason` column) |
+| ChatGPT round 4 | 9 | 9 | 0 | 0 | 9 production-hardening invariants, 0 schema changes |
+| ChatGPT round 5 | 3 | 3 | 0 | 0 | Testing-posture contradiction resolved + chronology fix + 2 pack stragglers |
+| ChatGPT round 6 (close) | 1 optional | 1 | 0 | 0 | Mental-model one-liner |
+| **Totals** | **36 ChatGPT + 35 Codex + 4 brief passes** | **71** | **0** | **0** | — |
+
+### Deferred items routed to `tasks/todo.md`
+
+**None.** Every finding across every round was applied. `tasks/todo.md` requires no appends from this review session.
+
+### Durable patterns extracted
+
+One pattern extracted to `KNOWLEDGE.md` — see the 2026-04-23 entry "Spec review arc converges on additive invariants after structural work lands".
+
+### Spec PR readiness
+
+PR #180: https://github.com/michaelhazza/automation-v1/pull/180
+
+PR is implementation-ready per the spec-review agent's contract. No blockers. No deferred items. No outstanding findings.
+
+**Review session CLOSED.**
+
+
 
 
 
