@@ -208,7 +208,7 @@ export const agentRuns = pgTable(
     delegationScope: text('delegation_scope').$type<DelegationScope>(),
     hierarchyDepth: smallint('hierarchy_depth'),
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
-    handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id),
+    handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

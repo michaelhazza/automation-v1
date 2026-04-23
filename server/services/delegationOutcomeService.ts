@@ -5,7 +5,7 @@
 // INV-3: insertOutcomeSafe is the SINGLE skill-handler entry point.
 //        recordOutcomeStrict is test/backfill-only — never call it from skill handlers.
 
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { delegationOutcomes } from '../db/schema/delegationOutcomes.js';
 import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 import type { DelegationOutcome } from '../../shared/types/delegation.js';
@@ -41,58 +41,32 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
 
     const db = getOrgScopedDb('delegationOutcomeService.insertOutcomeSafe');
 
-    // Step 2 — service-layer integrity check
+    // Step 2 — service-layer integrity check (single round trip — spec §4.4)
+    // never-throws contract: any failure logs WARN and returns; the surrounding
+    // try/catch is the structural guarantee that errors cannot escape this function.
     const actors = await db
       .select({ id: subaccountAgents.id, subaccountId: subaccountAgents.subaccountId })
       .from(subaccountAgents)
       .where(
-        and(
-          eq(subaccountAgents.id, input.callerAgentId),
-        ),
-      )
-      .limit(1);
+        inArray(subaccountAgents.id, [input.callerAgentId, input.targetAgentId]),
+      );
 
-    // Also fetch target
-    const targets = await db
-      .select({ id: subaccountAgents.id, subaccountId: subaccountAgents.subaccountId })
-      .from(subaccountAgents)
-      .where(eq(subaccountAgents.id, input.targetAgentId))
-      .limit(1);
-
-    if (actors.length === 0) {
+    if (actors.length !== 2) {
       logger.warn('delegation_outcome_write_failed', {
         tag: 'delegation_outcome_write_failed',
         callerAgentId: input.callerAgentId,
-        reason: 'caller agent not found',
-      });
-      return;
-    }
-    if (targets.length === 0) {
-      logger.warn('delegation_outcome_write_failed', {
-        tag: 'delegation_outcome_write_failed',
         targetAgentId: input.targetAgentId,
-        reason: 'target agent not found',
+        reason: 'one or both agent rows not found in org scope',
       });
       return;
     }
 
-    if (actors[0].subaccountId !== input.subaccountId) {
+    const mismatched = actors.filter((a) => a.subaccountId !== input.subaccountId);
+    if (mismatched.length > 0) {
       logger.warn('delegation_outcome_write_failed', {
         tag: 'delegation_outcome_write_failed',
-        callerAgentId: input.callerAgentId,
-        expectedSubaccountId: input.subaccountId,
-        actualSubaccountId: actors[0].subaccountId,
-        reason: 'caller agent subaccount_id mismatch',
-      });
-      return;
-    }
-    if (targets[0].subaccountId !== input.subaccountId) {
-      logger.warn('delegation_outcome_write_failed', {
-        tag: 'delegation_outcome_write_failed',
-        targetAgentId: input.targetAgentId,
-        expectedSubaccountId: input.subaccountId,
-        actualSubaccountId: targets[0].subaccountId,
-        reason: 'target agent subaccount_id mismatch',
+        mismatchedIds: mismatched.map((a) => a.id),
+        reason: 'actor subaccount_id mismatch — construction bug',
       });
       return;
     }
@@ -150,10 +124,6 @@ export async function recordOutcomeStrict(input: DelegationOutcomeInput): Promis
 // ---------------------------------------------------------------------------
 // list — read path
 // ---------------------------------------------------------------------------
-
-export interface ListDelegationOutcomesFilters extends RawListFilters {
-  orgId: string;
-}
 
 /**
  * Read delegation outcomes for an organisation.
