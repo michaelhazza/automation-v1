@@ -8,7 +8,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**In-flight spec:** `none`
+**In-flight spec:** `docs/cached-context-infrastructure-spec.md` — implementation plan finalised in `tasks/builds/cached-context-infrastructure/` (plan.md overview + 6 phase files + testing/rollout file). Branch: `claude/implementation-plan-Y622C`. Execution expectation: `superpowers:subagent-driven-development`, Phase 1 first.
 
 **Pick-next queue:** See `tasks/todo.md` for the durable backlog. Highest-value unblocked items at the time of writing:
   1. **LAEL-P1-1** — `llmRouter` `llm.requested` / `llm.completed` emission + `agent_run_llm_payloads` writer integration. Without it the Live Agent Execution Log shows no "doing" phase.
