@@ -73,6 +73,7 @@ run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 # ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"
+run_gate "$SCRIPT_DIR/verify-rls-session-var-canon.sh"
 run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 
 # ── Sprint 3 (P2.1 + P2.2 + P2.3) gates from docs/improvements-roadmap-spec.md ──

@@ -1369,10 +1369,25 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 
 `server/jobs/securityEventsCleanupJob.ts` prunes events beyond retention. `scripts/prune-security-events.ts` is the manual equivalent.
 
+### Canonical RLS session variables (hard rule)
+
+The only session variables that RLS policies may reference are:
+
+| Variable | Set by | Purpose |
+|---|---|---|
+| `app.organisation_id` | `server/middleware/auth.ts`, `server/lib/createWorker.ts` | Org-scope predicate for every tenant-owned table |
+| `app.current_subaccount_id` | `server/db/withPrincipalContext.ts` | Subaccount-scope predicate for principal-aware reads |
+| `app.current_principal_type` | `server/db/withPrincipalContext.ts` | `'user' \| 'service' \| 'delegated'` |
+| `app.current_principal_id` | `server/db/withPrincipalContext.ts` | User/service/acting-as ID |
+| `app.current_team_ids` | `server/db/withPrincipalContext.ts` | Team membership array for `shared_team` visibility |
+
+**Never use `app.current_organisation_id`** — that name is not set anywhere. A policy that references it silently disables itself (because `current_setting(..., true)` returns NULL when the variable is unset). The naming asymmetry (`app.organisation_id` without the `current_` prefix, while principal vars use it) is an accepted decision — see `docs/canonical-data-platform-roadmap.md` §P3B and `docs/canonical-data-platform-p1-p2-p3-impl.md` §623. Migration `0213_fix_cached_context_rls.sql` repairs earlier migrations that violated this rule. CI gate `verify-rls-session-var-canon.sh` enforces the ban going forward.
+
 ### CI gates
 
 - `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
 - `verify-rls-contract-compliance.sh` — verifies the three-layer contract is wired end-to-end
+- `verify-rls-session-var-canon.sh` — bans the phantom `app.current_organisation_id` variable from migrations and server code
 
 ---
 

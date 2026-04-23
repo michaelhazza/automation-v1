@@ -13,6 +13,7 @@
   "action-registry-zod": 0,
   "rls-coverage": 0,
   "rls-contract-compliance": 31,
+  "rls-session-var-canon": 10,
   "job-idempotency-keys": 0,
   "reflection-loop-wired": 0,
   "tool-intent-convention": 0,
