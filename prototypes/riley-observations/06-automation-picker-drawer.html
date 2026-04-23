@@ -1,0 +1,112 @@
+<!doctype html>
+<!--
+  Mock 6 / 10 — Pick an Automation
+  ==================================
+  Primary user task: pick one of my external tools, fill in what to send it.
+  Simplified per docs/frontend-design-principles.md:
+    - dropped scope-filter tabs (scope is resolved server-side; user doesn't need the filter)
+    - dropped engine-filter chips (nice-to-have, not load-bearing)
+    - dropped the connection-readiness chip on every row (surface only unreadiness inline,
+      and only on the picked item)
+    - dropped the "quick-pick chip row" under every input field (still supported in a tokenizer;
+      not a separate UI surface)
+    - input mapping shown as plain labelled fields; template tokens are one of several values
+      you can type — the syntax isn't a first-class design surface
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 6 — Pick an Automation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: rgba(15,23,42,0.5); }
+</style>
+</head>
+<body class="min-h-screen flex items-stretch justify-end p-0">
+
+<div class="w-[480px] min-h-screen bg-white flex flex-col">
+  <!-- Header -->
+  <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+    <div>
+      <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Step 3</div>
+      <div class="text-[14.5px] font-semibold text-slate-900">Call an Automation</div>
+    </div>
+    <button class="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-500">×</button>
+  </div>
+
+  <!-- Search -->
+  <div class="px-5 py-3 border-b border-slate-100">
+    <div class="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2 text-slate-500">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" placeholder="Search your Automations…" class="flex-1 bg-transparent outline-none text-[13px]" />
+    </div>
+  </div>
+
+  <!-- List + Selected expanded -->
+  <div class="flex-1 overflow-auto px-5 py-3 space-y-2">
+    <!-- Selected, expanded -->
+    <div class="border border-indigo-500 bg-indigo-50/40 rounded-lg p-3.5">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #6d28d9, #8b5cf6);">M</div>
+        <div class="flex-1">
+          <div class="text-[13.5px] font-semibold text-slate-900">Push to HubSpot list</div>
+          <div class="text-[11.5px] text-slate-500">Make · subaccount</div>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+
+      <!-- Inputs (one card, plain fields) -->
+      <div class="mt-4 pt-4 border-t border-indigo-200/60 space-y-3">
+        <div>
+          <label class="block text-[12px] font-medium text-slate-700 mb-1">Which contacts</label>
+          <input type="text" value="Contacts from the previous step" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white" />
+        </div>
+        <div>
+          <label class="block text-[12px] font-medium text-slate-700 mb-1">List name</label>
+          <input type="text" value="Re-engagement Q4" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Other options — minimal row, one inline signal only when something's wrong -->
+    <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors flex items-center gap-3">
+      <div class="w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #059669, #10b981);">n</div>
+      <div class="flex-1">
+        <div class="text-[13.5px] font-semibold text-slate-900">Sync contact to Mailchimp</div>
+        <div class="text-[11.5px] text-amber-700 mt-0.5">Needs a Mailchimp connection</div>
+      </div>
+    </button>
+
+    <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors flex items-center gap-3">
+      <div class="w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #d97706, #f59e0b);">Z</div>
+      <div class="flex-1">
+        <div class="text-[13.5px] font-semibold text-slate-900">Post to Slack #leads</div>
+        <div class="text-[11.5px] text-slate-500 mt-0.5">Zapier</div>
+      </div>
+    </button>
+
+    <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors flex items-center gap-3">
+      <div class="w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #0891b2, #06b6d4);">G</div>
+      <div class="flex-1">
+        <div class="text-[13.5px] font-semibold text-slate-900">Trigger GHL pipeline move</div>
+        <div class="text-[11.5px] text-slate-500 mt-0.5">GHL</div>
+      </div>
+    </button>
+  </div>
+
+  <!-- Footer -->
+  <div class="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
+    <button class="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-semibold rounded-lg border border-slate-300">Cancel</button>
+    <button class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Add step</button>
+  </div>
+</div>
+
+<!-- Floating header for the mock (outside the drawer) -->
+<div class="fixed top-4 left-4 flex items-baseline gap-4 text-[13px]">
+  <span class="text-white font-semibold text-[15px]">Mock 6 · Pick an Automation</span>
+  <a href="index.html" class="text-indigo-200 hover:text-white no-underline">← All mocks</a>
+</div>
+
+</body>
+</html>

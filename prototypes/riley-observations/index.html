@@ -1,0 +1,178 @@
+<!doctype html>
+<!--
+  Index — Riley Observations mockup review surface (v2, simplified)
+  ===================================================================
+  Rewritten per docs/frontend-design-principles.md to match the
+  consumer-simple posture. Each mockup was trimmed to the minimum surface
+  for its primary task; design-decision annotation dashboards, side panels,
+  KPI tiles, diagnostic panels, and ID exposures all removed.
+
+  Spec under review: docs/riley-observations-dev-spec.md
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Riley Observations — Mockup Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+  .card { transition: all 150ms; }
+  .card:hover { border-color:#a5b4fc; background:#fafbff; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[820px] p-8">
+  <div class="mb-7">
+    <div class="text-[11px] uppercase tracking-[0.18em] font-semibold text-indigo-600 mb-1">Spec review · pre-build</div>
+    <h1 class="text-[24px] font-bold text-slate-900">Riley Observations — Mockups</h1>
+    <p class="text-[13.5px] text-slate-600 mt-1.5 leading-relaxed">
+      Ten minimal mockups covering the user-facing changes in the spec.
+      Each one shows the primary user task for its surface — nothing more.
+    </p>
+  </div>
+
+  <!-- Rules applied -->
+  <div class="bg-white border border-slate-200 rounded-lg p-4 mb-6 text-[12.5px] text-slate-700 leading-relaxed">
+    <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Design rules applied</div>
+    Start from the user's task, not the data model · default to hidden for dashboards / diagnostics / ID exposures · one primary action per screen · inline state beats dashboards · complexity budget enforced per <a class="text-indigo-600 hover:underline" href="../../docs/frontend-design-principles.md">docs/frontend-design-principles.md</a>.
+  </div>
+
+  <!-- Mock list -->
+  <div class="space-y-2">
+    <a href="01-sidebar-post-rename.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">01</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Sidebar post-rename</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Two sidebar entries, differentiated by icon. Part 1.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="02-agent-chat-explore-mode.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">02</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Agent chat with Explore Mode</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Mode chip in the header, approval card when a step would change something. Part 3.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="03-workflow-run-modal-step2.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">03</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Run Workflow — pick a mode</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Two radio choices, one Run button. Part 3.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="04-promote-to-execute-prompt.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">04</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Promote-to-Execute prompt</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">One sentence, two buttons. Part 3.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="05-workflow-studio-step-picker.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">05</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Add a step — picker menu</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">"Call an Automation" in the same menu as every other step type. Part 2.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="06-automation-picker-drawer.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">06</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Pick an Automation + map inputs</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">List, selected expands with plain input fields. Part 2.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="07-invoke-automation-run-detail.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">07</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">A step failed — what to do</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Inline in the run log: one human error line, one Fix button. Part 2.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="08-workflows-library.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">08</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Workflows library</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Name, agent, last run. One primary action. Part 1.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="09-automations-library.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">09</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Automations library</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Same shape as Workflows. Tool + readiness dot inline. Part 1.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+
+    <a href="10-agent-config-page.html" class="card block bg-white border border-slate-200 rounded-lg p-4 no-underline">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-mono text-slate-400 w-8">10</span>
+        <div class="flex-1">
+          <div class="text-[14px] font-semibold text-slate-900">Agent settings — safety + schedule</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Single-column form. No observability sidebar. Parts 3 + 4.</div>
+        </div>
+        <span class="text-[11px] text-slate-400">→</span>
+      </div>
+    </a>
+  </div>
+
+  <!-- What moved or disappeared -->
+  <div class="mt-8 bg-white border border-slate-200 rounded-lg p-5 text-[13px] text-slate-700 leading-relaxed">
+    <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Removed from v1 (moved to admin, backlog, or just cut)</div>
+    <ul class="space-y-1.5 list-disc pl-5 text-[12.5px]">
+      <li>Heartbeat gate activity chart and skip-rate KPI — admin observability page, not per-agent sidebar.</li>
+      <li>Run Detail page exposing request JSON, response JSON, tracing events, HTTP status — admin concerns.</li>
+      <li>Error-code reference grid — docs, not UI.</li>
+      <li>Engine filter chips and scope filter tabs on the libraries — default views handle this.</li>
+      <li>Trust-receipts list on the promote-to-Execute prompt — the counter ("5 successful runs") is the receipt.</li>
+      <li>Workflow-Studio right inspector with composition metrics — inline step count appears where needed.</li>
+      <li>Mode-switch mid-conversation system-message demo — logged in the run log, not inline-reinforced.</li>
+      <li>Per-row step-count chips on Workflows cards — data-model leak.</li>
+      <li>Design-decision annotation dashboards on each mock — replaced with a single explanatory line.</li>
+    </ul>
+  </div>
+
+  <!-- Part 4 / 5 / 6 reminder -->
+  <div class="mt-6 text-[12px] text-slate-500 leading-relaxed">
+    Part 5 (context-assembly telemetry) and Part 6 (decomposition rule) have no v1 UI and aren't mocked. Part 4's admin observability also has no v1 UI; only the per-agent settings surface (mock 10) is shown.
+  </div>
+</div>
+
+</body>
+</html>
