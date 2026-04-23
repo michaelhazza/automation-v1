@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the work happened — Acme renewal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+    padding: 0;
+  }
+  .container { max-width: 880px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 18px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { margin: 0 6px; color: #d1d5db; }
+
+  .hdr {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 22px 26px; margin-bottom: 16px;
+  }
+  .hdr .title-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
+  }
+  .hdr h1 {
+    font-size: 22px; font-weight: 600; letter-spacing: -0.2px; color: #1a1d23;
+  }
+  .hdr .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; background: #f0fdf4; color: #15803d;
+    border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  }
+  .hdr .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+  .hdr .sub {
+    font-size: 13px; color: #6b7280;
+  }
+
+  /* One-line summary (the reading of the graph) */
+  .summary-card {
+    background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
+    border: 1px solid #c7d2fe; border-radius: 10px;
+    padding: 14px 20px; margin-bottom: 20px;
+    font-size: 13.5px; color: #3730a3; line-height: 1.55;
+  }
+  .summary-card strong { color: #1e1b4b; }
+
+  /* Graph card */
+  .graph-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .legend {
+    padding: 11px 22px; border-bottom: 1px solid #f0f1f3;
+    display: flex; gap: 22px; align-items: center;
+    font-size: 11.5px; color: #6b7280;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .legend .dot.done { background: #22c55e; }
+  .legend .dot.active { background: #6366f1; }
+  .legend .dot.warn { background: #f59e0b; }
+  .legend .hint {
+    margin-left: auto; font-style: italic; color: #9ca3af; font-size: 11px;
+  }
+
+  .graph-wrap {
+    padding: 28px 20px 18px; background: #fafbfc;
+    position: relative;
+  }
+
+  svg#tree { display: block; margin: 0 auto; max-width: 100%; }
+
+  .node-g { cursor: pointer; transition: transform 0.15s ease; }
+  .node-g:hover { transform: translateY(-1px); }
+  .node-rect {
+    fill: #fff; stroke: #e5e7eb; stroke-width: 1.5;
+    transition: stroke 0.15s, fill 0.15s;
+    filter: drop-shadow(0 1px 2px rgba(15,23,42,0.04));
+  }
+  .node-g.selected .node-rect { stroke: #6366f1; stroke-width: 2; }
+  .node-g:hover .node-rect { stroke: #a5b4fc; }
+  .node-name {
+    font-size: 12.5px; font-weight: 600; fill: #1a1d23;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .node-role {
+    font-size: 10.5px; fill: #6b7280;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .node-dot { }
+  .node-dot.done   { fill: #22c55e; }
+  .node-dot.active { fill: #6366f1; }
+  .node-dot.warn   { fill: #f59e0b; }
+
+  .edge       { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-linecap: round; }
+  .edge-arrow { marker-end: url(#arrow); }
+  @keyframes cascade {
+    0%   { stroke-dashoffset: 600; opacity: 0.35; }
+    100% { stroke-dashoffset: 0;   opacity: 1; }
+  }
+  .edge-flow {
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: cascade 0.9s ease-out forwards;
+  }
+  .edge-flow.d1 { animation-delay: 0s; }
+  .edge-flow.d2 { animation-delay: 0.4s; }
+  .edge-flow.d3 { animation-delay: 0.9s; }
+
+  /* Subtle replay button for the cascade */
+  .replay-btn {
+    position: absolute; top: 14px; right: 14px;
+    font-family: inherit; font-size: 11px; font-weight: 500;
+    color: #6b7280; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 5px; padding: 4px 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .replay-btn:hover { border-color: #a5b4fc; color: #4338ca; }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.75); opacity: 0.6; }
+  }
+  .pulse {
+    transform-origin: center; transform-box: fill-box;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  /* Detail card (appears under graph when a node is selected) */
+  .detail-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 16px 20px; margin-top: 6px;
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .detail-card .avatar {
+    width: 38px; height: 38px; border-radius: 9px; background: #eef2ff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .detail-card .body { flex: 1; }
+  .detail-card .name {
+    font-size: 14px; font-weight: 600; color: #1a1d23; margin-bottom: 2px;
+  }
+  .detail-card .role {
+    font-size: 11.5px; color: #6b7280; margin-bottom: 8px;
+  }
+  .detail-card .did {
+    font-size: 13px; color: #374151; line-height: 1.55;
+  }
+
+  .foot-meta {
+    padding: 12px 22px; border-top: 1px solid #f0f1f3;
+    font-size: 11.5px; color: #9ca3af; display: flex; gap: 16px;
+  }
+  .foot-meta .primary { color: #6b7280; }
+
+  .back-link {
+    margin-top: 6px; font-size: 13px; color: #4338ca; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .back-link:hover { text-decoration: underline; }
+
+  /* Mockup-only annotation, subtle */
+  .mockup-note {
+    margin-top: 22px; padding-top: 14px; border-top: 1px dashed #e5e7eb;
+    font-size: 11px; color: #9ca3af; text-align: center; font-style: italic;
+  }
+
+  @media (max-width: 640px) {
+    .container { padding: 16px 16px 40px; }
+    .legend { flex-wrap: wrap; gap: 12px; }
+    .legend .hint { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="#">Briefs</a>
+    <span class="sep">›</span>
+    <a href="#">Acme renewal proposal</a>
+    <span class="sep">›</span>
+    <span>How it happened</span>
+  </div>
+
+  <div class="hdr">
+    <div class="title-row">
+      <h1>How it happened</h1>
+      <span class="status-pill"><span class="dot"></span>Completed</span>
+    </div>
+    <div class="sub">Acme renewal proposal · 1 minute 47 seconds · 6 agents</div>
+  </div>
+
+  <div class="summary-card">
+    <strong>The COO coordinated three teams</strong> to produce the proposal — sales wrote the body, research compared competitors, operations drafted the pricing annex.
+  </div>
+
+  <div class="graph-card">
+
+    <div class="legend">
+      <span class="item"><span class="dot done"></span>Finished</span>
+      <span class="item"><span class="dot active"></span>Working now</span>
+      <span class="item"><span class="dot warn"></span>Needed attention</span>
+      <span class="hint">Click any agent to see what they did</span>
+    </div>
+
+    <div class="graph-wrap">
+      <button id="replay-btn" class="replay-btn" title="Replay the flow">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10a5 5 0 1 0 1.3-6.4L3 5"/><path d="M3 2v3h3"/></svg>
+        Replay flow
+      </button>
+      <svg id="tree" viewBox="0 0 820 420" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+          </marker>
+        </defs>
+        <!-- Edges (org-chart elbow connectors with cascade animation, drawn first so nodes cover joints) -->
+        <g class="edges">
+          <!-- COO stub: reveals first -->
+          <path class="edge edge-flow d1" d="M 410 72 L 410 105"/>
+          <!-- Horizontal bar and drops to Heads: reveal together, second -->
+          <path class="edge edge-flow d2" d="M 150 105 L 670 105"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 150 105 L 150 136"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 410 105 L 410 136"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 670 105 L 670 136"/>
+          <!-- Manager → worker drops: reveal last -->
+          <path class="edge edge-flow edge-arrow d3" d="M 150 198 L 150 276"/>
+          <path class="edge edge-flow edge-arrow d3" d="M 410 198 L 410 276"/>
+          <path class="edge edge-flow edge-arrow d3" d="M 670 198 L 670 276"/>
+        </g>
+
+        <!-- COO (selected by default — it's the root) -->
+        <g class="node-g selected" data-agent="coo" transform="translate(330, 14)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">COO</text>
+          <text class="node-role" x="16" y="42">Team lead</text>
+        </g>
+
+        <!-- Head of Sales -->
+        <g class="node-g" data-agent="sales" transform="translate(70, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Sales</text>
+          <text class="node-role" x="16" y="42">Proposal body</text>
+        </g>
+
+        <!-- Head of Research -->
+        <g class="node-g" data-agent="research" transform="translate(330, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Research</text>
+          <text class="node-role" x="16" y="42">Competitor pricing</text>
+        </g>
+
+        <!-- Head of Operations (amber dot = finished with a heads-up on tier-2) -->
+        <g class="node-g" data-agent="ops" transform="translate(590, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot warn" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Operations</text>
+          <text class="node-role" x="16" y="42">Pricing annex · heads-up</text>
+        </g>
+
+        <!-- SDR 1 -->
+        <g class="node-g" data-agent="sdr" transform="translate(70, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">SDR 1</text>
+          <text class="node-role" x="16" y="42">Account context</text>
+        </g>
+
+        <!-- Research Analyst -->
+        <g class="node-g" data-agent="analyst" transform="translate(330, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Research Analyst</text>
+          <text class="node-role" x="16" y="42">4 competitors</text>
+        </g>
+
+        <!-- Pricing Specialist -->
+        <g class="node-g" data-agent="pricing" transform="translate(590, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Pricing Specialist</text>
+          <text class="node-role" x="16" y="42">3 tiers drafted</text>
+        </g>
+
+      </svg>
+
+      <!-- Detail card under graph — switches content when a node is clicked -->
+      <div class="detail-card" id="detail">
+        <div class="avatar">👤</div>
+        <div class="body">
+          <div class="name" id="d-name">COO</div>
+          <div class="role" id="d-role">Team lead · finished in 14 seconds</div>
+          <div class="did" id="d-did">Read the Brief, picked three teams to run in parallel, and stitched their work into one proposal at the end.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="foot-meta">
+      <span class="primary">6 agents worked on this · 3 layers deep</span>
+    </div>
+  </div>
+
+  <a class="back-link" href="#">← Back to chat</a>
+
+  <div class="mockup-note">Mockup · static · simplified for end-user comprehension. Designed for occasional review of what happened, not live monitoring — see the live split-view for in-flight work.</div>
+
+</div>
+
+<script>
+  const AGENTS = {
+    coo:      { icon: '🧭', name: 'COO',                role: 'Team lead · finished in 14 seconds',
+                did: 'Read the Brief, picked three teams to run in parallel, and stitched their work into one proposal at the end.' },
+    sales:    { icon: '📝', name: 'Head of Sales',      role: 'Proposal body · finished in 44 seconds',
+                did: 'Wrote the proposal body, using account context pulled by SDR 1.' },
+    research: { icon: '🔍', name: 'Head of Research',   role: 'Competitor pricing · finished in 48 seconds',
+                did: 'Compared the three cost-leader competitors and wrote the competitor pricing summary.' },
+    ops:      { icon: '💰', name: 'Head of Operations', role: 'Pricing annex · finished in 52 seconds',
+                did: 'Drafted the three-tier pricing annex. Flagged the tier-2 margin as thin — that heads-up appears in the final proposal so you can decide whether to offer it.' },
+    sdr:      { icon: '📇', name: 'SDR 1',              role: 'Account context · finished in 12 seconds',
+                did: 'Pulled account context from the CRM: pipeline value $240k, last touch 8 days ago.' },
+    analyst:  { icon: '📊', name: 'Research Analyst',   role: 'Competitor scan · finished in 22 seconds',
+                did: 'Scanned four competitor rate cards and surfaced the 12% cost-leader gap.' },
+    pricing:  { icon: '📐', name: 'Pricing Specialist', role: 'Pricing tiers · finished in 34 seconds',
+                did: 'Drafted the three pricing tiers and raised the tier-2 margin concern to the Head of Operations.' },
+  };
+
+  const dName = document.getElementById('d-name');
+  const dRole = document.getElementById('d-role');
+  const dDid  = document.getElementById('d-did');
+  const dAvatar = document.querySelector('#detail .avatar');
+
+  function selectNode(key) {
+    document.querySelectorAll('.node-g').forEach(g => g.classList.remove('selected'));
+    const g = document.querySelector(`.node-g[data-agent="${key}"]`);
+    if (g) g.classList.add('selected');
+    const a = AGENTS[key];
+    if (!a) return;
+    dAvatar.textContent = a.icon;
+    dName.textContent = a.name;
+    dRole.textContent = a.role;
+    dDid.textContent  = a.did;
+  }
+
+  document.querySelectorAll('.node-g').forEach(g => {
+    g.addEventListener('click', () => selectNode(g.dataset.agent));
+  });
+
+  // Replay the cascade flow animation on demand
+  const replayBtn = document.getElementById('replay-btn');
+  replayBtn.addEventListener('click', () => {
+    document.querySelectorAll('.edge-flow').forEach(el => {
+      el.style.animation = 'none';
+      void el.getBoundingClientRect(); // force reflow
+      el.style.animation = '';
+    });
+  });
+</script>
+
+</body>
+</html>

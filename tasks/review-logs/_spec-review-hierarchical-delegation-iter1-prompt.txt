@@ -1,0 +1,29 @@
+You are reviewing a DEVELOPMENT SPECIFICATION DOCUMENT (markdown), not code. Apply an implementation-readiness rubric.
+
+Context about the project:
+- Pre-production codebase. No live users. Rapid evolution, breaking changes expected.
+- Testing posture: static gates are primary; runtime tests are pure-function-only. No frontend tests, no E2E tests, no API contract tests.
+- Rollout model: commit-and-revert. No feature flags unless for behaviour modes. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Your task: critique the spec as a senior engineer reviewing whether it is implementation-ready. Focus on:
+1. Internal contradictions (same concept defined differently in two sections)
+2. Stale / retired language that survives in prose
+3. Load-bearing claims ("idempotent", "source of truth", "must", "guarantees") without a named enforcement mechanism
+4. File-inventory drift (prose names a file/column/migration that isn't in the Files-to-change inventory)
+5. Schema overlap (two tables/columns with adjacent purposes without a clear source-of-truth declaration)
+6. Sequencing / phase-dependency bugs (Phase N references Phase N+k artefact)
+7. Invariants stated in one place but not enforced in another
+8. Items without explicit verdicts (no "ships in Phase N" / "deferred" / "won't do")
+9. New primitives introduced without concrete names (types, functions, tables, columns)
+10. Permissions / RLS gaps for tenant-scoped tables
+11. Execution-model contradictions (sync/async, inline/queued, cached/dynamic)
+
+Note: do NOT suggest adding tests that this codebase's posture rejects (frontend tests, E2E tests, API contract tests, performance baselines, composition tests). Do NOT suggest feature flags or staged rollout. Do NOT suggest inventing new abstractions where existing primitives could be extended.
+
+For every finding, state: (a) one-sentence description, (b) which section of the spec, (c) specific suggested fix, (d) severity (critical / important / minor / nit).
+
+The spec follows. Review it thoroughly.
+
+---
+
