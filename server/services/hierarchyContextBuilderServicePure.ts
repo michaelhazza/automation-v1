@@ -28,10 +28,10 @@ export class HierarchyContextBuildError extends Error {
 }
 
 /**
- * Build a HierarchyContext for the given agentId from the roster.
+ * Build a HierarchyContext for the given agentId from the subaccount roster.
  *
  * @param input.agentId  The subaccount_agents.id of the calling agent.
- * @param input.roster   All active subaccount_agents rows in this subaccount.
+ * @param input.agents   All active subaccount_agents rows in this subaccount.
  *
  * @throws HierarchyContextBuildError('agent_not_in_subaccount') when agentId is not in the roster.
  * @throws HierarchyContextBuildError('cycle_detected') when the parent chain loops.
@@ -39,9 +39,9 @@ export class HierarchyContextBuildError extends Error {
  */
 export function buildHierarchyContextPure(input: {
   agentId: string;
-  roster: RosterRow[];
+  agents: RosterRow[];
 }): HierarchyContext {
-  const { agentId, roster } = input;
+  const { agentId, agents: roster } = input;
 
   // Build a fast lookup map: id → row
   const byId = new Map<string, RosterRow>();

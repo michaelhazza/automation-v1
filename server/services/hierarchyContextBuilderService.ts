@@ -54,7 +54,7 @@ export async function buildForRun(input: {
       ),
     );
 
-  const result = buildHierarchyContextPure({ agentId: input.agentId, roster: rows });
+  const result = buildHierarchyContextPure({ agentId: input.agentId, agents: rows });
 
   // INV-4: runtime immutability — freeze before returning
   return Object.freeze(result);

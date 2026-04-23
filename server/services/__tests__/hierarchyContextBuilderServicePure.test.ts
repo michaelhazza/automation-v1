@@ -96,22 +96,22 @@ const baseRoster: RosterRow[] = [
 // ---------------------------------------------------------------------------
 
 test('root agent: parentId is null', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', agents: baseRoster });
   assertEqual(ctx.parentId, null, 'root.parentId');
 });
 
 test('root agent: depth is 0', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', agents: baseRoster });
   assertEqual(ctx.depth, 0, 'root.depth');
 });
 
 test('root agent: rootId equals agentId', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', agents: baseRoster });
   assertEqual(ctx.rootId, 'sa-root', 'root.rootId');
 });
 
 test('root agent: childIds includes direct children only', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', agents: baseRoster });
   // sa-mgr and sa-side are direct children; workers are grandchildren, not included
   assertDeepEqual(ctx.childIds.sort(), ['sa-mgr', 'sa-side'], 'root.childIds');
 });
@@ -121,22 +121,22 @@ test('root agent: childIds includes direct children only', () => {
 // ---------------------------------------------------------------------------
 
 test('middle manager: parentId is root', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
   assertEqual(ctx.parentId, 'sa-root', 'manager.parentId');
 });
 
 test('middle manager: depth is 1', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
   assertEqual(ctx.depth, 1, 'manager.depth');
 });
 
 test('middle manager: rootId is root', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
   assertEqual(ctx.rootId, 'sa-root', 'manager.rootId');
 });
 
 test('middle manager: childIds populated with direct children', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
   assertDeepEqual(ctx.childIds.sort(), ['sa-wkr-a', 'sa-wkr-b'], 'manager.childIds');
 });
 
@@ -145,22 +145,22 @@ test('middle manager: childIds populated with direct children', () => {
 // ---------------------------------------------------------------------------
 
 test('leaf worker: childIds is empty', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', agents: baseRoster });
   assertDeepEqual(ctx.childIds, [], 'leaf.childIds');
 });
 
 test('leaf worker: depth is 2', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', agents: baseRoster });
   assertEqual(ctx.depth, 2, 'leaf.depth');
 });
 
 test('leaf worker: rootId is root', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', agents: baseRoster });
   assertEqual(ctx.rootId, 'sa-root', 'leaf.rootId');
 });
 
 test('leaf worker: parentId is manager', () => {
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', roster: baseRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-wkr-a', agents: baseRoster });
   assertEqual(ctx.parentId, 'sa-mgr', 'leaf.parentId');
 });
 
@@ -169,15 +169,15 @@ test('leaf worker: parentId is manager', () => {
 // ---------------------------------------------------------------------------
 
 test('deterministic childIds: two calls return same order', () => {
-  const call1 = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
-  const call2 = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: baseRoster });
+  const call1 = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
+  const call2 = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: baseRoster });
   assertDeepEqual(call1.childIds, call2.childIds, 'childIds determinism');
 });
 
 test('deterministic childIds: order is ascending regardless of roster input order', () => {
   // Reversed roster order should still produce sorted childIds
   const reversed = [...baseRoster].reverse();
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', roster: reversed });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-mgr', agents: reversed });
   assertDeepEqual(ctx.childIds, ['sa-wkr-a', 'sa-wkr-b'], 'childIds sorted asc');
 });
 
@@ -187,7 +187,7 @@ test('deterministic childIds: order is ascending regardless of roster input orde
 
 test('agent_not_in_subaccount: throws when agentId not in roster', () => {
   assertThrowsWithCode(
-    () => buildHierarchyContextPure({ agentId: 'sa-ghost', roster: baseRoster }),
+    () => buildHierarchyContextPure({ agentId: 'sa-ghost', agents: baseRoster }),
     'agent_not_in_subaccount',
     'ghost-agent',
   );
@@ -195,7 +195,7 @@ test('agent_not_in_subaccount: throws when agentId not in roster', () => {
 
 test('agent_not_in_subaccount: throws on empty roster', () => {
   assertThrowsWithCode(
-    () => buildHierarchyContextPure({ agentId: 'sa-any', roster: [] }),
+    () => buildHierarchyContextPure({ agentId: 'sa-any', agents: [] }),
     'agent_not_in_subaccount',
     'empty-roster',
   );
@@ -207,7 +207,7 @@ test('cycle_detected: throws when roster has a two-node cycle', () => {
     { id: 'sa-b', parentSubaccountAgentId: 'sa-a' },
   ];
   assertThrowsWithCode(
-    () => buildHierarchyContextPure({ agentId: 'sa-a', roster: cyclicRoster }),
+    () => buildHierarchyContextPure({ agentId: 'sa-a', agents: cyclicRoster }),
     'cycle_detected',
     'two-node-cycle',
   );
@@ -218,7 +218,7 @@ test('cycle_detected: throws when roster has a self-loop', () => {
     { id: 'sa-self', parentSubaccountAgentId: 'sa-self' },
   ];
   assertThrowsWithCode(
-    () => buildHierarchyContextPure({ agentId: 'sa-self', roster: selfLoopRoster }),
+    () => buildHierarchyContextPure({ agentId: 'sa-self', agents: selfLoopRoster }),
     'cycle_detected',
     'self-loop',
   );
@@ -236,7 +236,7 @@ test('depth_exceeded: throws when chain is deeper than MAX_HIERARCHY_DEPTH', () 
   // The deepest node is at depth MAX_HIERARCHY_DEPTH + 1
   const deepestId = `sa-node-${MAX_HIERARCHY_DEPTH + 1}`;
   assertThrowsWithCode(
-    () => buildHierarchyContextPure({ agentId: deepestId, roster: deepChain }),
+    () => buildHierarchyContextPure({ agentId: deepestId, agents: deepChain }),
     'depth_exceeded',
     'depth-exceeded',
   );
@@ -252,7 +252,7 @@ test('depth of exactly MAX_HIERARCHY_DEPTH does not throw', () => {
     });
   }
   const leafId = `sa-node-${MAX_HIERARCHY_DEPTH}`;
-  const ctx = buildHierarchyContextPure({ agentId: leafId, roster: chain });
+  const ctx = buildHierarchyContextPure({ agentId: leafId, agents: chain });
   assertEqual(ctx.depth, MAX_HIERARCHY_DEPTH, 'max-depth boundary');
 });
 
@@ -266,7 +266,7 @@ test('root childIds includes all agents with parentSubaccountAgentId === rootId'
     ...baseRoster,
     { id: 'sa-extra', parentSubaccountAgentId: 'sa-root' },
   ];
-  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', roster: extendedRoster });
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-root', agents: extendedRoster });
   assertDeepEqual(ctx.childIds.sort(), ['sa-extra', 'sa-mgr', 'sa-side'], 'root.childIds extended');
 });
 
