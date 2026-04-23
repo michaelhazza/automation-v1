@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cached-context · Attachment UX mockups (v2 — doc-centric)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.6;
+    padding: 40px 32px 60px;
+  }
+  .container { max-width: 980px; margin: 0 auto; }
+
+  .hero {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 28px 32px; margin-bottom: 24px;
+  }
+  .hero .tag {
+    display: inline-block; font-size: 10px; font-weight: 700; color: #4338ca;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 10px;
+    background: #eef2ff; border-radius: 12px; margin-bottom: 10px;
+  }
+  .hero h1 {
+    font-size: 26px; font-weight: 600; letter-spacing: -0.3px; line-height: 1.25;
+    margin-bottom: 10px;
+  }
+  .hero p { font-size: 14px; color: #4b5563; max-width: 720px; }
+  .hero p code { background: #f3f4f6; padding: 1px 6px; border-radius: 3px; font-size: 12.5px; }
+  .hero p strong { color: #1a1d23; }
+
+  .meta-row {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    margin-top: 16px; padding-top: 16px;
+    border-top: 1px solid #f0f1f3; font-size: 12.5px; color: #6b7280;
+  }
+  .meta-row strong { color: #1a1d23; }
+  .meta-row a { color: #4338ca; text-decoration: none; font-weight: 500; }
+  .meta-row a:hover { text-decoration: underline; }
+
+  /* Concept callout */
+  .concept {
+    background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
+    border: 1px solid #c7d2fe; border-radius: 10px;
+    padding: 18px 24px; margin-bottom: 24px; font-size: 13.5px; color: #3730a3; line-height: 1.6;
+  }
+  .concept strong { color: #1e1b4b; }
+  .concept code {
+    background: rgba(255,255,255,0.6); padding: 1px 6px; border-radius: 3px; font-size: 12.5px;
+  }
+
+  h2 {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;
+  }
+  .section-desc {
+    font-size: 13px; color: #6b7280; margin-bottom: 14px; margin-top: -4px;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 22px 24px; text-decoration: none; color: inherit; display: block;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+  .card:hover {
+    border-color: #a5b4fc; transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(67,56,202,0.08);
+  }
+  .card.hero-spot { grid-column: 1 / span 2; border-left: 3px solid #4338ca; }
+  .card.exception { border-left: 3px solid #b91c1c; }
+
+  .card .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: 700;
+    background: #eef2ff; color: #4338ca; margin-bottom: 12px;
+  }
+  .card.exception .num { background: #fef2f2; color: #b91c1c; }
+
+  .card h3 {
+    font-size: 17px; font-weight: 600; color: #1a1d23; margin-bottom: 6px;
+    letter-spacing: -0.1px;
+  }
+  .card .desc { font-size: 13px; color: #4b5563; line-height: 1.6; margin-bottom: 12px; }
+  .card .meta {
+    font-size: 11px; color: #6b7280; padding-top: 10px; border-top: 1px solid #f0f1f3;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .meta .rule { font-weight: 500; }
+  .card .cta { font-size: 12px; color: #4338ca; font-weight: 600; }
+
+  /* Shift panel */
+  .shift {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 22px 28px; margin-bottom: 24px;
+  }
+  .shift h3 {
+    font-size: 15px; font-weight: 600; margin-bottom: 14px;
+  }
+  .shift-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .shift-col { padding: 18px 20px; font-size: 13px; }
+  .shift-col:first-child {
+    background: #fef2f2; border-right: 1px solid #fecaca;
+  }
+  .shift-col:last-child {
+    background: #f0fdf4;
+  }
+  .shift-col h4 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .shift-col:first-child h4 { color: #991b1b; }
+  .shift-col:last-child h4 { color: #15803d; }
+  .shift-col ul { padding-left: 0; list-style: none; }
+  .shift-col li {
+    padding: 5px 0; padding-left: 18px; position: relative; color: #4b5563;
+  }
+  .shift-col:first-child li::before {
+    content: '✕'; position: absolute; left: 0; color: #dc2626; font-weight: 700;
+  }
+  .shift-col:last-child li::before {
+    content: '✓'; position: absolute; left: 0; color: #16a34a; font-weight: 700;
+  }
+
+  /* Iterate note */
+  .iterate {
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    padding: 16px 20px; font-size: 13px; color: #3730a3; line-height: 1.6;
+  }
+  .iterate strong { color: #1e1b4b; }
+  .iterate code { background: #fff; padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+
+  footer {
+    margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb;
+    font-size: 12px; color: #9ca3af; text-align: center;
+  }
+  footer code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="hero">
+    <div class="tag">📐 Prototype · v2.1 · doc-centric UX + unified picker + in-context upload</div>
+    <h1>Cached-context infrastructure — attachment mockups</h1>
+    <p>
+      Three mockups centered on the primary user task: <strong>attach documents to automations</strong>. Documents are the first-class noun. "Bundles" appear only as a soft opt-in suggestion after the user has attached the same doc set to two places — never as a prerequisite.
+    </p>
+    <div class="meta-row">
+      <span><strong>Spec</strong> · <a href="../../docs/cached-context-infrastructure-spec.md">docs/cached-context-infrastructure-spec.md</a></span>
+      <span><strong>UI rules</strong> · <a href="../../docs/frontend-design-principles.md">docs/frontend-design-principles.md</a></span>
+      <span><strong>v2.1 scope</strong> · 4 mockups</span>
+    </div>
+  </div>
+
+  <div class="concept">
+    <strong>The concept.</strong> Users attach individual documents. When a user attaches the same doc set to a second task, the UI offers <em>"save these as a bundle for easy reuse?"</em> — soft, dismissible, non-blocking. Exact-match detection via the spec's existing <code>prefix_hash</code>, no fuzzy logic. The backend handles everything as a `document_bundles` row (unnamed until the user opts in to name it); users never see the "unnamed" variant.
+  </div>
+
+  <h2>Primary user journey</h2>
+  <div class="section-desc">Attach documents → (optionally save as a bundle when it makes sense) → run.</div>
+
+  <div class="grid">
+
+    <a class="card hero-spot" href="mockup-attach-docs.html">
+      <span class="num">1</span>
+      <h3>Attach reference documents</h3>
+      <div class="desc">
+        The hero of this feature. Documents show up as inline chips. The picker has a <strong>single search field across documents AND bundles</strong> — two labelled sections, one search input. Tabs at the top remind that the same control appears on one-off tasks and agent config. After save, a bundle-save suggestion appears only if the exact same doc set is already attached to another task — otherwise the flow completes silently.
+      </div>
+      <div class="meta">
+        <span class="rule">Unified picker · opt-in bundle prompt · prefix-hash detection</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card" href="mockup-upload-document.html">
+      <span class="num">2</span>
+      <h3>Upload documents</h3>
+      <div class="desc">
+        Reusable modal used across the site. Multi-file drag-drop, per-file editable name, token estimate per file. Opt-in <em>"Group these documents as a bundle"</em> checkbox reveals a bundle-name input when ticked — lets the user shortcut the post-save bundle suggestion at upload time. Opened from the attach picker: auto-attaches the documents (or bundle) to the current task. Opened from the standalone Documents page: just adds to the library.
+      </div>
+      <div class="meta">
+        <span class="rule">Reusable · multi-file · opt-in bundle grouping · context-aware auto-attach</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card" href="mockup-bundle-detail.html">
+      <span class="num">3</span>
+      <h3>Bundle detail</h3>
+      <div class="desc">
+        What a named bundle looks like once the user has opted in. Soft intro callout on first visits explains the concept. Primary action is <em>attach this bundle to another task</em>. Edit warning shown when the bundle is used by ≥ 2 tasks. Advanced details (size, model fit) collapsed at the bottom — shown expanded here for legibility.
+      </div>
+      <div class="meta">
+        <span class="rule">Opt-in · clear reuse affordance</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card exception" href="mockup-budget-breach-block.html">
+      <span class="num">4</span>
+      <h3>Reference material too big — what now?</h3>
+      <div class="desc">
+        Safety-critical screen. Headline is "the reference documents attached to this task are too big" regardless of whether they came from a bundle or were attached individually — doc-framed, not bundle-framed. The over-limit bar, top-5 contributors, and 4 actions (Remove/trim · Upgrade · Split · Stop) are all the user needs to decide what to do.
+      </div>
+      <div class="meta">
+        <span class="rule">Exception · safety-critical · language now doc-centric</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="shift">
+    <h3>What changed vs the previous set</h3>
+    <div class="shift-grid">
+      <div class="shift-col">
+        <h4>Before — capability-first UX</h4>
+        <ul>
+          <li>User attaches a named group as the primary unit</li>
+          <li>Must create the named group before attaching anything</li>
+          <li>The internal grouping concept is surfaced as a first-class noun everywhere</li>
+          <li>A full management page is a v1 requirement</li>
+          <li>Per-tier utilization badge on the attachment row</li>
+        </ul>
+      </div>
+      <div class="shift-col">
+        <h4>After — doc-first UX</h4>
+        <ul>
+          <li>User attaches individual documents directly</li>
+          <li>No concept the user has to learn before attaching</li>
+          <li>"Bundle" only appears as an opt-in suggestion</li>
+          <li>Bundle detail page is opt-in · appears only after user saves one</li>
+          <li>No health badge in the primary flow · moved to bundle detail "Advanced"</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="iterate">
+    <strong>Iterating.</strong> The three mockups above are the second pass. If the bundle-suggestion copy is too pushy (or not pushy enough), the picker needs bundles surfaced earlier, or the budget-breach screen should name the bundle when one is attached — let me know and I'll adjust. If any change is big enough to need a rule update in <a href="../../docs/frontend-design-principles.md"><code>docs/frontend-design-principles.md</code></a>, I'll do the rule edit first, then reapply.
+  </div>
+
+  <footer>
+    Folder: <code>prototypes/cached-context/</code> · 4 mockups · aligned with <code>docs/frontend-design-principles.md</code> · document-centric UX · unified picker · bundles opt-in
+  </footer>
+
+</div>
+
+</body>
+</html>
