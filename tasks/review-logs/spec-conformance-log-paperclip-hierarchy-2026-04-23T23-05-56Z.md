@@ -8,6 +8,7 @@
 **Scope:** whole spec / all four phases (progress.md and recent commits confirm Phase 4 finalized)
 **Changed-code set:** 90+ files (committed only; staged/unstaged/untracked trees all empty)
 **Run at:** 2026-04-23T23:05:56Z
+**Commit at finish:** `2b092f4a`
 
 Invoked as a caller-confirmed all-of-spec pass on a completed implementation (commit `8172608f` finalizes Phase 4). Each phase had its own per-chunk `spec-conformance` run during development; this pass catches anything that may have slipped through phase boundaries.
 
