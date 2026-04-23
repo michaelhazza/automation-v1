@@ -315,6 +315,12 @@ Computed once per call, inside the skill handler, before validation. The adaptiv
 
 Structured errors returned by `spawn_sub_agents` and `reassign_task` when validation fails. Shape follows the existing structured-error convention used elsewhere in `skillExecutor.ts` — `{ success: false, error: { code, message, context } }`.
 
+**Uniform contract (applies to every error code in this section).**
+- `code` is one of the string literals enumerated below. The enum is closed for v1 — adding a new code requires a spec update.
+- `message` is human-readable, intended for the agent's prompt context. It may include runtime identifiers but MUST NOT include values that can drift between spec revisions (e.g. do not embed schema version numbers in the message).
+- `context` is an object with a stable minimum shape: it MUST include `runId` (the `SkillExecutionContext.runId` the skill was called with) and `callerAgentId` (the `SkillExecutionContext.agentId`). Additional per-code fields listed in each example below are also required when the relevant identifier is resolvable at validation time (e.g. `targetAgentId` for `delegation_out_of_scope`). Extra diagnostic fields MAY be added by the skill handler without a spec update, but MUST be additive — never rename or remove a field that has already shipped. This is the stability contract the Brief prompt scaffolding and `agent_execution_events` consumers rely on.
+- Every error emitted by these skills is also written to `agent_execution_events` with the same `{ code, context }` payload so the Live Execution Log stays lossless even when `delegation_outcomes` writes are dropped (§10.3).
+
 **`delegation_out_of_scope`** — target is not within the resolved scope for this call.
 
 ```json
@@ -324,6 +330,7 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
     "code": "delegation_out_of_scope",
     "message": "Target agent agt_marketing_x is not a direct report of caller agt_sales_mgr under scope 'children'.",
     "context": {
+      "runId": "run_abc",
       "callerAgentId": "agt_sales_mgr",
       "targetAgentId": "agt_marketing_x",
       "delegationScope": "children",
@@ -342,6 +349,7 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
     "code": "cross_subtree_not_permitted",
     "message": "Only the subaccount root can use delegationScope='subaccount'. Caller agt_sales_mgr has parentId=agt_orch_abc.",
     "context": {
+      "runId": "run_abc",
       "callerAgentId": "agt_sales_mgr",
       "callerParentId": "agt_orch_abc",
       "suggestedScope": "descendants"
@@ -358,7 +366,7 @@ Structured errors returned by `spawn_sub_agents` and `reassign_task` when valida
   "error": {
     "code": "hierarchy_context_missing",
     "message": "Skill spawn_sub_agents requires context.hierarchy to validate delegation scope but it was not provided. This is a bug in context construction.",
-    "context": { "runId": "run_abc", "agentId": "agt_sales_mgr", "skillSlug": "spawn_sub_agents" }
+    "context": { "runId": "run_abc", "callerAgentId": "agt_sales_mgr", "skillSlug": "spawn_sub_agents" }
   }
 }
 ```
@@ -1293,11 +1301,33 @@ The three new detectors (§6.9) plug into the existing Workspace Health Audit sc
 
 Health findings about root-agent invariant violations (`subaccountMultipleRoots`, `subaccountNoRoot`) lag behind real-time. If a template apply splits brain for seconds (shouldn't, per §6.8 same-tx rotation), the detector sees it only on the next audit sweep. Acceptable — the partial unique index (§5.1) is the real-time enforcement; detectors are the backstop.
 
-### 10.6 Consistency pass (per checklist §5)
+### 10.6 Run-id trace continuity invariant
+
+Every delegation-spawned run (sub-agent via `spawn_sub_agents`, handoff via `reassign_task`) MUST preserve `runId` lineage so the DAG traversal in §7.2 cannot silently break. The invariant is stated here because it cuts across §6.3, §6.4, §7.2, and §8.2 — one canonical statement prevents drift.
+
+**The invariant.** For every row in `agent_runs` whose existence was caused by a delegation skill call:
+
+1. **Spawn chain.** If the row represents a sub-agent run (`isSubAgent = true`), `parentRunId` MUST equal the `SkillExecutionContext.runId` of the `spawn_sub_agents` call that created it. Never null, never rewritten.
+2. **Handoff chain.** If the row represents a handoff run (created by `reassign_task`'s dispatch of `agent-handoff-run`), `handoffSourceRunId` MUST equal the `SkillExecutionContext.runId` of the `reassign_task` call. Never null, never rewritten.
+3. **Both pointers when both caused it.** If a run was spawned as a sub-agent AND later had its task reassigned to it via a handoff (edge case, but possible), both `parentRunId` and `handoffSourceRunId` are populated — the former for the spawn lineage, the latter for the handoff lineage. Both MUST remain immutable once set.
+4. **Telemetry alignment.** The corresponding `delegation_outcomes` row (§4.4) for an accepted delegation MUST carry the SAME `runId` as the parent pointer on the child run (`delegation_outcomes.runId === child.parentRunId` for spawns, `=== child.handoffSourceRunId` for handoffs). The write-site for `delegation_outcomes` reads `SkillExecutionContext.runId` — the same value — so this is a call-site invariant, not a reconciliation step. Error rows in `agent_execution_events` (§4.3) carry `context.runId` sourced from the same `SkillExecutionContext.runId`; a single correlated id threads every artefact the delegation produces.
+
+**Why an explicit invariant.** The DAG traversal in §7.2 walks edges by `parentRunId === current.id` or `handoffSourceRunId === current.id`. If either pointer is null when it shouldn't be, or if the runId written to `delegation_outcomes` diverges from the runId on the parent pointer, the graph loses an edge silently — the UI renders a "disconnected" node and the rejection-telemetry metrics in §17 mis-attribute outcomes. The invariant names the call-site requirement once so every downstream consumer (graph, metrics, error log) can rely on a single correlated id per delegation.
+
+**Where it's enforced (call-site, not reconciliation):**
+- `spawn_sub_agents` handler (§6.3) sets `parentRunId = context.runId` in the sub-agent's `agent_runs` insert.
+- `reassign_task` handler (§6.4) sets `handoffSourceRunId = context.runId` in the handoff run's dispatch payload, which `agentExecutionService` persists on the new run's row.
+- Both handlers pass `context.runId` into `delegationOutcomeService.insertOutcomeSafe()` (§10.3).
+- Error objects emitted by these handlers (§4.3) carry `context.runId` from the same source. No alternative runId source is acceptable — never regenerate, never read from another field.
+
+**No reconciliation job.** There is no back-fill or re-linking path. The invariant holds by construction at write time, or the row is broken and must be investigated as a bug — not auto-repaired. A broken pointer in practice means a code change bypassed the handler's write site, which the type system + pure-core tests (§12) catch before merge.
+
+### 10.7 Consistency pass (per checklist §5)
 
 - **No pg-boss job row claimed for inline operations.** ✓ §10.1–§10.4 are explicitly inline.
 - **Prose vs execution model consistency.** ✓ §6 describes synchronous service calls; §7 describes synchronous HTTP handlers; §10 pins both as inline. No "service does X" → job-row contradictions.
 - **Non-functional goals.** No latency budgets or cache-efficiency claims that would contradict the model. Phase-1 adds a table write per delegation; at expected volume (<100 delegation attempts per org per day in the Automation OS internal company), this does not meaningfully change per-run latency.
+- **Run-id trace continuity.** ✓ §10.6 names the cross-cutting invariant; §6.3 / §6.4 / §7.2 / §4.3 / §4.4 all source `runId` from `SkillExecutionContext.runId` at their respective write sites. No reconciliation path; invariant holds by construction or the row is a bug.
 
 ---
 
