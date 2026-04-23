@@ -212,3 +212,13 @@ export * from './fastPathDecisions.js';
 
 // Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
 export * from './userSettings.js';
+
+// Cached Context Infrastructure Phase 1 — reference documents + bundles + snapshots + budget policies
+// (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
+export * from './referenceDocuments.js';
+export * from './referenceDocumentVersions.js';
+export * from './documentBundles.js';
+export * from './documentBundleMembers.js';
+export * from './documentBundleAttachments.js';
+export * from './bundleResolutionSnapshots.js';
+export * from './modelTierBudgetPolicies.js';

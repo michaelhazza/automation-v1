@@ -137,3 +137,82 @@ const anthropicAdapter: LLMProviderAdapter = {
 };
 
 export default anthropicAdapter;
+
+// ---------------------------------------------------------------------------
+// Token counting — standalone helper, NOT on the routeCall path.
+// Called by referenceDocumentService at document create / update-content time
+// to pre-compute per-model-family token counts stored on version rows.
+// ---------------------------------------------------------------------------
+
+const SUPPORTED_MODEL_FAMILIES = [
+  'anthropic.claude-sonnet-4-6',
+  'anthropic.claude-opus-4-7',
+  'anthropic.claude-haiku-4-5',
+] as const;
+
+export type SupportedModelFamily = typeof SUPPORTED_MODEL_FAMILIES[number];
+
+// Maps our model-family identifiers to the Anthropic model IDs used for token counting.
+const MODEL_FAMILY_TO_ANTHROPIC_MODEL: Record<SupportedModelFamily, string> = {
+  'anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
+  'anthropic.claude-opus-4-7': 'claude-opus-4-7',
+  'anthropic.claude-haiku-4-5': 'claude-haiku-4-5-20251001',
+};
+
+/**
+ * Counts tokens for a text string against one model family using the
+ * Anthropic count_tokens endpoint. Throws CACHED_CONTEXT_DOC_TOKEN_COUNT_FAILED
+ * on upstream error — callers roll back the whole operation.
+ */
+export async function countTokens(args: {
+  modelFamily: SupportedModelFamily;
+  content: string;
+}): Promise<number> {
+  const apiKey = env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', message: 'ANTHROPIC_API_KEY is not set' };
+  }
+
+  const model = MODEL_FAMILY_TO_ANTHROPIC_MODEL[args.modelFamily];
+  let response: Response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages/count_tokens', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: args.content }],
+      }),
+    });
+  } catch (err) {
+    throw {
+      statusCode: 502,
+      code: 'CACHED_CONTEXT_DOC_TOKEN_COUNT_FAILED',
+      message: `Token count request failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (!response.ok) {
+    let errorDetail = '';
+    try {
+      const errBody = await response.json() as { error?: { message?: string } };
+      errorDetail = errBody?.error?.message ?? response.statusText;
+    } catch {
+      errorDetail = response.statusText;
+    }
+    throw {
+      statusCode: 502,
+      code: 'CACHED_CONTEXT_DOC_TOKEN_COUNT_FAILED',
+      message: `Token count API error: ${errorDetail}`,
+    };
+  }
+
+  const data = await response.json() as { input_tokens: number };
+  return data.input_tokens;
+}
+
+export { SUPPORTED_MODEL_FAMILIES };

@@ -86,6 +86,13 @@ export const ORG_PERMISSIONS = {
   RULES_READ: 'org.rules.read',
   RULES_WRITE: 'org.rules.write',
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
+  // ── Cached Context Infrastructure ────────────────────────────────────────
+  REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
+  REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
+  REFERENCE_DOCUMENTS_DEPRECATE:  'reference_documents.deprecate',
+  DOCUMENT_BUNDLES_READ:          'document_bundles.read',
+  DOCUMENT_BUNDLES_WRITE:         'document_bundles.write',
+  DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -211,6 +218,13 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.RULES_WRITE,  description: 'Create, edit, pause, resume, and delete Rules',                            groupName: 'org.rules' },
   { key: ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE,
                                        description: 'Mark a Rule as authoritative (overrides non-authoritative rules)',        groupName: 'org.rules' },
+  // reference_documents + document_bundles (Cached Context Infrastructure)
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ,      description: 'View reference documents and their versions',                              groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE,     description: 'Create, edit, rename, pause, resume, and soft-delete reference documents', groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_DEPRECATE, description: 'Deprecate reference documents (forward-only lifecycle action)',            groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ,         description: 'View document bundles and their members',                                  groupName: 'document_bundles' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_WRITE,        description: 'Create, edit, promote, and delete document bundles',                       groupName: 'document_bundles' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_ATTACH,       description: 'Attach document bundles to agents, tasks, and scheduled tasks',            groupName: 'document_bundles' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },

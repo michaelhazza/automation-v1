@@ -457,6 +457,49 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0194_conversations_polymorphic.sql',
     rationale: 'Individual messages within conversations — includes BriefChatArtefact JSONB blobs with query results, approval payloads, and error diagnostics. Same sensitivity as the parent conversation.',
   },
+  // 0202–0208 — Cached Context Infrastructure (spec: docs/cached-context-infrastructure-spec.md)
+  {
+    tableName: 'reference_documents',
+    schemaFile: 'referenceDocuments.ts',
+    policyMigration: '0202_reference_documents.sql',
+    rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
+  },
+  {
+    tableName: 'reference_document_versions',
+    schemaFile: 'referenceDocumentVersions.ts',
+    policyMigration: '0203_reference_document_versions.sql',
+    rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states.',
+  },
+  {
+    tableName: 'document_bundles',
+    schemaFile: 'documentBundles.ts',
+    policyMigration: '0204_document_bundles.sql',
+    rationale: 'Document bundle groupings — names and descriptions can reveal organisational intent; bundle composition reveals which documents are used together. Cross-tenant leak exposes the org\'s knowledge structure.',
+  },
+  {
+    tableName: 'document_bundle_members',
+    schemaFile: 'documentBundleMembers.ts',
+    policyMigration: '0205_document_bundle_members.sql',
+    rationale: 'Join table linking documents to bundles — membership reveals bundle composition. Cross-tenant leak exposes the relationship between documents and bundles.',
+  },
+  {
+    tableName: 'document_bundle_attachments',
+    schemaFile: 'documentBundleAttachments.ts',
+    policyMigration: '0206_document_bundle_attachments.sql',
+    rationale: 'Links bundles to agents, tasks, or scheduled tasks — reveals which automated workflows reference which knowledge. Cross-tenant leak exposes operational context.',
+  },
+  {
+    tableName: 'bundle_resolution_snapshots',
+    schemaFile: 'bundleResolutionSnapshots.ts',
+    policyMigration: '0207_bundle_resolution_snapshots.sql',
+    rationale: 'Immutable per-run captures of resolved document versions and prefix hashes — contain the exact document content that was sent to the LLM for each run. Cross-tenant leak exposes both content and LLM call patterns.',
+  },
+  {
+    tableName: 'model_tier_budget_policies',
+    schemaFile: 'modelTierBudgetPolicies.ts',
+    policyMigration: '0208_model_tier_budget_policies.sql',
+    rationale: 'Per-org execution budget policies — per-org overrides reveal cost configuration and policy settings. Platform-default rows (organisation_id IS NULL) are intentionally readable across all orgs (custom SELECT policy).',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */
