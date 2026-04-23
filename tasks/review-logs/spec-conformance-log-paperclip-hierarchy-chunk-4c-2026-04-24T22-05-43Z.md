@@ -7,6 +7,7 @@
 **Scope:** Chunk 4c — Delegation graph route + service + DelegationGraphView
 **Changed-code set:** 7 files (as provided by caller)
 **Run at:** 2026-04-23T22:05:43Z
+**Commit at finish:** `3d6b5681`
 
 ---
 
