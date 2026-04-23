@@ -1,0 +1,106 @@
+# ChatGPT Spec Review Session — cached-context-infrastructure — 2026-04-23T04-33-02Z
+
+## Session Info
+- Spec: `docs/cached-context-infrastructure-spec.md`
+- Branch: `claude/cached-context-infrastructure-fcVmS`
+- PR: #180 — https://github.com/michaelhazza/automation-v1/pull/180
+- Started: 2026-04-23T04:33:02Z
+
+---
+
+## Round 1 — 2026-04-23T04-33-02Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+
+This is a very strong spec. It cleanly translates the brief into enforceable contracts, and more importantly, it respects the boundaries and invariants from the brief without drifting into "clever" implementations.
+
+At this stage, we're not looking for redesign. We're looking for:
+- brittleness under real usage
+- over/under-specification
+- places where implementation will "guess" instead of follow a rule
+
+There are no structural blockers. This is implementable as-is. The feedback below is about tightening a few high-risk edges.
+
+High-confidence callouts (flagged areas)
+
+§3.6 Attachment UX — verdict: one of the strongest parts of the spec. Correct call: backend primitive = packs, user mental model = documents + optional bundles. That separation is clean and durable.
+
+One improvement (important but small): Auto-pack reuse is based on exact document set — correct, but missing one UX invariant: **Order independence must be explicit in UX, not just backend.** Add (one line in §3.6.4 or §3.6.7): "Document sets are considered identical regardless of selection order." Why: prevents confusion when suggestion fires "unexpectedly"; aligns UX with prefix-hash behaviour.
+
+§6.2 documentPackService — core contracts. Conceptually correct, but one risk: implicit coupling between auto-pack identity and future behaviour. Auto-pack = canonical representation of document set. Good, but becomes load-bearing for dedup, suggestions, attachments, bundle promotion.
+
+Missing guardrail: **Auto-pack identity must be stable and independent of attachment context.** Why: prevents future bugs where same docs in different subaccounts diverge, or same docs but different lifecycle flags accidentally fork packs.
+
+promoteToNamedBundle (in-place) is right. Subtle risk: **Missing invariant: promotion must not change identity.** Add explicitly: "Promoting an auto-pack to a named bundle must not alter its membership, identity, or prefix hash." Why: prevents accidental mutation during promotion; protects cache reuse; protects snapshot integrity.
+
+suggestBundle return shape: conceptually solid. Only improvement: **Add explicit determinism requirement:** "The suggestion decision must be deterministic for a given document set and user state." Why: avoids flickering suggestions; avoids race conditions under concurrent edits.
+
+§7.2 chipKind discriminator: correct for v1. Bundle → one 📦 chip, auto-pack → expanded 📄 chips. Aligns with mental model, simplicity, bundle as abstraction layer. One thing to lock in: **A bundle chip always represents a single attachment unit, regardless of its underlying document count.** Why: prevents future UI from "expanding sometimes"; keeps mental model stable.
+
+Real risks
+
+1. "Auto-pack explosion" edge case: optimised for reuse, but consider — user repeatedly creates slightly different doc sets, each becomes a new auto-pack. Result: hidden proliferation of auto-packs, potential performance and storage issues later. Fix (brief-level, not implementation): add principle "The system should guard against unbounded growth of auto-created packs over time." Don't solve it now — just signal it.
+
+2. Snapshot integrity vs live data drift: correctly snapshot document versions and re-hash on read. Good. But missing explicit failure mode: **What happens on mismatch?** Add one explicit rule (important): "If a snapshot integrity check fails, the run must fail immediately and surface a system-level error." Why: prevents silent corruption; avoids undefined behaviour.
+
+3. Budget enforcement split (subtle complexity): assembly-time enforcement + router-time enforcement (runCostBreaker). Correct. But the spec assumes developers will "understand the split." Add one clarifying sentence: "Assembly-time validation prevents invalid requests; runtime cost enforcement handles execution-time variance and fallback behaviour." Why: removes ambiguity; prevents duplicate enforcement logic.
+
+4. Cache identity vs provider behaviour: prefix_hash + assembledPrefixHash defined cleanly. Missing: **Provider cache is best-effort, not guaranteed.** Add principle: "Cache identity guarantees determinism on our side, but cache hits depend on provider behaviour and are not guaranteed." Why: prevents false assumptions; important for debugging.
+
+5. Degraded classification (slight ambiguity): "degraded = includes unexpected cache miss." Risk: mixes quality issues with infra variability. Recommendation clarify: "Degraded reflects suboptimal execution conditions, not necessarily incorrect output." Small wording tweak, big clarity gain.
+
+Minor polish (optional)
+
+1. Naming consistency: uses "bundle" and "named bundle" interchangeably. Pick one primary label and stick to it in UI sections.
+
+2. "prefix_hash" vs "assembledPrefixHash": handled correctly technically. Just add one line: "prefix_hash refers to per-pack identity; assembledPrefixHash refers to call-level identity." Avoids confusion later.
+
+3. Suggestion dismissal permanence: says "permanent dismissal per (user, doc-set)." Good. Consider adding: "Dismissal does not prevent manual bundle creation." Prevents edge-case UX confusion.
+
+Final verdict
+
+Strong:
+- Clear separation of primitives
+- Excellent UX abstraction layer
+- Deterministic system design
+- Strong invariants carried from brief
+- Correct use of existing infrastructure
+
+Fixed from brief phase (correctly):
+- avoided overengineering
+- avoided RAG creep
+- avoided UI complexity
+- avoided multiple budget systems
+
+What remains: no redesign needed. Only tighten a few invariants, clarify edge behaviours, prevent future misinterpretation.
+
+Bottom line: this spec is ready for implementation. If you implement exactly what's written, you'll get predictable behaviour, strong observability, minimal rework later.
+
+### Recommendations and Decisions
+
+13 discrete findings parsed from round 1. All classified as mechanical-additive (small invariant or clarification lines that tighten existing behaviour without changing scope or direction).
+
+User decision: **all: as recommended** (accept all 13, apply all, including the deferred-signal treatment on F6 and the 2 mockup-line touches for F11).
+
+| # | Finding | Classification | Disposition | Spec/artefact changes |
+|---|---------|----------------|-------------|----------------------|
+| F1 | Order-independence UX invariant — "Document sets are identical regardless of selection order" | mechanical | **applied** | §3.6.4 new paragraph + §3.6.7 invariant #9 cross-reference |
+| F2 | Auto-pack identity must be stable and independent of attachment context | mechanical | **applied** | §6.2 invariant #6 added |
+| F3 | Promotion must not alter membership, identity, or prefix hash | mechanical | **applied** | §6.2 invariant #7 added, listing the three columns that change and the columns/rows that do not |
+| F4 | suggestBundle determinism requirement | mechanical | **applied** | §3.6.4 "Determinism" paragraph + §6.2 invariant #8 |
+| F5 | Bundle chip always represents a single attachment unit | mechanical | **applied** | §3.6.7 invariant #8 added |
+| F6 | Guard against unbounded auto-pack growth (signal only) | mechanical (deferred signal) | **applied** | §12.16 new deferred entry + §14 R11 risk row |
+| F7 | Snapshot integrity mismatch → fail-fast, system-level error | mechanical | **applied** | §6.4 new invariant box above the assembly-flow steps |
+| F8 | Budget enforcement split clarifying sentence | mechanical | **applied** | §6.5 new paragraph on "Division of enforcement responsibilities" |
+| F9 | Cache identity guarantees determinism on our side; provider cache hits are not guaranteed | mechanical | **applied** | §4.4 new paragraph "Cache identity vs provider cache behaviour" |
+| F10 | Degraded = suboptimal execution conditions, not incorrect output | mechanical | **applied** | §4.6 `degraded` bullet extended with the clarifying sentence |
+| F11 | Naming consistency — "bundle" primary, "named bundle" only when contrasting with auto-packs | mechanical | **applied** | §3.6.1 new "Naming rule" paragraph; `mockup-upload-document.html` line 302 tightened ("named bundle" → "bundle" in UI help text); `mockup-attach-docs.html` line 399 and `index.html` line 199 left intact (mockup-only explainer + dev-facing description, both appropriately contrastive) |
+| F12 | Hash glossary line — per-pack vs call-level | mechanical | **applied** | §4.4 new "Hash glossary" block at the top of the section |
+| F13 | Dismissal does not prevent manual bundle creation | mechanical | **applied** | §3.6.4 new "Dismissal scope" paragraph |
+
+**Mockups touched:** 1 file (`mockup-upload-document.html`) — single UI-copy tightening, no structural change.
+
+**Commit:** round-1 changes committed as a single commit per the spec-review agent's contract (auto-commit-and-push after each round).
+
