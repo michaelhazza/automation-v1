@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bundle · 42 Macro (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  .container { max-width: 780px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 18px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .breadcrumb .sep { margin: 0 6px; color: #9ca3af; }
+
+  /* Intro callout — softly explains what a bundle is */
+  .intro-callout {
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    padding: 12px 18px; margin-bottom: 16px;
+    display: flex; gap: 12px; align-items: center; font-size: 12.5px; color: #3730a3;
+  }
+  .intro-callout .ic-icon {
+    width: 28px; height: 28px; background: #fff; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .intro-callout strong { color: #1e1b4b; }
+  .intro-callout .dismiss {
+    margin-left: auto; color: #6366f1; background: none; border: none;
+    cursor: pointer; font-size: 13px; padding: 4px 8px; font-family: inherit;
+  }
+  .intro-callout .dismiss:hover { color: #4338ca; }
+
+  /* Header */
+  .hdr {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 22px 24px; margin-bottom: 16px;
+    display: flex; gap: 16px; align-items: center;
+  }
+  .hdr .icon {
+    width: 48px; height: 48px; background: #eef2ff; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; font-size: 24px;
+    flex-shrink: 0;
+  }
+  .hdr .meta { flex: 1; }
+  .name-edit input {
+    font-size: 22px; font-weight: 600; letter-spacing: -0.3px;
+    border: 1px solid transparent; background: transparent; padding: 4px 8px;
+    border-radius: 5px; font-family: inherit; color: #1a1d23; width: 100%;
+    margin-bottom: 4px;
+  }
+  .name-edit input:hover { border-color: #e5e7eb; }
+  .name-edit input:focus { outline: none; border-color: #6366f1; background: #fff; }
+  .hdr .sub {
+    font-size: 13px; color: #6b7280; display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap; padding-left: 8px;
+  }
+  .hdr .sub .sep { color: #d1d5db; }
+  .hdr .sub .ok { color: #15803d; }
+
+  .hdr-actions { display: flex; gap: 8px; }
+  .btn {
+    padding: 8px 16px; border-radius: 5px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid; font-family: inherit;
+  }
+  .btn-secondary { background: #fff; color: #374151; border-color: #d1d5db; }
+  .btn-secondary:hover { background: #fafbfc; }
+  .btn-primary { background: #4338ca; color: #fff; border-color: #4338ca; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-danger { color: #b91c1c; border-color: transparent; background: none; }
+  .btn-danger:hover { background: #fef2f2; }
+
+  /* Documents card */
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  .card-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card-head h2 { font-size: 14px; font-weight: 600; }
+  .card-head .count { font-size: 12px; color: #6b7280; }
+
+  .doc-row {
+    display: grid; grid-template-columns: 28px 1fr auto auto; gap: 14px;
+    align-items: center; padding: 12px 20px; border-bottom: 1px solid #f0f1f3;
+  }
+  .doc-row:last-of-type { border-bottom: none; }
+  .doc-row .d-icon {
+    width: 28px; height: 28px; background: #f3f4f6; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+    color: #6b7280;
+  }
+  .doc-row .d-name { font-weight: 500; font-size: 13.5px; }
+  .doc-row .d-sub { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .doc-row .d-updated { font-size: 12px; color: #6b7280; white-space: nowrap; }
+  .doc-row .d-remove {
+    background: none; border: none; color: #9ca3af; font-size: 16px;
+    cursor: pointer; padding: 4px 8px; border-radius: 4px; font-family: inherit;
+  }
+  .doc-row .d-remove:hover { color: #b91c1c; background: #fef2f2; }
+
+  .add-doc-row {
+    padding: 12px 20px;
+  }
+  .add-doc-btn {
+    width: 100%; padding: 10px 14px;
+    background: #fff; border: 1.5px dashed #a5b4fc; border-radius: 6px;
+    color: #4338ca; font-size: 13px; font-weight: 500; cursor: pointer;
+    font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .add-doc-btn:hover { background: #eef2ff; }
+
+  /* Used-by block */
+  .used-by {
+    padding: 14px 20px; background: #fafbfc; border-top: 1px solid #f0f1f3;
+    border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
+  }
+  .used-by .ub-label {
+    font-size: 11px; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 600; margin-bottom: 8px;
+  }
+  .used-by .ub-row {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
+  .used-by a {
+    color: #4338ca; text-decoration: none; font-weight: 500; font-size: 13px;
+    padding: 4px 10px; border-radius: 12px; background: #eef2ff;
+  }
+  .used-by a:hover { background: #e0e7ff; }
+  .used-by .edit-warning {
+    margin-top: 10px; font-size: 11.5px; color: #b45309; font-style: italic;
+  }
+
+  /* Advanced disclosure */
+  .advanced {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .adv-toggle {
+    width: 100%; padding: 14px 20px; background: none; border: none;
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; font-family: inherit; font-size: 13px; color: #4b5563; font-weight: 500;
+  }
+  .adv-toggle .chev { color: #9ca3af; font-size: 12px; }
+  .adv-body {
+    padding: 0 20px 18px;
+    border-top: 1px solid #f0f1f3;
+  }
+  .adv-body h3 {
+    font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;
+    font-weight: 600; padding-top: 14px; margin-bottom: 10px;
+  }
+  .adv-kv {
+    display: grid; grid-template-columns: 180px 1fr; gap: 14px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid #f9fafb; font-size: 12.5px;
+  }
+  .adv-kv:last-child { border-bottom: none; }
+  .adv-kv .k { color: #6b7280; }
+  .adv-kv .v { color: #1a1d23; font-weight: 500; }
+  .adv-kv .v.good { color: #15803d; }
+  .adv-kv .v.warn { color: #b45309; }
+  .adv-kv .v.bad { color: #b91c1c; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Bundle detail · bundles are the opt-in efficiency affordance introduced by the "save as bundle" suggestion · simple list, one primary action, soft intro.</div>
+
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="#">Knowledge</a>
+    <span class="sep">›</span>
+    <a href="#">Bundles</a>
+    <span class="sep">›</span>
+    <span>42 Macro</span>
+  </div>
+
+  <!-- Soft intro — shown on the user's first few bundle pages, dismissible -->
+  <div class="intro-callout">
+    <div class="ic-icon">💡</div>
+    <div>
+      <strong>A bundle is just a saved group of documents.</strong> Attach the bundle to a task instead of picking the same documents one by one. Edit the bundle once — every task using it stays in sync.
+    </div>
+    <button class="dismiss">Got it ✕</button>
+  </div>
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="icon">📦</div>
+    <div class="meta">
+      <div class="name-edit">
+        <input type="text" value="42 Macro">
+      </div>
+      <div class="sub">
+        <span>3 documents</span>
+        <span class="sep">·</span>
+        <span class="ok">✓ Within model limits</span>
+        <span class="sep">·</span>
+        <span>Last edited 2 hours ago</span>
+      </div>
+    </div>
+    <div class="hdr-actions">
+      <button class="btn btn-secondary">Attach to a task →</button>
+    </div>
+  </div>
+
+  <!-- Documents in bundle -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Documents in this bundle</h2>
+      <span class="count">3 documents</span>
+    </div>
+
+    <div class="doc-row">
+      <div class="d-icon">📄</div>
+      <div>
+        <div class="d-name">Macro market framework</div>
+        <div class="d-sub">Added when bundle created</div>
+      </div>
+      <div class="d-updated">Updated today</div>
+      <button class="d-remove" title="Remove from bundle">✕</button>
+    </div>
+
+    <div class="doc-row">
+      <div class="d-icon">📄</div>
+      <div>
+        <div class="d-name">Central bank policy compendium</div>
+        <div class="d-sub">Added when bundle created</div>
+      </div>
+      <div class="d-updated">Updated 11 hours ago</div>
+      <button class="d-remove" title="Remove from bundle">✕</button>
+    </div>
+
+    <div class="doc-row">
+      <div class="d-icon">📄</div>
+      <div>
+        <div class="d-name">Annual macro outlook 2026</div>
+        <div class="d-sub">Added when bundle created</div>
+      </div>
+      <div class="d-updated">Updated 3 weeks ago</div>
+      <button class="d-remove" title="Remove from bundle">✕</button>
+    </div>
+
+    <div class="add-doc-row">
+      <button class="add-doc-btn">
+        <span>+</span>
+        <span>Add a document to this bundle</span>
+      </button>
+    </div>
+
+    <!-- Where it's attached -->
+    <div class="used-by">
+      <div class="ub-label">Attached to</div>
+      <div class="ub-row">
+        <a href="mockup-attach-docs.html">Daily macro report</a>
+        <a href="#">Weekly macro memo</a>
+      </div>
+      <div class="edit-warning">
+        Adding or removing documents will affect both of these tasks.
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer actions -->
+  <div style="display: flex; justify-content: flex-end; gap: 8px;">
+    <button class="btn btn-danger">Delete bundle</button>
+  </div>
+
+  <!-- Advanced disclosure — collapsed by default; shown expanded here for mockup legibility -->
+  <div class="advanced" style="margin-top: 16px;">
+    <button class="adv-toggle">
+      <span>Advanced details</span>
+      <span class="chev">▸</span>
+    </button>
+    <div class="adv-body">
+      <h3>Size &amp; model fit</h3>
+      <div class="adv-kv">
+        <span class="k">Total size</span>
+        <span class="v">402,000 tokens</span>
+      </div>
+      <div class="adv-kv">
+        <span class="k">Biggest single doc</span>
+        <span class="v">Central bank policy compendium · 180k</span>
+      </div>
+      <div class="adv-kv">
+        <span class="k">Fits in current model</span>
+        <span class="v good">Yes · plenty of room (78% free)</span>
+      </div>
+      <div class="adv-kv">
+        <span class="k">Room before cap</span>
+        <span class="v good">1,398,000 tokens</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

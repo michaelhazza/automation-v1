@@ -137,6 +137,38 @@ Report contents:
 
 After writing the file, return a short summary to the caller: the log path, the iteration count, and the verdict line. The caller reads the log path to locate the full report.
 
+### Auto-commit-and-push on finish
+
+This step OVERRIDES the CLAUDE.md "no auto-commits or auto-pushes" user preference within this flow only. The user has explicitly opted in: review-agent work must persist to the remote so subsequent review cycles and other sessions see the current state of the branch.
+
+Run this step ONCE, after the final log has been written — not per iteration. Codex reviews `--uncommitted` changes in Step 1, and committing between iterations would empty the review target for the next iteration.
+
+If no files changed across the whole loop (every Codex recommendation was rejected, no edits applied), skip this step — do not create an empty commit. Otherwise:
+
+```bash
+# Stage only the files touched by this run. Never `git add -A`.
+# The set to stage is:
+#   1. Every file listed under "Changes Made" in the final log
+#   2. The final log itself at tasks/review-logs/dual-review-log-<slug>-<timestamp>.md
+git add <files-changed-list> \
+        "tasks/review-logs/dual-review-log-${SLUG}-${TIMESTAMP}.md"
+
+# <short summary> is a 5–10 word description of what was accepted across the loop
+# (e.g. "error-boundary fix + logger call-site cleanup").
+git commit -m "$(cat <<'EOF'
+chore(dual-review): <slug> — <short summary>
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+
+git push
+```
+
+If the commit fails (pre-commit hook, signing issue, etc.), fix the underlying issue and create a NEW commit — never `--amend` or `--no-verify`. If `git push` fails because the remote has diverged, do NOT force-push — surface the exact error to the caller.
+
+Record the resulting commit hash in the final log under a new line `**Commit at finish:** <hash>` near the top of the log.
+
 ---
 
 ## Rules
