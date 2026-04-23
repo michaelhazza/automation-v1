@@ -1,744 +1,1073 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Brief walkthrough · Acme renewal · One agent, many workers</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acme renewal proposal — chat with a team (mockup)</title>
 <style>
-  :root {
-    --sl-900: #0f172a; --sl-800: #1e293b; --sl-700: #334155; --sl-600: #475569;
-    --sl-500: #64748b; --sl-400: #94a3b8; --sl-300: #cbd5e1; --sl-200: #e2e8f0;
-    --sl-100: #f1f5f9; --sl-50:  #f8fafc;
-    --indigo-700: #4338ca; --indigo-600: #4f46e5; --indigo-500: #6366f1; --indigo-100: #e0e7ff; --indigo-50: #eef2ff;
-    --green-700: #047857; --green-600: #059669; --green-500: #10b981; --green-50: #ecfdf5;
-    --amber-700: #b45309; --amber-600: #d97706; --amber-500: #f59e0b; --amber-50: #fffbeb;
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
   }
-  html, body {
-    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    font-feature-settings: 'cv11', 'ss01';
-    background: var(--sl-50); color: var(--sl-800); -webkit-font-smoothing: antialiased;
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 24px 60px; }
+
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { margin: 0 6px; color: #d1d5db; }
+
+  /* Mockup-only state toggle (not part of the real UI) */
+  .mockup-toggle {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: #6b7280;
   }
-  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'cv11' 1; }
-  h1, h2 { letter-spacing: -0.02em; font-weight: 600; }
-  h3 { letter-spacing: -0.01em; font-weight: 600; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
-  .pill-dot { width: 6px; height: 6px; border-radius: 999px; }
-  .pill-success { background: #ecfdf5; color: #047857; } .pill-success .pill-dot { background: #10b981; }
-  .pill-running { background: #eef2ff; color: #4338ca; } .pill-running .pill-dot { background: #6366f1; }
-  .pill-pending { background: #f1f5f9; color: #64748b; } .pill-pending .pill-dot { background: #94a3b8; }
-  .pill-warn    { background: #fffbeb; color: #b45309; } .pill-warn .pill-dot { background: #f59e0b; }
-  .pill-purple  { background: #f5f3ff; color: #6d28d9; } .pill-purple .pill-dot { background: #8b5cf6; }
-  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
-  .chip.agent { background: #eef2ff; color: #4338ca; }
-  .chip.user  { background: #f1f5f9; color: #475569; }
-  .chip.scope { background: #f5f3ff; color: #6d28d9; }
-  .chip.direction-down { background: #ecfdf5; color: #047857; }
-  .chip.direction-up   { background: #fffbeb; color: #b45309; }
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.55; transform: scale(0.7); }
+  .mockup-toggle .label {
+    font-size: 10px; font-weight: 700; color: #9ca3af;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px;
   }
-  .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
-  @keyframes progress-bar {
-    0% { left: -40%; }
-    100% { left: 100%; }
+  .mockup-toggle button {
+    font-family: inherit; font-size: 12px; font-weight: 500;
+    padding: 5px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    background: #fff; color: #4b5563; cursor: pointer;
   }
-  .progress-bar { position: relative; overflow: hidden; }
-  .progress-bar::after {
-    content: ''; position: absolute; top: 0; width: 40%; height: 100%;
-    background: linear-gradient(90deg, transparent, #6366f1, transparent);
-    animation: progress-bar 1.6s ease-in-out infinite;
+  .mockup-toggle button:hover { border-color: #a5b4fc; color: #4338ca; }
+  .mockup-toggle button.active {
+    background: #eef2ff; border-color: #4338ca; color: #4338ca; font-weight: 600;
   }
-  .stepper-btn { transition: background 120ms ease, color 120ms ease, border-color 120ms ease; }
-  .stepper-btn[aria-current='true'] { background: var(--indigo-50); border-color: var(--indigo-500); color: var(--indigo-700); font-weight: 600; }
-  .stepper-btn[data-visited='true'] .stepper-num { background: var(--green-500); color: #fff; border-color: transparent; }
-  .stepper-btn[aria-current='true'] .stepper-num { background: var(--indigo-600); color: #fff; border-color: transparent; }
-  .step-view { display: none; }
-  .step-view.active { display: block; }
-  .event-row { display: grid; grid-template-columns: 80px 140px 1fr; gap: 10px; padding: 6px 10px; font-size: 11px; border-bottom: 1px dashed var(--sl-100); }
-  .event-row:last-child { border-bottom: 0; }
-  .event-time { color: var(--sl-400); }
-  .event-actor { color: var(--sl-700); font-weight: 500; }
-  .event-msg { color: var(--sl-700); }
-  .event-msg code { background: var(--sl-100); padding: 1px 4px; border-radius: 3px; font-size: 10px; }
-  .brief-msg-agent { background: #fff; border: 1px solid var(--sl-200); }
-  .brief-msg-user  { background: var(--sl-100); }
-  .brief-progress-chip {
+  .mockup-toggle .note {
+    margin-left: auto; font-size: 11px; color: #9ca3af; font-style: italic;
+  }
+
+  .hdr {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 18px 22px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .hdr .icon {
+    width: 40px; height: 40px; border-radius: 10px; background: #eef2ff;
+    display: flex; align-items: center; justify-content: center; font-size: 19px;
+    flex-shrink: 0;
+  }
+  .hdr h1 {
+    font-size: 19px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 2px;
+  }
+  .hdr .sub { font-size: 12.5px; color: #6b7280; }
+
+  /* MAIN LAYOUT — split view on desktop */
+  .stage {
+    display: grid; grid-template-columns: 1fr; gap: 14px;
+    transition: grid-template-columns 0.25s ease;
+  }
+  .stage.expanded {
+    grid-template-columns: minmax(420px, 1fr) 1.35fr;
+  }
+
+  /* CHAT COLUMN */
+  .chat {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    display: flex; flex-direction: column; min-height: 580px;
+  }
+  .chat-head {
+    padding: 12px 18px; border-bottom: 1px solid #f0f1f3;
+    font-size: 12px; color: #6b7280;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .chat-head .status {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 2px 8px; border-radius: 999px;
-    background: var(--indigo-50); color: var(--indigo-700);
-    font-size: 11px; font-weight: 500;
+    font-size: 11.5px;
   }
-  details > summary { cursor: pointer; list-style: none; }
-  details > summary::-webkit-details-marker { display: none; }
-  .kbd { display: inline-block; padding: 1px 6px; font-size: 11px; font-weight: 500; border-radius: 3px; border: 1px solid var(--sl-200); background: var(--sl-50); color: var(--sl-600); box-shadow: 0 1px 0 var(--sl-200); }
-  .bg-grid {
-    background-image: radial-gradient(circle, #e2e8f0 1px, transparent 1px);
-    background-size: 16px 16px;
+  .chat-head .status .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+  .chat-head .status .dot.active { background: #6366f1; }
+
+  .chat-body {
+    flex: 1; overflow-y: auto; padding: 18px; display: flex;
+    flex-direction: column; gap: 14px;
+  }
+
+  .msg-user {
+    align-self: flex-end; max-width: 85%;
+    background: #eef2ff; color: #1e1b4b; padding: 10px 14px;
+    border-radius: 14px 14px 4px 14px; font-size: 13.5px; line-height: 1.5;
+  }
+  .msg-user-label {
+    font-size: 10.5px; color: #6b7280; margin-bottom: 4px; text-align: right;
+  }
+
+  .msg-agent {
+    max-width: 92%;
+    background: #fff; border: 1px solid #e5e7eb;
+    padding: 14px 16px; border-radius: 4px 14px 14px 14px;
+  }
+  .msg-agent .head {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .msg-agent .avatar {
+    width: 26px; height: 26px; border-radius: 50%; background: #4338ca; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .msg-agent .name { font-size: 12.5px; font-weight: 600; color: #1a1d23; }
+  .msg-agent .when {
+    margin-left: auto; font-size: 11px; color: #9ca3af;
+  }
+  .msg-agent .text {
+    font-size: 13.5px; color: #1a1d23; line-height: 1.6;
+  }
+  .msg-agent .text strong { color: #1e1b4b; }
+
+  /* Progress card shown while working */
+  .progress-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; background: #fafbfc;
+    border: 1px solid #f0f1f3; border-radius: 8px; margin-top: 10px;
+  }
+  .progress-card .pulse-wrap {
+    width: 28px; height: 28px; position: relative; flex-shrink: 0;
+  }
+  .progress-card .pulse-wrap .core {
+    width: 10px; height: 10px; border-radius: 50%; background: #6366f1;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  }
+  .progress-card .pulse-wrap .ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid #6366f1; opacity: 0.6;
+    animation: ring-pulse 1.6s ease-out infinite;
+  }
+  @keyframes ring-pulse {
+    0%   { transform: scale(0.6); opacity: 0.6; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+  .progress-card .txt {
+    font-size: 13px; color: #374151;
+  }
+  .progress-card .txt strong { color: #1a1d23; font-weight: 600; }
+  .progress-card .txt .sub { font-size: 11.5px; color: #9ca3af; margin-top: 2px; }
+
+  /* Artefact card inside the final reply */
+  .artefact {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 12px; padding: 10px 12px;
+    background: #fafbfc; border: 1px solid #e5e7eb; border-radius: 8px;
+  }
+  .artefact .a-icon {
+    width: 30px; height: 30px; border-radius: 6px; background: #eef2ff;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+    color: #4338ca; flex-shrink: 0;
+  }
+  .artefact .a-body { flex: 1; }
+  .artefact .a-name { font-size: 12.5px; font-weight: 600; color: #1a1d23; }
+  .artefact .a-meta { font-size: 11px; color: #9ca3af; }
+  .artefact .a-open {
+    font-size: 11.5px; color: #4338ca; text-decoration: none; font-weight: 600;
+  }
+  .artefact .a-open:hover { text-decoration: underline; }
+
+  .msg-agent .footer-row {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 12px;
+    font-size: 11.5px; color: #6b7280;
+  }
+  .msg-agent .footer-row .view-link {
+    color: #4338ca; text-decoration: none; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .msg-agent .footer-row .view-link:hover { text-decoration: underline; }
+
+  /* Ask bar at bottom */
+  .ask-bar {
+    padding: 12px 14px; border-top: 1px solid #f0f1f3; background: #fafbfc;
+  }
+  .ask-input {
+    display: flex; gap: 8px; align-items: center;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .ask-input input {
+    flex: 1; border: none; outline: none; font-family: inherit;
+    font-size: 13px; color: #1a1d23; background: transparent;
+  }
+  .ask-input input::placeholder { color: #9ca3af; }
+  .ask-input .kbd {
+    font-size: 10.5px; color: #6b7280; background: #f3f4f6;
+    padding: 2px 6px; border-radius: 3px; font-weight: 600;
+  }
+
+  /* Expand CTA shown when the graph is collapsed (desktop only) */
+  .expand-cta {
+    background: #fff; border: 1px dashed #c7d2fe; border-radius: 10px;
+    padding: 40px 24px; text-align: center; min-height: 580px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px;
+  }
+  .expand-cta .e-icon {
+    width: 44px; height: 44px; border-radius: 12px; background: #eef2ff;
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
+  }
+  .expand-cta h3 {
+    font-size: 15px; font-weight: 600; color: #1a1d23;
+  }
+  .expand-cta p {
+    font-size: 13px; color: #6b7280; max-width: 300px; line-height: 1.5;
+  }
+  .expand-cta button {
+    margin-top: 6px; font-family: inherit;
+    padding: 9px 18px; font-size: 13px; font-weight: 600;
+    background: #4338ca; color: #fff; border: 1px solid #4338ca;
+    border-radius: 6px; cursor: pointer;
+  }
+  .expand-cta button:hover { background: #3730a3; }
+
+  /* RIGHT COLUMN — now holds both graph + activity log stacked */
+  .right-stack {
+    display: flex; flex-direction: column; gap: 14px; min-height: 580px;
+  }
+
+  /* GRAPH PANE */
+  .graph-pane {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    display: flex; flex-direction: column; flex: 0 0 auto;
+  }
+  .graph-head {
+    padding: 12px 18px; border-bottom: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .graph-head .tag {
+    font-size: 10.5px; font-weight: 700; color: #4338ca;
+    background: #eef2ff; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .graph-head .title { font-size: 13px; font-weight: 600; color: #1a1d23; }
+  .graph-head .live {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: #6366f1; font-weight: 500;
+  }
+  .graph-head .live .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #6366f1;
+    animation: live-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .graph-head .close {
+    margin-left: auto; background: none; border: none; cursor: pointer;
+    color: #9ca3af; font-size: 16px; font-family: inherit; padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .graph-head .close:hover { color: #1a1d23; background: #f3f4f6; }
+
+  .graph-body {
+    flex: 1; padding: 22px 14px; background: #fafbfc;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+
+  .legend {
+    padding: 10px 18px; border-top: 1px solid #f0f1f3;
+    display: flex; gap: 18px; font-size: 11.5px; color: #6b7280;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .legend .dot.done { background: #22c55e; }
+  .legend .dot.active { background: #6366f1; }
+  .legend .dot.idle { background: #d1d5db; }
+  .legend .dot.warn { background: #f59e0b; }
+  .legend .hint {
+    margin-left: auto; font-style: italic; color: #9ca3af;
+  }
+
+  /* Mini graph SVG styling */
+  svg#live-tree { max-width: 100%; height: auto; display: block; }
+  .live-node .lnode-rect {
+    fill: #fff; stroke: #e5e7eb; stroke-width: 1.5;
+    filter: drop-shadow(0 1px 2px rgba(15,23,42,0.04));
+    transition: stroke 0.25s, fill 0.25s;
+  }
+  .live-node.idle .lnode-rect { opacity: 0.55; stroke-dasharray: 3 3; }
+  .live-node.active .lnode-rect { stroke: #6366f1; stroke-width: 2; fill: #fafbff; }
+  .live-node.done   .lnode-rect { stroke: #e5e7eb; }
+
+  .lnode-name {
+    font-size: 11.5px; font-weight: 600; fill: #1a1d23;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .live-node.idle .lnode-name { fill: #9ca3af; }
+
+  .lnode-role {
+    font-size: 10px; fill: #6b7280;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .live-node.idle .lnode-role { fill: #c0c5cf; }
+
+  .lnode-dot.idle   { fill: #d1d5db; }
+  .lnode-dot.active { fill: #6366f1; transform-origin: center; transform-box: fill-box; animation: pulse-dot 1.4s ease-in-out infinite; }
+  .lnode-dot.done   { fill: #22c55e; }
+  .lnode-dot.warn   { fill: #f59e0b; }
+  @keyframes pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.65); opacity: 0.55; }
+  }
+
+  .live-edge { fill: none; stroke: #e5e7eb; stroke-width: 1.6; stroke-linecap: round; transition: stroke 0.25s; }
+  .live-edge.flowing {
+    stroke: #6366f1; stroke-dasharray: 4 4; stroke-width: 1.8;
+    animation: flow 1.2s linear infinite;
+  }
+  .live-edge.done { stroke: #94a3b8; }
+  @keyframes flow { to { stroke-dashoffset: -16; } }
+
+  /* ACTIVITY LOG PANE */
+  .log-pane {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 220px;
+  }
+  .log-head {
+    padding: 12px 18px; border-bottom: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .log-head .tag {
+    font-size: 10.5px; font-weight: 700; color: #4338ca;
+    background: #eef2ff; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .log-head .title { font-size: 13px; font-weight: 600; color: #1a1d23; }
+  .log-head .sub   { font-size: 11px; color: #9ca3af; margin-left: auto; font-style: italic; }
+  .log-body {
+    flex: 1; overflow-y: auto; padding: 6px 0;
+  }
+  .log-entry {
+    display: grid; grid-template-columns: 18px 82px 1fr;
+    gap: 10px; align-items: flex-start;
+    padding: 8px 18px; font-size: 12.5px; line-height: 1.45;
+    border-bottom: 1px solid #f6f7f8;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry .l-dot {
+    width: 7px; height: 7px; border-radius: 50%; margin-top: 6px;
+  }
+  .log-entry .l-dot.done   { background: #22c55e; }
+  .log-entry .l-dot.active { background: #6366f1; animation: log-dot-pulse 1.4s ease-in-out infinite; }
+  .log-entry .l-dot.warn   { background: #f59e0b; }
+  .log-entry .l-dot.info   { background: #9ca3af; }
+  @keyframes log-dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.5); opacity: 0.5; }
+  }
+  .log-entry .l-time {
+    font-size: 11.5px; color: #9ca3af; font-variant-numeric: tabular-nums;
+    padding-top: 1px;
+  }
+  .log-entry .l-text {
+    color: #374151;
+  }
+  .log-entry .l-text strong { color: #1a1d23; font-weight: 600; }
+  .log-entry .l-text .check { color: #16a34a; font-weight: 600; }
+
+  /* Secondary ref row — linked entity + View/Edit actions */
+  .l-ref {
+    margin-top: 4px; display: flex; align-items: center;
+    gap: 8px; font-size: 11.5px; color: #6b7280;
+  }
+  .l-ref .r-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 7px; border-radius: 999px;
+    background: #f1f5f9; color: #475569; font-size: 10.5px; font-weight: 500;
+  }
+  .l-ref .r-chip.rule     { background: #fef3c7; color: #92400e; }
+  .l-ref .r-chip.doc      { background: #e0f2fe; color: #0369a1; }
+  .l-ref .r-chip.memory   { background: #f5f3ff; color: #6d28d9; }
+  .l-ref .r-chip.skill    { background: #ecfdf5; color: #065f46; }
+  .l-ref .r-action {
+    background: none; border: none; font-family: inherit;
+    color: #4338ca; font-size: 11.5px; font-weight: 500;
+    cursor: pointer; padding: 0;
+  }
+  .l-ref .r-action:hover { text-decoration: underline; }
+  .l-ref .r-sep { color: #d1d5db; }
+  .l-ref .r-locked {
+    color: #9ca3af; font-size: 11px; font-style: italic;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+
+  /* Ref dialog (appears on View/Edit click) */
+  .ref-dialog {
+    position: fixed; inset: 0; z-index: 100;
+    display: none; align-items: center; justify-content: center;
+    padding: 40px 20px;
+  }
+  .ref-dialog.open { display: flex; }
+  .ref-dialog .overlay {
+    position: absolute; inset: 0; background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px);
+  }
+  .ref-dialog .panel {
+    position: relative; width: 100%; max-width: 520px;
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .ref-dialog .d-head {
+    padding: 16px 20px; border-bottom: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ref-dialog .d-head .r-chip { flex-shrink: 0; }
+  .ref-dialog .d-head .d-title {
+    font-size: 15px; font-weight: 600; color: #1a1d23; flex: 1;
+  }
+  .ref-dialog .d-head .d-close {
+    background: none; border: none; color: #9ca3af; font-size: 20px;
+    cursor: pointer; font-family: inherit; padding: 2px 6px; border-radius: 4px;
+  }
+  .ref-dialog .d-head .d-close:hover { background: #f3f4f6; color: #1a1d23; }
+
+  .ref-dialog .d-body {
+    padding: 16px 20px; font-size: 13px; color: #374151;
+    max-height: 60vh; overflow-y: auto;
+  }
+  .ref-dialog .d-body .field { margin-bottom: 14px; }
+  .ref-dialog .d-body .field:last-child { margin-bottom: 0; }
+  .ref-dialog .d-body .field label {
+    display: block; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 700; color: #6b7280; margin-bottom: 4px;
+  }
+  .ref-dialog .d-body .field .value {
+    font-size: 13px; color: #1a1d23; background: #fafbfc;
+    border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px;
+    line-height: 1.5;
+  }
+  .ref-dialog .d-body .field .value.readonly { color: #374151; }
+
+  .ref-dialog .d-foot {
+    padding: 12px 20px; border-top: 1px solid #f0f1f3;
+    background: #fafbfc; display: flex; align-items: center; gap: 10px;
+  }
+  .ref-dialog .d-foot .perm-note {
+    font-size: 11px; color: #6b7280; font-style: italic; flex: 1;
+  }
+  .ref-dialog .d-foot button {
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 7px 14px; border-radius: 5px; cursor: pointer; border: 1px solid;
+  }
+  .ref-dialog .d-foot .btn-secondary {
+    background: #fff; color: #374151; border-color: #d1d5db;
+  }
+  .ref-dialog .d-foot .btn-primary {
+    background: #4338ca; color: #fff; border-color: #4338ca;
+  }
+  .ref-dialog .d-foot .btn-primary:hover { background: #3730a3; }
+  .ref-dialog .d-foot .btn-secondary:hover { background: #fafbfc; }
+
+  /* Mobile — hide graph pane */
+  .mobile-notice {
+    display: none;
+    background: #fffbeb; border: 1px dashed #fcd34d; border-radius: 8px;
+    padding: 12px 16px; font-size: 12px; color: #92400e;
+    margin-top: 14px;
+  }
+  @media (max-width: 820px) {
+    .stage.expanded { grid-template-columns: 1fr; }
+    .graph-pane, .expand-cta { display: none; }
+    .mobile-notice { display: block; }
+  }
+
+  /* Footer mockup annotation */
+  .mockup-note {
+    margin-top: 22px; padding-top: 14px; border-top: 1px dashed #e5e7eb;
+    font-size: 11px; color: #9ca3af; text-align: center; font-style: italic;
   }
 </style>
 </head>
 <body>
 
-<!-- ───────── Top nav strip ───────── -->
-<nav class="border-b border-slate-200 bg-white">
-  <div class="max-w-[1440px] mx-auto px-8 h-14 flex items-center justify-between">
-    <div class="flex items-center gap-6">
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-md bg-slate-900 flex items-center justify-center">
-          <span class="text-white text-[11px] font-semibold tracking-tight">S</span>
-        </div>
-        <span class="text-[13px] font-semibold text-slate-900">Synthetos</span>
-        <span class="text-[11px] font-medium text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 ml-1">ACME CORP</span>
-      </div>
-      <div class="flex items-center gap-1 text-[13px] text-slate-500">
-        <a class="hover:text-slate-800" href="#">Docs</a>
-        <svg class="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-        <a class="hover:text-slate-800" href="#">Walkthroughs</a>
-        <svg class="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-        <span class="text-slate-800 font-medium">One agent, many workers</span>
-      </div>
-    </div>
-    <div class="flex items-center gap-4 text-[12px]">
-      <span class="text-slate-500">michael@acme.com</span>
-      <div class="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[11px] font-semibold">MH</div>
-    </div>
-  </div>
-</nav>
+<div class="container">
 
-<main class="max-w-[1440px] mx-auto px-8 py-6">
-
-  <!-- ───────── Page header ───────── -->
-  <header class="mb-6">
-    <div class="flex items-start justify-between">
-      <div>
-        <div class="text-[11px] font-semibold text-indigo-600 uppercase tracking-wide mb-1">Click-through walkthrough · 7 steps</div>
-        <h1 class="text-[26px] text-slate-900 mb-2">One agent talks. A team of agents does the work.</h1>
-        <p class="text-[14px] text-slate-600 max-w-[720px] leading-relaxed">
-          A worked example using the Acme renewal proposal Brief. Step through what the user sees (left) vs. what the hierarchy is doing (right). The user types once and gets one CEO-voice answer back. Underneath, three managers coordinate four workers, with scope-aware delegation enforced at every hop.
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
-        <button id="reset-btn" class="text-[12px] text-slate-600 border border-slate-200 bg-white rounded-md px-3 py-1.5 hover:bg-slate-50">Reset</button>
-        <a href="./delegation-graph.html" class="text-[12px] text-white bg-indigo-600 rounded-md px-3 py-1.5 hover:bg-indigo-700 flex items-center gap-1.5">
-          View delegation graph
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 5l7 7-7 7"/></svg>
-        </a>
-      </div>
-    </div>
-  </header>
-
-  <!-- ───────── Stepper ───────── -->
-  <section class="mb-6">
-    <ol class="grid grid-cols-7 gap-2" id="stepper">
-      <li><button aria-current="true" data-step="1" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">1</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Ask</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">User types a Brief</div>
-      </button></li>
-      <li><button aria-current="false" data-step="2" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">2</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Route</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">Triage → COO</div>
-      </button></li>
-      <li><button aria-current="false" data-step="3" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">3</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Decompose</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">COO spawns 3 sub-tasks</div>
-      </button></li>
-      <li><button aria-current="false" data-step="4" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">4</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sub-delegate</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">Head of Sales → SDR</div>
-      </button></li>
-      <li><button aria-current="false" data-step="5" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">5</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Work</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">Workers produce artefacts</div>
-      </button></li>
-      <li><button aria-current="false" data-step="6" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">6</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Aggregate</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">Reports flow back up</div>
-      </button></li>
-      <li><button aria-current="false" data-step="7" class="stepper-btn w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:bg-slate-50">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="stepper-num w-5 h-5 rounded-full border border-slate-300 text-[10px] font-semibold flex items-center justify-center">7</span>
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Respond</span>
-        </div>
-        <div class="text-[12px] font-medium text-slate-700 leading-tight">User sees one reply</div>
-      </button></li>
-    </ol>
-  </section>
-
-  <!-- ───────── Two-column canvas ───────── -->
-  <section class="grid grid-cols-[1fr_1fr] gap-4">
-
-    <!-- ── LEFT: what the user sees ── -->
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style="min-height: 720px;">
-      <header class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">User-facing · Brief chat</div>
-          <h2 class="text-[14px] font-semibold text-slate-900 mt-0.5">Acme renewal proposal</h2>
-        </div>
-        <span class="pill pill-pending" id="user-status"><span class="pill-dot"></span>Awaiting input</span>
-      </header>
-
-      <div class="flex-1 overflow-y-auto p-4 space-y-3" id="user-chat">
-        <!-- Chat messages injected by step logic -->
-        <div class="text-center text-[11px] text-slate-400 py-2">— Start of Brief conversation —</div>
-      </div>
-
-      <!-- Sticky Ask bar -->
-      <div class="p-3 border-t border-slate-100 bg-slate-50">
-        <div class="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2 shadow-sm">
-          <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-          <input type="text" placeholder="Ask anything…" class="flex-1 text-[13px] text-slate-700 bg-transparent outline-none" disabled/>
-          <span class="kbd">⌘</span><span class="kbd">K</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── RIGHT: what the hierarchy is doing ── -->
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style="min-height: 720px;">
-      <header class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Behind the scenes · Agent execution</div>
-          <h2 class="text-[14px] font-semibold text-slate-900 mt-0.5">Hierarchy delegation feed</h2>
-        </div>
-        <span class="pill pill-pending" id="hierarchy-status"><span class="pill-dot"></span>Idle</span>
-      </header>
-
-      <div class="px-4 py-3 border-b border-slate-100 bg-slate-50">
-        <div id="step-summary" class="text-[12px] text-slate-600 leading-relaxed">
-          The Brief hasn't been submitted yet. When it is, the triage classifier picks a <code class="text-[11px] bg-white border border-slate-200 rounded px-1 py-0.5">scope</code> and <code class="text-[11px] bg-white border border-slate-200 rounded px-1 py-0.5">hierarchyRouteResolver</code> picks the entry-point agent.
-        </div>
-      </div>
-
-      <!-- Mini hierarchy diagram that lights up as work flows -->
-      <div class="px-4 py-4 border-b border-slate-100 bg-grid">
-        <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Acme subaccount · active tier</div>
-        <svg viewBox="0 0 640 300" class="w-full" style="height: 240px;" id="mini-graph">
-          <defs>
-            <marker id="mini-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
-            </marker>
-            <marker id="mini-arrow-idle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#cbd5e1"/>
-            </marker>
-            <marker id="mini-arrow-up" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"/>
-            </marker>
-          </defs>
-
-          <!-- Edges -->
-          <path id="edge-orch-coo" d="M 310 40 L 310 80" stroke="#cbd5e1" stroke-width="1.5" fill="none" marker-end="url(#mini-arrow-idle)"/>
-
-          <path id="edge-coo-sales" d="M 290 130 L 140 170" stroke="#cbd5e1" stroke-width="1.5" fill="none" marker-end="url(#mini-arrow-idle)"/>
-          <path id="edge-coo-research" d="M 310 130 L 310 170" stroke="#cbd5e1" stroke-width="1.5" fill="none" marker-end="url(#mini-arrow-idle)"/>
-          <path id="edge-coo-ops" d="M 330 130 L 480 170" stroke="#cbd5e1" stroke-width="1.5" fill="none" marker-end="url(#mini-arrow-idle)"/>
-
-          <path id="edge-sales-sdr" d="M 120 220 L 120 260" stroke="#cbd5e1" stroke-width="1.5" fill="none" marker-end="url(#mini-arrow-idle)"/>
-
-          <!-- Nodes -->
-          <g id="mini-node-orch" transform="translate(240, 10)">
-            <rect width="140" height="32" rx="6" fill="#fff" stroke="#e2e8f0"/>
-            <text x="70" y="20" font-family="Inter" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">Orchestrator</text>
-          </g>
-          <g id="mini-node-coo" transform="translate(240, 80)">
-            <rect width="140" height="50" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-            <text x="70" y="22" font-family="Inter" font-size="12" font-weight="600" fill="#64748b" text-anchor="middle">COO</text>
-            <text x="70" y="38" font-family="Inter" font-size="9" fill="#94a3b8" text-anchor="middle">Acme subaccount root</text>
-          </g>
-          <g id="mini-node-sales" transform="translate(50, 170)">
-            <rect width="140" height="50" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-            <text x="70" y="22" font-family="Inter" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">Head of Sales</text>
-            <text x="70" y="38" font-family="Inter" font-size="9" fill="#94a3b8" text-anchor="middle">3 direct reports</text>
-          </g>
-          <g id="mini-node-research" transform="translate(240, 170)">
-            <rect width="140" height="50" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-            <text x="70" y="22" font-family="Inter" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">Head of Research</text>
-            <text x="70" y="38" font-family="Inter" font-size="9" fill="#94a3b8" text-anchor="middle">2 direct reports</text>
-          </g>
-          <g id="mini-node-ops" transform="translate(430, 170)">
-            <rect width="140" height="50" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-            <text x="70" y="22" font-family="Inter" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">Head of Operations</text>
-            <text x="70" y="38" font-family="Inter" font-size="9" fill="#94a3b8" text-anchor="middle">2 direct reports</text>
-          </g>
-          <g id="mini-node-sdr" transform="translate(50, 260)">
-            <rect width="140" height="32" rx="6" fill="#fff" stroke="#e2e8f0"/>
-            <text x="70" y="20" font-family="Inter" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">SDR 1</text>
-          </g>
-        </svg>
-      </div>
-
-      <!-- Event log -->
-      <div class="flex-1 overflow-y-auto" id="event-log">
-        <div class="px-4 py-6 text-center text-[11px] text-slate-400">— No events yet. Advance the stepper to see dispatches. —</div>
-      </div>
-
-      <!-- Footer decision chips -->
-      <footer class="px-4 py-2.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3 text-[11px]" id="decision-chips">
-        <span class="key-label text-slate-400 font-semibold uppercase tracking-wide">Decisions so far</span>
-        <span class="text-slate-400">—</span>
-      </footer>
-    </div>
-
-  </section>
-
-  <!-- ───────── Step navigation ───────── -->
-  <div class="mt-6 flex items-center justify-between">
-    <button id="prev-btn" class="text-[13px] text-slate-600 border border-slate-200 bg-white rounded-md px-4 py-2 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" disabled>← Previous</button>
-    <div class="text-[12px] text-slate-500">Step <span class="num font-semibold text-slate-800" id="step-counter">1</span> of 7</div>
-    <button id="next-btn" class="text-[13px] text-white bg-indigo-600 rounded-md px-4 py-2 hover:bg-indigo-700">Next step →</button>
+  <div class="breadcrumb">
+    <a href="#">Briefs</a>
+    <span class="sep">›</span>
+    <span>Acme renewal proposal</span>
   </div>
 
-  <!-- ───────── Decisions surfaced ───────── -->
-  <section class="mt-10 grid grid-cols-3 gap-4">
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
-      <div class="text-[10px] font-semibold text-indigo-600 uppercase tracking-wide mb-1">Decision surfaced · UX</div>
-      <h3 class="text-[13px] text-slate-900 mb-2">How visible should intermediate steps be?</h3>
-      <p class="text-[12px] text-slate-600 leading-relaxed mb-3">
-        Default this mockup uses: <span class="font-medium text-slate-800">hidden by default, one progress chip</span> ("Working across 3 teams…") with an expandable log. No per-agent trace in the user-facing chat.
-      </p>
-      <p class="text-[12px] text-slate-500 leading-relaxed">
-        Alternative: reveal each hop ("Checking competitor pricing…", "Drafting body…"). More trust-building, but noisier — and the user already has the delegation-graph tab for forensics.
-      </p>
+  <!-- Mockup-only state toggle -->
+  <div class="mockup-toggle">
+    <span class="label">Preview state</span>
+    <button data-state="working" class="active">Working · graph open</button>
+    <button data-state="done">Finished · graph open</button>
+    <button data-state="collapsed">Graph hidden</button>
+    <span class="note">Mockup controls — not part of the real UI</span>
+  </div>
+
+  <div class="hdr">
+    <div class="icon">💬</div>
+    <div>
+      <h1>Acme renewal proposal</h1>
+      <div class="sub" id="hdr-sub">Started 2 minutes ago</div>
     </div>
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
-      <div class="text-[10px] font-semibold text-indigo-600 uppercase tracking-wide mb-1">Decision surfaced · Latency</div>
-      <h3 class="text-[13px] text-slate-900 mb-2">Progressive reveal, or a single arrival?</h3>
-      <p class="text-[12px] text-slate-600 leading-relaxed mb-3">
-        Default this mockup uses: <span class="font-medium text-slate-800">indeterminate progress bar + one status chip</span> rotating through high-level phases every 3s. When the answer is ready, it appears as one CEO-voice message.
-      </p>
-      <p class="text-[12px] text-slate-500 leading-relaxed">
-        Alternative: stream partial drafts as the worker subtrees complete. Adds UI complexity; defers the "one agent, one answer" promise.
-      </p>
-    </div>
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
-      <div class="text-[10px] font-semibold text-indigo-600 uppercase tracking-wide mb-1">Decision surfaced · Failure</div>
-      <h3 class="text-[13px] text-slate-900 mb-2">What does a failed sub-task look like?</h3>
-      <p class="text-[12px] text-slate-600 leading-relaxed mb-3">
-        Default this mockup uses: <span class="font-medium text-slate-800">the manager handles it; the user never sees the failure</span>. The delegation graph still records the rejection with full reason — Phase 4 enforcement guarantees the audit trail.
-      </p>
-      <p class="text-[12px] text-slate-500 leading-relaxed">
-        Only if the top-level Brief fails does the user see a degraded response, with a "View what happened" link to the graph view.
-      </p>
-    </div>
-  </section>
+  </div>
 
-  <!-- ───────── Footer note ───────── -->
-  <footer class="mt-8 pb-8 text-[11px] text-slate-400">
-    Mockup · static demo · corresponds to dev spec §1 overview + §6.7 orchestratorFromTaskJob + §6.3 spawn_sub_agents + §6.4 reassign_task + §8.2 delegation graph. Advance through the stepper to see the narrative. Not wired to a live API.
-  </footer>
+  <!-- MAIN SPLIT STAGE -->
+  <div class="stage expanded" id="stage">
 
-</main>
+    <!-- LEFT: chat -->
+    <div class="chat">
+      <div class="chat-head">
+        <span>Chat</span>
+        <span class="status" id="chat-status"><span class="dot active"></span>Working…</span>
+      </div>
 
-<!-- ───────── Step logic ───────── -->
-<script>
-  // Per-step content. Each step paints the user chat, the event log, the mini-graph active state,
-  // and the summary strip at the top of the right column.
+      <div class="chat-body" id="chat-body">
 
-  const STEPS = {
-    1: {
-      title: 'User types a Brief',
-      userStatus: { text: 'Composing', tone: 'pending' },
-      hierarchyStatus: { text: 'Idle', tone: 'pending' },
-      summary: `The user opens <code>GlobalAskBar</code> from anywhere in the app and types a short Brief. The full ask is one sentence. No roles, no routing hints, no structure.`,
-      chat: [
-        { kind: 'user-typing', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-      ],
-      events: [],
-      activeEdges: [],
-      activeNodes: [],
-      decisions: [],
-    },
-    2: {
-      title: 'Triage → COO',
-      userStatus: { text: 'Submitted · working', tone: 'running' },
-      hierarchyStatus: { text: 'Routing', tone: 'running' },
-      summary: `The triage classifier inspects the Brief, picks <code>scope: 'subaccount'</code>, and calls <code>hierarchyRouteResolverService.resolveRootForScope</code>. That resolver replaces the old hardcoded <code>'orchestrator'</code> slug for subaccount-scope work — it finds the Acme subaccount's configured root agent (the COO) via the partial unique index on <code>subaccount_agents</code>.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'progress', text: 'Working…' },
-      ],
-      events: [
-        { time: '14:02:12', actor: 'Triage classifier', msg: 'Brief classified · <code>route=needs_orchestrator</code> · <code>scope=subaccount</code>' },
-        { time: '14:02:12', actor: 'hierarchyRouteResolver', msg: 'Resolved root for <code>subaccount=acme</code> → <code>agent=COO</code>' },
-        { time: '14:02:12', actor: 'orchestratorFromTaskJob', msg: 'Dispatched run to COO · <code>delegationScope=null</code> (root run, no caller scope yet)' },
-      ],
-      activeEdges: ['edge-orch-coo'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-      ],
-    },
-    3: {
-      title: 'COO decomposes into 3 sub-tasks',
-      userStatus: { text: 'Working · 3 teams engaged', tone: 'running' },
-      hierarchyStatus: { text: 'Fan-out · 3 spawns', tone: 'running' },
-      summary: `The COO identifies three work-streams: competitor pricing research, proposal body, and pricing annex. It calls <code>spawn_sub_agents</code> once with <code>delegationScope: 'descendants'</code>. The skill validates that each proposed target is in the COO's subtree (all three Heads report to the COO), then dispatches three sub-agent runs in parallel.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'progress', text: 'Working across 3 teams · research, sales, operations' },
-      ],
-      events: [
-        { time: '14:02:14', actor: 'COO', msg: 'Started · <code>depth=1</code> · root run, no caller scope' },
-        { time: '14:02:26', actor: 'COO', msg: 'Decomposed Brief into 3 sub-tasks' },
-        { time: '14:02:26', actor: 'spawn_sub_agents', msg: '<code>scope=descendants</code> · validated 3 targets in subtree' },
-        { time: '14:02:26', actor: 'delegation_outcomes', msg: '3 rows written · <code>outcome=accepted</code> · <code>direction=down</code>' },
-        { time: '14:02:26', actor: 'Head of Sales', msg: 'Sub-agent run started · <code>delegationScope=descendants</code> inherited' },
-        { time: '14:02:26', actor: 'Head of Research', msg: 'Sub-agent run started · <code>delegationScope=descendants</code> inherited' },
-        { time: '14:02:26', actor: 'Head of Operations', msg: 'Sub-agent run started · <code>delegationScope=descendants</code> inherited' },
-      ],
-      activeEdges: ['edge-orch-coo', 'edge-coo-sales', 'edge-coo-research', 'edge-coo-ops'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo', 'mini-node-sales', 'mini-node-research', 'mini-node-ops'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-        { text: 'spawn', value: 'descendants × 3' },
-      ],
-    },
-    4: {
-      title: 'Head of Sales sub-delegates to SDR',
-      userStatus: { text: 'Working across 3 teams', tone: 'running' },
-      hierarchyStatus: { text: 'Depth 3 · sub-delegation', tone: 'running' },
-      summary: `The Head of Sales needs fresh CRM data for the proposal body. It calls <code>reassign_task</code> targeting SDR 1 with <code>delegationScope: 'children'</code>. Validation asserts <code>target.parentSubaccountAgentId === callerAgentId</code> — SDR 1 reports directly to Head of Sales, so the attempt is accepted and an <code>agent_runs.delegation_direction='down'</code> row is written.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'progress', text: 'Working across 3 teams · research, sales, operations' },
-      ],
-      events: [
-        { time: '14:02:34', actor: 'Head of Sales', msg: 'Needs account context for proposal body · querying CRM' },
-        { time: '14:02:34', actor: 'reassign_task', msg: 'Target <code>SDR 1</code> · <code>scope=children</code>' },
-        { time: '14:02:34', actor: 'scope validator', msg: '<code>target.parentSubaccountAgentId === caller.agentId</code> ✓' },
-        { time: '14:02:34', actor: 'delegation_outcomes', msg: 'Row written · <code>outcome=accepted</code> · <code>direction=down</code>' },
-        { time: '14:02:34', actor: 'SDR 1', msg: 'Run started · <code>depth=3</code> · <code>handoffDepth=1</code>' },
-        { time: '14:02:46', actor: 'SDR 1', msg: 'CRM context returned · pipeline value $240k · last touch 8d ago' },
-      ],
-      activeEdges: ['edge-orch-coo', 'edge-coo-sales', 'edge-coo-research', 'edge-coo-ops', 'edge-sales-sdr'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo', 'mini-node-sales', 'mini-node-research', 'mini-node-ops', 'mini-node-sdr'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-        { text: 'spawn', value: 'descendants × 3' },
-        { text: 'reassign', value: 'children → SDR 1' },
-      ],
-    },
-    5: {
-      title: 'Workers produce artefacts',
-      userStatus: { text: 'Working across 3 teams', tone: 'running' },
-      hierarchyStatus: { text: 'Workers active', tone: 'running' },
-      summary: `Each worker does its job. Research Analyst compares competitor rate cards. SDR 1 returns pipeline context. Pricing Specialist drafts the annex. None of the workers delegates anywhere — they have no children, so their adaptive <code>scope</code> default falls back to <code>'subaccount'</code>, but they never need to use it. Derived delegation skills are not resolved for them because <code>context.hierarchy.childIds.length === 0</code>.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'progress', text: 'Working across 3 teams · research, sales, operations' },
-      ],
-      events: [
-        { time: '14:02:48', actor: 'Research Analyst', msg: 'Compared 4 competitors · cost-leader gap 12%' },
-        { time: '14:02:50', actor: 'Research Analyst', msg: 'Artefact written · <code>competitor_pricing.md</code>' },
-        { time: '14:02:52', actor: 'SDR 1', msg: 'Artefact written · <code>account_context.json</code>' },
-        { time: '14:03:04', actor: 'Pricing Specialist', msg: 'Pricing annex drafted · 3 tiers · flagged risk on tier-2 margin' },
-        { time: '14:03:06', actor: 'Pricing Specialist', msg: 'Escalated tier-2 risk · <code>reassign_task</code> to parent' },
-        { time: '14:03:06', actor: 'delegation_outcomes', msg: 'Upward escalation · <code>direction=up</code> · always permitted regardless of scope' },
-      ],
-      activeEdges: ['edge-orch-coo', 'edge-coo-sales', 'edge-coo-research', 'edge-coo-ops', 'edge-sales-sdr'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo', 'mini-node-sales', 'mini-node-research', 'mini-node-ops', 'mini-node-sdr'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-        { text: 'spawn', value: 'descendants × 3' },
-        { text: 'reassign', value: 'children → SDR 1' },
-        { text: 'escalate', value: 'up → Head of Ops' },
-      ],
-    },
-    6: {
-      title: 'Reports flow back up',
-      userStatus: { text: 'Aggregating results', tone: 'running' },
-      hierarchyStatus: { text: 'Aggregation · 3 parents', tone: 'running' },
-      summary: `As workers finish, their parent runs resume. Head of Sales merges SDR output into the proposal body. Head of Research wraps the competitor analysis. Head of Operations incorporates the escalated tier-2 risk into the annex. Each sub-agent returns its artefact to the COO via the spawn reply path — no new <code>reassign_task</code> needed for the upward report; that's just the run completing.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'progress', text: 'Aggregating results…' },
-      ],
-      events: [
-        { time: '14:03:10', actor: 'Head of Sales', msg: 'Sub-agent completed · proposal body v1 · <code>run=run_head_sales_b1</code>' },
-        { time: '14:03:14', actor: 'Head of Research', msg: 'Sub-agent completed · competitor pricing summary · <code>run=run_head_research_c1</code>' },
-        { time: '14:03:18', actor: 'Head of Operations', msg: 'Sub-agent completed · pricing annex v1 with tier-2 note · <code>run=run_head_ops_d1</code>' },
-        { time: '14:03:18', actor: 'COO', msg: 'All 3 spawned children resolved · resuming aggregation' },
-        { time: '14:03:24', actor: 'COO', msg: 'Proposal stitched · 2 sections + annex · 1 risk flag preserved verbatim' },
-      ],
-      activeEdges: ['edge-orch-coo', 'edge-coo-sales', 'edge-coo-research', 'edge-coo-ops', 'edge-sales-sdr'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo', 'mini-node-sales', 'mini-node-research', 'mini-node-ops', 'mini-node-sdr'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-        { text: 'spawn', value: 'descendants × 3' },
-        { text: 'reassign', value: 'children → SDR 1' },
-        { text: 'escalate', value: 'up → Head of Ops' },
-        { text: 'aggregate', value: '3 parents' },
-      ],
-    },
-    7: {
-      title: 'User sees one CEO-voice reply',
-      userStatus: { text: 'Completed · 1m 47s', tone: 'success' },
-      hierarchyStatus: { text: 'All 7 runs completed', tone: 'success' },
-      summary: `The COO produces one artefact. The user sees a single reply in the Brief chat — written in one voice, with no exposed layer cake of intermediate runs. A "View delegation graph" link sits at the bottom of the message for anyone who wants to see how the work fanned out.`,
-      chat: [
-        { kind: 'user', text: 'Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.' },
-        { kind: 'agent-final' },
-      ],
-      events: [
-        { time: '14:03:30', actor: 'COO', msg: 'Final artefact written · <code>acme_renewal_proposal.md</code>' },
-        { time: '14:03:30', actor: 'COO', msg: 'Brief response rendered · 7 runs · 1m 47s' },
-        { time: '14:03:30', actor: 'Run trace', msg: '<code>GET /api/agent-runs/run_a8c3f/delegation-graph</code> available' },
-      ],
-      activeEdges: ['edge-orch-coo', 'edge-coo-sales', 'edge-coo-research', 'edge-coo-ops', 'edge-sales-sdr'],
-      activeNodes: ['mini-node-orch', 'mini-node-coo', 'mini-node-sales', 'mini-node-research', 'mini-node-ops', 'mini-node-sdr'],
-      decisions: [
-        { text: 'scope', value: 'subaccount' },
-        { text: 'root', value: 'COO' },
-        { text: 'spawn', value: 'descendants × 3' },
-        { text: 'reassign', value: 'children → SDR 1' },
-        { text: 'escalate', value: 'up → Head of Ops' },
-        { text: 'aggregate', value: '3 parents' },
-        { text: 'response', value: '1 CEO-voice reply' },
-      ],
-    },
-  };
+        <!-- User message (always visible) -->
+        <div>
+          <div class="msg-user-label">You · just now</div>
+          <div class="msg-user">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
+        </div>
 
-  // Render helpers
-  const userChat = document.getElementById('user-chat');
-  const eventLog = document.getElementById('event-log');
-  const userStatus = document.getElementById('user-status');
-  const hierarchyStatus = document.getElementById('hierarchy-status');
-  const summary = document.getElementById('step-summary');
-  const decisionChips = document.getElementById('decision-chips');
-  const stepCounter = document.getElementById('step-counter');
-  const prevBtn = document.getElementById('prev-btn');
-  const nextBtn = document.getElementById('next-btn');
-  const stepperBtns = document.querySelectorAll('#stepper .stepper-btn');
-  const resetBtn = document.getElementById('reset-btn');
-
-  let current = 1;
-
-  function renderChat(messages) {
-    userChat.innerHTML = '';
-    if (messages.length === 0) {
-      userChat.innerHTML = '<div class="text-center text-[11px] text-slate-400 py-2">— Start of Brief conversation —</div>';
-      return;
-    }
-    messages.forEach(m => {
-      const div = document.createElement('div');
-      if (m.kind === 'user-typing') {
-        div.className = 'max-w-[82%] ml-auto rounded-xl px-3 py-2 brief-msg-user border-dashed';
-        div.innerHTML = `
-          <div class="flex items-center gap-1.5 mb-1">
-            <span class="chip user">You</span>
-            <span class="text-[10px] text-slate-400">typing…</span>
+        <!-- Agent response — content swapped by state -->
+        <div class="msg-agent" id="agent-msg">
+          <div class="head">
+            <div class="avatar">CO</div>
+            <div class="name">COO</div>
+            <div class="when" id="agent-when">working…</div>
           </div>
-          <p class="text-[13px] text-slate-700 leading-relaxed">${m.text}<span class="text-slate-400 pulse-dot">▍</span></p>`;
-      } else if (m.kind === 'user') {
-        div.className = 'max-w-[82%] ml-auto rounded-xl px-3 py-2 brief-msg-user';
-        div.innerHTML = `
-          <div class="flex items-center gap-1.5 mb-1">
-            <span class="chip user">You</span>
-            <span class="text-[10px] text-slate-400 num">14:02:10</span>
+          <div class="text" id="agent-text">
+            On it — I've pulled in three teams to work on this.
           </div>
-          <p class="text-[13px] text-slate-700 leading-relaxed">${m.text}</p>`;
-      } else if (m.kind === 'progress') {
-        div.className = 'max-w-[82%] rounded-xl brief-msg-agent px-3 py-3';
-        div.innerHTML = `
-          <div class="flex items-center gap-2 mb-2">
-            <div class="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold">CO</div>
-            <span class="text-[12px] font-semibold text-slate-800">COO</span>
-            <span class="pill pill-running"><span class="pill-dot pulse-dot"></span>running</span>
-          </div>
-          <div class="brief-progress-chip mb-2">
-            <span class="pill-dot pulse-dot" style="background:#4f46e5"></span>
-            ${m.text}
-          </div>
-          <div class="h-1 bg-slate-100 rounded-full progress-bar"></div>`;
-      } else if (m.kind === 'agent-final') {
-        div.className = 'max-w-[82%] rounded-xl brief-msg-agent px-4 py-4 shadow-sm';
-        div.innerHTML = `
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold">CO</div>
-            <span class="text-[12px] font-semibold text-slate-800">COO</span>
-            <span class="pill pill-success"><span class="pill-dot"></span>completed</span>
-            <span class="text-[11px] text-slate-400 num ml-auto">14:03:30</span>
-          </div>
-          <p class="text-[13px] text-slate-800 leading-relaxed mb-3">
-            Here's the draft Acme renewal proposal. The body positions us against the three cost-leader competitors with a 12% gap narrative. The annex has three pricing tiers; <strong>the tier-2 margin is thin — I've flagged it explicitly so you can decide whether to offer it at all.</strong>
-          </p>
-          <div class="border border-slate-200 rounded-lg p-3 mb-3 bg-slate-50">
-            <div class="flex items-center gap-2 mb-1.5">
-              <svg class="w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
-              <span class="text-[12px] font-medium text-slate-700">acme_renewal_proposal.md</span>
-              <span class="text-[10px] text-slate-400 num ml-auto">2.4 KB · 3 sections + annex</span>
+          <div id="agent-extra">
+            <div class="progress-card">
+              <div class="pulse-wrap"><span class="ring"></span><span class="core"></span></div>
+              <div class="txt">
+                <strong>Working across 3 teams</strong>
+                <div class="sub">Research, Sales, Operations</div>
+              </div>
             </div>
-            <p class="text-[11px] text-slate-500 leading-relaxed">Proposal body · Competitor pricing summary · Pricing annex (tier-1, tier-2 flagged, tier-3)</p>
           </div>
-          <div class="flex items-center justify-between pt-2 border-t border-slate-100">
-            <a href="./delegation-graph.html" class="text-[12px] text-indigo-600 hover:underline font-medium flex items-center gap-1">
-              View delegation graph
-              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 3v18M6 12h6a4 4 0 014 4v2M6 6h4a4 4 0 014 4v0"/></svg>
-            </a>
-            <span class="text-[11px] text-slate-400">7 runs · 6 agents · 3 levels · 1m 47s</span>
-          </div>`;
-      }
-      userChat.appendChild(div);
-    });
-    userChat.scrollTop = userChat.scrollHeight;
+        </div>
+
+      </div>
+
+      <div class="ask-bar">
+        <div class="ask-input">
+          <input type="text" placeholder="Ask a follow-up…"/>
+          <span class="kbd">⌘ K</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: graph pane (expanded) OR expand CTA (collapsed) -->
+    <div id="right-col">
+      <!-- Filled by JS based on state -->
+    </div>
+
+  </div>
+
+  <!-- Mobile notice (auto-shown on small screens) -->
+  <div class="mobile-notice">
+    <strong>Mobile view</strong> — the live coordination view is desktop-only. You'll still see the finished reply here. On a computer, you can expand the side panel to see which agents are working on your request in real time.
+  </div>
+
+  <div class="mockup-note">Mockup · static · click the preview-state buttons above to see each state. Real UI opens in the "graph hidden" state by default — the user chooses to expand it. Try clicking "View" on any rule / document / memory in the activity log.</div>
+
+</div>
+
+<!-- Ref dialog (for View/Edit on linked entities in the activity log) -->
+<div class="ref-dialog" id="ref-dialog">
+  <div class="overlay"></div>
+  <div class="panel">
+    <header class="d-head">
+      <span class="r-chip"></span>
+      <div class="d-title">—</div>
+      <button class="d-close" aria-label="Close">×</button>
+    </header>
+    <div class="d-body"></div>
+    <footer class="d-foot">
+      <span class="perm-note"></span>
+      <button class="btn-secondary">Close</button>
+      <button class="btn-primary" data-action="edit">Edit</button>
+    </footer>
+  </div>
+</div>
+
+<!-- GRAPH + LOG TEMPLATE (both stacked in the right column) -->
+<template id="tpl-graph">
+ <div class="right-stack">
+  <div class="graph-pane">
+    <div class="graph-head">
+      <span class="tag">Live view</span>
+      <span class="title" id="gtitle">Work in progress</span>
+      <span class="live" id="glive"><span class="dot"></span>updating</span>
+      <button class="close" id="gclose" title="Hide the live view">×</button>
+    </div>
+    <div class="graph-body">
+      <svg id="live-tree" viewBox="0 0 600 340" preserveAspectRatio="xMidYMid meet">
+        <!-- Edges (org-chart elbow connectors) -->
+        <g class="edges">
+          <!-- COO → 3 managers via shared horizontal bar at y=100 -->
+          <path id="e-coo-sales"    class="live-edge" d="M 300 64 L 300 100 L 100 100 L 100 140"/>
+          <path id="e-coo-research" class="live-edge" d="M 300 64 L 300 140"/>
+          <path id="e-coo-ops"      class="live-edge" d="M 300 64 L 300 100 L 500 100 L 500 140"/>
+          <!-- Managers → workers: straight vertical drops -->
+          <path id="e-sales-sdr"        class="live-edge" d="M 100 194 L 100 262"/>
+          <path id="e-research-analyst" class="live-edge" d="M 300 194 L 300 262"/>
+          <path id="e-ops-pricing"      class="live-edge" d="M 500 194 L 500 262"/>
+        </g>
+
+        <!-- COO (root) -->
+        <g id="n-coo" class="live-node done" transform="translate(230, 10)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot done" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">COO</text>
+          <text class="lnode-role" x="14" y="38">Team lead</text>
+        </g>
+
+        <!-- Head of Sales -->
+        <g id="n-sales" class="live-node done" transform="translate(30, 140)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot done" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">Head of Sales</text>
+          <text class="lnode-role" x="14" y="38">Proposal body</text>
+        </g>
+
+        <!-- Head of Research -->
+        <g id="n-research" class="live-node active" transform="translate(230, 140)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot active" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">Head of Research</text>
+          <text class="lnode-role" x="14" y="38">Competitor pricing</text>
+        </g>
+
+        <!-- Head of Operations -->
+        <g id="n-ops" class="live-node active" transform="translate(430, 140)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot active" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">Head of Operations</text>
+          <text class="lnode-role" x="14" y="38">Pricing annex</text>
+        </g>
+
+        <!-- SDR 1 -->
+        <g id="n-sdr" class="live-node done" transform="translate(30, 262)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot done" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">SDR 1</text>
+          <text class="lnode-role" x="14" y="38">Account context</text>
+        </g>
+
+        <!-- Research Analyst -->
+        <g id="n-analyst" class="live-node active" transform="translate(230, 262)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot active" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">Research Analyst</text>
+          <text class="lnode-role" x="14" y="38">Scanning 4 competitors</text>
+        </g>
+
+        <!-- Pricing Specialist -->
+        <g id="n-pricing" class="live-node idle" transform="translate(430, 262)">
+          <rect class="lnode-rect" width="140" height="54" rx="9"/>
+          <circle class="lnode-dot idle" cx="14" cy="16" r="4"/>
+          <text class="lnode-name" x="25" y="20">Pricing Specialist</text>
+          <text class="lnode-role" x="14" y="38">Waiting for research</text>
+        </g>
+
+      </svg>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="dot done"></span>Finished</span>
+      <span class="item"><span class="dot active"></span>Working now</span>
+      <span class="item"><span class="dot idle"></span>Waiting</span>
+      <span class="hint">Updates automatically</span>
+    </div>
+  </div>
+
+  <div class="log-pane">
+    <div class="log-head">
+      <span class="tag">Activity</span>
+      <span class="title">What's happening</span>
+      <span class="sub">newest first</span>
+    </div>
+    <div class="log-body" id="log-body">
+      <!-- Filled by JS based on state -->
+    </div>
+  </div>
+ </div>
+</template>
+
+<!-- COLLAPSED CTA TEMPLATE -->
+<template id="tpl-collapsed">
+  <div class="expand-cta">
+    <div class="e-icon">🔍</div>
+    <h3>See how the work is being coordinated</h3>
+    <p>Open a live side-by-side view of the agents working on your request — which team is doing what, right now.</p>
+    <button id="expand-btn">Show live view</button>
+  </div>
+</template>
+
+<script>
+  const rightCol = document.getElementById('right-col');
+  const stage    = document.getElementById('stage');
+  const tplGraph     = document.getElementById('tpl-graph');
+  const tplCollapsed = document.getElementById('tpl-collapsed');
+
+  const chatStatus = document.getElementById('chat-status');
+  const hdrSub     = document.getElementById('hdr-sub');
+  const agentWhen  = document.getElementById('agent-when');
+  const agentText  = document.getElementById('agent-text');
+  const agentExtra = document.getElementById('agent-extra');
+
+  function mountGraph() {
+    rightCol.innerHTML = '';
+    rightCol.appendChild(tplGraph.content.cloneNode(true));
+    stage.classList.add('expanded');
+    // Wire close button
+    const closeBtn = rightCol.querySelector('#gclose');
+    closeBtn.addEventListener('click', () => setState('collapsed', /*userClick*/ false));
   }
 
-  function renderEvents(events) {
-    eventLog.innerHTML = '';
-    if (events.length === 0) {
-      eventLog.innerHTML = '<div class="px-4 py-6 text-center text-[11px] text-slate-400">— No events yet. Advance the stepper to see dispatches. —</div>';
-      return;
-    }
-    const wrap = document.createElement('div');
-    wrap.className = 'divide-y divide-slate-50';
-    events.forEach(e => {
-      const row = document.createElement('div');
-      row.className = 'event-row';
-      row.innerHTML = `
-        <span class="event-time num">${e.time}</span>
-        <span class="event-actor">${e.actor}</span>
-        <span class="event-msg">${e.msg}</span>
-      `;
-      wrap.appendChild(row);
-    });
-    eventLog.appendChild(wrap);
-    eventLog.scrollTop = eventLog.scrollHeight;
+  function mountCollapsed() {
+    rightCol.innerHTML = '';
+    rightCol.appendChild(tplCollapsed.content.cloneNode(true));
+    stage.classList.remove('expanded');
+    const btn = rightCol.querySelector('#expand-btn');
+    btn.addEventListener('click', () => setState('working', /*userClick*/ false));
   }
 
-  function renderStatus(el, { text, tone }) {
-    el.className = 'pill ' + (
-      tone === 'success' ? 'pill-success' :
-      tone === 'running' ? 'pill-running' :
-      tone === 'warn' ? 'pill-warn' : 'pill-pending'
-    );
-    el.innerHTML = `<span class="pill-dot ${tone === 'running' ? 'pulse-dot' : ''}"></span>${text}`;
+  function applyWorking() {
+    mountGraph();
+    chatStatus.innerHTML = '<span class="dot active"></span>Working…';
+    hdrSub.textContent = 'Started 38 seconds ago';
+    agentWhen.textContent = 'working…';
+    agentText.textContent = "On it — I've pulled in three teams to work on this.";
+    agentExtra.innerHTML = `
+      <div class="progress-card">
+        <div class="pulse-wrap"><span class="ring"></span><span class="core"></span></div>
+        <div class="txt">
+          <strong>Working across 3 teams</strong>
+          <div class="sub">Research, Sales, Operations</div>
+        </div>
+      </div>`;
+
+    // Graph state for "working": Sales done (with SDR), Research active (Analyst active), Ops active (Pricing idle)
+    setLiveState({
+      active: ['n-research', 'n-ops', 'n-analyst'],
+      done:   ['n-coo', 'n-sales', 'n-sdr'],
+      idle:   ['n-pricing'],
+      warnOn: [],
+      flowingEdges: ['e-coo-research', 'e-coo-ops', 'e-research-analyst'],
+      doneEdges:    ['e-coo-sales', 'e-sales-sdr'],
+      idleEdges:    ['e-ops-pricing'],
+      glive: 'updating',
+      gtitle: 'Work in progress',
+    });
+
+    renderLog([
+      { tone: 'active', time: 'just now',  text: '<strong>Head of Operations</strong> · drafting pricing annex' },
+      { tone: 'active', time: '4s ago',    text: '<strong>Research Analyst</strong> · scanning 4 competitors' },
+      { tone: 'info',   time: '8s ago',    text: 'Fetched 2 competitor rate cards', ref: 'competitor-rate-cards' },
+      { tone: 'done',   time: '14s ago',   text: '<strong>SDR 1</strong> · pulled CRM account context <span class="check">✓</span>', ref: 'crm-acme' },
+      { tone: 'info',   time: '22s ago',   text: 'Applied rule · minimum 15% margin on renewals', ref: 'rule-min-margin' },
+      { tone: 'done',   time: '28s ago',   text: '<strong>Head of Sales</strong> · proposal body drafted <span class="check">✓</span>' },
+      { tone: 'done',   time: '34s ago',   text: '<strong>COO</strong> · pulled in 3 teams' },
+      { tone: 'info',   time: '38s ago',   text: 'Routed to <strong>COO</strong>' },
+    ]);
   }
 
-  function renderDecisions(decisions) {
-    decisionChips.innerHTML = `
-      <span class="key-label text-slate-400 font-semibold uppercase tracking-wide">Decisions so far</span>
-    `;
-    if (decisions.length === 0) {
-      decisionChips.insertAdjacentHTML('beforeend', '<span class="text-slate-400">—</span>');
-      return;
-    }
-    decisions.forEach(d => {
-      const tone = d.text === 'escalate' ? 'warn' : (d.text === 'response' ? 'success' : 'purple');
-      decisionChips.insertAdjacentHTML('beforeend', `
-        <span class="pill pill-${tone === 'warn' ? 'warn' : tone === 'success' ? 'success' : 'purple'}">
-          <span class="pill-dot"></span>${d.text}: <span class="font-semibold ml-1">${d.value}</span>
-        </span>
-      `);
+  function applyDone() {
+    mountGraph();
+    chatStatus.innerHTML = '<span class="dot"></span>Finished';
+    hdrSub.textContent = 'Finished · 1 minute 47 seconds';
+    agentWhen.textContent = 'just now';
+    agentText.innerHTML = `Here's the draft Acme renewal proposal. The body positions us against the three cost-leader competitors with a 12% gap narrative. The annex has three pricing tiers — <strong>I've flagged the tier-2 margin as thin so you can decide whether to offer it.</strong>`;
+    agentExtra.innerHTML = `
+      <div class="artefact">
+        <div class="a-icon">📄</div>
+        <div class="a-body">
+          <div class="a-name">Acme renewal proposal</div>
+          <div class="a-meta">2.4 KB · body, competitor pricing, annex</div>
+        </div>
+        <a class="a-open" href="#">Open</a>
+      </div>
+      <div class="footer-row">
+        <a class="view-link" href="./delegation-graph.html">
+          View how it happened
+          <span>→</span>
+        </a>
+        <span>·</span>
+        <span>6 agents · 1 minute 47 seconds</span>
+      </div>`;
+
+    setLiveState({
+      active: [],
+      done:   ['n-coo', 'n-sales', 'n-research', 'n-sdr', 'n-analyst', 'n-pricing'],
+      idle:   [],
+      warnOn: ['n-ops'],
+      flowingEdges: [],
+      doneEdges: ['e-coo-sales', 'e-coo-research', 'e-coo-ops', 'e-sales-sdr', 'e-research-analyst', 'e-ops-pricing'],
+      idleEdges: [],
+      glive: 'finished',
+      gtitle: 'All finished',
     });
+
+    renderLog([
+      { tone: 'done', time: '1m 47s ago', text: 'Proposal stitched and ready <span class="check">✓</span>', ref: 'proposal-doc' },
+      { tone: 'warn', time: '1m 45s ago', text: '<strong>Head of Operations</strong> · flagged tier-2 margin as thin', ref: 'memory-tier2-policy' },
+      { tone: 'done', time: '1m 34s ago', text: '<strong>Pricing Specialist</strong> · 3 pricing tiers drafted' },
+      { tone: 'done', time: '1m 22s ago', text: '<strong>Research Analyst</strong> · competitor scan complete' },
+      { tone: 'info', time: '1m 10s ago', text: 'Applied rule · minimum 15% margin on renewals', ref: 'rule-min-margin' },
+      { tone: 'done', time: '54s ago',    text: '<strong>Head of Sales</strong> · proposal body complete <span class="check">✓</span>' },
+      { tone: 'done', time: '46s ago',    text: '<strong>SDR 1</strong> · pulled CRM account context <span class="check">✓</span>', ref: 'crm-acme' },
+      { tone: 'info', time: '30s ago',    text: 'Fetched 2 competitor rate cards', ref: 'competitor-rate-cards' },
+      { tone: 'done', time: '24s ago',    text: '<strong>COO</strong> · pulled in 3 teams' },
+      { tone: 'info', time: '16s ago',    text: 'Routed to <strong>COO</strong>' },
+    ]);
   }
 
-  function renderMiniGraph(activeEdges, activeNodes) {
-    // Reset all edges + nodes to idle
-    const allEdges = ['edge-orch-coo','edge-coo-sales','edge-coo-research','edge-coo-ops','edge-sales-sdr'];
-    allEdges.forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.setAttribute('stroke', '#cbd5e1');
-      el.setAttribute('marker-end', 'url(#mini-arrow-idle)');
-      el.setAttribute('stroke-dasharray', '');
-    });
-    const allNodes = ['mini-node-orch','mini-node-coo','mini-node-sales','mini-node-research','mini-node-ops','mini-node-sdr'];
+  function applyCollapsed() {
+    mountCollapsed();
+    chatStatus.innerHTML = '<span class="dot active"></span>Working…';
+    hdrSub.textContent = 'Started 38 seconds ago';
+    agentWhen.textContent = 'working…';
+    agentText.textContent = "On it — I've pulled in three teams to work on this.";
+    agentExtra.innerHTML = `
+      <div class="progress-card">
+        <div class="pulse-wrap"><span class="ring"></span><span class="core"></span></div>
+        <div class="txt">
+          <strong>Working across 3 teams</strong>
+          <div class="sub">Research, Sales, Operations</div>
+        </div>
+      </div>`;
+  }
+
+  function setLiveState(cfg) {
+    // Reset all nodes
+    const allNodes = ['n-coo','n-sales','n-research','n-ops','n-sdr','n-analyst','n-pricing'];
     allNodes.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
-      const rect = el.querySelector('rect');
-      const texts = el.querySelectorAll('text');
-      rect.setAttribute('stroke', '#e2e8f0');
-      rect.setAttribute('fill', '#fff');
-      texts.forEach(t => t.setAttribute('fill', t.getAttribute('font-size') === '9' ? '#94a3b8' : '#64748b'));
+      el.classList.remove('idle', 'active', 'done', 'warn');
+      const dot = el.querySelector('.lnode-dot');
+      dot.classList.remove('idle', 'active', 'done', 'warn');
     });
 
-    // Activate
-    activeEdges.forEach(id => {
+    cfg.done.forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      el.classList.add('done'); el.querySelector('.lnode-dot').classList.add('done');
+    });
+    cfg.active.forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      el.classList.add('active'); el.querySelector('.lnode-dot').classList.add('active');
+    });
+    cfg.idle.forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      el.classList.add('idle'); el.querySelector('.lnode-dot').classList.add('idle');
+    });
+    // Warn = finished with a heads-up — amber dot, no done class
+    cfg.warnOn.forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      el.classList.add('done'); el.querySelector('.lnode-dot').classList.remove('done');
+      el.querySelector('.lnode-dot').classList.add('warn');
+    });
+
+    // Edges
+    const allEdges = ['e-coo-sales','e-coo-research','e-coo-ops','e-sales-sdr','e-research-analyst','e-ops-pricing'];
+    allEdges.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.setAttribute('stroke', '#059669');
-      el.setAttribute('marker-end', 'url(#mini-arrow-active)');
+      el.classList.remove('flowing', 'done');
     });
-    activeNodes.forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const rect = el.querySelector('rect');
-      const texts = el.querySelectorAll('text');
-      rect.setAttribute('stroke', '#4f46e5');
-      rect.setAttribute('stroke-width', '1.5');
-      rect.setAttribute('fill', '#eef2ff');
-      texts.forEach(t => t.setAttribute('fill', t.getAttribute('font-size') === '9' ? '#64748b' : '#1e293b'));
+    cfg.flowingEdges.forEach(id => {
+      const el = document.getElementById(id); if (el) el.classList.add('flowing');
     });
+    cfg.doneEdges.forEach(id => {
+      const el = document.getElementById(id); if (el) el.classList.add('done');
+    });
+
+    // Graph-head text
+    const gtitle = document.getElementById('gtitle');
+    const glive  = document.getElementById('glive');
+    if (gtitle) gtitle.textContent = cfg.gtitle;
+    if (glive) {
+      if (cfg.glive === 'finished') {
+        glive.innerHTML = '<span class="dot" style="background:#22c55e; animation:none"></span>done';
+        glive.style.color = '#15803d';
+      } else {
+        glive.innerHTML = '<span class="dot"></span>updating';
+        glive.style.color = '#6366f1';
+      }
+    }
   }
 
-  function render(stepNum) {
-    const s = STEPS[stepNum];
-    renderChat(s.chat);
-    renderEvents(s.events);
-    renderStatus(userStatus, s.userStatus);
-    renderStatus(hierarchyStatus, s.hierarchyStatus);
-    summary.innerHTML = s.summary;
-    renderDecisions(s.decisions);
-    renderMiniGraph(s.activeEdges, s.activeNodes);
-
-    stepCounter.textContent = stepNum;
-    prevBtn.disabled = stepNum === 1;
-    nextBtn.textContent = stepNum === 7 ? 'Finish' : 'Next step →';
-    nextBtn.disabled = false;
-
-    stepperBtns.forEach(b => {
-      const n = parseInt(b.dataset.step, 10);
-      b.setAttribute('aria-current', n === stepNum ? 'true' : 'false');
-      b.dataset.visited = n < stepNum ? 'true' : 'false';
-    });
+  function renderLog(entries) {
+    const body = document.getElementById('log-body');
+    if (!body) return;
+    body.innerHTML = entries.map(e => {
+      const ref = e.ref ? REFS[e.ref] : null;
+      const refRow = ref ? `
+        <div class="l-ref">
+          <span class="r-chip ${ref.kind}">${ref.chipIcon} ${ref.chipLabel}</span>
+          ${ref.canView ? `<button class="r-action" data-open-ref="${e.ref}">View</button>` : ''}
+          ${ref.canView && ref.canEdit ? `<span class="r-sep">·</span>` : ''}
+          ${ref.canEdit ? `<button class="r-action" data-open-ref="${e.ref}" data-edit="1">Edit</button>` : ''}
+          ${!ref.canEdit && ref.canView ? `<span class="r-sep">·</span><span class="r-locked">🔒 no edit permission</span>` : ''}
+        </div>` : '';
+      return `
+        <div class="log-entry">
+          <span class="l-dot ${e.tone}"></span>
+          <span class="l-time">${e.time}</span>
+          <div>
+            <div class="l-text">${e.text}</div>
+            ${refRow}
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
-  nextBtn.addEventListener('click', () => {
-    if (current < 7) { current++; render(current); }
+  // Linked-entity catalogue — mirrors the shape of agent_execution_events.linkedEntity
+  // plus the permission mask computed by agentRunEditPermissionMaskPure.ts. In the real
+  // UI, viewHref/editHref are nullable per user; here we simulate with canView/canEdit booleans.
+  const REFS = {
+    'rule-min-margin': {
+      kind: 'rule',
+      chipIcon: '📐',
+      chipLabel: 'Pricing rule',
+      canView: true, canEdit: true,
+      title: 'Minimum margin on renewals',
+      fields: [
+        { label: 'Applies to',  value: 'Renewal proposals (all subaccounts)' },
+        { label: 'Condition',   value: 'When pricing annex is drafted' },
+        { label: 'Rule',        value: 'Gross margin must be ≥ 15% on every tier', readonly: false },
+        { label: 'Last edited', value: 'Michael · 2 weeks ago' },
+      ],
+      editWarn: 'Changing this rule affects all renewal proposals going forward.',
+    },
+    'crm-acme': {
+      kind: 'doc',
+      chipIcon: '📇',
+      chipLabel: 'CRM record',
+      canView: true, canEdit: true,
+      title: 'Acme Corp · CRM account',
+      fields: [
+        { label: 'Pipeline stage', value: 'Renewal · negotiation' },
+        { label: 'Pipeline value', value: '$240,000 ARR' },
+        { label: 'Last touch',     value: '8 days ago · email from SDR 1' },
+        { label: 'Owner',          value: 'Jane Park' },
+      ],
+      editWarn: 'Editing syncs to HubSpot within 30 seconds.',
+    },
+    'competitor-rate-cards': {
+      kind: 'doc',
+      chipIcon: '📄',
+      chipLabel: '2 documents',
+      canView: true, canEdit: false,
+      title: 'Competitor rate cards',
+      fields: [
+        { label: 'Source', value: 'Reference library · Competitor intel' },
+        { label: 'Files',  value: 'competitor_a_rate_card.pdf · competitor_b_rate_card.pdf' },
+        { label: 'Last updated', value: '3 weeks ago' },
+      ],
+      editWarn: null,
+    },
+    'memory-tier2-policy': {
+      kind: 'memory',
+      chipIcon: '🧠',
+      chipLabel: 'Memory',
+      canView: true, canEdit: true,
+      title: 'Tier-2 margin policy · operations',
+      fields: [
+        { label: 'Note',  value: 'Flag any tier-2 offer where margin drops below 18%. Recent renewals show pricing pressure on the middle tier.' },
+        { label: 'Owner', value: 'Head of Operations' },
+        { label: 'Added', value: '6 weeks ago' },
+      ],
+      editWarn: null,
+    },
+    'proposal-doc': {
+      kind: 'doc',
+      chipIcon: '📄',
+      chipLabel: 'Proposal',
+      canView: true, canEdit: true,
+      title: 'Acme renewal proposal · draft v1',
+      fields: [
+        { label: 'Sections', value: 'Body · Competitor pricing · Pricing annex (tier-2 flagged)' },
+        { label: 'Size',     value: '2.4 KB' },
+        { label: 'Status',   value: 'Draft · awaiting review' },
+      ],
+      editWarn: null,
+    },
+  };
+
+  // Ref-dialog open/close
+  function openRef(refId, editMode) {
+    const ref = REFS[refId];
+    if (!ref) return;
+    const d = document.getElementById('ref-dialog');
+    d.querySelector('.r-chip').className = 'r-chip ' + ref.kind;
+    d.querySelector('.r-chip').innerHTML = `${ref.chipIcon} ${ref.chipLabel}`;
+    d.querySelector('.d-title').textContent = ref.title;
+    const bodyEl = d.querySelector('.d-body');
+    bodyEl.innerHTML = ref.fields.map(f => `
+      <div class="field">
+        <label>${f.label}</label>
+        <div class="value ${f.readonly === false ? '' : 'readonly'}">${f.value}</div>
+      </div>
+    `).join('') + (editMode && ref.editWarn ? `
+      <div class="field"><div class="value" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">⚠ ${ref.editWarn}</div></div>
+    ` : '');
+    const foot = d.querySelector('.d-foot');
+    const perm = !ref.canEdit ? 'You have view access only · ask an admin to edit.'
+               : editMode     ? 'You are editing · changes apply to future runs.'
+               :                'You have edit permission on this item.';
+    foot.querySelector('.perm-note').textContent = perm;
+    foot.querySelector('.btn-primary').textContent = editMode ? 'Save changes' : (ref.canEdit ? 'Edit' : 'Close');
+    foot.querySelector('.btn-primary').dataset.action = editMode ? 'save' : (ref.canEdit ? 'edit' : 'close');
+    foot.querySelector('.btn-primary').dataset.ref = refId;
+    d.classList.add('open');
+  }
+  function closeRef() {
+    document.getElementById('ref-dialog').classList.remove('open');
+  }
+
+  // Event delegation for log view/edit buttons (re-rendered each state change)
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-ref]');
+    if (btn) {
+      openRef(btn.dataset.openRef, btn.dataset.edit === '1');
+      return;
+    }
+    if (e.target.matches('.ref-dialog .overlay, .ref-dialog .d-close')) {
+      closeRef();
+    }
+    if (e.target.matches('.ref-dialog .d-foot .btn-primary')) {
+      const action = e.target.dataset.action;
+      if (action === 'edit') openRef(e.target.dataset.ref, true);
+      else closeRef();
+    }
+    if (e.target.matches('.ref-dialog .d-foot .btn-secondary')) {
+      closeRef();
+    }
   });
-  prevBtn.addEventListener('click', () => {
-    if (current > 1) { current--; render(current); }
-  });
-  stepperBtns.forEach(b => {
-    b.addEventListener('click', () => {
-      current = parseInt(b.dataset.step, 10);
-      render(current);
-    });
-  });
-  resetBtn.addEventListener('click', () => {
-    current = 1;
-    render(current);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeRef();
   });
 
-  // Initial paint
-  render(1);
+  // State toggle behaviour
+  function setState(state, fromToggleClick) {
+    document.querySelectorAll('.mockup-toggle button').forEach(b => {
+      b.classList.toggle('active', b.dataset.state === state);
+    });
+    if (state === 'working')   applyWorking();
+    if (state === 'done')      applyDone();
+    if (state === 'collapsed') applyCollapsed();
+  }
+
+  document.querySelectorAll('.mockup-toggle button').forEach(b => {
+    b.addEventListener('click', () => setState(b.dataset.state, true));
+  });
+
+  // Initial state: working
+  setState('working');
 </script>
 
 </body>

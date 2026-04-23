@@ -1,621 +1,369 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Run Trace · Delegation graph · Acme renewal</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the work happened — Acme renewal</title>
 <style>
-  :root {
-    --sl-900: #0f172a; --sl-800: #1e293b; --sl-700: #334155; --sl-600: #475569;
-    --sl-500: #64748b; --sl-400: #94a3b8; --sl-300: #cbd5e1; --sl-200: #e2e8f0;
-    --sl-100: #f1f5f9; --sl-50:  #f8fafc;
-    --indigo-700: #4338ca; --indigo-600: #4f46e5; --indigo-500: #6366f1; --indigo-100: #e0e7ff; --indigo-50: #eef2ff;
-    --green-700: #047857; --green-600: #059669; --green-500: #10b981; --green-50: #ecfdf5;
-    --red-700: #b91c1c; --red-600: #dc2626; --red-500: #ef4444; --red-50: #fef2f2;
-    --amber-700: #b45309; --amber-600: #d97706; --amber-500: #f59e0b; --amber-50: #fffbeb;
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+    padding: 0;
   }
-  html, body {
-    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    font-feature-settings: 'cv11', 'ss01';
-    background: var(--sl-50); color: var(--sl-800); -webkit-font-smoothing: antialiased;
+  .container { max-width: 880px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 18px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { margin: 0 6px; color: #d1d5db; }
+
+  .hdr {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 22px 26px; margin-bottom: 16px;
   }
-  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'cv11' 1; }
-  h1, h2 { letter-spacing: -0.02em; font-weight: 600; }
-  .tab-btn { transition: background 120ms ease, color 120ms ease; }
-  .tab-btn.active { background: white; color: var(--sl-900); box-shadow: 0 1px 2px rgba(15,23,42,0.06), 0 1px 1px rgba(15,23,42,0.04); }
-  .tab-view { display: none; }
-  .tab-view.active { display: block; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
-  .pill-dot { width: 6px; height: 6px; border-radius: 999px; }
-  .pill-success { background: #ecfdf5; color: #047857; } .pill-success .pill-dot { background: #10b981; }
-  .pill-running { background: #eef2ff; color: #4338ca; } .pill-running .pill-dot { background: #6366f1; }
-  .pill-rejected { background: #fef2f2; color: #b91c1c; } .pill-rejected .pill-dot { background: #ef4444; }
-  .pill-warn { background: #fffbeb; color: #b45309; } .pill-warn .pill-dot { background: #f59e0b; }
-  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; background: var(--sl-100); color: var(--sl-600); }
-  .chip.scope-children     { background: #eef2ff; color: #4338ca; }
-  .chip.scope-descendants  { background: #f5f3ff; color: #6d28d9; }
-  .chip.scope-subaccount   { background: #ecfeff; color: #0e7490; }
-  .chip.depth { background: var(--sl-100); color: var(--sl-500); }
-  .legend-swatch { display: inline-block; width: 28px; height: 2px; vertical-align: middle; }
-  .legend-swatch.dashed { background: transparent; background-image: linear-gradient(to right, var(--amber-500) 50%, transparent 50%); background-size: 8px 2px; background-repeat: repeat-x; height: 2px; }
-  .legend-swatch.dotted { background: transparent; background-image: radial-gradient(circle, var(--amber-600) 45%, transparent 55%); background-size: 4px 2px; background-repeat: repeat-x; height: 2px; }
-  .legend-swatch.solid { background: var(--green-600); }
-  .legend-swatch.rejected { background: var(--red-500); }
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.55; transform: scale(0.7); }
+  .hdr .title-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
   }
-  .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
-  @keyframes dash-flow {
-    to { stroke-dashoffset: -16; }
+  .hdr h1 {
+    font-size: 22px; font-weight: 600; letter-spacing: -0.2px; color: #1a1d23;
   }
-  .edge-flowing { stroke-dasharray: 4 4; animation: dash-flow 1.2s linear infinite; }
-  .graph-node { cursor: pointer; transition: filter 120ms ease; }
-  .graph-node:hover { filter: drop-shadow(0 2px 6px rgba(15,23,42,0.18)); }
-  .graph-node.selected > rect { stroke: var(--indigo-500); stroke-width: 2; }
-  .graph-node.selected > .node-halo { display: block; }
-  .node-halo { display: none; }
-  .graph-node.current-run > rect { stroke: var(--indigo-500); stroke-width: 2; }
-  .graph-node.current-run > .node-current-tag { display: block; }
-  .node-current-tag { display: none; }
-  .key-label { font-size: 10px; font-weight: 600; letter-spacing: 0.03em; color: var(--sl-500); text-transform: uppercase; }
-  .kv-row { display: grid; grid-template-columns: 128px 1fr; gap: 12px; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--sl-100); }
-  .kv-row:last-child { border-bottom: 0; }
-  .kv-label { color: var(--sl-500); }
-  .kv-value { color: var(--sl-800); font-weight: 500; }
-  .filter-toggle[aria-pressed='true'] { background: var(--indigo-50); color: var(--indigo-700); border-color: var(--indigo-500); }
-  details > summary { cursor: pointer; list-style: none; }
-  details > summary::-webkit-details-marker { display: none; }
-  .node-rect-success { fill: #fff; stroke: var(--sl-300); }
-  .node-rect-running { fill: #fff; stroke: var(--indigo-300); }
-  .node-rect-pending { fill: #f8fafc; stroke: var(--sl-200); stroke-dasharray: 4 4; }
+  .hdr .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; background: #f0fdf4; color: #15803d;
+    border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  }
+  .hdr .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+  .hdr .sub {
+    font-size: 13px; color: #6b7280;
+  }
+
+  /* One-line summary (the reading of the graph) */
+  .summary-card {
+    background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
+    border: 1px solid #c7d2fe; border-radius: 10px;
+    padding: 14px 20px; margin-bottom: 20px;
+    font-size: 13.5px; color: #3730a3; line-height: 1.55;
+  }
+  .summary-card strong { color: #1e1b4b; }
+
+  /* Graph card */
+  .graph-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .legend {
+    padding: 11px 22px; border-bottom: 1px solid #f0f1f3;
+    display: flex; gap: 22px; align-items: center;
+    font-size: 11.5px; color: #6b7280;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .legend .dot.done { background: #22c55e; }
+  .legend .dot.active { background: #6366f1; }
+  .legend .dot.warn { background: #f59e0b; }
+  .legend .hint {
+    margin-left: auto; font-style: italic; color: #9ca3af; font-size: 11px;
+  }
+
+  .graph-wrap {
+    padding: 28px 20px 18px; background: #fafbfc;
+    position: relative;
+  }
+
+  svg#tree { display: block; margin: 0 auto; max-width: 100%; }
+
+  .node-g { cursor: pointer; transition: transform 0.15s ease; }
+  .node-g:hover { transform: translateY(-1px); }
+  .node-rect {
+    fill: #fff; stroke: #e5e7eb; stroke-width: 1.5;
+    transition: stroke 0.15s, fill 0.15s;
+    filter: drop-shadow(0 1px 2px rgba(15,23,42,0.04));
+  }
+  .node-g.selected .node-rect { stroke: #6366f1; stroke-width: 2; }
+  .node-g:hover .node-rect { stroke: #a5b4fc; }
+  .node-name {
+    font-size: 12.5px; font-weight: 600; fill: #1a1d23;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .node-role {
+    font-size: 10.5px; fill: #6b7280;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    pointer-events: none;
+  }
+  .node-dot { }
+  .node-dot.done   { fill: #22c55e; }
+  .node-dot.active { fill: #6366f1; }
+  .node-dot.warn   { fill: #f59e0b; }
+
+  .edge       { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-linecap: round; }
+  .edge-arrow { marker-end: url(#arrow); }
+  @keyframes cascade {
+    0%   { stroke-dashoffset: 600; opacity: 0.35; }
+    100% { stroke-dashoffset: 0;   opacity: 1; }
+  }
+  .edge-flow {
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: cascade 0.9s ease-out forwards;
+  }
+  .edge-flow.d1 { animation-delay: 0s; }
+  .edge-flow.d2 { animation-delay: 0.4s; }
+  .edge-flow.d3 { animation-delay: 0.9s; }
+
+  /* Subtle replay button for the cascade */
+  .replay-btn {
+    position: absolute; top: 14px; right: 14px;
+    font-family: inherit; font-size: 11px; font-weight: 500;
+    color: #6b7280; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 5px; padding: 4px 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .replay-btn:hover { border-color: #a5b4fc; color: #4338ca; }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.75); opacity: 0.6; }
+  }
+  .pulse {
+    transform-origin: center; transform-box: fill-box;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  /* Detail card (appears under graph when a node is selected) */
+  .detail-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 16px 20px; margin-top: 6px;
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .detail-card .avatar {
+    width: 38px; height: 38px; border-radius: 9px; background: #eef2ff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .detail-card .body { flex: 1; }
+  .detail-card .name {
+    font-size: 14px; font-weight: 600; color: #1a1d23; margin-bottom: 2px;
+  }
+  .detail-card .role {
+    font-size: 11.5px; color: #6b7280; margin-bottom: 8px;
+  }
+  .detail-card .did {
+    font-size: 13px; color: #374151; line-height: 1.55;
+  }
+
+  .foot-meta {
+    padding: 12px 22px; border-top: 1px solid #f0f1f3;
+    font-size: 11.5px; color: #9ca3af; display: flex; gap: 16px;
+  }
+  .foot-meta .primary { color: #6b7280; }
+
+  .back-link {
+    margin-top: 6px; font-size: 13px; color: #4338ca; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .back-link:hover { text-decoration: underline; }
+
+  /* Mockup-only annotation, subtle */
+  .mockup-note {
+    margin-top: 22px; padding-top: 14px; border-top: 1px dashed #e5e7eb;
+    font-size: 11px; color: #9ca3af; text-align: center; font-style: italic;
+  }
+
+  @media (max-width: 640px) {
+    .container { padding: 16px 16px 40px; }
+    .legend { flex-wrap: wrap; gap: 12px; }
+    .legend .hint { margin-left: 0; width: 100%; }
+  }
 </style>
 </head>
 <body>
 
-<!-- ───────── Top nav strip ───────── -->
-<nav class="border-b border-slate-200 bg-white">
-  <div class="max-w-[1440px] mx-auto px-8 h-14 flex items-center justify-between">
-    <div class="flex items-center gap-6">
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-md bg-slate-900 flex items-center justify-center">
-          <span class="text-white text-[11px] font-semibold tracking-tight">S</span>
-        </div>
-        <span class="text-[13px] font-semibold text-slate-900">Synthetos</span>
-        <span class="text-[11px] font-medium text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 ml-1">ACME CORP</span>
-      </div>
-      <div class="flex items-center gap-1 text-[13px] text-slate-500">
-        <a class="hover:text-slate-800" href="#">Briefs</a>
-        <svg class="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-        <a class="hover:text-slate-800" href="#">Acme renewal proposal</a>
-        <svg class="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-        <span class="text-slate-800 font-medium">Run Trace</span>
-      </div>
-    </div>
-    <div class="flex items-center gap-4 text-[12px]">
-      <span class="text-slate-500">michael@acme.com</span>
-      <div class="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[11px] font-semibold">MH</div>
-    </div>
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="#">Briefs</a>
+    <span class="sep">›</span>
+    <a href="#">Acme renewal proposal</a>
+    <span class="sep">›</span>
+    <span>How it happened</span>
   </div>
-</nav>
 
-<main class="max-w-[1440px] mx-auto px-8 py-6">
-
-  <!-- ───────── Page header ───────── -->
-  <header class="flex items-start justify-between mb-4">
-    <div>
-      <div class="flex items-center gap-2 mb-1">
-        <h1 class="text-[22px] text-slate-900">Run <span class="num">run_a8c3f…</span></h1>
-        <span class="pill pill-success"><span class="pill-dot"></span>Completed</span>
-      </div>
-      <div class="text-[13px] text-slate-500 flex items-center gap-3">
-        <span>Brief · <span class="text-slate-700 font-medium">"Draft a proposal for the Acme renewal"</span></span>
-        <span class="text-slate-300">·</span>
-        <span class="num">Mar 4, 2026 · 14:02 UTC</span>
-        <span class="text-slate-300">·</span>
-        <span class="num">Duration 1m 47s</span>
-        <span class="text-slate-300">·</span>
-        <span class="num">7 runs · 3 levels</span>
-      </div>
+  <div class="hdr">
+    <div class="title-row">
+      <h1>How it happened</h1>
+      <span class="status-pill"><span class="dot"></span>Completed</span>
     </div>
-    <div class="flex items-center gap-2">
-      <button class="text-[12px] text-slate-600 border border-slate-200 bg-white rounded-md px-3 py-1.5 hover:bg-slate-50">Refresh</button>
-      <button class="text-[12px] text-slate-600 border border-slate-200 bg-white rounded-md px-3 py-1.5 hover:bg-slate-50 flex items-center gap-1.5">
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5 5 5-5M12 15V3"/></svg>
-        Export JSON
+    <div class="sub">Acme renewal proposal · 1 minute 47 seconds · 6 agents</div>
+  </div>
+
+  <div class="summary-card">
+    <strong>The COO coordinated three teams</strong> to produce the proposal — sales wrote the body, research compared competitors, operations drafted the pricing annex.
+  </div>
+
+  <div class="graph-card">
+
+    <div class="legend">
+      <span class="item"><span class="dot done"></span>Finished</span>
+      <span class="item"><span class="dot active"></span>Working now</span>
+      <span class="item"><span class="dot warn"></span>Needed attention</span>
+      <span class="hint">Click any agent to see what they did</span>
+    </div>
+
+    <div class="graph-wrap">
+      <button id="replay-btn" class="replay-btn" title="Replay the flow">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10a5 5 0 1 0 1.3-6.4L3 5"/><path d="M3 2v3h3"/></svg>
+        Replay flow
       </button>
-    </div>
-  </header>
+      <svg id="tree" viewBox="0 0 820 420" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+          </marker>
+        </defs>
+        <!-- Edges (org-chart elbow connectors with cascade animation, drawn first so nodes cover joints) -->
+        <g class="edges">
+          <!-- COO stub: reveals first -->
+          <path class="edge edge-flow d1" d="M 410 72 L 410 105"/>
+          <!-- Horizontal bar and drops to Heads: reveal together, second -->
+          <path class="edge edge-flow d2" d="M 150 105 L 670 105"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 150 105 L 150 136"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 410 105 L 410 136"/>
+          <path class="edge edge-flow edge-arrow d2" d="M 670 105 L 670 136"/>
+          <!-- Manager → worker drops: reveal last -->
+          <path class="edge edge-flow edge-arrow d3" d="M 150 198 L 150 276"/>
+          <path class="edge edge-flow edge-arrow d3" d="M 410 198 L 410 276"/>
+          <path class="edge edge-flow edge-arrow d3" d="M 670 198 L 670 276"/>
+        </g>
 
-  <!-- ───────── Tab bar ───────── -->
-  <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-4">
-    <button class="tab-btn text-[12px] px-3 py-1.5 rounded-md text-slate-600" data-tab="trace">Trace</button>
-    <button class="tab-btn text-[12px] px-3 py-1.5 rounded-md text-slate-600" data-tab="payload">Payload</button>
-    <button class="tab-btn active text-[12px] px-3 py-1.5 rounded-md text-slate-900 flex items-center gap-1.5" data-tab="graph">
-      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 3v18M6 12h6a4 4 0 014 4v2M6 6h4a4 4 0 014 4v0"/></svg>
-      Delegation graph
-    </button>
+        <!-- COO (selected by default — it's the root) -->
+        <g class="node-g selected" data-agent="coo" transform="translate(330, 14)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">COO</text>
+          <text class="node-role" x="16" y="42">Team lead</text>
+        </g>
+
+        <!-- Head of Sales -->
+        <g class="node-g" data-agent="sales" transform="translate(70, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Sales</text>
+          <text class="node-role" x="16" y="42">Proposal body</text>
+        </g>
+
+        <!-- Head of Research -->
+        <g class="node-g" data-agent="research" transform="translate(330, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Research</text>
+          <text class="node-role" x="16" y="42">Competitor pricing</text>
+        </g>
+
+        <!-- Head of Operations (amber dot = finished with a heads-up on tier-2) -->
+        <g class="node-g" data-agent="ops" transform="translate(590, 140)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot warn" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Head of Operations</text>
+          <text class="node-role" x="16" y="42">Pricing annex · heads-up</text>
+        </g>
+
+        <!-- SDR 1 -->
+        <g class="node-g" data-agent="sdr" transform="translate(70, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">SDR 1</text>
+          <text class="node-role" x="16" y="42">Account context</text>
+        </g>
+
+        <!-- Research Analyst -->
+        <g class="node-g" data-agent="analyst" transform="translate(330, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Research Analyst</text>
+          <text class="node-role" x="16" y="42">4 competitors</text>
+        </g>
+
+        <!-- Pricing Specialist -->
+        <g class="node-g" data-agent="pricing" transform="translate(590, 280)">
+          <rect class="node-rect" width="160" height="58" rx="10"/>
+          <circle class="node-dot done" cx="16" cy="18" r="4"/>
+          <text class="node-name" x="28" y="22">Pricing Specialist</text>
+          <text class="node-role" x="16" y="42">3 tiers drafted</text>
+        </g>
+
+      </svg>
+
+      <!-- Detail card under graph — switches content when a node is clicked -->
+      <div class="detail-card" id="detail">
+        <div class="avatar">👤</div>
+        <div class="body">
+          <div class="name" id="d-name">COO</div>
+          <div class="role" id="d-role">Team lead · finished in 14 seconds</div>
+          <div class="did" id="d-did">Read the Brief, picked three teams to run in parallel, and stitched their work into one proposal at the end.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="foot-meta">
+      <span class="primary">6 agents worked on this · 3 layers deep</span>
+    </div>
   </div>
 
-  <!-- ───────── Graph layout ───────── -->
-  <div class="grid grid-cols-[1fr_340px] gap-4">
+  <a class="back-link" href="#">← Back to chat</a>
 
-    <!-- ── Graph canvas + legend ── -->
-    <section class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+  <div class="mockup-note">Mockup · static · simplified for end-user comprehension. Designed for occasional review of what happened, not live monitoring — see the live split-view for in-flight work.</div>
 
-      <!-- Toolbar -->
-      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <div class="flex items-center gap-2">
-          <span class="key-label">Filter</span>
-          <button class="filter-toggle text-[11px] border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50" aria-pressed="true">All edges</button>
-          <button class="filter-toggle text-[11px] border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50" aria-pressed="false">Accepted only</button>
-          <button class="filter-toggle text-[11px] border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50" aria-pressed="false">Rejections</button>
-          <span class="text-slate-300 mx-1">·</span>
-          <span class="key-label">Layout</span>
-          <button class="filter-toggle text-[11px] border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50" aria-pressed="true">Vertical</button>
-          <button class="filter-toggle text-[11px] border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50" aria-pressed="false">Horizontal</button>
-        </div>
-        <div class="flex items-center gap-1 text-[11px] text-slate-500">
-          <span>Zoom</span>
-          <button class="w-6 h-6 border border-slate-200 rounded hover:bg-slate-50 flex items-center justify-center">−</button>
-          <span class="num w-10 text-center">100%</span>
-          <button class="w-6 h-6 border border-slate-200 rounded hover:bg-slate-50 flex items-center justify-center">+</button>
-        </div>
-      </div>
-
-      <!-- Legend -->
-      <div class="flex items-center gap-5 px-4 py-2.5 border-b border-slate-100 bg-slate-50 text-[11px] text-slate-600">
-        <span class="flex items-center gap-1.5"><span class="legend-swatch solid"></span><span>down · accepted</span></span>
-        <span class="flex items-center gap-1.5"><span class="legend-swatch dashed"></span><span>up · escalation</span></span>
-        <span class="flex items-center gap-1.5"><span class="legend-swatch dotted"></span><span>lateral · root-only</span></span>
-        <span class="flex items-center gap-1.5"><span class="legend-swatch rejected"></span><span>rejected</span></span>
-        <span class="text-slate-300 mx-1">·</span>
-        <span class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l3 2"/></svg><span>Click node to select · double-click to open run</span></span>
-      </div>
-
-      <!-- SVG graph -->
-      <div class="relative" style="height: 620px;">
-        <svg id="graph" viewBox="0 0 1060 620" class="w-full h-full">
-          <defs>
-            <!-- Arrow markers per direction -->
-            <marker id="arrow-down" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
-            </marker>
-            <marker id="arrow-up" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"/>
-            </marker>
-            <marker id="arrow-lateral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/>
-            </marker>
-            <marker id="arrow-rejected" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
-            </marker>
-          </defs>
-
-          <!-- Depth guides -->
-          <g class="depth-guides" stroke="#e2e8f0" stroke-dasharray="2 4" stroke-width="1">
-            <line x1="0" y1="100" x2="1060" y2="100"/>
-            <line x1="0" y1="240" x2="1060" y2="240"/>
-            <line x1="0" y1="400" x2="1060" y2="400"/>
-            <line x1="0" y1="540" x2="1060" y2="540"/>
-          </g>
-          <g class="depth-labels" font-size="10" font-weight="600" fill="#94a3b8" font-family="Inter">
-            <text x="10" y="96">ORG · depth 0</text>
-            <text x="10" y="236">SUBACCOUNT · depth 1</text>
-            <text x="10" y="396">MANAGERS · depth 2</text>
-            <text x="10" y="536">WORKERS · depth 3</text>
-          </g>
-
-          <!-- ─── Edges (drawn first so nodes sit on top) ─── -->
-          <g class="edges" fill="none" stroke-linecap="round" stroke-linejoin="round">
-
-            <!-- Orchestrator (depth 0) → COO (depth 1) — handoff, down accepted -->
-            <path d="M 530 120 L 530 200" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <text x="540" y="165" font-size="10" fill="#047857" font-family="Inter" font-weight="600">HANDOFF · down</text>
-
-            <!-- COO (depth 1) → Head of Sales (depth 2), scope=descendants, down -->
-            <path d="M 500 280 L 210 320" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <!-- COO → Head of Research -->
-            <path d="M 530 280 L 530 320" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <!-- COO → Head of Operations -->
-            <path d="M 560 280 L 850 320" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <text x="620" y="305" font-size="10" fill="#047857" font-family="Inter" font-weight="600">SPAWN × 3 · scope=descendants</text>
-
-            <!-- Head of Sales → SDR 1 — reassign, children, down accepted -->
-            <path d="M 210 400 L 210 460" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <!-- Head of Research → Research Analyst -->
-            <path d="M 530 400 L 530 460" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-            <!-- Head of Operations → Pricing Specialist -->
-            <path d="M 850 400 L 850 460" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down)"/>
-
-            <!-- REJECTED attempt: Head of Sales tried to reassign to Research Analyst (cross-subtree) -->
-            <path d="M 270 370 Q 400 430 475 470" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow-rejected)" opacity="0.85"/>
-            <rect x="305" y="412" width="150" height="22" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
-            <text x="380" y="428" font-size="10" fill="#b91c1c" font-family="Inter" font-weight="600" text-anchor="middle">REJECTED · out_of_scope</text>
-
-            <!-- Upward escalation sample: Pricing Specialist escalated to Head of Operations (up dashed) -->
-            <path d="M 880 460 Q 960 430 880 400" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-up)" opacity="0.85"/>
-            <text x="935" y="432" font-size="10" fill="#b45309" font-family="Inter" font-weight="600">UP · escalated</text>
-          </g>
-
-          <!-- ─── Nodes ─── -->
-          <!-- Depth 0: Orchestrator -->
-          <g class="graph-node" data-node="orchestrator" transform="translate(410, 60)">
-            <rect class="node-rect-success node-halo" x="-4" y="-4" width="248" height="68" rx="10" fill="none" stroke="#e0e7ff" stroke-width="6" opacity="0.6"/>
-            <rect class="node-rect-success" x="0" y="0" width="240" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#4f46e5"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Orchestrator</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">system · triage dispatch</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 0</text>
-            </g>
-            <text x="226" y="14" font-size="9" font-family="Inter" fill="#94a3b8" text-anchor="end">240ms</text>
-          </g>
-
-          <!-- Depth 1: COO (subaccount root, current run) -->
-          <g class="graph-node current-run selected" data-node="coo" transform="translate(410, 200)">
-            <rect class="node-halo" x="-6" y="-6" width="252" height="72" rx="12" fill="none" stroke="#6366f1" stroke-width="3" opacity="0.35"/>
-            <rect class="node-rect-success" x="0" y="0" width="240" height="60" rx="8" stroke-width="1.5" stroke="#4f46e5"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#4f46e5"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">COO</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">Acme Corp · subaccount root</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="82" height="14" rx="3" fill="#f5f3ff"/>
-              <text x="41" y="11" font-size="9" font-family="Inter" fill="#6d28d9" text-anchor="middle" font-weight="600">SCOPE · descendants</text>
-            </g>
-            <g transform="translate(164, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 1</text>
-            </g>
-            <g class="node-current-tag" transform="translate(160, -10)">
-              <rect width="84" height="18" rx="9" fill="#4f46e5"/>
-              <text x="42" y="12" font-family="Inter" font-size="10" fill="#ffffff" font-weight="600" text-anchor="middle">THIS RUN</text>
-            </g>
-            <text x="226" y="14" font-size="9" font-family="Inter" fill="#94a3b8" text-anchor="end">14s</text>
-          </g>
-
-          <!-- Depth 2: Head of Sales -->
-          <g class="graph-node" data-node="head-sales" transform="translate(110, 340)">
-            <rect class="node-rect-success node-halo" x="-4" y="-4" width="208" height="68" rx="10" fill="none" stroke="#e0e7ff" stroke-width="6" opacity="0.6"/>
-            <rect class="node-rect-success" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#6366f1"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Head of Sales</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">3 direct reports · manager</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="56" height="14" rx="3" fill="#eef2ff"/>
-              <text x="28" y="11" font-size="9" font-family="Inter" fill="#4338ca" text-anchor="middle" font-weight="600">SCOPE · children</text>
-            </g>
-            <g transform="translate(138, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 2</text>
-            </g>
-          </g>
-
-          <!-- Depth 2: Head of Research -->
-          <g class="graph-node" data-node="head-research" transform="translate(430, 340)">
-            <rect class="node-rect-success node-halo" x="-4" y="-4" width="208" height="68" rx="10" fill="none" stroke="#e0e7ff" stroke-width="6" opacity="0.6"/>
-            <rect class="node-rect-success" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#6366f1"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Head of Research</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">2 direct reports · manager</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="56" height="14" rx="3" fill="#eef2ff"/>
-              <text x="28" y="11" font-size="9" font-family="Inter" fill="#4338ca" text-anchor="middle" font-weight="600">SCOPE · children</text>
-            </g>
-            <g transform="translate(138, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 2</text>
-            </g>
-          </g>
-
-          <!-- Depth 2: Head of Operations -->
-          <g class="graph-node" data-node="head-ops" transform="translate(750, 340)">
-            <rect class="node-rect-success node-halo" x="-4" y="-4" width="208" height="68" rx="10" fill="none" stroke="#e0e7ff" stroke-width="6" opacity="0.6"/>
-            <rect class="node-rect-success" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#6366f1"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Head of Operations</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">2 direct reports · manager</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="56" height="14" rx="3" fill="#eef2ff"/>
-              <text x="28" y="11" font-size="9" font-family="Inter" fill="#4338ca" text-anchor="middle" font-weight="600">SCOPE · children</text>
-            </g>
-            <g transform="translate(138, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 2</text>
-            </g>
-          </g>
-
-          <!-- Depth 3: SDR 1 -->
-          <g class="graph-node" data-node="sdr-1" transform="translate(110, 480)">
-            <rect class="node-rect-success" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#94a3b8"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">SDR 1</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">worker · no direct reports</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 3</text>
-            </g>
-          </g>
-
-          <!-- Depth 3: Research Analyst -->
-          <g class="graph-node" data-node="research-analyst" transform="translate(430, 480)">
-            <rect class="node-rect-success" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#94a3b8"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Research Analyst</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">worker · no direct reports</text>
-            <g transform="translate(14, 44)">
-              <rect width="56" height="14" rx="7" fill="#ecfdf5"/>
-              <circle cx="9" cy="7" r="3" fill="#10b981"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#047857" font-weight="600">completed</text>
-            </g>
-            <g transform="translate(76, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 3</text>
-            </g>
-          </g>
-
-          <!-- Depth 3: Pricing Specialist (running) -->
-          <g class="graph-node" data-node="pricing-specialist" transform="translate(750, 480)">
-            <rect class="node-rect-running" x="0" y="0" width="200" height="60" rx="8" stroke-width="1"/>
-            <rect x="0" y="0" width="4" height="60" rx="2" fill="#94a3b8"/>
-            <text x="16" y="22" font-family="Inter" font-size="13" font-weight="600" fill="#0f172a">Pricing Specialist</text>
-            <text x="16" y="38" font-family="Inter" font-size="10" fill="#64748b">worker · retry in flight</text>
-            <g transform="translate(14, 44)">
-              <rect width="48" height="14" rx="7" fill="#eef2ff"/>
-              <circle cx="9" cy="7" r="3" fill="#6366f1" class="pulse-dot"/>
-              <text x="17" y="11" font-size="9" font-family="Inter" fill="#4338ca" font-weight="600">running</text>
-            </g>
-            <g transform="translate(68, 44)">
-              <rect width="52" height="14" rx="3" fill="#f1f5f9"/>
-              <text x="26" y="11" font-size="9" font-family="Inter" fill="#64748b" text-anchor="middle" font-weight="600">depth 3</text>
-            </g>
-          </g>
-
-        </svg>
-      </div>
-
-      <!-- Footer summary -->
-      <div class="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50 text-[11px] text-slate-500">
-        <div class="flex items-center gap-4">
-          <span><span class="text-slate-800 font-semibold num">7</span> nodes</span>
-          <span><span class="text-slate-800 font-semibold num">8</span> edges · <span class="text-green-700 num">6</span> accepted · <span class="text-amber-700 num">1</span> up · <span class="text-red-700 num">1</span> rejected</span>
-          <span>Max depth <span class="text-slate-800 font-semibold num">3</span> · bounded by <span class="num">MAX_HANDOFF_DEPTH + 1 = 6</span></span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span>Source: <code class="text-slate-700 bg-white border border-slate-200 rounded px-1.5 py-0.5">GET /api/agent-runs/run_a8c3f/delegation-graph</code></span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Right pane: selected node detail ── -->
-    <aside class="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style="height: 760px;">
-
-      <header class="px-4 py-3 border-b border-slate-100">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="key-label">Selected</span>
-          <span class="pill pill-running"><span class="pill-dot pulse-dot"></span>THIS RUN</span>
-        </div>
-        <h2 class="text-[15px] font-semibold text-slate-900">COO</h2>
-        <p class="text-[12px] text-slate-500 mt-0.5">The subaccount's configured root agent. Receives scope=subaccount Briefs from the Orchestrator.</p>
-      </header>
-
-      <div class="px-4 py-3 border-b border-slate-100">
-        <div class="kv-row"><span class="kv-label">Run ID</span><span class="kv-value num">run_a8c3f9d2</span></div>
-        <div class="kv-row"><span class="kv-label">Agent</span><span class="kv-value">COO <span class="text-slate-400 num">(sa_agt_4c7b)</span></span></div>
-        <div class="kv-row"><span class="kv-label">Status</span><span class="kv-value"><span class="pill pill-success"><span class="pill-dot"></span>Completed</span></span></div>
-        <div class="kv-row"><span class="kv-label">Depth</span><span class="kv-value num">1</span></div>
-        <div class="kv-row"><span class="kv-label">Scope used</span><span class="kv-value"><span class="chip scope-descendants">descendants</span></span></div>
-        <div class="kv-row"><span class="kv-label">Direction</span><span class="kv-value">—</span></div>
-        <div class="kv-row"><span class="kv-label">Parent run</span><span class="kv-value num"><a class="text-indigo-600 hover:underline" href="#">run_orch_77…</a></span></div>
-        <div class="kv-row"><span class="kv-label">Children</span><span class="kv-value num">3 spawned · 0 handoff</span></div>
-        <div class="kv-row"><span class="kv-label">Duration</span><span class="kv-value num">14.2s</span></div>
-        <div class="kv-row"><span class="kv-label">Started</span><span class="kv-value num">14:02:14 UTC</span></div>
-      </div>
-
-      <div class="px-4 py-3 border-b border-slate-100">
-        <div class="key-label mb-2">Delegation decision</div>
-        <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-[12px] text-slate-700 leading-relaxed">
-          Decomposed the Brief into three work-streams. Spawned three sub-agents in parallel using
-          <code class="text-[11px] bg-white border border-slate-200 rounded px-1 py-0.5">spawn_sub_agents</code>
-          with <code class="text-[11px] bg-white border border-slate-200 rounded px-1 py-0.5">delegationScope: 'descendants'</code>.
-        </div>
-      </div>
-
-      <div class="px-4 py-3 border-b border-slate-100">
-        <div class="key-label mb-2">Derived delegation skills</div>
-        <div class="space-y-1.5">
-          <div class="flex items-center gap-2 text-[12px]">
-            <svg class="w-3.5 h-3.5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-            <code class="text-[11px] bg-slate-100 rounded px-1.5 py-0.5">spawn_sub_agents</code>
-            <span class="text-slate-500 text-[11px]">derived · has 3 children</span>
-          </div>
-          <div class="flex items-center gap-2 text-[12px]">
-            <svg class="w-3.5 h-3.5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-            <code class="text-[11px] bg-slate-100 rounded px-1.5 py-0.5">reassign_task</code>
-            <span class="text-slate-500 text-[11px]">derived · has 3 children</span>
-          </div>
-          <div class="flex items-center gap-2 text-[12px]">
-            <svg class="w-3.5 h-3.5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-            <code class="text-[11px] bg-slate-100 rounded px-1.5 py-0.5">config_list_agents</code>
-            <span class="text-slate-500 text-[11px]">derived · has 3 children</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="px-4 py-3 border-b border-slate-100 flex-1 overflow-y-auto">
-        <div class="key-label mb-2">Outgoing delegations</div>
-        <ul class="space-y-2">
-          <li class="border border-slate-200 rounded-md p-2.5">
-            <div class="flex items-start justify-between mb-1">
-              <div class="flex items-center gap-1.5">
-                <svg class="w-3 h-3 text-green-600" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5L18.2 22 12 17.3 5.8 22l2.4-8.1L2 9.4h7.6z"/></svg>
-                <span class="text-[12px] font-medium text-slate-800">Head of Sales</span>
-              </div>
-              <span class="pill pill-success"><span class="pill-dot"></span>accepted</span>
-            </div>
-            <div class="text-[11px] text-slate-500">spawn · down · draft proposal body</div>
-          </li>
-          <li class="border border-slate-200 rounded-md p-2.5">
-            <div class="flex items-start justify-between mb-1">
-              <div class="flex items-center gap-1.5">
-                <svg class="w-3 h-3 text-green-600" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5L18.2 22 12 17.3 5.8 22l2.4-8.1L2 9.4h7.6z"/></svg>
-                <span class="text-[12px] font-medium text-slate-800">Head of Research</span>
-              </div>
-              <span class="pill pill-success"><span class="pill-dot"></span>accepted</span>
-            </div>
-            <div class="text-[11px] text-slate-500">spawn · down · competitor pricing research</div>
-          </li>
-          <li class="border border-slate-200 rounded-md p-2.5">
-            <div class="flex items-start justify-between mb-1">
-              <div class="flex items-center gap-1.5">
-                <svg class="w-3 h-3 text-indigo-500 pulse-dot" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>
-                <span class="text-[12px] font-medium text-slate-800">Head of Operations</span>
-              </div>
-              <span class="pill pill-running"><span class="pill-dot pulse-dot"></span>child in flight</span>
-            </div>
-            <div class="text-[11px] text-slate-500">spawn · down · pricing annex</div>
-          </li>
-        </ul>
-      </div>
-
-      <div class="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-        <a class="text-[12px] text-indigo-600 hover:underline font-medium" href="#">Open run detail →</a>
-        <button class="text-[12px] text-slate-500 hover:text-slate-800">Close panel</button>
-      </div>
-
-    </aside>
-
-  </div>
-
-  <!-- ───────── Rejection callout (under graph) ───────── -->
-  <section class="mt-4 grid grid-cols-2 gap-4">
-
-    <div class="bg-white rounded-xl border border-red-200 p-4">
-      <div class="flex items-center gap-2 mb-1">
-        <svg class="w-4 h-4 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-        <h3 class="text-[13px] font-semibold text-red-900">1 rejected delegation in this run</h3>
-        <span class="pill pill-rejected ml-1"><span class="pill-dot"></span>delegation_out_of_scope</span>
-      </div>
-      <p class="text-[12px] text-slate-600 mb-3 leading-relaxed">
-        <span class="font-medium text-slate-800">Head of Sales</span> attempted to reassign a sub-task to
-        <span class="font-medium text-slate-800">Research Analyst</span> using
-        <code class="text-[11px] bg-slate-100 border border-slate-200 rounded px-1 py-0.5">delegationScope: 'children'</code>.
-        Target is not a direct report — Research Analyst reports to Head of Research. Attempt was blocked before dispatch; the caller received a structured error and routed the work back up to the COO instead.
-      </p>
-      <details>
-        <summary class="text-[11px] font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1">
-          <svg class="w-3 h-3 transition-transform details-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
-          Error payload
-        </summary>
-        <pre class="mt-2 bg-slate-900 text-slate-100 text-[11px] leading-relaxed rounded-md p-3 overflow-x-auto"><code>{
-  "success": false,
-  "error": {
-    "code": "delegation_out_of_scope",
-    "message": "Target agt_research_analyst is not a direct report of caller agt_head_sales under scope 'children'.",
-    "context": {
-      "callerAgentId": "agt_head_sales",
-      "targetAgentId": "agt_research_analyst",
-      "delegationScope": "children",
-      "callerChildIds": ["agt_sdr_1", "agt_sdr_2", "agt_sdr_3"]
-    }
-  }
-}</code></pre>
-      </details>
-    </div>
-
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
-      <div class="flex items-center gap-2 mb-1">
-        <svg class="w-4 h-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        <h3 class="text-[13px] font-semibold text-slate-900">Why the graph shape matters</h3>
-      </div>
-      <p class="text-[12px] text-slate-600 leading-relaxed">
-        Every edge records <code class="text-[11px] bg-slate-100 border border-slate-200 rounded px-1 py-0.5">delegation_direction</code> on the child run — <span class="text-green-700 font-medium">down</span> for normal descent, <span class="text-amber-700 font-medium">up</span> for escalation to the parent, <span class="text-amber-700 font-medium">lateral</span> for root-only cross-subtree handoff. The direction is immutable once written, so delegation patterns are explainable in one pass without joining through mutable task state.
-      </p>
-      <ul class="mt-3 space-y-1.5 text-[12px] text-slate-600">
-        <li class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span><span>Rejected attempts show in-line so the user understands why a branch exists without a subtree under it.</span></li>
-        <li class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span><span>The opened run is highlighted; double-click any node to pivot the view to that run's trace.</span></li>
-        <li class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span><span>Graph is reconstructed from <code class="text-[11px] bg-slate-100 border border-slate-200 rounded px-1 py-0.5">agent_runs</code> alone — no joins through <code class="text-[11px] bg-slate-100 border border-slate-200 rounded px-1 py-0.5">tasks</code>.</span></li>
-      </ul>
-    </div>
-
-  </section>
-
-  <!-- ───────── Footer note ───────── -->
-  <footer class="mt-6 pb-8">
-    <div class="text-[11px] text-slate-400">
-      Mockup · static demo · corresponds to dev spec §7.2 + §8.2. Realistic worked example — Acme renewal Brief, 7 runs across 3 hierarchy levels, 6 accepted / 1 up-escalation / 1 rejected. Not wired to a live API.
-    </div>
-  </footer>
-
-</main>
+</div>
 
 <script>
-  // Node selection
-  const graph = document.getElementById('graph');
-  const nodes = graph.querySelectorAll('.graph-node');
-  nodes.forEach(n => {
-    n.addEventListener('click', () => {
-      nodes.forEach(x => x.classList.remove('selected'));
-      n.classList.add('selected');
-    });
+  const AGENTS = {
+    coo:      { icon: '🧭', name: 'COO',                role: 'Team lead · finished in 14 seconds',
+                did: 'Read the Brief, picked three teams to run in parallel, and stitched their work into one proposal at the end.' },
+    sales:    { icon: '📝', name: 'Head of Sales',      role: 'Proposal body · finished in 44 seconds',
+                did: 'Wrote the proposal body, using account context pulled by SDR 1.' },
+    research: { icon: '🔍', name: 'Head of Research',   role: 'Competitor pricing · finished in 48 seconds',
+                did: 'Compared the three cost-leader competitors and wrote the competitor pricing summary.' },
+    ops:      { icon: '💰', name: 'Head of Operations', role: 'Pricing annex · finished in 52 seconds',
+                did: 'Drafted the three-tier pricing annex. Flagged the tier-2 margin as thin — that heads-up appears in the final proposal so you can decide whether to offer it.' },
+    sdr:      { icon: '📇', name: 'SDR 1',              role: 'Account context · finished in 12 seconds',
+                did: 'Pulled account context from the CRM: pipeline value $240k, last touch 8 days ago.' },
+    analyst:  { icon: '📊', name: 'Research Analyst',   role: 'Competitor scan · finished in 22 seconds',
+                did: 'Scanned four competitor rate cards and surfaced the 12% cost-leader gap.' },
+    pricing:  { icon: '📐', name: 'Pricing Specialist', role: 'Pricing tiers · finished in 34 seconds',
+                did: 'Drafted the three pricing tiers and raised the tier-2 margin concern to the Head of Operations.' },
+  };
+
+  const dName = document.getElementById('d-name');
+  const dRole = document.getElementById('d-role');
+  const dDid  = document.getElementById('d-did');
+  const dAvatar = document.querySelector('#detail .avatar');
+
+  function selectNode(key) {
+    document.querySelectorAll('.node-g').forEach(g => g.classList.remove('selected'));
+    const g = document.querySelector(`.node-g[data-agent="${key}"]`);
+    if (g) g.classList.add('selected');
+    const a = AGENTS[key];
+    if (!a) return;
+    dAvatar.textContent = a.icon;
+    dName.textContent = a.name;
+    dRole.textContent = a.role;
+    dDid.textContent  = a.did;
+  }
+
+  document.querySelectorAll('.node-g').forEach(g => {
+    g.addEventListener('click', () => selectNode(g.dataset.agent));
   });
 
-  // Tab switch (visual only — no tab content swap for this mockup)
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-
-  // Filter toggle visual state
-  document.querySelectorAll('.filter-toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const isOn = btn.getAttribute('aria-pressed') === 'true';
-      btn.setAttribute('aria-pressed', String(!isOn));
-    });
-  });
-
-  // Details chev rotation
-  document.querySelectorAll('details').forEach(d => {
-    d.addEventListener('toggle', () => {
-      const c = d.querySelector('.details-chev');
-      if (c) c.style.transform = d.open ? 'rotate(90deg)' : 'rotate(0deg)';
+  // Replay the cascade flow animation on demand
+  const replayBtn = document.getElementById('replay-btn');
+  replayBtn.addEventListener('click', () => {
+    document.querySelectorAll('.edge-flow').forEach(el => {
+      el.style.animation = 'none';
+      void el.getBoundingClientRect(); // force reflow
+      el.style.animation = '';
     });
   });
 </script>
