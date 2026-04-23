@@ -179,7 +179,40 @@ Pasted by the user. 7 top-level findings + 3-item minor polish set = 9 discrete 
 
 **Mockups touched:** 0.
 
-**Commit:** round-4 changes committed as a single commit per the spec-review agent's contract.
+**Commit:** round-4 changes committed as commit `884d696` per the spec-review agent's contract.
+
+---
+
+## Round 5 — 2026-04-23 (applied) — finalisation pass
+
+### ChatGPT Feedback (raw)
+
+Pasted by the user. Three items. ChatGPT's verdict: *"This is basically at the finish line. Only two real issues left, and one tiny polish item. After fixing the testing-posture contradiction, I'd call it done."*
+
+### User decision
+
+**Implicit "all: as recommended"** — user requested "anything else we need to implement?" and supplied 3 specific items. All three applied.
+
+### Recommendations and Decisions (round 5)
+
+| # | Finding | Classification | Disposition | Spec/artefact changes |
+|---|---------|----------------|-------------|----------------------|
+| R5-F1 | Testing-posture contradiction — §Framing says `pure_function_only`, §11.5 says "None", but §11.2 + §11.3 define a DB-backed integration test + a concurrency test | mechanical (material — contract contradiction) | **applied — Option A (relax framing)** | §Framing line reworded to explicitly note the carve-outs exist and point at §11.5; §11.5 rewritten to declare both tests as permitted CLAUDE.md hot-path carve-outs with per-test justification. Option B (delete the tests) rejected — would weaken hot-path coverage of the idempotent concurrency story and the cache-attribution + HITL integration |
+| R5-F2 | Revision-history rows out of chronological order (Round 3, Round 4, then Round 1 at the bottom) | cosmetic | **applied** | Rows reordered so chronology is: UX revision → Round 1 → Vocabulary unification → Round 3 → Round 4 → Round 5 |
+| R5-F3 | Final grep sweep caught 2 residual `pack` refs: §6.2 softDelete "pack-level soft-delete" and §6.2 invariant #9 "unnamed-bundle pack ID" | mechanical | **applied** | Both scrubbed to `bundle-level soft-delete` and `unnamed-bundle ID`. All other `pack` hits in the tree are legitimate (rename-history documentation, "Pack is deprecated" rule, historical filenames of deleted v0 mockups, unrelated "packing"/"package") |
+
+**Schema surface change:** 0.
+**Mockups touched:** 0.
+**Routes touched:** 0.
+
+**Commit:** round-5 changes committed as a single commit per the spec-review agent's contract.
+
+### Final status
+
+ChatGPT's round-5 verdict: *"Ready for implementation."* The spec has been through 5 rounds of external ChatGPT review + 2 `spec-reviewer` (Codex) iterations + 4 external brief-review passes. All invariants across UX contract, contracts, schema, services, execution model, and testing are internally consistent.
+
+Spec is ready for implementation sign-off.
+
 
 
 
