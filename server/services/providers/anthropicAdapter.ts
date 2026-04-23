@@ -131,6 +131,7 @@ const anthropicAdapter: LLMProviderAdapter = {
       tokensIn:   data.usage.input_tokens,
       tokensOut:  data.usage.output_tokens,
       cachedPromptTokens: data.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
       providerRequestId: data.id ?? providerRequestId,
     };
   },

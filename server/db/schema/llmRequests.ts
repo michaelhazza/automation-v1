@@ -108,8 +108,12 @@ export const llmRequests = pgTable(
     // initiated a mid-body network RST).
     abortReason:   text('abort_reason'),
 
-    // Caching
+    // Caching — tokens read from Anthropic's ephemeral cache
     cachedPromptTokens: integer('cached_prompt_tokens').notNull().default(0),
+    // Tokens written to Anthropic's ephemeral cache on this call (migration 0210 §5.9)
+    cacheCreationTokens: integer('cache_creation_tokens').notNull().default(0),
+    // Call-level assembled prefix hash from cachedContextOrchestrator (migration 0210 §5.9)
+    prefixHash: text('prefix_hash'),
 
     // Routing metadata — now nullable (rev §6). Required for agent_run /
     // process_execution / iee rows; NULL for system / analyzer rows.
@@ -159,6 +163,10 @@ export const llmRequests = pgTable(
     statusIdx:            index('llm_requests_status_idx')
       .on(table.status)
       .where(sql`${table.status} <> 'success'`),
+    // Cached context infrastructure — §5.9
+    prefixHashIdx:        index('llm_requests_prefix_hash_idx')
+      .on(table.prefixHash)
+      .where(sql`${table.prefixHash} IS NOT NULL`),
   }),
 );
 
