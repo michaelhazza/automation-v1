@@ -90,3 +90,59 @@ Post-integrity sanity: all forward references resolve (§1.5 → §3a, §5.4a �
 Top themes: architectural principles / capability contract / composition constraints / defer marketplace-readiness.
 
 ---
+
+## Round 2 — 2026-04-23T08-55-59Z
+
+### ChatGPT Feedback (parsed)
+
+Six findings raised in round 2, framed via the user's per-item decisions (user message conveys the complete finding set):
+
+1. `automations.deterministic` flag — declare whether the Automation is a pure function of its inputs. (Relates to future caching / memoisation.)
+2. Tighten §5.4a rule 3 + §5.7 to **name** the engine-enforced retry behaviour on `idempotent`, with explicit `retryPolicy.overrideNonIdempotentGuard: true` opt-in for authors who know what they're doing.
+3. `automations.expected_duration_class` flag — declare typical latency band for queue prioritisation / SLA routing.
+4. Standardised error shape `{ code, type, message, retryable }` with `type` enum `'validation' | 'execution' | 'timeout' | 'external'`, mapping existing `status` values to `type` buckets; extend §5.7 + §5.9 + §9a.
+5. §5.10a — one-line additive clause stating that future relaxation of rules 1–3 requires an orchestration-model upgrade spec, not in-place edits.
+6. §5.4a enum work — (a) add one-line definitions for each existing enum value (`read_only` / `mutating` / `unknown`); (b) extend the enum with an `irreversible` class.
+
+### Recommendations and Decisions
+
+| # | Finding | Recommendation | User Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| 1 | `automations.deterministic` flag | defer | defer | medium | Valid but no v1 subsystem keys on it; reconsider when response caching / memoisation lands. Fold into §9b cross-cutting entry. |
+| 2 | Engine-enforced non-idempotent retry guard + explicit `overrideNonIdempotentGuard` opt-in | apply | apply | high | Round 1 left enforcement ambiguous ("the dispatcher does not auto-retry ... unless the author has explicitly overridden"); round 2 pins the mechanism, names it, and defines the override field. Clear contract for both author UI and dispatcher. |
+| 3 | `automations.expected_duration_class` flag | defer | defer | medium | No queue-prioritisation layer in v1; per-row `timeout_ms` override is the related concern already in §9b Workflow-composition deferrals. Reconsider with queue prio / SLA routing. |
+| 4 | Standardised error shape `{ code, type, message, retryable }` with `type` enum | apply | apply | high | Real gap — error handlers currently pattern-match on string codes only. A bucketed `type` enables coarse dashboards + error-handler branches without enumerating every code. Extends §5.7 (code→type mapping), §5.9 (event.error field), §9a (new `AutomationStepError` row). |
+| 5 | §5.10a future-relaxation clause | apply | apply | medium | Prevents silent rule-erosion across future specs; explicit "rules 1–3 are not edited in place" preserves historical record of the v1 constraint posture. |
+| 6a | Definitions for each §5.4a enum value (`read_only` / `mutating` / `unknown`) | apply | apply | medium | Cheap clarity — operators auditing Automations need unambiguous definitions; round 1 only named the enum values, not what they mean. |
+| 6b | Add `irreversible` as third side-effects enum value | defer | defer | medium | Not needed while Execute Mode keeps `mutating` = review by default; reconsider if auto-gate-bypass posture changes post-launch. Fold into §9b cross-cutting entry. |
+
+### Applied (only items the user approved as "apply")
+
+- **§5.4a rule 3 — engine-enforced non-idempotent retry guard.** Tightened to name the mechanism explicitly, state that dispatcher enforcement overrides authored `retryPolicy`, and define the `retryPolicy.overrideNonIdempotentGuard: true` opt-in (logged on step record, second-tier authoring-time warning). Covers item 2.
+- **§5.7 Error propagation — full rewrite.** Added the standardised `AutomationStepError` TypeScript interface with `{ code, type, message, retryable }`. Added the `type`-bucket mapping table (`validation` / `execution` / `timeout` / `external`) with rationale for each bucket. Updated per-error-class behaviour to surface `code` + `type`. Updated the retry bullet to name the engine-enforced guard, cite the `retryable` field's derivation (`retryable: true` iff transient-class AND the guard doesn't apply OR has been overridden), and explicitly route the `AutomationStepError` to error-handler branches. Covers items 2 + 4.
+- **§5.3 `InvokeAutomationStep` inline comment.** Updated the `retryPolicy?` comment to reference the engine-enforced guard and the `overrideNonIdempotentGuard` override field. Covers item 2.
+- **§5.9 `workflow.step.automation.completed` event.** Added `error?: AutomationStepError` field to the event shape, present iff `status !== 'ok'`. Added inline mapping table showing the status↔code 1:1 correspondence (short-form vs full-qualified). Covers item 4.
+- **§5.10a Composition constraints — future relaxation clause.** Appended a final paragraph stating that relaxation of rules 1–3 requires an orchestration-model upgrade spec and that rules 1–3 are not edited in place — a superseding section replaces them. Covers item 5.
+- **§5.4a `side_effects` column definition.** Added one-line definitions for each enum value: `read_only` (reads, writes nothing), `mutating` (writes to systems of record, review required), `unknown` (undeclared; treated as `mutating` until reclassified). Covers item 6a.
+- **§9a Contracts table.** Updated `workflow.step.automation.completed` row to note the new `error` field, the 1:1 status↔code mapping via §5.9, and added a new row for `AutomationStepError` with producer/consumer/nullability/example. Covers item 4.
+- **§9b Deferred Items — cross-cutting entry extended.** Added a sub-bullet block "Capability-contract extensions — reconsider per trigger, not in v1" under the existing Automation-versioning / marketplace-readiness entry, covering all three deferred items with explicit re-evaluation triggers: `deterministic` (caching / memoisation), `expected_duration_class` (queue prioritisation / SLA routing, with cross-ref to existing per-row `timeout_ms` override), `irreversible` enum value (auto-gate-bypass posture change). Covers items 1, 3, 6b.
+
+### Rejected
+
+None this round.
+
+### Deferred
+
+Items 1, 3, 6b folded into the existing §9b cross-cutting entry "Automation + Workflow versioning and marketplace-readiness" as a sub-block with three bullets and explicit re-evaluation triggers. Will promote to `tasks/todo.md` at session finalization.
+
+### Integrity check
+
+1 issue found this round:
+
+- **Naming mismatch between §5.9 `status` enum (short-form — `'http_error'`, `'timeout'`, `'network_error'`, `'input_validation_failed'`, `'output_validation_failed'`, `'missing_connection'`) and §5.7 error-code vocabulary (full-qualified — `'automation_http_error'`, `'automation_timeout'`, etc.).** The round-2 §9a edit initially claimed "`error.code` always corresponds to `status` (1:1)", but the literal strings differ. Mechanically reconciled by inlining an explicit status→code mapping table in the §5.9 `error?` field comment and updating the §9a row phrasing to cite "short-form telemetry label" vs "full §5.7 error-code string" with 1:1 per the inlined mapping. Pre-existing mismatch (predates round 2) — round 2 surfaced it by requiring a standardised error shape that named `code` explicitly.
+
+Post-integrity sanity: all forward references resolve. §5.4a rule 3 (new override field) ↔ §5.3 comment ↔ §5.7 retry bullet ↔ §9a `InvokeAutomationStep` row — all consistent. §5.9 status enum ↔ §5.7 code enum ↔ §5.9 mapping table — all consistent. §5.10a future-relaxation clause has no back-references. §5.4a enum definitions ↔ gate-resolution rule ↔ §5.6 — consistent (`unknown` is treated as `mutating` for gate purposes in both the rule and the new enum definition). No sections left empty. No broken heading links.
+
+Top themes: standardised error shape / engine-enforced retry guard / future-proofing composition / capability-contract definitions / three deferred capability-contract extensions.
+
+---

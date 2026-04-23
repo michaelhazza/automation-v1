@@ -662,9 +662,15 @@ interface InvokeAutomationStep {
                                   // today — this is a service-level constant. Adding a per-row
                                   // override column is an open question deferred to architect (§12).
   retryPolicy?: StepRetryPolicy;  // default: inherit from Workflow's step-retry default, subject
-                                  // to the Automation's `idempotent` column (§5.4a rule 3) —
-                                  // non-idempotent Automations disable auto-retry on transient
-                                  // failure unless the author overrides explicitly.
+                                  // to the engine-enforced non-idempotent retry guard from the
+                                  // Automation's `idempotent` column (§5.4a rule 3, §5.7) —
+                                  // non-idempotent Automations have auto-retry on transient
+                                  // failure classes suppressed at dispatch time. Authors who
+                                  // know what they're doing can opt out via
+                                  // `retryPolicy.overrideNonIdempotentGuard: true` on the step;
+                                  // the override is honoured by the dispatcher, logged on the
+                                  // step record, and surfaced in authoring-time UI as a
+                                  // second-tier warning.
   gateLevel?: 'auto' | 'review';  // default: resolved from the Automation's `side_effects` column
                                   // per §5.4a rule 1 and §5.6 (read_only → auto; mutating or
                                   // unknown → review). `'block'` is intentionally excluded — to
@@ -701,7 +707,7 @@ Two new columns on `automations` (added by migration `0203_rename_processes_to_a
 
 | Column | Type | Default | Nullability | Purpose |
 |---|---|---|---|---|
-| `side_effects` | text enum (`'read_only' \| 'mutating' \| 'unknown'`) | `'unknown'` | NOT NULL | Declares what the external call does to systems of record. Drives the gate-resolution default for the Automation when invoked from a Workflow step with no explicit `gateLevel`. |
+| `side_effects` | text enum (`'read_only' \| 'mutating' \| 'unknown'`) | `'unknown'` | NOT NULL | Declares what the external call does to systems of record. Drives the gate-resolution default for the Automation when invoked from a Workflow step with no explicit `gateLevel`. **Enum values:** `read_only` — the Automation reads from external systems and returns data but writes nothing back (e.g. fetch-contact, list-orders, query-inventory); safe to run without review. `mutating` — the Automation writes to or modifies external systems of record (e.g. create-contact, send-email, post-message, update-deal); review required by default because the effect is observable outside our boundary. `unknown` — side-effect class has not been declared by the Automation author; treated as `mutating` for gate-resolution purposes (safe default) until an admin reclassifies. |
 | `idempotent` | boolean | `false` | NOT NULL | Declares whether the external call is safe to retry on transient failure without producing duplicate effects. Drives retry-policy posture at the Workflow layer. |
 
 Resolution rules:
@@ -711,7 +717,7 @@ Resolution rules:
    - `side_effects = 'mutating'` → `gateLevel: 'review'`
    - `side_effects = 'unknown'` → `gateLevel: 'review'` (safe default; audit the Automation and reclassify)
 2. **Explore Mode override.** Per §5.6 / §6.2, Explore Mode forces `'review'` on every `invoke_automation` step regardless of declared gate or `side_effects` class. The classification drives the Execute-Mode default, not the Explore-Mode override.
-3. **Retry posture.** `idempotent = true` allows the Workflow's step-retry default to apply on transient failures (`timeout`, `network_error`, 5xx `http_error`). `idempotent = false` disables automatic retry on those error classes — the Workflow must handle failure explicitly (continue, stop, or branch to error handler). Authoring-time UI warns when a user selects a retry policy on an Automation with `idempotent = false`; the choice is persisted as authored (no silent override).
+3. **Retry posture — engine-enforced non-idempotent guard.** `idempotent = true` allows the Workflow's step-retry default to apply on transient failures (`timeout`, `network_error`, 5xx `http_error`). `idempotent = false` disables automatic retry on those error classes at dispatch time — the step dispatcher enforces this regardless of the authored `retryPolicy`. The Workflow must handle failure explicitly (continue, stop, or branch to error handler). Authoring-time UI warns when a user selects a retry policy on an Automation with `idempotent = false`; the choice is persisted as authored. The dispatcher's non-idempotent guard is the canonical enforcement point — a persisted `retryPolicy` on a non-idempotent Automation is a no-op at runtime unless the author has explicitly opted out via `retryPolicy.overrideNonIdempotentGuard: true` on the step. The override is an author-asserted "I know this Automation is safe to retry despite the declared `idempotent: false`" escape hatch; it is logged on the step record and surfaced in authoring-time UI as a second-tier warning, but the dispatcher honours it. The override exists for edge cases (author knows the external engine deduplicates by request-id, or the business-level effect is naturally idempotent even if the capability declaration is conservative); it is not the default path.
 4. **Audit expectation.** Every Automation ships with `side_effects` and `idempotent` set by the author; the default `'unknown' / false` is a safe-but-noisy fallback for unmigrated or imported rows. Post-launch monitoring flags rows stuck on defaults.
 
 The capability-layer contract is the Automation's self-declaration; the Workflow layer consumes it but does not override it. A user who needs a stricter posture on a specific step sets `gateLevel: 'review'` or disables retries explicitly on the step — they do not mutate the underlying Automation.
@@ -735,11 +741,43 @@ Cross-reference: `side_effects` on **Automations** (this section) is a distinct 
 
 ### 5.7 Error propagation
 
-- Automation call returns non-2xx HTTP → step fails with `error_code: 'automation_http_error'`, payload includes status + response body.
-- Automation call times out → step fails with `error_code: 'automation_timeout'`. Timeout defaults to 300s unless overridden on the step.
-- Network error / DNS failure → step fails with `error_code: 'automation_network_error'`.
-- Retries apply per the step's `retryPolicy` (default: Workflow's step-retry default), gated by the Automation's `idempotent` column per §5.4a rule 3 — a `retryPolicy` on a non-idempotent Automation is persisted as authored but the dispatcher does not auto-retry on transient failure classes (`timeout`, `network_error`, 5xx `http_error`) unless the author has explicitly overridden the guard at authoring time.
-- Failure cascades follow Workflow error-handling semantics (continue / stop / branch to error handler — whatever the existing DSL supports).
+**Standardised error shape.** Every `invoke_automation` failure — authoring-time, pre-dispatch, or post-dispatch — surfaces a standardised error object to both Workflow error-handlers and the `workflow.step.automation.completed` telemetry event:
+
+```typescript
+interface AutomationStepError {
+  code: string;                                          // the §5.7 error_code vocabulary (`automation_http_error`,
+                                                         // `automation_timeout`, `automation_network_error`,
+                                                         // `automation_input_validation_failed`,
+                                                         // `automation_output_validation_failed`,
+                                                         // `automation_missing_connection`, `automation_not_found`,
+                                                         // `automation_scope_mismatch`, `automation_composition_invalid`,
+                                                         // `workflow_composition_invalid`)
+  type: 'validation' | 'execution' | 'timeout' | 'external'; // bucketed class — see mapping below
+  message: string;                                       // human-readable, suitable for run-log surface
+  retryable: boolean;                                    // dispatcher advisory — true only when the error class
+                                                         // is transient AND the Automation is `idempotent: true`
+                                                         // (or `retryPolicy.overrideNonIdempotentGuard: true`)
+}
+```
+
+**`type` bucketing** — every `code` maps to exactly one `type`:
+
+| `type` | `code` values |
+|---|---|
+| `validation` | `automation_input_validation_failed`, `automation_output_validation_failed`, `workflow_composition_invalid`, `automation_composition_invalid` |
+| `execution` | `automation_missing_connection`, `automation_not_found`, `automation_scope_mismatch` |
+| `timeout` | `automation_timeout` |
+| `external` | `automation_http_error`, `automation_network_error` |
+
+Rationale: `validation` = the step never had a chance to run correctly (bad inputs, bad outputs, bad composition); `execution` = pre-dispatch resolution/configuration failure; `timeout` = a specific retry-relevant class promoted out of `external` so handlers can branch on slowness alone; `external` = the external engine was reached but failed to produce a clean response. Workflow error handlers may branch on `type` (coarse) or `code` (fine-grained); downstream observability pivots on `type` for operator dashboards without needing to enumerate every code.
+
+**Per-error-class behaviour:**
+
+- Automation call returns non-2xx HTTP → step fails with `code: 'automation_http_error'`, `type: 'external'`, payload includes status + response body.
+- Automation call times out → step fails with `code: 'automation_timeout'`, `type: 'timeout'`. Timeout defaults to 300s unless overridden on the step.
+- Network error / DNS failure → step fails with `code: 'automation_network_error'`, `type: 'external'`.
+- Retries apply per the step's `retryPolicy` (default: Workflow's step-retry default), gated at the engine by the Automation's `idempotent` column per §5.4a rule 3 — the **engine-enforced non-idempotent retry guard**. A `retryPolicy` on a non-idempotent Automation is persisted as authored but the dispatcher does not auto-retry on transient failure classes (`timeout`, `network_error`, 5xx `http_error`). The guard is engine-level (enforced by the step dispatcher), not authoring-level; authoring-time UI only warns, it does not block. To override the guard for a specific step, the author sets `retryPolicy.overrideNonIdempotentGuard: true` on that step. The override is honoured by the dispatcher, logged on the step record, and surfaced in authoring-time UI as a second-tier warning. The dispatcher sets `retryable: true` on the surfaced error only when the transient-class condition holds AND the guard either does not apply (Automation is `idempotent: true`) or has been explicitly overridden; otherwise `retryable: false`.
+- Failure cascades follow Workflow error-handling semantics (continue / stop / branch to error handler — whatever the existing DSL supports). Error-handler branches receive the full `AutomationStepError` object; the existing `error_code` surface is preserved as `error.code` for callers that pattern-match on the string.
 
 ### 5.8 Credential resolution and scoping
 
@@ -809,6 +847,25 @@ Two events per `invoke_automation` step, but the `dispatched` event is condition
   httpStatus?: number,           // present when `status` is `'ok'`, `'http_error'`, or `'output_validation_failed'`
   latencyMs: number,             // time from step start to step terminal outcome (pre-dispatch failures have low latency)
   responseSizeBytes?: number,    // present when the webhook returned a body
+  error?: AutomationStepError,   // present iff `status !== 'ok'`; standardised shape per §5.7 —
+                                 // { code, type, message, retryable }. `status` is the short-form
+                                 // telemetry label within this event; `error.code` is the full
+                                 // qualified §5.7 error-code vocabulary string. They correspond
+                                 // 1:1 per this mapping: 'http_error'→'automation_http_error',
+                                 // 'timeout'→'automation_timeout',
+                                 // 'network_error'→'automation_network_error',
+                                 // 'input_validation_failed'→'automation_input_validation_failed',
+                                 // 'output_validation_failed'→'automation_output_validation_failed',
+                                 // 'missing_connection'→'automation_missing_connection',
+                                 // 'automation_not_found'→'automation_not_found' (same string),
+                                 // 'automation_scope_mismatch'→'automation_scope_mismatch' (same),
+                                 // 'automation_composition_invalid'→'automation_composition_invalid' (same).
+                                 // `error.type` is the §5.7 bucket
+                                 // (`validation` | `execution` | `timeout` | `external`);
+                                 // `error.retryable` reflects the dispatcher's retry-advisory after
+                                 // applying the §5.4a rule 3 guard (and any override). Operator
+                                 // dashboards pivot on `error.type` for coarse grouping and
+                                 // `error.code` for fine-grained drill-down.
   timestamp: ISO8601,
 }
 ```
@@ -833,6 +890,8 @@ Per §1.5 principle 1 (Automations are leaf calls; logic lives at the Workflow l
 4. **Dispatcher defence-in-depth.** The step dispatcher rejects any `invoke_automation` step resolution that would produce more than one outbound webhook for the step (e.g. an Automation row that has been mutated to embed a list of webhook targets). One step, one webhook, one response.
 
 Violations of rules 1–3 are authoring-time errors (`error_code: 'workflow_composition_invalid'`) raised by the Workflow-definition validator. Rule 4 is a dispatch-time error (`error_code: 'automation_composition_invalid'`) raised by the step dispatcher. Both error codes register alongside the §5.7 vocabulary.
+
+Future relaxation of rules 1–3 (e.g. allowing `invoke_workflow` steps, Automation → Automation chaining at our layer, or callback-based composition) requires an orchestration-model upgrade spec that defines recursion detection, cycle breaking, depth accounting, and the revised capability contract. Rules 1–3 are not edited in place — a later change replaces them with a superseding section and leaves the rule numbering here intact as historical record.
 
 ### 5.11 UI considerations
 
@@ -1545,7 +1604,8 @@ Per `docs/spec-authoring-checklist.md §3`, every data shape crossing a service 
 |---|---|---|---|---|---|
 | `InvokeAutomationStep` | TypeScript discriminated union member in the Workflow DSL (see §5.3) | Workflow author (authoring UI) → stored in the Workflow definition JSON on `workflow_templates` / `workflow_runs` | `workflowEngineService.ts` step dispatcher (post-rename) | `kind` required; `outputMapping`/`timeoutSeconds`/`retryPolicy`/`gateLevel` optional with documented defaults | `{ kind: 'invoke_automation', automationId: 'uuid-a', inputMapping: { to: '{{ run.input.email }}', subject: 'Hi' }, gateLevel: 'review' }` |
 | `workflow.step.automation.dispatched` | Tracing event registered in `server/lib/tracing.ts` (see §5.9) | `workflowEngineService.ts` at the moment the webhook fetch is initiated | Tracing sink / operator observability queries | All fields required except optional ones per the type; `subaccountId` nullable for org-scoped runs | `{ eventType: 'workflow.step.automation.dispatched', runId: 'r-1', workflowId: 'w-1', stepId: 's-1', automationId: 'a-1', automationEngineId: 'e-1', engineType: 'make', subaccountId: 'sa-1', orgId: 'o-1', timestamp: '2026-04-22T21:45:51Z' }` |
-| `workflow.step.automation.completed` | Tracing event (see §5.9) | `workflowEngineService.ts` after the step reaches a terminal outcome (dispatched-and-returned OR pre-dispatch failure) | Tracing sink / operator queries | `httpStatus` / `responseSizeBytes` optional (absent on `timeout`, `network_error`, `missing_connection`, `automation_not_found`, `automation_scope_mismatch`, `automation_composition_invalid`, `input_validation_failed`); status enum per §5.9 — every terminal outcome appears. Invariant: `workflow.step.automation.dispatched` fires iff the step reached successful pre-dispatch resolution; pre-dispatch failures emit ONLY the completed event. Authoring-time rejections (`workflow_composition_invalid`) never reach this event path. | `{ eventType: 'workflow.step.automation.completed', runId: 'r-1', workflowId: 'w-1', stepId: 's-1', automationId: 'a-1', status: 'ok', httpStatus: 200, latencyMs: 842, responseSizeBytes: 1240, timestamp: '2026-04-22T21:45:51Z' }` |
+| `workflow.step.automation.completed` | Tracing event (see §5.9) | `workflowEngineService.ts` after the step reaches a terminal outcome (dispatched-and-returned OR pre-dispatch failure) | Tracing sink / operator queries | `httpStatus` / `responseSizeBytes` optional (absent on `timeout`, `network_error`, `missing_connection`, `automation_not_found`, `automation_scope_mismatch`, `automation_composition_invalid`, `input_validation_failed`); status enum per §5.9 — every terminal outcome appears. `error` field present iff `status !== 'ok'` and carries the standardised `AutomationStepError` shape from §5.7 (`{ code, type, message, retryable }`). `status` is the short-form telemetry label; `error.code` is the full §5.7 error-code string — they correspond 1:1 per the mapping table inlined in §5.9. Invariant: `workflow.step.automation.dispatched` fires iff the step reached successful pre-dispatch resolution; pre-dispatch failures emit ONLY the completed event. Authoring-time rejections (`workflow_composition_invalid`) never reach this event path. | `{ eventType: 'workflow.step.automation.completed', runId: 'r-1', workflowId: 'w-1', stepId: 's-1', automationId: 'a-1', status: 'ok', httpStatus: 200, latencyMs: 842, responseSizeBytes: 1240, timestamp: '2026-04-22T21:45:51Z' }` — failure example: `{ ..., status: 'http_error', httpStatus: 502, latencyMs: 1200, error: { code: 'automation_http_error', type: 'external', message: 'Upstream engine returned 502', retryable: false }, timestamp: '…' }` |
+| `AutomationStepError` | TypeScript value (see §5.7) | Workflow step dispatcher when an `invoke_automation` step fails | Workflow error-handler branches; `workflow.step.automation.completed` event payload | All fields required; `code` enum per §5.7 error-code vocabulary; `type` ∈ `{validation, execution, timeout, external}` bucketed per §5.7 mapping; `retryable` reflects dispatcher's advisory after §5.4a rule 3 guard and any `overrideNonIdempotentGuard` | `{ code: 'automation_timeout', type: 'timeout', message: 'Webhook did not respond within 300s', retryable: true }` |
 | `automations.side_effects` / `automations.idempotent` | Columns on `automations` table (see §5.4a) | Automation author (admin UI) → migration `0203_rename_processes_to_automations.sql` adds the columns with the rename | `resolveEffectiveGate` (gate default); Workflow step dispatcher (retry posture); Workflow authoring UI (warning on non-idempotent retry) | `side_effects` NOT NULL, defaults to `'unknown'`; `idempotent` NOT NULL, defaults to `false`. Values constrained to the §5.4a enums. | `{ side_effects: 'mutating', idempotent: false }` |
 | `UserAgentSafetyModePreference` row | `user_agent_safety_mode_preferences` table row (see §6.3) | `userAgentSafetyModePreferencesService` on run completion | Run-creation resolver (`resolveSafetyMode` in §6.6) | `subaccount_id` nullable; `promoted_to_execute_at` nullable; all others NOT NULL | `{ id: 'pref-1', organisation_id: 'o-1', user_id: 'u-1', agent_id: 'a-1', subaccount_id: 'sa-1', last_successful_mode: 'explore', successful_explore_runs: 3, promoted_to_execute_at: null, updated_at: '2026-04-22T21:45:51Z' }` |
 | `HeartbeatGateInput` | TypeScript value (see §7.5) | `heartbeatActivityGateService.ts` dispatch handler | `evaluateHeartbeatGate` pure function | `lastTickEvaluatedAt` / `lastMeaningfulTickAt` nullable (first-tick) | `{ agentId: 'a-1', subaccountId: 'sa-1', lastTickEvaluatedAt: null, lastMeaningfulTickAt: null, ticksSinceLastMeaningfulRun: 0, config: { eventDeltaThreshold: 3, minTicksBeforeMandatoryRun: 6 } }` |
@@ -1597,6 +1657,10 @@ Per `docs/spec-authoring-checklist.md §7`, every prose mention of "deferred", "
 - **Data sandbox** (duplicated DBs, synthetic data). §1.2 — Explore Mode is the substitute in v1.
 - **OpenClaw substrate work.** §1.2 — covered in `openclaw-strategic-analysis.md`, not this spec.
 - **Automation + Workflow versioning and marketplace-readiness.** Full lifecycle ownership for shared/partner/BYO capabilities — immutable execution versions pinned on runs, opt-in upgrade paths, cross-tenant isolation, partner-provided capability ingestion, marketplace distribution primitives. Pre-launch posture (§2) + §1.5 principle 3 (Workflows are the primary user construct) mean v1 does not need multi-tenant partner publishing. The §5.10a composition constraints are the forward-compatible foundation: today's "depth = 1, no recursive Workflow calls" ruleset is what a future multi-party graph will inherit from. Re-evaluate when (a) an external party needs to publish capabilities the platform consumes, OR (b) in-place upgrades to a shared Automation cause a customer-visible break — whichever surfaces first. No v1 migration or schema accommodation beyond what §5.4a and §5.10a already declare.
+  - **Capability-contract extensions — reconsider per trigger, not in v1.** The §5.4a capability contract is deliberately minimal in v1 (`side_effects` + `idempotent` only). Three extensions are parked here with explicit triggers:
+    - **`automations.deterministic` flag** — declares whether the Automation is a pure function of its inputs. Not added in v1 because no subsystem currently keys on it. Reconsider when/if Automation-response caching or memoisation lands — at that point cached-result safety needs the author's declaration.
+    - **`automations.expected_duration_class` flag** — declares typical latency band (e.g. `fast < 5s`, `normal < 60s`, `slow < 300s`). Not added in v1 because the dispatcher has a single timeout constant and no queue-prioritisation layer. Reconsider when queue prioritisation / SLA routing lands. Note that the **per-row `timeout_ms` override column** (a separate prior deferral already listed under Workflow-composition Part 2 above) is the related-but-distinct concern — the timeout override is a hard ceiling, `expected_duration_class` would be a scheduling hint.
+    - **`irreversible` as a third side-effects enum value** — distinguishes `mutating-but-reversible` (create-contact, which we can delete) from `mutating-and-irreversible` (send-email, which we cannot unsend). Deliberately NOT added to the v1 enum — §5.4a keeps `read_only | mutating | unknown` only. Reconsider if the platform's auto-gate-bypass posture changes post-launch (i.e. if "Execute Mode skips review for `mutating`" ever becomes the default, we would need `irreversible` as the explicit "always review regardless of mode" class). Until then, `mutating` is sufficient.
 
 Architect pass reviews this list at plan time; any item that turns out to block v1 gets promoted out of Deferred Items and into the phase it belongs in.
 
