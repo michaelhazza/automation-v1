@@ -35,7 +35,7 @@ export default function StartingTeamPicker({ value, onChange, disabled }: Starti
   }, []);
 
   const selectClass =
-    'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500';
+    'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
   if (loadState === 'loading') {
     return (
@@ -53,19 +53,28 @@ export default function StartingTeamPicker({ value, onChange, disabled }: Starti
     );
   }
 
+  const selectedDescription = value
+    ? (templates.find((t) => t.id === value)?.description ?? null)
+    : null;
+
   return (
-    <select
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
-      disabled={disabled}
-      className={selectClass}
-    >
-      <option value="">None / configure later</option>
-      {templates.map((t) => (
-        <option key={t.id} value={t.id} title={t.description ?? ''}>
-          {t.name}
-        </option>
-      ))}
-    </select>
+    <div>
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+        disabled={disabled}
+        className={selectClass}
+      >
+        <option value="">None / configure later</option>
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      {selectedDescription && (
+        <p className="mt-1.5 text-[12px] text-slate-500">{selectedDescription}</p>
+      )}
+    </div>
   );
 }

@@ -30,6 +30,7 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [applyWarning, setApplyWarning] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const mountedRef = useRef(true);
   useEffect(() => { return () => { mountedRef.current = false; }; }, []);
@@ -49,6 +50,8 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
 
   const handleCreate = async () => {
     setError('');
+    setApplyWarning(null);
+    setSubmitting(true);
     try {
       const { data: created } = await api.post('/api/subaccounts', {
         name: form.name,
@@ -87,6 +90,8 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
       } else {
         setError(serverMessage ?? 'Failed to create subaccount. Please try again.');
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -154,15 +159,17 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
               <StartingTeamPicker
                 value={selectedTemplateId}
                 onChange={setSelectedTemplateId}
+                disabled={submitting}
               />
             </div>
           </div>
           <div className="flex gap-3">
             <button
               onClick={handleCreate}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
+              disabled={submitting}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors"
             >
-              Create
+              {submitting ? 'Creating…' : 'Create'}
             </button>
             <button
               onClick={() => { setShowForm(false); setSelectedTemplateId(null); }}
