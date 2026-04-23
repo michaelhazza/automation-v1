@@ -12,6 +12,7 @@
 **Run at:** 2026-04-24T00:00:00Z
 **Prior log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4a-2026-04-24T00-00-00Z.md`
 **Remediation commit:** `ac60f6e6` — `fix(paperclip-hierarchy): chunk 4a spec gap — extract spawn/reassign precondition pure helpers + tests`
+**Commit at finish:** `f6917d68`
 
 ---
 
