@@ -117,7 +117,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ),
   asyncHandler(async (req, res) => {
-    const result = await documentBundleService.getBundleWithMembers(req.params.id);
+    const result = await documentBundleService.getBundleWithMembers(req.params.id, req.orgId!);
     if (!result) {
       res.status(404).json({ error: 'Bundle not found' });
       return;
@@ -134,7 +134,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ),
   asyncHandler(async (req, res) => {
-    const result = await documentBundleService.getBundleWithMembers(req.params.id);
+    const result = await documentBundleService.getBundleWithMembers(req.params.id, req.orgId!);
     if (!result) {
       res.status(404).json({ error: 'Bundle not found' });
       return;
@@ -157,7 +157,7 @@ router.patch(
       return;
     }
     // Only allow renaming named bundles
-    const existing = await documentBundleService.getBundleWithMembers(req.params.id);
+    const existing = await documentBundleService.getBundleWithMembers(req.params.id, req.orgId!);
     if (!existing) {
       res.status(404).json({ error: 'Bundle not found' });
       return;
@@ -169,6 +169,7 @@ router.patch(
     // Re-promote with the new name (update name)
     const updated = await documentBundleService.promoteToNamedBundle({
       bundleId: req.params.id,
+      organisationId: req.orgId!,
       name,
       userId: req.user!.id,
     }).catch((e: { code?: string }) => {
@@ -198,6 +199,7 @@ router.post(
     }
     const bundle = await documentBundleService.promoteToNamedBundle({
       bundleId: req.params.id,
+      organisationId: req.orgId!,
       name,
       userId: req.user!.id,
     });
@@ -218,7 +220,7 @@ router.post(
       res.status(400).json({ error: 'documentId is required' });
       return;
     }
-    const member = await documentBundleService.addMember({ bundleId: req.params.id, documentId });
+    const member = await documentBundleService.addMember({ bundleId: req.params.id, organisationId: req.orgId!, documentId });
     res.status(201).json(member);
   }),
 );
@@ -231,7 +233,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.DOCUMENT_BUNDLES_WRITE),
   asyncHandler(async (req, res) => {
-    await documentBundleService.removeMember({ bundleId: req.params.id, documentId: req.params.docId });
+    await documentBundleService.removeMember({ bundleId: req.params.id, organisationId: req.orgId!, documentId: req.params.docId });
     res.status(204).send();
   }),
 );
@@ -275,6 +277,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     await documentBundleService.detach({
       bundleId: req.params.id,
+      organisationId: req.orgId!,
       subjectType: req.params.subjectType as AttachmentSubjectType,
       subjectId: req.params.subjectId,
     });
@@ -290,7 +293,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.DOCUMENT_BUNDLES_WRITE),
   asyncHandler(async (req, res) => {
-    await documentBundleService.softDelete(req.params.id);
+    await documentBundleService.softDelete(req.params.id, req.orgId!);
     res.status(204).send();
   }),
 );
@@ -335,6 +338,7 @@ for (const [path, subjectType] of [
     requireOrgPermission(ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ),
     asyncHandler(async (req, res) => {
       const attachments = await documentBundleService.listAttachmentsForSubject({
+        organisationId: req.orgId!,
         subjectType,
         subjectId: req.params.id,
       });

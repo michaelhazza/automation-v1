@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   documentBundles,
   documentBundleMembers,
@@ -22,8 +22,9 @@ import { computeDocSetHash } from './documentBundleServicePure.js';
 // Owns CRUD for document_bundles, document_bundle_members,
 // document_bundle_attachments, and bundle_suggestion_dismissals.
 //
-// Auth: service trusts pre-validated organisationId / subaccountId from
-// route handlers. Routes enforce org scope and permission keys.
+// Every public method takes `organisationId` explicitly and scopes queries to
+// it (Layer 2 of the three-layer isolation contract). All DB access goes
+// through `getOrgScopedDb()` (Layer 1B). RLS is the silent Layer 3 backstop.
 // ---------------------------------------------------------------------------
 
 export type {
@@ -73,6 +74,7 @@ export async function create(input: {
   if (!input.name.trim()) {
     throw { statusCode: 400, code: CACHED_CONTEXT_BUNDLE_NAME_EMPTY, message: 'Bundle name cannot be empty' };
   }
+  const db = getOrgScopedDb('documentBundleService.create');
   try {
     const [row] = await db.insert(documentBundles).values({
       organisationId: input.organisationId,
@@ -105,6 +107,7 @@ export async function findOrCreateUnnamedBundle(input: {
   createdByUserId: string;
 }): Promise<DocumentBundle> {
   const docSetHash = computeDocSetHash(input.documentIds);
+  const db = getOrgScopedDb('documentBundleService.findOrCreateUnnamedBundle');
 
   // Fast path: find an existing auto bundle whose member set exactly matches.
   // We store docSetHash as a description sentinel to enable fast lookup.
@@ -183,6 +186,7 @@ export async function findOrCreateUnnamedBundle(input: {
 // ---------------------------------------------------------------------------
 export async function promoteToNamedBundle(input: {
   bundleId: string;
+  organisationId: string;
   name: string;
   userId: string;
 }): Promise<DocumentBundle> {
@@ -190,6 +194,7 @@ export async function promoteToNamedBundle(input: {
     throw { statusCode: 400, code: CACHED_CONTEXT_BUNDLE_NAME_EMPTY, message: 'Bundle name cannot be empty' };
   }
 
+  const db = getOrgScopedDb('documentBundleService.promoteToNamedBundle');
   try {
     const updated = await db
       .update(documentBundles)
@@ -202,6 +207,7 @@ export async function promoteToNamedBundle(input: {
       .where(
         and(
           eq(documentBundles.id, input.bundleId),
+          eq(documentBundles.organisationId, input.organisationId),
           eq(documentBundles.isAutoCreated, true),
           isNull(documentBundles.deletedAt)
         )
@@ -209,10 +215,13 @@ export async function promoteToNamedBundle(input: {
       .returning();
 
     if (updated.length === 0) {
-      // Check if bundle exists at all.
+      // Check if bundle exists at all within the org.
       const exists = await db.select({ id: documentBundles.id })
         .from(documentBundles)
-        .where(eq(documentBundles.id, input.bundleId))
+        .where(and(
+          eq(documentBundles.id, input.bundleId),
+          eq(documentBundles.organisationId, input.organisationId),
+        ))
         .limit(1);
       if (exists.length === 0) {
         throw { statusCode: 404, code: CACHED_CONTEXT_BUNDLE_NOT_FOUND, message: 'Bundle not found' };
@@ -245,6 +254,7 @@ export async function suggestBundle(input: {
   if (input.documentIds.length < 2) return { suggest: false };
 
   const docSetHash = computeDocSetHash(input.documentIds);
+  const db = getOrgScopedDb('documentBundleService.suggestBundle');
 
   // 1. Dismissal check
   const dismissed = await db
@@ -252,6 +262,7 @@ export async function suggestBundle(input: {
     .from(bundleSuggestionDismissals)
     .where(
       and(
+        eq(bundleSuggestionDismissals.organisationId, input.organisationId),
         eq(bundleSuggestionDismissals.userId, input.userId),
         eq(bundleSuggestionDismissals.docSetHash, docSetHash)
       )
@@ -321,6 +332,7 @@ export async function suggestBundle(input: {
     .where(
       and(
         eq(documentBundleAttachments.bundleId, bundleId),
+        eq(documentBundleAttachments.organisationId, input.organisationId),
         isNull(documentBundleAttachments.deletedAt)
       )
     );
@@ -352,6 +364,7 @@ export async function dismissBundleSuggestion(input: {
   documentIds: string[];
 }): Promise<BundleSuggestionDismissalResult> {
   const docSetHash = computeDocSetHash(input.documentIds);
+  const db = getOrgScopedDb('documentBundleService.dismissBundleSuggestion');
 
   const [row] = await db
     .insert(bundleSuggestionDismissals)
@@ -380,24 +393,36 @@ export async function dismissBundleSuggestion(input: {
 // ---------------------------------------------------------------------------
 export async function addMember(input: {
   bundleId: string;
+  organisationId: string;
   documentId: string;
 }): Promise<DocumentBundleMember> {
+  const db = getOrgScopedDb('documentBundleService.addMember');
   return db.transaction(async (tx) => {
-    // Verify document isn't deprecated
+    // Verify document isn't deprecated (and belongs to same org).
     const [doc] = await tx
       .select({ id: referenceDocuments.id, deprecatedAt: referenceDocuments.deprecatedAt })
       .from(referenceDocuments)
-      .where(eq(referenceDocuments.id, input.documentId))
+      .where(and(
+        eq(referenceDocuments.id, input.documentId),
+        eq(referenceDocuments.organisationId, input.organisationId),
+      ))
       .limit(1);
-    if (doc?.deprecatedAt) {
+    if (!doc) {
+      throw { statusCode: 404, code: CACHED_CONTEXT_BUNDLE_SUBJECT_NOT_FOUND, message: 'Document not found' };
+    }
+    if (doc.deprecatedAt) {
       throw { statusCode: 409, code: CACHED_CONTEXT_DOC_CANT_ADD_DEPRECATED, message: 'Cannot add a deprecated document to a bundle' };
     }
 
-    // Bump bundle version
+    // Bump bundle version (scoped to org).
     const [bundle] = await tx
       .update(documentBundles)
       .set({ currentVersion: sql`current_version + 1`, updatedAt: new Date() })
-      .where(and(eq(documentBundles.id, input.bundleId), isNull(documentBundles.deletedAt)))
+      .where(and(
+        eq(documentBundles.id, input.bundleId),
+        eq(documentBundles.organisationId, input.organisationId),
+        isNull(documentBundles.deletedAt),
+      ))
       .returning({ currentVersion: documentBundles.currentVersion });
 
     if (!bundle) {
@@ -416,13 +441,19 @@ export async function addMember(input: {
 
 export async function removeMember(input: {
   bundleId: string;
+  organisationId: string;
   documentId: string;
 }): Promise<void> {
+  const db = getOrgScopedDb('documentBundleService.removeMember');
   await db.transaction(async (tx) => {
     const [bundle] = await tx
       .update(documentBundles)
       .set({ currentVersion: sql`current_version + 1`, updatedAt: new Date() })
-      .where(and(eq(documentBundles.id, input.bundleId), isNull(documentBundles.deletedAt)))
+      .where(and(
+        eq(documentBundles.id, input.bundleId),
+        eq(documentBundles.organisationId, input.organisationId),
+        isNull(documentBundles.deletedAt),
+      ))
       .returning({ currentVersion: documentBundles.currentVersion });
 
     if (!bundle) {
@@ -453,16 +484,33 @@ export async function attach(input: {
   organisationId: string;
   subaccountId: string | null;
 }): Promise<DocumentBundleAttachment> {
-  // Verify subject exists and belongs to same org
+  const db = getOrgScopedDb('documentBundleService.attach');
+
+  // Verify bundle exists and belongs to the caller's org.
+  const [bundle] = await db
+    .select({ id: documentBundles.id })
+    .from(documentBundles)
+    .where(and(
+      eq(documentBundles.id, input.bundleId),
+      eq(documentBundles.organisationId, input.organisationId),
+      isNull(documentBundles.deletedAt),
+    ))
+    .limit(1);
+  if (!bundle) {
+    throw { statusCode: 404, code: CACHED_CONTEXT_BUNDLE_NOT_FOUND, message: 'Bundle not found' };
+  }
+
+  // Verify subject exists and belongs to same org.
   await verifySubjectExists(input.subjectType, input.subjectId, input.organisationId);
 
-  // Idempotent: check for existing live attachment
+  // Idempotent: check for existing live attachment.
   const existing = await db
     .select()
     .from(documentBundleAttachments)
     .where(
       and(
         eq(documentBundleAttachments.bundleId, input.bundleId),
+        eq(documentBundleAttachments.organisationId, input.organisationId),
         eq(documentBundleAttachments.subjectType, input.subjectType),
         eq(documentBundleAttachments.subjectId, input.subjectId),
         isNull(documentBundleAttachments.deletedAt)
@@ -487,15 +535,18 @@ export async function attach(input: {
 
 export async function detach(input: {
   bundleId: string;
+  organisationId: string;
   subjectType: AttachmentSubjectType;
   subjectId: string;
 }): Promise<void> {
+  const db = getOrgScopedDb('documentBundleService.detach');
   await db
     .update(documentBundleAttachments)
     .set({ deletedAt: new Date() })
     .where(
       and(
         eq(documentBundleAttachments.bundleId, input.bundleId),
+        eq(documentBundleAttachments.organisationId, input.organisationId),
         eq(documentBundleAttachments.subjectType, input.subjectType),
         eq(documentBundleAttachments.subjectId, input.subjectId),
         isNull(documentBundleAttachments.deletedAt)
@@ -510,6 +561,7 @@ export async function listBundles(
   organisationId: string,
   filters?: { subaccountId?: string | null }
 ): Promise<DocumentBundle[]> {
+  const db = getOrgScopedDb('documentBundleService.listBundles');
   const conds = [
     eq(documentBundles.organisationId, organisationId),
     eq(documentBundles.isAutoCreated, false),
@@ -529,6 +581,7 @@ export async function listAllBundles(
   organisationId: string,
   filters?: { subaccountId?: string | null }
 ): Promise<DocumentBundle[]> {
+  const db = getOrgScopedDb('documentBundleService.listAllBundles');
   const conds = [
     eq(documentBundles.organisationId, organisationId),
     isNull(documentBundles.deletedAt),
@@ -543,14 +596,18 @@ export async function listAllBundles(
   return db.select().from(documentBundles).where(and(...conds));
 }
 
-export async function getBundleWithMembers(bundleId: string): Promise<{
+export async function getBundleWithMembers(bundleId: string, organisationId: string): Promise<{
   bundle: DocumentBundle;
   members: Array<{ member: DocumentBundleMember; document: ReferenceDocument }>;
 } | null> {
+  const db = getOrgScopedDb('documentBundleService.getBundleWithMembers');
   const [bundle] = await db
     .select()
     .from(documentBundles)
-    .where(eq(documentBundles.id, bundleId))
+    .where(and(
+      eq(documentBundles.id, bundleId),
+      eq(documentBundles.organisationId, organisationId),
+    ))
     .limit(1);
 
   if (!bundle) return null;
@@ -562,6 +619,7 @@ export async function getBundleWithMembers(bundleId: string): Promise<{
     .where(
       and(
         eq(documentBundleMembers.bundleId, bundleId),
+        eq(referenceDocuments.organisationId, organisationId),
         isNull(documentBundleMembers.deletedAt)
       )
     );
@@ -570,15 +628,18 @@ export async function getBundleWithMembers(bundleId: string): Promise<{
 }
 
 export async function listAttachmentsForSubject(input: {
+  organisationId: string;
   subjectType: AttachmentSubjectType;
   subjectId: string;
 }): Promise<DocumentBundleAttachment[]> {
+  const db = getOrgScopedDb('documentBundleService.listAttachmentsForSubject');
   return db
     .select()
     .from(documentBundleAttachments)
     .innerJoin(documentBundles, eq(documentBundleAttachments.bundleId, documentBundles.id))
     .where(
       and(
+        eq(documentBundleAttachments.organisationId, input.organisationId),
         eq(documentBundleAttachments.subjectType, input.subjectType),
         eq(documentBundleAttachments.subjectId, input.subjectId),
         isNull(documentBundleAttachments.deletedAt),
@@ -588,11 +649,16 @@ export async function listAttachmentsForSubject(input: {
     .then((rows) => rows.map((r) => r.document_bundle_attachments));
 }
 
-export async function softDelete(bundleId: string): Promise<void> {
+export async function softDelete(bundleId: string, organisationId: string): Promise<void> {
+  const db = getOrgScopedDb('documentBundleService.softDelete');
   await db
     .update(documentBundles)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(documentBundles.id, bundleId), isNull(documentBundles.deletedAt)));
+    .where(and(
+      eq(documentBundles.id, bundleId),
+      eq(documentBundles.organisationId, organisationId),
+      isNull(documentBundles.deletedAt),
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +669,7 @@ async function verifySubjectExists(
   subjectId: string,
   organisationId: string
 ): Promise<void> {
+  const db = getOrgScopedDb('documentBundleService.verifySubjectExists');
   let row: Array<{ organisationId: string }> = [];
 
   if (subjectType === 'agent') {

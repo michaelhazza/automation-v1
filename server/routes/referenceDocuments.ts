@@ -159,6 +159,7 @@ router.post(
       });
       const promoted = await documentBundleService.promoteToNamedBundle({
         bundleId: unnamed.id,
+        organisationId: req.orgId!,
         name: bundleName,
         userId: req.user!.id,
       });
@@ -199,7 +200,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ),
   asyncHandler(async (req, res) => {
-    const result = await referenceDocumentService.getByIdWithCurrentVersion(req.params.id);
+    const result = await referenceDocumentService.getByIdWithCurrentVersion(req.params.id, req.orgId!);
     if (!result) {
       res.status(404).json({ error: 'Reference document not found' });
       return;
@@ -221,7 +222,7 @@ router.patch(
       res.status(400).json({ error: 'name is required' });
       return;
     }
-    const doc = await referenceDocumentService.rename({ documentId: req.params.id, newName: name });
+    const doc = await referenceDocumentService.rename({ documentId: req.params.id, organisationId: req.orgId!, newName: name });
     res.json(doc);
   }),
 );
@@ -241,6 +242,7 @@ router.put(
     }
     const version = await referenceDocumentService.updateContent({
       documentId: req.params.id,
+      organisationId: req.orgId!,
       content,
       updatedByUserId: req.user!.id,
       notes,
@@ -257,7 +259,7 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
   asyncHandler(async (req, res) => {
-    await referenceDocumentService.pause(req.params.id, req.user!.id);
+    await referenceDocumentService.pause(req.params.id, req.orgId!, req.user!.id);
     res.status(204).send();
   }),
 );
@@ -270,7 +272,7 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
   asyncHandler(async (req, res) => {
-    await referenceDocumentService.resume(req.params.id, req.user!.id);
+    await referenceDocumentService.resume(req.params.id, req.orgId!, req.user!.id);
     res.status(204).send();
   }),
 );
@@ -288,7 +290,7 @@ router.post(
       res.status(400).json({ error: 'reason is required' });
       return;
     }
-    await referenceDocumentService.deprecate({ documentId: req.params.id, reason, userId: req.user!.id });
+    await referenceDocumentService.deprecate({ documentId: req.params.id, organisationId: req.orgId!, reason, userId: req.user!.id });
     res.status(204).send();
   }),
 );
@@ -301,7 +303,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
   asyncHandler(async (req, res) => {
-    await referenceDocumentService.softDelete(req.params.id, req.user!.id);
+    await referenceDocumentService.softDelete(req.params.id, req.orgId!, req.user!.id);
     res.status(204).send();
   }),
 );
@@ -314,7 +316,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ),
   asyncHandler(async (req, res) => {
-    const versions = await referenceDocumentService.listVersions(req.params.id);
+    const versions = await referenceDocumentService.listVersions(req.params.id, req.orgId!);
     res.json(versions);
   }),
 );
@@ -332,7 +334,7 @@ router.get(
       res.status(400).json({ error: 'version must be a positive integer' });
       return;
     }
-    const versionRow = await referenceDocumentService.getVersion(req.params.id, version);
+    const versionRow = await referenceDocumentService.getVersion(req.params.id, req.orgId!, version);
     if (!versionRow) {
       res.status(404).json({ error: 'Version not found' });
       return;

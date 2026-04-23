@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { db } from '../db/index.js';
-import { referenceDocumentVersions } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
-import type { ContextAssemblyResult, ResolvedExecutionBudget } from '../../shared/types/cachedContext.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { referenceDocumentVersions, referenceDocuments } from '../db/schema/index.js';
+import { eq, and, inArray } from 'drizzle-orm';
+import type { ContextAssemblyResult, ResolvedExecutionBudget, PrefixHashComponents } from '../../shared/types/cachedContext.js';
 import type { BundleResolutionSnapshot } from '../db/schema/bundleResolutionSnapshots.js';
 import {
   ASSEMBLY_VERSION,
@@ -18,17 +18,22 @@ import {
 //
 // Flow: load pinned version rows → integrity check → assemblePrefix →
 //       validate → return ContextAssemblyResult
+//
+// Scope: all DB reads go through getOrgScopedDb (Layer 1B) AND filter on
+// organisationId (Layer 2). Callers must pass organisationId.
 // ---------------------------------------------------------------------------
 
 export const CACHED_CONTEXT_SNAPSHOT_INTEGRITY_VIOLATION = 'CACHED_CONTEXT_SNAPSHOT_INTEGRITY_VIOLATION';
 
 export async function assembleAndValidate(input: {
+  organisationId: string;
   snapshots: BundleResolutionSnapshot[];
   variableInput: string;
   instructions: string;
   resolvedBudget: ResolvedExecutionBudget;
 }): Promise<ContextAssemblyResult> {
-  const { snapshots, variableInput, instructions, resolvedBudget } = input;
+  const { organisationId, snapshots, variableInput, instructions, resolvedBudget } = input;
+  const db = getOrgScopedDb('contextAssemblyEngine.assembleAndValidate');
 
   // 1. Load all pinned reference_document_versions rows
   const dvKeys: Array<{ documentId: string; documentVersion: number; snapshotSerializedBytesHash: string }> = [];
@@ -42,7 +47,7 @@ export async function assembleAndValidate(input: {
     }
   }
 
-  // Bulk-fetch all needed version rows
+  // Bulk-fetch all needed version rows (scoped to caller's org via the parent doc).
   const versionMap = new Map<string, { content: string; serializedBytesHash: string }>();
   for (const dvKey of dvKeys) {
     const [row] = await db
@@ -53,10 +58,12 @@ export async function assembleAndValidate(input: {
         version: referenceDocumentVersions.version,
       })
       .from(referenceDocumentVersions)
+      .innerJoin(referenceDocuments, eq(referenceDocumentVersions.documentId, referenceDocuments.id))
       .where(
         and(
           eq(referenceDocumentVersions.documentId, dvKey.documentId),
-          eq(referenceDocumentVersions.version, dvKey.documentVersion)
+          eq(referenceDocumentVersions.version, dvKey.documentVersion),
+          eq(referenceDocuments.organisationId, organisationId),
         )
       )
       .limit(1);
@@ -75,6 +82,20 @@ export async function assembleAndValidate(input: {
     versionMap.set(`${dvKey.documentId}:${dvKey.documentVersion}`, { content: row.content, serializedBytesHash: row.serializedBytesHash });
   }
 
+  // Lookup document names for the HITL block payload (S6: render names, not UUIDs).
+  const uniqueDocIds = Array.from(new Set(dvKeys.map((k) => k.documentId)));
+  const nameRows = uniqueDocIds.length > 0
+    ? await db
+        .select({ id: referenceDocuments.id, name: referenceDocuments.name })
+        .from(referenceDocuments)
+        .where(and(
+          inArray(referenceDocuments.id, uniqueDocIds),
+          eq(referenceDocuments.organisationId, organisationId),
+        ))
+    : [];
+  const nameByDocumentId = new Map<string, string>();
+  for (const r of nameRows) nameByDocumentId.set(r.id, r.name);
+
   // 2. Assemble the prefix
   const assembledPrefix = assemblePrefix({
     snapshots: snapshots.map((s) => ({
@@ -87,13 +108,13 @@ export async function assembleAndValidate(input: {
   // 3. Estimate variable-input tokens
   const variableInputTokens = estimateTokenCount(variableInput);
 
-  // 4. Build per-document token list for validation (using snapshot token counts)
+  // 4. Build per-document token list for validation (using snapshot token counts).
   const perDocumentTopTokens: Array<{ documentId: string; documentName: string; tokens: number }> = [];
   for (const snap of snapshots) {
     for (const dv of snap.orderedDocumentVersions) {
       perDocumentTopTokens.push({
         documentId: dv.documentId,
-        documentName: dv.documentId, // name not in snapshot; documentId is sufficient for block payload
+        documentName: nameByDocumentId.get(dv.documentId) ?? dv.documentId,
         tokens: dv.tokenCount,
       });
     }
@@ -120,7 +141,44 @@ export async function assembleAndValidate(input: {
   });
 
   if (validationResult.kind === 'breach') {
-    return { kind: 'budget_breach', blockPayload: validationResult.payload };
+    // B4: populate intendedPrefixHashComponents per spec §4.5 (the pure
+    // validator leaves it null because it has no access to per-document
+    // serializedBytesHashes — the stateful wrapper composes them from the
+    // resolved snapshot rows).
+    //
+    // Per spec §4.4 the arrays are `document_id ascending` with
+    // `documentSerializedBytesHashes` parallel to `orderedDocumentIds`, and
+    // `includedFlags` has one entry per documentId (see example at §4.4
+    // lines 582-590). When the same document is attached through multiple
+    // bundles on one run, we collapse to a single entry per documentId —
+    // matching the single-bundle PrefixHashComponents shape — and sort the
+    // final list ascending by documentId so the diagnostic record round-
+    // trips to the per-bundle hash shape.
+    const byDocId = new Map<string, string>();
+    for (const snap of sortedByBundleId) {
+      for (const dv of snap.orderedDocumentVersions) {
+        if (!byDocId.has(dv.documentId)) {
+          byDocId.set(dv.documentId, dv.serializedBytesHash);
+        }
+      }
+    }
+    const orderedDocumentIds = Array.from(byDocId.keys()).sort((a, b) => a.localeCompare(b));
+    const documentSerializedBytesHashes = orderedDocumentIds.map((id) => byDocId.get(id)!);
+    const intendedPrefixHashComponents: PrefixHashComponents = {
+      orderedDocumentIds,
+      documentSerializedBytesHashes,
+      includedFlags: orderedDocumentIds.map((documentId) => ({
+        documentId,
+        included: true as const,
+        reason: 'attached_and_active' as const,
+      })),
+      modelFamily: resolvedBudget.modelFamily,
+      assemblyVersion: ASSEMBLY_VERSION,
+    };
+    return {
+      kind: 'budget_breach',
+      blockPayload: { ...validationResult.payload, intendedPrefixHashComponents },
+    };
   }
 
   // 8. Hash variable input

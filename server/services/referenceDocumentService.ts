@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { referenceDocuments, referenceDocumentVersions } from '../db/schema/index.js';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import type { ReferenceDocument, NewReferenceDocument } from '../db/schema/referenceDocuments.js';
@@ -11,8 +11,9 @@ import { countTokens, SUPPORTED_MODEL_FAMILIES } from './providers/anthropicAdap
 // Owns the CRUD + versioning + token-counting lifecycle for reference_documents
 // and reference_document_versions.
 //
-// Auth: service trusts pre-validated organisationId / subaccountId from route
-// handlers. Route handlers enforce org scope and permission keys.
+// Every public method takes `organisationId` explicitly and scopes queries to
+// it (Layer 2 of the three-layer isolation contract). All DB access goes
+// through `getOrgScopedDb()` (Layer 1B). RLS is the silent Layer 3 backstop.
 // ---------------------------------------------------------------------------
 
 export {
@@ -62,9 +63,9 @@ export async function create(input: {
   // Count tokens for all model families before any DB write. If this fails the
   // document is not persisted — strict failure policy per spec §6.1.
   const tokenCounts = await computeAllTokenCounts(input.content);
-  const serialized = serializeDocument({ documentId: 'placeholder', version: 1, content: input.content });
   const contentHash = hashContent(input.content);
 
+  const db = getOrgScopedDb('referenceDocumentService.create');
   return db.transaction(async (tx) => {
     // Insert the document row first (current_version_id starts NULL).
     let docRow: ReferenceDocument;
@@ -88,7 +89,7 @@ export async function create(input: {
       throw err;
     }
 
-    // Now serialize with the real document ID.
+    // Serialize with the real document ID for version 1.
     const realSerialized = serializeDocument({ documentId: docRow.id, version: 1, content: input.content });
     const serializedBytesHash = hashSerialized(realSerialized);
 
@@ -111,7 +112,10 @@ export async function create(input: {
     const [updated] = await tx
       .update(referenceDocuments)
       .set({ currentVersionId: versionRow.id, currentVersion: 1, updatedAt: new Date() })
-      .where(eq(referenceDocuments.id, docRow.id))
+      .where(and(
+        eq(referenceDocuments.id, docRow.id),
+        eq(referenceDocuments.organisationId, input.organisationId),
+      ))
       .returning();
 
     return updated;
@@ -124,13 +128,15 @@ export async function create(input: {
 
 export async function updateContent(input: {
   documentId: string;
+  organisationId: string;
   content: string;
   updatedByUserId: string;
   notes?: string;
 }): Promise<ReferenceDocumentVersion> {
   assertNoDelimiter(input.content);
 
-  const doc = await getDoc(input.documentId);
+  const doc = await getDoc(input.documentId, input.organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.updateContent');
 
   // Idempotent: if content matches current version, return existing.
   if (doc.currentVersionId) {
@@ -169,7 +175,10 @@ export async function updateContent(input: {
     await tx
       .update(referenceDocuments)
       .set({ currentVersionId: versionRow.id, currentVersion: newVersion, updatedAt: new Date() })
-      .where(eq(referenceDocuments.id, doc.id));
+      .where(and(
+        eq(referenceDocuments.id, doc.id),
+        eq(referenceDocuments.organisationId, input.organisationId),
+      ));
 
     return versionRow;
   });
@@ -179,13 +188,17 @@ export async function updateContent(input: {
 // rename
 // ---------------------------------------------------------------------------
 
-export async function rename(input: { documentId: string; newName: string }): Promise<ReferenceDocument> {
-  const doc = await getDoc(input.documentId);
+export async function rename(input: { documentId: string; organisationId: string; newName: string }): Promise<ReferenceDocument> {
+  const doc = await getDoc(input.documentId, input.organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.rename');
   try {
     const [updated] = await db
       .update(referenceDocuments)
       .set({ name: input.newName, updatedAt: new Date() })
-      .where(eq(referenceDocuments.id, doc.id))
+      .where(and(
+        eq(referenceDocuments.id, doc.id),
+        eq(referenceDocuments.organisationId, input.organisationId),
+      ))
       .returning();
     return updated;
   } catch (err: unknown) {
@@ -201,39 +214,55 @@ export async function rename(input: { documentId: string; newName: string }): Pr
 // Lifecycle flag methods
 // ---------------------------------------------------------------------------
 
-export async function pause(documentId: string, _userId: string): Promise<void> {
-  await getDoc(documentId);
+export async function pause(documentId: string, organisationId: string, _userId: string): Promise<void> {
+  await getDoc(documentId, organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.pause');
   await db
     .update(referenceDocuments)
     .set({ pausedAt: new Date(), updatedAt: new Date() })
-    .where(eq(referenceDocuments.id, documentId));
+    .where(and(
+      eq(referenceDocuments.id, documentId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ));
 }
 
-export async function resume(documentId: string, _userId: string): Promise<void> {
-  await getDoc(documentId);
+export async function resume(documentId: string, organisationId: string, _userId: string): Promise<void> {
+  await getDoc(documentId, organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.resume');
   await db
     .update(referenceDocuments)
     .set({ pausedAt: null, updatedAt: new Date() })
-    .where(eq(referenceDocuments.id, documentId));
+    .where(and(
+      eq(referenceDocuments.id, documentId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ));
 }
 
-export async function deprecate(input: { documentId: string; reason: string; userId: string }): Promise<void> {
-  const doc = await getDoc(input.documentId);
+export async function deprecate(input: { documentId: string; organisationId: string; reason: string; userId: string }): Promise<void> {
+  const doc = await getDoc(input.documentId, input.organisationId);
   if (doc.deprecatedAt) {
     throw { statusCode: 409, code: CACHED_CONTEXT_DOC_ALREADY_DEPRECATED, message: 'Document is already deprecated' };
   }
+  const db = getOrgScopedDb('referenceDocumentService.deprecate');
   await db
     .update(referenceDocuments)
     .set({ deprecatedAt: new Date(), deprecationReason: input.reason, updatedAt: new Date() })
-    .where(eq(referenceDocuments.id, input.documentId));
+    .where(and(
+      eq(referenceDocuments.id, input.documentId),
+      eq(referenceDocuments.organisationId, input.organisationId),
+    ));
 }
 
-export async function softDelete(documentId: string, _userId: string): Promise<void> {
-  await getDoc(documentId);
+export async function softDelete(documentId: string, organisationId: string, _userId: string): Promise<void> {
+  await getDoc(documentId, organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.softDelete');
   await db
     .update(referenceDocuments)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(referenceDocuments.id, documentId));
+    .where(and(
+      eq(referenceDocuments.id, documentId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +273,7 @@ export async function listByOrg(
   organisationId: string,
   filters?: { subaccountId?: string | null; includeDeleted?: boolean },
 ): Promise<ReferenceDocument[]> {
+  const db = getOrgScopedDb('referenceDocumentService.listByOrg');
   const conditions = [eq(referenceDocuments.organisationId, organisationId)];
   if (!filters?.includeDeleted) {
     conditions.push(isNull(referenceDocuments.deletedAt));
@@ -264,15 +294,20 @@ export async function listByOrg(
 
 export async function getByIdWithCurrentVersion(
   documentId: string,
-): Promise<{ doc: ReferenceDocument; version: ReferenceDocumentVersion } | null> {
+  organisationId: string,
+): Promise<{ doc: ReferenceDocument; version: ReferenceDocumentVersion | null } | null> {
+  const db = getOrgScopedDb('referenceDocumentService.getByIdWithCurrentVersion');
   const [doc] = await db
     .select()
     .from(referenceDocuments)
-    .where(eq(referenceDocuments.id, documentId))
+    .where(and(
+      eq(referenceDocuments.id, documentId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ))
     .limit(1);
   if (!doc) return null;
 
-  if (!doc.currentVersionId) return { doc, version: null as unknown as ReferenceDocumentVersion };
+  if (!doc.currentVersionId) return { doc, version: null };
 
   const [version] = await db
     .select()
@@ -280,10 +315,13 @@ export async function getByIdWithCurrentVersion(
     .where(eq(referenceDocumentVersions.id, doc.currentVersionId))
     .limit(1);
 
-  return { doc, version: version ?? null as unknown as ReferenceDocumentVersion };
+  return { doc, version: version ?? null };
 }
 
-export async function listVersions(documentId: string): Promise<ReferenceDocumentVersion[]> {
+export async function listVersions(documentId: string, organisationId: string): Promise<ReferenceDocumentVersion[]> {
+  // Parent-row check enforces org scope; version rows inherit via the parent.
+  await getDoc(documentId, organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.listVersions');
   return db
     .select()
     .from(referenceDocumentVersions)
@@ -291,7 +329,13 @@ export async function listVersions(documentId: string): Promise<ReferenceDocumen
     .orderBy(desc(referenceDocumentVersions.version));
 }
 
-export async function getVersion(documentId: string, version: number): Promise<ReferenceDocumentVersion | null> {
+export async function getVersion(
+  documentId: string,
+  organisationId: string,
+  version: number,
+): Promise<ReferenceDocumentVersion | null> {
+  await getDoc(documentId, organisationId);
+  const db = getOrgScopedDb('referenceDocumentService.getVersion');
   const [row] = await db
     .select()
     .from(referenceDocumentVersions)
@@ -307,11 +351,15 @@ export async function getVersion(documentId: string, version: number): Promise<R
 // Internal helper
 // ---------------------------------------------------------------------------
 
-async function getDoc(documentId: string): Promise<ReferenceDocument> {
+async function getDoc(documentId: string, organisationId: string): Promise<ReferenceDocument> {
+  const db = getOrgScopedDb('referenceDocumentService.getDoc');
   const [doc] = await db
     .select()
     .from(referenceDocuments)
-    .where(eq(referenceDocuments.id, documentId))
+    .where(and(
+      eq(referenceDocuments.id, documentId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ))
     .limit(1);
   if (!doc) {
     throw { statusCode: 404, code: CACHED_CONTEXT_DOC_NOT_FOUND, message: `Reference document ${documentId} not found` };

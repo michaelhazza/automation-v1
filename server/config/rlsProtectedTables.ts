@@ -457,7 +457,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0194_conversations_polymorphic.sql',
     rationale: 'Individual messages within conversations — includes BriefChatArtefact JSONB blobs with query results, approval payloads, and error diagnostics. Same sensitivity as the parent conversation.',
   },
-  // 0202–0208 — Cached Context Infrastructure (spec: docs/cached-context-infrastructure-spec.md)
+  // 0202–0208 + 0212 — Cached Context Infrastructure (spec: docs/cached-context-infrastructure-spec.md).
+  // Migration 0213 repairs the RLS policies on all eight tables below (wrong
+  // session variable + missing FORCE + missing WITH CHECK) to match the
+  // canonical 0079/0200 pattern.
   {
     tableName: 'reference_documents',
     schemaFile: 'referenceDocuments.ts',

@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   documentBundleAttachments,
   documentBundles,
@@ -42,13 +42,17 @@ export async function resolveAtRunStart(input: {
   snapshots: BundleResolutionSnapshot[];
   totalEstimatedPrefixTokens: number;
 }> {
-  // 1. Load all live bundle attachments for this subject
+  const db = getOrgScopedDb('bundleResolutionService.resolveAtRunStart');
+
+  // 1. Load all live bundle attachments for this subject (scoped to the caller's org).
   const attachments = await db
     .select({ bundleId: documentBundleAttachments.bundleId })
     .from(documentBundleAttachments)
     .innerJoin(documentBundles, eq(documentBundleAttachments.bundleId, documentBundles.id))
     .where(
       and(
+        eq(documentBundleAttachments.organisationId, input.organisationId),
+        eq(documentBundles.organisationId, input.organisationId),
         eq(documentBundleAttachments.subjectType, input.subjectType),
         eq(documentBundleAttachments.subjectId, input.subjectId),
         isNull(documentBundleAttachments.deletedAt),
@@ -80,11 +84,15 @@ export async function resolveAtRunStart(input: {
   return { snapshots: resultSnapshots, totalEstimatedPrefixTokens };
 }
 
-export async function getSnapshot(snapshotId: string): Promise<BundleResolutionSnapshot | null> {
+export async function getSnapshot(snapshotId: string, organisationId: string): Promise<BundleResolutionSnapshot | null> {
+  const db = getOrgScopedDb('bundleResolutionService.getSnapshot');
   const [row] = await db
     .select()
     .from(bundleResolutionSnapshots)
-    .where(eq(bundleResolutionSnapshots.id, snapshotId))
+    .where(and(
+      eq(bundleResolutionSnapshots.id, snapshotId),
+      eq(bundleResolutionSnapshots.organisationId, organisationId),
+    ))
     .limit(1);
   return row ?? null;
 }
@@ -99,9 +107,10 @@ async function resolveOneBundle(input: {
   modelFamily: string;
 }): Promise<BundleResolutionSnapshot> {
   const MAX_VERSION_RETRIES = 3;
+  const db = getOrgScopedDb('bundleResolutionService.resolveOneBundle');
 
   for (let attempt = 0; attempt <= MAX_VERSION_RETRIES; attempt++) {
-    // Read bundle + currentVersion
+    // Read bundle + currentVersion (scoped to the caller's org).
     const [bundle] = await db
       .select({
         id: documentBundles.id,
@@ -110,7 +119,10 @@ async function resolveOneBundle(input: {
         currentVersion: documentBundles.currentVersion,
       })
       .from(documentBundles)
-      .where(eq(documentBundles.id, input.bundleId))
+      .where(and(
+        eq(documentBundles.id, input.bundleId),
+        eq(documentBundles.organisationId, input.organisationId),
+      ))
       .limit(1);
 
     if (!bundle) {
@@ -151,7 +163,10 @@ async function resolveOneBundle(input: {
     const [bundleRecheck] = await db
       .select({ currentVersion: documentBundles.currentVersion })
       .from(documentBundles)
-      .where(eq(documentBundles.id, input.bundleId))
+      .where(and(
+        eq(documentBundles.id, input.bundleId),
+        eq(documentBundles.organisationId, input.organisationId),
+      ))
       .limit(1);
 
     if (bundleRecheck?.currentVersion !== capturedVersion) {
@@ -219,12 +234,13 @@ async function resolveOneBundle(input: {
 
       if (inserted) return inserted;
 
-      // Conflict fired — re-select the winning row
+      // Conflict fired — re-select the winning row (scoped to org).
       const [winner] = await db
         .select()
         .from(bundleResolutionSnapshots)
         .where(
           and(
+            eq(bundleResolutionSnapshots.organisationId, input.organisationId),
             eq(bundleResolutionSnapshots.bundleId, candidate.bundleId),
             eq(bundleResolutionSnapshots.prefixHash, candidate.prefixHash)
           )

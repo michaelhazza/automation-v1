@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns, bundleResolutionSnapshots } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { AttachmentSubjectType } from '../db/schema/documentBundleAttachments.js';
@@ -98,12 +98,16 @@ function classifyErrorCode(err: unknown): CachedContextOrchestratorResult & { ru
 
 async function writeTerminalOutcome(input: {
   runId: string;
+  organisationId: string;
   outcome: 'completed' | 'degraded' | 'failed';
   degradedReason: 'soft_warn' | 'token_drift' | 'cache_miss' | null;
   bundleSnapshotIds: string[] | null;
   variableInputHash: string | null;
   softWarnTripped: boolean;
 }): Promise<void> {
+  const db = getOrgScopedDb('cachedContextOrchestrator.writeTerminalOutcome');
+  // Drizzle omits columns set to `undefined` — deliberate for the retry/
+  // failure paths where we don't want to overwrite a field we never learned.
   await db
     .update(agentRuns)
     .set({
@@ -116,6 +120,7 @@ async function writeTerminalOutcome(input: {
     .where(
       and(
         eq(agentRuns.id, input.runId),
+        eq(agentRuns.organisationId, input.organisationId),
         isNull(agentRuns.runOutcome)
       )
     );
@@ -146,6 +151,7 @@ async function resolveAndAssemble(input: {
   });
 
   const assemblyResult = await assembleAndValidate({
+    organisationId: input.organisationId,
     snapshots,
     variableInput: input.variableInput,
     instructions: input.instructions,
@@ -195,19 +201,28 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
           idempotencyKey: `ccb:${runId}`,
         });
 
+        const db = getOrgScopedDb('cachedContextOrchestrator.execute.preHitl');
         await db
           .update(agentRuns)
           .set({
             bundleSnapshotIds: knownBundleSnapshotIds as any,
           })
-          .where(and(eq(agentRuns.id, runId), isNull(agentRuns.runOutcome)));
+          .where(and(
+            eq(agentRuns.id, runId),
+            eq(agentRuns.organisationId, organisationId),
+            isNull(agentRuns.runOutcome),
+          ));
 
         const decision = await hitlService.awaitDecision(proposed.actionId, HITL_REVIEW_TIMEOUT_MS);
 
         if (!decision.approved) {
-          const failureReason = decision.comment?.includes('timeout') ? 'hitl_timeout' : 'hitl_rejected';
+          // Prefer the explicit timedOut flag (set only by the timeout path)
+          // over substring-matching the free-text comment, which would
+          // misclassify rejections mentioning the word "timeout".
+          const failureReason = decision.timedOut ? 'hitl_timeout' : 'hitl_rejected';
           await writeTerminalOutcome({
             runId,
+            organisationId,
             outcome: 'failed',
             degradedReason: null,
             bundleSnapshotIds: knownBundleSnapshotIds,
@@ -227,6 +242,7 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
         if (resolveResult.assemblyResult.kind === 'budget_breach') {
           await writeTerminalOutcome({
             runId,
+            organisationId,
             outcome: 'failed',
             degradedReason: null,
             bundleSnapshotIds: knownBundleSnapshotIds,
@@ -249,14 +265,19 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
       knownVariableInputHash = variableInputHash;
       knownPrefixHash = assembledPrefixHash;
 
-      await db
+      const db2 = getOrgScopedDb('cachedContextOrchestrator.execute.preCall');
+      await db2
         .update(agentRuns)
         .set({
           bundleSnapshotIds: bundleSnapshotIds as any,
           variableInputHash,
           softWarnTripped,
         })
-        .where(and(eq(agentRuns.id, runId), isNull(agentRuns.runOutcome)));
+        .where(and(
+          eq(agentRuns.id, runId),
+          eq(agentRuns.organisationId, organisationId),
+          isNull(agentRuns.runOutcome),
+        ));
 
       // Step 6: call LLM router
       const response = await routeCall({
@@ -304,11 +325,15 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
         runOutcome = 'degraded';
         degradedReason = 'token_drift';
       } else if (hitType === 'miss') {
-        // cache_miss: full miss when a snapshot with this prefixHash existed in-window
-        const priorSnap = await db
+        // cache_miss: full miss when a snapshot with this prefixHash existed in-window.
+        const db3 = getOrgScopedDb('cachedContextOrchestrator.execute.priorSnapLookup');
+        const priorSnap = await db3
           .select({ id: bundleResolutionSnapshots.id })
           .from(bundleResolutionSnapshots)
-          .where(eq(bundleResolutionSnapshots.prefixHash, assembledPrefixHash))
+          .where(and(
+            eq(bundleResolutionSnapshots.organisationId, organisationId),
+            eq(bundleResolutionSnapshots.prefixHash, assembledPrefixHash),
+          ))
           .limit(1);
         if (priorSnap.length > 0) {
           runOutcome = 'degraded';
@@ -319,6 +344,7 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
       // Step 9: terminal write
       await writeTerminalOutcome({
         runId,
+        organisationId,
         outcome: runOutcome,
         degradedReason,
         bundleSnapshotIds,
@@ -339,6 +365,7 @@ export const cachedContextOrchestrator: CachedContextOrchestrator = {
       const classified = classifyErrorCode(err);
       await writeTerminalOutcome({
         runId,
+        organisationId,
         outcome: 'failed',
         degradedReason: null,
         bundleSnapshotIds: knownBundleSnapshotIds ?? null,

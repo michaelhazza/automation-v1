@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { modelTierBudgetPolicies } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { ResolvedExecutionBudget } from '../../shared/types/cachedContext.js';
@@ -31,6 +31,7 @@ export async function resolve(input: {
   modelFamily: string;
   taskConfig?: ExecutionBudgetOverrides;
 }): Promise<ResolvedExecutionBudget> {
+  const db = getOrgScopedDb('executionBudgetResolver.resolve');
   // Fetch both org-specific (ceiling) and platform-default rows
   const [orgRow, platformRow] = await Promise.all([
     db
