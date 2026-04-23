@@ -1,9 +1,17 @@
 # Cached Context Infrastructure — Development Spec
 
-**Status:** Draft implementation spec — ready for `spec-reviewer`
+**Status:** Draft implementation spec — ready for final user review before implementation
 **Branch:** `claude/cached-context-infrastructure-fcVmS`
 **Author:** Design session following `tasks/dev-brief-cached-context-infrastructure.md` (four external-review passes, locked)
-**Date:** 2026-04-22
+**Date:** 2026-04-22 (initial) · 2026-04-23 (UX revision)
+
+## Revision history
+
+| Date | Change |
+|---|---|
+| 2026-04-22 | Initial spec after four external-review passes on the dev brief. |
+| 2026-04-22 | `spec-reviewer` loop — 2 iterations, 35 mechanical fixes, exited on two-consecutive-mechanical-only (see `tasks/review-logs/spec-review-final-cached-context-infrastructure-*.md`). |
+| 2026-04-23 | **UX revision** — product decision to reframe the user-facing noun from "pack" to "documents + optional bundles" after mockup review surfaced complexity mismatch with the product's consumer-simple positioning. Backend primitive name (`document_packs`) is unchanged; user-facing surfaces are reframed. New §3.6 Attachment UX contract defines the canonical user flows. New `is_auto_created` column on `document_packs` (§5.3); new `bundle_suggestion_dismissals` table (§5.12). Four mockups under `prototypes/cached-context/` are the canonical visual reference. Frontend design rules that this revision codifies live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). |
 
 ## Related artefacts
 
@@ -35,6 +43,12 @@ This spec explicitly follows the conventions in `docs/spec-context.md`:
 1. Overview
 2. Background & current state
 3. Scope & dependencies
+   - 3.1 In scope
+   - 3.2 Out of scope
+   - 3.3 Why a new primitive
+   - 3.4 Dependencies
+   - 3.5 Non-functional goals
+   - **3.6 Attachment UX — user-facing contract** (added 2026-04-23)
 4. Contracts
    - 4.1 `RESOLVED_EXECUTION_BUDGET`
    - 4.2 `CONTEXT_ASSEMBLY_RESULT`
@@ -54,6 +68,7 @@ This spec explicitly follows the conventions in `docs/spec-context.md`:
    - 5.9 Additions to `llm_requests`
    - 5.10 Additions to `scheduled_tasks` (optional, see text)
    - 5.11 Indexes, constraints, and invariants summary
+   - **5.12 `bundle_suggestion_dismissals` table** (added 2026-04-23)
 6. Services
    - 6.1 `referenceDocumentService` (+ Pure)
    - 6.2 `documentPackService` (+ Pure)
@@ -79,15 +94,15 @@ This spec explicitly follows the conventions in `docs/spec-context.md`:
 
 This spec delivers a new execution-layer primitive for *explicitly attached* reference documents used by recurring and ad-hoc agent tasks. What ships:
 
-1. **A new primitive family: `reference_documents` + `document_packs`.** User-uploaded reference material, versioned at the document level, grouped into named packs. Packs attach at three explicit surfaces: agent, task, or scheduled-task. No scope cascade — attachment is the only mechanism by which a pack is loaded into a run.
+1. **A new primitive family: `reference_documents` + `document_packs`.** User-uploaded reference material, versioned at the document level. Packs are the backend attachment unit; they attach at three explicit surfaces: agent, task, or scheduled-task. No scope cascade — attachment is the only mechanism by which a pack is loaded into a run. **User-facing framing.** Users attach individual *documents*; an auto-pack is created transparently per attachment. Users can optionally promote an auto-pack into a named *bundle* (via post-save suggestion or upload-time checkbox) for single-click reuse. "Pack" never appears in the UI — it is an implementation detail of the caching / snapshot mechanism. See §3.6 for the full user-facing contract and the mockups under `prototypes/cached-context/`.
 2. **Run-time pack snapshots (`pack_resolution_snapshots`).** At the start of every run, each attached pack is resolved to an immutable snapshot `{ pack_id, pack_version, ordered_document_versions, document_serialized_bytes_hashes }` and persisted on the run. The snapshot captures the IDENTITY + INTEGRITY of the resolved prefix; the engine reads the snapshot to determine which pinned `reference_document_versions` rows to fetch, then re-hashes those rows on read to confirm the bytes match. Snapshots dedup per pack via `UNIQUE(pack_id, prefix_hash)` — cross-pack reuse of the same hash is expected and flows through to the provider's cache layer.
 3. **Context assembly engine (`contextAssemblyEngine`).** A single engine every file-attached caller uses. Pipeline shape: `assemble → validate → (optional transform) → execute`. Deterministic ordering, versioned serialization format, single `cache_control` breakpoint at the end of the reference block, variable input appended after.
 4. **Canonical `ExecutionBudget`.** A unified budget struct `{ max_input_tokens, max_output_tokens, max_total_cost_usd, per_document_max_tokens, reserve_output_tokens, soft_warn_ratio, model_family, model_context_window }` resolved per invocation from three inputs (task config ∩ model-tier defaults ∩ org ceilings). Assembly-time breach dimensions (`max_input_tokens`, `per_document_cap`) route to HITL; `max_output_tokens` is the router's response cap; `max_total_cost_usd` is audit-only at assembly time — mid-flight cost enforcement belongs to the existing `runCostBreaker` primitive. Hard invariant at resolution time: `max_input_tokens + reserve_output_tokens ≤ model_context_window`.
 5. **Prefix-hash identity contract — two levels.** Per-pack: `prefix_hash = hash({ ordered_document_ids, document_serialized_bytes_hashes, included_flags, model_family, assembly_version })` — the five inputs that fully determine one pack's cached-prefix identity. Call-level: `assembledPrefixHash = hash({ snapshot_prefix_hashes (packId asc), model_family, assembly_version })` — the single value stored on `llm_requests.prefix_hash`. Per-pack components are persisted on each snapshot row for diagnosis; the call-level hash is the cache-attribution key. `assembly_version` is a manually-bumped constant in the engine; any change to sort order, breakpoint placement, separator tokens, serialization format, or either hash input requires a bump.
 6. **HITL block on budget breach.** Hard-limit breaches create a `gateLevel='block'` action with a structured payload `{ threshold_breached, budget_used, budget_allowed, top_contributors, suggested_actions }` and route through the existing `hitlService`. Soft-warn breaches log and proceed, classified as **degraded** runs.
 7. **Three-way run outcomes.** `completed` / `degraded` / `failed` on `agent_runs`. Degraded covers soft-warn breaches, estimate-vs-actual drift above threshold, and unexpected cache misses. Collapsing into binary loses operational signal.
-8. **Cache attribution on the existing ledger.** `llm_requests.cachedPromptTokens` already captures reads; spec adds `cache_creation_tokens` and `prefix_hash` columns. Usage Explorer exposes cache-hit rate, cache-write cost, and first-run-vs-cached-run cost delta.
-9. **Pack utilization background metric.** A scheduled job computes `pack_utilization = estimated_prefix_tokens / max_input_tokens` per pack per model tier. Surfaced in Pack UI and Usage Explorer at 70% warn / 90% urgent thresholds before the 100% runtime block.
+8. **Cache attribution on the existing ledger.** `llm_requests.cachedPromptTokens` already captures reads; spec adds `cache_creation_tokens` and `prefix_hash` columns. These power cache-hit-rate / cache-write-cost / first-run-vs-cached-run-delta queries for admin-only observability (§11 — query surface only, no user-facing dashboard in v1).
+9. **Pack utilization background metric.** A scheduled job computes `pack_utilization = estimated_prefix_tokens / max_input_tokens` per pack per model tier. Surfaced in v1 as a single inline health label on the bundle detail page ("Healthy" / "Near cap" / "At cap") plus the collapsed "Advanced details" section. No tier-comparison dashboard, no KPI tiles, no trend charts — see §3.6 UX contract and §3.2 out-of-scope.
 
 **What this spec does NOT cover.** External document connectors (Drive / Dropbox / S3 / Notion / GitHub) — deferred (§12.1). Batch API usage — deferred. Multi-breakpoint cache strategies — deferred. Vector retrieval / RAG as an alternative to full-context attachment — different primitive, different spec. Automatic pack summarisation on breach — deferred. Cross-tenant pack sharing — deferred. Parallel fan-out — deferred. Agent-level "access but don't always load" mode — deferred (§12.6).
 
@@ -145,14 +160,15 @@ The pilot workload (daily macro report: five reference markdown files, ~30–50k
 
 ### 3.1 In scope
 
-- New tables: `reference_documents`, `reference_document_versions`, `document_packs`, `document_pack_members`, `document_pack_attachments`, `pack_resolution_snapshots`, `model_tier_budget_policies` (§5).
-- Column additions to `agent_runs` (3) and `llm_requests` (2). Optional one column on `scheduled_tasks`.
-- New services (`referenceDocumentService`, `documentPackService`, `packResolutionService`, `contextAssemblyEngine`, `executionBudgetResolver`, `cachedContextOrchestrator`) plus their `*ServicePure.ts` siblings where pure (§6).
+- New tables: `reference_documents`, `reference_document_versions`, `document_packs`, `document_pack_members`, `document_pack_attachments`, `pack_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals` (§5).
+- Column additions to `agent_runs` (3) and `llm_requests` (2). New column on `document_packs` (`is_auto_created`). Optional one column on `scheduled_tasks`.
+- New services (`referenceDocumentService`, `documentPackService`, `packResolutionService`, `contextAssemblyEngine`, `executionBudgetResolver`, `cachedContextOrchestrator`) plus their `*ServicePure.ts` siblings where pure (§6). `documentPackService` carries the auto-pack + bundle-promotion + suggestion methods (§6.2).
 - New pg-boss job `packUtilizationJob` (§6.7).
-- New routes under `/api/reference-documents/*` and `/api/document-packs/*` (§7).
+- New routes under `/api/reference-documents/*` and `/api/document-packs/*` (§7), including the reusable multi-file upload endpoint (§7.1) and the bundle-suggestion + dismissal endpoints (§7.2).
+- **Frontend surfaces — v1 minimal set (per §3.6):** attach-documents control on agent / task / scheduled-task config pages (`mockup-attach-docs.html`); reusable multi-file upload modal (`mockup-upload-document.html`); bundle detail page (`mockup-bundle-detail.html`, opt-in); budget-breach HITL block UI (`mockup-budget-breach-block.html`). Documents list page is a standard CRUD primitive and is not mocked — follow the `memory_blocks` pattern.
 - RLS policies on all new tenant-scoped tables + manifest entries in `rlsProtectedTables.ts` (§8).
 - HITL block-path extension via new `actionType='cached_context_budget_breach'` (no changes to `hitlService`).
-- Usage Explorer query additions for cache-hit rate, cache-creation cost, first-run-vs-cached-run delta, pack utilization (§11 — query surface only, no UI redesign).
+- Admin-only query surface for cache-hit rate, cache-creation cost, first-run-vs-cached-run delta, pack utilization (§11 — SQL query definitions only, no v1 UI dashboards).
 - Pilot validation on the daily-macro-report task.
 
 ### 3.2 Out of scope (deferred, see §12)
@@ -165,7 +181,9 @@ The pilot workload (daily macro report: five reference markdown files, ~30–50k
 - Cross-tenant pack sharing.
 - Parallel fan-out across multiple API calls.
 - Agent-level "access without always-load" retrieval-mode semantics.
-- Client UI redesign for Pack management beyond the minimum needed to attach packs to tasks — covered only at the route-surface level in v1.
+- **Explicit UI cuts (per `docs/frontend-design-principles.md` and §3.6):** pack-utilization dashboard with tier-by-tier radial comparison; Usage Explorer "Pack lens" with trend charts / cost-split donut / per-tenant ranking; run-detail cache-attribution panel with prefix-hash / snapshot-integrity / cache-read-vs-write token tiles; scheduled-task detail page with embedded run-history calendar + sidebar utilization widgets. These represent real backend capabilities that ship, but their UI surfaces are deferred until a specific admin workflow needs them (at which point they go on a role-gated admin observability page, never on the primary user journey).
+- **"Use existing bundle instead" suggestion** — when the user re-attaches a doc set that matches an existing named bundle, prompting "use your existing bundle 'X'?" is a future enhancement. v1 only surfaces the "save as bundle" suggestion for doc sets that do not yet have a named bundle.
+- **Dismissal analytics** — surfacing how often users dismiss bundle suggestions (to tune the heuristic) is deferred.
 
 ### 3.3 Why a new primitive (not extension of `memory_blocks`)
 
@@ -190,6 +208,133 @@ Memory blocks continue unchanged. Universal Brief's contract is preserved exactl
 - **Pre-flight latency overhead:** budget resolution + assembly is pure CPU work; target < 50ms at p95 for typical packs (< 10 documents).
 - **Snapshot storage:** deduplicated per pack by `UNIQUE(pack_id, prefix_hash)`; expected < 1 row per unique pack state per model family per pack. Cross-pack hash reuse is supported — identical doc sets in two different packs produce two snapshot rows sharing a `prefix_hash`, and a non-unique `prefix_hash` lookup index (§5.6) supports cross-pack Usage Explorer queries.
 - **HITL block blast radius:** a budget breach blocks exactly one task; other tasks on the same schedule or agent are unaffected.
+
+### 3.6 Attachment UX — user-facing contract
+
+This section defines the canonical user-facing behaviour for attaching reference material. The rest of the spec (schema, services, routes) must respect the invariants declared here. The four mockups under `prototypes/cached-context/` are the visual source of truth; if the spec text and a mockup disagree on a UX question, the mockup wins.
+
+**Governing rule — applied throughout.** Frontend design principles for this project live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). Any UI work generated from this spec must pass the pre-design checklist in that document before shipping. A rich backend does not justify a rich UI.
+
+#### 3.6.1 User-facing nouns
+
+| Backend primitive | User-facing term | Surface |
+|---|---|---|
+| `reference_documents` | **document** | Everywhere in the UI. The primary noun. |
+| `document_packs` (unnamed, `is_auto_created=true`) | — not surfaced — | Hidden from users entirely. Created implicitly on attach. |
+| `document_packs` (named, `is_auto_created=false`) | **bundle** | Surfaced only after the user opts in via the post-save suggestion (§3.6.4) or the upload-time checkbox (§3.6.5). |
+| `document_pack_attachments` | — not surfaced as a noun — | Presented as a per-parent "Reference documents" list of doc chips + bundle chips. |
+
+The word "pack" does NOT appear in user-facing UI copy, route error messages, API response field names exposed to clients, or user-facing documentation. It remains the internal primitive name in code, schema, and this spec's backend-facing sections.
+
+#### 3.6.2 Mockups (canonical visual reference)
+
+The four mockups below are the locked UX for v1. Change any of them and this section's invariants must be updated in the same commit.
+
+| # | Mockup | Covers |
+|---|---|---|
+| 1 | [`prototypes/cached-context/mockup-attach-docs.html`](../prototypes/cached-context/mockup-attach-docs.html) | The hero attach flow. Unified picker (documents + bundles in one search). Context tabs for agent / task / scheduled-task. Post-save bundle suggestion card (§3.6.4). |
+| 2 | [`prototypes/cached-context/mockup-upload-document.html`](../prototypes/cached-context/mockup-upload-document.html) | Reusable multi-file upload modal. Opt-in "Group these documents as a bundle" checkbox. Context-aware auto-attach confirmation. |
+| 3 | [`prototypes/cached-context/mockup-bundle-detail.html`](../prototypes/cached-context/mockup-bundle-detail.html) | Named-bundle detail. Soft intro callout on first visits. "Attach to a task" primary action. Advanced details (size, model fit) collapsed. |
+| 4 | [`prototypes/cached-context/mockup-budget-breach-block.html`](../prototypes/cached-context/mockup-budget-breach-block.html) | HITL block UX rendering `HitlBudgetBlockPayload` (§4.5). Safety-critical information-dense exception. |
+
+The landing page at [`prototypes/cached-context/index.html`](../prototypes/cached-context/index.html) groups these with rationale and the "what was cut and why" record from the pre-UX-revision mockup set.
+
+#### 3.6.3 Primary user flows
+
+**Flow A — Attach existing documents.**
+1. User opens an agent / task / scheduled-task config page.
+2. Under "Reference documents", user clicks "Add a document".
+3. Picker opens with a single search input covering BOTH the user's documents and their named bundles (two labelled sections in one dropdown).
+4. User clicks a document → it appears as a doc chip (`📄`) on the parent. User clicks a bundle → the bundle appears as a bundle chip (`📦`) on the parent (representing the bundle as a unit, not its expanded documents).
+5. User clicks Save → the attachments are persisted. Post-save suggestion fires if §3.6.4 conditions are met.
+
+**Flow B — Upload new documents (attach-flow entry).**
+1. From the picker (Flow A step 3), user clicks "Upload a new document".
+2. Multi-file upload modal opens (§3.6.5).
+3. User drops 1–N files, optionally names each, optionally ticks "Group as bundle" + names the bundle.
+4. On submit → documents are uploaded to the library AND auto-attached to the current parent. If the bundle checkbox was ticked, the bundle is created and attached as a unit.
+5. Modal closes. Attached items appear as chips on the parent.
+
+**Flow C — Upload new documents (standalone entry).**
+1. User opens `Knowledge › Documents` page.
+2. Clicks "Upload documents".
+3. Same modal as Flow B, but the auto-attach confirmation strip is hidden — uploads land in the library only.
+
+**Flow D — Save as bundle (post-save suggestion).**
+1. User completes Flow A for the second time with the same doc set on a different parent.
+2. After save, a soft suggestion card appears below the Save button (not a modal — does not interrupt): *"Save these N documents as a bundle? You've now attached the same N documents to 2 tasks."*
+3. User clicks "Save as bundle" → named-bundle input appears inline → user names it → bundle is created (the underlying auto-pack is promoted).
+4. Or user clicks "No thanks" → permanent dismissal for this doc set (§3.6.4 invariants).
+
+**Flow E — Reuse a named bundle.**
+1. Bundle appears in the picker's "Your bundles" section (Flow A step 3) and in the bundle detail page's "Attach to a task" action (mockup 3).
+2. Attaching a bundle adds it as a bundle chip (`📦`) on the parent — the bundle's documents are NOT exploded into individual doc chips. Removing the bundle chip detaches the bundle as a unit.
+
+**Flow F — HITL block.**
+1. A run's assembly breaches `max_input_tokens` or `per_document_cap` (§4.5).
+2. The user sees the block UX (mockup 4). Copy: *"The reference documents attached to this task are too big."* Regardless of whether the documents came from a bundle or were attached individually, the block is framed around "attached documents", not "the pack".
+3. User picks one of four actions: Remove or trim a document (recommended) · Upgrade to a bigger model · Split into two tasks · Stop this run.
+
+#### 3.6.4 Bundle suggestion heuristic (exact match only)
+
+The post-save suggestion (Flow D) fires only when ALL of these conditions hold. Fuzzy matching (e.g. Jaccard similarity over shared document IDs) is explicitly rejected — it produces brittle, unpredictable prompts.
+
+1. The attachment that just saved includes **2 or more documents**. Single-document "bundles" are noise.
+2. The exact same document set (same document IDs, any order) is already attached to **≥ 1 other subject** (task, agent, or scheduled-task). Detection uses the existing `prefix_hash` primitive (`contextAssemblyEnginePure.computePrefixHash`, §4.4) — the hash is invariant under reordering because the engine sorts document IDs ascending before hashing.
+3. The user has NOT previously dismissed this exact doc set (see `bundle_suggestion_dismissals`, §5.12). Dismissal is permanent per (user, doc-set-hash) pair — the suggestion does not re-appear for that user + doc set combination.
+4. The user does NOT already have a named bundle (`is_auto_created=false`) with this exact doc set. In the v1 spec, if a match exists the suggestion simply does not fire. A future enhancement may replace it with a "use your existing bundle" prompt (§3.2 deferred).
+
+**Timing.** The suggestion fires on save, not during the edit. The user is never interrupted mid-flow.
+
+**Presentation.** A non-modal card below the Save button, dismissible. Two buttons: "No thanks" (permanent dismissal) and "Save as bundle" (opens an inline name input, then promotes the existing auto-pack to a named bundle).
+
+#### 3.6.5 Reusable multi-file upload modal contract
+
+The upload modal (mockup 2) is a single component used from two entry points with one context-aware branch.
+
+**Invariants (applied to all entries):**
+- Multi-file drag-drop into a single dashed drop zone, or click-to-browse fallback. The whole modal is a drop target when files are already staged.
+- Each staged file renders as a row: icon, filename (read-only display in monospace), size + token-estimate (computed on the client from the file bytes pre-upload for instant feedback), and an inline editable **Name** field (seeded from the filename with extension stripped).
+- A `+ Add more files` button below the list; drop-to-add continues to work.
+- An opt-in **"Group these documents as a bundle"** checkbox below the file list.
+  - Checkbox is **disabled** when < 2 files are staged (no bundle of one).
+  - When ticked, a **Bundle name** input reveals inline; it is **required** when the checkbox is ticked.
+  - The checkbox is **unchecked by default** — bundles are an opt-in affordance.
+- Accepted formats: `.md`, `.pdf`, `.txt`, `.docx`. Limit: 10 MB per file. Total files per submit: no hard cap in v1, but the submit button disables if any file fails client-side parsing.
+- On submit, files upload in parallel (not sequential — single transaction at the service layer handles atomicity, §7.1).
+- On success, the modal closes; the invoking page refreshes its "Reference documents" list (attach-flow entry) or its documents table (standalone entry).
+
+**Entry-point differences:**
+
+| Entry | Auto-attach | Confirmation-strip copy |
+|---|---|---|
+| From the picker on an agent / task / scheduled-task config page (Flow B) | Yes — all uploaded documents auto-attach to the current parent. If the bundle checkbox was ticked, the bundle is created and attached as a unit. | Shown: *"These N documents will be added to \<parent name\> after upload."* If bundle: *"These N documents will be saved as the \<bundle name\> bundle and attached to \<parent name\>."* |
+| From the standalone `Knowledge › Documents` page (Flow C) | No — documents land in the library only. If the bundle checkbox was ticked, the bundle is created but not attached anywhere. | Hidden. (The library context needs no attach confirmation.) |
+
+The modal is a single component with a `context: 'attach' \| 'library'` prop and a `parent?: { subjectType, subjectId }` prop when in attach context. No code duplication between the two entries.
+
+#### 3.6.6 Health signal surfacing
+
+Backend capability (§6.7 `packUtilizationJob` + `utilizationByModelFamily`) computes per-pack utilization per model tier. v1 user-facing surfacing is **deliberately minimal**:
+
+- **Bundle detail page** — a single inline text label in the header: one of "Healthy" (`< 70%` worst tier), "Near cap" (`70–90%`), "At cap" (`> 90%`). Collapsed "Advanced details" section (closed by default) shows per-tier numbers as a small KV list. No radial rings. No side-by-side tier comparison as a primary element.
+- **Picker on attach flow** — the same three-state label appears on the bundle rows in the picker so the user can see it before picking.
+- **Nowhere else** in v1. No dashboard. No Usage Explorer pack lens. No KPI tiles on the task config page.
+
+See §3.2 out-of-scope for the explicit dashboard cuts.
+
+#### 3.6.7 UX invariants the rest of the spec must respect
+
+1. **Documents are independently attachable.** The attach surface (routes in §7) must accept a set of document IDs — not just a pack ID. Internally, an auto-pack is created or reused; the client never names it.
+2. **Named bundles are opt-in and created through exactly two paths:**
+   - Accepting a post-save suggestion (Flow D) → promotes an existing auto-pack.
+   - Ticking the upload-time checkbox (Flow B / C) → promotes the auto-pack created during the upload.
+   No other service path creates a named bundle. `POST /api/document-packs` with an explicit name is retained for API completeness but is not surfaced in the UI.
+3. **Auto-packs are invisible.** No UI surface lists auto-packs; no error message names them; no email / notification references them. Queries for "Your bundles" filter `WHERE is_auto_created = false`.
+4. **Health signals are secondary.** Any new observability surface derived from `utilizationByModelFamily` defaults to hidden / admin-only. The primary user flow renders a single three-state label.
+5. **HITL block is doc-framed, not pack-framed.** Copy and `HitlBudgetBlockPayload` presentation (mockup 4) describe "the reference documents attached to this task", regardless of whether they came from a bundle. The backend payload shape (§4.5) is unchanged — only the UI rendering is doc-framed.
+6. **Bundle edits affect all attached parents.** A bundle's document list is shared state. Editing a bundle used by ≥ 2 parents displays an inline warning (mockup 3) — this is a UX invariant, not a validation.
+7. **"Pack" is a backend term.** Any user-visible surface that currently uses "pack" is a bug and must be scrubbed before ship. Code / schema / this spec's backend sections retain "pack" as the primitive name.
 
 ---
 
@@ -479,7 +624,7 @@ interface HitlBudgetBlockPayload {
 **Type:** Postgres text enum pinned via Drizzle `$type<...>` on `agent_runs.run_outcome`. Stored as text for enum-add flexibility (no Postgres ENUM type to evolve).
 
 **Producer:** `cachedContextOrchestrator.execute()` (§6.6) at the run-terminal write.
-**Consumers:** Usage Explorer queries (§11), retry logic (not implemented in v1 — §12.7), observability dashboards.
+**Consumers:** Admin observability queries (§11 testing + §16 success criteria), retry logic (not implemented in v1 — §12.7), future admin-only dashboards (deferred — §3.2 / §12.12).
 
 ```ts
 type RunOutcome = 'completed' | 'degraded' | 'failed';
@@ -630,7 +775,7 @@ export const referenceDocumentVersions = pgTable(
 **File:** `server/db/schema/documentPacks.ts`
 **Migration:** `0204_document_packs.sql`
 
-One row per named pack. Packs are logical; membership lives in `document_pack_members` (§5.4).
+One row per pack. Packs are the backend attachment unit. The `is_auto_created` flag distinguishes implicit packs (created on attach with `name=NULL`, invisible to users) from named bundles (created by opt-in user action, visible in "Your bundles"). See §3.6 for the user-facing contract.
 
 ```ts
 export const documentPacks = pgTable(
@@ -640,8 +785,24 @@ export const documentPacks = pgTable(
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
     subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
 
-    name: text('name').notNull(),
+    /** NULL iff is_auto_created=true. Non-null iff is_auto_created=false. Enforced by CHECK constraint. */
+    name: text('name'),
     description: text('description'),
+
+    /**
+     * TRUE when the pack was created implicitly by an attach flow (user picked a set of documents
+     * and the backend wrapped them into this pack). FALSE when a user has promoted the pack to a
+     * named bundle via the post-save suggestion (§3.6.4) or the upload-time checkbox (§3.6.5).
+     *
+     * Promotion is a one-way transition: auto → named. Demotion back to auto is not supported.
+     *
+     * UI queries for "Your bundles" filter `WHERE is_auto_created = false`. Auto-packs are hidden
+     * from all user-facing lists.
+     */
+    isAutoCreated: boolean('is_auto_created').notNull().default(true),
+
+    /** Audit — who created the pack (either the implicit-attach actor or the explicit bundle-namer). */
+    createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
 
     /** Monotonically increments on any membership edit (add/remove/reorder). Starts at 1. */
     currentVersion: integer('current_version').notNull().default(1),
@@ -651,21 +812,41 @@ export const documentPacks = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => ({
+    /**
+     * Named-bundle name uniqueness per org. Auto-packs (name IS NULL) never collide; the partial
+     * predicate `name IS NOT NULL` lets the index serve only the named-bundle subset.
+     */
     orgNameUniq: uniqueIndex('document_packs_org_name_uq')
       .on(t.organisationId, t.name)
-      .where(sql`${t.deletedAt} IS NULL`),
+      .where(sql`${t.deletedAt} IS NULL AND ${t.name} IS NOT NULL`),
     orgIdx: index('document_packs_org_idx').on(t.organisationId),
     subaccountIdx: index('document_packs_subaccount_idx')
       .on(t.subaccountId)
       .where(sql`${t.subaccountId} IS NOT NULL`),
+    /** Fast lookup of named bundles in the UI picker and bundles list. */
+    namedBundleLookupIdx: index('document_packs_named_lookup_idx')
+      .on(t.organisationId, t.subaccountId)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.isAutoCreated} = false`),
   })
 );
+```
+
+**CHECK constraint (attached in migration 0204):**
+```sql
+ALTER TABLE document_packs
+  ADD CONSTRAINT document_packs_name_matches_auto_flag
+  CHECK (
+    (is_auto_created = true  AND name IS NULL) OR
+    (is_auto_created = false AND name IS NOT NULL AND length(trim(name)) > 0)
+  );
 ```
 
 **Notes.**
 - `currentVersion` is bumped transactionally by `documentPackService.updateMembers()` on any membership change. Run-time snapshots record the pack version they resolved against — historical runs stay reproducible when the pack evolves.
 - No embedding column; packs are groupings, not retrieval candidates.
 - Soft-delete. A soft-deleted pack cannot be attached; existing attachments are left in place to preserve historical attribution but are filtered out at resolution time.
+- **Auto-pack reuse by document-set hash.** When a user attaches the same document set a second time (to a different parent), the backend does NOT create a new auto-pack. It reuses the existing auto-pack (matched by the document set's canonical hash — see `documentPackService.findOrCreateAutoPack` in §6.2). This is what makes the bundle-suggestion heuristic in §3.6.4 work: the condition "same doc set is already attached to ≥ 1 other subject" is equivalent to "an auto-pack with these documents has an attachment on another subject".
+- **Named-bundle promotion path.** When the user accepts the bundle-save suggestion or ticks the upload-time checkbox, the existing auto-pack is promoted in place (`is_auto_created` flipped to `false`, `name` set). The pack's `id` does not change, so existing attachments are preserved — the parents that had the auto-pack attached now have the named bundle attached, automatically and without re-issuing attach writes.
 
 ### 5.4 `document_pack_members` table
 
@@ -939,17 +1120,19 @@ No schema change to `scheduled_tasks` itself. Pack attachments at the schedule l
 |---|---|---|
 | `reference_documents` | `(organisation_id, name) WHERE deleted_at IS NULL` | Prevents duplicate names within an org |
 | `reference_document_versions` | `(document_id, version)` | Monotonic version per document |
-| `document_packs` | `(organisation_id, name) WHERE deleted_at IS NULL` | Prevents duplicate pack names within an org |
+| `document_packs` | `(organisation_id, name) WHERE deleted_at IS NULL AND name IS NOT NULL` | Prevents duplicate NAMED-bundle names within an org; auto-packs (name IS NULL) are excluded from the uniqueness constraint |
 | `document_pack_members` | `(pack_id, document_id) WHERE deleted_at IS NULL` | Prevents duplicate membership |
 | `document_pack_attachments` | `(pack_id, subject_type, subject_id) WHERE deleted_at IS NULL` | Prevents duplicate attachment |
 | `pack_resolution_snapshots` | `(pack_id, prefix_hash)` | Dedup across concurrent resolution, per pack (cross-pack prefix sharing permitted) |
 | `model_tier_budget_policies` | `(organisation_id, model_family)` | One policy per org per model, NULL org = platform default |
+| `bundle_suggestion_dismissals` | `(user_id, doc_set_hash)` | One dismissal per user per doc set; idempotent second dismissal |
 
 **DB CHECK constraints:**
 
 | Table | Constraint | Purpose |
 |---|---|---|
 | `model_tier_budget_policies` | `max_input_tokens + reserve_output_tokens <= model_context_window` | Capacity invariant (§4.1) |
+| `document_packs` | `(is_auto_created=true AND name IS NULL) OR (is_auto_created=false AND name IS NOT NULL AND length(trim(name)) > 0)` | Auto-pack vs named-bundle invariant (§5.3) — name is present iff and only iff the pack has been promoted |
 
 **Soft-FK columns (no DB RI, service-layer enforcement):**
 
@@ -967,6 +1150,67 @@ No schema change to `scheduled_tasks` itself. Pack attachments at the schedule l
 | Assembly-version bump required on engine logic change | `contextAssemblyEnginePure.test.ts` fixture assertion |
 | Run outcome written exactly once | `cachedContextOrchestrator.execute` — single-row `UPDATE agent_runs SET run_outcome = :outcome WHERE id = :runId AND run_outcome IS NULL` (optimistic lock; duplicate terminal writes under retry update 0 rows and are treated as idempotent no-ops) |
 | No silent fallback (no auto-truncation, auto-drop, auto-downgrade) | `contextAssemblyEngine.validate` raises `BudgetBreachError` instead of mutating the payload |
+| Auto-pack reuse across attachments with identical doc sets | `documentPackService.findOrCreateAutoPack` — canonical doc-set hash lookup before insert |
+| Named-bundle promotion is a one-way transition | `documentPackService.promoteToNamedBundle` — rejects rows with `is_auto_created=false` |
+
+### 5.12 `bundle_suggestion_dismissals` table
+
+**File:** `server/db/schema/bundleSuggestionDismissals.ts`
+**Migration:** `0212_bundle_suggestion_dismissals.sql`
+
+Records per-user permanent dismissals of the bundle-save suggestion (§3.6.4). One row per (user, doc-set-hash) pair. When the suggestion fires, the service checks for a matching row and suppresses the prompt if present.
+
+```ts
+export const bundleSuggestionDismissals = pgTable(
+  'bundle_suggestion_dismissals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+
+    /**
+     * Canonical hash of the document set the user dismissed. Computed by
+     * `documentPackServicePure.computeDocSetHash(documentIds: string[])` — sorts
+     * the IDs ascending and hashes the sorted sequence with SHA-256. The same
+     * primitive is used by `contextAssemblyEnginePure.computePrefixHash` (§4.4)
+     * for its `orderedDocumentIds` sub-hash component, so matching dismissed
+     * sets against live attachments is a single hash comparison.
+     */
+    docSetHash: text('doc_set_hash').notNull(),
+
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    /** One dismissal per user per doc set. A second dismiss of the same set is a no-op. */
+    userDocSetUniq: uniqueIndex('bundle_suggestion_dismissals_user_doc_set_uq')
+      .on(t.userId, t.docSetHash),
+    /** Fast lookup by user for cleanup or cross-org views. */
+    userIdx: index('bundle_suggestion_dismissals_user_idx').on(t.userId),
+    /** Org-scoped RLS support. */
+    orgIdx: index('bundle_suggestion_dismissals_org_idx').on(t.organisationId),
+  })
+);
+```
+
+**Notes.**
+- **Scoping: per-user, not per-org.** A second user in the same org who attaches the same doc set sees the suggestion the first time — dismissals are the personal preference of the user who did the dismissing.
+- **No soft-delete.** Dismissals are permanent per the §3.6.4 heuristic. If a future UX change wants to support un-dismissing, it will add a `deleted_at` column then.
+- **`doc_set_hash` is not a foreign key to `pack_resolution_snapshots.prefix_hash`.** The two hashes are related but not identical (the snapshot prefix hash also includes `model_family` + `assembly_version`); the dismissal hash is just the doc-ID set. Decoupling keeps the dismissal table engine-version-agnostic — an `assembly_version` bump does not invalidate dismissals.
+- **RLS.** The table is org-scoped via `organisation_id`, with an additional user-identity check in the read path: `bundleSuggestionDismissals.findForUser(userId, docSetHash)` joins through the user context so a user cannot see other users' dismissals even within the same org. Full RLS clause in §8.1.
+
+**Example row:**
+
+```json
+{
+  "id": "bsd_5f2a...",
+  "organisationId": "org_abc...",
+  "subaccountId": null,
+  "userId": "usr_42...",
+  "docSetHash": "0xaf2c91...",
+  "dismissedAt": "2026-04-23T14:32:17Z"
+}
+```
 
 ---
 
@@ -1052,6 +1296,7 @@ Owns CRUD for `document_packs`, `document_pack_members`, and `document_pack_atta
 
 ```ts
 export interface DocumentPackService {
+  /** Explicit named-bundle creation. Not surfaced in the UI in v1 (§3.6.7). Retained for API completeness. */
   create(input: {
     organisationId: string;
     subaccountId: string | null;
@@ -1059,6 +1304,85 @@ export interface DocumentPackService {
     description?: string;
     createdByUserId: string;
   }): Promise<DocumentPack>;
+
+  /**
+   * Core attach-flow primitive (§3.6.3 Flow A). Given a set of document IDs, returns either
+   * (a) an existing auto-pack whose members match the input set exactly, or (b) a new
+   * auto-pack with those members inserted in the same transaction. The returned pack has
+   * `isAutoCreated = true` and `name = null`.
+   *
+   * Matching is by canonical doc-set hash (§5.12 — same hash used for dismissal tracking).
+   * Lookup is scoped to `(organisationId, subaccountId)` — a doc set belonging to different
+   * orgs produces different auto-packs even if the hash coincides.
+   *
+   * Idempotent under concurrent calls: two parallel requests with identical inputs will race
+   * on the doc-set hash lookup; the loser catches the unique-violation error and re-selects
+   * the winner's row. The returned pack is always the unique row for the (org, subaccount,
+   * doc-set-hash) triple.
+   */
+  findOrCreateAutoPack(input: {
+    organisationId: string;
+    subaccountId: string | null;
+    documentIds: string[];
+    createdByUserId: string;
+  }): Promise<DocumentPack>;
+
+  /**
+   * Promotes an existing auto-pack to a named bundle (§3.6.3 Flow D accept, §3.6.5 upload
+   * checkbox). Flips `is_auto_created` from true to false and sets `name`. Rejects with
+   * `CACHED_CONTEXT_PACK_ALREADY_NAMED` (409) if the pack is already `is_auto_created=false`.
+   * Rejects with `CACHED_CONTEXT_BUNDLE_NAME_TAKEN` (409) if another non-auto pack in the same
+   * org already has this name.
+   *
+   * Promotion is a one-way transition — demotion (named → auto) is not supported.
+   *
+   * Importantly, the pack's `id` does NOT change. Existing `document_pack_attachments` rows
+   * referring to this pack continue to work; the parents that had the auto-pack attached now
+   * have the named bundle attached, without re-issuing attach writes.
+   */
+  promoteToNamedBundle(input: {
+    packId: string;
+    name: string;
+    userId: string;
+  }): Promise<DocumentPack>;
+
+  /**
+   * Bundle-save suggestion lookup (§3.6.4). Returns whether the suggestion should fire for
+   * the given user + doc set, and — if it should — how many OTHER subjects currently have
+   * this doc set attached (used for the "attached to N tasks" copy in the suggestion card).
+   *
+   * Condition truth table:
+   * - `documentIds.length < 2`: always returns { suggest: false }
+   * - Any dismissal row exists for (userId, docSetHash): { suggest: false }
+   * - A named bundle (is_auto_created=false) exists with this exact doc set: { suggest: false }
+   * - Otherwise, counts distinct subjects attached to the auto-pack with this doc set:
+   *   - count === 0: { suggest: false } — just created, nothing to suggest yet
+   *   - count === 1: { suggest: false } — only attached to the current subject
+   *   - count >= 2: { suggest: true, alsoUsedOn: count - 1, docSetHash, autoPackId }
+   *
+   * The `excludeSubjectId` parameter is used when the caller is in the middle of a save
+   * flow and needs to exclude the subject they just saved to from the "other attachments"
+   * count. It is NOT used for access control.
+   */
+  suggestBundle(input: {
+    organisationId: string;
+    subaccountId: string | null;
+    userId: string;
+    documentIds: string[];
+    excludeSubjectId?: { subjectType: AttachmentSubjectType; subjectId: string };
+  }): Promise<BundleSuggestion>;
+
+  /**
+   * Records a permanent dismissal of the bundle-save suggestion for the given user + doc set
+   * (§3.6.4). Idempotent: second call with the same inputs is a no-op and returns the existing
+   * dismissal's timestamp rather than raising a uniqueness error.
+   */
+  dismissBundleSuggestion(input: {
+    organisationId: string;
+    subaccountId: string | null;
+    userId: string;
+    documentIds: string[];
+  }): Promise<BundleSuggestionDismissal>;
 
   addMember(input: { packId: string; documentId: string }): Promise<DocumentPackMember>;
   removeMember(input: { packId: string; documentId: string }): Promise<void>;
@@ -1071,29 +1395,81 @@ export interface DocumentPackService {
   }): Promise<DocumentPackAttachment>;
   detach(input: { packId: string; subjectType: AttachmentSubjectType; subjectId: string }): Promise<void>;
 
-  listPacks(organisationId: string, filters?: { subaccountId?: string | null }): Promise<DocumentPack[]>;
+  /**
+   * Lists ONLY named bundles (is_auto_created=false). Used by the "Your bundles" section of
+   * the attach picker (§3.6.3) and the bundles list page. Auto-packs are deliberately excluded.
+   */
+  listBundles(organisationId: string, filters?: { subaccountId?: string | null }): Promise<DocumentPack[]>;
+
+  /**
+   * Lists ALL packs including auto-packs. Admin-only; not exposed on user-facing routes.
+   */
+  listAllPacks(organisationId: string, filters?: { subaccountId?: string | null }): Promise<DocumentPack[]>;
+
   getPackWithMembers(packId: string): Promise<{ pack: DocumentPack; members: Array<{ member: DocumentPackMember; document: ReferenceDocument }> } | null>;
   listAttachmentsForSubject(input: { subjectType: AttachmentSubjectType; subjectId: string }): Promise<DocumentPackAttachment[]>;
 
   softDelete(packId: string, userId: string): Promise<void>;
 }
+
+/** Return type for suggestBundle (§6.2). */
+export type BundleSuggestion =
+  | { suggest: false }
+  | {
+      suggest: true;
+      alsoUsedOn: number;         // count of OTHER subjects already attached (>= 1)
+      docSetHash: string;          // for passing back to dismissBundleSuggestion or promoteToNamedBundle
+      autoPackId: string;          // the existing auto-pack that would be promoted
+    };
+
+export interface BundleSuggestionDismissal {
+  id: string;
+  userId: string;
+  docSetHash: string;
+  dismissedAt: string; // ISO 8601
+}
+```
+
+**Pure helpers (`documentPackServicePure.ts`):**
+
+```ts
+/**
+ * Canonical doc-set hash (§5.12 field `docSetHash`). Sorts IDs ascending then hashes with
+ * SHA-256. Must produce the same value as `contextAssemblyEnginePure.computePrefixHash`'s
+ * `orderedDocumentIds` sub-hash (§4.4). Unit tested on both modules with a shared fixture.
+ */
+export function computeDocSetHash(documentIds: string[]): string;
 ```
 
 **Key behaviours.**
 
-- **`create`** inserts the pack at `currentVersion = 1`.
-- **`addMember` / `removeMember`** each bump `document_packs.currentVersion` in the same transaction. Re-adding a previously-removed document creates a new `document_pack_members` row (soft-deleted rows are left in place). The pack-version bump is the signal that pack state has changed — `packResolutionService` reads the current version and builds a fresh snapshot on the next run.
+- **`create`** inserts the pack at `currentVersion = 1` with `isAutoCreated = false` and `name` set. Retained for API completeness; not surfaced in the v1 UI (§3.6.7).
+- **`findOrCreateAutoPack`** is the core attach-flow primitive. Canonical-hash lookup within the org scope; INSERT on miss under a unique constraint (`document_packs` would reject the duplicate through the service-layer de-duplication via the hash — note the DB doesn't enforce this directly, so the service's concurrency handling has an `ON CONFLICT DO NOTHING + re-select` pattern on the members join).
+- **`promoteToNamedBundle`** performs an UPDATE in a single transaction: `UPDATE document_packs SET is_auto_created = false, name = :name, updated_at = now() WHERE id = :packId AND is_auto_created = true`. If 0 rows are updated, the pack is already named — raise `CACHED_CONTEXT_PACK_ALREADY_NAMED`. Name-uniqueness is caught by the partial unique index.
+- **`suggestBundle`** is a read-only lookup composing three queries: (1) existence check in `bundle_suggestion_dismissals`, (2) existence check for a named bundle with this doc set (joins `document_packs` + `document_pack_members`), (3) attachment count for the matching auto-pack. Returns in < 20ms at p95 under expected v1 volumes.
+- **`dismissBundleSuggestion`** issues `INSERT INTO bundle_suggestion_dismissals ... ON CONFLICT (user_id, doc_set_hash) DO UPDATE SET dismissed_at = excluded.dismissed_at` so a second dismissal re-stamps the timestamp without raising.
+- **`addMember` / `removeMember`** each bump `document_packs.currentVersion` in the same transaction. Re-adding a previously-removed document creates a new `document_pack_members` row (soft-deleted rows are left in place). The pack-version bump is the signal that pack state has changed — `packResolutionService` reads the current version and builds a fresh snapshot on the next run. **Editing a named bundle affects every subject the bundle is attached to** — this is the UX invariant surfaced by the "Used by: 2 tasks" warning on the bundle-detail page (§3.6.3 Flow E, mockup 3); the backend behaviour is unchanged.
 - **`attach`** verifies the subject row exists by table lookup (`agents` / `tasks` / `scheduled_tasks`) and that the subject's org scope matches the pack's org scope. The polymorphic FK is service-enforced here. A duplicate attachment against a currently-LIVE row (same `(pack_id, subject_type, subject_id)`, `deleted_at IS NULL`) returns the existing row idempotently. A re-attach against a soft-deleted row INSERTS a fresh row — the partial unique index `(pack_id, subject_type, subject_id) WHERE deleted_at IS NULL` (§5.5) permits this; the audit trail stays linear rather than resurrecting old attribution.
 - **`detach`** soft-deletes the row. Live attachments under a soft-deleted pack return no results in `listAttachmentsForSubject` — the pack-level soft-delete is authoritative.
 - **Authorisation** — same pattern as `referenceDocumentService`: routes enforce, service trusts.
 
 **Error codes:**
 
-- `CACHED_CONTEXT_PACK_NAME_TAKEN` (409).
+- `CACHED_CONTEXT_BUNDLE_NAME_TAKEN` (409) — promoting an auto-pack to a name already used by another named bundle in this org.
+- `CACHED_CONTEXT_PACK_ALREADY_NAMED` (409) — calling `promoteToNamedBundle` on a pack that's already `is_auto_created=false`.
 - `CACHED_CONTEXT_PACK_NOT_FOUND` (404).
 - `CACHED_CONTEXT_DOC_CANT_ADD_DEPRECATED` (409) — attempt to add a deprecated document to a pack.
 - `CACHED_CONTEXT_PACK_SUBJECT_NOT_FOUND` (404) — attach target row does not exist.
 - `CACHED_CONTEXT_PACK_SUBJECT_ORG_MISMATCH` (403) — attach target belongs to a different org.
+- `CACHED_CONTEXT_BUNDLE_NAME_EMPTY` (400) — attempted promote with empty/whitespace-only name.
+
+**Invariants (enforced by service + DB):**
+
+1. Calling `findOrCreateAutoPack` twice with identical inputs returns the same pack row (idempotent by doc-set hash scoped to org + subaccount).
+2. A pack with `is_auto_created=true` never has a non-null name (DB CHECK, §5.3).
+3. A pack with `is_auto_created=false` always has a non-null, non-empty name (DB CHECK, §5.3).
+4. Promotion preserves `id` — attachments are not moved, re-issued, or invalidated.
+5. Dismissals are idempotent per (user, doc-set-hash).
 
 ### 6.3 `packResolutionService` (+ `packResolutionServicePure`)
 
@@ -1526,7 +1902,8 @@ Two new route files, thin handlers over the services (§6). Every route uses `as
 
 ```
 GET    /api/reference-documents                  list by org
-POST   /api/reference-documents                  create (body: name, content, description?, subaccountId?)
+POST   /api/reference-documents                  create single document (body: name, content, description?, subaccountId?)
+POST   /api/reference-documents/bulk-upload      multi-file upload (see below — the §3.6.5 contract)
 GET    /api/reference-documents/:id              get with current version
 PATCH  /api/reference-documents/:id              rename + description (NOT content)
 PUT    /api/reference-documents/:id/content      updateContent (body: content, notes?)
@@ -1538,22 +1915,124 @@ GET    /api/reference-documents/:id/versions     version history
 GET    /api/reference-documents/:id/versions/:v  one version
 ```
 
-**Permissions:** new permission keys `reference_documents.read`, `reference_documents.write`, `reference_documents.deprecate`. Added to `server/config/permissions.ts` + seeded via migration 0202 on permission-set upsert (follow the pattern used for `memory_blocks.*` permission keys).
+**`POST /api/reference-documents/bulk-upload` — multi-file upload contract.** Backs the reusable upload modal in `mockup-upload-document.html` (§3.6.5).
+
+Request — `multipart/form-data`:
+- `files[]` — 1..N file parts. Accepted MIME types mapped to `source_type='upload'`: `text/markdown`, `application/pdf`, `text/plain`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`. 10 MB per file limit enforced at the multipart parser.
+- `names[]` — parallel array of display names, same length and order as `files[]`. Empty strings are replaced with the filename (extension stripped).
+- `subaccountId` — optional string. Applies to every uploaded document.
+- `bundleName` — optional string. Non-empty iff the user ticked the "Group as bundle" checkbox (§3.6.5). When present, a named bundle is created containing exactly the uploaded documents.
+- `attachTo` — optional JSON string `{ subjectType: 'agent' | 'task' | 'scheduled_task', subjectId: string }`. When present, the upload auto-attaches its output (the N individual documents if `bundleName` is absent, OR the single bundle if `bundleName` is present) to the named subject. Omitted for standalone-library entries (§3.6.5 Flow C).
+
+Request validation:
+- `files[].length === names[].length` — reject 400 otherwise (`CACHED_CONTEXT_UPLOAD_NAMES_LENGTH_MISMATCH`).
+- If `bundleName` is present, `files[].length >= 2` — reject 400 otherwise (`CACHED_CONTEXT_UPLOAD_BUNDLE_TOO_FEW_FILES`).
+- Every `names[i]` after the filename-fallback must be non-empty and unique within the request — reject 400 otherwise (`CACHED_CONTEXT_UPLOAD_NAME_EMPTY` / `CACHED_CONTEXT_UPLOAD_NAME_DUPLICATE_IN_REQUEST`).
+
+Response — `200 OK`:
+```json
+{
+  "documentIds": ["doc_a1...", "doc_b2...", "doc_c3..."],
+  "bundleId": "pack_xyz..." | null,
+  "autoAttachedTo": { "subjectType": "scheduled_task", "subjectId": "sch_42..." } | null
+}
+```
+
+**Transactional semantics.** The handler wraps the whole flow (N document creates + optional bundle create + optional attach) in a single DB transaction. Any failure rolls back all document creates — the user is never left with a partial library mutation. Client-side token estimation (done in-browser pre-upload for the modal's token display) is NOT re-validated server-side for trust; the server computes its own authoritative token counts on the uploaded bytes and writes those to `reference_document_versions.token_counts`. The pre-upload estimate is a UX affordance only.
+
+**Idempotency.** The endpoint accepts `Idempotency-Key` header per the repo's existing idempotency pattern. A replayed request with the same key returns the original response within the key's 24-hour TTL.
+
+**Permissions:** new permission keys `reference_documents.read`, `reference_documents.write`, `reference_documents.deprecate`. The `bulk-upload` endpoint requires `reference_documents.write` AND — when `attachTo` is present — the corresponding attachment permission on the target subject (e.g. `document_packs.attach`). Added to `server/config/permissions.ts` + seeded via migration 0202 on permission-set upsert (follow the pattern used for `memory_blocks.*` permission keys).
 
 ### 7.2 `server/routes/documentPacks.ts`
 
+Routes split by user-facing vs admin-only. User-facing routes use the "bundle" noun in parameters and response shapes where applicable; admin-only routes retain "pack" terminology.
+
+**User-facing routes (bundle-nouns, surfaced in the UI):**
+
 ```
-GET    /api/document-packs                       list by org
-POST   /api/document-packs                       create (body: name, description?, subaccountId?)
-GET    /api/document-packs/:id                   get with members
-PATCH  /api/document-packs/:id                   rename + description
-POST   /api/document-packs/:id/members           addMember (body: documentId)
-DELETE /api/document-packs/:id/members/:docId    removeMember
-POST   /api/document-packs/:id/attach            attach (body: subjectType, subjectId)
-DELETE /api/document-packs/:id/attach/:subjectType/:subjectId    detach
-DELETE /api/document-packs/:id                   soft delete
-GET    /api/document-packs/:id/utilization       read utilization JSONB (computed by §6.7 job)
+GET    /api/document-packs/bundles                                  list NAMED bundles only (is_auto_created=false)
+GET    /api/document-packs/:id                                      get pack with members (works for named bundles; auto-packs only accessible to the owning user's attach context)
+PATCH  /api/document-packs/:id                                      rename + description (named bundles only; rejects auto-packs with 409)
+POST   /api/document-packs/:id/members                              addMember (body: documentId) — bumps currentVersion
+DELETE /api/document-packs/:id/members/:docId                       removeMember — bumps currentVersion
+POST   /api/document-packs/:id/attach                               attach (body: subjectType, subjectId)
+DELETE /api/document-packs/:id/attach/:subjectType/:subjectId       detach
+DELETE /api/document-packs/:id                                      soft delete (named bundles; auto-packs are gc'd when the last attachment is removed)
+
+POST   /api/document-packs/attach-documents                         attach-by-document-set (§3.6.3 Flow A primitive)
+POST   /api/document-packs/:id/promote                              promote an auto-pack to a named bundle (§3.6.4 Flow D, §3.6.5 upload)
+GET    /api/document-packs/suggest-bundle                           bundle-suggestion lookup (query: documentIds, excludeSubjectType?, excludeSubjectId?)
+POST   /api/bundle-suggestion-dismissals                            dismiss the suggestion (body: documentIds)
 ```
+
+**Admin-only routes (pack-nouns, NOT surfaced in the UI):**
+
+```
+GET    /api/document-packs/admin/all                                list ALL packs including auto-packs (admin only)
+GET    /api/document-packs/admin/:id/utilization                    read utilization JSONB (admin only; computed by §6.7 job)
+```
+
+**`POST /api/document-packs/attach-documents` contract (§3.6.3 Flow A):**
+
+Request body:
+```json
+{
+  "documentIds": ["doc_a1...", "doc_b2...", "doc_c3..."],
+  "subjectType": "agent" | "task" | "scheduled_task",
+  "subjectId": "sch_42..."
+}
+```
+
+Response — `200 OK`:
+```json
+{
+  "packId": "pack_xyz...",
+  "packIsAutoCreated": true,
+  "attachmentId": "att_abc..."
+}
+```
+
+Behaviour: calls `documentPackService.findOrCreateAutoPack` to resolve/create the auto-pack, then `documentPackService.attach` to bind it to the subject. Idempotent — re-attaching the same doc set to the same subject returns the existing attachment row. If the subject already has a DIFFERENT auto-pack attached with a different doc set, the new pack is ADDED as a second attachment (multi-pack composition per §2.1).
+
+**`POST /api/document-packs/:id/promote` contract (§3.6.4 Flow D):**
+
+Request body:
+```json
+{ "name": "2026 Q2 reference pack" }
+```
+
+Response — `200 OK`:
+```json
+{ "packId": "pack_xyz...", "name": "2026 Q2 reference pack", "isAutoCreated": false }
+```
+
+Errors: `CACHED_CONTEXT_PACK_ALREADY_NAMED` (409), `CACHED_CONTEXT_BUNDLE_NAME_TAKEN` (409), `CACHED_CONTEXT_BUNDLE_NAME_EMPTY` (400), `CACHED_CONTEXT_PACK_NOT_FOUND` (404).
+
+**`GET /api/document-packs/suggest-bundle` contract (§3.6.4):**
+
+Query params:
+- `documentIds` — comma-separated doc UUIDs, minimum length 2 (shorter returns `{ suggest: false }` without error).
+- `excludeSubjectType` — optional, one of `agent | task | scheduled_task`.
+- `excludeSubjectId` — optional.
+
+Response — `200 OK`:
+```json
+{ "suggest": false }
+// or
+{ "suggest": true, "alsoUsedOn": 1, "docSetHash": "0xaf2c91...", "autoPackId": "pack_xyz..." }
+```
+
+Callers (the UI, post-save) use `autoPackId` as the target for a subsequent promote call, and `docSetHash` as the dismissal key.
+
+**`POST /api/bundle-suggestion-dismissals` contract (§3.6.4 dismissal):**
+
+Request body:
+```json
+{ "documentIds": ["doc_a1...", "doc_b2...", "doc_c3..."] }
+```
+
+The server computes `docSetHash` server-side (not trusting a client-supplied hash) and writes the dismissal row. Response `201 Created` with the dismissal record, or `200 OK` with the existing record on idempotent replay.
 
 **Subject listings (read-side):**
 
@@ -1563,15 +2042,48 @@ GET    /api/tasks/:id/attached-packs             listAttachmentsForSubject('task
 GET    /api/scheduled-tasks/:id/attached-packs   listAttachmentsForSubject('scheduled_task', :id)
 ```
 
-**Permissions:** new keys `document_packs.read`, `document_packs.write`, `document_packs.attach`. Seeded in migration 0204.
+Response shape distinguishes bundle chips from individual-document chips (§3.6.3 Flow A):
+```json
+{
+  "attachments": [
+    {
+      "packId": "pack_aa...",
+      "isAutoCreated": false,
+      "bundleName": "42 Macro",
+      "documentCount": 3,
+      "chipKind": "bundle"
+    },
+    {
+      "packId": "pack_bb...",
+      "isAutoCreated": true,
+      "bundleName": null,
+      "documentCount": 1,
+      "documents": [{ "id": "doc_z9...", "name": "Standalone doc" }],
+      "chipKind": "document"
+    }
+  ]
+}
+```
+
+Clients render `chipKind='bundle'` rows as a single 📦 chip, and `chipKind='document'` rows as one 📄 chip per document in the auto-pack.
+
+**Permissions:** new keys `document_packs.read`, `document_packs.write`, `document_packs.attach`. Admin routes (`/admin/*`) require a platform-admin role in addition. Seeded in migration 0204.
 
 ### 7.3 No changes to the `llmRouter` surface
 
 The router's public `routeCall()` gains two optional params (`prefixHash`, `cacheTtl`) as noted in §6.6. The route surface (`/api/*`) is unchanged — the router is an internal service.
 
-### 7.4 No UI-only client routes in v1
+### 7.4 Client-side UI surfaces
 
-The v1 scope (§3.1) limits client work to pack-attachment surfaces on existing task / scheduled-task / agent pages. The Pack management UI is covered only at the route surface above. A full Pack management page (browse / edit / attach visualisation) is deferred to a follow-up.
+The v1 client scope is defined by the four mockups under `prototypes/cached-context/` (§3.6.2). Implementation touches:
+
+- **Agent / task / scheduled-task config pages** — existing pages gain a "Reference documents" section using the pattern in `mockup-attach-docs.html`. This includes the unified picker, the upload-modal trigger, and the post-save bundle-suggestion card. Backed by `/api/document-packs/attach-documents`, `/api/document-packs/suggest-bundle`, `/api/document-packs/:id/promote`, `/api/bundle-suggestion-dismissals`, and the subject listings above.
+- **`Knowledge › Documents` page** — new standalone documents page. Standard CRUD list (pattern borrowed from `memory_blocks` page). Hosts the "Upload documents" button that opens the same upload modal in library-only context (§3.6.5 Flow C).
+- **`Knowledge › Bundles` page** — new standalone bundles list page. Lists named bundles only (`GET /api/document-packs/bundles`). Clicking a bundle opens the bundle-detail page.
+- **Bundle-detail page** — implements `mockup-bundle-detail.html`. Driven by `/api/document-packs/:id` + member edits via the existing `/members` routes.
+- **HITL review queue rendering** — existing review-queue page gains a renderer for `actionType='cached_context_budget_breach'` using the layout in `mockup-budget-breach-block.html`.
+
+All UI surfaces must be built against `docs/frontend-design-principles.md` — `chipKind`-aware rendering, no prefix-hash / snapshot-id surfacing to users, no tier-comparison dashboards, no Usage Explorer panels.
 
 ---
 
@@ -1726,15 +2238,20 @@ All new tables created + RLS + manifest entries + DB CHECK constraints + seed `m
 **Schema changes introduced:** 7 new tables + DB constraint.
 **Columns referenced by code:** all Phase 1 tables fully self-contained.
 
-### Phase 2 — Packs + attachment
+### Phase 2 — Packs + attachment + bundle suggestion
 
-**Migrations:** none new (pack tables landed in Phase 1). Phase 2 is code-only.
+**Migrations:** `0212_bundle_suggestion_dismissals.sql` (§5.12). Pack tables landed in Phase 1; Phase 2 adds the dismissals table + code.
 
-**Services:** `documentPackService` + Pure (create / addMember / removeMember / attach / detach / list / getPackWithMembers / listAttachmentsForSubject / softDelete).
+**Services:** `documentPackService` + Pure — full §6.2 surface including `findOrCreateAutoPack`, `promoteToNamedBundle`, `suggestBundle`, `dismissBundleSuggestion`, and the pure helper `computeDocSetHash`.
 
-**Routes:** `/api/document-packs/*` full surface + subject-listing routes.
+**Routes:** `/api/document-packs/*` full surface (§7.2) + `/api/bundle-suggestion-dismissals` + subject-listing routes. The `attach-documents` primitive (§7.2) goes in here — it's the backing endpoint for the mockup-attach-docs UX.
 
-**Acceptance:** packs can be created, documents added/removed; attachments to agents / tasks / scheduled-tasks work; listings by subject return correctly.
+**Acceptance:**
+- Packs can be created (both explicit-named and implicit-auto); documents added/removed; attachments to agents / tasks / scheduled-tasks work; listings by subject return correctly with `chipKind` discrimination.
+- `findOrCreateAutoPack` is idempotent by doc-set hash + org + subaccount scope.
+- `promoteToNamedBundle` flips an auto-pack to named in place (same `id`, existing attachments preserved).
+- `suggestBundle` returns `{ suggest: false }` for single-doc sets, dismissed sets, and sets already covered by a named bundle; returns `{ suggest: true, alsoUsedOn: N }` for sets attached on 2+ subjects.
+- `dismissBundleSuggestion` is idempotent (second call on same user + doc-set updates the timestamp without raising).
 
 ### Phase 3 — Budget resolver + assembly engine
 
@@ -1770,12 +2287,12 @@ All new tables created + RLS + manifest entries + DB CHECK constraints + seed `m
 
 **Migrations:** none.
 
-**Work:** configure the daily-macro-report scheduled task to use the cached-context orchestrator. Create the reference documents (5 markdown files), create `42_macro_ath_context` pack, attach to the scheduled task, run for one week. Monitor via Usage Explorer.
+**Work:** configure the daily-macro-report scheduled task to use the cached-context orchestrator. Upload the five reference documents via the upload modal (§3.6.5) — either one by one or as a single multi-file upload, with or without the bundle checkbox depending on the pilot operator's preference. Attach to the scheduled task. Run for one week. Monitor via admin observability queries (not through a dedicated Usage Explorer page — that UI is deferred per §3.2).
 
 **Acceptance (the pilot validation criteria from the brief's §9):**
 - Two runs within 1 hour produce a cache hit on the second (non-zero `cache_read_input_tokens`).
-- A deliberate budget-breach test (add a large document) blocks at HITL with the structured payload; no API credits consumed.
-- Usage Explorer surfaces cache hit rate, cache-write cost, and first-run-vs-cached-run cost delta per run.
+- A deliberate budget-breach test (add a large document) blocks at HITL with the structured payload, rendered per `mockup-budget-breach-block.html`; no API credits consumed.
+- Admin queries surface cache hit rate, cache-write cost, and first-run-vs-cached-run cost delta per run.
 - `pack_utilization` job runs hourly and updates the pack's utilization JSONB.
 - Seven consecutive days of clean runs with correct cache attribution.
 
@@ -1884,7 +2401,7 @@ Per `docs/spec-authoring-checklist.md §7`. Every deferred item here corresponds
 - **12.9 Automatic pack summarisation on threshold breach.** Not supported in v1 — breach routes to HITL for operator decision. Summarisation would live in the assembly pipeline's `(optional transform)` slot (§4 of the brief), which is reserved but empty.
 - **12.10 Cross-tenant pack sharing.** Tenants keep their own packs. Platform-level reference material (standard disclaimers, common frameworks) is deferred.
 - **12.11 Parallel fan-out across multiple API calls.** Splitting a task across multiple parallel LLM calls (for token-count-over-budget workloads) is a separate concern.
-- **12.12 Pack UI.** Browse / edit / attach visualisation on a dedicated page. v1 exposes the route surface only.
+- **12.12 Pack observability UI (admin-only).** Per-pack utilization dashboard with tier-by-tier radial rings, usage explorer "pack lens" with hit-rate trends / cost-split / ranking / per-tenant breakdown, and run-detail cache-attribution panel. These represent real backend capabilities the spec already ships at the query layer (§11), but their UI surfaces are deferred until a specific admin workflow needs them — at which point they go on a role-gated admin observability page, never on the primary user journey. See `docs/frontend-design-principles.md` for the governing rule. The pre-revision mockups in `prototypes/cached-context/index.html` document what was cut and why.
 - **12.13 Admin editing of platform-default `model_tier_budget_policies`.** v1 seed rows are editable only via direct DB access. A system-admin-gated route is deferred.
 - **12.14 New-model-family backfill.** When a new `model_tier_budget_policies` row is added for a previously-unseen `modelFamily`, existing `reference_document_versions.tokenCounts` rows lack that key and assembly against that family would fail. v1 does not ship a backfill migration/job because v1 has a fixed three-family set (Sonnet / Opus / Haiku per §5.2). Adding a fourth family post-pilot is a deliberate operational step that MUST include: (a) a data migration that computes `tokenCounts[newFamily]` for every live `reference_document_versions` row via the Anthropic `countTokens` helper, and (b) a gate on the `model_tier_budget_policies` insert that refuses to activate until the backfill reports zero unfilled rows. Strict fail policy: `referenceDocumentService` throws `CACHED_CONTEXT_DOC_TOKEN_COUNT_MISSING` (500) if assembly encounters a missing `tokenCounts[modelFamily]` key at run time.
 - **12.15 Resolver-narrowed cache TTL.** v1 treats the caller's `ttl` hint as a pass-through. A future `model_tier_budget_policies.maxCacheTtl` column + resolver narrowing (`min(caller, orgCeiling, modelTier)`) is deferred — the adapter today supports only `'5m'` and `'1h'` values, so narrowing has small practical value until multi-tier TTLs land upstream.
@@ -1901,13 +2418,14 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 |---|---|---|---|
 | 0202 | `migrations/0202_reference_documents.sql` | 1 | Create `reference_documents` + RLS + manifest entry + permission seed keys |
 | 0203 | `migrations/0203_reference_document_versions.sql` | 1 | Create `reference_document_versions` + RLS + soft-FK on `reference_documents.current_version_id` |
-| 0204 | `migrations/0204_document_packs.sql` | 1 | Create `document_packs` (incl. `utilization_by_model_family` JSONB) + RLS + permission seed keys |
+| 0204 | `migrations/0204_document_packs.sql` | 1 | Create `document_packs` (incl. `is_auto_created`, `created_by_user_id`, `utilization_by_model_family` JSONB) + CHECK constraint (`is_auto_created` ↔ `name` invariant, §5.3) + partial unique index on named-bundle names + RLS + permission seed keys |
 | 0205 | `migrations/0205_document_pack_members.sql` | 1 | Create `document_pack_members` + RLS |
 | 0206 | `migrations/0206_document_pack_attachments.sql` | 1 | Create `document_pack_attachments` + RLS |
 | 0207 | `migrations/0207_pack_resolution_snapshots.sql` | 1 | Create `pack_resolution_snapshots` + RLS + `UNIQUE(pack_id, prefix_hash)` + non-unique `prefix_hash` lookup index |
 | 0208 | `migrations/0208_model_tier_budget_policies.sql` | 1 | Create `model_tier_budget_policies` + CHECK constraint + seed 3 platform-default rows |
 | 0209 | `migrations/0209_agent_runs_cached_context.sql` | 4 | Add `pack_snapshot_ids` / `variable_input_hash` / `run_outcome` / `soft_warn_tripped` to `agent_runs` |
 | 0210 | `migrations/0210_llm_requests_cached_context.sql` | 5 | Add `cache_creation_tokens` / `prefix_hash` to `llm_requests` |
+| 0212 | `migrations/0212_bundle_suggestion_dismissals.sql` | 2 | Create `bundle_suggestion_dismissals` (§5.12) + RLS (user-scoped read + write) + manifest entry + unique index on (user_id, doc_set_hash) |
 
 ### 13.2 Drizzle schema (new files)
 
@@ -1915,11 +2433,12 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 |---|---|---|
 | `server/db/schema/referenceDocuments.ts` | 1 | `reference_documents` |
 | `server/db/schema/referenceDocumentVersions.ts` | 1 | `reference_document_versions` |
-| `server/db/schema/documentPacks.ts` | 1 | `document_packs` |
+| `server/db/schema/documentPacks.ts` | 1 | `document_packs` (incl. `is_auto_created`, `created_by_user_id`) |
 | `server/db/schema/documentPackMembers.ts` | 1 | `document_pack_members` |
 | `server/db/schema/documentPackAttachments.ts` | 1 | `document_pack_attachments` |
 | `server/db/schema/packResolutionSnapshots.ts` | 1 | `pack_resolution_snapshots` |
 | `server/db/schema/modelTierBudgetPolicies.ts` | 1 | `model_tier_budget_policies` |
+| `server/db/schema/bundleSuggestionDismissals.ts` | 2 | `bundle_suggestion_dismissals` (§5.12) |
 
 ### 13.3 Drizzle schema (modified files)
 
@@ -1934,8 +2453,8 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 |---|---|---|
 | `server/services/referenceDocumentService.ts` | 1 | CRUD + versioning + token-counting |
 | `server/services/referenceDocumentServicePure.ts` | 1 | hashContent / hashSerialized / serializeDocument |
-| `server/services/documentPackService.ts` | 2 | CRUD + attachment + membership |
-| `server/services/documentPackServicePure.ts` | 2 | attachment-key canonicalisation helpers |
+| `server/services/documentPackService.ts` | 2 | CRUD + attachment + membership + auto-pack lifecycle (`findOrCreateAutoPack`, `promoteToNamedBundle`, `suggestBundle`, `dismissBundleSuggestion`) per §6.2 |
+| `server/services/documentPackServicePure.ts` | 2 | attachment-key canonicalisation helpers + `computeDocSetHash` (§6.2 pure helper; shared fixture with `contextAssemblyEnginePure.computePrefixHash`) |
 | `server/services/packResolutionService.ts` | 4 | run-start snapshot resolution |
 | `server/services/packResolutionServicePure.ts` | 4 | orderDocumentsDeterministically / buildSnapshotRow |
 | `server/services/contextAssemblyEngine.ts` | 3 | stateful wrapper |
@@ -1955,10 +2474,10 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 
 ### 13.6 Routes (new files)
 
-| File | Phase |
-|---|---|
-| `server/routes/referenceDocuments.ts` | 1 |
-| `server/routes/documentPacks.ts` | 2 |
+| File | Phase | Notable endpoints |
+|---|---|---|
+| `server/routes/referenceDocuments.ts` | 1 | standard CRUD + **`POST /api/reference-documents/bulk-upload`** multi-file upload endpoint (§7.1) |
+| `server/routes/documentPacks.ts` | 2 | CRUD + attach/detach + **`POST /api/document-packs/attach-documents`** (doc-set attach primitive) + **`POST /api/document-packs/:id/promote`** + **`GET /api/document-packs/suggest-bundle`** + **`POST /api/bundle-suggestion-dismissals`** (all §7.2) |
 
 ### 13.7 Routes (modified files)
 
@@ -1979,13 +2498,13 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 
 | File | Phase | Exports |
 |---|---|---|
-| `shared/types/cachedContext.ts` | 3 | `ResolvedExecutionBudget`, `ContextAssemblyResult`, `PrefixHashComponents`, `HitlBudgetBlockPayload`, `RunOutcome`, `AttachmentSubjectType`, `AttachmentMode`, `ReferenceDocumentSourceType`, `ReferenceDocumentChangeSource` |
+| `shared/types/cachedContext.ts` | 3 | `ResolvedExecutionBudget`, `ContextAssemblyResult`, `PrefixHashComponents`, `HitlBudgetBlockPayload`, `RunOutcome`, `AttachmentSubjectType`, `AttachmentMode`, `ReferenceDocumentSourceType`, `ReferenceDocumentChangeSource`, `BundleSuggestion`, `BundleSuggestionDismissal` (last two added in Phase 2 per §6.2) |
 
 ### 13.10 Config (modified files)
 
 | File | Phase | Change |
 |---|---|---|
-| `server/config/rlsProtectedTables.ts` | 1 | +7 manifest entries (§8.2) |
+| `server/config/rlsProtectedTables.ts` | 1, 2 | +7 manifest entries in Phase 1 + 1 entry for `bundle_suggestion_dismissals` in Phase 2 (§8.2) |
 | `server/config/permissions.ts` | 1, 2 | +6 permission keys (`reference_documents.*` ×3, `document_packs.*` ×3) |
 | `server/config/actionRegistry.ts` | 5 | +1 action type + Zod schema |
 | `scripts/gates/rls-bypass-allowlist.txt` | 2 | +1 line allow-listing `server/jobs/packUtilizationJob.ts` (§8.6 carve-out) |
@@ -2007,6 +2526,19 @@ Exhaustive list of files this spec creates or modifies. Per `docs/spec-authoring
 |---|---|---|
 | `architecture.md` | 6 | Add "Cached context" entry to Key files per domain §; document the new primitive family |
 | `docs/capabilities.md` | 6 | Add "File-attached recurring tasks" as a Product Capability under the relevant category |
+
+### 13.13 Documentation + mockups (reference — created alongside this spec revision)
+
+These files are already on disk as of the 2026-04-23 UX revision. Listed here for completeness so the file inventory is exhaustive.
+
+| File | Purpose |
+|---|---|
+| `docs/frontend-design-principles.md` | Governing UI rules (pre-design checklist, ship-by-default, defer-by-default, complexity budget, worked example for this feature). §3.6 references this as the authority for UI decisions. |
+| `prototypes/cached-context/index.html` | Landing page for the mockup set, concept-shift summary, iteration notes. |
+| `prototypes/cached-context/mockup-attach-docs.html` | §3.6.3 Flow A + §3.6.4 post-save suggestion. |
+| `prototypes/cached-context/mockup-upload-document.html` | §3.6.5 reusable upload modal. |
+| `prototypes/cached-context/mockup-bundle-detail.html` | §3.6.3 Flow E + bundle management. |
+| `prototypes/cached-context/mockup-budget-breach-block.html` | §3.6.3 Flow F + `HitlBudgetBlockPayload` (§4.5) rendering. |
 
 ---
 
@@ -2056,7 +2588,7 @@ The spec is validated when the following are all true after Phase 6:
 1. **End-to-end pilot run.** The daily-macro-report scheduled task runs through `cachedContextOrchestrator` with its 5-document pack, Sonnet 4.6, standard endpoint. No per-task glue code.
 2. **Cache hit verifiable.** Two runs within the TTL window produce a cache hit on the second — `cache_read_input_tokens > 0` on the `llm_requests` row. The first run has `cache_creation_input_tokens > 0`.
 3. **Budget-breach block.** A deliberate test pack (3 oversized documents) triggers a `gateLevel='block'` action with the structured payload. Zero API credits consumed on the blocked run. The orchestrator pauses; operator approves; orchestrator re-resolves and runs cleanly.
-4. **Attribution visible in Usage Explorer.** Queries expose: cache-hit rate per pack per tenant per day, cache-creation cost per tenant per day, first-run-vs-cached-run cost delta per pack, pack utilization per pack per model family.
+4. **Attribution visible at the admin query surface.** SQL queries expose: cache-hit rate per pack per tenant per day, cache-creation cost per tenant per day, first-run-vs-cached-run cost delta per pack, pack utilization per pack per model family. No user-facing dashboard in v1 — these queries back the existing admin observability tooling only (per §3.2 out-of-scope, the "Pack lens" Usage Explorer page is deferred).
 5. **Run outcome classification works.** Queries against `agent_runs.run_outcome` distinguish `completed`, `degraded`, and `failed` counts. Degraded runs surface at least one of: `soft_warn_tripped = true`, drift > 10%, unexpected cache miss.
 6. **Prefix-hash diagnosis proves diagnostic.** A deliberate pack edit produces a different call-level `prefix_hash` on `llm_requests` on the next run. The diagnosis path documented in §4.4 (read `agent_runs.pack_snapshot_ids`, fetch per-pack `prefix_hash_components`, diff against prior snapshots) identifies which specific pack / document / version inputs changed.
 7. **Seven days clean.** Seven consecutive daily runs of the pilot task, no failures, cache behaviour consistent with expectations, cost attribution clean.

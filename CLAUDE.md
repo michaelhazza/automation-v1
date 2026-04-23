@@ -435,6 +435,24 @@ See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are dur
 
 ---
 
+## Frontend Design Principles
+
+**Automation OS is a consumer-simple product built on enterprise-grade backend capability.** Backend specs stay thorough — they must cover the full capability surface. Frontend surfaces stay minimal — they must be usable by non-technical operators without training. A rich backend does not justify a rich UI; those are two different decisions.
+
+The failure mode to avoid: surfacing every backend capability the spec exposes as a frontend screen. Utilization metrics, attribution hashes, per-tenant aggregations, diagnostic panels — the backend needs to compute them; the UI almost never needs to render them by default. Most of them either belong in admin-only views, behind progressive disclosure, or deferred out of v1 entirely.
+
+**Five hard rules — applied to every UI artifact (mockup, component, page):**
+
+1. **Start with the user's primary task, not the data model.** Before sketching any screen, answer: *what single task is the user here to complete?* Design the minimum surface for that task. If you find yourself designing from "the backend exposes columns X, Y, Z — so the UI shows panels X, Y, Z", stop and start over from the task.
+2. **Default to hidden.** Metric dashboards, KPI boards, trend charts, diagnostic panels, prefix-hash / ID exposure, aggregated-cost views, per-tenant financial breakdowns, observability surfaces — all **deferred by default**. Ship them only when a specific user asks for a specific workflow that requires them, or when they go in an admin-only view that the average user never sees.
+3. **One primary action per screen.** If a screen has ≥ 2 primary actions, split it. If it has ≥ 3 sidebar panels, cut one. If it has a table AND a chart AND a ranking AND KPI tiles, you're rebuilding a monitoring product on top of the core product.
+4. **Inline state beats dashboards.** A status dot next to a name beats a utilization dashboard. A single "last run · succeeded" line beats a run-history panel. Before adding a new page, ask: *can this live as inline state on a page that already exists?* Usually yes.
+5. **The re-check.** Before committing any UI artifact, ask: *would a non-technical operator complete the primary task on this screen without feeling overwhelmed?* If the answer is anything other than "yes, obviously", cut information until it is.
+
+**Deep rationale, pre-design checklist, worked good-vs-bad examples:** see [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read that doc before generating a mockup or designing a new page.
+
+---
+
 ## User Preferences
 
 - Concise communication, no emojis
