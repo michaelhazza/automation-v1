@@ -10,6 +10,7 @@
 import {
   classifySpawnTargets,
   resolveWriteSkillScope,
+  evaluateSpawnPreconditions,
 } from '../skillExecutorDelegationPure.js';
 import type { HierarchyContext } from '../../../shared/types/delegation.js';
 
@@ -179,6 +180,84 @@ test('unknown string rawScope falls through to adaptive default', () => {
     hierarchy: hierarchyNoChildren,
   });
   assertEqual(result, 'subaccount', 'scope');
+});
+
+// ---------------------------------------------------------------------------
+// evaluateSpawnPreconditions
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('evaluateSpawnPreconditions');
+console.log('');
+
+const hierarchyWithChild: Readonly<HierarchyContext> = {
+  agentId: 'sa-caller',
+  parentId: null,
+  childIds: ['sa-child'],
+  rootId: 'sa-caller',
+  depth: 0,
+};
+
+test('hierarchy missing → hierarchy_context_missing', () => {
+  const result = evaluateSpawnPreconditions({
+    hierarchy: undefined,
+    currentHandoffDepth: 0,
+    maxHandoffDepth: 5,
+    effectiveScope: 'children',
+  });
+  assertEqual(result, { ok: false, errorCode: 'hierarchy_context_missing' }, 'result');
+});
+
+test('depth at limit → max_handoff_depth_exceeded', () => {
+  const result = evaluateSpawnPreconditions({
+    hierarchy: hierarchyWithChild,
+    currentHandoffDepth: 5,
+    maxHandoffDepth: 5,
+    effectiveScope: 'children',
+  });
+  assertEqual(result, { ok: false, errorCode: 'max_handoff_depth_exceeded' }, 'result');
+});
+
+test('depth below limit → ok', () => {
+  const result = evaluateSpawnPreconditions({
+    hierarchy: hierarchyWithChild,
+    currentHandoffDepth: 4,
+    maxHandoffDepth: 5,
+    effectiveScope: 'children',
+  });
+  assertEqual(result, { ok: true, effectiveScope: 'children' }, 'result');
+});
+
+test('subaccount scope → cross_subtree_not_permitted', () => {
+  const result = evaluateSpawnPreconditions({
+    hierarchy: hierarchyWithChild,
+    currentHandoffDepth: 0,
+    maxHandoffDepth: 5,
+    effectiveScope: 'subaccount',
+  });
+  assertEqual(result, { ok: false, errorCode: 'cross_subtree_not_permitted' }, 'result');
+});
+
+test('adaptive default for leaf caller (no children) resolves subaccount → evaluateSpawnPreconditions rejects', () => {
+  // resolveWriteSkillScope with a leaf caller (no children) → 'subaccount'
+  const leafHierarchy: Readonly<HierarchyContext> = {
+    agentId: 'sa-caller',
+    parentId: null,
+    childIds: [],
+    rootId: 'sa-caller',
+    depth: 0,
+  };
+  const resolved = resolveWriteSkillScope({ rawScope: undefined, hierarchy: leafHierarchy });
+  assertEqual(resolved, 'subaccount', 'resolved scope');
+
+  // Then evaluateSpawnPreconditions must reject that resolved scope
+  const result = evaluateSpawnPreconditions({
+    hierarchy: leafHierarchy,
+    currentHandoffDepth: 0,
+    maxHandoffDepth: 5,
+    effectiveScope: resolved,
+  });
+  assertEqual(result, { ok: false, errorCode: 'cross_subtree_not_permitted' }, 'precondition result');
 });
 
 // ---------------------------------------------------------------------------

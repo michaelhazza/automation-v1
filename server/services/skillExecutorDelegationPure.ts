@@ -118,3 +118,54 @@ export function validateReassignScope(input: {
   if (!inScope) return { valid: false, errorCode: 'delegation_out_of_scope' };
   return { valid: true };
 }
+
+// ---------------------------------------------------------------------------
+// evaluateSpawnPreconditions
+// ---------------------------------------------------------------------------
+
+export const MAX_HANDOFF_DEPTH_SPAWN = 5; // mirrors MAX_HANDOFF_DEPTH in skillExecutor.ts
+
+/**
+ * Validates pre-conditions for executeSpawnSubAgents before any DB work.
+ * Pure — takes all inputs, returns a verdict.
+ *
+ * Covers: hierarchy missing, depth exceeded, subaccount-scope rejection.
+ */
+export function evaluateSpawnPreconditions(input: {
+  hierarchy: Readonly<HierarchyContext> | undefined;
+  currentHandoffDepth: number;
+  maxHandoffDepth: number;
+  effectiveScope: DelegationScope;
+}):
+  | { ok: true; effectiveScope: 'children' | 'descendants' }
+  | { ok: false; errorCode: 'hierarchy_context_missing' | 'max_handoff_depth_exceeded' | 'cross_subtree_not_permitted' } {
+  if (!input.hierarchy) {
+    return { ok: false, errorCode: 'hierarchy_context_missing' };
+  }
+  if (input.currentHandoffDepth + 1 > input.maxHandoffDepth) {
+    return { ok: false, errorCode: 'max_handoff_depth_exceeded' };
+  }
+  if (input.effectiveScope === 'subaccount') {
+    return { ok: false, errorCode: 'cross_subtree_not_permitted' };
+  }
+  return { ok: true, effectiveScope: input.effectiveScope as 'children' | 'descendants' };
+}
+
+// ---------------------------------------------------------------------------
+// evaluateReassignPreconditions
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates pre-conditions for executeReassignTask before any DB work.
+ * Covers: hierarchy missing.
+ */
+export function evaluateReassignPreconditions(input: {
+  hierarchy: Readonly<HierarchyContext> | undefined;
+}):
+  | { ok: true }
+  | { ok: false; errorCode: 'hierarchy_context_missing' } {
+  if (!input.hierarchy) {
+    return { ok: false, errorCode: 'hierarchy_context_missing' };
+  }
+  return { ok: true };
+}

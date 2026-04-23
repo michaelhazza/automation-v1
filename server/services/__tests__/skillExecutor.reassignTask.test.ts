@@ -17,7 +17,9 @@
 import {
   computeReassignDirection,
   validateReassignScope,
+  evaluateReassignPreconditions,
 } from '../skillExecutorDelegationPure.js';
+import type { HierarchyContext } from '../../../shared/types/delegation.js';
 
 let passed = 0;
 let failed = 0;
@@ -207,6 +209,31 @@ test('upward escalation ordering — parentId target fails validateReassignScope
   // Expected: rejected — confirms that upward escalation MUST be short-circuited
   // by the caller before reaching validateReassignScope.
   assertEqual(scopeResult.valid, false, 'scope-only check rejects parent → proves the caller must short-circuit on direction=up');
+});
+
+// ---------------------------------------------------------------------------
+// evaluateReassignPreconditions
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('evaluateReassignPreconditions');
+console.log('');
+
+test('hierarchy missing → hierarchy_context_missing', () => {
+  const result = evaluateReassignPreconditions({ hierarchy: undefined });
+  assertEqual(result, { ok: false, errorCode: 'hierarchy_context_missing' }, 'result');
+});
+
+test('hierarchy present → ok', () => {
+  const hierarchy: Readonly<HierarchyContext> = {
+    agentId: 'sa-1',
+    parentId: null,
+    childIds: ['sa-child'],
+    rootId: 'sa-1',
+    depth: 0,
+  };
+  const result = evaluateReassignPreconditions({ hierarchy });
+  assertEqual(result, { ok: true }, 'result');
 });
 
 // ---------------------------------------------------------------------------
