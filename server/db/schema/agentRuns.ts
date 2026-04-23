@@ -201,6 +201,17 @@ export const agentRuns = pgTable(
     nextEventSeq: integer('next_event_seq').notNull().default(0),
     eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
 
+    // Cached Context Infrastructure (migration 0209) — §5.8
+    // bundleSnapshotIds: array of bundle_resolution_snapshots.id for this run
+    bundleSnapshotIds: jsonb('bundle_snapshot_ids').$type<string[]>(),
+    // variableInputHash: SHA-256 of the dynamic (post-breakpoint) content
+    variableInputHash: text('variable_input_hash'),
+    // runOutcome: nullable while in-flight; set atomically at terminal write
+    runOutcome: text('run_outcome').$type<'completed' | 'degraded' | 'failed'>(),
+    softWarnTripped: boolean('soft_warn_tripped').notNull().default(false),
+    // degradedReason: diagnostic enum recorded alongside run_outcome='degraded' (§4.6)
+    degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

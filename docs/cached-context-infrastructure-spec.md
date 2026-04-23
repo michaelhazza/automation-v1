@@ -2180,22 +2180,48 @@ Every new tenant-scoped table (§5.1–5.7) must satisfy the four requirements i
 
 ### 8.1 RLS policies
 
-Every table creation migration (0202–0208) includes an RLS policy block in the same migration. Policies follow the three-layer fail-closed pattern documented at `architecture.md §1155` and mirror the exact shape used by `memory_blocks`.
+Every table creation migration (0202–0208) includes an RLS policy block in the same migration. Policies follow the three-layer fail-closed pattern documented at `architecture.md §1155` and mirror the exact shape used by `memory_blocks` / migration `0200_fix_universal_brief_rls.sql`.
+
+The canonical org session variable is `app.organisation_id` (set by `server/middleware/auth.ts` and `server/lib/createWorker.ts`). The subaccount variable is `app.current_subaccount_id` (set by `server/db/withPrincipalContext.ts`). Do not use `app.current_organisation_id` — that name is never set anywhere in the codebase.
 
 Template for tenant-scoped tables with both `organisation_id` and nullable `subaccount_id`:
 
 ```sql
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY <table>_org_isolation ON <table>
-  USING (organisation_id = current_setting('app.current_organisation_id')::uuid);
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
 CREATE POLICY <table>_subaccount_isolation ON <table>
   USING (
     subaccount_id IS NULL
-    OR subaccount_id = current_setting('app.current_subaccount_id', true)::uuid
+    OR (
+      current_setting('app.current_subaccount_id', true) IS NOT NULL
+      AND current_setting('app.current_subaccount_id', true) <> ''
+      AND subaccount_id = current_setting('app.current_subaccount_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    subaccount_id IS NULL
+    OR (
+      current_setting('app.current_subaccount_id', true) IS NOT NULL
+      AND current_setting('app.current_subaccount_id', true) <> ''
+      AND subaccount_id = current_setting('app.current_subaccount_id', true)::uuid
+    )
   );
 ```
+
+`FORCE ROW LEVEL SECURITY` is required so table owners (including the application role that runs migrations) cannot bypass the policy. The `IS NOT NULL`/non-empty guard returns zero rows when the session var is unset rather than relying on NULL-cast behaviour. Both clauses must appear on every policy — copy the template as-is.
 
 Applied to:
 - `reference_documents`
@@ -2208,18 +2234,31 @@ Applied to:
 
   ```sql
   ALTER TABLE model_tier_budget_policies ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE model_tier_budget_policies FORCE ROW LEVEL SECURITY;
 
   CREATE POLICY model_tier_budget_policies_read ON model_tier_budget_policies
     FOR SELECT
     USING (
       organisation_id IS NULL
-      OR organisation_id = current_setting('app.current_organisation_id')::uuid
+      OR (
+        current_setting('app.organisation_id', true) IS NOT NULL
+        AND current_setting('app.organisation_id', true) <> ''
+        AND organisation_id = current_setting('app.organisation_id', true)::uuid
+      )
     );
 
   CREATE POLICY model_tier_budget_policies_write ON model_tier_budget_policies
     FOR ALL
-    USING (organisation_id = current_setting('app.current_organisation_id')::uuid)
-    WITH CHECK (organisation_id = current_setting('app.current_organisation_id')::uuid);
+    USING (
+      current_setting('app.organisation_id', true) IS NOT NULL
+      AND current_setting('app.organisation_id', true) <> ''
+      AND organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+    WITH CHECK (
+      current_setting('app.organisation_id', true) IS NOT NULL
+      AND current_setting('app.organisation_id', true) <> ''
+      AND organisation_id = current_setting('app.organisation_id', true)::uuid
+    );
   ```
 
   Platform-default row editing is admin-role only (§8.5 + §12.13). The generic `<table>_org_isolation` template in this section is NOT applied to `model_tier_budget_policies` — the table has its own explicit block above.

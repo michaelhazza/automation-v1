@@ -132,6 +132,18 @@ export interface RouterCallParams {
    * row + reconciliation contract as a non-streamed call.
    */
   stream?:      boolean;
+  /**
+   * Cached Context Infrastructure §6.6 — assembled prefix hash for this call.
+   * Optional; only passed by cachedContextOrchestrator. Phase 4 accepts the
+   * param but does NOT persist it (column lands in Phase 5 / migration 0210).
+   */
+  prefixHash?:  string;
+  /**
+   * Cached Context Infrastructure §6.6 — caller TTL hint for ephemeral cache.
+   * Passed through to the provider adapter's cache_control block. Defaults to
+   * '1h' when not provided. Resolver-narrowed TTL is deferred (§12.15).
+   */
+  cacheTtl?:    '5m' | '1h';
 }
 
 // ---------------------------------------------------------------------------
@@ -1265,6 +1277,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       wasDowngraded,
       routingReason,
       cachedPromptTokens:  providerResponse.cachedPromptTokens ?? 0,
+      cacheCreationTokens: providerResponse.cacheCreationTokens ?? 0,
+      prefixHash:          params.prefixHash,
       provider:            actualProvider,
       model:               actualModel,
       providerRequestId:   providerResponse.providerRequestId,
@@ -1309,6 +1323,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         providerTokensIn:    providerResponse.tokensIn,
         providerTokensOut:   providerResponse.tokensOut,
         cachedPromptTokens:  providerResponse.cachedPromptTokens ?? 0,
+        cacheCreationTokens: providerResponse.cacheCreationTokens ?? 0,
+        prefixHash:          params.prefixHash,
         costRaw:             String(costResult.costRaw),
         costWithMargin:      String(costResult.costWithMargin),
         costWithMarginCents: costResult.costWithMarginCents,

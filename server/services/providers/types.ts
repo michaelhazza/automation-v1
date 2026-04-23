@@ -46,6 +46,8 @@ export interface ProviderResponse {
   tokensOut:         number;
   providerRequestId: string;
   cachedPromptTokens?: number;
+  // Tokens written to Anthropic's ephemeral cache on this call (§5.9)
+  cacheCreationTokens?: number;
 
   // Routing metadata — set by routeCall() (not provider adapters).
   // Consumed by agent loop for escalation decisions.
