@@ -326,6 +326,10 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### paperclip-hierarchy
+
+- [ ] **REQ #C4a-6 — Return-shape contract for delegation errors (architectural).** `spawn_sub_agents` and `reassign_task` return `{ success: false, error: <string code>, context }` but spec §4.3 mandates `{ success: false, error: { code, message, context } }`. The telemetry event payloads already use the spec-correct nested envelope; only the skill handler return values diverge. Fixing this either (a) introduces return-shape inconsistency across the ~40 other skills in `skillExecutor.ts` that return `error: string`, or (b) implies a broader migration of the string-error pattern. Architect decision needed: is the legacy string pattern grandfathered and spec §4.3 describes only new-delegation-skills-only contracts, or must all three codes adopt the nested envelope? If nested, audit `executeWithActionAudit`, LLM-facing serialisation, and agent prompt parsing for breakage. Source: spec §4.3 lines 316–322; `spec-conformance-log-paperclip-hierarchy-chunk-4a-2026-04-24T00-00-00Z.md`.
+
 ### PR #171 — claude-md-updates (2026-04-22)
 
 - [ ] Add non-goals enforcement gate to spec-reviewer — valid improvement but requires spec-reviewer to reason about product strategy (not just structural spec quality); out of scope for this PR; revisit when spec-reviewer is next revised.
@@ -555,4 +559,15 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
   - Spec section: spec §4.3 "Uniform contract" (lines 316–322 of the spec); applies to all three new codes (`hierarchy_context_missing`, `cross_subtree_not_permitted`, `delegation_out_of_scope`) in both handlers.
   - Gap: Current return value has `error` as a flat string and `context` hoisted to the top level. The telemetry event writes (`insertExecutionEventSafe` payloads) use the spec-correct nested envelope, so the split is return-value-only.
   - Suggested approach: This is a contract change. Legacy `skillExecutor` skills throughout the file return `error: string`, so moving delegation errors to a nested envelope either (a) introduces inconsistency across skills, or (b) implies a broader migration. Decide with architect whether the legacy string pattern is grandfathered and spec §4.3 describes the new-delegation-skills-only envelope, or whether the return shape should be changed and downstream consumers (agent prompts, action-audit wrapper `executeWithActionAudit`, any LLM-facing serialization) must be audited for breakage.
+
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4b (2026-04-24)
+
+**Captured:** 2026-04-24T00:00:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-2026-04-24T00-00-00Z.md`
+**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4b, lines 627–661) + `docs/hierarchical-delegation-dev-spec.md` (§6.5, §12.2)
+
+- [ ] REQ #C4b-1 — Pure test file `skillService.resolver.test.ts` does not cover the "WARN logged" assertion called out in the plan's Files-New bullet.
+  - Spec section: `plan.md` line 632 ("`context.hierarchy` undefined → no derived skills, WARN logged"); acceptance criterion line 661 ("logs WARN `hierarchy_missing_at_resolver_time` once").
+  - Gap: The pure test file only covers the "returns `[]`" half of the plan's undefined-hierarchy case. WARN emission lives inside the impure `resolveSkillsForAgent`; the test file explicitly notes (lines 7–10) that this case was deferred to integration-level coverage because it requires a logger mock plus DB scaffolding. No such integration test exists yet in this chunk.
+  - Suggested approach: Either (a) mock the `logger` module and assert WARN in a thin integration test against `resolveSkillsForAgent` (will need to stub the `skills` table query or use an empty `skillSlugs` input so the DB path short-circuits on line 127's early return), or (b) refactor the WARN decision into a pure helper returning `{ derivedSlugs, warn: boolean, reason }` so the pure test can assert the boolean alongside the slug output. Option (b) is the cleaner pure-helper shape and keeps `skillServicePure.ts` authoritative for Chunk 4b's logic.
 
