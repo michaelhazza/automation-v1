@@ -17,7 +17,7 @@ You run after the development session claims completion and **before** `pr-revie
 
 1. Context Loading
 2. Setup — auto-detect inputs (spec path, changed files, scope)
-3. Verification pass (Steps 1–2: extract checklist, verify each requirement)
+3. Verification pass (Step 0: emit per-subcomponent TodoWrite list; Steps 1–2: extract checklist, verify each requirement)
 4. Classification criteria (Step 3: MECHANICAL_GAP vs DIRECTIONAL_GAP vs AMBIGUOUS)
 5. Apply fixes (Step 4: mechanical, directional routing, log) and re-verify (Step 5)
 6. Final output envelope
@@ -111,6 +111,16 @@ Try the following in order:
 Record the scope decision in the log. Future sessions need to know *what was verified*, not just *that verification ran*.
 
 ## Verification pass
+
+### Step 0 — Emit a per-subcomponent TodoWrite list (MANDATORY)
+
+Before Step 1's checklist extraction, call the `TodoWrite` tool once to create an explicit task list with **one `pending` item per spec subcomponent**. Derive subcomponents from the spec's own section numbering — every numbered subsection that names an implementable artifact (each §5 schema element: table, column, index, constraint; each §6 service method; each §7 route; each error-code constant; each action-registry entry; each migration file) becomes one todo. Do not batch subsections; do not collapse a whole phase into a single item.
+
+Why: the user must be able to watch the audit walk through each subcomponent, one at a time, seeing progress per item. A single "audit everything" checkbox hides which item the agent is currently verifying and loses per-subcomponent traceability.
+
+As the verification pass runs (Steps 1–5), flip each item to `in_progress` when its audit starts and to `completed` only when that subcomponent is either confirmed PASS, has had its MECHANICAL_GAP fix applied, or has had its DIRECTIONAL_GAP routed to `tasks/todo.md`. Never batch completions — update one item at a time so the visible progress matches the real work.
+
+If the scoped phase is narrower than the whole spec (Setup Step C), emit todos only for that phase's subcomponents. OUT_OF_SCOPE subcomponents are not added to the list.
 
 ### Step 1 — Extract the conformance checklist from the spec
 
