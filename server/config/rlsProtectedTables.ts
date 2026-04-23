@@ -457,6 +457,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0194_conversations_polymorphic.sql',
     rationale: 'Individual messages within conversations — includes BriefChatArtefact JSONB blobs with query results, approval payloads, and error diagnostics. Same sensitivity as the parent conversation.',
   },
+  // 0205 — Paperclip Hierarchy: delegation outcomes telemetry
+  {
+    tableName: 'delegation_outcomes',
+    schemaFile: 'delegationOutcomes.ts',
+    policyMigration: '0205_delegation_outcomes.sql',
+    rationale: 'Per-run delegation decision log — caller/target agent ids and scope reveal agent hierarchy topology; cross-tenant leak would expose one org\'s agent structure to another.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

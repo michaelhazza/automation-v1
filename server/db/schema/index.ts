@@ -212,3 +212,6 @@ export * from './fastPathDecisions.js';
 
 // Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
 export * from './userSettings.js';
+
+// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0205)
+export * from './delegationOutcomes.js';

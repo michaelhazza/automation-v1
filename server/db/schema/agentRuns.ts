@@ -1,6 +1,7 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
+import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -200,6 +201,14 @@ export const agentRuns = pgTable(
     // signal event — see spec §4.1.
     nextEventSeq: integer('next_event_seq').notNull().default(0),
     eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
+
+    // Paperclip Hierarchy — delegation telemetry (migration 0204).
+    // All four columns are nullable: only populated on runs that participate
+    // in a delegation chain. Ships empty; no behaviour change in this chunk.
+    delegationScope: text('delegation_scope').$type<DelegationScope>(),
+    hierarchyDepth: smallint('hierarchy_depth'),
+    delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
+    handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
