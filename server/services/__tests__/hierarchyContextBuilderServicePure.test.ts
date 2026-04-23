@@ -257,6 +257,27 @@ test('depth of exactly MAX_HIERARCHY_DEPTH does not throw', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Orphaned parent — parent id referenced but not present in roster
+// ---------------------------------------------------------------------------
+
+test('orphaned parent: walk terminates at caller when parent is not in roster', () => {
+  // Policy: when the upward walk encounters a parentSubaccountAgentId that is not
+  // present in the roster (e.g. the parent row is inactive and was filtered out),
+  // the walk stops and the last successfully resolved node (the caller itself)
+  // becomes rootId.  parentId is still preserved from the caller's own row so
+  // the reference is not silently lost — callers can see the dangling pointer.
+  const orphanedRoster: RosterRow[] = [
+    { id: 'sa-caller', parentSubaccountAgentId: 'sa-missing' },
+    // 'sa-missing' is intentionally absent (inactive / filtered out)
+  ];
+  const ctx = buildHierarchyContextPure({ agentId: 'sa-caller', agents: orphanedRoster });
+  assertEqual(ctx.rootId, 'sa-caller', 'orphan.rootId — caller is its own root');
+  assertEqual(ctx.depth, 0, 'orphan.depth — no hops resolved');
+  assertEqual(ctx.parentId, 'sa-missing', 'orphan.parentId — dangling reference preserved');
+  assertDeepEqual(ctx.childIds, [], 'orphan.childIds — no children');
+});
+
+// ---------------------------------------------------------------------------
 // Root childIds completeness
 // ---------------------------------------------------------------------------
 

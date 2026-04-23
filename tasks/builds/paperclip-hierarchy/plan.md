@@ -476,7 +476,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
   const hierarchy = await hierarchyContextBuilderService.buildForRun({ agentId, subaccountId, organisationId });
   const ctx: SkillExecutionContext = { ...existingFields, hierarchy };
   ```
-  Per spec §6.1 "built once per run". On `HierarchyContextBuildError`, surface as a hard run failure (the existing run-failure path — same class as "agent not found"). Also write `agent_runs.hierarchy_depth = hierarchy.depth` on the new row. The other Phase-1 columns (`delegation_scope`, `delegation_direction`, `handoff_source_run_id`) stay null until Phase 4.
+  Per spec §6.1 "built once per run". On `HierarchyContextBuildError`, log WARN (`hierarchy_not_built_for_run`) and leave `ctx.hierarchy` undefined — non-aborting. Read skills fall through (Chunk 3b); write skills fail closed (Chunk 4a). Do not abort the run. Also write `agent_runs.hierarchy_depth = hierarchy.depth` on the new row. The other Phase-1 columns (`delegation_scope`, `delegation_direction`, `handoff_source_run_id`) stay null until Phase 4.
 
 **Implementation notes.**
 - Construction ordering matters — `agentExecutionService` must build hierarchy BEFORE invoking `skillService.resolveSkillsForAgent` (§6.5). Phase 4's derived-skill resolver reads `context.hierarchy.childIds`; if hierarchy is built lazily AFTER the resolver, derived skills go missing.
@@ -496,7 +496,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 **Acceptance criteria.**
 - Every new `agent_runs` row has `hierarchy_depth` populated matching the caller's depth in the active subaccount roster.
 - `ctx.hierarchy` is a frozen object — `ctx.hierarchy.childIds.push(...)` throws in strict mode.
-- A run for an agent with no roster row (manually crafted failure) surfaces `HierarchyContextBuildError('agent_not_in_subaccount')` as a run failure, not a silent zero-context run.
+- A run for an agent with no roster row surfaces `HierarchyContextBuildError('agent_not_in_subaccount')` as a WARN-tagged non-aborting fallthrough — `ctx.hierarchy` is undefined, the run continues.
 - Deterministic `childIds`: two runs for the same agent over the same roster produce identical `childIds` order.
 - No regression in existing `agentExecutionService` tests.
 

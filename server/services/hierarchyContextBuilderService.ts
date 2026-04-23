@@ -56,6 +56,8 @@ export async function buildForRun(input: {
 
   const result = buildHierarchyContextPure({ agentId: input.agentId, agents: rows });
 
-  // INV-4: runtime immutability — freeze before returning
+  // INV-4: runtime immutability — deep-freeze before returning.
+  // Object.freeze is shallow, so freeze nested arrays explicitly first.
+  Object.freeze(result.childIds);
   return Object.freeze(result);
 }
