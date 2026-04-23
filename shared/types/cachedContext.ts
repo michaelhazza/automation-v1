@@ -6,13 +6,28 @@
 // ---------------------------------------------------------------------------
 
 export interface ResolvedExecutionBudget {
+  /** Max input-side tokens (bundle prefix + variable input). */
   maxInputTokens: number;
+  /** Max output-side tokens (response reservation). */
   maxOutputTokens: number;
-  reserveOutputTokens: number;
+  /** Hard per-call cost ceiling in USD (not cents). */
+  maxTotalCostUsd: number;
+  /** Per-document hard cap in tokens. */
   perDocumentMaxTokens: number;
-  maxTotalCostUsdCents: number;
-  softWarnThreshold: number; // = maxInputTokens * softWarnRatio
-  modelFamily: string;
+  /** Reserved output tokens subtracted from maxInputTokens headroom. */
+  reserveOutputTokens: number;
+  /** Soft-warn threshold as a fraction of maxInputTokens (0 < x < 1). */
+  softWarnRatio: number;
+  /** Source inputs recorded for debugging / audit. */
+  resolvedFrom: {
+    taskConfigId: string | null;
+    modelTierPolicyId: string;
+    orgCeilingPolicyId: string | null;
+  };
+  /** Model family this budget was resolved against. */
+  modelFamily: 'anthropic.claude-sonnet-4-6' | 'anthropic.claude-opus-4-7' | 'anthropic.claude-haiku-4-5';
+  /** Declared model context window at resolution time. */
+  modelContextWindow: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,19 +89,28 @@ export type DegradedReason = 'soft_warn' | 'token_drift' | 'cache_miss';
 
 export type ContextAssemblyResult =
   | {
-      kind: 'ready';
-      assembledPrefix: string;
-      assembledPrefixHash: string;
-      prefixHashComponents: PrefixHashComponents;
-      estimatedPrefixTokens: number;
+      kind: 'ok';
+      /** Fully formed LLM payload ready to hand to llmRouter.routeCall. */
+      routerPayload: {
+        system: { stablePrefix: string; dynamicSuffix: string };
+        messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+        estimatedContextTokens: number;
+      };
+      /** Call-level assembled-prefix-hash identity (§4.4). */
+      prefixHash: string;
+      /** Hash of the variable input alone (not cached). */
+      variableInputHash: string;
+      /** Snapshot IDs referenced by this assembly. */
+      bundleSnapshotIds: string[];
+      /** Soft-warn signal carried forward for run-outcome classification. */
       softWarnTripped: boolean;
+      /** Assembly-version constant that produced this payload. */
+      assemblyVersion: number;
     }
   | {
       kind: 'budget_breach';
-      thresholdBreached: 'max_input_tokens' | 'per_document_cap';
-      budgetUsed: { inputTokens: number; worstPerDocumentTokens: number };
-      budgetAllowed: { maxInputTokens: number; perDocumentCap: number };
-      topContributors: HitlBudgetBlockPayload['topContributors'];
+      /** Structured HITL block payload. */
+      blockPayload: HitlBudgetBlockPayload;
     };
 
 // ---------------------------------------------------------------------------
