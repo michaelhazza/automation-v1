@@ -7,7 +7,7 @@ visibility: none
 
 ## Parameters
 
-None.
+- scope: string (optional) — Accepted for signature consistency across list skills; has no filter effect in v1.
 
 ## Instructions
 

@@ -16,8 +16,11 @@ import { skillService } from '../../services/skillService.js';
 import { configHistoryService } from '../../services/configHistoryService.js';
 import { boardService } from '../../services/boardService.js';
 import { db } from '../../db/index.js';
-import { subaccounts, agents } from '../../db/schema/index.js';
+import { subaccounts, agents, subaccountAgents } from '../../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
+import { logger } from '../../lib/logger.js';
+import { DELEGATION_SCOPE_VALUES, type DelegationScope } from '../../../shared/types/delegation.js';
+import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, type RosterEntry } from './configSkillHandlersPure.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -489,21 +492,89 @@ export async function executeConfigRemoveDataSource(
 // ---------------------------------------------------------------------------
 
 export async function executeConfigListAgents(
-  _input: Record<string, unknown>,
+  input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
+  // Determine effectiveScope
+  const rawScope = input.scope;
+  const effectiveScope: DelegationScope = (
+    DELEGATION_SCOPE_VALUES.includes(rawScope as DelegationScope)
+      ? rawScope as DelegationScope
+      : (context.hierarchy?.childIds.length ?? 0) > 0 ? 'children' : 'subaccount'
+  );
+
+  // Warn when hierarchy is missing (falls through to subaccount behaviour)
+  if (!context.hierarchy) {
+    logger.warn('hierarchy_missing_read_skill_fallthrough', { skill: 'config_list_agents', runId: context.runId });
+  }
+
   try {
     const list = await agentService.listAllAgents(context.organisationId);
+
+    // Apply hierarchy-based filtering when scope is children or descendants
+    let filteredList = list as Record<string, unknown>[];
+
+    if ((effectiveScope === 'children' || effectiveScope === 'descendants') && context.hierarchy) {
+      // Load roster: subaccountAgents for this subaccount (active rows only)
+      const subaccountId = context.subaccountId;
+      let agentIdSet: Set<string>;
+
+      if (subaccountId) {
+        const rosterRows = await db
+          .select({
+            subaccountAgentId: subaccountAgents.id,
+            agentId: subaccountAgents.agentId,
+            parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+          })
+          .from(subaccountAgents)
+          .where(
+            and(
+              eq(subaccountAgents.subaccountId, subaccountId),
+              eq(subaccountAgents.isActive, true),
+            ),
+          );
+
+        const roster: RosterEntry[] = rosterRows.map((r) => ({
+          subaccountAgentId: r.subaccountAgentId,
+          agentId: r.agentId,
+          parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+        }));
+
+        let targetSubaccountAgentIds: string[];
+        if (effectiveScope === 'children') {
+          targetSubaccountAgentIds = context.hierarchy.childIds;
+        } else {
+          // descendants
+          targetSubaccountAgentIds = computeDescendantIds({
+            callerSubaccountAgentId: context.hierarchy.agentId,
+            roster,
+          });
+        }
+
+        const targetAgentIds = mapSubaccountAgentIdsToAgentIds({
+          subaccountAgentIds: targetSubaccountAgentIds,
+          roster,
+        });
+        agentIdSet = new Set(targetAgentIds);
+      } else {
+        // No subaccount context — cannot scope by hierarchy; return empty
+        agentIdSet = new Set();
+      }
+
+      filteredList = filteredList.filter((a) => agentIdSet.has(a.id as string));
+    }
+    // effectiveScope === 'subaccount': return all agents (existing behaviour)
+
     return {
       success: true,
-      agents: list.map((a: Record<string, unknown>) => ({
+      agents: filteredList.map((a) => ({
         id: a.id,
         name: a.name,
-        slug: (a as Record<string, unknown>).slug,
+        slug: a.slug,
         status: a.status,
-        modelId: (a as Record<string, unknown>).modelId,
-        defaultSkillSlugs: (a as Record<string, unknown>).defaultSkillSlugs,
-        description: (a as Record<string, unknown>).description,
+        modelId: a.modelId,
+        defaultSkillSlugs: a.defaultSkillSlugs,
+        description: a.description,
       })),
     };
   } catch (err) {
@@ -512,6 +583,7 @@ export async function executeConfigListAgents(
 }
 
 export async function executeConfigListSubaccounts(
+  // scope is accepted for signature consistency; has no filter effect in v1
   _input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
@@ -527,6 +599,7 @@ export async function executeConfigListSubaccounts(
 }
 
 export async function executeConfigListLinks(
+  // scope is accepted for signature consistency; has no filter effect in v1
   input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
