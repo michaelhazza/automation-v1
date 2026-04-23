@@ -30,3 +30,15 @@ export function computeDerivedSkills(input: {
   }
   return [];
 }
+
+/**
+ * Returns true when the hierarchy resolver should emit a WARN.
+ * Fires when the caller is in a subaccount context (hierarchy was expected)
+ * but the hierarchy snapshot could not be built.
+ */
+export function shouldWarnMissingHierarchy(input: {
+  hierarchy: Readonly<HierarchyContext> | undefined;
+  subaccountId: string | undefined;
+}): boolean {
+  return input.hierarchy === undefined && input.subaccountId !== undefined;
+}

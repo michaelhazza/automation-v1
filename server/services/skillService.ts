@@ -20,7 +20,7 @@ import {
   MAX_SKILLS_PER_SUBACCOUNT,
 } from '../config/limits.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
-import { computeDerivedSkills } from './skillServicePure.js';
+import { computeDerivedSkills, shouldWarnMissingHierarchy } from './skillServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -117,7 +117,7 @@ export const skillService = {
     hierarchy?: Readonly<HierarchyContext>,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
     const derivedSlugs = computeDerivedSkills({ hierarchy });
-    if (hierarchy === undefined && subaccountId) {
+    if (shouldWarnMissingHierarchy({ hierarchy, subaccountId })) {
       logger.warn('hierarchy_missing_at_resolver_time', {
         organisationId,
         subaccountId,

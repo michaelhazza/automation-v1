@@ -1,19 +1,15 @@
 /**
- * skillService.resolver.test.ts — Pure function tests for computeDerivedSkills.
+ * skillService.resolver.test.ts — Pure function tests for skillServicePure.
  *
- * Covers: no hierarchy, empty childIds, non-empty childIds, and union
- * idempotency when derived slugs overlap with attached slugs.
- *
- * NOTE: The WARN fired inside resolveSkillsForAgent (the impure function) when
- * hierarchy === undefined && subaccountId is truthy cannot be tested here —
- * that behaviour requires a real DB and logger mock. It is exercised at the
- * integration level in agentExecutionService tests.
+ * Covers: computeDerivedSkills (no hierarchy, empty childIds, non-empty
+ * childIds, union idempotency) and shouldWarnMissingHierarchy (WARN decision
+ * logic for the hierarchy_missing_at_resolver_time invariant).
  *
  * Runnable via:
  *   npx tsx server/services/__tests__/skillService.resolver.test.ts
  */
 
-import { computeDerivedSkills } from '../skillServicePure.js';
+import { computeDerivedSkills, shouldWarnMissingHierarchy } from '../skillServicePure.js';
 
 let passed = 0;
 let failed = 0;
@@ -132,6 +128,40 @@ test('union idempotency: all three derived slugs overlap with attached — resul
   const effectiveSlugs = Array.from(new Set([...attachedSlugs, ...derivedSlugs]));
 
   assertEqual(effectiveSlugs.length, 3, 'all three slugs de-duped to length 3');
+});
+
+// ---------------------------------------------------------------------------
+// shouldWarnMissingHierarchy — WARN decision logic (INV: hierarchy_missing_at_resolver_time)
+// ---------------------------------------------------------------------------
+
+test('hierarchy undefined, subaccountId provided → shouldWarn true', () => {
+  const result = shouldWarnMissingHierarchy({
+    hierarchy: undefined,
+    subaccountId: 'sub-abc',
+  });
+  assert(result === true, 'expected shouldWarnMissingHierarchy to return true');
+});
+
+test('hierarchy undefined, subaccountId undefined → shouldWarn false (non-subaccount run)', () => {
+  const result = shouldWarnMissingHierarchy({
+    hierarchy: undefined,
+    subaccountId: undefined,
+  });
+  assert(result === false, 'expected shouldWarnMissingHierarchy to return false for non-subaccount run');
+});
+
+test('hierarchy present, subaccountId provided → shouldWarn false (hierarchy built successfully)', () => {
+  const result = shouldWarnMissingHierarchy({
+    hierarchy: {
+      agentId: 'sa-root',
+      parentId: null,
+      childIds: [],
+      rootId: 'sa-root',
+      depth: 0,
+    },
+    subaccountId: 'sub-abc',
+  });
+  assert(result === false, 'expected shouldWarnMissingHierarchy to return false when hierarchy is present');
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────────
