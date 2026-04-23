@@ -3026,4 +3026,58 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
+
+---
+
+## Hierarchical Agent Delegation
+
+Full contract: `docs/hierarchical-delegation-dev-spec.md`.
+
+### Root-agent contract
+
+Each subaccount has at most one active root agent (`parentSubaccountAgentId IS NULL AND isActive = true`). A partial unique index in `server/db/schema/subaccountAgents.ts` enforces uniqueness at the DB layer. The same-transaction rotation helper in `server/services/hierarchyTemplateService.ts` swaps roots atomically. If no subaccount-scoped root exists, brief routing falls back to the org-level orchestrator via `hierarchyRouteResolverService.ts`.
+
+### Hierarchy context (`HierarchyContext`)
+
+Built once per run at step 4 of `agentExecutionService.ts` by `hierarchyContextBuilderService.ts`. The snapshot is immutable for the lifetime of the run (INV-4). Consumers (`skillExecutor.ts`, `skillService.ts`) receive it via `SkillExecutionContext.hierarchy`; they never rebuild or rewrite it. The context carries: `subaccountAgentId`, `subaccountId`, `parentSubaccountAgentId | null`, `childIds[]`, `delegationScope`, `hierarchyDepth`.
+
+### `DelegationScope` enum
+
+`'children' | 'descendants' | 'subaccount'`. Scope is stored on the subaccount_agent row and read into `HierarchyContext.delegationScope`. Execution semantics:
+
+- `children` — spawned sub-agents must be direct children of the calling agent.
+- `descendants` — spawned sub-agents can be any node in the subtree rooted at the caller.
+- `subaccount` — caller is the subaccount root; full cross-tree delegation permitted (escape hatch).
+
+The adaptive default: if `delegationScope` is null, the resolver uses `children` when the caller has children and `subaccount` when the caller is the subaccount root.
+
+### Derived delegation skills
+
+When `hierarchyContext.childIds.length > 0`, `skillService.resolveSkillsForAgent` automatically adds `config_list_agents`, `spawn_sub_agents`, and `reassign_task` to the agent's effective skill set. Derived resolution only adds; it never removes explicit attachments. Explicit attachment (`skillSlugs` on `subaccount_agents`) remains a supported escape hatch for no-child agents (§6.5).
+
+### Structured errors and dual-write contract
+
+Three delegation-specific error codes emitted as `agent_execution_events` rows (via `insertExecutionEventSafe`, best-effort per INV-3):
+
+- `delegation_out_of_scope` — target agent is not within the caller's scope.
+- `cross_subtree_not_permitted` — cross-subtree delegation attempted without `subaccount` scope.
+- `hierarchy_context_missing` — hierarchy snapshot absent when delegation skill is invoked.
+
+The dual-write contract (`delegationOutcomeService.ts`): for every spawn or handoff attempt, a `delegation_outcomes` row is written (fire-and-forget via `insertOutcomeSafe`). Failures are swallowed — they never surface to the caller. This preserves the synchronous delegation path even under transient DB pressure.
+
+### Run-trace delegation graph
+
+`GET /api/agent-runs/:id/delegation-graph` returns a DAG (not a tree): nodes are runs, spawn edges come from `parentRunId + isSubAgent = true`, handoff edges come from `handoffSourceRunId`. A single run can have both a spawn parent and a handoff parent. Implemented in `server/services/delegationGraphService.ts` (impure BFS walker) and `server/services/delegationGraphServicePure.ts` (pure assembly). The UI renders the graph as a collapsible tree in `client/src/components/run-trace/DelegationGraphView.tsx` under the "Delegation Graph" tab of `RunTraceViewerPage`.
+
+### Composition with capability-aware routing
+
+Hierarchy enforcement and capability-aware routing are orthogonal. Hierarchy enforcement (`skillExecutor.ts` scope validation) constrains *which agents* the caller may delegate to. Capability-aware routing (`hierarchyRouteResolverService.ts`) chooses the *best agent within the admissible set* for a given brief. They compose without coupling: hierarchy narrows the candidate set; routing picks the winner.
+
+### Workspace health detectors
+
+Three detectors for the delegation subsystem (all in `server/services/workspaceHealth/detectors/`):
+
+- `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
+- `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
+- `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.
 - **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.

@@ -23,6 +23,7 @@ import { systemAgentLinkNeverSynced } from './systemAgentLinkNeverSynced';
 import { detectStaleConnectors } from './staleConnectorDetector';
 import { detectSubaccountMultipleRoots } from './subaccountMultipleRoots';
 import { detectSubaccountNoRoot } from './subaccountNoRoot';
+import { detectExplicitDelegationSkillsWithoutChildren } from './explicitDelegationSkillsWithoutChildren';
 
 export const ALL_DETECTORS: Detector[] = [
   agentNoRecentRuns,
@@ -41,6 +42,7 @@ export const ASYNC_DETECTORS = [
   detectStaleConnectors,
   detectSubaccountMultipleRoots,
   detectSubaccountNoRoot,
+  detectExplicitDelegationSkillsWithoutChildren,   // Phase 4 — §6.9
 ] as const;
 
 export {
@@ -53,4 +55,5 @@ export {
   detectStaleConnectors,
   detectSubaccountMultipleRoots,
   detectSubaccountNoRoot,
+  detectExplicitDelegationSkillsWithoutChildren,
 };
