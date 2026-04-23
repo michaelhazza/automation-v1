@@ -147,6 +147,39 @@ Executed as a separate commit (`82987a8`). Spec, frontend-design-principles, KNO
 
 **Mockups touched:** 0 — all round 3 findings are backend/contract-only.
 
-**Commit:** round-3 changes committed as a single commit per the spec-review agent's contract.
+**Commit:** round-3 changes committed as commit `47776dd` per the spec-review agent's contract.
+
+---
+
+## Round 4 — 2026-04-23 (applied)
+
+### ChatGPT Feedback (raw)
+
+Pasted by the user. 7 top-level findings + 3-item minor polish set = 9 discrete items. ChatGPT's verdict: *"very close to production-final. No blockers. ~6 high-value refinements will materially reduce long-term risk."*
+
+### User decision
+
+**"all: as recommended"** — apply all 9 items.
+
+### Recommendations and Decisions (round 4)
+
+| # | Finding | Classification | Disposition | Spec/artefact changes |
+|---|---------|----------------|-------------|----------------------|
+| R4-F1 | Snapshot ↔ document-version FK invariant — every `(documentId, documentVersion)` pair must resolve to an existing row; version rows never deleted | mechanical | **applied** | §5.2 notes extended with two named invariants: "Version rows are immutable" and "Snapshot ↔ version-row guarantee" |
+| R4-F2 | Prefix-hash collision policy as explicit design assumption — no runtime fallback | mechanical | **applied** | §4.4 new paragraph "Hash-collision policy (design assumption)" below the non-destructive assembly-version paragraph |
+| R4-F3 | Bundle-mutation concurrency invariant — resolution reads must be version-locked or transactionally consistent | mechanical | **applied** | §6.3 new paragraph "Resolution is version-locked against concurrent bundle edits" — specifies `REPEATABLE READ` / `SELECT FOR KEY SHARE` / version-retry as three acceptable implementations |
+| R4-F4 | Token-drift aggregability — signals must remain joinable per model family and document type for future estimator calibration | mechanical | **applied** | §4.6 new "Drift-data aggregability invariant" paragraph documenting the join path across `agent_runs` / `llm_requests` / `bundle_resolution_snapshots` / `reference_documents` — no schema addition needed |
+| R4-F5 | HITL retry breach-type independence — retry breach classification is recomputed independently from original | mechanical | **applied** | §6.6 step 4 extended: "Retry breach classification is independent" — explicit statement that a cross-dimension retry (e.g. first `max_input_tokens` → retry `per_document_cap`) still terminates as `hitl_second_breach` |
+| R4-F6 | Bundle utilization = worst-case across tiers | mechanical | **applied** | §3.6.6 new "Aggregation invariant" paragraph + §6.7 post-thresholds note — both specify `max(utilizationRatio)` then threshold, with conservative-bias rationale |
+| R4-F7a | Version row immutability as a named invariant | mechanical | **applied (subsumed into R4-F1 edit)** | §5.2 first bullet now reads as a named invariant with explicit no-update / no-delete / no-soft-delete statement |
+| R4-F7b | Single-attachment-per-parent invariant | mechanical (judgment call) | **applied (idempotent-not-rejected wording)** | §6.2 `attach` notes rewritten with named "Single-attachment-per-parent invariant"; deliberate UX choice: double-attach is idempotent, not an error — enforcement is structural via the partial unique index. Flagged to user; they approved with "all as recommended" |
+| R4-F7c | Snapshot insert idempotency as a named invariant | mechanical | **applied** | §5.6 concurrency-invariant section gets a new "Snapshot-insert idempotency (named invariant)" paragraph below the existing invariant |
+
+**Schema surface change:** 0 — all round 4 items are prose-only invariants. No new columns, no new tables, no new routes.
+
+**Mockups touched:** 0.
+
+**Commit:** round-4 changes committed as a single commit per the spec-review agent's contract.
+
 
 
