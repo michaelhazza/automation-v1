@@ -259,8 +259,11 @@ export async function suggestBundle(input: {
     .limit(1);
   if (dismissed.length > 0) return { suggest: false };
 
-  // 2. Named bundle already exists for this doc set?
-  const namedBundle = await db
+  // 2. Named bundle already exists for THIS doc set?
+  // Joins document_bundles + document_bundle_members and matches by computed
+  // doc-set hash. Named bundles don't retain the doc_set_hash sentinel (promote
+  // clears description), so we compute from live membership.
+  const namedBundles = await db
     .select({ id: documentBundles.id })
     .from(documentBundles)
     .where(
@@ -272,9 +275,20 @@ export async function suggestBundle(input: {
         eq(documentBundles.isAutoCreated, false),
         isNull(documentBundles.deletedAt)
       )
-    )
-    .limit(1);
-  if (namedBundle.length > 0) return { suggest: false };
+    );
+  for (const nb of namedBundles) {
+    const members = await db
+      .select({ documentId: documentBundleMembers.documentId })
+      .from(documentBundleMembers)
+      .where(
+        and(
+          eq(documentBundleMembers.bundleId, nb.id),
+          isNull(documentBundleMembers.deletedAt)
+        )
+      );
+    const nbHash = computeDocSetHash(members.map((m) => m.documentId));
+    if (nbHash === docSetHash) return { suggest: false };
+  }
 
   // 3. Find the unnamed bundle for this doc set
   const unnamedBundle = await db
