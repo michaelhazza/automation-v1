@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -111,6 +112,9 @@ export const subaccountAgents = pgTable(
     agentIdx: index('subaccount_agents_agent_idx').on(table.agentId),
     uniqueIdx: uniqueIndex('subaccount_agents_unique_idx').on(table.subaccountId, table.agentId),
     scheduleIdx: index('subaccount_agents_schedule_idx').on(table.scheduleEnabled),
+    oneRootPerSubaccount: uniqueIndex('subaccount_agents_one_root_per_subaccount')
+      .on(table.subaccountId)
+      .where(sql`${table.parentSubaccountAgentId} IS NULL AND ${table.isActive} = true`),
   })
 );
 
