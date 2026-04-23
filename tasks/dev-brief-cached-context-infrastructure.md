@@ -28,7 +28,7 @@ We need recurring AI tasks that operate over a stable set of reference documents
 
 Today we'd build this ad-hoc per tenant. Wrong shape. Every tenant on our platform will eventually need this pattern, and solving it once as reusable infrastructure is the correct move before we build the second one-off.
 
-After mapping the initial design against the codebase, we found that most of the *plumbing* exists (LLM router, HITL gate, cost ledger, cache-control support, scheduled tasks) but the *reference-document primitive itself is a genuine gap*. Documents are explicitly-attached, never-cascaded material — a different loading model from memory blocks, and a different primitive. v1 introduces `reference_documents` + `document_packs` as a new sibling to memory blocks, adds run-time pack snapshots for reproducibility, unifies three overlapping budget primitives into one canonical `ExecutionBudget` at the router, and wires a concrete block-path through the existing HITL gate.
+After mapping the initial design against the codebase, we found that most of the *plumbing* exists (LLM router, HITL gate, cost ledger, cache-control support, scheduled tasks) but the *reference-document primitive itself is a genuine gap*. Documents are explicitly-attached, never-cascaded material — a different loading model from memory blocks, and a different primitive. v1 introduces `reference_documents` + `document_bundles` as a new sibling to memory blocks, adds run-time bundle snapshots for reproducibility, unifies three overlapping budget primitives into one canonical `ExecutionBudget` at the router, and wires a concrete block-path through the existing HITL gate.
 
 **System boundary.** Cached-context infrastructure is responsible for deterministic assembly, budgeting, and execution of *explicitly attached* reference documents. It does not decide document relevance dynamically, does not perform retrieval, and does not infer which documents a task needs. Attachment is the input; assembly is the output. Relevance inference and retrieval are separate concerns (see §6) and belong to a different primitive.
 
@@ -38,7 +38,7 @@ After mapping the initial design against the codebase, we found that most of the
 
 **Product pattern:** "file-attached recurring task."
 
-- A stable pack of reference documents (brand guidelines, SOPs, framework notes, client context)
+- A stable bundle of reference documents (brand guidelines, SOPs, framework notes, client context)
 - A variable input that changes every run (today's transcript, this week's emails)
 - A recurring schedule (daily, weekly, triggered)
 - A consistent structured output
@@ -68,7 +68,7 @@ Documents need the opposite loading model: **explicitly linked, never cascaded, 
 
 | Brief's proposed primitive | What the codebase has today |
 |---|---|
-| `reference_documents` table | **Gap.** `memory_blocks` serves learned facts with a cascade model; it is not the right home for large, explicitly-attached reference material. We build `reference_documents` + `document_packs` as a new primitive, sibling to `memory_blocks`. |
+| `reference_documents` table | **Gap.** `memory_blocks` serves learned facts with a cascade model; it is not the right home for large, explicitly-attached reference material. We build `reference_documents` + `document_bundles` as a new primitive, sibling to `memory_blocks`. |
 | "Explicit `cache_control` placement" | `anthropicAdapter.ts` already sets `cache_control: { type: 'ephemeral' }` on the system prefix in production — we extend the shape, not rebuild it. |
 | "Builder returns a validated payload" | `llmRouter.routeCall()` is the single financial chokepoint; it *just gained* an `estimatedContextTokens` param — the pre-flight hook we wanted. |
 | "Block at the HITL gate on breach" | `actions.gateLevel: 'auto' \| 'review' \| 'block'` + `hitlService` already model this path. |
@@ -76,8 +76,8 @@ Documents need the opposite loading model: **explicitly linked, never cascaded, 
 | New threshold config table | `scheduledTasks.tokenBudgetPerRun` exists; `runCostBreaker` exists; adding a third is fragmentation. We unify under one canonical `ExecutionBudget` (see §4.3). |
 
 **The shift this caused.** v1 is a thin new primitive plus an orchestration layer over existing infrastructure:
-1. Introduces `reference_documents` + `document_packs` as a *new* primitive — sibling to `memory_blocks`, never cascaded, explicitly attached at agent / task / scheduled-task level.
-2. Resolves packs to immutable snapshots at run time for reproducibility.
+1. Introduces `reference_documents` + `document_bundles` as a *new* primitive — sibling to `memory_blocks`, never cascaded, explicitly attached at agent / task / scheduled-task level.
+2. Resolves bundles to immutable snapshots at run time for reproducibility.
 3. Assembles deterministically with a stamped `assembly_version` for cache-coherence under code change.
 4. Validates against one canonical `ExecutionBudget` via the existing router pre-flight hook.
 5. Routes via the existing `llmRouter.routeCall()`; captures cache-read, cache-write, and prefix-hash on the existing ledger.
@@ -90,27 +90,27 @@ Documents need the opposite loading model: **explicitly linked, never cascaded, 
 
 Six concrete additions. Each is small. Together they turn a one-off pattern into a reusable primitive.
 
-**1. Reference documents + document packs.** A new sibling primitive to memory blocks. `reference_documents` stores user-uploaded reference material. `document_packs` bundle them into named sets ("42 Macro context pack," "Acme client brief pack"). The pack itself has a version counter that increments on edit; immutable snapshots are captured at run time (see §4.1a).
+**1. Reference documents + document bundles.** A new sibling primitive to memory blocks. `reference_documents` stores user-uploaded reference material. `document_bundles` bundle them into named sets ("42 Macro context bundle," "Acme client brief bundle"). The bundle itself has a version counter that increments on edit; immutable snapshots are captured at run time (see §4.1a).
 
 Documents are versioned explicitly via a `reference_document_versions` table: `{ document_id, version, content_hash, token_counts_by_model_family, serialized_bytes_hash, created_at }`. The current-version pointer lives on `reference_documents`; every edit writes a new immutable version row. Snapshots reference `(document_id, document_version)`, not `content_hash` alone — this gives durable audit, diff, rollback, and future connector-sync safety in one move. Without an explicit version layer, document edits would lose traceability and snapshot reproducibility would rely entirely on hash collisions staying rare.
 
 **Attachment is explicit, never cascaded.** Three attachment surfaces:
 
-- **Agent-level** — "this agent can read Q3 Board Pack." Persistent; shows up on every run of that agent. Analogous to how skills/data-sources attach.
-- **Task-level** — "this specific task uses these packs." Scoped to the run.
-- **Scheduled-task-level** — "every run spawned from this schedule uses these packs." Same shape as task-level, applied at the schedule row.
+- **Agent-level** — "this agent can read Q3 Board Bundle." Persistent; shows up on every run of that agent. Analogous to how skills/data-sources attach.
+- **Task-level** — "this specific task uses these bundles." Scoped to the run.
+- **Scheduled-task-level** — "every run spawned from this schedule uses these bundles." Same shape as task-level, applied at the schedule row.
 
-Documents are *not* scope-cascaded through org or subaccount hierarchy. Attempting to cascade 200 client documents on every run would blow context, dilute attention, and explode cost. Packs are the unit of grouping; attachment is the unit of relevance.
+Documents are *not* scope-cascaded through org or subaccount hierarchy. Attempting to cascade 200 client documents on every run would blow context, dilute attention, and explode cost. Bundles are the unit of grouping; attachment is the unit of relevance.
 
-**1a. Pack snapshots at run time.** At the start of every run, the engine resolves each attached pack to an immutable snapshot: `{ pack_id, pack_version, ordered_document_ids, document_content_hashes }`. The snapshot is persisted on the run row. Assembly then reads from the snapshot, not from live pack data. This gives three things we can't otherwise get:
+**1a. Bundle snapshots at run time.** At the start of every run, the engine resolves each attached bundle to an immutable snapshot: `{ bundle_id, bundle_version, ordered_document_ids, document_content_hashes }`. The snapshot is persisted on the run row. Assembly then reads from the snapshot, not from live bundle data. This gives three things we can't otherwise get:
 
-- **Reproducibility** — historical runs can be reconstructed exactly, even if the pack was edited afterwards.
-- **Concurrency safety** — a pack edit mid-run doesn't poison the in-flight call.
+- **Reproducibility** — historical runs can be reconstructed exactly, even if the bundle was edited afterwards.
+- **Concurrency safety** — a bundle edit mid-run doesn't poison the in-flight call.
 - **Audit trail** — every run has a durable record of what it was shown.
 
-Snapshots dedup by prefix-hash fingerprint: two back-to-back cron runs against an unchanged pack share one snapshot row. The dedup is enforced at the DB level with `UNIQUE(prefix_hash)` on the snapshots table — concurrent cron bursts cannot race-insert duplicates. Pinning (`task.pinned_pack_version = 3`) is a v2 extension requiring no schema change.
+Snapshots dedup by prefix-hash fingerprint: two back-to-back cron runs against an unchanged bundle share one snapshot row. The dedup is enforced at the DB level with `UNIQUE(prefix_hash)` on the snapshots table — concurrent cron bursts cannot race-insert duplicates. Pinning (`task.pinned_bundle_version = 3`) is a v2 extension requiring no schema change.
 
-**Atomic resolution invariant.** Pack resolution happens once, at run start, under a single transaction. Subsequent edits to documents, packs, or attachments do not affect the in-flight run. Assembly reads from the snapshot row; live tables are not consulted past the resolution moment. This is stated explicitly because "helpful" future code that re-reads pack state mid-run is the most plausible way this invariant gets broken.
+**Atomic resolution invariant.** Bundle resolution happens once, at run start, under a single transaction. Subsequent edits to documents, bundles, or attachments do not affect the in-flight run. Assembly reads from the snapshot row; live tables are not consulted past the resolution moment. This is stated explicitly because "helpful" future code that re-reads bundle state mid-run is the most plausible way this invariant gets broken.
 
 **2. Pre-measured document size, with drift tracking.** Every document is sized (per model family, since tokenisers differ) when it's saved, and the number is stored. Instant "will this fit?" checks before firing a task, no wasted cost or latency re-measuring the same documents daily. Refresh triggers on content change. Every run also captures actual input tokens from the response and compares against the pre-flight estimate — systematic drift (tokeniser changes, assembly separators, boilerplate) is flagged for per-model correction. The calibration algorithm is a spec-level detail; the brief commits to measuring drift, not solving it upfront.
 
@@ -139,7 +139,7 @@ Why three inputs not one: safety (output quality degrades below capacity), cost 
 assemble → validate → (optional transform) → execute
 ```
 
-- **Assemble** — resolve pack snapshot, sort deterministically by stable document ID, place one `cache_control` breakpoint at the end of the reference block, append the variable input after the breakpoint.
+- **Assemble** — resolve bundle snapshot, sort deterministically by stable document ID, place one `cache_control` breakpoint at the end of the reference block, append the variable input after the breakpoint.
 - **Validate** — check the assembled payload against the resolved `ExecutionBudget` via the router's pre-flight hook.
 - **Optional transform** — v1 has no transforms; the slot is reserved. v2+ degrade strategies (drop lowest-priority document, truncate, fall back to a smaller model, summarise inline) plug in here without reshaping the pipeline.
 - **Execute** — hand to `llmRouter.routeCall()` for attribution, idempotency, and dispatch.
@@ -162,7 +162,7 @@ prefix_hash = hash({
 
 - `ordered_document_ids` — detects order changes.
 - `document_content_hashes` — detects content edits.
-- `included_flags` — per-document inclusion state at resolution time. A document is *included* iff: not paused, not deprecated, passes attachment scope (agent / task / scheduled-task), and is listed in the pack's current version. Any state change that flips an included_flag invalidates the hash naturally — no special-case handling needed.
+- `included_flags` — per-document inclusion state at resolution time. A document is *included* iff: not paused, not deprecated, passes attachment scope (agent / task / scheduled-task), and is listed in the bundle's current version. Any state change that flips an included_flag invalidates the hash naturally — no special-case handling needed.
 - `model_family` — Opus 4.7 and Sonnet 4.6 have different tokenisers and cannot share a cache.
 - `assembly_version` — a constant in the engine, bumped manually by the PR that changes assembly logic (sort order, breakpoint placement, separator tokens). Without this, a code deploy silently serves stale cached prefixes against new assembly logic. Automating the bump is a spec-level decision.
 
@@ -172,7 +172,7 @@ The hash *and its components* are logged on the run. When two runs with identica
 
 - `applied_memory_block_ids` — learned facts Universal Brief injected. *Already exists.*
 - `cited_memory_block_ids` — blocks actually referenced in the output. *Already exists, populated by `scoreRunBlocks`.*
-- `cached_prefix_hash` + `pack_snapshot_id` — what this work contributes.
+- `cached_prefix_hash` + `bundle_snapshot_id` — what this work contributes.
 
 Three fields, not one — conflating them loses signal. Universal Brief's attribution and cached-context's attribution are siblings, not the same concept.
 
@@ -180,7 +180,7 @@ Three fields, not one — conflating them loses signal. Universal Brief's attrib
 
 **Run identity is prefix identity + variable input identity.** The `prefix_hash` covers the cached reference block. It does not cover the variable input (today's transcript, the email thread, the report being ingested). For full run traceability — "why did this run produce that output?" — both identities must be logged on the run row. One hash tells us whether the cache was valid; the other tells us what the model was actually asked about. Conflating them hides real variation.
 
-**Pack utilization as a progressive signal, not just a cliff.** A scheduled background metric (`pack_utilization = estimated_prefix_tokens / max_input_tokens`) is computed per pack per model-tier and surfaced in the Pack UI and Usage Explorer. Thresholds: 70% → warning ("approaching limit"), 90% → urgent ("one more document may block"), 100% → block at run time. Without this, packs grow silently and users only learn they've breached the limit when a scheduled task fires at 3am and blocks at the HITL gate. With it, users see the ramp and prune proactively.
+**Bundle utilization as a progressive signal, not just a cliff.** A scheduled background metric (`bundle_utilization = estimated_prefix_tokens / max_input_tokens`) is computed per bundle per model-tier and surfaced in the Bundle UI and Usage Explorer. Thresholds: 70% → warning ("approaching limit"), 90% → urgent ("one more document may block"), 100% → block at run time. Without this, bundles grow silently and users only learn they've breached the limit when a scheduled task fires at 3am and blocks at the HITL gate. With it, users see the ramp and prune proactively.
 
 **6. The safety valve, with a concrete block payload.** If a task would exceed `ExecutionBudget`, it does not silently run expensive and it does not silently fail. It stops at the existing HITL gate as `block`. The structured payload the operator sees:
 
@@ -190,7 +190,7 @@ Three fields, not one — conflating them loses signal. Universal Brief's attrib
   budget_used,
   budget_allowed,
   top_contributors: [{ document_id, name, tokens, percent_of_budget }]  // top 5
-  suggested_actions: ['trim_pack', 'upgrade_model', 'split_task', 'abort']
+  suggested_actions: ['trim_bundle', 'upgrade_model', 'split_task', 'abort']
 }
 ```
 
@@ -210,13 +210,13 @@ Soft-warn breaches (above warn threshold, below hard limit) log and proceed, fla
 
 **One cache-control breakpoint, not four.** The Anthropic API supports up to four breakpoints, useful when document sets are tiered by change frequency. For v1 our document sets are monolithic — one breakpoint at the end of the reference block covers everything. Multi-breakpoint strategies wait for a real use case.
 
-**Pack-level grouping, not file-level.** If every task references individual files, we spend the rest of our lives updating task configs. Pack-level grouping adds one layer of indirection and buys us the ability to evolve document sets without touching tasks.
+**Bundle-level grouping, not file-level.** If every task references individual files, we spend the rest of our lives updating task configs. Bundle-level grouping adds one layer of indirection and buys us the ability to evolve document sets without touching tasks.
 
 **Thresholds in the database, not code.** Per the platform's "configured behaviour in the database" principle. If tuning a limit requires a code deploy, we've put it in the wrong place.
 
 **Sonnet 4.6 default.** Standard tier, 1M context, good enough for synthesis tasks. Opus for the narrow set of tasks that explicitly need it. Haiku for simple cases. Per-tenant override via task config.
 
-**Pack quality is not only measured in tokens.** Token count is the necessary budget signal but not a sufficient quality signal. A pack that stays inside the limit but contains contradictory documents, deeply nested metadata, or heterogeneous formats can still degrade output — the model spreads attention across low-signal material. v1 measures tokens and blocks on that; we do not prescribe a composition metric yet, but the spec author should leave room for one. Pathological pack compositions show up as output-quality regressions despite token budgets being green — the signal to watch for.
+**Bundle quality is not only measured in tokens.** Token count is the necessary budget signal but not a sufficient quality signal. A bundle that stays inside the limit but contains contradictory documents, deeply nested metadata, or heterogeneous formats can still degrade output — the model spreads attention across low-signal material. v1 measures tokens and blocks on that; we do not prescribe a composition metric yet, but the spec author should leave room for one. Pathological bundle compositions show up as output-quality regressions despite token budgets being green — the signal to watch for.
 
 ---
 
@@ -228,8 +228,8 @@ Explicit scope cuts, so the spec stays tight:
 - **Batch API** (future 50% discount, async latency).
 - **Multi-breakpoint cache strategies** (only needed when document sets are tiered).
 - **Automatic document summarisation** on threshold breach (manual review only for now).
-- **Cross-tenant document sharing** (tenants keep their own packs).
-- **Vector retrieval / RAG** as an alternative to full-context attachment — adjacent problem, different brief already exists in the backlog. v1 explicitly assumes the full pack fits in context.
+- **Cross-tenant document sharing** (tenants keep their own bundles).
+- **Vector retrieval / RAG** as an alternative to full-context attachment — adjacent problem, different brief already exists in the backlog. v1 explicitly assumes the full bundle fits in context.
 - **Parallel fan-out** (splitting a task across multiple API calls).
 
 The goal is the minimum viable infrastructure that makes file-attached recurring tasks safe and observable. Optimisations come after live data.
@@ -244,7 +244,7 @@ Just enough to evaluate fit without reading the repo:
 - **Three-tier agent model:** System agents (platform IP) → org agents (tenant-configured) → subaccount agents (per-client). All runs flow through a single run model with a cost ledger.
 - **LLM routing:** Every LLM call goes through `llmRouter.routeCall()` — the financial chokepoint. It handles attribution, idempotency, cost ceilings, and provider fallback. It just gained an `estimatedContextTokens` param (the pre-flight hook for us).
 - **Memory blocks (existing, *not* our document store):** per-tenant markdown with a rich lifecycle — priority, authoritative flag, paused/deprecated states, quality score (0.00–1.00), provenance tag. Cascades by scope (org → subaccount), always-on, size-capped. Correct home for curated *learned* facts the agent accumulates over time. **Not** the right shape for large user-uploaded reference material.
-- **Reference documents (new, what we're building):** large user-uploaded reference material, versioned, token-counted per model family, grouped into `document_packs`, explicitly attached at agent / task / scheduled-task level, never cascaded by scope. Sibling primitive to memory blocks, not a replacement.
+- **Reference documents (new, what we're building):** large user-uploaded reference material, versioned, token-counted per model family, grouped into `document_bundles`, explicitly attached at agent / task / scheduled-task level, never cascaded by scope. Sibling primitive to memory blocks, not a replacement.
 - **HITL gate:** Every gated action declares a `gateLevel` of `auto` (proceed), `review` (human must approve), or `block` (hard stop). A dedicated service blocks execution until a human decides. Projects into a `reviewItems` table for the operator UI.
 - **Recurring tasks:** `scheduled_tasks` table with rrule-based cadence. Jobs dispatch via `pg-boss`. Each run writes to a `scheduled_task_runs` table.
 - **Universal Brief (just shipped, orthogonal):** a conversational surface that injects *memory blocks* dynamically at call time and scores which blocks were cited post-run via `scoreRunBlocks`. Universal Brief is *call-time dynamic* on learned facts; cached-context is *pre-declared static* on reference documents. Same ledger, same attribution schema (three siblings on the run row), different orchestration. An agent run can use both — they compose, they do not compete.
@@ -260,8 +260,8 @@ The six open questions raised in the first-draft brief have all been resolved �
 2. **Token-estimate calibration algorithm.** Brief commits to measuring drift per model family; spec decides the correction strategy (additive offset, multiplicative factor, threshold for applying the correction, how often to recalibrate).
 3. **Exact HITL-block UX.** Brief commits to the structured payload shape in §4.6; spec decides the operator-side UI — one-click "swap to Opus" vs review-and-approve, inline document-trim affordance, etc.
 4. **Soft-warn threshold exposure in the Usage Explorer.** Brief commits that soft-warn runs are flagged; spec decides the dashboard shape.
-5. **Pack-version pinning.** Brief confirms v1 always resolves to the latest pack version. Spec decides whether v1 ships the pinning *column* on tasks (cheap future-proofing) or defers entirely to v2.
-6. **Agent-level access vs task-level use.** v1 treats attachment as inclusion: a pack attached at agent level loads on every run of that agent. A future pattern — "the agent has *access* to the pack but only *loads* it when the task justifies it" — is a retrieval behaviour, explicitly deferred with the RAG brief (§6). Spec decides whether the v1 attachment model needs a forward-compatible flag (`attachment_mode: 'always_load' | 'available_on_demand'`) so v2 retrieval can slot in without reshaping the attachment table.
+5. **Bundle-version pinning.** Brief confirms v1 always resolves to the latest bundle version. Spec decides whether v1 ships the pinning *column* on tasks (cheap future-proofing) or defers entirely to v2.
+6. **Agent-level access vs task-level use.** v1 treats attachment as inclusion: a bundle attached at agent level loads on every run of that agent. A future pattern — "the agent has *access* to the bundle but only *loads* it when the task justifies it" — is a retrieval behaviour, explicitly deferred with the RAG brief (§6). Spec decides whether the v1 attachment model needs a forward-compatible flag (`attachment_mode: 'always_load' | 'available_on_demand'`) so v2 retrieval can slot in without reshaping the attachment table.
 
 ---
 
@@ -269,11 +269,11 @@ The six open questions raised in the first-draft brief have all been resolved �
 
 The infrastructure is validated when:
 
-- A new task can reference a pack by ID and a variable input, and the worker assembles a cached-prefix API request with no per-task glue code.
+- A new task can reference a bundle by ID and a variable input, and the worker assembles a cached-prefix API request with no per-task glue code.
 - Running the same task twice within the 1-hour TTL produces a cache hit on the second run, confirmed by the `cache_read_input_tokens` field on the response.
-- A task configured with a pack that exceeds the hard limit is blocked at the HITL gate with a structured error, and no API credits are consumed.
+- A task configured with a bundle that exceeds the hard limit is blocked at the HITL gate with a structured error, and no API credits are consumed.
 - The Usage Explorer shows actual cache-hit rate and cache-attributed cost per tenant per task — measured, not estimated.
-- The Usage Explorer exposes the *cost delta* between first-run (cache-write) and subsequent-run (cache-read) executions of the same pack, so the business value of caching is visible per task and per tenant — not just the raw hit rate.
+- The Usage Explorer exposes the *cost delta* between first-run (cache-write) and subsequent-run (cache-read) executions of the same bundle, so the business value of caching is visible per task and per tenant — not just the raw hit rate.
 - The pilot macro-report task runs end-to-end on this infrastructure for a week without surprises.
 
 ---
@@ -284,12 +284,12 @@ The infrastructure is validated when:
 - Deterministic ordering everywhere (documents, hashes, serialisation).
 - **Documents are explicitly attached, never cascaded.** Memory blocks cascade; documents do not. Different primitives, different loading models.
 - **Snapshot at run time; assemble from the snapshot.** Runs are reproducible and concurrency-safe by construction.
-- **Pack resolution is atomic at run start.** No mutation to documents, packs, or attachments affects an in-flight run. Live tables are not consulted past the resolution moment.
+- **Bundle resolution is atomic at run start.** No mutation to documents, bundles, or attachments affects an in-flight run. Live tables are not consulted past the resolution moment.
 - **One canonical budget at the enforcement boundary.** Many inputs resolve into one `ExecutionBudget`; no parallel enforcement paths.
 - Fail fast and loud at the HITL gate; never silently burn credits.
 - Capture actual cache attribution per run (reads *and* writes), not estimated.
 - **Idempotent by contract.** A single logical task run produces exactly one billed LLM execution, even under retry, scheduler duplication, or worker restart. The router is where this invariant is enforced; cached-context inherits it.
-- **Reconstructable from persisted state.** Any run can be replayed end-to-end from the snapshot, budget, and prefix-hash components on the row — never from the live document or pack tables. Mutable state must not be load-bearing for reproducibility.
+- **Reconstructable from persisted state.** Any run can be replayed end-to-end from the snapshot, budget, and prefix-hash components on the row — never from the live document or bundle tables. Mutable state must not be load-bearing for reproducibility.
 - **Resilient to upstream drift.** Tokenisers, model versions, cache semantics, and provider pricing will all change under us. Token-count drift is tracked (§4.2); assembly is versioned (§4.4). The principle generalises: no code path may silently depend on an upstream invariant we do not ourselves validate.
-- **No silent fallback.** The system must not silently alter the input set or execution strategy to fit within constraints. Auto-truncation, auto-dropping documents, silent model downgrade, quiet retry on a reduced pack — all forbidden by default. Any such change must be explicit (a named transform in the assembly pipeline — see §4.4), observable (logged on the run row with a structured reason), or operator-approved (routed through the HITL gate). This protects against "helpful" future code paths that trade correctness for silent convenience.
+- **No silent fallback.** The system must not silently alter the input set or execution strategy to fit within constraints. Auto-truncation, auto-dropping documents, silent model downgrade, quiet retry on a reduced bundle — all forbidden by default. Any such change must be explicit (a named transform in the assembly pipeline — see §4.4), observable (logged on the run row with a structured reason), or operator-approved (routed through the HITL gate). This protects against "helpful" future code paths that trade correctness for silent convenience.
 - Defer complexity; v1 must be boring and observable before it is clever.

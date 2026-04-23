@@ -8,7 +8,7 @@ Durable rules for any UI artifact built in this repo — mockups, components, pa
 
 Automation OS positions as **consumer-simple on enterprise-grade backend**. The product sells to agency operators, solo founders, and non-technical knowledge workers — the same audience that finds tools like HubSpot and Salesforce overwhelming. The backend needs to be powerful (router, cost ledger, HITL gates, cached-context infrastructure, policy engine); the frontend needs to be invisible where possible and obvious everywhere else. These two stay decoupled.
 
-The trap this doc prevents: **treating the spec's exposed capability surface as the UI surface.** A spec that adds `pack_utilization`, `prefix_hash`, `cache_creation_tokens`, `run_outcome = 'completed' | 'degraded' | 'failed'`, and per-tenant cache-cost rollups does not imply a pack-utilization dashboard, a prefix-hash inspector, a cache-cost explorer, and a per-tenant financial breakdown. Backend spec → full coverage. Frontend design → strict editorial filter.
+The trap this doc prevents: **treating the spec's exposed capability surface as the UI surface.** A spec that adds `bundle_utilization`, `prefix_hash`, `cache_creation_tokens`, `run_outcome = 'completed' | 'degraded' | 'failed'`, and per-tenant cache-cost rollups does not imply a bundle-utilization dashboard, a prefix-hash inspector, a cache-cost explorer, and a per-tenant financial breakdown. Backend spec → full coverage. Frontend design → strict editorial filter.
 
 ---
 
@@ -37,8 +37,8 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 Work through these in order. An unchecked box is a design finding; every unchecked box means the artifact is under-specified and not ready to build.
 
 - [ ] **Who is the primary user of this screen?** Roles: agency operator / solo founder / tenant admin / internal staff / Synthetos admin. Different users tolerate different complexity ceilings. Agency operator = lowest tolerance. Internal staff = highest.
-- [ ] **What single task are they here to complete?** One sentence. Example: *"Attach a document pack to this scheduled task."* NOT *"Manage document packs and monitor utilization and review run history."* If the answer is a list, you have multiple screens, not one.
-- [ ] **What is the minimum information needed to complete that task?** List it. Example: pack name, pack document count, an attach button. NOT utilization-per-tier, cache-hit-rate, prefix-hash preview, attach button.
+- [ ] **What single task are they here to complete?** One sentence. Example: *"Attach a document bundle to this scheduled task."* NOT *"Manage document bundles and monitor utilization and review run history."* If the answer is a list, you have multiple screens, not one.
+- [ ] **What is the minimum information needed to complete that task?** List it. Example: bundle name, bundle document count, an attach button. NOT utilization-per-tier, cache-hit-rate, prefix-hash preview, attach button.
 - [ ] **What would happen if I removed X?** For every candidate element (panel, metric, chart, table, sidebar card), ask this. If the answer is *"the user would still complete the primary task"*, the element is deferred.
 - [ ] **Where does everything else go?** Every deferred element goes to exactly one of: (a) progressive disclosure on this screen (collapsed "Advanced" section), (b) a dedicated page the primary user rarely visits, (c) admin-only view, (d) deferred out of v1 entirely. Name the destination per element.
 - [ ] **The re-check.** Imagine a non-technical operator landing on this screen for the first time. Do they know what to do within 3 seconds? If not, cut more.
@@ -51,7 +51,7 @@ Work through these in order. An unchecked box is a design finding; every uncheck
 - **The minimum state needed to complete the action** — current value inline, not in a separate panel.
 - **The result of the last action taken** — inline confirmation (e.g. "attached · 2m ago"), not a history table.
 - **One sidebar callout at most** — only if it's load-bearing for completing the primary task (e.g. a required field's help text).
-- **Empty states with one next action** — "No packs yet. [Create pack]". Not a tour, not tips, not a chart of nothing.
+- **Empty states with one next action** — "No bundles yet. [Create bundle]". Not a tour, not tips, not a chart of nothing.
 
 ---
 
@@ -63,8 +63,8 @@ Everything below is **deferred out of v1 unless explicitly requested for a speci
 - Trend charts over time windows (7-day / 30-day / 90-day).
 - Diagnostic panels that expose internal identifiers (prefix hashes, snapshot IDs, idempotency keys, correlation IDs).
 - Aggregated cost rollups, per-tenant financial breakdowns, spend-saved calculations, cost-split donuts.
-- Observability explorers ("Usage Explorer", "Pack Lens", "Model Lens", "Feature Lens").
-- Ranking tables ("packs by utilization", "tenants by spend", "features by cost").
+- Observability explorers ("Usage Explorer", "Bundle Lens", "Model Lens", "Feature Lens").
+- Ranking tables ("bundles by utilization", "tenants by spend", "features by cost").
 - Run-history tables on per-entity pages — runs live in the existing run log, not on every page that has a run.
 - Three-tier / four-tier comparison views (e.g. "Sonnet vs Opus vs Haiku side-by-side").
 - "Cost saved vs. first run" or any other counterfactual-comparison framing.
@@ -108,28 +108,28 @@ Pick the lowest-weight pattern that works. Do not mix three patterns on one scre
 
 ## Worked example — cached-context infrastructure
 
-The cached-context spec exposes these backend capabilities: reference document CRUD, document pack CRUD, pack resolution snapshots, prefix-hash identity, cache read/write attribution, three-way run-outcome classification, pack utilization per model tier, per-tenant cache-cost rollups, HITL budget-breach block payload.
+The cached-context spec exposes these backend capabilities: reference document CRUD, document bundle CRUD, bundle resolution snapshots, prefix-hash identity, cache read/write attribution, three-way run-outcome classification, bundle utilization per model tier, per-tenant cache-cost rollups, HITL budget-breach block payload.
 
 ### What the v1 UI should ship
 
 The primary user task is **attach documents to automations**. That's the whole feature from the user's POV. Everything else is invisible infrastructure.
 
 - **Documents page** — a simple list of uploaded reference documents (name, size, updated). One primary action: upload. Standard primitive.
-- **Pack creation** — name + add documents. One primary action: save. Standard primitive.
-- **Pack attachment control** — reused inline on agent / task / scheduled-task config pages. One drop-down or multi-select. One primary action: attach. Shows currently attached packs as chips with a remove (x).
-- **One inline signal on the pack list row** — a dot/label: `healthy` / `near cap` / `at cap`. Drives user attention to trim when needed. No tier-by-tier breakdown visible by default.
+- **Bundle creation** — name + add documents. One primary action: save. Standard primitive.
+- **Bundle attachment control** — reused inline on agent / task / scheduled-task config pages. One drop-down or multi-select. One primary action: attach. Shows currently attached bundles as chips with a remove (x).
+- **One inline signal on the bundle list row** — a dot/label: `healthy` / `near cap` / `at cap`. Drives user attention to trim when needed. No tier-by-tier breakdown visible by default.
 - **One inline signal on the task / scheduled-task row** — last run outcome (`completed` / `degraded` / `failed`) as a dot. Runs live in the existing run log.
 
-That's it. Three new screens (documents, pack detail, pack attachment control) + two inline signals on existing pages. No new dashboards, no new explorers, no charts, no tiles.
+That's it. Three new screens (documents, bundle detail, bundle attachment control) + two inline signals on existing pages. No new dashboards, no new explorers, no charts, no tiles.
 
 ### What the v1 UI should NOT ship
 
-- Pack utilization dashboard with green/amber/red radial rings per tier.
-- Scheduled-task detail with 7-day run-calendar, detailed run table, sidebar pack utilization.
+- Bundle utilization dashboard with green/amber/red radial rings per tier.
+- Scheduled-task detail with 7-day run-calendar, detailed run table, sidebar bundle utilization.
 - Run-detail page exposing prefix hashes, components JSON, snapshot integrity checks, cache-read-vs-write tokens, cost-saved counterfactual.
-- Usage Explorer with per-pack hit-rate trend lines, cost-split donut, pack ranking, per-tenant breakdown.
+- Usage Explorer with per-bundle hit-rate trend lines, cost-split donut, bundle ranking, per-tenant breakdown.
 - Any comparison view of Sonnet vs Opus vs Haiku.
-- Any exposure of `prefix_hash`, `packSnapshotId`, `idempotencyKey`, or other internal identifiers to the primary user.
+- Any exposure of `prefix_hash`, `bundleSnapshotId`, `idempotencyKey`, or other internal identifiers to the primary user.
 
 All of these represent real backend signals that can and should be computed. They surface (if at all) on an admin-only observability page gated behind an explicit role, never on the primary user journey. Most will be deferred out of v1 entirely — **shipping them is optional; the feature works without them**.
 
@@ -138,7 +138,7 @@ All of these represent real backend signals that can and should be computed. The
 The five mockups in [`prototypes/cached-context/`](../prototypes/cached-context/) were generated before this doc existed. They violate rules 1, 2, 3, 4 — most of them represent "what the backend could surface if we exposed every column", not "what the user needs to complete the task".
 
 - **`mockup-budget-breach-block.html`** — valid. Renders the `HitlBudgetBlockPayload` shape the spec commits to (§4.5). Safety-critical screen that legitimately has to surface WHY a run is blocked. Keep.
-- **`mockup-pack-utilization.html`** — reduce to a single inline badge on the pack list row. The tier-by-tier radial dashboard is the anti-pattern.
+- **`mockup-pack-utilization.html`** — reduce to a single inline badge on the bundle list row. The tier-by-tier radial dashboard is the anti-pattern. (Historical filename; this mockup was deleted in the UX revision.)
 - **`mockup-scheduled-task-with-pack.html`** — replace with an inline attachment control on the existing scheduled-task config page. Run-history lives in the run log, not here.
 - **`mockup-run-detail-cached.html`** — delete from v1. Runs open the existing run-detail page. Prefix-hash / cache attribution surfaces there as a collapsed "Advanced" section, not as its own screen.
 - **`mockup-usage-explorer-packs.html`** — delete from v1. The observability story is a valid admin concern but not a v1 deliverable.

@@ -160,7 +160,7 @@
   </div>
 
   <div class="concept">
-    <strong>The concept shift.</strong> "Pack" is gone from the user-facing UI. Users attach individual documents; the engine still uses the backend pack primitive for caching and hashing, invisibly. When a user attaches the same doc set to a second task, the UI offers <em>"save these as a bundle for easy reuse?"</em> — soft, dismissible, non-blocking. Exact-match detection via the spec's existing <code>prefix_hash</code>, no fuzzy logic.
+    <strong>The concept.</strong> Users attach individual documents. When a user attaches the same doc set to a second task, the UI offers <em>"save these as a bundle for easy reuse?"</em> — soft, dismissible, non-blocking. Exact-match detection via the spec's existing <code>prefix_hash</code>, no fuzzy logic. The backend handles everything as a `document_bundles` row (unnamed until the user opts in to name it); users never see the "unnamed" variant.
   </div>
 
   <h2>Primary user journey</h2>
@@ -208,7 +208,7 @@
       <span class="num">4</span>
       <h3>Reference material too big — what now?</h3>
       <div class="desc">
-        Safety-critical screen. Language updated — "pack" removed; the headline is "the reference documents attached to this task are too big" regardless of whether they came from a bundle or were attached individually. Kept: the over-limit bar, top-5 contributors, 4 actions (Remove/trim · Upgrade · Split · Stop).
+        Safety-critical screen. Headline is "the reference documents attached to this task are too big" regardless of whether they came from a bundle or were attached individually — doc-framed, not bundle-framed. The over-limit bar, top-5 contributors, and 4 actions (Remove/trim · Upgrade · Split · Stop) are all the user needs to decide what to do.
       </div>
       <div class="meta">
         <span class="rule">Exception · safety-critical · language now doc-centric</span>
@@ -222,13 +222,13 @@
     <h3>What changed vs the previous set</h3>
     <div class="shift-grid">
       <div class="shift-col">
-        <h4>Before — pack-first UX</h4>
+        <h4>Before — capability-first UX</h4>
         <ul>
-          <li>User attaches "packs" as the primary unit</li>
-          <li>Must create a pack before attaching anything</li>
-          <li>"Pack" is surfaced as a noun everywhere</li>
-          <li>Pack detail page is a v1 requirement</li>
-          <li>Pack utilization badge on the attachment row</li>
+          <li>User attaches a named group as the primary unit</li>
+          <li>Must create the named group before attaching anything</li>
+          <li>The internal grouping concept is surfaced as a first-class noun everywhere</li>
+          <li>A full management page is a v1 requirement</li>
+          <li>Per-tier utilization badge on the attachment row</li>
         </ul>
       </div>
       <div class="shift-col">
