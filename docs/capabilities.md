@@ -427,6 +427,20 @@ Pre-built connectors for the tools agencies already use — connect once, use ac
 - Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
 - See [Integrations Reference](#integrations-reference) for the full list
 
+### Document Bundles & Cached Context
+
+Reusable document libraries that let agents carry stable reference knowledge across runs — assembled once, served instantly at every execution.
+
+- **Document bundles** — Named collections of versioned reference documents. Attach a bundle to an agent, task, or scheduled task; every run in that scope receives the full bundle as context without re-uploading or re-prompting.
+- **Multi-file upload** — Upload multiple documents in a single operation; each file is stored as an immutable, versioned content record. Uploading new content creates a new version; prior versions are never deleted, preserving full reproducibility.
+- **Auto-bundles** — When documents are uploaded and immediately attached without naming a bundle, an unnamed bundle is created automatically and reused whenever the same document set recurs. Operators can promote any auto-bundle to a named bundle with a single action.
+- **Bundle suggestion** — After attaching a set of documents, the platform detects whether the set forms a useful named bundle and surfaces a one-click save prompt. Operators can permanently dismiss the suggestion per document set.
+- **Per-run snapshot isolation** — At run start, the platform captures an immutable snapshot of every attached bundle — the exact document versions, content hashes, and token counts in effect at that moment. Subsequent bundle edits or document updates never affect a run already in flight.
+- **Budget-aware assembly** — The platform resolves a per-run execution budget (model tier policy → org ceiling → task override) before assembling the prefix. Assembly validates token usage against the budget before calling the model; if the prefix exceeds the budget, the run is paused for operator review rather than silently truncating.
+- **Operator review gate** — Budget breaches surface as structured review items: which threshold was exceeded, the top document contributors, and suggested remediations (trim bundle, split task, upgrade model tier). Operators approve or reject; an approved retry re-resolves from current state exactly once.
+- **Utilisation labels** — Each bundle displays a utilisation indicator (low / medium / high / over-budget) showing how much of the typical model's context window the bundle occupies — so operators know before attaching whether a bundle will fit.
+- **Reproducible audit trail** — Every run records the snapshot IDs, variable-input hash, and run outcome (completed / degraded / failed). Degraded runs record the specific reason (soft warning threshold, token drift, or unexpected cache miss) for post-run observability.
+
 ### Execution Infrastructure
 
 Production-grade reliability — agents run consistently, recover from failures, and never double-execute.
