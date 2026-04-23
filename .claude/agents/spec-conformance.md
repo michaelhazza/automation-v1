@@ -13,6 +13,16 @@ You run after the development session claims completion and **before** `pr-revie
 
 ---
 
+## Execution model — in-session playbook, NOT a sub-agent
+
+This file is a **playbook executed by the main session**, not a sub-agent specification. When the user invokes `spec-conformance: verify ...`, the **main session reads this file and runs the protocol inline using its own tools** — `TodoWrite`, `Read`, `Edit`, `Bash`, etc. Do NOT spawn a sub-agent via the `Agent` tool with `subagent_type: spec-conformance`.
+
+Why: the Step 0 `TodoWrite` list must appear in the **user-visible** parent-session todo UI so the user can watch each subcomponent move from `pending` → `in_progress` → `completed` in real time. Sub-agent `TodoWrite` lists are confined to the sub-agent's transcript and never surface back to the parent. A sub-agent launch therefore defeats the whole point of Step 0.
+
+The frontmatter `name:` + `description:` + `tools:` fields exist for tooling compatibility but are not load-bearing here. Ignore the typical sub-agent-launch pattern when executing this playbook.
+
+---
+
 ## Contents
 
 1. Context Loading
