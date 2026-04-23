@@ -13,6 +13,7 @@
 | 2026-04-22 | `spec-reviewer` loop — 2 iterations, 35 mechanical fixes, exited on two-consecutive-mechanical-only (see `tasks/review-logs/spec-review-final-cached-context-infrastructure-*.md`). |
 | 2026-04-23 | **UX revision** — product decision to reframe the user-facing noun to "documents + optional bundles" after mockup review surfaced complexity mismatch with the product's consumer-simple positioning. New §3.6 Attachment UX contract defines the canonical user flows. New `is_auto_created` column on `document_bundles` (§5.3); new `bundle_suggestion_dismissals` table (§5.12). Four mockups under `prototypes/cached-context/` are the canonical visual reference. Frontend design rules that this revision codifies live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). |
 | 2026-04-23 | **Vocabulary unification** — "bundle" replaces the earlier "pack" vocabulary throughout the schema, services, routes, types, error codes, and prose. Single domain vocabulary across UI, backend, and docs — no translation layer. Table names: `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`. Services: `documentBundleService`, `bundleResolutionService`, `bundleUtilizationJob`. Method rename: `findOrCreateUnnamedBundle` (was `findOrCreateAutoPack`). Route namespace: `/api/document-bundles/*` and `/*/attached-bundles`. Conceptual split reframed: "named bundle" (`is_auto_created=false`, surfaced as `chipKind='bundle'`) vs "unnamed bundle" (`is_auto_created=true`, invisible to users, surfaced as `chipKind='document'` per contained doc). |
+| 2026-04-23 | **ChatGPT spec review — round 3** applied. 10 additive invariant / clarification findings, all accepted. Material additions: cross-tenant hash-identity invariant + `assembly_version` bump semantics (§4.4); snapshot isolation invariant (§6.3); indexed-lookup performance constraint on `suggestBundle` (§6.2 invariant #9); new `degraded_reason` diagnostic column on `agent_runs` (§4.6 + §5.8, with `'soft_warn' \| 'token_drift' \| 'cache_miss'` enum and precedence rule); HITL retry re-resolution invariant (§6.6 step 4 rewritten); strengthened §12.16 + R11 auto-bundle lifecycle wording from "should guard" to "must support future lifecycle management"; document-rename-doesn't-affect-identity invariant (§5.1); token-counts-computed-at-version-write invariant (§5.2); bundle-deletion wrapper-only semantics (§6.2 softDelete notes). One schema addition (`degraded_reason` column) — low-risk, additive, matches `run_outcome` pattern. Session log: `tasks/review-logs/chatgpt-spec-review-cached-context-infrastructure-2026-04-23T04-33-02Z.md`. |
 | 2026-04-23 | **ChatGPT spec review — round 1** applied. 13 additive invariant / clarification findings, all accepted. Material additions: order-independence UX invariant + determinism requirement on the bundle-suggestion heuristic (§3.6.4); three new invariants in §6.2 (unnamed bundle identity stability, promotion identity preservation, suggestBundle determinism); bundle-chip-as-single-attachment-unit invariant (§3.6.7); explicit snapshot-integrity fail-fast invariant (§6.4); budget enforcement split clarification (§6.5); cache-identity vs provider-cache-behaviour principle + hash glossary (§4.4); `degraded` semantics clarification (§4.6); naming-rule note on "bundle" vs "named bundle" (§3.6.1); unnamed bundle growth risk (§14 R11) + new deferred-work entry (§12.16). One mockup UI-copy line tightened in `mockup-upload-document.html`. Session log: `tasks/review-logs/chatgpt-spec-review-cached-context-infrastructure-2026-04-23T04-33-02Z.md`. |
 
 ## Related artefacts
@@ -538,6 +539,10 @@ interface BundleResolutionSnapshot {
 
 **Cache identity vs provider cache behaviour.** These hash identities guarantee determinism on our side — the spec ensures byte-identical prefixes produce identical hashes, and non-identical prefixes produce different hashes. **But a cache hit at the provider is NOT guaranteed by identity alone.** Provider caches are best-effort: TTL can expire between calls (the 5-minute ephemeral window), provider-side cache-key shape may evolve, provider-side eviction policies are opaque, and provider-level incidents can flush caches. A `cache_read_input_tokens = 0` on a call whose `assembledPrefixHash` matches an earlier call within the TTL window is possible and must not be treated as a bug — it is classified as a degraded run (§4.6 "unexpected cache miss"). Dashboards and debugging proceed from this premise: we can prove our hash identities are stable; we cannot prove the provider cached the prefix.
 
+**Cross-tenant hash identity.** Prefix-hash identity is content-based — the hash is a pure function of the byte-serialized documents + `model_family` + `assembly_version`. Two tenants that upload identical document content produce identical hashes. This is **expected and safe**: the provider's cache is keyed by the bytes sent in the request, so cross-tenant cache reuse happens naturally at the provider level whenever the bytes match. No tenant data is leaked by this reuse — both tenants are independently sending the same bytes, and each tenant's `bundle_resolution_snapshots` row remains tenant-scoped for attribution. Do NOT salt hashes per tenant; doing so would eliminate cross-tenant cache reuse (a real cost-saving benefit) without adding any isolation property the current design doesn't already have.
+
+**Assembly-version bumps are non-destructive.** A bump to `ASSEMBLY_VERSION` in `contextAssemblyEnginePure` invalidates cache reuse across the version boundary: runs on the new version produce new `prefix_hash` values that do not collide with runs on the old version. **But existing snapshot rows are NOT invalidated.** `bundle_resolution_snapshots` is append-only; prior-version snapshots remain readable for audit, are still referenced by historical `agent_runs.bundle_snapshot_ids`, and coexist indefinitely with new-version snapshots. No migration, no deletion, no "cleanup" sweep. The rule is enforced at the engine level — the engine can always read a prior-version snapshot's `prefix_hash_components` because those components are persisted with the `assembly_version` field that produced them (§4.3 `assemblyVersion` field). This keeps the system append-only across engine evolution.
+
 **Type:** TypeScript interface. Exported from `shared/types/cachedContext.ts`. Stored as JSONB on `bundle_resolution_snapshots.prefix_hash_components` — one components object per bundle per unique resolution state. `llm_requests.prefix_hash` is the CALL-LEVEL assembled hash (the `assembledPrefixHash` from the glossary above) and does NOT directly join any single snapshot row. For diagnosis, consumers join `llm_requests.llm_request_id` to `agent_runs.llm_request_id` (where present) or reconstruct from `agent_runs.bundle_snapshot_ids`: read every snapshot row whose `id` is in that JSONB array, diff the per-bundle `prefix_hash_components` against a prior run's snapshots, and recompute the call-level `assembledPrefixHash` via `computeAssembledPrefixHash` to verify it matches `llm_requests.prefix_hash`. `llm_requests` does NOT carry components directly (§5.9).
 
 **Producer:** `contextAssemblyEnginePure.computePrefixHash()` (§6.4).
@@ -646,6 +651,9 @@ interface HitlBudgetBlockPayload {
 
 ```ts
 type RunOutcome = 'completed' | 'degraded' | 'failed';
+
+/** Internal-only diagnostic tag recorded alongside run_outcome='degraded'. NEVER surfaced to users. */
+type DegradedReason = 'soft_warn' | 'token_drift' | 'cache_miss';
 ```
 
 **Semantics (authoritative — consumed by dashboards and future retry logic):**
@@ -654,15 +662,25 @@ type RunOutcome = 'completed' | 'degraded' | 'failed';
 - **`degraded`**: Run finished AND at least one of: soft-warn breach (§4.1 `softWarnRatio`), estimate-vs-actual input-token delta above 10% (tolerance manual-tunable — see §12.5), unexpected cache miss when the prefix hash matched a previous snapshot within the TTL window. **`degraded` reflects suboptimal execution conditions, not necessarily incorrect output.** The run's result is valid — it just cost more, took longer, or behaved differently than an ideal run. Dashboards and retry logic must not equate "degraded" with "bad output"; it is an infrastructure / cost signal.
 - **`failed`**: Run did not finish (HITL-block rejected, router error, provider 5xx, timeout, parse failure, budget-resolver raised `BudgetResolutionError`, orchestrator aborted).
 
+**`degraded_reason` diagnostic tag (persisted alongside `run_outcome`).** Three categorically different things can degrade a run, and conflating them in dashboards makes tuning impossible. v1 persists a nullable `degraded_reason` text column on `agent_runs` (§5.8). Semantics:
+
+- `soft_warn` — a soft-warn threshold was tripped (`§4.1 softWarnRatio`). The user's bundle is approaching its cap; they may want to trim before it blocks.
+- `token_drift` — actual input tokens exceeded estimated by more than the tolerance (§12.5). The token estimator needs calibration for this workload / model family.
+- `cache_miss` — `prefix_hash` matched a prior snapshot within the TTL window but the provider returned `cache_read_input_tokens = 0`. Provider-side variability (§4.4 cache-identity-vs-provider-behaviour); not a bug on our side.
+
+Precedence when multiple conditions are true in one run: `soft_warn` > `token_drift` > `cache_miss` (the user-actionable signal wins). This column is **internal-only** — the UI never renders it. It exists for admin observability, future retry logic (§12.7 can route by reason), and debugging.
+
 **Example instances (fragment of an agent_runs row):**
 
 ```json
-{ "run_outcome": "completed" }
-{ "run_outcome": "degraded" /* plus soft_warn_tripped = true */ }
-{ "run_outcome": "failed" /* terminal LLM request status != 'success' */ }
+{ "run_outcome": "completed", "degraded_reason": null }
+{ "run_outcome": "degraded", "degraded_reason": "soft_warn", "soft_warn_tripped": true }
+{ "run_outcome": "degraded", "degraded_reason": "token_drift" }
+{ "run_outcome": "degraded", "degraded_reason": "cache_miss" }
+{ "run_outcome": "failed", "degraded_reason": null }
 ```
 
-**Invariant:** `run_outcome` is written exactly once, at the terminal write. In-flight runs have `run_outcome IS NULL`. The terminal-write UPDATE carries the `run_outcome IS NULL` optimistic-lock precondition (§9.3) — duplicate writes under retry update 0 rows. This UPDATE is NOT co-transactional with the router's `llm_requests` insert; both writes are idempotent in effect, and no observer can see a contradictory in-flight state.
+**Invariant:** `run_outcome` is written exactly once, at the terminal write. In-flight runs have `run_outcome IS NULL`. The terminal-write UPDATE carries the `run_outcome IS NULL` optimistic-lock precondition (§9.3) — duplicate writes under retry update 0 rows. `degraded_reason` is written in the same UPDATE; `NULL` unless `run_outcome = 'degraded'`. This UPDATE is NOT co-transactional with the router's `llm_requests` insert; both writes are idempotent in effect, and no observer can see a contradictory in-flight state.
 
 ---
 
@@ -732,6 +750,7 @@ export const referenceDocuments = pgTable(
 - `currentVersionId` is a soft FK to `reference_document_versions.id` (§5.2). The FK constraint is created in migration 0203 (the versions table) rather than 0202 to avoid circular dependency — same pattern as `memory_blocks.activeVersionId` (see `memoryBlocks.ts` lines 93–103).
 - `source_type`/`source_ref`/`last_synced_at` are deferred-feature columns from day one — v1 never writes anything but `manual`/`null`/`null`. Exists to make the v2 connector landing a non-refactor.
 - Soft-delete via `deletedAt`. A soft-deleted document is excluded from assembly even if still bundle-linked.
+- **Document rename does not affect prefix-hash identity.** The `name` column is metadata only. Prefix-hash components (§4.4) hash `documentSerializedBytesHashes` (which derives from `reference_document_versions.serializedBytesHash`) and `orderedDocumentIds` — neither includes the document name. Renaming a document leaves every existing bundle's `prefix_hash` unchanged and every cached provider prefix intact. This is invariant: future changes must not smuggle user-facing names into the hash input.
 
 ### 5.2 `reference_document_versions` table
 
@@ -784,6 +803,7 @@ export const referenceDocumentVersions = pgTable(
 
 **Notes.**
 - `tokenCounts` is a JSONB map keyed by `modelFamily`. v1 writes three keys (Sonnet / Opus / Haiku). New model families append new keys in a future migration — no schema change.
+- **`tokenCounts` is the source of truth — computed once, at version-write time, never at assembly time.** When `referenceDocumentService.writeVersion` (§6.1) inserts a new version row, it invokes `anthropicAdapter.countTokens` once per supported model family and records the result. Assembly (§6.4) reads `tokenCounts[modelFamily]` directly from the pinned version row — it does NOT re-tokenise, re-estimate, or mutate the value. This keeps per-request latency low (no provider round-trip during assembly), makes token counts auditable and reproducible, and prevents drift between what the budget resolver saw and what assembly assembled against. Rule: any future optimisation that wants to "freshen" token counts at assembly time must instead trigger a new version write; assembly-time recomputation is forbidden.
 - `serializedBytesHash` is hashed over the serialized form (document bytes plus the delimiter/metadata wrapper from the engine's serialization format — see §6.4). This is the hash that feeds `prefix_hash_components.documentSerializedBytesHashes` (§4.4) and is mirrored onto each snapshot's `orderedDocumentVersions[].serializedBytesHash` entry (§4.3 / §5.6). We hash the serialized form (not raw content) because that is what Anthropic sees — byte-identical serialization is the identity that matters for cache hits. `contentHash` on this table is the RAW-content hash; it serves the idempotent-write check in §6.1 (`updateContent` short-circuits when new content's `contentHash` matches the current version) and plays no role in prefix identity.
 - No `deletedAt` — version rows are immutable. Document-level soft-delete cascades via FK.
 - Idempotent writes: if the caller attempts to write a version row whose content matches the current version's `contentHash`, `referenceDocumentService.writeVersion` returns the existing row without inserting — matches the `memoryBlockVersions` coalescing pattern.
@@ -1075,9 +1095,14 @@ ALTER TABLE agent_runs ADD COLUMN bundle_snapshot_ids jsonb;            -- array
 ALTER TABLE agent_runs ADD COLUMN variable_input_hash text;           -- SHA-256 of the dynamic (post-breakpoint) content
 ALTER TABLE agent_runs ADD COLUMN run_outcome text;                   -- §4.6 enum, nullable while in-flight
 ALTER TABLE agent_runs ADD COLUMN soft_warn_tripped boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_runs ADD COLUMN degraded_reason text;               -- §4.6 DegradedReason enum; NULL unless run_outcome='degraded'
 
 CREATE INDEX agent_runs_run_outcome_idx ON agent_runs (run_outcome)
   WHERE run_outcome IS NOT NULL;
+
+-- Optional partial index to support degradation-category dashboards without scanning all agent_runs.
+CREATE INDEX agent_runs_degraded_reason_idx ON agent_runs (degraded_reason)
+  WHERE degraded_reason IS NOT NULL;
 ```
 
 **Drizzle diff in `server/db/schema/agentRuns.ts`:**
@@ -1088,12 +1113,14 @@ bundleSnapshotIds: jsonb('bundle_snapshot_ids').$type<string[]>(),
 variableInputHash: text('variable_input_hash'),
 runOutcome: text('run_outcome').$type<'completed' | 'degraded' | 'failed'>(),
 softWarnTripped: boolean('soft_warn_tripped').notNull().default(false),
+degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
 ```
 
 **Notes.**
 - `bundleSnapshotIds` is JSONB (array of UUIDs) rather than a dedicated join table. Rationale: a run references at most ~5 snapshots (one per attached bundle, and v1 expects 1–2 bundles per run); the join table overhead isn't justified.
 - `runOutcome` is nullable on purpose — `NULL` means in-flight. Terminal writes set it atomically with the LLM-request status (§9.3).
 - `softWarnTripped` is a cheap boolean hoisted out of JSONB so dashboards can filter without JSON ops.
+- `degradedReason` is the diagnostic enum recorded alongside `run_outcome='degraded'` (§4.6). Text-typed with Drizzle enum pinning; nullable (always `NULL` when `run_outcome != 'degraded'`); not surfaced to users. Precedence when multiple conditions trip simultaneously: `soft_warn` > `token_drift` > `cache_miss`, computed in `cachedContextOrchestrator` (§6.6 terminal write).
 
 ### 5.9 Additions to `llm_requests`
 
@@ -1469,6 +1496,12 @@ export function computeDocSetHash(documentIds: string[]): string;
 - **`addMember` / `removeMember`** each bump `document_bundles.currentVersion` in the same transaction. Re-adding a previously-removed document creates a new `document_bundle_members` row (soft-deleted rows are left in place). The bundle-version bump is the signal that bundle state has changed — `bundleResolutionService` reads the current version and builds a fresh snapshot on the next run. **Editing a named bundle affects every subject the bundle is attached to** — this is the UX invariant surfaced by the "Used by: 2 tasks" warning on the bundle-detail page (§3.6.3 Flow E, mockup 3); the backend behaviour is unchanged.
 - **`attach`** verifies the subject row exists by table lookup (`agents` / `tasks` / `scheduled_tasks`) and that the subject's org scope matches the bundle's org scope. The polymorphic FK is service-enforced here. A duplicate attachment against a currently-LIVE row (same `(bundle_id, subject_type, subject_id)`, `deleted_at IS NULL`) returns the existing row idempotently. A re-attach against a soft-deleted row INSERTS a fresh row — the partial unique index `(bundle_id, subject_type, subject_id) WHERE deleted_at IS NULL` (§5.5) permits this; the audit trail stays linear rather than resurrecting old attribution.
 - **`detach`** soft-deletes the row. Live attachments under a soft-deleted bundle return no results in `listAttachmentsForSubject` — the bundle-level soft-delete is authoritative.
+- **`softDelete` (bundle deletion semantics).** `softDelete` sets `document_bundles.deletedAt` on the bundle row — a **wrapper-only removal**. It does NOT cascade:
+  - The bundle's member documents (`reference_documents`) are NOT deleted. They remain in the library and can still be individually attached, added to other bundles, or uploaded into new bundles.
+  - Existing `bundle_resolution_snapshots` rows referencing the deleted bundle remain intact. Historical runs that referenced those snapshots via `agent_runs.bundle_snapshot_ids` are still auditable — the snapshot's pinned `orderedDocumentVersions` are readable, and the engine can still reconstruct the prefix bytes if asked.
+  - `agent_runs` rows are not touched. A run that completed against a now-deleted bundle keeps its `run_outcome`, `bundle_snapshot_ids`, and attribution exactly as recorded.
+  - Live `document_bundle_attachments` rows under a soft-deleted bundle become invisible to `listAttachmentsForSubject` (filtered at the pack-level soft-delete). New runs on those subjects will raise `CACHED_CONTEXT_NO_BUNDLES_ATTACHED` if nothing else is attached.
+  The user-facing consequence: "Delete bundle" removes the reusable group but preserves every underlying document, every historical record, and every audit trail. Recreation is an explicit "Create bundle" action — there is no undelete.
 - **Authorisation** — same pattern as `referenceDocumentService`: routes enforce, service trusts.
 
 **Error codes:**
@@ -1491,12 +1524,15 @@ export function computeDocSetHash(documentIds: string[]): string;
 6. **Unnamed bundle identity is stable and independent of attachment context.** The bundle row produced by `findOrCreateUnnamedBundle` is a function purely of `(organisationId, subaccountId, documentIds)`. It does NOT vary with: the calling `subjectType` / `subjectId`, the user's role, whether the attach flow was triggered from upload vs picker, the current model family, or any lifecycle flag on the documents. Two attach flows for the same doc set at the same (org, subaccount) scope always resolve to the same bundle row — which is what makes the bundle-suggestion heuristic in §3.6.4 work. This invariant prevents accidental unnamed bundle forking by a future code path that adds an extra discriminator to the lookup.
 7. **Promotion does not alter membership, identity, or hash identity.** `promoteToNamedBundle` changes exactly three columns: `is_auto_created` (true → false), `name` (null → user-supplied), `updated_at` (now). It does NOT change: `id`, `organisation_id`, `subaccount_id`, `current_version`, `created_by_user_id`, `created_at`, the set of rows in `document_bundle_members` for this bundle, or any downstream `bundle_resolution_snapshots.prefix_hash` value. This preserves cache reuse across the promotion boundary (same bundle → same snapshots → same cached prefixes) and protects `agent_runs.bundle_snapshot_ids` integrity for historical runs.
 8. **`suggestBundle` is deterministic over queried state.** Given the same `(organisationId, subaccountId, userId, documentIds)` input and the same DB state, `suggestBundle` returns the same result on every call. The output is a pure function over the four conditions in §3.6.4; no time-based tiebreaks, no A/B sampling, no ordering-dependent signals.
+9. **Suggestion detection operates on indexed lookups, not full attachment scans.** Implementation of `suggestBundle` must resolve "is this doc set attached elsewhere?" via indexed queries — the `document_bundles` lookup by canonical doc-set hash (matching `findOrCreateUnnamedBundle`'s identity), the partial index on named bundles for the existing-named-bundle check, and the `bundle_suggestion_dismissals` unique index by `(user_id, doc_set_hash)`. The three-query composition in §6.2's `suggestBundle` description must not be implemented as a join that scans `document_bundle_attachments` without an index-backed predicate on the matching unnamed-bundle pack ID. Performance target: p95 < 20ms under pilot volumes.
 
 ### 6.3 `bundleResolutionService` (+ `bundleResolutionServicePure`)
 
 **File:** `server/services/bundleResolutionService.ts` + `server/services/bundleResolutionServicePure.ts`
 
 Owns run-start snapshotting. Called exactly once per run, at the top of the cached-context orchestrator path.
+
+**Run isolation invariant (load-bearing).** Snapshot resolution fully isolates a run from subsequent bundle or document mutations. Once `resolveAtRunStart` returns the snapshot set for a run, that run reads its context exclusively from those pinned snapshots for its entire lifetime — no live re-read of `document_bundles`, `document_bundle_members`, or `reference_document_versions` is permitted after resolution, even if a user edits the bundle or a document version mid-run. The engine's read-time integrity check (§6.4) reads the pinned `reference_document_versions` row by `(documentId, documentVersion)` and verifies the bytes still hash to the snapshot's recorded value; this is integrity verification against tampering, not re-resolution against live state. Together with the fail-fast rule in §6.4 (snapshot integrity mismatch → terminate the run), this gives per-run reproducibility as a hard property: the input side of every run is a function of exactly one snapshot set, captured at one point in time, and never re-evaluated.
 
 **Public surface (stateful):**
 
@@ -1835,20 +1871,22 @@ Any uncaught / unmapped error is surfaced as `router_error` with the original ex
 1. Resolve `ExecutionBudget` (§6.5) — includes the capacity invariant check.
 2. Resolve bundle snapshots (§6.3) — produces one snapshot per attached bundle. If no bundles attached, raises `CACHED_CONTEXT_NO_BUNDLES_ATTACHED` (the caller decides handling; pilot mode treats as error).
 3. Call `contextAssemblyEngine.assembleAndValidate(...)` (§6.4).
-4. **If `{ kind: 'budget_breach' }`:** call `actionService.proposeAction({ actionType: 'cached_context_budget_breach', gateLevel: 'block', payloadJson: blockPayload, ... })`. Wait for `hitlService` resolution. On approval → re-run steps 1–3 **exactly once** (the operator may have trimmed the bundle). If the second assembly attempt ALSO returns `{ kind: 'budget_breach' }`, terminate with `run_outcome='failed'` and `failureReason='hitl_second_breach'` — no third attempt, no second HITL block. On rejection or suspend-window timeout → write `run_outcome='failed'` on `agent_runs` with `failureReason='hitl_rejected'` or `'hitl_timeout'` respectively.
+4. **If `{ kind: 'budget_breach' }`:** call `actionService.proposeAction({ actionType: 'cached_context_budget_breach', gateLevel: 'block', payloadJson: blockPayload, ... })`. Wait for `hitlService` resolution. On approval → **re-run steps 1–3 exactly once against the current state of the bundle, documents, and budget policy at the moment of re-entry**. The retry must not reuse the previous snapshot, previous budget resolution, or previous assembly output — between the original block and the approval, the operator may have trimmed the bundle, edited a document version, or changed the task's budget override, and the re-run must reflect all of those. Concretely: the orchestrator calls `executionBudgetResolver.resolve` afresh, `bundleResolutionService.resolveAtRunStart` afresh (producing a new snapshot set — which may reuse existing `bundle_resolution_snapshots` rows if the state hasn't actually changed, per §5.6 dedup), and `contextAssemblyEngine.assembleAndValidate` afresh. If the second assembly attempt ALSO returns `{ kind: 'budget_breach' }`, terminate with `run_outcome='failed'` and `failureReason='hitl_second_breach'` — no third attempt, no second HITL block. On rejection or suspend-window timeout → write `run_outcome='failed'` on `agent_runs` with `failureReason='hitl_rejected'` or `'hitl_timeout'` respectively.
 5. **If `{ kind: 'ok' }`:** write `bundle_snapshot_ids` + `variable_input_hash` + `soft_warn_tripped` to `agent_runs` (pre-call write). The run outcome is still `NULL`.
 6. Call `llmRouter.routeCall({ payload: routerPayload, estimatedContextTokens, prefixHash: assembledPrefixHash, featureTag: 'cached-context', maxTokens: resolvedBudget.maxOutputTokens, cacheTtl: ttl ?? '1h', ... })`. Router handles idempotency, attribution, provider fallback, and cost ceilings. `maxOutputTokens` is the per-call response cap (existing router parameter, named `maxTokens` at the router surface, passed through to `anthropicAdapter` as `max_tokens` on the request body). `prefixHash` + `cacheTtl` are new optional params the router's `llmRouter.ts` gains (see below).
 7. Parse `response.usage`: capture `cachedPromptTokens = cache_read_input_tokens`, `cacheCreationTokens = cache_creation_input_tokens`. Determine `hitType` from the ratio.
 8. **Run outcome classification (§4.6):**
-   - If soft-warn was tripped → `degraded`.
-   - If actual input tokens exceed estimated by > 10% → `degraded` (drift flag).
-   - If `hitType === 'miss'` AND a prior snapshot with this `prefixHash` exists in-window → `degraded` (unexpected miss).
-   - Otherwise → `completed`.
+   - If soft-warn was tripped → `degraded` with `degraded_reason = 'soft_warn'`.
+   - Else if actual input tokens exceed estimated by > 10% → `degraded` with `degraded_reason = 'token_drift'`.
+   - Else if `hitType === 'miss'` AND a prior snapshot with this `prefixHash` exists in-window → `degraded` with `degraded_reason = 'cache_miss'`.
+   - Otherwise → `completed` with `degraded_reason = NULL`.
+   Precedence is the one listed above: `soft_warn` > `token_drift` > `cache_miss`. If multiple conditions trip simultaneously, only the highest-precedence reason is recorded.
 9. **Terminal write on `agent_runs`** (single-row UPDATE, not in the same transaction as the router's `llm_requests` write). One UPDATE shape, used for both success and failure paths:
 
    ```sql
    UPDATE agent_runs
      SET run_outcome       = :outcome,
+         degraded_reason   = :degradedReason,  -- NULL unless :outcome='degraded'
          bundle_snapshot_ids = COALESCE(agent_runs.bundle_snapshot_ids, :bundleSnapshotIds),
          variable_input_hash = COALESCE(agent_runs.variable_input_hash, :variableInputHash),
          soft_warn_tripped = :softWarnTripped
@@ -1856,7 +1894,8 @@ Any uncaught / unmapped error is surfaced as `router_error` with the original ex
      AND run_outcome IS NULL;
    ```
 
-   - On the `completed` / `degraded` path, all four fields are supplied; the `COALESCE` is defensive against step 5's pre-call write having already landed them.
+   - On the `completed` / `degraded` path, all five fields are supplied; the `COALESCE` is defensive against step 5's pre-call write having already landed them.
+   - `degraded_reason` is always supplied: `'soft_warn' | 'token_drift' | 'cache_miss'` when `:outcome='degraded'`, `NULL` otherwise. The orchestrator's classification in step 8 computes the single precedence-winning reason.
    - On the `failed` path, `:bundleSnapshotIds` and `:variableInputHash` are supplied WHEN KNOWN (§6.3 succeeded for the former, §6.4 step 3 succeeded for the latter) and NULL otherwise — the `COALESCE` preserves any values step 5 already wrote, and also preserves NULLs when the failure happened before step 5 could run. This keeps failed-path attribution on the run row (per G9 fix in iteration 2).
    - The `run_outcome IS NULL` precondition is the optimistic lock — a duplicate terminal write under retry updates 0 rows and is treated as an idempotent re-entry (no error; the caller observes the row already has a terminal outcome).
 
@@ -2430,7 +2469,7 @@ Per `docs/spec-authoring-checklist.md §7`. Every deferred item here corresponds
 - **12.13 Admin editing of platform-default `model_tier_budget_policies`.** v1 seed rows are editable only via direct DB access. A system-admin-gated route is deferred.
 - **12.14 New-model-family backfill.** When a new `model_tier_budget_policies` row is added for a previously-unseen `modelFamily`, existing `reference_document_versions.tokenCounts` rows lack that key and assembly against that family would fail. v1 does not ship a backfill migration/job because v1 has a fixed three-family set (Sonnet / Opus / Haiku per §5.2). Adding a fourth family post-pilot is a deliberate operational step that MUST include: (a) a data migration that computes `tokenCounts[newFamily]` for every live `reference_document_versions` row via the Anthropic `countTokens` helper, and (b) a gate on the `model_tier_budget_policies` insert that refuses to activate until the backfill reports zero unfilled rows. Strict fail policy: `referenceDocumentService` throws `CACHED_CONTEXT_DOC_TOKEN_COUNT_MISSING` (500) if assembly encounters a missing `tokenCounts[modelFamily]` key at run time.
 - **12.15 Resolver-narrowed cache TTL.** v1 treats the caller's `ttl` hint as a pass-through. A future `model_tier_budget_policies.maxCacheTtl` column + resolver narrowing (`min(caller, orgCeiling, modelTier)`) is deferred — the adapter today supports only `'5m'` and `'1h'` values, so narrowing has small practical value until multi-tier TTLs land upstream.
-- **12.16 Unnamed bundle growth policy.** Unnamed bundles are created implicitly on every unique-doc-set attach (§6.2 `findOrCreateUnnamedBundle`). Because the attach flow is frictionless, a power user can easily create hundreds of unnamed bundles in a single session — most of which may never be promoted to named bundles. v1 does not implement a GC policy for this; the `document_bundles` table is expected to handle the volume for the pilot and early production. A future policy — exact mechanism deferred — will need to balance: (a) retention for auditability (attachments reference bundle IDs), (b) reclaiming storage for orphaned unnamed bundles (no live attachments, no bundle name, no snapshot references within retention window), and (c) not breaking the bundle-suggestion heuristic's ability to detect "this same doc set exists elsewhere". Signalled here so implementation teams watch for the bloat pattern and trigger the follow-up spec when the count justifies it. See §14 R11.
+- **12.16 Unnamed bundle lifecycle management (required future work).** Unnamed bundles are created implicitly on every unique-doc-set attach (§6.2 `findOrCreateUnnamedBundle`). Because the attach flow is frictionless, a power user can easily create hundreds of unnamed bundles in a single session — most of which may never be promoted to named bundles. **v1 intentionally does not implement lifecycle management for unnamed bundles, but the system MUST support future lifecycle management (pruning, consolidation, or non-persistence strategies).** This is required future work, not aspirational — table sizes will justify action during or shortly after the pilot, and the follow-up spec must land before general-availability promotion. The follow-up spec will need to balance: (a) retention for auditability (attachments reference bundle IDs), (b) reclaiming storage for orphaned unnamed bundles (no live attachments, no bundle name, no snapshot references within retention window), and (c) not breaking the bundle-suggestion heuristic's ability to detect "this same doc set exists elsewhere" — the dismissal table's decoupled `doc_set_hash` (§5.12) was deliberately chosen so hash persistence survives any pruning policy. See §14 R11 for the live risk.
 
 ---
 

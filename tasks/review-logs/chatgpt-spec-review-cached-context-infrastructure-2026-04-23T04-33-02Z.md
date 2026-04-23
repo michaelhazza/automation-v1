@@ -102,5 +102,51 @@ User decision: **all: as recommended** (accept all 13, apply all, including the 
 
 **Mockups touched:** 1 file (`mockup-upload-document.html`) — single UI-copy tightening, no structural change.
 
-**Commit:** round-1 changes committed as a single commit per the spec-review agent's contract (auto-commit-and-push after each round).
+**Commit:** round-1 changes committed as a single commit per the spec-review agent's contract (auto-commit-and-push after each round). Commit `3005d64`.
+
+---
+
+## Round 2 — skipped
+
+The user progressed directly from round 1 → round 3 feedback (no interim round 2 was pasted into the session).
+
+---
+
+## Round 3 — 2026-04-23 (applied)
+
+### ChatGPT Feedback (raw)
+
+Pasted by the user. 8 top-level findings + a 3-item "minor polish" set = 10 discrete items. All framed as "no redesign, tighten invariants, protect against future 'well-intentioned' changes." No blockers.
+
+### User decision
+
+**"all: as recommended"** — apply all 10 items.
+
+### Parallel scope change — vocabulary rename
+
+Before applying round 3 findings, the user instructed: *"make sure you've completely replaced 'pack' with 'bundle', I mean at the schema level as well, before we go ahead and build this feature so we're not creating confusing code debt later"*.
+
+Executed as a separate commit (`82987a8`). Spec, frontend-design-principles, KNOWLEDGE.md, dev brief, mockups all renamed: `document_packs` → `document_bundles`, `pack_resolution_snapshots` → `bundle_resolution_snapshots`, `packId` → `bundleId`, `documentPackService` → `documentBundleService`, `findOrCreateAutoPack` → `findOrCreateUnnamedBundle`, all error codes `CACHED_CONTEXT_PACK_*` → `CACHED_CONTEXT_BUNDLE_*`, routes `/api/document-packs/*` → `/api/document-bundles/*`, plus prose. Round 3 findings applied against the renamed spec.
+
+### Recommendations and Decisions (round 3)
+
+| # | Finding | Classification | Disposition | Spec/artefact changes |
+|---|---------|----------------|-------------|----------------------|
+| R3-F1 | Cross-tenant hash identity invariant — content-based hashes may collide across tenants; cross-tenant cache reuse is expected and safe | mechanical | **applied** | §4.4 new paragraph "Cross-tenant hash identity" extending the existing hash glossary |
+| R3-F2 | Snapshot isolation invariant — resolution fully isolates a run from subsequent bundle/document mutations | mechanical | **applied** | §6.3 new "Run isolation invariant" paragraph under the service header |
+| R3-F3 | Suggestion detection must operate on indexed lookups, not full attachment scans | mechanical | **applied** | §6.2 invariants list item #9 |
+| R3-F4 | `assembly_version` bump invalidates cache reuse but NOT existing snapshots — append-only semantics | mechanical | **applied** | §4.4 new paragraph "Assembly-version bumps are non-destructive" |
+| R3-F5 | New `degraded_reason` diagnostic enum column on `agent_runs` — internal-only, not user-facing | mechanical (schema addition) | **applied** | §4.6 contract extended with `DegradedReason` type + precedence rule + example rows; §5.8 schema adds `degraded_reason text` column + partial index; §6.6 step 8 updated to record the reason; §6.6 terminal UPDATE extended with `degraded_reason = :degradedReason` |
+| R3-F6 | HITL retry must re-run resolution + assembly against current state, not reuse previous snapshot | mechanical | **applied** | §6.6 step 4 rewritten to spell out fresh `executionBudgetResolver.resolve` + `bundleResolutionService.resolveAtRunStart` + `contextAssemblyEngine.assembleAndValidate` on the post-approval retry |
+| R3-F7 | Strengthen §12.16 from "should guard" to "system MUST support future lifecycle management" | mechanical | **applied** | §12.16 rewritten to declare required future work (not aspirational); dismissal hash decoupling noted as survivability feature |
+| R3-F8a | Document rename does not affect prefix-hash identity | mechanical | **applied** | §5.1 notes extended with the invariant statement |
+| R3-F8b | Token counts computed at version-write, not at assembly time | mechanical | **applied** | §5.2 notes extended — assembly-time recomputation is forbidden; future optimisations must trigger new version writes |
+| R3-F8c | Bundle deletion is wrapper-only — does not cascade to documents, snapshots, or runs | mechanical | **applied** | §6.2 new `softDelete` behavior block itemising what is NOT cascaded (documents, snapshots, agent_runs) |
+
+**Schema surface change:** 1 new nullable text column (`agent_runs.degraded_reason`) + 1 partial index. Low-risk, additive, matches existing `run_outcome` pattern. The spec's migration 0209 grows by two SQL statements.
+
+**Mockups touched:** 0 — all round 3 findings are backend/contract-only.
+
+**Commit:** round-3 changes committed as a single commit per the spec-review agent's contract.
+
 
