@@ -146,3 +146,64 @@ Post-integrity sanity: all forward references resolve. §5.4a rule 3 (new overri
 Top themes: standardised error shape / engine-enforced retry guard / future-proofing composition / capability-contract definitions / three deferred capability-contract extensions.
 
 ---
+
+## Round 3 — 2026-04-23T09-12-00Z
+
+### ChatGPT Feedback (parsed — conveyed via user per-item decisions)
+
+ChatGPT raised seven findings in round 3 framed as cross-cutting hardening items. User decision for the whole round: `all: as recommended` (all 7 items applied).
+
+1. §1.5 — new principle 4: unknown-safe default (missing contract fields → most restrictive behaviour: no retry, require review, no composition).
+2. §5.4a rule 3 — new clause: hard retry ceiling `maxAttempts ≤ 3` engine-enforced, not author-configurable above; cross-ref in §5.3 inline comment.
+3. §5.7 bucketing table + `AutomationStepError` TypeScript type + §9a row — extend `type` enum with `'unknown'` + "no code maps here in v1" note + rule that unknown must not crash orchestration.
+4. §5.10a — one-line consolidating statement at the top: composition constraints enforced at both authoring-time validation AND runtime execution guards.
+5. §1.5 — new cross-cutting rule (principle 5): side_effects classification drives default UX behaviour and cannot be downgraded without explicit user action. Covers both Automation-level (§5.4a) and skill-level (§6.4).
+6. §1.5 principle 2 — extend with "contract is source of truth" paragraph: Automation capability contract is authoritative; Workflow logic must not duplicate or override its values.
+7. §5.9 `workflow.step.automation.completed` event — add `retry_attempt` field; matching row in §9a.
+
+### Recommendations and Decisions
+
+| # | Finding | Recommendation | User Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| 1 | §1.5 principle 4 — unknown-safe default | apply | apply | high | First-class rule locks down a pattern already implicit in §5.4a `unknown` → `'review'`; makes every subsystem derive the same posture from the same principle rather than re-deriving per section. |
+| 2 | §5.4a rule 3 — hard retry ceiling `maxAttempts ≤ 3` engine-enforced | apply | apply | high | External-blast-radius protection; runaway retry loops against third-party webhooks are worse than a clean failure; 3 matches the defence-in-depth posture already established by §5.10a composition constraints. |
+| 3 | §5.7 — `type: 'unknown'` + orchestration-safety contract | apply | apply | medium | Cheap additive safety-net bucket; pairs with principle 4; no v1 codes map to it but ensures a future unclassifiable failure surfaces cleanly rather than crashing the dispatcher. |
+| 4 | §5.10a — consolidating statement at top: both authoring AND runtime enforcement | apply | apply | medium | Already true in the existing prose (rules 1–3 authoring-time, rule 4 dispatch-time) but not stated as a principle up-front; one-line hoist makes the enforcement surface obvious to spec readers. |
+| 5 | §1.5 principle 5 — side_effects drives UX, no silent downgrades | apply | apply | high | Unifies §5.4a + §6.4 under a single cross-cutting rule; prevents future spec drift where mode-transitions silently change classification semantics. |
+| 6 | §1.5 principle 2 — "contract is source of truth" paragraph | apply | apply | medium | Natural extension of the reference-by-ID rule; closes the "step-level override of contract values" authoring anti-pattern before it starts. |
+| 7 | §5.9 — `retryAttempt` field on completed event | apply | apply | medium | Required for operators to reconstruct the attempt timeline under the new §5.4a rule 3 retry semantics; without it, the `(runId, stepId)` pivot is ambiguous when multiple events fire. |
+
+### Applied (all 7 items — user approved the full round)
+
+- **Pre-rate-limit (working-tree-only at resumption):** Items 1, 5, 6 were already applied in the working tree before the previous agent hit a rate limit — §1.5 principle 4 (unknown-safe default), principle 5 (side_effects drives UX, no silent downgrades), and the "Contract is the source of truth" paragraph extending principle 2. Kept as-is; no re-application.
+- **§5.4a rule 3 — hard retry ceiling.** Extended rule 3 with the **engine-enforced `maxAttempts ≤ 3` hard ceiling** clause: dispatcher clamps any persisted `retryPolicy.maxAttempts > 3` to 3 at dispatch time, regardless of `idempotent` value or `overrideNonIdempotentGuard` setting; authoring-time validator surfaces a second-tier warning but does not block save (the clamp is the canonical enforcement); rationale cites external-blast-radius of runaway retries. Covers item 2.
+- **§5.3 `InvokeAutomationStep` inline comment.** Extended the `retryPolicy?` comment with the `maxAttempts ≤ 3` cross-ref so authors reading the step-type definition see the ceiling at the authoring surface, not just in §5.4a. Covers item 2.
+- **§5.7 `AutomationStepError` type — `type` enum extended to `'unknown'`.** Added `'unknown'` to the enum. Added a new row `| unknown | *(no codes map here in v1 — reserved bucket)* |` to the bucketing table. Added an **orchestration-safety contract** paragraph below the rationale: the dispatcher never deliberately emits `type: 'unknown'` in v1; the bucket exists for future / third-party / genuinely unclassifiable failures; any error surfacing with `type: 'unknown'` is treated as non-retryable, non-composable, and visible (still fires `completed` event) per §1.5 principle 4; engine invariant that dispatcher must always populate `type` with one of the five values. Covers item 3.
+- **§5.10a — consolidating statement at top.** Added an **Enforcement surface** paragraph as the opener of §5.10a: composition constraints are enforced at both authoring-time validation (Workflow-definition validator on save) and runtime execution guards (step dispatcher at dispatch as defence-in-depth); neither surface is sufficient alone; runtime catches mutated / imported / race-condition / storage-corruption states that bypass the authoring UI. Covers item 4.
+- **§5.9 `workflow.step.automation.completed` event — `retryAttempt` field.** Added `retryAttempt: number` as a **required** (non-optional) field: 1-indexed counter (1 = initial, 2 = first retry, 3 = final per §5.4a rule 3 hard ceiling); one event per attempt so a successful-on-second-try step produces two events; pre-dispatch failures always carry `retryAttempt: 1` because they are never retried; operator dashboards pivot on `(runId, stepId, retryAttempt)` to reconstruct the attempt timeline. Covers item 7.
+- **§9a Contracts table — `AutomationStepError` row updated.** Extended the `type` enum mention to `{validation, execution, timeout, external, unknown}`; added inline note that no v1 codes map to `unknown` (reserved safety-net); added cross-ref to §1.5 principle 4 orchestration-safety contract; extended `retryable` advisory note to mention the hard `maxAttempts ≤ 3` ceiling. Covers item 3.
+- **§9a Contracts table — `workflow.step.automation.completed` row updated.** Added `retryAttempt` field description (required; 1-indexed; 1 = initial, 2 = first retry, 3 = final per §5.4a rule 3 hard ceiling; one event per attempt; pre-dispatch failures always `retryAttempt: 1`). Updated both success and failure example fragments to show the field. Covers item 7.
+
+### Rejected
+
+None this round.
+
+### Deferred
+
+None this round.
+
+### Integrity check
+
+0 issues found this round. All three user-flagged risk areas verified clean:
+
+- **(a) retry-ceiling clash.** `grep` over the spec for `maxAttempts | retry count | attempts [0-9]`: no pre-existing `maxAttempts` value above 3, no implicit or explicit retry-count contradicting the new ceiling. Clean.
+- **(b) unknown-safe-default clash.** `grep` over the spec for "default …" rules on `auto | review | continue | retry`: every pre-existing default is already the most-restrictive option for its domain (`side_effects = 'unknown'` → `'review'`, missing skill `side_effects` frontmatter → `true`, etc.). The new principle 4 canonicalises a pattern that was already consistent across §5.4a, §5.6, and §6.4. No contradiction.
+- **(c) new `type: 'unknown'` breaking existing status→code→type mapping.** The §5.9 `status` enum (10 terminal outcomes) and the §5.7 error-code vocab (10 codes) map 1:1 as before; every code in the §5.7 mapping table still lands in one of the four non-`unknown` buckets (`validation` / `execution` / `timeout` / `external`). The new `unknown` bucket has no v1 codes mapping to it by design — it is a reserved safety-net, not a new mapping row. The authoring-time-only posture of `workflow_composition_invalid` is preserved (still in `type: 'validation'` via §5.7 table, still annotated as authoring-time-only in §5.9 status-enum comment). No existing mapping edge broken.
+
+Post-integrity sanity: all new cross-references resolve — §1.5 principle 4 → §5.4a rules 1 + 3, §5.7, §5.10a (all exist); §1.5 principle 5 → §5.4a, §6.4, §5.6, §6.5, §6.2 (all exist); §5.4a rule 3 hard ceiling → §5.3 comment (added) + §5.7 retry bullet (existing reference to rule 3 still valid); §5.7 `type: 'unknown'` bucket → §1.5 principle 4 (exists); §5.9 `retryAttempt` → §5.4a rule 3 hard ceiling (exists); §9a rows → all new fields/enums reflected. No sections left empty. No broken heading links. No section references to headings that were renamed this round (none were).
+
+Top themes: unknown-safe default (principle 4) / hard retry ceiling (`maxAttempts ≤ 3`) / `type: 'unknown'` orchestration-safety bucket / composition-enforcement-surface hoist / side-effects-classification cross-cutting rule (principle 5) / contract-source-of-truth (principle 2 extension) / retry-attempt telemetry.
+
+§1.5 principle count after round 3: **5 principles**.
+
+---
