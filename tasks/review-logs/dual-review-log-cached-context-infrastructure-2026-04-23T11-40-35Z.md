@@ -19,6 +19,7 @@
 **Branch:** `claude/implementation-plan-Y622C`
 **Source PR-review log:** `tasks/review-logs/pr-review-log-cached-context-infrastructure-2026-04-23T10-01-52Z.md`
 **Codex CLI:** OpenAI Codex v0.118.0 (gpt-5.4)
+**Commit at finish:** 55c741dc
 
 ---
 
@@ -125,6 +126,6 @@ Zero findings accepted for in-session implementation in iteration 2. Per the dua
 
 ---
 
-**Commit at finish:** (recorded after commit step)
+**Commit at finish:** `55c741dc` — pushed to `origin/claude/implementation-plan-Y622C`
 
 **Verdict:** PR ready. All critical and important issues resolved. One architectural item (cross-org dismissal conflict) deferred to `tasks/todo.md` as a pre-existing spec-level inconsistency — not a regression of this fix pass.
