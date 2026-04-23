@@ -1,4 +1,5 @@
 import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { createHash } from 'crypto';
@@ -168,6 +169,13 @@ export interface SkillExecutionContext {
    * Lives on the context so it survives across tool-call iterations.
    */
   readDataSourceCallCount?: number;
+  /**
+   * Immutable snapshot of this agent's position in the subaccount hierarchy.
+   * Built once per run by agentExecutionService BEFORE skill resolution.
+   * Undefined for diagnostic/test runs or when the agent has no subaccount context.
+   * See INV-4 in tasks/builds/paperclip-hierarchy/plan.md.
+   */
+  hierarchy?: Readonly<HierarchyContext>;
   /**
    * Current LLM tool call id, set by skillExecutor.execute() at the top
    * of every dispatch. Sprint 2 P1.1 Layer 3: when present, the per-case
