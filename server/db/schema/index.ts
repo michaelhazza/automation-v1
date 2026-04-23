@@ -222,3 +222,6 @@ export * from './documentBundleMembers.js';
 export * from './documentBundleAttachments.js';
 export * from './bundleResolutionSnapshots.js';
 export * from './modelTierBudgetPolicies.js';
+
+// Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
+export * from './bundleSuggestionDismissals.js';

@@ -500,6 +500,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0208_model_tier_budget_policies.sql',
     rationale: 'Per-org execution budget policies — per-org overrides reveal cost configuration and policy settings. Platform-default rows (organisation_id IS NULL) are intentionally readable across all orgs (custom SELECT policy).',
   },
+  // 0212 — Bundle suggestion dismissals
+  {
+    tableName: 'bundle_suggestion_dismissals',
+    schemaFile: 'bundleSuggestionDismissals.ts',
+    policyMigration: '0212_bundle_suggestion_dismissals.sql',
+    rationale: 'Per-user dismissals of bundle-save suggestions — reveals which document sets a user has seen and ignored. Cross-tenant leak exposes user behaviour patterns.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

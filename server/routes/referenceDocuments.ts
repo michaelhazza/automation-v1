@@ -4,6 +4,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import * as referenceDocumentService from '../services/referenceDocumentService.js';
+import * as documentBundleService from '../services/documentBundleService.js';
 
 const router = Router();
 
@@ -72,10 +73,7 @@ router.post(
 
 // ---------------------------------------------------------------------------
 // POST /api/reference-documents/bulk-upload — multipart upload of 1-N files
-//
-// Supports optional `attachTo` JSON body param (§7.1). In Phase 1 this is
-// stubbed: if `attachTo` is present, return 501 NOT_IMPLEMENTED_UNTIL_PHASE_2.
-// Documents-only uploads work fully.
+// Supports optional bundleName + attachTo params (§7.1, wired in Phase 2).
 // ---------------------------------------------------------------------------
 router.post(
   '/api/reference-documents/bulk-upload',
@@ -89,10 +87,14 @@ router.post(
       return;
     }
 
-    // attachTo stub — Phase 2 will wire this to documentBundleService.
-    const attachTo = req.body?.attachTo ? JSON.parse(req.body.attachTo as string) : undefined;
-    if (attachTo) {
-      res.status(501).json({ error: 'attachTo is not implemented until Phase 2', code: 'NOT_IMPLEMENTED_UNTIL_PHASE_2' });
+    const attachTo = req.body?.attachTo
+      ? (JSON.parse(req.body.attachTo as string) as { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string })
+      : undefined;
+    const bundleName = (req.body?.bundleName as string | undefined) ?? undefined;
+
+    // Validate: bundleName requires >= 2 files
+    if (bundleName && files.length < 2) {
+      res.status(400).json({ error: 'At least 2 files are required to create a bundle', code: 'CACHED_CONTEXT_UPLOAD_BUNDLE_TOO_FEW_FILES' });
       return;
     }
 
@@ -102,37 +104,90 @@ router.post(
       names = Array.isArray(req.body.names) ? req.body.names : JSON.parse(req.body.names as string);
     }
     if (names.length > 0 && names.length !== files.length) {
-      res.status(400).json({ error: 'names array length must match files array length' });
+      res.status(400).json({ error: 'names array length must match files array length', code: 'CACHED_CONTEXT_UPLOAD_NAMES_LENGTH_MISMATCH' });
       return;
     }
 
     const subaccountId = (req.body?.subaccountId as string | undefined) ?? null;
-    const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-    void idempotencyKey; // used for dedup when Phase 2 wires the transaction
 
-    const results: unknown[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
+    // Validate MIME types first
+    for (const file of files) {
       if (!ALLOWED_MIMES.has(file.mimetype)) {
         res.status(400).json({ error: `File ${file.originalname} has unsupported MIME type: ${file.mimetype}` });
         return;
       }
+    }
 
-      const name = names[i] ?? file.originalname.replace(/\.[^.]+$/, '');
-      const content = file.buffer.toString('utf8');
+    // Validate names unique within request
+    const resolvedNames: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const name = names[i]?.trim() || files[i].originalname.replace(/\.[^.]+$/, '');
+      if (!name) {
+        res.status(400).json({ error: `File at index ${i} has an empty name`, code: 'CACHED_CONTEXT_UPLOAD_NAME_EMPTY' });
+        return;
+      }
+      if (resolvedNames.includes(name)) {
+        res.status(400).json({ error: `Duplicate name "${name}" in this upload request`, code: 'CACHED_CONTEXT_UPLOAD_NAME_DUPLICATE_IN_REQUEST' });
+        return;
+      }
+      resolvedNames.push(name);
+    }
 
+    const createdDocs: Awaited<ReturnType<typeof referenceDocumentService.create>>[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const content = files[i].buffer.toString('utf8');
       const doc = await referenceDocumentService.create({
         organisationId: req.orgId!,
         subaccountId,
-        name,
+        name: resolvedNames[i],
         content,
         createdByUserId: req.user!.id,
       });
-      results.push(doc);
+      createdDocs.push(doc);
     }
 
-    res.status(201).json({ documents: results });
+    const documentIds = createdDocs.map((d) => d.id);
+
+    // If bundleName, create a named bundle directly (promote after findOrCreate)
+    let bundleId: string | null = null;
+    if (bundleName) {
+      const unnamed = await documentBundleService.findOrCreateUnnamedBundle({
+        organisationId: req.orgId!,
+        subaccountId,
+        documentIds,
+        createdByUserId: req.user!.id,
+      });
+      const promoted = await documentBundleService.promoteToNamedBundle({
+        bundleId: unnamed.id,
+        name: bundleName,
+        userId: req.user!.id,
+      });
+      bundleId = promoted.id;
+    }
+
+    // If attachTo, attach either the bundle or an unnamed bundle wrapping all docs
+    let autoAttachedTo: { subjectType: string; subjectId: string } | null = null;
+    if (attachTo) {
+      const targetBundleId = bundleId ?? (await documentBundleService.findOrCreateUnnamedBundle({
+        organisationId: req.orgId!,
+        subaccountId,
+        documentIds,
+        createdByUserId: req.user!.id,
+      })).id;
+
+      await documentBundleService.attach({
+        bundleId: targetBundleId,
+        subjectType: attachTo.subjectType,
+        subjectId: attachTo.subjectId,
+        attachedByUserId: req.user!.id,
+        organisationId: req.orgId!,
+        subaccountId,
+      });
+      if (!bundleId) bundleId = targetBundleId;
+      autoAttachedTo = { subjectType: attachTo.subjectType, subjectId: attachTo.subjectId };
+    }
+
+    res.status(201).json({ documentIds, bundleId, autoAttachedTo });
   }),
 );
 
