@@ -492,3 +492,31 @@ Decisions the spec-reviewer committed autonomously during review round 1. Human 
 - [ ] **AUTO-DECIDED (option a) — Pure function (not recursive CTE) for descendants-scope subtree computation (§16.4).** Committed option (a): reuses `hierarchyContextBuilderService`'s downward walk over the active roster. §6.2 updated to remove "recursive CTE" language. §16.4 marked RESOLVED.
 - [ ] **Permission-set seed file location (§14.1).** Spec lists the location as TBD by the implementer. The permission *key* lives in `server/lib/permissions.ts` (new `ORG_OBSERVABILITY_VIEW` export). The seed that grants it to `org_admin` needs its home pinned at implementation start — likely also `server/lib/permissions.ts` in the existing `ORG_ADMIN_PERMISSIONS` block, or wherever permission-set seeding currently lives. Resolve before Phase 1 coding starts.
 
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-3b (2026-04-23)
+
+**Captured:** 2026-04-23T00-00-00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-3b-2026-04-23T00-00-00Z.md`
+**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` § Chunk 3b
+**Branch:** `claude/build-paperclip-hierarchy-ymgPW`
+
+All four items below form a single coherent finding: **behavioral tests for `executeConfigListAgents` are missing.** Only the pure helpers (`computeDescendantIds`, `mapSubaccountAgentIdsToAgentIds`) are tested. The handler-level adaptive/override/warn/fallthrough behaviour has no runtime assertion.
+
+Classified DIRECTIONAL rather than MECHANICAL because adding these tests requires a design choice between (a) extracting a new pure helper `resolveEffectiveScope({ rawScope, hierarchy })` and unit-testing it, (b) introducing a new behavioral-test harness with mocks for `agentService` / `db` / `logger` in a file that currently follows `runtime_tests: pure_function_only`, or (c) accepting the current pure-only coverage. The spec does not name the approach.
+
+- [ ] REQ #3 — Test: adaptive default with children → `children`.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test exercises the adaptive-default-with-children branch of `executeConfigListAgents`.
+  - Suggested approach: Extract adaptive logic into a pure helper in `configSkillHandlersPure.ts` and unit-test, or add a behavioral integration test with mocks.
+- [ ] REQ #4 — Test: adaptive default without children → `subaccount`.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test exercises the adaptive-default-without-children branch.
+  - Suggested approach: Same as REQ #3.
+- [ ] REQ #5 — Test: explicit scope overrides adaptive.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test asserts that an explicit `scope: 'subaccount'` on an agent with children returns the full roster.
+  - Suggested approach: Same as REQ #3.
+- [ ] REQ #6 — Test: missing-hierarchy fallthrough + WARN log assertion.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test asserts the `hierarchy_missing_read_skill_fallthrough` WARN fires when `context.hierarchy` is undefined, nor that the handler falls through to unfiltered behaviour.
+  - Suggested approach: Needs a logger mock plus either a behavioral test or a pure helper that returns `{ effectiveScope, shouldWarn }` for pure assertion.
+
