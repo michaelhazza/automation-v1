@@ -99,6 +99,27 @@ test('agent with no delegation slugs → emits nothing', () => {
   assertEqual(result.length, 0);
 });
 
+test('agent with all three derived but none attached → emits nothing (derived-only does NOT trip)', () => {
+  // hasActiveChildren: true means the skill resolver would derive the trio
+  // for this agent at runtime — but this detector only fires on EXPLICIT
+  // attachment via skillSlugs. A manager with children and no explicit
+  // delegation-slug attachments must not produce a finding.
+  const rows = [
+    makeRow({
+      id: 'saa-5',
+      skillSlugs: [],
+      hasActiveChildren: true,
+    }),
+    makeRow({
+      id: 'saa-6',
+      skillSlugs: null,
+      hasActiveChildren: true,
+    }),
+  ];
+  const result = findAgentsWithExplicitDelegationButNoChildren(rows);
+  assertEqual(result.length, 0);
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 console.log('');
