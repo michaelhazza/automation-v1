@@ -682,6 +682,7 @@ export const agentExecutionService = {
         skillSlugs,
         request.organisationId,
         request.subaccountId,
+        request.subaccountAgentId ? hierarchyContext : undefined,  // Pass hierarchy only in subaccount context
       );
       if (skillInstructionsTruncated) {
         logger.warn('[agentExecutionService] Skill instructions were truncated — agent may have reduced capability', {

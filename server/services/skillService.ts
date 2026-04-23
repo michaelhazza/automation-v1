@@ -19,6 +19,8 @@ import {
   MAX_TOTAL_SKILL_INSTRUCTIONS,
   MAX_SKILLS_PER_SUBACCOUNT,
 } from '../config/limits.js';
+import type { HierarchyContext } from '../../shared/types/delegation.js';
+import { computeDerivedSkills } from './skillServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -112,15 +114,24 @@ export const skillService = {
     skillSlugs: string[],
     organisationId: string,
     subaccountId?: string,
+    hierarchy?: Readonly<HierarchyContext>,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
-    if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
+    const derivedSlugs = computeDerivedSkills({ hierarchy });
+    if (hierarchy === undefined && subaccountId) {
+      logger.warn('hierarchy_missing_at_resolver_time', {
+        organisationId,
+        subaccountId,
+      });
+    }
+    const effectiveSlugs = Array.from(new Set([...skillSlugs, ...derivedSlugs]));
+    if (effectiveSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
 
     // Batch-fetch all matching skills across tiers in one query
     const candidates = await db
       .select()
       .from(skills)
       .where(and(
-        inArray(skills.slug, skillSlugs),
+        inArray(skills.slug, effectiveSlugs),
         isNull(skills.deletedAt),
         eq(skills.isActive, true),
         or(
@@ -146,7 +157,7 @@ export const skillService = {
     }
 
     // Any slugs not found in skills table → fall back to systemSkillService (batch)
-    const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
+    const missingSlugs = effectiveSlugs.filter(s => !bySlug.has(s));
     const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
     if (missingSlugs.length > 0) {
       try {
@@ -174,7 +185,7 @@ export const skillService = {
     const tools: AnthropicTool[] = [];
     const allInstructions: string[] = [];
 
-    for (const slug of skillSlugs) {
+    for (const slug of effectiveSlugs) {
       const skill = bySlug.get(slug);
       if (skill) {
         const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
