@@ -116,7 +116,11 @@ export async function resolveRootForScope(input: {
     subaccountRoots = rows;
   }
 
-  const orgLevelLink = await resolveOrgLevelLink(organisationId);
+  // Only fetch the org-level fallback when we might actually need it.
+  // If the subaccount has a configured root, the pure function returns
+  // immediately and the org link is never read — avoid the extra DB round-trip.
+  const needsOrgFallback = subaccountId === null || subaccountRoots.length === 0;
+  const orgLevelLink = needsOrgFallback ? await resolveOrgLevelLink(organisationId) : null;
 
   return resolveRootForScopePure({ scope, subaccountId, subaccountRoots, orgLevelLink });
 }

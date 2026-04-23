@@ -20,7 +20,6 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 
 export const ORCHESTRATOR_FROM_TASK_QUEUE = 'orchestrator-from-task';
-const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';
 const MIN_DESCRIPTION_CHARS = 10;
 
 export interface OrchestratorFromTaskPayload {
@@ -144,9 +143,8 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
 
   // 4. Resolve the root subaccount-agent link for this scope.
   //
-  //    ORCHESTRATOR_AGENT_SLUG is retained below for documentation value —
-  //    the resolver encapsulates the actual DB lookup using that slug.
-  //    See spec §6.6 and hierarchyRouteResolverService for the full
+  //    The resolver queries systemAgents for 'orchestrator' as the org-level
+  //    fallback. See spec §6.6 and hierarchyRouteResolverService for the full
   //    decision tree.
   const resolvedRoot = await resolveRootForScope({
     organisationId,
