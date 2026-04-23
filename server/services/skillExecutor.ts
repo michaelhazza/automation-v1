@@ -8,6 +8,8 @@ import {
   classifySpawnTargets,
   computeReassignDirection,
   validateReassignScope,
+  evaluateSpawnPreconditions,
+  evaluateReassignPreconditions,
 } from './skillExecutorDelegationPure.js';
 import { computeDescendantIds } from '../tools/config/configSkillHandlersPure.js';
 import { readFile } from 'fs/promises';
@@ -3436,8 +3438,9 @@ async function executeReassignTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // --- STEP 1: Require hierarchy context (INV-4; write skills fail closed) ---
-  if (!context.hierarchy) {
+  // --- STEP 1: Evaluate preconditions (hierarchy context) ---
+  const reassignPre = evaluateReassignPreconditions({ hierarchy: context.hierarchy });
+  if (!reassignPre.ok) {
     const errorCtx = {
       runId: context.runId,
       callerAgentId: context.agentId,
@@ -3453,7 +3456,7 @@ async function executeReassignTask(
     return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
   }
 
-  const hierarchy = context.hierarchy;
+  const hierarchy = context.hierarchy!;
 
   // --- STEP 2: Input parsing ---
   const taskId = String(input.task_id ?? '');
@@ -3675,26 +3678,7 @@ async function executeSpawnSubAgents(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // --- STEP 1: Require hierarchy context (INV-4; write skills fail closed) ---
-  if (!context.hierarchy) {
-    const errorCtx = {
-      runId: context.runId,
-      callerAgentId: context.agentId,
-      skillSlug: 'spawn_sub_agents',
-    };
-    void insertExecutionEventSafe({
-      runId: context.runId,
-      organisationId: context.organisationId,
-      subaccountId: context.subaccountId ?? null,
-      payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
-      sourceService: 'skillExecutor',
-    });
-    return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
-  }
-
-  const hierarchy = context.hierarchy;
-
-  // --- STEP 2: Validate input structure ---
+  // --- STEP 1: Validate input structure ---
   const subTasks = input.sub_tasks as Array<{ title: string; brief: string; assigned_agent_id: string }> | undefined;
 
   if (!subTasks || !Array.isArray(subTasks)) {
@@ -3709,11 +3693,36 @@ async function executeSpawnSubAgents(
     }
   }
 
-  // --- STEP 3: Compute effective scope ---
-  const effectiveScope = resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy });
+  // --- STEP 2: Compute effective scope ---
+  const effectiveScope = context.hierarchy
+    ? resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy: context.hierarchy })
+    : 'children'; // dummy — evaluateSpawnPreconditions rejects before using this
 
-  // --- STEP 4: Reject 'subaccount' scope (cross-subtree not permitted for spawn) ---
-  if (effectiveScope === 'subaccount') {
+  // --- STEP 3: Evaluate preconditions (hierarchy + depth + subaccount-scope) ---
+  const spawnPre = evaluateSpawnPreconditions({
+    hierarchy: context.hierarchy,
+    currentHandoffDepth: context.handoffDepth ?? 0,
+    maxHandoffDepth: MAX_HANDOFF_DEPTH,
+    effectiveScope,
+  });
+
+  if (!spawnPre.ok) {
+    if (spawnPre.errorCode === 'hierarchy_context_missing') {
+      const errorCtx = { runId: context.runId, callerAgentId: context.agentId, skillSlug: 'spawn_sub_agents' };
+      void insertExecutionEventSafe({
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+        payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
+        sourceService: 'skillExecutor',
+      });
+      return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
+    }
+    if (spawnPre.errorCode === 'max_handoff_depth_exceeded') {
+      return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot spawn sub-agents at this depth.` };
+    }
+    // cross_subtree_not_permitted
+    const hierarchy = context.hierarchy!;
     const errorCtx = {
       runId: context.runId,
       callerAgentId: context.agentId,
@@ -3743,13 +3752,10 @@ async function executeSpawnSubAgents(
     return { success: false, error: CROSS_SUBTREE_NOT_PERMITTED, context: errorCtx };
   }
 
-  // --- STEP 5: Depth check ---
-  const currentDepth = context.handoffDepth ?? 0;
-  if (currentDepth + 1 > MAX_HANDOFF_DEPTH) {
-    return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot spawn sub-agents at this depth.` };
-  }
+  const hierarchy = context.hierarchy!;
+  const safeScope = spawnPre.effectiveScope;
 
-  // --- STEP 6: Budget check ---
+  // --- STEP 4: Budget check ---
   const totalBudget = context.tokenBudget ?? 30000;
   const elapsed = context.startTime ? Date.now() - context.startTime : 0;
   const totalTimeout = context.timeoutMs ?? 300000;
@@ -3788,7 +3794,7 @@ async function executeSpawnSubAgents(
 
   // --- STEP 8: Compute descendant ids if needed ---
   let descendantIds: string[] = [];
-  if (effectiveScope === 'descendants') {
+  if (safeScope === 'descendants') {
     const rosterRows = await db
       .select({
         subaccountAgentId: subaccountAgents.id,
@@ -3816,7 +3822,7 @@ async function executeSpawnSubAgents(
   // --- STEP 9: Scope classification ---
   const { accepted, rejected } = classifySpawnTargets({
     proposedSubaccountAgentIds: resolvedTargets.map(t => t.saLink.id),
-    effectiveScope: effectiveScope as 'children' | 'descendants',
+    effectiveScope: safeScope,
     childIds: hierarchy.childIds,
     descendantIds,
   });
@@ -3830,7 +3836,7 @@ async function executeSpawnSubAgents(
         runId: context.runId,
         callerAgentId: hierarchy.agentId,
         targetAgentId: t.saLink.id,
-        delegationScope: effectiveScope,
+        delegationScope: safeScope,
         outcome: 'rejected',
         reason: DELEGATION_OUT_OF_SCOPE,
         delegationDirection: 'down',
@@ -3842,7 +3848,7 @@ async function executeSpawnSubAgents(
       runId: context.runId,
       callerAgentId: context.agentId,
       targetAgentId: rejectedAgentIds[0],
-      delegationScope: effectiveScope,
+      delegationScope: safeScope,
       callerChildIds,
     };
     if (hierarchy.childIds.length > 50) errorCtx.truncated = true;
@@ -3906,7 +3912,7 @@ async function executeSpawnSubAgents(
             },
             isSubAgent: true,
             parentSpawnRunId: context.runId,
-            delegationScope: effectiveScope,
+            delegationScope: safeScope,
             delegationDirection: 'down',
           });
 
@@ -3940,7 +3946,7 @@ async function executeSpawnSubAgents(
         runId: context.runId,
         callerAgentId: hierarchy.agentId,
         targetAgentId: t.saLink.id,
-        delegationScope: effectiveScope,
+        delegationScope: safeScope,
         outcome: 'accepted',
         reason: null,
         delegationDirection: 'down',

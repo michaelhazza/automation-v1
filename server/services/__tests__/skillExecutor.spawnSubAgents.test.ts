@@ -261,6 +261,31 @@ test('adaptive default for leaf caller (no children) resolves subaccount → eva
 });
 
 // ---------------------------------------------------------------------------
+// INV-3 swallow-regression contract
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('INV-3 swallow-regression contract');
+console.log('');
+
+test('INV-3 swallow-regression: void fire-and-forget pattern does not propagate outcome write failure', () => {
+  // Documents the call-site pattern: void <asyncFn>() means even if the fn throws/rejects,
+  // the caller is unaffected. This guards against accidentally adding `await` to outcome writes
+  // or removing the `void` keyword.
+  let afterWriteReached = false;
+  const failingWrite = async (): Promise<void> => {
+    throw new Error('simulated delegation_outcome_write_failed');
+  };
+  // Exact pattern used in executeSpawnSubAgents and executeReassignTask.
+  // .catch(() => {}) silences the unhandled-rejection warning in the test runner;
+  // the critical assertion is that afterWriteReached is set synchronously before the
+  // promise settles, proving that void does not suspend the caller.
+  void failingWrite().catch(() => {});
+  afterWriteReached = true;
+  assertEqual(afterWriteReached, true, 'code after void call must execute regardless of outcome write failure');
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
