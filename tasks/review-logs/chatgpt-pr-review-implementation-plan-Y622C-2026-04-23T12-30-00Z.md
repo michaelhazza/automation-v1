@@ -73,28 +73,66 @@ Final verdict: merge with awareness. Pre-merge checks:
 
 Items 2, 3, 5, 6: rejected per user decision — no code changes, no backlog entries.
 
----
-
-## Final Summary
-
-- Rounds: 1
-- Implemented: 1 (item 4) | Rejected: 4 (items 2, 3, 5, 6) | Deferred: 1 (item 1)
-- Index write failures: 0
-- Deferred to `tasks/todo.md` § Deferred from chatgpt-pr-review — PR #183:
-  - Subaccount isolation decision — document "Option B-lite" posture — spec update, narrow scope
-- Architectural items surfaced to screen (user decisions):
-  - Subaccount isolation downgrade (item 1) → defer as spec doc update
-  - Concurrency guarantee for bundle snapshotting (item 2) → reject (spec already pins via prefix hash + bundle_version)
-  - Snapshot retention / lifecycle (item 3) → reject (Phase 2/3 deferred)
-  - Polymorphic attachment FK (item 5) → reject (intentional polymorphism contract)
-  - Token budget graceful degradation (item 6) → reject (HITL-by-design)
-- KNOWLEDGE.md updated: no (no systematic gap spanning multiple rounds — single-round review)
-- architecture.md updated: yes — added "Canonical RLS session variables (hard rule)" subsection and new CI gate line
-- PR: #183 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/183
-
 ### Top themes
 - naming (canonical session variable namespace enforcement)
 - architecture (subaccount isolation posture documentation)
 
+---
+
+_Note: A premature Final Summary was initially written here after Round 1. The session has been reopened for Round 2 following additional ChatGPT feedback on the PR. The Final Summary is moved to the end of the session log._
+
+---
+
+## Round 2 — 2026-04-23T12-30-00Z (follow-up after premature finalise)
+
+### ChatGPT Feedback (raw)
+
+_Raw ChatGPT paste was handled in the live session transcript and not captured verbatim into this log at paste time. The round produced 4 distinct findings; all were recommended `reject` by the agent and confirmed `reject` by the user. Thematic summary of the 4 findings below — each finding maps to a concern ChatGPT re-raised from Round 1 context or introduced as a variant-under-a-different-name. Verbatim content is available in the user's ChatGPT conversation history (PR #183 round-2 thread)._
+
+### Recommendations and Decisions
+
+| # | Finding (thematic) | Recommendation | User Decision | Severity | Rationale |
+|---|--------------------|----------------|---------------|----------|-----------|
+| 1 | Re-raise of subaccount-isolation concern (variant framing of Round 1 #1) | reject | reject | high | Already deferred in Round 1 with a narrow-scope spec-doc task on `tasks/todo.md`; re-raising the same item under a new framing does not change the scope — re-deferral would duplicate the backlog entry |
+| 2 | Re-raise / variant of concurrency guarantee on bundle-snapshot race (variant of Round 1 #2) | reject | reject | high | Spec §4.2 `bundle_version` pinning + prefix-hash dedup already functionally pins the snapshot; ChatGPT is pattern-matching on prior discussion rather than re-reading the current spec state after Round 1 |
+| 3 | Re-raise of retention/lifecycle strategy (variant of Round 1 #3) | reject | reject | medium | Phase 2/3 retention explicitly deferred in the spec; v1 "retain indefinitely + monitor volume" posture stands — no new information in the round-2 variant |
+| 4 | Additional polish / scope-creep suggestion not aligned with current spec phase | reject | reject | low | Out of scope for PR #183; if genuinely valuable would be a follow-up ticket, but no specific signal beyond Round 1 coverage |
+
+### Implemented (user-approved)
+
+None — all four findings rejected by user decision. No code changes, no backlog entries added this round.
+
+### Top themes
+- regression (ChatGPT re-raising previously adjudicated items under variant framing)
+- scope (speculative polish beyond the PR's stated phase boundary)
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Implemented: 1 (Round 1 item 4 — `app.current_organisation_id` ban + architecture.md canon doc)
+- Rejected: 8 (Round 1 items 2, 3, 5, 6; Round 2 items 1, 2, 3, 4)
+- Deferred: 1 (Round 1 item 1 — subaccount isolation spec-doc task on `tasks/todo.md`)
+- Index write failures: 0
+- Deferred to `tasks/todo.md § Deferred from chatgpt-pr-review — PR #183`:
+  - Subaccount isolation decision — document "Option B-lite" posture (from Round 1; no additions from Round 2)
+- Architectural items surfaced to screen (user decisions, across both rounds):
+  - Subaccount isolation downgrade (R1 #1) → defer as spec doc update
+  - Concurrency guarantee for bundle snapshotting (R1 #2, re-raised R2 #2) → reject both rounds (spec already pins via prefix-hash + bundle_version)
+  - Snapshot retention / lifecycle (R1 #3, re-raised R2 #3) → reject both rounds (Phase 2/3 deferred)
+  - Polymorphic attachment FK (R1 #5) → reject (intentional polymorphism contract)
+  - Token budget graceful degradation (R1 #6) → reject (HITL-by-design)
+  - Subaccount-isolation variant (R2 #1) → reject — already captured as R1 defer
+  - Scope-creep polish (R2 #4) → reject — out of PR phase
+- KNOWLEDGE.md updated: yes — two new entries covering ChatGPT round-over-round regression pattern and architectural-posture validation lessons
+- architecture.md updated: yes — added "Canonical RLS session variables (hard rule)" subsection + CI gate line (Round 1)
+- PR: #183 — approved for merge at https://github.com/michaelhazza/automation-v1/pull/183
+
 ### Consistency Warnings
-None — single-round session.
+
+None across rounds — Round 2 attempted to re-open 3 of the 4 Round 1 architectural rejections under variant framing; user held consistent `reject` position on all three. No contradictions between rounds; the session is internally consistent.
+
+### Round-over-round pattern observation
+
+Round 2 produced zero new signal. All four items either re-raised Round 1 concerns under slightly different framing or introduced low-severity scope-creep polish. This is a recognisable ChatGPT-PR-review failure mode — the model pattern-matches on the Round 1 discussion surface rather than re-reading the current PR/spec state post-Round-1 fixes. Captured as a KNOWLEDGE.md entry so future review loops budget accordingly (single round often sufficient for architecturally-sound PRs; stop at the first round that produces zero new structural signal).

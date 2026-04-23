@@ -295,3 +295,31 @@ Closing out the cached-context spec after 5 rounds of external ChatGPT review + 
 **Rule for testing-posture framing in long specs:** if the spec inherits a framing default from a higher-level doc (e.g. `runtime_tests: pure_function_only` from `docs/spec-context.md`), and the spec defines tests that deviate from that default, declare the deviation explicitly in the spec's own framing-deviations section. Silence creates a cross-layer contradiction that reviewers will catch late. Caught in round 5 of this spec; worth doing proactively next time.
 
 Applies to any implementation-readiness spec review: API contracts, primitive rollouts, cross-cutting concerns.
+
+### 2026-04-23 Pattern — ChatGPT PR-review re-raises previously-adjudicated items under variant framing in follow-up rounds
+
+During PR #183 (cached-context-infrastructure) the ChatGPT review loop went two rounds. Round 1 produced 6 findings: 1 implemented, 4 rejected, 1 deferred (with a documented spec-doc follow-up task). Round 2 produced 4 findings — and 3 of the 4 were the Round 1 rejections re-raised under slightly different framing (subaccount-isolation variant, concurrency-guarantee variant, retention-lifecycle variant). The fourth was a low-severity scope-creep suggestion outside the PR's stated phase. Net new signal in Round 2: zero. The user's correct posture was to reject all four. 
+
+The failure mode: ChatGPT appears to pattern-match on the Round 1 discussion surface (the areas where it previously engaged) rather than re-reading the PR diff / spec state *post*-Round-1 fixes. The model re-opens discussions that were already closed with a recorded architectural rationale, hoping the variant phrasing will change the outcome. 
+
+**Rules for future `chatgpt-pr-review` sessions:**
+
+1. **After Round 1, expect Round 2 to re-raise the Round 1 rejects.** Budget it mentally — don't be surprised. The correct response to a re-raise is `reject` with rationale "already adjudicated in round 1 — no new information", not a fresh analysis as if the item were new.
+2. **A round that produces only variant-reframings of prior rejections is a convergence signal, not a new round of signal.** Finalize after that round. Additional rounds will produce diminishing returns, not insight.
+3. **In the Recommendations and Decisions table for a re-raise, explicitly reference the Round 1 item number in the rationale.** E.g. "Re-raise of R1 #2 under variant framing — spec §4.2 already pins `bundle_version`; no new information." This makes the regression pattern visible in the log and short-circuits future reviewers trying to evaluate the re-raise on its merits.
+4. **Record the round-over-round regression count as a top-theme in the session log** so pattern frequency across PRs is grep-able. Theme vocabulary: `regression` (a re-raise of a prior round's rejected item), distinct from `scope` (new speculative polish) or architecture (a genuinely new structural concern).
+
+This pattern is specific to `chatgpt-pr-review` (interactive PR loop). `spec-reviewer` (Codex, walk-away) shows a different shape — iterations genuinely converge on additive invariants as documented in the 2026-04-23 spec-review-arc entry above. The difference is that Codex is running over the *current* file state on each iteration; ChatGPT is threading a conversation and carries prior-round context forward as soft state.
+
+### 2026-04-23 Pattern — Architecturally-sound PRs often need only one round of external PR review; stop at zero-new-signal
+
+Related to the re-raise pattern above but framed for the decision: "is this PR review done?" For PRs that land with strong architectural framing (clear layer separation, named invariants, explicit deferrals to future phases, spec-conformance + dual-review already run), external ChatGPT PR review tends to produce meaningful signal only in Round 1. By Round 2 the well is usually dry — the reviewer has nothing structural to criticise, so it re-raises prior items or suggests speculative polish.
+
+**Decision rule:** Treat a Round 2 that produces zero `implement` decisions as the finalization trigger. Don't keep running rounds hoping for signal — the signal would already be here if it existed. For PRs without that strong framing (missing layer boundaries, unclear invariants, first-cut architecture), multiple rounds are genuinely useful and the decay may take longer. Calibrate against the quality of the PR itself, not a fixed round count.
+
+Observed round-decay patterns (this codebase):
+- Universal Brief PR (#176): 6 rounds (architecturally complex first-cut, genuinely new signal through round ~4)
+- CRM Query Planner PR (#177): 3 rounds (strong framing, converged early)
+- cached-context-infrastructure PR (#183): 2 rounds (spec-reviewer + dual-reviewer already ran; ChatGPT had little to add)
+
+Higher confidence in architecture → fewer productive ChatGPT rounds. The prior review-loop investment compounds — each reviewer that runs first narrows the signal surface available to the next reviewer.
