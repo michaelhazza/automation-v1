@@ -60,6 +60,26 @@ export interface StreamEventsOptions {
 }
 
 // ---------------------------------------------------------------------------
+// insertExecutionEventSafe — delegation-error dual-write entry point (INV-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort delegation-error event write. INV-3 companion to insertOutcomeSafe.
+ * On failure: WARN tag `delegation_event_write_failed`, returns without throwing.
+ * Skill handlers call this; never call appendEvent directly for delegation errors.
+ */
+export async function insertExecutionEventSafe(input: AppendEventInput): Promise<void> {
+  try {
+    await appendEvent(input);
+  } catch (err) {
+    logger.warn('delegation_event_write_failed', {
+      runId: input.runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Retry + metrics
 // ---------------------------------------------------------------------------
 

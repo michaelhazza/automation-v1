@@ -1,5 +1,15 @@
 import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
+import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
+import { insertOutcomeSafe } from './delegationOutcomeService.js';
+import { insertExecutionEventSafe } from './agentExecutionEventService.js';
+import {
+  resolveWriteSkillScope,
+  classifySpawnTargets,
+  computeReassignDirection,
+  validateReassignScope,
+} from './skillExecutorDelegationPure.js';
+import { computeDescendantIds } from '../tools/config/configSkillHandlersPure.js';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { createHash } from 'crypto';
@@ -3426,12 +3436,31 @@ async function executeReassignTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
+  // --- STEP 1: Require hierarchy context (INV-4; write skills fail closed) ---
+  if (!context.hierarchy) {
+    const errorCtx = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      skillSlug: 'reassign_task',
+    };
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
+  }
+
+  const hierarchy = context.hierarchy;
+
+  // --- STEP 2: Input parsing ---
   const taskId = String(input.task_id ?? '');
   const handoffContext = input.handoff_context ? String(input.handoff_context) : undefined;
 
   if (!taskId) return { success: false, error: 'task_id is required' };
 
-  // Support both singular and plural agent assignment
   const rawSingular = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
   const rawPlural = Array.isArray(input.assigned_agent_ids)
     ? (input.assigned_agent_ids as unknown[]).map(String)
@@ -3445,20 +3474,145 @@ async function executeReassignTask(
     return { success: false, error: 'Cannot reassign a task to yourself. Choose a different agent.' };
   }
 
+  // --- STEP 3: Depth check ---
   const currentDepth = context.handoffDepth ?? 0;
   if (currentDepth + 1 > MAX_HANDOFF_DEPTH) {
     return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot reassign further.` };
   }
 
+  // --- STEP 4: Compute effective scope ---
+  const effectiveScope = resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy });
+
+  // --- STEP 5: Resolve saLinks and validate scope for each target ---
+  // Load descendant ids once if needed (single round trip for all targets)
+  let descendantIds: string[] = [];
+  if (effectiveScope === 'descendants') {
+    const rosterRows = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.organisationId, context.organisationId),
+          eq(subaccountAgents.isActive, true)
+        )
+      );
+    descendantIds = computeDescendantIds({
+      callerSubaccountAgentId: hierarchy.agentId,
+      roster: rosterRows.map(r => ({
+        subaccountAgentId: r.subaccountAgentId,
+        agentId: r.agentId,
+        parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+      })),
+    });
+  }
+
+  const isCallerRoot = hierarchy.rootId === hierarchy.agentId;
+
+  // Validate all targets; collect resolved saLinks + directions
+  const resolvedAssignees: Array<{ agentId: string; saLinkId: string; direction: 'up' | 'down' | 'lateral' }> = [];
+
+  for (const agentId of assignedAgentIds) {
+    // Look up the subaccount agent link for this target
+    const [saLinkRow] = await db
+      .select({ sa: subaccountAgents })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.agentId, agentId),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+          isNull(agents.deletedAt)
+        )
+      );
+
+    if (!saLinkRow) {
+      return { success: false, error: `Agent ${agentId} not found or inactive in this subaccount` };
+    }
+
+    const targetSaId = saLinkRow.sa.id;
+
+    // Compute direction — upward escalation check BEFORE scope validation (INV-2 ordering)
+    const direction = computeReassignDirection({
+      targetSubaccountAgentId: targetSaId,
+      parentId: hierarchy.parentId,
+      childIds: hierarchy.childIds,
+      descendantIds,
+    });
+
+    // Upward escalation always permitted — skip scope check
+    if (direction === 'up') {
+      resolvedAssignees.push({ agentId, saLinkId: targetSaId, direction });
+      continue;
+    }
+
+    // Validate scope for non-upward targets
+    const scopeResult = validateReassignScope({
+      targetSubaccountAgentId: targetSaId,
+      effectiveScope,
+      childIds: hierarchy.childIds,
+      descendantIds,
+      isCallerRoot,
+    });
+
+    if (!scopeResult.valid) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: targetSaId,
+        delegationScope: effectiveScope,
+        outcome: 'rejected',
+        reason: scopeResult.errorCode,
+        delegationDirection: direction,
+      });
+      const callerChildIds = hierarchy.childIds.slice(0, 50);
+      const errorCtx: Record<string, unknown> = scopeResult.errorCode === 'cross_subtree_not_permitted'
+        ? { runId: context.runId, callerAgentId: context.agentId, callerParentId: hierarchy.parentId, suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants' }
+        : { runId: context.runId, callerAgentId: context.agentId, targetAgentId: agentId, delegationScope: effectiveScope, callerChildIds };
+      if (scopeResult.errorCode === 'delegation_out_of_scope' && hierarchy.childIds.length > 50) {
+        errorCtx.truncated = true;
+      }
+      void insertExecutionEventSafe({
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+        payload: { eventType: 'tool.error', critical: false, error: { code: scopeResult.errorCode, message: scopeResult.errorCode === 'cross_subtree_not_permitted' ? 'Cross-subtree reassignment requires the caller to be the subaccount root.' : 'Reassign target is outside delegation scope.', context: errorCtx } },
+        sourceService: 'skillExecutor',
+      });
+      return { success: false, error: scopeResult.errorCode, context: errorCtx };
+    }
+
+    resolvedAssignees.push({ agentId, saLinkId: targetSaId, direction });
+  }
+
+  // Determine the canonical direction to store on the task.
+  // For single-target (typical case), use the computed direction.
+  // For multi-target, use 'down' if any target is down, else use the first target's direction.
+  const taskDelegationDirection: 'up' | 'down' | 'lateral' =
+    resolvedAssignees.some(a => a.direction === 'down') ? 'down' :
+    resolvedAssignees.some(a => a.direction === 'up') ? 'up' :
+    'lateral';
+
+  // --- STEP 6: Execute handoff (critical path) ---
   try {
     await taskService.updateTask(taskId, context.organisationId, {
       assignedAgentIds,
     });
 
+    // Write delegation_direction on the task (critical path)
     await db.update(tasks).set({
       handoffSourceRunId: context.runId,
       handoffContext: handoffContext ? { message: handoffContext } : null,
       handoffDepth: currentDepth + 1,
+      delegationDirection: taskDelegationDirection,
       updatedAt: new Date(),
     // guard-ignore-next-line: org-scoped-writes reason="taskId passed through taskService.updateTask above which verifies org membership; this is a supplemental metadata update on the same task"
     }).where(eq(tasks.id, taskId));
@@ -3471,10 +3625,10 @@ async function executeReassignTask(
 
     // Trigger a handoff for every assigned agent
     const handoffResults = await Promise.all(
-      assignedAgentIds.map(agentId =>
+      resolvedAssignees.map(a =>
         enqueueHandoff({
           taskId,
-          agentId,
+          agentId: a.agentId,
           subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
@@ -3484,6 +3638,21 @@ async function executeReassignTask(
       )
     );
     const handoffsEnqueued = handoffResults.filter(Boolean).length;
+
+    // Write accepted outcome rows (fire-and-forget per INV-3)
+    for (const a of resolvedAssignees) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: a.saLinkId,
+        delegationScope: effectiveScope,
+        outcome: 'accepted',
+        reason: null,
+        delegationDirection: a.direction,
+      });
+    }
 
     return {
       success: true,
@@ -3506,11 +3675,26 @@ async function executeSpawnSubAgents(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // Prevent nesting
-  if (context.isSubAgent) {
-    return { success: false, error: 'Sub-agents cannot spawn their own sub-agents. Only one level of nesting is allowed.' };
+  // --- STEP 1: Require hierarchy context (INV-4; write skills fail closed) ---
+  if (!context.hierarchy) {
+    const errorCtx = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      skillSlug: 'spawn_sub_agents',
+    };
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
   }
 
+  const hierarchy = context.hierarchy;
+
+  // --- STEP 2: Validate input structure ---
   const subTasks = input.sub_tasks as Array<{ title: string; brief: string; assigned_agent_id: string }> | undefined;
 
   if (!subTasks || !Array.isArray(subTasks)) {
@@ -3519,15 +3703,53 @@ async function executeSpawnSubAgents(
   if (subTasks.length < 2 || subTasks.length > MAX_SUB_AGENTS) {
     return { success: false, error: `sub_tasks must contain 2-${MAX_SUB_AGENTS} items` };
   }
-
-  // Validate each sub-task
   for (const st of subTasks) {
     if (!st.title || !st.brief || !st.assigned_agent_id) {
       return { success: false, error: 'Each sub-task requires title, brief, and assigned_agent_id' };
     }
   }
 
-  // Calculate per-child budget
+  // --- STEP 3: Compute effective scope ---
+  const effectiveScope = resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy });
+
+  // --- STEP 4: Reject 'subaccount' scope (cross-subtree not permitted for spawn) ---
+  if (effectiveScope === 'subaccount') {
+    const errorCtx = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      callerParentId: hierarchy.parentId,
+      suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants',
+    };
+    for (const st of subTasks) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: st.assigned_agent_id,
+        delegationScope: effectiveScope,
+        outcome: 'rejected',
+        reason: CROSS_SUBTREE_NOT_PERMITTED,
+        delegationDirection: 'lateral',
+      });
+    }
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: CROSS_SUBTREE_NOT_PERMITTED, message: 'Cross-subtree spawn is not permitted. Use children or descendants scope.', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: CROSS_SUBTREE_NOT_PERMITTED, context: errorCtx };
+  }
+
+  // --- STEP 5: Depth check ---
+  const currentDepth = context.handoffDepth ?? 0;
+  if (currentDepth + 1 > MAX_HANDOFF_DEPTH) {
+    return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot spawn sub-agents at this depth.` };
+  }
+
+  // --- STEP 6: Budget check ---
   const totalBudget = context.tokenBudget ?? 30000;
   const elapsed = context.startTime ? Date.now() - context.startTime : 0;
   const totalTimeout = context.timeoutMs ?? 300000;
@@ -3539,48 +3761,124 @@ async function executeSpawnSubAgents(
     return { success: false, error: `Insufficient token budget remaining for ${subTasks.length} sub-agents. Need at least ${MIN_SUB_AGENT_TOKEN_BUDGET * subTasks.length} tokens.` };
   }
 
+  // --- STEP 7: Resolve saLinks for all targets ---
+  // Must be done before scope classification because we need subaccountAgentIds.
+  const resolvedTargets: Array<{ st: typeof subTasks[0]; saLink: { id: string; agentId: string } }> = [];
+  for (const st of subTasks) {
+    const [saLink] = await db
+      .select({ sa: subaccountAgents })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.agentId, st.assigned_agent_id),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+          isNull(agents.deletedAt)
+        )
+      );
+
+    if (!saLink) {
+      return { success: false, error: `Agent ${st.assigned_agent_id} not found or inactive in this subaccount` };
+    }
+
+    resolvedTargets.push({ st, saLink: { id: saLink.sa.id, agentId: st.assigned_agent_id } });
+  }
+
+  // --- STEP 8: Compute descendant ids if needed ---
+  let descendantIds: string[] = [];
+  if (effectiveScope === 'descendants') {
+    const rosterRows = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.organisationId, context.organisationId),
+          eq(subaccountAgents.isActive, true)
+        )
+      );
+    descendantIds = computeDescendantIds({
+      callerSubaccountAgentId: hierarchy.agentId,
+      roster: rosterRows.map(r => ({
+        subaccountAgentId: r.subaccountAgentId,
+        agentId: r.agentId,
+        parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+      })),
+    });
+  }
+
+  // --- STEP 9: Scope classification ---
+  const { accepted, rejected } = classifySpawnTargets({
+    proposedSubaccountAgentIds: resolvedTargets.map(t => t.saLink.id),
+    effectiveScope: effectiveScope as 'children' | 'descendants',
+    childIds: hierarchy.childIds,
+    descendantIds,
+  });
+
+  if (rejected.length > 0) {
+    const rejectedTargets = resolvedTargets.filter(t => rejected.includes(t.saLink.id));
+    for (const t of rejectedTargets) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: t.saLink.id,
+        delegationScope: effectiveScope,
+        outcome: 'rejected',
+        reason: DELEGATION_OUT_OF_SCOPE,
+        delegationDirection: 'down',
+      });
+    }
+    const rejectedAgentIds = rejectedTargets.map(t => t.saLink.agentId);
+    const callerChildIds = hierarchy.childIds.slice(0, 50);
+    const errorCtx: Record<string, unknown> = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      targetAgentId: rejectedAgentIds[0],
+      delegationScope: effectiveScope,
+      callerChildIds,
+    };
+    if (hierarchy.childIds.length > 50) errorCtx.truncated = true;
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: DELEGATION_OUT_OF_SCOPE, message: 'One or more spawn targets are outside delegation scope.', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: DELEGATION_OUT_OF_SCOPE, context: errorCtx };
+  }
+
+  // --- STEP 10: Execute spawn ---
   try {
-    // Create task cards and resolve agent links
+    // Create task cards for all accepted targets
     const childJobs: Array<{
       task: { id: string; title: string };
       saLink: { id: string; agentId: string };
     }> = [];
 
-    for (const st of subTasks) {
+    for (const t of resolvedTargets) {
       const task = await taskService.createTask(
         context.organisationId,
         context.subaccountId!,
         {
-          title: st.title.slice(0, MAX_TASK_TITLE_LENGTH),
-          brief: st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
+          title: t.st.title.slice(0, MAX_TASK_TITLE_LENGTH),
+          brief: t.st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
           status: 'in_progress',
-          assignedAgentId: st.assigned_agent_id,
+          assignedAgentId: t.st.assigned_agent_id,
           createdByAgentId: context.agentId,
           isSubTask: true,
-          parentTaskId: context.runId, // Link to parent's task context
+          parentTaskId: context.runId,
         }
       );
-
-      // Find subaccount agent link
-      const [saLink] = await db
-        .select({ sa: subaccountAgents })
-        .from(subaccountAgents)
-        .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-        .where(
-          and(
-            eq(subaccountAgents.subaccountId, context.subaccountId!),
-            eq(subaccountAgents.agentId, st.assigned_agent_id),
-            eq(subaccountAgents.isActive, true),
-            eq(agents.status, 'active'),
-            isNull(agents.deletedAt)
-          )
-        );
-
-      if (!saLink) {
-        return { success: false, error: `Agent ${st.assigned_agent_id} not found or inactive in this subaccount` };
-      }
-
-      childJobs.push({ task, saLink: { id: saLink.sa.id, agentId: st.assigned_agent_id } });
+      childJobs.push({ task, saLink: t.saLink });
     }
 
     // Execute all children in parallel
@@ -3608,6 +3906,8 @@ async function executeSpawnSubAgents(
             },
             isSubAgent: true,
             parentSpawnRunId: context.runId,
+            delegationScope: effectiveScope,
+            delegationDirection: 'down',
           });
 
           return {
@@ -3631,6 +3931,21 @@ async function executeSpawnSubAgents(
         }
       })
     );
+
+    // Write accepted outcome rows (fire-and-forget per INV-3)
+    for (const t of resolvedTargets) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: t.saLink.id,
+        delegationScope: effectiveScope,
+        outcome: 'accepted',
+        reason: null,
+        delegationDirection: 'down',
+      });
+    }
 
     const totalTokens = childResults.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
 

@@ -62,7 +62,7 @@ import { agentBeliefService } from './agentBeliefService.js';
 import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
 import { triggerService } from './triggerService.js';
 import { buildForRun as buildHierarchyForRun, HierarchyContextBuildError } from './hierarchyContextBuilderService.js';
-import type { HierarchyContext } from '../../shared/types/delegation.js';
+import type { HierarchyContext, DelegationScope, DelegationDirection } from '../../shared/types/delegation.js';
 import {
   createDefaultPipeline,
   hashToolCall,
@@ -249,6 +249,13 @@ export interface AgentRunRequest {
     idempotencyKey: string;
     routingSource: 'rule' | 'llm' | 'fallback';
   };
+  /**
+   * Paperclip Hierarchy — delegation telemetry (Chunk 4a).
+   * Populated by spawn_sub_agents and reassign_task when hierarchy is active.
+   * Stored on agent_runs.delegation_scope / agent_runs.delegation_direction.
+   */
+  delegationScope?: DelegationScope;
+  delegationDirection?: DelegationDirection;
 }
 
 export interface AgentRunResult {
@@ -396,6 +403,8 @@ export const agentExecutionService = {
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         playbookStepRunId: request.playbookStepRunId ?? null,
         isTestRun: request.isTestRun ?? false,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
