@@ -226,6 +226,16 @@ test('valid direction values are preserved', () => {
   assertEqual(buildListQueryFilters({ delegationDirection: 'lateral' }).delegationDirection, 'lateral', 'lateral preserved');
 });
 
+test('string limit "200" is parsed and returned as 200', () => {
+  const result = buildListQueryFilters({ limit: '200' });
+  assertEqual(result.limit, 200, 'string limit parsed');
+});
+
+test('string limit "600" is capped at MAX_LIMIT (500)', () => {
+  const result = buildListQueryFilters({ limit: '600' });
+  assertEqual(result.limit, 500, 'string limit capped at 500');
+});
+
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------

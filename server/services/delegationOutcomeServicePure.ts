@@ -81,8 +81,8 @@ export interface RawListFilters {
   delegationDirection?: string;
   /** ISO 8601 string or Date. Defaults to now - 7d. */
   since?: string | Date;
-  /** Default 100, capped at 500. */
-  limit?: number;
+  /** Default 100, capped at 500. Accepts a numeric string from req.query. */
+  limit?: number | string;
 }
 
 export interface CoercedListFilters {
@@ -103,9 +103,14 @@ export interface CoercedListFilters {
  *   typo.
  */
 export function buildListQueryFilters(raw: RawListFilters): CoercedListFilters {
-  // Clamp limit
-  let limit = raw.limit ?? DEFAULT_LIMIT;
-  if (!Number.isFinite(limit) || limit < 1) limit = DEFAULT_LIMIT;
+  // Clamp limit — parse string values that come from req.query
+  let limit: number = DEFAULT_LIMIT;
+  if (raw.limit !== undefined && raw.limit !== null) {
+    const parsed = typeof raw.limit === 'string' ? parseInt(raw.limit, 10) : raw.limit;
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      limit = parsed;
+    }
+  }
   if (limit > MAX_LIMIT) limit = MAX_LIMIT;
 
   // Coerce since
