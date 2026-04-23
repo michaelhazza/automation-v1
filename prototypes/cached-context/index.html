@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cached-context infrastructure · Prototype mockups</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+    padding: 40px 32px 60px;
+  }
+  .container { max-width: 1040px; margin: 0 auto; }
+
+  .hero {
+    background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
+    border: 1px solid #c7d2fe; border-radius: 10px; padding: 28px 32px;
+    margin-bottom: 28px;
+  }
+  .hero .tag {
+    display: inline-block; font-size: 10px; font-weight: 700; color: #3730a3;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 10px;
+    background: #fff; border-radius: 12px; margin-bottom: 10px;
+  }
+  .hero h1 {
+    font-size: 28px; font-weight: 600; letter-spacing: -0.4px; line-height: 1.2;
+    color: #1e1b4b; margin-bottom: 10px;
+  }
+  .hero p { font-size: 14px; color: #3730a3; max-width: 760px; }
+  .hero p code { background: rgba(255,255,255,0.6); padding: 1px 6px; border-radius: 3px; font-size: 12.5px; }
+
+  .meta-row {
+    display: flex; gap: 20px; margin-top: 16px; padding-top: 16px;
+    border-top: 1px solid rgba(67,56,202,0.15); font-size: 12.5px; color: #4338ca;
+  }
+  .meta-row strong { color: #1e1b4b; }
+  .meta-row a { color: #4338ca; text-decoration: none; font-weight: 600; }
+
+  .note {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 16px 20px; font-size: 13px; color: #4b5563; margin-bottom: 28px;
+  }
+  .note strong { color: #1a1d23; }
+
+  h2 {
+    font-size: 13px; font-weight: 600; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 14px;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 22px 24px; text-decoration: none; color: inherit; display: block;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+  .card:hover {
+    border-color: #a5b4fc; transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(67,56,202,0.08);
+  }
+
+  .card .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: 700;
+    background: #eef2ff; color: #4338ca; margin-bottom: 12px;
+  }
+  .card.hero-card .num { background: #fef2f2; color: #b91c1c; }
+
+  .card h3 {
+    font-size: 16px; font-weight: 600; color: #1a1d23; margin-bottom: 6px;
+    letter-spacing: -0.1px;
+  }
+  .card .desc { font-size: 12.5px; color: #4b5563; line-height: 1.55; margin-bottom: 12px; }
+  .card .meta {
+    font-size: 11px; color: #6b7280; padding-top: 10px; border-top: 1px solid #f0f1f3;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .meta .spec { font-weight: 600; color: #4338ca; }
+  .card .meta code {
+    background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 10.5px;
+    font-family: 'Menlo', 'Consolas', monospace;
+  }
+  .card .cta { font-size: 12px; color: #4338ca; font-weight: 600; }
+
+  .novel { border-left: 3px solid #6366f1; }
+  .observ { border-left: 3px solid #16a34a; }
+
+  .section-meta {
+    font-size: 12px; color: #6b7280; margin-top: -8px; margin-bottom: 16px;
+  }
+
+  footer {
+    margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb;
+    font-size: 12px; color: #9ca3af; text-align: center;
+  }
+  footer code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="hero">
+    <div class="tag">📐 Prototype · Mockups 1–5</div>
+    <h1>Cached-context infrastructure</h1>
+    <p>
+      Pre-implementation UX mockups that visually stress-test the payload shapes the spec commits to. Covers the three novel user-facing surfaces (HITL budget-breach block · pack utilization · scheduled task with attached pack) plus the observability story (run-detail cache attribution · Usage Explorer pack lens). Self-contained HTML · realistic data from the spec's 42-Macro example · no backend wiring.
+    </p>
+    <div class="meta-row">
+      <span><strong>Spec</strong> · <a href="../../docs/cached-context-infrastructure-spec.md">docs/cached-context-infrastructure-spec.md</a></span>
+      <span><strong>Branch</strong> · <code style="background: rgba(255,255,255,0.5); padding: 1px 5px; border-radius: 3px; font-size: 11.5px;">claude/cached-context-infrastructure-fcVmS</code></span>
+      <span style="margin-left: auto;"><strong>5 mockups</strong> · ~2,457 lines</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>What these validate.</strong> Most of the cached-context spec is invisible infrastructure (assembly engine, budget resolver, cache attribution) that doesn't need visual validation. These five pages cover the places where the UX isn't obvious and where the payload shapes need to stand up to real screens before routes lock in. If the information hierarchy is wrong here, the payload shape is wrong. Skip pack CRUD, document CRUD, permission settings — standard shapes, borrow from existing memory_blocks / agents pages.
+  </div>
+
+  <h2>Novel user-facing surfaces</h2>
+  <div class="section-meta">The three screens where the UX isn't obvious — payload shapes are under direct test here.</div>
+
+  <div class="grid">
+
+    <a class="card novel" href="mockup-budget-breach-block.html">
+      <span class="num">1</span>
+      <h3>Budget-breach HITL block</h3>
+      <div class="desc">
+        The operator's view when a task is blocked at the HITL gate for exceeding the pack budget. Renders the full <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:11px;">HitlBudgetBlockPayload</code>: threshold breached, budget used vs allowed, top 5 contributing documents as a bar chart, four suggested actions (trim / upgrade / split / abort).
+      </div>
+      <div class="meta">
+        <span class="spec">Spec · §4.5 + §6.6</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card novel" href="mockup-pack-utilization.html">
+      <span class="num">2</span>
+      <h3>Pack utilization per tier</h3>
+      <div class="desc">
+        Pack detail page with utilization front-and-centre. Green 47% (Sonnet) / amber 78% (Opus) / red 94% (Haiku) shown side-by-side with threshold advisory copy, plus the top-5 documents table so users know what to trim before the cap bites. Validates the progressive-warning story — packs grow silently without this.
+      </div>
+      <div class="meta">
+        <span class="spec">Spec · §5.3 + §6.7</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card novel" href="mockup-scheduled-task-with-pack.html" style="grid-column: 1 / span 2;">
+      <span class="num">3</span>
+      <h3>Scheduled task with attached pack</h3>
+      <div class="desc">
+        The day-in-the-life view. A <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:11px;">daily-macro-report</code> task with the 42 Macro pack attached, 7-day run calendar with outcome badges (completed / degraded / failed), detailed recent-runs table showing cache HIT vs MISS with prefix hashes, sidebar with pack utilization + snapshot metadata. Ties the feature together from the user's POV end-to-end.
+      </div>
+      <div class="meta">
+        <span class="spec">Spec · §5.10 + §4.6</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+  </div>
+
+  <h2>Observability story</h2>
+  <div class="section-meta">Validates the §9 success criteria: cache value is visible and the "is caching making us money?" question has a clear answer.</div>
+
+  <div class="grid">
+
+    <a class="card observ" href="mockup-run-detail-cached.html">
+      <span class="num">4</span>
+      <h3>Run detail · cache attribution</h3>
+      <div class="desc">
+        A completed run's detail view: outcome badge, expandable prefix-hash identity with components, pack-snapshot table with integrity checks, <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:11px;">cache_read_input_tokens</code> vs <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:11px;">cache_creation_input_tokens</code>, and the "cost saved vs first run" comparison. Validates that cache value is visible per-run.
+      </div>
+      <div class="meta">
+        <span class="spec">Spec · §4.4 + §5.9 + §9</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+    <a class="card observ" href="mockup-usage-explorer-packs.html">
+      <span class="num">5</span>
+      <h3>Usage explorer · pack lens</h3>
+      <div class="desc">
+        New Usage Explorer view aggregating cache behaviour per pack per tenant: the "is caching making us money?" board answer, 30-day hit-rate trend line, packs ranked by utilization, cost-split donut, per-tenant breakdown. If leadership can't answer the spend question from this page, it's the wrong page.
+      </div>
+      <div class="meta">
+        <span class="spec">Spec · §11 + §9</span>
+        <span class="cta">Open mockup →</span>
+      </div>
+    </a>
+
+  </div>
+
+  <footer>
+    Generated for external review · payload shapes cross-referenced against the spec · realistic data only — no backend wiring · folder: <code>prototypes/cached-context/</code>
+  </footer>
+
+</div>
+
+</body>
+</html>
