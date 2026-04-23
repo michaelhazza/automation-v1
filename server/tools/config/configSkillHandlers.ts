@@ -19,8 +19,7 @@ import { db } from '../../db/index.js';
 import { subaccounts, agents, subaccountAgents } from '../../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
-import { DELEGATION_SCOPE_VALUES, type DelegationScope } from '../../../shared/types/delegation.js';
-import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, type RosterEntry } from './configSkillHandlersPure.js';
+import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, resolveEffectiveScope, type RosterEntry } from './configSkillHandlersPure.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -496,12 +495,7 @@ export async function executeConfigListAgents(
   context: SkillExecutionContext,
 ): Promise<unknown> {
   // Determine effectiveScope
-  const rawScope = input.scope;
-  const effectiveScope: DelegationScope = (
-    DELEGATION_SCOPE_VALUES.includes(rawScope as DelegationScope)
-      ? rawScope as DelegationScope
-      : (context.hierarchy?.childIds.length ?? 0) > 0 ? 'children' : 'subaccount'
-  );
+  const effectiveScope = resolveEffectiveScope({ rawScope: input.scope, hierarchy: context.hierarchy });
 
   // Warn when hierarchy is missing (falls through to subaccount behaviour)
   if (!context.hierarchy) {

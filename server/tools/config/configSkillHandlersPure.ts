@@ -3,6 +3,8 @@
  * Testable in isolation with npx tsx.
  */
 
+import { DELEGATION_SCOPE_VALUES, type DelegationScope, type HierarchyContext } from '../../../shared/types/delegation.js';
+
 export interface RosterEntry {
   /** subaccount_agents.id — the link row primary key */
   subaccountAgentId: string;
@@ -76,4 +78,26 @@ export function mapSubaccountAgentIdsToAgentIds(input: {
     }
   }
   return result;
+}
+
+/**
+ * Determines the effective DelegationScope for a list-agents call.
+ * Pure — no IO.
+ *
+ * - If rawScope is a valid DelegationScope value, returns it (explicit override).
+ * - If hierarchy has children, adaptive default is 'children'.
+ * - Otherwise adaptive default is 'subaccount'.
+ * - If hierarchy is undefined/null (missing context), returns 'subaccount'.
+ */
+export function resolveEffectiveScope(input: {
+  rawScope: unknown;
+  hierarchy: Readonly<HierarchyContext> | undefined;
+}): DelegationScope {
+  if (DELEGATION_SCOPE_VALUES.includes(input.rawScope as DelegationScope)) {
+    return input.rawScope as DelegationScope;
+  }
+  if ((input.hierarchy?.childIds.length ?? 0) > 0) {
+    return 'children';
+  }
+  return 'subaccount';
 }

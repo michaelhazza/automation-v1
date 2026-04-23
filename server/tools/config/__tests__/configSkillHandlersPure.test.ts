@@ -6,8 +6,10 @@
 import {
   computeDescendantIds,
   mapSubaccountAgentIdsToAgentIds,
+  resolveEffectiveScope,
   type RosterEntry,
 } from '../configSkillHandlersPure.js';
+import type { HierarchyContext } from '../../../../shared/types/delegation.js';
 
 // ---------------------------------------------------------------------------
 // Minimal test harness
@@ -141,6 +143,63 @@ await test('mapSubaccountAgentIdsToAgentIds: empty input → empty result', () =
   ];
   const result = mapSubaccountAgentIdsToAgentIds({ subaccountAgentIds: [], roster });
   assertDeepEqual(result, [], 'empty subaccountAgentIds → empty result');
+});
+
+// ---------------------------------------------------------------------------
+// resolveEffectiveScope tests
+// ---------------------------------------------------------------------------
+
+const hierarchyNoChildren: HierarchyContext = {
+  agentId: 'sa-caller',
+  parentId: 'sa-parent',
+  childIds: [],
+  rootId: 'sa-root',
+  depth: 1,
+};
+
+const hierarchyWithChildren: HierarchyContext = {
+  agentId: 'sa-caller',
+  parentId: 'sa-parent',
+  childIds: ['sa-1'],
+  rootId: 'sa-root',
+  depth: 1,
+};
+
+await test('resolveEffectiveScope: explicit override — children scope (beats adaptive)', () => {
+  // rawScope = 'children', hierarchy has no children → override wins
+  const result = resolveEffectiveScope({ rawScope: 'children', hierarchy: hierarchyNoChildren });
+  assert(result === 'children', `expected 'children', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: explicit override — descendants scope', () => {
+  const result = resolveEffectiveScope({ rawScope: 'descendants', hierarchy: hierarchyWithChildren });
+  assert(result === 'descendants', `expected 'descendants', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: explicit override — subaccount scope (beats adaptive with children)', () => {
+  // hierarchy has children but explicit override is 'subaccount'
+  const result = resolveEffectiveScope({ rawScope: 'subaccount', hierarchy: hierarchyWithChildren });
+  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: adaptive default — has children → returns children', () => {
+  const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyWithChildren });
+  assert(result === 'children', `expected 'children', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: adaptive default — no children → returns subaccount', () => {
+  const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyNoChildren });
+  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: fallthrough — missing hierarchy → returns subaccount', () => {
+  const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: undefined });
+  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+});
+
+await test('resolveEffectiveScope: invalid rawScope treated as no scope → adaptive (children present → children)', () => {
+  const result = resolveEffectiveScope({ rawScope: 'invalid-value', hierarchy: hierarchyWithChildren });
+  assert(result === 'children', `expected 'children', got '${result}'`);
 });
 
 // ---------------------------------------------------------------------------
