@@ -207,3 +207,97 @@ Top themes: unknown-safe default (principle 4) / hard retry ceiling (`maxAttempt
 §1.5 principle count after round 3: **5 principles**.
 
 ---
+
+## Round 4 — 2026-04-23T (closing) — ChatGPT verdict
+
+### ChatGPT Feedback (raw closing remarks)
+
+> **Strategic note (not a blocker).** As you move into implementation, watch for this: the biggest failure mode now is engine drift from contract, not spec gaps. Keep enforcement centralised. Avoid "just this one exception" logic in workflows. Don't let execution logic reintroduce implicit behaviour. If you hold that line, this system scales cleanly.
+
+> **Highest-leverage next step after this PR:** Define a thin execution test harness that validates contract behaviour before full build-out.
+
+### Recommendations and Decisions
+
+| # | Finding | Recommendation | User Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| 1 | Strategic watchout — "engine drift from contract" (centralise enforcement; avoid in-workflow exceptions) | route to KNOWLEDGE.md | route to KNOWLEDGE.md | n/a | Durable, cross-feature pattern that outlives this spec; correct home is the project-wide knowledge base, not the spec itself. |
+| 2 | Implementation-time follow-up — thin execution test harness validating §5.4a + §5.10a contract behaviour before full build-out | route to tasks/todo.md | route to tasks/todo.md | n/a | Build-phase deliverable, not a spec edit; correct home is the backlog with a direct cross-ref to the capability contract + composition constraints it validates. |
+
+### Applied (spec edits this round)
+
+None. Round 4 was the closing verdict — no spec edits. All strategic output routed per user decision.
+
+### Rejected
+
+None.
+
+### Deferred
+
+None directly — both closing items were routed per user instruction (watchout → KNOWLEDGE.md; test harness → tasks/todo.md).
+
+### Integrity check
+
+Skipped — no spec edits this round.
+
+Top themes: closing verdict / centralise enforcement / thin execution test harness.
+
+---
+
+## Final Summary
+
+**Rounds:** 3 substantive review rounds + 1 closing verdict round = 4 total.
+
+**Findings processed across rounds 1–3:** 24 total (10 round 1 + 7 round 2 + 7 round 3).
+
+- **Accepted + applied:** 17 (round 1: 6 applied; round 2: 5 applied; round 3: 7 applied — full "all: as recommended" approval).
+- **Rejected:** 3 (round 1 items 3, 4, 7 — already covered or stylistic duplication).
+- **Deferred:** 4 (round 1 items 5 + 10 folded into one §9b entry; round 2 items 1, 3, 6b folded into the same §9b entry as a sub-block with explicit re-evaluation triggers).
+
+**Round 4 closing verdict:** 2 items — both strategic, both routed per user instruction (1 to `KNOWLEDGE.md`, 1 to `tasks/todo.md`). Zero spec edits in round 4.
+
+**Final spec state — paths + sections changed:**
+
+Single file: `docs/riley-observations-dev-spec.md` — 1973 lines.
+
+Sections materially changed across the arc:
+
+- **§1.5 Architectural principles (new section, round 1; extended through rounds 2–3).** Five binding principles — capability-layer boundary, derive-don't-duplicate + contract-source-of-truth, Workflows-primary UX contract, unknown-safe default, side-effects-classification-drives-UX-no-silent-downgrades.
+- **§5.2 Scope.** Added §5.4a + §5.10a references to the in-scope list (round 1).
+- **§5.3 `InvokeAutomationStep` inline comments.** `retryPolicy` + `gateLevel` comments now cross-reference §5.4a capability contract, `overrideNonIdempotentGuard` override field, and the `maxAttempts ≤ 3` hard ceiling (rounds 1–3).
+- **§5.4a Automation capability contract (new section, round 1; rule 3 tightened rounds 2–3).** New columns `automations.side_effects` (enum `read_only | mutating | unknown`) and `automations.idempotent` (bool) introduced by migration `0203`. Gate-resolution defaults, Explore-Mode override, retry posture, engine-enforced non-idempotent guard, `overrideNonIdempotentGuard` opt-in, hard `maxAttempts ≤ 3` ceiling with dispatcher-clamp semantics, audit expectation, enum-value definitions (rounds 1–3).
+- **§5.6 HITL gate semantics.** Reconciled with §5.4a — default gate is driven by `side_effects`, not a blanket `'review'` (round 1).
+- **§5.7 Error propagation — full rewrite (round 2; `'unknown'` bucket + orchestration-safety contract added round 3).** Standardised `AutomationStepError` TypeScript shape `{ code, type, message, retryable }`. Five-value `type` bucketing table (`validation | execution | timeout | external | unknown`). `unknown`-bucket orchestration-safety contract (engine invariant, non-retryable, non-composable, still visible). Per-error-class behaviour updated to surface `code` + `type`. Retry bullet references engine-enforced guard + `retryable` derivation.
+- **§5.9 Telemetry emissions.** Added `automation_composition_invalid` terminal status (round 1). Added required `retryAttempt` field with full usage contract (round 3). Added optional `error?: AutomationStepError` field with inline status→code 1:1 mapping table (round 2).
+- **§5.10a Composition constraints (new section, round 1; enforcement-surface hoist + future-relaxation clause added rounds 2–3).** Opener paragraph codifies dual-surface enforcement (authoring-time validator + runtime dispatcher defence-in-depth). Max composition depth = 1, no `invoke_workflow` step type in v1, no callback-based composition, dispatcher one-step-one-webhook rule. Two new error codes: `workflow_composition_invalid` (authoring) + `automation_composition_invalid` (dispatch). Future-relaxation clause — rules 1–3 not edited in place; a later change replaces them with a superseding section.
+- **§9a Contracts table.** Updated `workflow.step.automation.completed` row to note `automation_composition_invalid` status, `retryAttempt` required field, optional `error` field, and authoring-time-only posture of `workflow_composition_invalid`. Added new row for `automations.side_effects` + `automations.idempotent` capability-contract columns. Added new row for `AutomationStepError` with `type` enum `{validation, execution, timeout, external, unknown}`, no-v1-codes-map-to-unknown note, and hard-ceiling cross-ref.
+- **§9b Deferred Items — single cross-cutting entry.** "Automation + Workflow versioning and marketplace-readiness" — folded round 1 items 5 + 10 (versioning + marketplace). Extended with sub-block "Capability-contract extensions — reconsider per trigger, not in v1" covering three round-2 deferred items (`deterministic`, `expected_duration_class`, `irreversible`) with explicit re-evaluation triggers for each.
+
+**Reviewer's "ready to merge" verdict:** ChatGPT declared merge / finalise / proceed to implementation on round 4, with two non-blocking strategic notes (engine-drift watchout → KNOWLEDGE.md pattern; thin execution test harness → `tasks/todo.md` backlog). No architectural concerns outstanding. Every finding across all 4 rounds has a final decision + rationale logged.
+
+**Implementation-readiness checklist — final pass:**
+
+- **Inputs defined.** Yes. `InvokeAutomationStep` (§5.3), `automations.side_effects` + `automations.idempotent` (§5.4a), `input_schema` / `output_schema` (§5.4 / §5.5), telemetry event payload shapes (§5.9), `AutomationStepError` interface (§5.7).
+- **Outputs defined.** Yes. Output mapping contract (§5.5), telemetry completion event (§5.9), `AutomationStepError` surface shape (§5.7), `workflow.step.automation.dispatched` + `.completed` events registered in `server/lib/tracing.ts` (§5.9).
+- **Failure modes covered.** Yes. Ten terminal statuses enumerated in §5.9. Ten error codes in §5.7 vocabulary. Five-value `type` bucketing table. `unknown`-bucket orchestration-safety contract. Retry ceiling (`maxAttempts ≤ 3`). Engine-enforced non-idempotent guard + override. Authoring vs dispatch-time error-code surface split.
+- **Ordering guarantees explicit.** Yes. Migration order 1–5 (§10.1 / §10.2). Part 1 step order (§4.2). Pre-dispatch vs post-dispatch phases (§5.9). `retryAttempt` emission order per attempt (§5.9 field comment).
+- **No unresolved forward references.** Yes. Round-3 integrity-check verified. §1.5 principle 4 → §5.4a rules 1 + 3, §5.7, §5.10a (all exist). §1.5 principle 5 → §5.4a, §6.4, §5.6, §6.5, §6.2 (all exist). §5.4a rule 3 hard ceiling → §5.3 comment + §5.7 retry bullet (both exist). §5.7 `type: 'unknown'` bucket → §1.5 principle 4 (exists). §5.9 `retryAttempt` → §5.4a rule 3 (exists). §9a rows → all new fields/enums reflected. §9b cross-cutting entry → §2, §1.5, §5.4a, §5.10a (all exist).
+
+**Checklist verdict:** all five pass. Spec is implementation-ready.
+
+**Consistency-check across rounds:** no contradictions between round decisions. Each round's applied edits preserve earlier-round decisions. Integrity-check ran clean in round 3 (0 issues) after surfacing and resolving 1 issue per round in rounds 1 and 2. Round 4 had no spec edits.
+
+**Deferred backlog routed to `tasks/todo.md` § "Spec Review deferred items" / `### riley-observations-dev-spec (2026-04-23)`:**
+
+1. **Automation + Workflow versioning and marketplace-readiness.** Versioning, immutable execution versions, opt-in upgrade paths, cross-tenant isolation, partner-provided capability ingestion. Re-evaluation triggers: (a) external party needs to publish capabilities, OR (b) in-place upgrade causes customer-visible break. (§9b main entry.)
+2. **`automations.deterministic` flag.** Reconsider per trigger when/if Automation-response caching or memoisation lands. (§9b sub-block.)
+3. **`automations.expected_duration_class` flag.** Reconsider per trigger when queue prioritisation / SLA routing lands. Related: per-row `timeout_ms` override column (already in §9b Workflow-composition Part 2 deferrals). (§9b sub-block.)
+4. **`irreversible` as third `side_effects` enum value.** Reconsider per trigger if platform's auto-gate-bypass posture changes post-launch. (§9b sub-block.)
+5. **Thin execution test harness (ChatGPT closing-verdict recommendation).** Validates the §5.4a capability contract + §5.10a composition constraints at runtime before full build-out. Implementation-phase deliverable — not a spec edit.
+
+**KNOWLEDGE.md entries added:** 2 (see next section).
+
+**Index write failures:** 0.
+
+**PR:** #179 — https://github.com/michaelhazza/automation-v1/pull/179 — spec changes ready at this URL.
+
+---
