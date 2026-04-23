@@ -1,0 +1,27 @@
+Implementation-readiness verdict: not ready yet. The spec has several contract-level contradictions that would cause implementation drift.
+
+1. Description: The spec treats “zero roots but active agents still runnable” as a valid state, but under the defined root predicate any active `subaccount_agents` row with `parent_subaccount_agent_id IS NULL` is itself a root, so the rootless-caller examples and the “rootless subaccounts also have `parentId === null` on every agent” logic cannot exist in a non-empty valid tree. Section: §§4.1, 5.1, 6.4 step 3, 16.3. Fix: Redefine zero-root to mean “no active subaccount agents” and remove the rootless-caller examples/authorization language, or explicitly introduce a separate designated-root concept; with the current primitives, tightening the prose is the simpler fix. Severity: critical.
+
+2. Description: Phase 1 is described as shipping telemetry/writes and “recording what’s happening under the flat model before enforcement,” but the same phase also says `delegation_outcomes` ships empty, writes start in Phase 4, and the trace graph UI is Phase 4 only. Section: §§1 item 1, 11 Phase 1 intro and exit criteria, 15.1. Fix: Either move outcome writes and graph delivery into Phase 1, or restate Phase 1 as storage-only/no telemetry until Phase 4 and remove the “before enforcement” observability claim. Severity: critical.
+
+3. Description: The spec alternates between carrying triage `scope` in pg-boss job data and in `task.triggerContext`, so the dispatch contract is not implementable as written. Section: §§3.4, 6.7, 10.4, 14.1, 14.2. Fix: Pick one carrier and normalize all sections to it; based on §6.7’s rationale, pg-boss job payload only is the cleaner choice. Severity: critical.
+
+4. Description: The delegation-graph endpoint is `/api/agent-runs/:id/delegation-graph` in one section and `/api/runs/:runId/delegation-graph` in others, and the same route both claims no `requireRunAccess` helper exists and later says `requireRunAccess('view')` guards it. Section: §§7.2, 8.2, 11 Phase 4, 14.4, 9.3. Fix: Choose one API path and one access-control model, then update route text, client text, and inventory together. Severity: important.
+
+5. Description: The spec says `ORCHESTRATOR_AGENT_SLUG` is retained for org-scope fallback, but other sections say “No slug constant” or “delete `ORCHESTRATOR_AGENT_SLUG`,” leaving the Phase 2 change ambiguous. Section: §§1 item 7, 6.6 step 2, 6.7, 11 Phase 2 exit criteria, 14.2. Fix: Decide whether the constant survives for org-scope routing; then make every section say the same thing. Severity: important.
+
+6. Description: The spec marks seeded-company restructuring as out of scope and says nothing depends on work outside `main`, but later makes dual-root seed cleanup a blocking Phase 2 gate. Section: §§2.1, 3.2, 3.3, 13. Fix: Either bring the seed manifest cleanup into Phase 2 scope with named files, or declare it as an explicit prerequisite dependency instead of saying there are none. Severity: important.
+
+7. Description: Migration `0204` is defined as adding four `agent_runs` columns, but the Phase 1 file inventory describes it as adding only two, so the inventory is not a reliable source of truth. Section: §§5.3, 5.5, 14.1. Fix: Update §14.1 to list `delegation_direction` and `handoff_source_run_id` everywhere `0204` is described. Severity: important.
+
+8. Description: Missing-hierarchy handling is specified for read skills and write skills, but not for the derived-skill resolver, which currently just drops derived delegation skills silently if `context.hierarchy` is absent. Section: §§4.1, 6.5. Fix: Add an explicit resolver policy for missing hierarchy: fail the run, or preserve attached skills only with WARN logging. Severity: important.
+
+9. Description: Phase 2 defaults non-Brief enqueue paths to `scope='subaccount'`, but `resolveRootForScope()` does not define behavior when `subaccountId` is `null`, even though its API allows null. Section: §§6.6, 6.7, 10.4. Fix: Add an explicit `scope='subaccount' && subaccountId == null` branch, likely org-root fallback, and reference it in the job handler text. Severity: important.
+
+10. Description: The spec claims every rejection writes a `delegation_outcomes` row, but the table requires a valid `target_agent_id` FK and the write path is best-effort, so invalid-target failures and DB-write failures cannot satisfy that guarantee. Section: §§4.3, 4.4, 5.4, 10.3. Fix: Narrow the claim to scope-validation rejections with resolvable actors, or loosen the schema/write contract if full rejection accounting is required. Severity: important.
+
+11. Description: `managerWithoutDerivedSkills` is named like it detects missing derived skills, but the described query actually finds agents with explicit delegation skills and no children, which is a different signal. Section: §§6.9, 11, 14.4, 17.5. Fix: Rename the detector to match the actual query, or change the query to match the name. Severity: minor.
+
+12. Description: The client section says there are “No new top-level routes,” but the optional dashboard introduces `/admin/delegation-outcomes`. Section: §§8 intro, 8.3. Fix: Qualify the intro as “no mandatory new top-level routes” or remove the claim. Severity: minor.
+
+If you want, I can turn this into a tighter “spec patch list” keyed by section so the author can revise it directly.
