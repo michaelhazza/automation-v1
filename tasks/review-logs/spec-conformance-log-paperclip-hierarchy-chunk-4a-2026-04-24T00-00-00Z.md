@@ -7,6 +7,7 @@
 **Scope:** Chunk 4a — Migration 0203 + `spawn_sub_agents` + `reassign_task` validation + telemetry dual-writes
 **Changed-code set:** 8 Chunk 4a files
 **Run at:** 2026-04-23T00:00:00Z
+**Commit at finish:** `530918e009cb89cba9171f84c22d3cfc703d6e22`
 
 ---
 

@@ -3026,6 +3026,7 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
+- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
 
 ---
 
@@ -3039,17 +3040,17 @@ Each subaccount has at most one active root agent (`parentSubaccountAgentId IS N
 
 ### Hierarchy context (`HierarchyContext`)
 
-Built once per run at step 4 of `agentExecutionService.ts` by `hierarchyContextBuilderService.ts`. The snapshot is immutable for the lifetime of the run (INV-4). Consumers (`skillExecutor.ts`, `skillService.ts`) receive it via `SkillExecutionContext.hierarchy`; they never rebuild or rewrite it. The context carries: `subaccountAgentId`, `subaccountId`, `parentSubaccountAgentId | null`, `childIds[]`, `delegationScope`, `hierarchyDepth`.
+Built once per run by `hierarchyContextBuilderService.ts` before the skill resolver executes in `agentExecutionService.ts`. The snapshot is immutable for the lifetime of the run (INV-4). Consumers (`skillExecutor.ts`, `skillService.ts`) receive it via `SkillExecutionContext.hierarchy`; they never rebuild or rewrite it. The context carries: `agentId`, `parentId | null`, `childIds[]`, `rootId`, `depth` (see `shared/types/delegation.ts`).
 
 ### `DelegationScope` enum
 
-`'children' | 'descendants' | 'subaccount'`. Scope is stored on the subaccount_agent row and read into `HierarchyContext.delegationScope`. Execution semantics:
+`'children' | 'descendants' | 'subaccount'`. Scope is a per-call parameter passed to `spawn_sub_agents`, `reassign_task`, and the three `config_list_*` read skills. The value is persisted on `agent_runs.delegation_scope` and `delegation_outcomes.delegation_scope` for the run; it is NOT stored on `subaccount_agents`. Execution semantics:
 
 - `children` — spawned sub-agents must be direct children of the calling agent.
 - `descendants` — spawned sub-agents can be any node in the subtree rooted at the caller.
-- `subaccount` — caller is the subaccount root; full cross-tree delegation permitted (escape hatch).
+- `subaccount` — full cross-tree delegation permitted (root-level escape hatch).
 
-The adaptive default: if `delegationScope` is null, the resolver uses `children` when the caller has children and `subaccount` when the caller is the subaccount root.
+The adaptive default: if `delegationScope` is null, the resolver uses `children` when `childIds.length > 0`, and `subaccount` otherwise (any leaf agent — including non-root leaves with explicit skill attachment).
 
 ### Derived delegation skills
 
@@ -3080,4 +3081,3 @@ Three detectors for the delegation subsystem (all in `server/services/workspaceH
 - `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
 - `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
 - `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.
-- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.

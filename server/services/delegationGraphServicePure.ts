@@ -13,8 +13,10 @@ import type {
   DelegationGraphResponse,
 } from '../../shared/types/delegation.js';
 
-// MAX_HANDOFF_DEPTH from the spec is 5; we stop collecting at depth 6 (one
-// level beyond the cap) so we can set truncated=true on any row at that level.
+// MAX_HANDOFF_DEPTH from the spec is 5; the BFS walker in delegationGraphService.ts
+// walks up to MAX_DEPTH_BOUND levels of descendants and passes truncated=true when
+// un-walked children remain. Exported for the walker; this pure function treats
+// truncated as an explicit input, not something derived from row depth.
 export const MAX_DEPTH_BOUND = 6;
 
 export interface RunRow {

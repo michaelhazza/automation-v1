@@ -170,6 +170,18 @@ router.get(
   })
 );
 
+// ─── Delegation graph for a run (paperclip-hierarchy §7.2) ──────────────────
+
+router.get(
+  '/api/agent-runs/:id/delegation-graph',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { buildForRun } = await import('../services/delegationGraphService.js');
+    const graph = await buildForRun(req.params.id, req.orgId!);
+    res.json(graph);
+  })
+);
+
 // ─── Get trace chain for a run (A1) ──────────────────────────────────────────
 
 router.get(

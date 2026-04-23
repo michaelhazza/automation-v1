@@ -12,6 +12,7 @@
   - `server/services/workspaceHealth/detectors/index.ts` (modified)
   - `architecture.md` (modified — new `## Hierarchical Agent Delegation` section)
 **Run at:** 2026-04-25T00:30:00Z
+**Commit at finish:** `189d52ca`
 
 ---
 

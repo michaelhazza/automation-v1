@@ -3,6 +3,7 @@
 **Spec:** `docs/hierarchical-delegation-dev-spec.md` §6.1 + `tasks/builds/paperclip-hierarchy/plan.md` Chunk 3a
 **Branch:** `claude/build-paperclip-hierarchy-ymgPW`
 **Head at check:** `b1a4e61f076cde0d270ead905e5cf3d51788522b`
+**Commit at finish:** `b0479e9a`
 **Base (merge-base main):** `399f3864b5187d2be99ca9f9807793699560ece7`
 **Scope:** Chunk 3a — pure + impure hierarchy builder, `SkillExecutionContext.hierarchy`, `agentExecutionService` integration
 **Run at:** 2026-04-23T00:00:00Z
