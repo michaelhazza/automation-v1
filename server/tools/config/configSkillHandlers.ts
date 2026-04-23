@@ -523,6 +523,7 @@ export async function executeConfigListAgents(
           .from(subaccountAgents)
           .where(
             and(
+              eq(subaccountAgents.organisationId, context.organisationId),
               eq(subaccountAgents.subaccountId, subaccountId),
               eq(subaccountAgents.isActive, true),
             ),
