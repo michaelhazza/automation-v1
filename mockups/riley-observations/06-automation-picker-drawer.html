@@ -1,0 +1,237 @@
+<!doctype html>
+<!--
+  Mock 6 / 10 — Automation picker drawer (inside Workflow Studio)
+  =================================================================
+  Open question resolved:
+    Is the picker + input-mapping flow clear for a non-technical agency owner?
+  Spec refs: §5.4 input mapping contract, §5.8 credential resolution and scoping,
+             §5.11 UI considerations
+  Real vs stubbed:
+    [real]    Right-side drawer pattern, input field shapes, scope badges.
+    [NEW]     Scope-filtered list (system / org / subaccount) with engine badges,
+              required-connection readiness, and input-schema hint.
+    [NEW]     Input-mapping editor using the existing {{ steps.X.output.Y }} DSL —
+              with a "quick-pick" chip row that makes the syntax self-serve for
+              non-technical users.
+    [NEW]     Visible scope match confirmation ("This Automation matches this
+              Workflow's subaccount scope") to preempt scope_mismatch confusion.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 6 — Automation picker + input mapping</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f1f5f9; }
+  .mock-annotation { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 11px; padding: 6px 10px; border-radius: 6px; line-height: 1.4; }
+  .token-chip { background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; border-radius:5px; padding:1px 6px; font-family:'SF Mono', Menlo, monospace; font-size:11px; font-weight:500; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-[1440px] mx-auto p-6">
+  <div class="flex justify-between items-start mb-4">
+    <div>
+      <h1 class="text-base font-bold text-slate-900">Mock 6 — Automation picker drawer + input mapping</h1>
+      <p class="text-[13px] text-slate-500 mt-0.5">Tier 1 · Resolves: <em>is picker + input-mapping clear for a non-technical agency owner?</em></p>
+    </div>
+    <a href="index.html" class="text-[13px] text-indigo-600 hover:text-indigo-800 font-medium no-underline">← Back to all mocks</a>
+  </div>
+
+  <div class="relative bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm" style="height: 760px;">
+    <!-- Studio canvas (dimmed background) -->
+    <div class="absolute inset-0 bg-slate-50 p-10 flex flex-col items-center gap-2">
+      <div class="w-[360px] bg-white border border-slate-200 rounded-xl p-3 flex items-center gap-3 opacity-40">
+        <div class="w-9 h-9 rounded-lg bg-indigo-100"></div>
+        <div class="flex-1"><div class="text-[13px] font-semibold text-slate-900">Find stale leads</div></div>
+      </div>
+      <div class="w-px h-6 bg-slate-300 opacity-40"></div>
+      <div class="w-[360px] bg-white border border-slate-200 rounded-xl p-3 flex items-center gap-3 opacity-40">
+        <div class="w-9 h-9 rounded-lg bg-violet-100"></div>
+        <div class="flex-1"><div class="text-[13px] font-semibold text-slate-900">Classify by re-engagement fit</div></div>
+      </div>
+      <div class="w-px h-6 bg-slate-300 opacity-40"></div>
+      <div class="w-[360px] bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Step 3 · Call Automation</div>
+          <div class="text-[13px] font-semibold text-slate-900">Configure external call →</div>
+        </div>
+      </div>
+    </div>
+    <!-- Dim overlay -->
+    <div class="absolute inset-0 bg-slate-900/30"></div>
+
+    <!-- Drawer -->
+    <aside class="absolute right-0 top-0 bottom-0 w-[600px] bg-white shadow-[-16px_0_48px_rgba(0,0,0,0.18)] flex flex-col">
+      <!-- Header -->
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Step 3 · Call Automation</div>
+          <div class="text-[15px] font-semibold text-slate-900">Choose an Automation to call</div>
+        </div>
+        <button class="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-500">×</button>
+      </div>
+
+      <!-- Filter row -->
+      <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2">
+        <div class="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
+          <button class="px-3 py-1 rounded-md text-[12px] font-semibold bg-white shadow-sm text-slate-900">All (7)</button>
+          <button class="px-3 py-1 rounded-md text-[12px] font-medium text-slate-500">This subaccount (3)</button>
+          <button class="px-3 py-1 rounded-md text-[12px] font-medium text-slate-500">Organisation (3)</button>
+          <button class="px-3 py-1 rounded-md text-[12px] font-medium text-slate-500">System (1)</button>
+        </div>
+        <div class="flex-1"></div>
+        <div class="flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-1 text-slate-500">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" placeholder="Search Automations…" class="bg-transparent outline-none text-[12.5px] w-40" />
+        </div>
+      </div>
+
+      <!-- Automation list -->
+      <div class="flex-1 overflow-auto px-6 py-3 space-y-2">
+        <!-- Selected -->
+        <div class="border-2 border-indigo-500 bg-indigo-50/40 rounded-lg p-3 relative">
+          <div class="absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 uppercase tracking-wider">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+            Selected
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #6d28d9, #8b5cf6);">M</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <div class="text-[13.5px] font-semibold text-slate-900">Push to HubSpot re-engagement list</div>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 uppercase">Make</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase">subaccount</span>
+              </div>
+              <div class="text-[12px] text-slate-600 mt-0.5">Adds contact IDs to the HubSpot "Re-engagement Q4" list via Make scenario sc-1831.</div>
+              <div class="mt-1.5 flex items-center gap-3 text-[11.5px] text-slate-500">
+                <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>2 / 2 connections ready</span>
+                <span>·</span>
+                <span>expects: <code class="text-[11px] bg-white border border-slate-200 rounded px-1 py-0.5">{ contactIds: string[], listName: string }</code></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Other options (compact) -->
+        <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #059669, #10b981);">n</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <div class="text-[13.5px] font-semibold text-slate-900">Sync contact to Mailchimp</div>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase">n8n</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase">organisation</span>
+              </div>
+              <div class="text-[12px] text-slate-600 mt-0.5">Adds contact to Mailchimp audience with tags.</div>
+              <div class="mt-1.5 text-[11.5px] text-amber-700 inline-flex items-center gap-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>1 connection missing: Mailchimp OAuth</div>
+            </div>
+          </div>
+        </button>
+
+        <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #d97706, #f59e0b);">Z</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <div class="text-[13.5px] font-semibold text-slate-900">Post to Slack #leads</div>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase">Zapier</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase">organisation</span>
+              </div>
+              <div class="text-[12px] text-slate-600 mt-0.5">Posts a summary message to Slack.</div>
+              <div class="mt-1.5 text-[11.5px] text-emerald-700 inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>1 / 1 connection ready</div>
+            </div>
+          </div>
+        </button>
+
+        <button class="w-full text-left border border-slate-200 bg-white hover:bg-slate-50 rounded-lg p-3 transition-colors">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[12px]" style="background: linear-gradient(135deg, #334155, #64748b);">⚙</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <div class="text-[13.5px] font-semibold text-slate-900">Generic webhook: internal ops</div>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 uppercase">Custom webhook</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase">system</span>
+              </div>
+              <div class="text-[12px] text-slate-600 mt-0.5">Internal system automation — always available.</div>
+              <div class="mt-1.5 text-[11.5px] text-emerald-700 inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>No connections required</div>
+            </div>
+          </div>
+        </button>
+      </div>
+
+      <!-- Divider -->
+      <div class="px-6 pt-3 border-t border-slate-100 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Map your inputs</div>
+
+      <!-- Input mapping editor -->
+      <div class="px-6 py-3 space-y-3 max-h-[280px] overflow-auto">
+        <div class="text-[12px] text-slate-600 leading-relaxed">
+          The Automation expects two fields. Fill each one with a value from earlier steps, or type a literal.
+        </div>
+
+        <!-- Field 1 -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <label class="text-[12.5px] font-semibold text-slate-800">contactIds <span class="text-red-500">*</span></label>
+            <span class="text-[10px] text-slate-500">string[]</span>
+          </div>
+          <div class="border border-slate-200 rounded-lg bg-slate-50 p-2 font-mono text-[12px] text-slate-800">
+            <span class="token-chip">{{ steps.find_stale_leads.output.ids }}</span>
+          </div>
+          <div class="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            <span class="text-[10.5px] text-slate-500">Quick pick:</span>
+            <button class="token-chip hover:bg-indigo-100">{{ steps.find_stale_leads.output.ids }}</button>
+            <button class="token-chip hover:bg-indigo-100">{{ steps.classify.output.qualifiedIds }}</button>
+            <button class="token-chip hover:bg-indigo-100">{{ run.input.contacts }}</button>
+          </div>
+        </div>
+
+        <!-- Field 2 -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <label class="text-[12.5px] font-semibold text-slate-800">listName <span class="text-red-500">*</span></label>
+            <span class="text-[10px] text-slate-500">string</span>
+          </div>
+          <div class="border border-slate-200 rounded-lg bg-white p-2 font-mono text-[12px] text-slate-800">
+            "Re-engagement Q4"
+          </div>
+          <div class="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            <span class="text-[10.5px] text-slate-500">Quick pick:</span>
+            <button class="token-chip hover:bg-indigo-100">{{ run.input.campaignName }}</button>
+            <button class="token-chip hover:bg-indigo-100">{{ steps.classify.output.segmentName }}</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scope confirmation + footer -->
+      <div class="px-6 py-3 border-t border-slate-100 bg-emerald-50/60 text-[12px] text-emerald-800 flex items-center gap-2">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+        Scope match: this Automation is subaccount-scoped to <strong>Acme Co</strong>, the same subaccount this Workflow runs against.
+      </div>
+      <div class="px-6 py-3 flex items-center justify-between border-t border-slate-100">
+        <button class="text-[12.5px] text-slate-500 hover:text-slate-700">Cancel</button>
+        <button class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Add step to Workflow</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Annotations -->
+  <div class="mt-6 grid grid-cols-3 gap-4">
+    <div class="mock-annotation">
+      <strong>Scope badge per row:</strong> subaccount / organisation / system. Matches §5.8's scope-resolution rule; pre-empts <code>automation_scope_mismatch</code> errors by surfacing tenancy at pick time.
+    </div>
+    <div class="mock-annotation">
+      <strong>Connection readiness:</strong> per-row check of whether <code>required_connections</code> resolve. Missing connections are the #1 cause of Automation-step failures at dispatch.
+    </div>
+    <div class="mock-annotation">
+      <strong>Quick-pick chips:</strong> non-technical users don't hand-type the <code>{{ steps.X.output.Y }}</code> template — they click a chip. The raw DSL is still shown for anyone who wants to edit it.
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

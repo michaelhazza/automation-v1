@@ -1,0 +1,239 @@
+<!doctype html>
+<!--
+  Mock 10 / 10 — Agent config page with Explore/Execute + heartbeat gate
+  ========================================================================
+  Open question resolved:
+    Admin-facing but crowded — needs layout validation. Do default_safety_mode
+    and the heartbeat activity-gate toggles integrate cleanly without visual
+    overload?
+  Spec refs: §6.8 "Agent config page" (default_safety_mode),
+             §7.9 UI surface (heartbeat activity-gate + thresholds)
+  Real vs stubbed:
+    [real]    Tab-bar form shell, section headers, toggle + input patterns
+              (matches AdminAgentEditPage.tsx around lines 1416–1422).
+    [NEW]     "Default safety mode" segment radio under Behaviour.
+    [NEW]     "Heartbeat activity gate" block under the existing heartbeat toggle,
+              with the two number inputs plus the copy from spec §7.9.
+    [NEW]     Live tick-state summary on the right — shows the deterministic
+              gate isn't a black box (last tick, ticks-since-meaningful-run, etc.).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 10 — Agent config page</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f1f5f9; }
+  .mock-annotation { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 11px; padding: 6px 10px; border-radius: 6px; line-height: 1.4; }
+  /* toggle */
+  .toggle { width:36px; height:20px; background:#cbd5e1; border-radius:999px; position:relative; transition:background 120ms; cursor:pointer; flex-shrink:0; }
+  .toggle::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; background:white; border-radius:50%; transition:left 120ms; box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+  .toggle.on { background:#6366f1; }
+  .toggle.on::after { left:18px; }
+  /* segmented radio */
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:white; }
+  .seg-opt { padding:6px 14px; font-size:12.5px; font-weight:600; color:#64748b; cursor:pointer; border:none; background:transparent; }
+  .seg-opt.on { background:#6366f1; color:white; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-[1440px] mx-auto p-6">
+  <div class="flex justify-between items-start mb-4">
+    <div>
+      <h1 class="text-base font-bold text-slate-900">Mock 10 — Agent config page (safety mode + heartbeat gate)</h1>
+      <p class="text-[13px] text-slate-500 mt-0.5">Tier 2 · Resolves: <em>does the admin form stay readable with two new sections?</em></p>
+    </div>
+    <a href="index.html" class="text-[13px] text-indigo-600 hover:text-indigo-800 font-medium no-underline">← Back to all mocks</a>
+  </div>
+
+  <!-- Page header -->
+  <div class="bg-white border border-slate-200 rounded-t-xl px-6 pt-5 pb-0">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white text-[20px]">📇</div>
+        <div>
+          <div class="text-[18px] font-bold text-slate-900">CRM Agent</div>
+          <div class="text-[12px] text-slate-500">System agent · Organisation config</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12.5px] font-medium rounded-md">View runs</button>
+        <button class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-md">Save changes</button>
+      </div>
+    </div>
+    <!-- Tab bar -->
+    <div class="flex gap-1 border-b border-slate-200 -mb-px">
+      <button class="px-4 py-2.5 text-[13px] font-semibold border-b-2 border-indigo-600 text-indigo-600">General</button>
+      <button class="px-4 py-2.5 text-[13px] font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Skills</button>
+      <button class="px-4 py-2.5 text-[13px] font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Memory</button>
+      <button class="px-4 py-2.5 text-[13px] font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Schedule</button>
+      <button class="px-4 py-2.5 text-[13px] font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Integrations</button>
+    </div>
+  </div>
+
+  <!-- Main grid -->
+  <div class="grid grid-cols-3 gap-0 bg-white border-x border-b border-slate-200 rounded-b-xl overflow-hidden">
+    <!-- Form column -->
+    <div class="col-span-2 p-6 space-y-6 border-r border-slate-200">
+
+      <!-- Identity section (existing, condensed) -->
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-3">Identity</div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Name</label>
+            <input type="text" value="CRM Agent" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Short description</label>
+            <input type="text" value="Manages contacts, deals, and pipeline updates" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white" />
+          </div>
+        </div>
+      </div>
+
+      <!-- BEHAVIOUR — new safety mode block -->
+      <div class="pt-2 border-t border-slate-100">
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-3">Behaviour</div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 relative">
+          <span class="absolute top-3 right-3 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-600 text-white uppercase tracking-wider">New</span>
+          <div class="flex items-center gap-2 mb-2">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-700"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <div class="text-[13.5px] font-semibold text-slate-900">Default safety mode for this agent</div>
+          </div>
+          <div class="text-[12px] text-slate-600 mb-3">New runs for this agent start in this mode unless you've already run it successfully in the other mode.</div>
+          <div class="seg">
+            <button class="seg-opt on">Explore</button>
+            <button class="seg-opt">Execute</button>
+          </div>
+          <div class="mt-3 text-[11.5px] text-slate-500">Explore is recommended for new agents. Auto-promote flow suggests Execute after 5 successful Explore runs per user.</div>
+        </div>
+      </div>
+
+      <!-- Heartbeat — existing toggle -->
+      <div class="pt-2 border-t border-slate-100">
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-3">Heartbeat</div>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-[13.5px] font-semibold text-slate-900">Run on a schedule</div>
+              <div class="text-[12px] text-slate-500">Wake this agent at a fixed interval to check for new signals.</div>
+            </div>
+            <div class="toggle on"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Interval (hours)</label>
+              <input type="number" value="4" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white" />
+            </div>
+            <div>
+              <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Offset (hours)</label>
+              <input type="number" value="0" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white" />
+            </div>
+          </div>
+
+          <!-- NEW — activity gate sub-block -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 relative">
+            <span class="absolute top-3 right-3 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-600 text-white uppercase tracking-wider">New</span>
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-700"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                <div class="text-[13.5px] font-semibold text-slate-900">Skip ticks with no activity</div>
+              </div>
+              <div class="toggle on"></div>
+            </div>
+            <div class="text-[12px] text-slate-600 mb-3">When on, this agent only runs a scheduled tick if something changed (new data, user requests, or outstanding issues). Prevents unnecessary LLM cost.</div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Minimum events to trigger a run</label>
+                <input type="number" value="3" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white" />
+                <div class="text-[11px] text-slate-500 mt-1">Default: 3. New data since last tick.</div>
+              </div>
+              <div>
+                <label class="block text-[12.5px] font-medium text-slate-700 mb-1.5">Maximum ticks before a mandatory run</label>
+                <input type="number" value="6" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] bg-white" />
+                <div class="text-[11px] text-slate-500 mt-1">Default: 6 (≈24h at 4h cadence).</div>
+              </div>
+            </div>
+
+            <!-- Rule inventory -->
+            <div class="mt-4 bg-white border border-slate-200 rounded-lg p-3">
+              <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Dispatch triggers (any one runs the tick)</div>
+              <ul class="text-[12px] text-slate-700 space-y-1 list-disc pl-5">
+                <li>More than <strong>3</strong> new events since last tick</li>
+                <li>More than <strong>6</strong> ticks since last meaningful run</li>
+                <li>A user clicked "Check now" since last tick</li>
+                <li>The subaccount has an outstanding "requires attention" flag</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right sidebar: live tick-state summary -->
+    <div class="col-span-1 p-6 bg-slate-50/50 space-y-5">
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Current state</div>
+        <div class="text-[12.5px] text-slate-700 space-y-2">
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-slate-500">Last tick evaluated</span>
+            <span class="font-mono text-[12px] text-slate-800">2m ago</span>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-slate-500">Last meaningful run</span>
+            <span class="font-mono text-[12px] text-slate-800">18h ago</span>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-slate-500">Ticks since meaningful run</span>
+            <span class="font-mono text-[12px] text-slate-800">4 / 6</span>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-slate-500">Last tick decision</span>
+            <span class="inline-flex items-center gap-1 font-semibold text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>skipped (no_signal)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-200">
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Gate activity (last 24h)</div>
+        <div class="flex items-end gap-1 h-16">
+          <div class="flex-1 bg-amber-300 rounded-sm" style="height: 30%"></div>
+          <div class="flex-1 bg-amber-300 rounded-sm" style="height: 30%"></div>
+          <div class="flex-1 bg-indigo-400 rounded-sm" style="height: 80%"></div>
+          <div class="flex-1 bg-amber-300 rounded-sm" style="height: 30%"></div>
+          <div class="flex-1 bg-amber-300 rounded-sm" style="height: 30%"></div>
+          <div class="flex-1 bg-indigo-400 rounded-sm" style="height: 90%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-slate-500 mt-2">
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-indigo-400"></span>Ran (2)</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-300"></span>Skipped (4)</span>
+          <span class="text-slate-400">Skip rate 67%</span>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-200">
+        <button class="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-md">Check now</button>
+        <div class="text-[11px] text-slate-500 mt-1.5 text-center">Forces the next tick regardless of gate.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div class="mt-6 grid grid-cols-3 gap-4">
+    <div class="mock-annotation">
+      <strong>Progressive disclosure:</strong> both new blocks sit inside mini-cards with gray backgrounds so they feel like settings groups, not flat additions. The page doesn't flatten into one long column.
+    </div>
+    <div class="mock-annotation">
+      <strong>Gate transparency:</strong> right sidebar shows the deterministic state (last tick, counter, last decision + reason) so admins can predict the next tick's behaviour without grepping logs. Matches the §7.8 tracing contract.
+    </div>
+    <div class="mock-annotation">
+      <strong>"Check now" button:</strong> directly wires into Rule 3 (explicit trigger) from §7.4 — closes the loop between the rule and a UI affordance.
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

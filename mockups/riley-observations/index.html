@@ -1,0 +1,231 @@
+<!doctype html>
+<!--
+  Index — Riley Observations mockup review surface
+  ==================================================
+  One click-through hub for all 10 mocks (7 Tier 1 + 3 Tier 2).
+  Each card names the open question it resolves so the spec review
+  can walk top-to-bottom and tick them off.
+
+  Spec under review: docs/riley-observations-dev-spec.md
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Riley Observations — Mockup Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; }
+  .card { transition: all 150ms; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
+  .tier-1 { border-left: 4px solid #6366f1; }
+  .tier-2 { border-left: 4px solid #10b981; }
+  .gradient-header { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Header -->
+<div class="gradient-header text-white">
+  <div class="max-w-[1280px] mx-auto px-8 py-10">
+    <div class="text-[11px] uppercase tracking-[0.2em] font-semibold text-indigo-200 mb-2">Spec review · pre-build</div>
+    <h1 class="text-[32px] font-extrabold leading-tight">Riley Observations — Mockups</h1>
+    <p class="text-[15px] text-indigo-100 mt-3 max-w-2xl leading-relaxed">
+      Ten static HTML mockups exploring the UX-heavy sections of the dev spec.
+      Each one names the open question it resolves so finalising the spec is a
+      walk down this list.
+    </p>
+    <div class="mt-6 flex items-center gap-3 text-[13px]">
+      <span class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-full"><span class="w-2 h-2 rounded-full bg-indigo-300"></span>7 Tier 1 (must-have before build)</span>
+      <span class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-full"><span class="w-2 h-2 rounded-full bg-emerald-300"></span>3 Tier 2 (strongly recommended)</span>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-[1280px] mx-auto px-8 py-10">
+
+  <!-- Context block -->
+  <div class="bg-white border border-slate-200 rounded-xl p-6 mb-8">
+    <div class="grid grid-cols-4 gap-6 text-[13px] text-slate-700">
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Source spec</div>
+        <a href="../../docs/riley-observations-dev-spec.md" class="text-indigo-600 hover:underline font-mono text-[11.5px]">docs/riley-observations-dev-spec.md</a>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Parts covered</div>
+        <div>1 (rename) · 2 (composition) · 3 (Explore / Execute) · 4 (heartbeat gate)</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">What's stubbed</div>
+        <div>Dynamic data, graph renderers, canvas DAG.</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">What's production-shaped</div>
+        <div>Layout, typography, colour palette, nav-item shape, modal chrome.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIER 1 -->
+  <h2 class="text-[20px] font-bold text-slate-900 mb-1">Tier 1 — Must-have before build</h2>
+  <p class="text-[13.5px] text-slate-500 mb-5">These seven mockups resolve the open UX questions the written spec can't answer on its own.</p>
+
+  <div class="grid grid-cols-2 gap-5 mb-12">
+    <!-- 1 -->
+    <a href="01-sidebar-post-rename.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 1 · Part 1</span>
+        <span class="text-[11px] text-slate-400">Sidebar + global nav</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Sidebar post-rename</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Automations and Workflows sitting adjacently, with differentiated icons and hover-tooltip copy.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> does the two-concept model look coherent or redundant?
+      </div>
+    </a>
+    <!-- 2 -->
+    <a href="02-agent-chat-explore-mode.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 2 · Part 3</span>
+        <span class="text-[11px] text-slate-400">Agent chat</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Agent chat · Explore Mode</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Header chip, banner, mode-switch system message, "waiting for approval" review bubble.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> is the chip treatment safety-primary or annoying? Is "Explore / Execute" the right naming?
+      </div>
+    </a>
+    <!-- 3 -->
+    <a href="03-workflow-run-modal-step2.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 3 · Part 3</span>
+        <span class="text-[11px] text-slate-400">Run Modal</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Workflow Run Modal step 2</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Radio pair (Explore / Execute) + side-by-side disabled variant for scheduled runs.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> does step 2 add friction or clarity? Is Execute copy alarming or honest?
+      </div>
+    </a>
+    <!-- 4 -->
+    <a href="04-promote-to-execute-prompt.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 4 · Part 3</span>
+        <span class="text-[11px] text-slate-400">Modal</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Promote-to-Execute prompt</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Earned-not-trapped framing: trust receipts, "Not yet" behaviour, reverse promotion.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> click-through trap vs earned promotion (ChatGPT-reviewer concern).
+      </div>
+    </a>
+    <!-- 5 -->
+    <a href="05-workflow-studio-step-picker.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 5 · Part 2</span>
+        <span class="text-[11px] text-slate-400">Workflow Studio</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">"Call Automation" step picker</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">New step-type option as a first-class sibling alongside Invoke Skill and Agent Decision.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> does composition feel first-class or bolt-on?
+      </div>
+    </a>
+    <!-- 6 -->
+    <a href="06-automation-picker-drawer.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 6 · Part 2</span>
+        <span class="text-[11px] text-slate-400">Drawer</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Automation picker + input mapping</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Scope-filtered list, connection readiness, input-mapping editor with quick-pick chips.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> is the picker + input-mapping clear for a non-technical agency owner?
+      </div>
+    </a>
+    <!-- 7 -->
+    <a href="07-invoke-automation-run-detail.html" class="card tier-1 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider">Mock 7 · Part 2</span>
+        <span class="text-[11px] text-slate-400">Run Detail</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">invoke_automation · success + failure</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Payload, response, tracing preview, and a "next step to fix" hint on failures.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> can the user self-diagnose a failed external call without filing a ticket?
+      </div>
+    </a>
+  </div>
+
+  <!-- TIER 2 -->
+  <h2 class="text-[20px] font-bold text-slate-900 mb-1">Tier 2 — Strongly recommended</h2>
+  <p class="text-[13.5px] text-slate-500 mb-5">Three more mockups for framing copy and form-layout validation.</p>
+
+  <div class="grid grid-cols-3 gap-5 mb-12">
+    <!-- 8 -->
+    <a href="08-workflows-library.html" class="card tier-2 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase tracking-wider">Mock 8 · Part 1</span>
+        <span class="text-[11px] text-slate-400">Library</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Workflows Library</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Empty + populated states; composition signal on every card.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> framing copy + first-run empty state.
+      </div>
+    </a>
+    <!-- 9 -->
+    <a href="09-automations-library.html" class="card tier-2 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase tracking-wider">Mock 9 · Part 1</span>
+        <span class="text-[11px] text-slate-400">Library</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Automations Library</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Parallel shape to Workflows; engine filter + connection readiness per card.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> parallel-but-distinct feel; engine-based onboarding.
+      </div>
+    </a>
+    <!-- 10 -->
+    <a href="10-agent-config-page.html" class="card tier-2 block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase tracking-wider">Mock 10 · Parts 3+4</span>
+        <span class="text-[11px] text-slate-400">Admin form</span>
+      </div>
+      <h3 class="text-[15px] font-bold text-slate-900">Agent config · safety + gate</h3>
+      <p class="text-[12.5px] text-slate-600 mt-1.5 leading-relaxed">Default safety mode + heartbeat activity-gate with live tick-state sidebar.</p>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-[11.5px] text-slate-500">
+        <strong class="text-slate-700">Resolves:</strong> does the crowded admin form stay readable?
+      </div>
+    </a>
+  </div>
+
+  <!-- What's NOT mocked -->
+  <div class="bg-slate-100 border border-slate-200 rounded-xl p-6">
+    <h2 class="text-[14px] font-bold text-slate-900 mb-2">Deliberately not mocked</h2>
+    <p class="text-[13px] text-slate-600 mb-3">These spec sections have no v1 UI surface (query-only observability) or are pure doc edits. No mock-up would add signal.</p>
+    <ul class="text-[12.5px] text-slate-700 space-y-1.5 list-disc pl-5">
+      <li><strong>Part 5 — Context-assembly telemetry.</strong> No UI in v1 (§8.5 "No UI in v1. Query via existing observability tooling.").</li>
+      <li><strong>Part 4 — Heartbeat gate dashboard.</strong> v1 observability is query-only; no user surface (§7.8 "Operator dashboard (future work, not in v1)"). <em>Config form IS mocked</em> — see Mock 10.</li>
+      <li><strong>Part 6 — Agent-decomposition rule.</strong> Checklist edit only; no UI.</li>
+    </ul>
+  </div>
+
+  <!-- How to use this -->
+  <div class="mt-8 bg-white border border-slate-200 rounded-xl p-6">
+    <h2 class="text-[14px] font-bold text-slate-900 mb-2">How to use this review surface</h2>
+    <ol class="text-[13px] text-slate-700 space-y-2 list-decimal pl-5 leading-relaxed">
+      <li>Walk top-to-bottom. Each card names its open question; click through, read the inline annotations, form a verdict.</li>
+      <li>If a mock resolves the question → note it in the spec as decided (copy the chosen copy verbatim if applicable).</li>
+      <li>If a mock raises a <em>new</em> question → add it to <code class="text-[11.5px] bg-slate-100 px-1.5 py-0.5 rounded">tasks/todo.md</code> under the existing "Deferred from spec-reviewer review — riley-observations-dev-spec" section.</li>
+      <li>When all ten verdicts land, the spec is ready for architect decomposition.</li>
+    </ol>
+  </div>
+
+  <div class="mt-8 text-center text-[11.5px] text-slate-400">
+    Mockups are static HTML. Use <code>File → Open</code> in a browser, or serve the folder locally (e.g. <code>python -m http.server</code> from <code>mockups/riley-observations/</code>).
+  </div>
+</div>
+
+</body>
+</html>
