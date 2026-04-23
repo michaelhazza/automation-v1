@@ -15,7 +15,7 @@ interface DelegationGraphNode {
   hierarchyDepth: number | null;
   delegationDirection: 'down' | 'up' | 'lateral' | null;
   status: string;
-  startedAt: string;
+  startedAt: string | null;
   completedAt: string | null;
 }
 
@@ -182,18 +182,13 @@ export default function DelegationGraphView({ runId }: DelegationGraphViewProps)
       .get<DelegationGraphResponse>(`/api/agent-runs/${runId}/delegation-graph`)
       .then(({ data }) => setGraph(data))
       .catch((err: unknown) => {
+        const data = (err as { response?: { data?: unknown } }).response?.data;
+        const errField = (data as { error?: unknown } | undefined)?.error;
         const message =
-          err != null &&
-          typeof err === 'object' &&
-          'response' in err &&
-          err.response != null &&
-          typeof err.response === 'object' &&
-          'data' in err.response &&
-          err.response.data != null &&
-          typeof err.response.data === 'object' &&
-          'error' in err.response.data
-            ? String((err.response as { data: { error: string } }).data.error)
-            : 'Failed to load delegation graph';
+          typeof errField === 'string'
+            ? errField
+            : (errField as { message?: string } | undefined)?.message ??
+              'Failed to load delegation graph';
         setError(message);
       })
       .finally(() => setLoading(false));

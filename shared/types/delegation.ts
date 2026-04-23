@@ -61,3 +61,36 @@ export interface DelegationOutcome {
   delegationDirection: DelegationDirection;
   createdAt: string; // ISO 8601
 }
+
+// ---------------------------------------------------------------------------
+// Delegation Graph — spec §7.2
+// ---------------------------------------------------------------------------
+
+export interface DelegationGraphNode {
+  runId: string;
+  agentId: string;
+  agentName: string;
+  isSubAgent: boolean;
+  delegationScope: 'children' | 'descendants' | 'subaccount' | null;
+  hierarchyDepth: number | null;
+  delegationDirection: 'down' | 'up' | 'lateral' | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type DelegationEdgeKind = 'spawn' | 'handoff';
+
+export interface DelegationGraphEdge {
+  parentRunId: string;
+  childRunId: string;
+  kind: DelegationEdgeKind;
+}
+
+export interface DelegationGraphResponse {
+  rootRunId: string;
+  nodes: DelegationGraphNode[];
+  edges: DelegationGraphEdge[];
+  /** true if fan-out exceeded MAX_DEPTH_BOUND = 6 levels */
+  truncated: boolean;
+}
