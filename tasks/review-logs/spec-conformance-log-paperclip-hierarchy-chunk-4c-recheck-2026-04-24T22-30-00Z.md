@@ -8,6 +8,7 @@
 **Changed-code set:** 7 files (same as original run)
 **Prior log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4c-2026-04-24T22-05-43Z.md`
 **Run at:** 2026-04-24T22:30:00Z
+**Commit at finish:** `4f7ffad4`
 
 ---
 
