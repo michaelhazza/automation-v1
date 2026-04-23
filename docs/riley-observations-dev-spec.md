@@ -24,6 +24,7 @@ Every proposed change in this spec has: a clear contract, named files/surfaces, 
 1. [Goals, non-goals, success criteria](#1-goals-non-goals-success-criteria)
 2. [Background — condensed](#2-background--condensed)
 3. [Existing system reference](#3-existing-system-reference)
+3a. [UI surface decisions](#3a-ui-surface-decisions)
 4. [Part 1 — Naming pass](#4-part-1--naming-pass)
 5. [Part 2 — Workflows calling Automations (composition)](#5-part-2--workflows-calling-automations-composition)
 6. [Part 3 — Explore Mode / Execute Mode](#6-part-3--explore-mode--execute-mode)
@@ -135,6 +136,50 @@ This is the vocabulary every Part builds on. Reference section — skip to Part 
 
 - Portal (`/portal/:subaccountId/*`) is the customer-facing view into agency-configured primitives.
 - Portal currently exposes both Playbooks and Processes (plus other surfaces). Any rename to user-visible strings propagates to portal copy.
+
+---
+
+## 3a. UI surface decisions
+
+Every UI change in this spec has an accompanying mockup in [`prototypes/riley-observations/`](../prototypes/riley-observations/index.html). The mockup set was reviewed against [`docs/frontend-design-principles.md`](./frontend-design-principles.md) and deliberately trimmed — where a v1 UI surface was originally going to expose internal configuration, diagnostics, or aggregated metrics, those surfaces were cut or deferred to admin-only views.
+
+Design posture applied across every mockup, and binding on every section below:
+
+- **Start from the user's task, not the data model.** A new column does not imply a new panel.
+- **One primary action per screen.** Libraries have one CTA. Modals have one Run / Save / Switch.
+- **Default to hidden** for dashboards, KPI tiles, diagnostic panels, trend charts, aggregated metrics, and internal identifier exposure. These ship only on admin-only observability pages that the primary user never opens.
+- **Inline state beats dashboards.** A status dot next to a name + a timestamp beats a utilization panel. Where runs surface on per-entity pages, they surface as single rows with one human error line and one "fix" CTA — not as full JSON / tracing / error-code references.
+- **Extend existing pages; do not introduce parallel surfaces.** Every "agent config" field in this spec slots into the existing `AdminAgentEditPage.tsx` / `SubaccountAgentEditPage.tsx` shells. No new config page is created. The implementation path is `Edit` an existing form, not `Write` a new route.
+
+### 3a.1 Mockup ↔ spec section map
+
+| # | Mockup | Part | Primary user task | Surface type |
+|---|---|---|---|---|
+| 01 | [Sidebar post-rename](../prototypes/riley-observations/01-sidebar-post-rename.html) | 1 | Navigate to the right primitive | Existing sidebar, renamed labels + differentiated icons |
+| 02 | [Agent chat · Explore Mode](../prototypes/riley-observations/02-agent-chat-explore-mode.html) | 3 | Chat safely — see what will change before it runs | Existing chat page, new mode chip + approval card |
+| 03 | [Workflow Run Modal](../prototypes/riley-observations/03-workflow-run-modal-step2.html) | 3 | Pick a safety mode and run the Workflow | Existing `WorkflowRunModal`, new radio pair |
+| 04 | [Promote-to-Execute](../prototypes/riley-observations/04-promote-to-execute-prompt.html) | 3 | Decide whether to stop reviewing every action | New one-sentence modal |
+| 05 | [Step picker — "Call Automation"](../prototypes/riley-observations/05-workflow-studio-step-picker.html) | 2 | Add a step to the Workflow | Existing Studio step-type menu, new option |
+| 06 | [Automation picker + input mapping](../prototypes/riley-observations/06-automation-picker-drawer.html) | 2 | Pick an Automation and fill in its inputs | New drawer triggered from mock 05 |
+| 07 | [Failed step inline in run log](../prototypes/riley-observations/07-invoke-automation-run-detail.html) | 2 | Know what to do when something broke | Existing run log, one row — **no new run-detail page** |
+| 08 | [Workflows library](../prototypes/riley-observations/08-workflows-library.html) | 1 | Find or create a Workflow | Existing library, simplified |
+| 09 | [Automations library](../prototypes/riley-observations/09-automations-library.html) | 1 | Find or register an Automation | Existing library, simplified |
+| 10 | [Agent settings — safety + schedule](../prototypes/riley-observations/10-agent-config-page.html) | 3 + 4 | Set the agent's defaults | Existing `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section (~L1410–1531); existing `SubaccountAgentEditPage.tsx` (safety mode only) — **no new config page** |
+
+### 3a.2 Decisions locked by the mockup pass
+
+The following UI decisions are binding on every downstream section. Where §5.11 / §6.8 / §7.9 disagree with the mockups, the mockups win — the section prose has been updated to match, and any remaining drift is a pre-implementation bug.
+
+1. **No new agent-config page is introduced.** `default_safety_mode` and the heartbeat activity-gate toggle are surgical additions to the existing "Schedule & Concurrency" section on `AdminAgentEditPage.tsx`. `default_safety_mode` mirrors onto `SubaccountAgentEditPage.tsx`. `OrgAgentConfigsPage.tsx` stays read-only. Architect + builder must `Edit` — not `Write` — these pages. Any parallel "Agent Safety Settings" page is a bug.
+2. **No new run-detail page for `invoke_automation` steps.** Failed Automation calls render as one row in the existing run log with a one-line human error ("The Mailchimp connection isn't set up for this subaccount") and one primary CTA ("Set up Mailchimp"). No JSON payload preview, no tracing-event names, no HTTP status exposure, no error-code reference grid on user screens. Internal diagnostics live in the tracing sink (§5.9) and an admin observability page — not here.
+3. **Heartbeat gate UI ships the toggle only.** The two numeric thresholds (`heartbeat_event_delta_threshold`, `heartbeat_min_ticks_before_mandatory_run`) remain in the schema with their defaults (3, 6) but **are not exposed as per-agent form fields in v1**. Tuning is an admin observability concern; re-exposure happens only if operational data shows per-agent tuning is necessary. The rule-inventory help text (*"more than 3 new events since last tick…"*) is dropped — gate logic is internal.
+4. **Scheduled-run mode is enforced server-side only.** The `WorkflowRunModal` has no "disabled selector" variant for scheduled runs; there is no second modal state to maintain. Scheduled runs skip the mode-picker step entirely and always resolve to Execute at dispatch (§6.6 rule 3).
+5. **Mid-conversation mode switches are recorded in the run log, not inline in the chat stream.** §6.8's original "Mode changed to Execute at 14:32 by {user}" system-message rendering is dropped. The run log (existing infrastructure) is the audit trail; the chat surface stays focused on conversation + approvals.
+6. **Promote-to-Execute prompt ships as one sentence + two buttons.** No trust-receipts list of previously-approved actions inside the modal; the lead-in line ("5 successful Explore runs") is the receipt. Typing "Execute" to confirm is not required in v1 (reopens only if post-launch incident data demands it).
+7. **Automation picker shows list + selected-row-expands-inline for input mapping.** No scope-filter tabs, no engine-filter chips, no per-row connection-readiness counters. Scope matching is resolved server-side via the §5.8 rule; engine type is informational metadata per row; connection readiness surfaces inline only when a connection is missing ("Needs a Mailchimp connection").
+8. **Libraries render as single tables with ≤ 4 columns.** No KPI tiles, no filter chips, no per-row step-count chips ("3 native · 1 Automation"). Workflows: name, agent, last-run. Automations: name, tool, readiness. One primary action per page.
+
+Anything not listed here that a future UI change introduces must pass the [frontend-design-principles](./frontend-design-principles.md) pre-design checklist before going into a mockup — let alone into production code.
 
 ---
 
@@ -736,13 +781,18 @@ Both events register in `server/lib/tracing.ts`. Keep response bodies OUT of the
 
 ### 5.11 UI considerations
 
-- The Workflow Studio (renamed in Part 1) gains a new step-type option: "Call Automation."
-- Selecting it opens a picker listing the user's Automations filtered by scope.
-- Picker shows Automation name, description, engine type (Make / n8n / etc.), required connections.
-- Input mapping editor uses the same `{{ steps.X.output.Y }}` template-expression UI as other Workflow step types — no parallel DSL for `invoke_automation`.
-- Output mapping editor previews the Automation's declared `output_schema` if present.
+Locked by the mockup pass (see §3a.2). Mockups: [05 step picker](../prototypes/riley-observations/05-workflow-studio-step-picker.html), [06 Automation picker](../prototypes/riley-observations/06-automation-picker-drawer.html), [07 failed step in run log](../prototypes/riley-observations/07-invoke-automation-run-detail.html).
 
-Exact UI layout and component list: architect pass.
+- **Step-type menu:** the existing Workflow Studio step-type menu gains a new sibling option *"Call an Automation."* It is rendered alongside *"Run a skill"*, *"Ask the agent to decide"*, *"Wait"*, and *"Ask a person to review"* with no elevated visual treatment beyond a subtle highlight on first introduction. No separate "advanced" or "external" submenu.
+- **Automation picker drawer:** single right-side drawer. Shows a plain list of the user's Automations. The selected row expands inline to reveal the input-mapping fields — no dedicated picker → configure two-step flow.
+- **Picker row content:** Automation name + tool badge (Make / n8n / GHL / Zapier / Webhook). No scope-filter tabs, no engine-filter chip row, no per-row connection-count readout. Connection-readiness surfaces inline only when a connection is missing (e.g. *"Needs a Mailchimp connection"*).
+- **Scope resolution is server-side.** The picker does not prompt the user to pick a scope; the §5.8 scope-matching rule runs on submit and rejects with `automation_scope_mismatch` if a cross-scope reference is attempted. Cross-scope references are rare by construction (users pick from their own scope's Automations) and do not need a UI filter.
+- **Input mapping:** plain labelled form fields. Authored values may be literals or template expressions in the existing `{{ steps.X.output.Y }}` DSL — the syntax is typed into the field directly, not exposed as a quick-pick chip row. The field placeholder and help-text document the template syntax for advanced users who need it. The template renderer module (cited in §5.3) remains the single DSL; no parallel input language.
+- **Output mapping:** the optional `outputMapping` is exposed as an additional section inside the selected row's expanded state, shown only when the user explicitly adds output bindings. The Automation's declared `output_schema` (if present) is surfaced as inline help text inside the first output-mapping field, not as a separate preview panel.
+- **Failed `invoke_automation` steps have NO dedicated run-detail page.** They surface as one row in the existing run log with a single human-readable error message and one primary CTA (e.g. *"Set up Mailchimp"*). Request / response bodies, tracing event names, HTTP status codes, and the full §5.7 error-code vocabulary are admin observability concerns — surfaced through the tracing sink and a future admin page, never on the user-facing run log.
+- **Success `invoke_automation` steps** surface as one row in the run log with a green dot and a short result summary (e.g. *"Pushed 34 contacts"*). The dispatched + completed telemetry events (§5.9) fire regardless; they are not exposed to the primary user.
+
+Exact component file names and placement within `WorkflowStudioPage.tsx` / run-log components: architect pass. Architect is bound by the mockups above — any divergence from them must route back through §3a's design-principles gate.
 
 ### 5.12 Success criteria
 
@@ -956,24 +1006,31 @@ Scheduled runs forcing `execute` is deliberate — review queues would pile up u
 
 ### 6.8 UI surfaces
 
+Locked by the mockup pass (see §3a.2). Mockups: [02 chat](../prototypes/riley-observations/02-agent-chat-explore-mode.html), [03 Run Modal](../prototypes/riley-observations/03-workflow-run-modal-step2.html), [04 Promote prompt](../prototypes/riley-observations/04-promote-to-execute-prompt.html), [10 agent settings](../prototypes/riley-observations/10-agent-config-page.html).
+
 The mode is visible on every run surface. Not hidden, not collapsible.
 
 **Agent chat page** (`AgentChatPage.tsx`):
-- Persistent header chip showing current mode: pill styled distinct per mode (Explore = neutral with lock icon; Execute = accent with play icon).
-- Single-click switch: clicking the chip toggles mode for the current conversation.
-- Banner below the header when entering a new conversation: *"Explore Mode — nothing will change until you approve."*
-- Mode changes mid-conversation are logged as system messages: *"Mode changed to Execute at 14:32 by {user}."*
+- Persistent header chip showing current mode. Single pill, no banner below the header. Explore = neutral pill with lock icon; Execute = accent pill with play icon. One inline chip is the whole mode affordance in the chat header.
+- Single-click toggle opens a small confirm dialog before switching. No inadvertent toggles mid-action.
+- Side-effecting actions in Explore Mode surface as an inline approval card in the message stream (buttons: *Approve* / *Skip*). Approved actions proceed; skipped actions are recorded and the run continues.
+- Mode changes mid-conversation are recorded in the existing run log; they are NOT rendered as an inline system-message bubble in the chat stream. The run-log entry is the audit trail — the chat surface stays focused on conversation + approvals.
 
 **Workflow Run Modal** (`WorkflowRunModal.tsx` after Part 1 rename):
-- Step 2 of the run wizard: explicit "Run in:" radio pair.
-  - Explore (selected by default): *"Review every side-effecting step before it runs."*
-  - Execute: *"Let auto-gated steps run immediately."*
-- The existing Supervised-mode checkbox is removed — Supervised semantics are a subset of Explore.
-- Scheduled runs: mode selector disabled, tooltip explains *"Scheduled runs always execute. Use Explore Mode for manual test runs."*
+- Single dialog with a two-radio mode picker: *Explore — review each action* / *Execute — run straight through*. Explore is the default.
+- No multi-step wizard framing around the mode picker; it's one question with one primary *Run* button.
+- The existing Supervised-mode checkbox is removed — Supervised semantics fold into Explore.
+- **Scheduled runs are handled server-side only.** There is no "selector disabled" UI variant for scheduled-run creation — the scheduled-run flow does not prompt for a mode. Mode resolution happens at dispatch via the §6.6 rules (top-level scheduled → Execute). No second modal state to maintain.
 
-**Agent config page** (`AdminAgentEditPage.tsx` + `SubaccountAgentEditPage.tsx` / `OrgAgentConfigsPage.tsx`):
-- New field under the existing config: "Default safety mode for this agent: [ Explore | Execute ]". Default is `explore` for new agents. (Form field name / column: `default_safety_mode`, never `default_run_mode`.)
-- Help text: *"New runs for this agent start in this mode unless you've already run it successfully in the other mode."*
+**Agent config — new fields on the EXISTING Agent Edit page, not a new page:**
+- `default_safety_mode` slots into the existing `AdminAgentEditPage.tsx` form AND the existing `SubaccountAgentEditPage.tsx` form. Rendered as a small two-option segmented control (*Explore* / *Execute*) inside the form's general/behaviour area. Column name / form field name: `default_safety_mode`, never `default_run_mode`.
+- Help text: *"Explore is recommended for new agents. Users can switch per-run if they need to."*
+- `OrgAgentConfigsPage.tsx` remains read-only in v1; no new field there.
+- **Implementation note (binding):** the architect pass and the builder session must `Edit` these existing files, not `Write` a new "Agent Safety Settings" page. `AdminAgentEditPage.tsx` is ~2,252 LOC today; the new field slots next to existing agent config (adjacent to the "Schedule & Concurrency" section used in §7.9). Introducing a parallel config surface is a bug.
+
+**Promote-to-Execute modal:**
+- One-sentence prompt + two buttons (*Not yet* / *Switch to Execute*). The lead-in line ("*5 successful Explore runs*") is the trust receipt — no separate list of previously-approved actions inside the modal.
+- *Not yet* suppresses the prompt until the counter accrues 5 more successful Explore runs; reverse promotion (user manually switches back to Explore after accepting Execute) resets the counter to 0 per §6.10.
 
 **Portal run surfaces** (customer-facing):
 - Customer-initiated Workflow runs always use agency-configured defaults (resolved server-side — customer cannot switch modes).
@@ -1252,12 +1309,16 @@ Operator dashboard (future work, not in v1): query this event type for a given a
 
 ### 7.9 UI surface
 
-`AdminAgentEditPage.tsx`, under the existing heartbeat toggle at line 1422, add:
+Locked by the mockup pass (see §3a.2). Mockup: [10 agent settings](../prototypes/riley-observations/10-agent-config-page.html).
 
-- Toggle: "Skip ticks with no activity" (maps to `heartbeat_activity_gate_enabled`).
-- Number input: "Minimum events to trigger a run" (maps to `heartbeat_event_delta_threshold`, default 3).
-- Number input: "Maximum ticks before a mandatory run" (maps to `heartbeat_min_ticks_before_mandatory_run`, default 6).
-- Help text: *"When on, this agent only runs a scheduled tick if something changed (new data, user requests, or outstanding issues). Prevents unnecessary LLM cost."*
+**New field on the EXISTING Agent Edit page, not a new page.** Slots into the existing `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section (existing heading at ~line 1410; existing heartbeat fields at ~lines 1420–1480). Builder session must `Edit` this file, not `Write` a new one.
+
+- **Toggle:** *"Skip ticks with no activity"* (maps to `heartbeat_activity_gate_enabled`).
+- **Help text:** *"Only runs when something's changed — prevents unnecessary cost."*
+
+**Numeric thresholds are NOT exposed as per-agent form fields in v1.** The two columns (`heartbeat_event_delta_threshold`, `heartbeat_min_ticks_before_mandatory_run`) remain in the schema with their default values (3 and 6) and are used internally by the gate's rule evaluation (§7.4). Per-agent tuning UI is deferred — if operational data after rollout shows individual agents need different thresholds, the thresholds re-surface on a future admin observability page. In v1, tuning happens at the schema-default level (migration + seed) if it happens at all. The rule-inventory help text (*"more than 3 new events since last tick…"*) is dropped — gate logic is internal.
+
+**Historical gate activity (skip rate over time, per-tick decisions, latency distribution)** is NOT rendered on the Agent Edit page. That observability lives in the tracing sink (§7.8) and surfaces — if at all — on a future admin observability page. No KPI tile, no sparkline, no "last decision: skipped (no_signal)" inline state on the form.
 
 System-admin only in v1. Agency-admin exposure follows after operational validation.
 

@@ -29,6 +29,31 @@ A mainstream AI-agent explainer video (Riley Brown, "OpenClaw workflows for non-
 
 ---
 
+## UI mockups — 2026-04-23 addendum
+
+Since this brief was drafted, the UI surfaces have been mocked and reviewed against [`docs/frontend-design-principles.md`](./frontend-design-principles.md). The full mockup set lives in [`prototypes/riley-observations/`](../prototypes/riley-observations/index.html); the locked design decisions live in the spec's [§3a.2](./riley-observations-dev-spec.md#3a-ui-surface-decisions).
+
+**All 10 mockups:**
+
+| # | Mockup | Recommendation | Primary user task |
+|---|---|---|---|
+| 01 | [Sidebar post-rename](../prototypes/riley-observations/01-sidebar-post-rename.html) | Rec 2 | Navigate to the right primitive |
+| 02 | [Agent chat · Explore Mode](../prototypes/riley-observations/02-agent-chat-explore-mode.html) | Rec 1 | Chat safely — see what will change before it runs |
+| 03 | [Workflow Run Modal — pick a mode](../prototypes/riley-observations/03-workflow-run-modal-step2.html) | Rec 1 | Pick a safety mode and run the Workflow |
+| 04 | [Promote-to-Execute prompt](../prototypes/riley-observations/04-promote-to-execute-prompt.html) | Rec 1 | Decide whether to stop reviewing every action |
+| 05 | [Workflow Studio — "Call Automation" step picker](../prototypes/riley-observations/05-workflow-studio-step-picker.html) | Rec 2 (composition) | Add a step to the Workflow |
+| 06 | [Automation picker + input mapping](../prototypes/riley-observations/06-automation-picker-drawer.html) | Rec 2 (composition) | Pick an Automation and fill in its inputs |
+| 07 | [Failed step inline in run log](../prototypes/riley-observations/07-invoke-automation-run-detail.html) | Rec 2 (composition) | Know what to do when something broke |
+| 08 | [Workflows library](../prototypes/riley-observations/08-workflows-library.html) | Rec 2 | Find or create a Workflow |
+| 09 | [Automations library](../prototypes/riley-observations/09-automations-library.html) | Rec 2 | Find or register an Automation |
+| 10 | [Agent settings — safety + schedule](../prototypes/riley-observations/10-agent-config-page.html) | Recs 1 + 3 | Set the agent's defaults on the existing Agent Edit page |
+
+**Binding resolution rule.** Where this brief prescribes UI behaviour that differs from the mockups (mode chip rendering, Run Modal wizard shape, Agent config page placement, "Check now" button, heartbeat-gate threshold inputs, etc.), the mockups and the spec's §3a.2 are the authoritative version. This brief is the originating narrative; §3a.2 is the implementation contract.
+
+**The key simplifications** (full list in spec §3a.2): no new agent-config page — `default_safety_mode` and heartbeat-gate toggle extend existing `AdminAgentEditPage.tsx` / `SubaccountAgentEditPage.tsx`; no new run-detail page for failed `invoke_automation` steps — they render as one row in the existing run log with one "Fix" CTA; heartbeat gate ships the toggle only (thresholds stay in the schema with defaults, not exposed in v1 UI); `WorkflowRunModal` drops the multi-step wizard framing; Promote-to-Execute drops the trust-receipts list.
+
+---
+
 ## Contents
 
 1. [Background, provenance, and reviewer reconciliation](#1-background-provenance-and-reviewer-reconciliation)

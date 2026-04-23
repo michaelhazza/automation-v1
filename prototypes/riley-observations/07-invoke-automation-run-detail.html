@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  Mock 7 / 10 — Failed Automation step (inline in the run log)
+  =============================================================
+  Primary user task: when something broke, know what to do next.
+  Simplified per docs/frontend-design-principles.md:
+    - dropped the dedicated Run Detail page layout (runs live in the existing run log)
+    - dropped the side-by-side success panel (success is an inline dot; no dedicated screen)
+    - dropped the 8-item error-code reference grid (that's admin docs, not user UI)
+    - dropped the JSON input / response / tracing preview (infrastructure leak)
+    - surface a single row in the existing run log with one human error line + one Fix button
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 7 — Failed Automation step</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[720px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 7 · A step failed in the run log</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- Run header (context) -->
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-slate-100">
+      <div class="text-[11.5px] text-slate-500">Weekly Lead Re-engagement · ran 2m ago</div>
+      <div class="text-[14.5px] font-semibold text-slate-900 mt-0.5">Stopped on step 3</div>
+    </div>
+
+    <!-- Step list (existing primitive). Each row is a single line. -->
+    <div>
+      <div class="px-5 py-3 flex items-center gap-3 border-b border-slate-100">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+        <div class="flex-1 text-[13.5px] text-slate-800">Find stale leads</div>
+        <div class="text-[11.5px] text-slate-500">34 contacts</div>
+      </div>
+      <div class="px-5 py-3 flex items-center gap-3 border-b border-slate-100">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+        <div class="flex-1 text-[13.5px] text-slate-800">Classify by fit</div>
+        <div class="text-[11.5px] text-slate-500">22 qualified</div>
+      </div>
+
+      <!-- Failed row — expanded, this is the whole "feature" surface for a failed Automation -->
+      <div class="px-5 py-4 bg-red-50/60 border-t border-b border-red-200">
+        <div class="flex items-start gap-3">
+          <span class="w-2 h-2 rounded-full bg-red-500 shrink-0 mt-1.5"></span>
+          <div class="flex-1">
+            <div class="text-[13.5px] font-semibold text-slate-900">Sync contact to Mailchimp</div>
+            <div class="text-[12.5px] text-red-800 mt-1">The Mailchimp connection isn't set up for this subaccount, so nothing was sent.</div>
+            <div class="mt-3 flex gap-2">
+              <button class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-md">Set up Mailchimp</button>
+              <button class="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12.5px] font-medium rounded-md border border-slate-300">Retry step</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skipped row -->
+      <div class="px-5 py-3 flex items-center gap-3">
+        <span class="w-2 h-2 rounded-full bg-slate-300 shrink-0"></span>
+        <div class="flex-1 text-[13.5px] text-slate-400">Send re-engagement email</div>
+        <div class="text-[11.5px] text-slate-400">skipped</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
+    Error codes, request payloads, response bodies, and tracing events are admin concerns. The primary user gets a one-line explanation and a Fix button.
+  </p>
+</div>
+
+</body>
+</html>
