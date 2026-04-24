@@ -207,11 +207,12 @@ export async function getPrioritisedClients(
     ORDER BY hs.subaccount_id, hs.observed_at DESC
   `);
 
-  if (!latestSnapshots.rows || latestSnapshots.rows.length === 0) return [];
+  const latestSnapshotRows = latestSnapshots as unknown as Array<{ subaccount_id: string; score: number; observed_at: Date }>;
+  if (latestSnapshotRows.length === 0) return [];
 
-  const subIds = latestSnapshots.rows.map(r => r.subaccount_id);
+  const subIds = latestSnapshotRows.map(r => r.subaccount_id);
   const scoreBySubId = new Map<string, number>(
-    latestSnapshots.rows.map(r => [r.subaccount_id, r.score]),
+    latestSnapshotRows.map(r => [r.subaccount_id, r.score]),
   );
 
   // ── 2. Latest churn assessment (band) per subaccount ─────────────────────
@@ -229,7 +230,7 @@ export async function getPrioritisedClients(
   `);
 
   const bandBySubId = new Map<string, string>(
-    (latestAssessments.rows ?? []).map(r => [r.subaccount_id, r.band]),
+    (latestAssessments as unknown as Array<{ subaccount_id: string; band: string }>).map(r => [r.subaccount_id, r.band]),
   );
 
   // ── 3. Score 7 days ago per subaccount (for delta) ────────────────────────
@@ -249,7 +250,7 @@ export async function getPrioritisedClients(
   `);
 
   const oldScoreBySubId = new Map<string, number>(
-    (oldSnapshots.rows ?? []).map(r => [r.subaccount_id, r.score]),
+    (oldSnapshots as unknown as Array<{ subaccount_id: string; score: number }>).map(r => [r.subaccount_id, r.score]),
   );
 
   // ── 4. Sparkline: one batched query, 4 weekly buckets over last 28 days ──
@@ -259,13 +260,13 @@ export async function getPrioritisedClients(
     const sparklineResult = await Promise.race([
       dbClient.execute<{
         subaccount_id: string;
-        week_bucket: number;
+        week_bucket: string;
         avg_score: number;
       }>(sql`
         SELECT
           hs.subaccount_id,
-          EXTRACT(WEEK FROM hs.observed_at)::int AS week_bucket,
-          AVG(hs.score)::int                     AS avg_score
+          DATE_TRUNC('week', hs.observed_at) AS week_bucket,
+          AVG(hs.score)::int                 AS avg_score
         FROM client_pulse_health_snapshots hs
         WHERE hs.organisation_id = ${orgId}
           AND hs.subaccount_id = ANY(${subIds})
@@ -278,7 +279,8 @@ export async function getPrioritisedClients(
       ),
     ]);
 
-    for (const row of sparklineResult.rows ?? []) {
+    const sparklineRows = sparklineResult as unknown as Array<{ subaccount_id: string; week_bucket: string; avg_score: number }>;
+    for (const row of sparklineRows) {
       const existing = sparklineMap.get(row.subaccount_id) ?? [];
       existing.push(row.avg_score);
       sparklineMap.set(row.subaccount_id, existing);
@@ -313,7 +315,7 @@ export async function getPrioritisedClients(
   `);
 
   const lastActionBySubId = new Map<string, { actionType: string; completedAt: Date }>(
-    (lastActionRows.rows ?? []).map(r => [
+    (lastActionRows as unknown as Array<{ subaccount_id: string; action_type: string; executed_at: Date | null; created_at: Date }>).map(r => [
       r.subaccount_id,
       {
         actionType: r.action_type,
@@ -334,7 +336,7 @@ export async function getPrioritisedClients(
   `);
 
   const hasPendingSet = new Set<string>(
-    (pendingReviewRows.rows ?? []).map(r => r.subaccount_id),
+    (pendingReviewRows as unknown as Array<{ subaccount_id: string }>).map(r => r.subaccount_id),
   );
 
   // ── 7. Subaccount names ───────────────────────────────────────────────────

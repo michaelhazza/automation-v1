@@ -39,10 +39,14 @@ export interface PendingInterventionActions {
 
 /**
  * Extracts the HTTP error code from an Axios-shaped rejection, if present.
+ * Reads the canonical asyncHandler shape `{ error: { code } }` first, then
+ * falls back to the legacy top-level `errorCode` for handlers that haven't
+ * been migrated yet.
  */
 function extractErrorCode(err: unknown): string | undefined {
-  return (err as { response?: { data?: { errorCode?: string } } })
-    ?.response?.data?.errorCode;
+  const data = (err as { response?: { data?: { error?: { code?: string }; errorCode?: string } } })
+    ?.response?.data;
+  return data?.error?.code ?? data?.errorCode;
 }
 
 function extractHttpStatus(err: unknown): number | undefined {

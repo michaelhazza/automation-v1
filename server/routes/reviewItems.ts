@@ -191,11 +191,10 @@ router.post(
 
     // Comment required on rejection — enforced here before hitting the service
     if (!comment || String(comment).trim().length === 0) {
-      res.status(400).json({
-        error: 'A comment is required when rejecting an action.',
-        code: 'COMMENT_REQUIRED',
-      });
-      return;
+      throw Object.assign(
+        new Error('A comment is required when rejecting an action.'),
+        { statusCode: 400, errorCode: 'COMMENT_REQUIRED' },
+      );
     }
 
     const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);

@@ -91,7 +91,17 @@ router.get(
       throw { statusCode: 400, message: 'Organisation context required' };
     }
 
-    // ── Parse query params ──────────────────────────────────────────────────
+    // ── Parse + validate query params ──────────────────────────────────────
+    const MAX_LIMIT = 100;
+    if (req.query.limit !== undefined) {
+      const limitRaw = Number.parseInt(String(req.query.limit), 10);
+      if (!Number.isFinite(limitRaw) || limitRaw < 1 || limitRaw > MAX_LIMIT) {
+        throw Object.assign(
+          new Error(`limit must be between 1 and ${MAX_LIMIT}`),
+          { statusCode: 400, errorCode: 'INVALID_LIMIT' },
+        );
+      }
+    }
     const limitRaw = Number.parseInt(String(req.query.limit ?? '7'), 10);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 7;
 
@@ -102,8 +112,10 @@ router.get(
     // ── Validate band param ────────────────────────────────────────────────
     const VALID_BANDS = ['all', 'critical', 'at_risk', 'watch', 'healthy'];
     if (!VALID_BANDS.includes(band)) {
-      res.status(400).json({ errorCode: 'INVALID_BAND', message: `band must be one of: ${VALID_BANDS.join(', ')}` });
-      return;
+      throw Object.assign(
+        new Error(`band must be one of: ${VALID_BANDS.join(', ')}`),
+        { statusCode: 400, errorCode: 'INVALID_BAND' },
+      );
     }
 
     // ── Fetch + filter + paginate ──────────────────────────────────────────
@@ -112,8 +124,10 @@ router.get(
     const { rows: page, nextCursor, hasMore, cursorError } = applyPagination(filtered, { limit, cursor, orgId });
 
     if (cursorError) {
-      res.status(400).json({ errorCode: 'INVALID_CURSOR', message: 'The provided cursor is invalid or has been tampered with.' });
-      return;
+      throw Object.assign(
+        new Error('The provided cursor is invalid or has been tampered with.'),
+        { statusCode: 400, errorCode: 'INVALID_CURSOR' },
+      );
     }
 
     // ── Shape response ─────────────────────────────────────────────────────

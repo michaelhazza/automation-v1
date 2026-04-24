@@ -45,7 +45,9 @@ function mockApiError(status: number, errorCode?: string) {
         message: `Request failed with status code ${status}`,
         response: {
           status,
-          data: errorCode ? { errorCode, message: errorCode } : { message: 'server error' },
+          data: errorCode
+            ? { error: { code: errorCode, message: errorCode } }
+            : { message: 'server error' },
         },
       };
       return Promise.reject(err);
