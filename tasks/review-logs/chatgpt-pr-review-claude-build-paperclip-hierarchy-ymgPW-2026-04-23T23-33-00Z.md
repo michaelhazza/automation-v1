@@ -225,6 +225,60 @@ No code changes → nothing to typecheck.
 
 ---
 
+## Final Summary
+
+- **Rounds:** 3
+- **Auto-accepted (technical):** 3 implemented | 0 rejected | 2 deferred
+- **User-decided:** 7 implemented | 1 rejected | 1 deferred
+- **Acknowledgments:** 2 (round 3 items #3 + #4 — no action required)
+- **Index write failures:** 0 (clean)
+
+### Deferred to tasks/todo.md § PR Review deferred items / PR #182
+
+- [user] Split `agent_runs` into `agent_runs_core` / `agent_runs_context` / `agent_runs_delegation` — reviewer said "not now, but soon." Explicit trigger conditions recorded (second un-fixable TS-inference wall, ~40-column threshold, new fourth column group).
+- [auto] Designate a canonical source of truth for delegation analytics (before any analytics surface ships that reads delegation data). Recommended direction: `delegation_outcomes` canonical for history, `agent_runs` telemetry columns for per-run joins.
+- [auto] Monitor cached-context cost under multi-level delegation chains. Current contract (each run resolves its own snapshot) is correct; N-deep chains cost N bundle resolutions. Future `reuseParentContext: true` opt-in documented in `architecture.md`.
+
+### Consistency check
+
+Zero contradictions across the 3 rounds. The architect-ordering finding in round 1 was revisited in round 2 (reviewer flagged the round 1 fix as still ambiguous); both rounds pointed the same direction (implement), round 2 just tightened the structure. No decision was flipped later.
+
+### Architectural items surfaced to screen (user decisions)
+
+- **#5 Round 1 (last-root mutation guard)** — user override on recommendation: my recommendation was `defer`, user approved `implement` with the invariant statement *"a sub-account will never exist without a root."* Shipped in `subaccountAgentService.updateLink` + `unlinkAgent` with `errorCode: 'last_root_protected'`.
+- **#4 Round 2 (`agent_runs` schema split)** — user-approved defer with explicit trigger conditions. Routed to `tasks/todo.md`.
+
+### KNOWLEDGE.md updated
+
+See entry below (pattern extraction).
+
+### architecture.md updated
+
+Yes. Four updates across 3 rounds:
+- §Hierarchical Agent Delegation — added subsection "Composition with cached-context infrastructure" locking the contract (round 2 #2).
+- §Structured errors and dual-write contract — added soft-breaker observability section (round 1 #3) then idempotency-guard section (round 2 #3).
+- §Root-agent contract — rewritten to document upper AND lower bounds of the "exactly one active root per subaccount" invariant plus the service-layer mutation guard (round 1 #5).
+
+### capabilities.md updated
+
+Yes. Six new bullets added to `### AI Agent System` covering the new hierarchy capabilities in customer-facing language (per-client leadership guarantee, scoped delegation, visible delegation graph, starter team templates, observable delegation ledger). Workspace Health detector count bumped from 7 to 10. New changelog entry for 2026-04-23 paperclip-hierarchy.
+
+### current-focus.md updated
+
+Yes. In-flight spec pointer moved from cached-context-infrastructure (PR #183 — now on main) to paperclip-hierarchy (PR #182 — this branch), merge-ready status.
+
+### PR readiness
+
+- PR #182: https://github.com/michaelhazza/automation-v1/pull/182
+- All 11 actionable findings across 3 rounds processed (7 user-implements, 3 auto-implements, 1 user-reject, 3 defers).
+- Branch merged with `main` cleanly (cached-context-infrastructure integrated; 4 migrations renumbered 0202-0205 → 0214-0217 to avoid collision; one Drizzle self-reference dropped to unblock TS inference).
+- Architecture, capabilities, and current-focus docs brought in sync with shipped code.
+- Deferred backlog recorded with explicit re-trigger conditions; no silent debt.
+
+**Ready to merge.**
+
+---
+
 ### Verification
 
 - `npm run build:server` (repository uses `build:server` as typecheck surface; there is no `typecheck` script) — ran on full working tree. All errors returned are in files not touched by this round: `pulseService.ts`, `regressionCaptureService.ts`, `skillExecutor.ts` at lines outside the delegation paths, `systemPnlService.ts`, `taskService.ts`, `workspaceMemoryService.ts`, `capabilityDiscoveryHandlers.ts`, `requestFeatureHandler.ts`. Filtering the output to any file edited by this round (`hierarchyRouteResolverServicePure`, `delegationOutcomeService`, `delegationGraphServicePure`, `subaccountAgentService`, `orchestratorFromTaskJob`, `shared/types/delegation`, `DelegationGraphView`, `StartingTeamPicker`, `architect.md`) returned zero errors.
