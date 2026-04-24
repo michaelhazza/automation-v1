@@ -179,32 +179,102 @@ Final verdict: No correctness bugs remain. No architectural blockers. No hidden 
 
 ---
 
+## Round 3 — 2026-04-24T14-50-00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+
+I went through the full PR surface, not just the delta you described. This is clean. There are no hidden correctness issues, no architectural regressions, and the resilience model is now actually robust. You're safe to merge. There are only two very minor observations, both optional.
+
+1. Status mirroring is now structurally correct (no drift risk today)
+You fixed the biggest historical footgun: canonical lives in server, client has a minimal mirror + helper functions. This is exactly the right tradeoff. Key piece: "server module is the source of truth; this file is a minimal browser-safe mirror". Reinforced with centralized helpers (isTerminalAnalyzerStatus, isMidFlightAnalyzerStatus) and removal of scattered string checks. Verdict: no drift today. Next evolution would be codegen, but not worth it yet.
+
+2. Stale-job recovery system is now properly closed-loop (this is excellent)
+Three layers: Detection (UI 5 min stalled, Sweep 15 min silence), Recovery (Sweep → marks failed + expires pg-boss lock; Resume endpoint → force-expire safety path), Execution (handler is idempotent and resumable). Specifically fixes the previously dangerous "dead worker + active pg-boss lock + UI stuck forever" state. Now: no permanent stuck state, no infinite 409 loop, no lost work. Production-grade behaviour.
+
+3. ProcessingStep: complex but now correct
+Polling lifecycle deterministic; Resume properly re-arms polling (pollVersion); stalled detection uses server timestamp, not mount time; terminal handling unified via helper. Was fragile before; now stable. Worth refactoring later. **Do not touch it now. It's in the right "stability-first" state.**
+
+4. MergeReviewBlock partition guard is a quiet high-quality addition
+Enum grows → dev warning fires; no runtime cost in prod; no silent misclassification. The exact kind of guard most codebases skip.
+
+5. One optional improvement (very minor)
+In the sweep: `ORDER BY updated_at FOR UPDATE SKIP LOCKED`. You might consider `ORDER BY updated_at ASC`. Postgres defaults to ASC, so behaviour is identical. Purely clarity. Not required.
+
+6. One UX edge (also optional)
+Edge case: job stalls (5 min) → user clicks Resume → backend still sees pg-boss active (rare race) → user gets error message. You already surface resumeError, which is good. Optional: if error contains "already running", replace with "Worker is still shutting down — try again shortly". Polish, not correctness.
+
+Final verdict: No bugs. No race conditions. No broken contracts. No hidden regressions. Deferred items correctly scoped. Properly merge-ready.
+
+Final answer: done.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | scope_signal | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|--------------|----------------|----------------|----------|-----------|
+| 1 | Status mirroring structurally correct — no drift risk today | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer marked "no drift today." Ratifies round-1 finding 2 implementation (server canonical + minimal client mirror). Not a finding — a validation that the shipped design holds under deep review. |
+| 2 | Stale-job recovery closed-loop (detection / recovery / execution layers) | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer marked "production-grade behaviour." Ratifies round-1 finding 7 (broadened force-expire) + the existing sweep + handler idempotency. Validation, not a finding. |
+| 3 | ProcessingStep complex but correct — do not touch | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer explicitly said "Do not touch it now. It's in the right stability-first state." Ratifies round-2 finding 4 deferral (extraction already routed to tasks/todo.md). No action. |
+| 4 | MergeReviewBlock partition guard — quiet high-quality addition | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer commendation on round-1 finding 6. No action. |
+| 5 | Sweep: explicit `ORDER BY updated_at ASC` for clarity | technical | standard | reject (cosmetic — zero behavioural change) | reject | low | Postgres default for `ORDER BY` is ASC. Appending an explicit `ASC` is purely cosmetic, zero behavioural impact, zero clarity win over the existing explicit ordering by `updated_at`. Reviewer marked "not required." User confirmed: reject. No auto-implement even though technical — `[missing-doc]` path does not apply; this is a "recommend reject" per §Recommendation Criteria "stylistic preference only, with no documented standard." |
+| 6 | Resume "already running" error: rewrite copy to "Worker is still shutting down — try again shortly" | user-facing | standard | reject (subsumed by round-1 deferred item) | reject | low | User-facing (visible error copy). Reviewer marked "polish, not correctness." Already subsumed by round-1 finding 3 deferral (resume tagged-union response contract) — the planned `{ status: 'resumed' \| 'already_running' \| 'rejected' }` contract means the UI will branch on the structured status code and render a first-class "already running" UX, not parse an error-string. Spot-fixing the string now would duplicate work and have to be reverted when the contract PR lands. User confirmed: reject. |
+
+### Top themes (finding_type vocabulary)
+
+- reviewer_observation (findings 1, 2, 3, 4 — four explicit validations)
+- other (finding 5 — cosmetic SQL clarity)
+- other (finding 6 — UX copy, subsumed by deferred contract)
+
+### Verification (round 3)
+
+No files changed in round 3 — both actionable items rejected. No lint / typecheck / test re-run required. HEAD unchanged at `b5b1dbc8` (includes the round-2 finalize commit `4ba038e6` + the subsequent `git merge origin/main` fast-forward of `b5b1dbc8`).
+
+### Decision-source notes
+
+- **Finding 5 — reject as cosmetic, not auto-implement.** Technical finding with a `reject` recommendation is a terminal auto-reject per the playbook; no escalation carveout fires (not architectural, no `[missing-doc]`, no confidence hedge). Logged directly. User confirmation captured for the audit trail regardless.
+- **Finding 6 — reject because subsumed by deferred contract.** Technically the reviewer's copy suggestion is valid in isolation. What makes it a reject-not-defer is that the fix it proposes (rewrite a string) would have to be reverted when the tagged-union contract (round-1 finding 3, already on the backlog) replaces the error-parsing pathway entirely. Adding a new durable rule: **do not spot-fix a string if a deferred refactor already replaces the pathway**. See KNOWLEDGE.md check below.
+
+---
+
 ## Final Summary
 
-- Rounds: 2
-- Auto-accepted (technical): 5 implemented | 2 rejected | 0 deferred
+- Rounds: 3
+- Auto-accepted (technical): 5 implemented | 6 rejected | 0 deferred
   - Round 1: findings 2, 4, 5, 6, 7 implemented (5 technical auto-implements)
   - Round 2: findings 2, 3 rejected (reviewer no-ops on technical observations)
-- User-decided: 2 implemented | 1 rejected | 2 deferred
+  - Round 3: findings 1, 2, 3, 4 rejected (four reviewer validations / no-ops)
+- User-decided: 2 implemented | 3 rejected | 2 deferred
   - Round 1: finding 1 implemented (user-facing filter bug fix), finding 3 deferred (user-facing architectural)
   - Round 2: finding 5 implemented (user-facing UX sort polish), finding 1 rejected (user-facing no-op reviewer observation), finding 4 deferred (technical escalated via architectural scope signal)
-- Index write failures: 0 (clean — finalize pass writes round-1 + round-2 entries)
+  - Round 3: finding 5 rejected (technical cosmetic — ASC default), finding 6 rejected (user-facing copy subsumed by round-1 deferred contract)
+- Index write failures: 0 (clean — finalize pass writes round-3 entries in addition to round-1 + round-2 entries already present)
 - Deferred to tasks/todo.md § Deferred from chatgpt-pr-review — PR #185:
   - [user] Resume response contract as tagged union with UI branching (round 1 finding 3)
   - [user] ProcessingStep complexity — extract polling lifecycle to state machine or hook (round 2 finding 4)
+  - No new deferrals in round 3.
 - Architectural items surfaced to user (user decisions):
   - Round 1 finding 3 — defer (user-approved)
   - Round 2 finding 4 — defer (escalated for architectural scope; user pre-authorised "defer → tasks/todo.md" via round-2 instructions)
+  - Round 3 — no architectural items surfaced.
 - KNOWLEDGE.md updated:
   - Round 1: yes (4 durable patterns — display-threshold filters, module-load invariants, stale-sweep recovery window, diff empty-string branching)
-  - Round 2: no (all round-2 findings were either reviewer no-ops or one-line UX polish — no durable pattern to extract beyond what round 1 already captured)
+  - Round 2: yes (1 durable pattern — state-bearing items surface first, complement to round-1 filter rule)
+  - Round 3: yes (1 durable pattern — do not spot-fix a string if a deferred refactor already replaces the pathway)
 - architecture.md updated: no
-- PR: #185 — ready to merge at https://github.com/michaelhazza/michaelhazza/automation-v1/pull/185
+- docs/capabilities.md updated: no
+- PR: #185 — ready to merge at https://github.com/michaelhazza/michaelhazza/automation-v1/pull/185 (HEAD `b5b1dbc8`)
 
 ### Consistency Warnings
 
-None. All decisions are internally consistent across rounds:
-- Round 2 finding 1 explicitly ratifies the round-1 defer on the resume contract (user-facing / defer both rounds).
-- Round 2 finding 2 is consistent with round-1 finding 2 implementation (centralise server statuses; client mirror accepted as intentional).
-- Round 2 finding 3 is consistent with round-1 finding 7 implementation (broadened force-expire).
-- Round 2 finding 5 builds on round-1 finding 1 (filter change + sort change on the same `proposals` derivation — same surface, same direction).
+None. All decisions across all three rounds are internally consistent:
+- Round 2 finding 1 ratifies round-1 finding 3 defer (resume contract).
+- Round 2 finding 2 ratifies round-1 finding 2 implementation (centralise server statuses).
+- Round 2 finding 3 ratifies round-1 finding 7 implementation (broadened force-expire).
+- Round 2 finding 5 builds on round-1 finding 1 (filter + sort on the same derivation).
+- Round 3 findings 1 / 2 / 3 / 4 are explicit third-party validations of round-1 and round-2 outputs.
+- Round 3 finding 6 respects the round-1 finding 3 deferral boundary: the copy improvement lives inside the deferred tagged-union contract scope, not in a spot-fix commit.
+
+### Deep-pass review observation (operational note, not a KNOWLEDGE.md entry)
+
+ChatGPT's round 3 was framed as a full PR surface re-read, not a delta review. The result — zero new findings, four explicit validations, two optional observations marked "not required" / "polish" — matches the expected "deep-pass after two correctness rounds converges to close" shape. Treat this as a positive signal to finalise, not to open another round. The repeated-finding-on-same-file anchor-on-diff failure mode documented in KNOWLEDGE.md (2026-04-24 ChatGPT hallucinate "duplicate line") is the opposite pattern and did not appear here — the reviewer clearly read HEAD on round 3 (specific lookups for `ORDER BY` and `resumeError` are both accurate against current HEAD).

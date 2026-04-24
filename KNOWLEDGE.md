@@ -633,3 +633,15 @@ Current file: exactly one `<li>` at one line, with `className="text-[13px]"`. Th
 **Same-session recurrence.** When the same hallucination pattern surfaces a second time in the same session on the same file, that is signal: the reviewer is anchored on the diff, not HEAD. No further rounds will recover signal from that anchor. Finalise the session rather than opening another round.
 
 **Prior entries on this pattern:** 2026-04-17 Gotcha (rebase with merge conflicts), 2026-04-17 Correction (verify against PR diff perspective), 2026-04-17 Gotcha (GitHub unified diff commonly misread). This is now **4 occurrences across 2 PRs** — it is a structural failure mode of LLM PR review, not a one-off. The right mitigation is in the review-agent contract (always verify with `Read` before acting), not in the codebase.
+
+### 2026-04-24 Convention — Don't spot-fix a string if a deferred refactor already replaces the pathway
+
+During round 3 of a ChatGPT PR review, the reviewer suggested rewriting a user-visible error copy ("already running" → "Worker is still shutting down — try again shortly") in `SkillAnalyzerProcessingStep.tsx` — the string extraction path that parses the 409 response body. The suggestion is valid in isolation. What made it a reject-not-defer is that a round-1 deferral already scoped a tagged-union response contract (`{ status: 'resumed' | 'already_running' | 'rejected', reason? }`) which replaces the error-string-parsing pathway entirely. Applying the copy fix now produces a spot-fix that must be reverted when the contract lands — pure rework.
+
+**Rule:** before accepting a reviewer's polish suggestion on a code path, check the deferred backlog (`tasks/todo.md § Deferred from...` sections) for any entry that replaces or restructures that same pathway. If the deferred refactor will obsolete the line you're being asked to change, reject the polish with a pointer to the deferred item — do not queue both.
+
+**Detection heuristic.** When a reviewer suggests a small-scoped copy / string / error-message change, grep `tasks/todo.md` for the file name or the adjacent function name. If a deferred item mentions the same surface, the polish is almost certainly a duplicate — reject and note the overlap in the round's Decisions table.
+
+**Why this is a convention, not a gotcha.** The backlog is authoritative for "things already planned" regardless of whether the planner is the same reviewer or a prior one. Ignoring it produces PR-level churn (apply → revert → apply different version) and a split commit history that obscures the refactor's intent. Applies to every review-agent loop: ChatGPT PR review, Codex dual-reviewer, human reviewers.
+
+**Applied to:** PR #185 ChatGPT review round 3 finding 6 — rejected the "already running" error-string rewrite because round-1 finding 3 had already deferred the resume tagged-union contract (see `tasks/todo.md § Deferred from chatgpt-pr-review — PR #185`). Session log: `tasks/review-logs/chatgpt-pr-review-bugfixes-april26-2026-04-24T11-55-28Z.md`.
