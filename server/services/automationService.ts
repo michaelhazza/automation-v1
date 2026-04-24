@@ -46,7 +46,7 @@ export class AutomationService {
     data: {
       name: string;
       description?: string;
-      workflowEngineId: string;
+      automationEngineId: string;
       orgCategoryId?: string;
       webhookPath: string;
       inputSchema?: string;
@@ -57,7 +57,7 @@ export class AutomationService {
     const [engine] = await db
       .select()
       .from(automationEngines)
-      .where(and(eq(automationEngines.id, data.workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
+      .where(and(eq(automationEngines.id, data.automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 404, message: 'Workflow engine not found or inactive' };
@@ -67,7 +67,7 @@ export class AutomationService {
       .insert(automations)
       .values({
         organisationId,
-        workflowEngineId: data.workflowEngineId,
+        automationEngineId: data.automationEngineId,
         orgCategoryId: data.orgCategoryId ?? null,
         name: data.name,
         description: data.description,
@@ -157,13 +157,13 @@ export class AutomationService {
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
-    const workflowEngineId = process.workflowEngineId;
-    if (!workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
+    const automationEngineId = process.automationEngineId;
+    if (!automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const [engine] = await db
       .select()
       .from(automationEngines)
-      .where(and(eq(automationEngines.id, workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
+      .where(and(eq(automationEngines.id, automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 400, message: 'Process cannot be activated: engine is inactive' };
@@ -185,7 +185,7 @@ export class AutomationService {
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
-    if (!process.workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
+    if (!process.automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const [updated] = await db
       .update(automations)
@@ -204,13 +204,13 @@ export class AutomationService {
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
-    const workflowEngineId = process.workflowEngineId;
-    if (!workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
+    const automationEngineId = process.automationEngineId;
+    if (!automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const [engine] = await db
       .select()
       .from(automationEngines)
-      .where(and(eq(automationEngines.id, workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
+      .where(and(eq(automationEngines.id, automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) throw { statusCode: 503, message: 'Engine not found' };
 
@@ -309,7 +309,7 @@ export class AutomationService {
       inputSchema: t.inputSchema,
       outputSchema: t.outputSchema,
       createdAt: t.createdAt,
-      ...(includeAdmin ? { workflowEngineId: t.workflowEngineId, webhookPath: t.webhookPath } : {}),
+      ...(includeAdmin ? { automationEngineId: t.automationEngineId, webhookPath: t.webhookPath } : {}),
     };
   }
 }

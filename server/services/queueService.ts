@@ -208,7 +208,7 @@ async function processExecution(executionId: string): Promise<void> {
     const [legacyEngine] = await db.select()
       .from(automationEngines)
       .where(and(
-        eq(automationEngines.id, processSnapshot.workflowEngineId as string),
+        eq(automationEngines.id, processSnapshot.automationEngineId as string),
         eq(automationEngines.organisationId, execution.organisationId),
       ));
 

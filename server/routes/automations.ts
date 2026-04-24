@@ -22,13 +22,13 @@ router.get('/api/automations', authenticate, asyncHandler(async (req, res) => {
 }));
 
 router.post('/api/automations', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_CREATE), asyncHandler(async (req, res) => {
-  const { name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
-  if (!name || !workflowEngineId || !webhookPath) {
-    res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, and webhookPath are required' });
+  const { name, description, automationEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
+  if (!name || !automationEngineId || !webhookPath) {
+    res.status(400).json({ error: 'Validation failed', details: 'name, automationEngineId, and webhookPath are required' });
     return;
   }
   const result = await automationService.createProcess(req.orgId!, {
-    name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
+    name, description, automationEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
   });
   res.status(201).json(result);
 }));
@@ -38,7 +38,7 @@ router.get('/api/automations/:id', authenticate, asyncHandler(async (req, res) =
   // For system-managed automations, hide the execution internals from org admins
   // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — hides internal fields from non-system-admins"
   if ((result as { isSystemManaged?: boolean }).isSystemManaged && req.user!.role !== 'system_admin') {
-    const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = result as Record<string, unknown>;
+    const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, automationEngineId, ...safe } = result as Record<string, unknown>;
     res.json(safe);
     return;
   }
@@ -84,7 +84,7 @@ router.post('/api/automations/:id/deactivate', authenticate, requireOrgPermissio
  * inputSchema, outputSchema, and configSchema.
  */
 function sanitizeSystemProcess(p: Record<string, unknown>): Record<string, unknown> {
-  const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = p;
+  const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, automationEngineId, ...safe } = p;
   return safe;
 }
 
@@ -103,11 +103,11 @@ router.get('/api/automations/system', authenticate, requireOrgPermission(ORG_PER
 // Link a system process to this org.
 // Creates a thin org-scoped wrapper that references the system process.
 // Org admins see name/description/config — execution internals remain hidden.
-router.post('/api/automations/link-system/:systemProcessId', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_CREATE), asyncHandler(async (req, res) => {
+router.post('/api/automations/link-system/:systemAutomationId', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_CREATE), asyncHandler(async (req, res) => {
   const [systemProcess] = await db.select()
     .from(automations)
     .where(and(
-      eq(automations.id, req.params.systemProcessId),
+      eq(automations.id, req.params.systemAutomationId),
       eq(automations.scope, 'system'),
       isNull(automations.deletedAt)
     ));
@@ -122,7 +122,7 @@ router.post('/api/automations/link-system/:systemProcessId', authenticate, requi
     .from(automations)
     .where(and(
       eq(automations.organisationId, req.orgId!),
-      eq(automations.systemProcessId, systemProcess.id),
+      eq(automations.systemAutomationId, systemProcess.id),
       isNull(automations.deletedAt)
     ));
   if (existing) {
@@ -133,7 +133,7 @@ router.post('/api/automations/link-system/:systemProcessId', authenticate, requi
 
   const [linked] = await db.insert(automations).values({
     organisationId: req.orgId!,
-    workflowEngineId: null,
+    automationEngineId: null,
     name: name || systemProcess.name,
     description: description ?? systemProcess.description,
     // Internal execution fields are intentionally omitted — resolved from systemProcess at runtime
@@ -141,7 +141,7 @@ router.post('/api/automations/link-system/:systemProcessId', authenticate, requi
     scope: 'organisation',
     isEditable: true,
     isSystemManaged: true,
-    systemProcessId: systemProcess.id,
+    systemAutomationId: systemProcess.id,
     defaultConfig: defaultConfig ?? null,
     status: 'active', // auto-active since the system process is already active
   }).returning();
@@ -149,7 +149,7 @@ router.post('/api/automations/link-system/:systemProcessId', authenticate, requi
   // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin sees raw linked fields, org_admin gets sanitized response"
   const isSystemAdmin = req.user!.role === 'system_admin';
   if (!isSystemAdmin) {
-    const { webhookPath: _w, inputSchema: _i, outputSchema: _o, configSchema: _c, requiredConnections: _r, workflowEngineId: _e, ...safe } = linked as Record<string, unknown>;
+    const { webhookPath: _w, inputSchema: _i, outputSchema: _o, configSchema: _c, requiredConnections: _r, automationEngineId: _e, ...safe } = linked as Record<string, unknown>;
     res.status(201).json(safe);
     return;
   }
@@ -173,7 +173,7 @@ router.post('/api/automations/:id/clone', authenticate, requireOrgPermission(ORG
 
   const [cloned] = await db.insert(automations).values({
     organisationId: req.orgId!,
-    workflowEngineId: null, // engine resolved at runtime
+    automationEngineId: null, // engine resolved at runtime
     name: name || `${source.name} (Clone)`,
     description: source.description,
     webhookPath: source.webhookPath,
@@ -184,7 +184,7 @@ router.post('/api/automations/:id/clone', authenticate, requireOrgPermission(ORG
     requiredConnections: source.requiredConnections,
     scope: 'organisation',
     isEditable: true,
-    parentProcessId: source.id,
+    parentAutomationId: source.id,
     status: 'draft',
   }).returning();
 

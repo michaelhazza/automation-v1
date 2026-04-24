@@ -12,7 +12,7 @@ export const automations = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id')
       .references(() => organisations.id),
-    workflowEngineId: uuid('workflow_engine_id')
+    automationEngineId: uuid('automation_engine_id')
       .references(() => automationEngines.id),
     // Org-level category (for admin organisation of automations)
     orgCategoryId: uuid('org_category_id')
@@ -35,9 +35,9 @@ export const automations = pgTable(
     // false for system automations — downstream cannot modify
     isEditable: boolean('is_editable').notNull().default(true),
     // Points to the upstream automation this was cloned from
-    parentProcessId: uuid('parent_process_id'),
+    parentAutomationId: uuid('parent_automation_id'),
     // Living link to a system automation — org admin sees name/description only
-    systemProcessId: uuid('system_process_id'),
+    systemAutomationId: uuid('system_automation_id'),
     // True when created via "link system automation" — restricts what org admin can edit
     isSystemManaged: boolean('is_system_managed').notNull().default(false),
     // Subaccount-native automations: subaccountId is set; org automations: subaccountId is null
@@ -56,18 +56,18 @@ export const automations = pgTable(
   (table) => ({
     orgStatusIdx: index('automations_org_status_idx').on(table.organisationId, table.status),
     orgCategoryStatusIdx: index('automations_org_cat_status_idx').on(table.organisationId, table.orgCategoryId, table.status),
-    engineIdx: index('automations_engine_idx').on(table.workflowEngineId),
+    engineIdx: index('automations_engine_idx').on(table.automationEngineId),
     orgIdIdx: index('automations_org_id_idx').on(table.organisationId),
     orgCategoryIdx: index('automations_org_category_idx').on(table.orgCategoryId),
     subaccountIdx: index('automations_subaccount_idx').on(table.subaccountId),
     statusIdx: index('automations_status_idx').on(table.status),
     scopeStatusIdx: index('automations_scope_status_idx').on(table.scope, table.status),
-    parentAutomationIdx: index('automations_parent_automation_idx').on(table.parentProcessId),
-    systemAutomationIdx: index('automations_system_automation_idx').on(table.systemProcessId),
+    parentAutomationIdx: index('automations_parent_automation_idx').on(table.parentAutomationId),
+    systemAutomationIdx: index('automations_system_automation_idx').on(table.systemAutomationId),
     // Prevent routing collisions — unique webhook path per engine (partial, excludes deleted)
     engineWebhookUniq: uniqueIndex('automations_engine_webhook_unique_idx')
-      .on(table.workflowEngineId, table.webhookPath)
-      .where(sql`${table.workflowEngineId} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+      .on(table.automationEngineId, table.webhookPath)
+      .where(sql`${table.automationEngineId} IS NOT NULL AND ${table.deletedAt} IS NULL`),
   })
 );
 

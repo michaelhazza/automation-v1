@@ -54,7 +54,7 @@ export interface DetectorContextAutomation {
   name: string;
   status: string;
   scope: string;
-  workflowEngineId: string | null;
+  automationEngineId: string | null;
   requiredConnections: Array<{ key: string; provider: string; required: boolean }> | null;
 }
 

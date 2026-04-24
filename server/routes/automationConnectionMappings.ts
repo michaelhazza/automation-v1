@@ -122,7 +122,7 @@ router.post(
 
     const [cloned] = await db.insert(automations).values({
       organisationId: req.orgId!,
-      workflowEngineId: null,
+      automationEngineId: null,
       name: name || `${source.name} (Clone)`,
       description: source.description,
       webhookPath: source.webhookPath,
@@ -133,7 +133,7 @@ router.post(
       requiredConnections: source.requiredConnections,
       scope: 'subaccount',
       isEditable: true,
-      parentProcessId: source.id,
+      parentAutomationId: source.id,
       subaccountId: subaccount.id,
       status: 'draft',
     }).returning();

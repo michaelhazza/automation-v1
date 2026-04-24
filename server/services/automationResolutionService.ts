@@ -91,18 +91,18 @@ export const automationResolutionService = {
    * Falls through unchanged for non-system-managed automations.
    */
   async resolveSystemAutomation(automation: Automation): Promise<Automation> {
-    if (!automation.isSystemManaged || !automation.systemProcessId) return automation;
+    if (!automation.isSystemManaged || !automation.systemAutomationId) return automation;
 
     const [systemAutomation] = await db.select()
       .from(automations)
       .where(and(
-        eq(automations.id, automation.systemProcessId),
+        eq(automations.id, automation.systemAutomationId),
         eq(automations.scope, 'system'),
         isNull(automations.deletedAt)
       ));
 
     if (!systemAutomation) {
-      throw { statusCode: 400, message: `Linked system automation ${automation.systemProcessId} not found or deleted` };
+      throw { statusCode: 400, message: `Linked system automation ${automation.systemAutomationId} not found or deleted` };
     }
     if (systemAutomation.status !== 'active') {
       throw { statusCode: 400, message: `Linked system automation "${systemAutomation.name}" is not active` };

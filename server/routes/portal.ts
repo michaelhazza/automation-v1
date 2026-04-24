@@ -247,7 +247,7 @@ router.post(
       .from(automations)
       .where(and(eq(automations.id, processId), eq(automations.status, 'active'), isNull(automations.deletedAt)));
 
-    if (!process || !process.workflowEngineId) {
+    if (!process || !process.automationEngineId) {
       res.status(400).json({ error: 'Process not available' });
       return;
     }
@@ -255,7 +255,7 @@ router.post(
     const [engine] = await db
       .select()
       .from(automationEngines)
-      .where(eq(automationEngines.id, process.workflowEngineId));
+      .where(eq(automationEngines.id, process.automationEngineId));
 
     if (!engine) {
       res.status(400).json({ error: 'Workflow engine not found' });

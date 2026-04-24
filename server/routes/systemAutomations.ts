@@ -24,7 +24,7 @@ router.get('/api/system/automations', authenticate, requireSystemAdmin, asyncHan
 
 // Create system process
 router.post('/api/system/automations', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
-  const { name, description, webhookPath, inputSchema, outputSchema, configSchema, defaultConfig, requiredConnections, workflowEngineId } = req.body;
+  const { name, description, webhookPath, inputSchema, outputSchema, configSchema, defaultConfig, requiredConnections, automationEngineId } = req.body;
 
   if (!name || !webhookPath) {
     throw { statusCode: 400, message: 'name and webhookPath are required' };
@@ -32,7 +32,7 @@ router.post('/api/system/automations', authenticate, requireSystemAdmin, asyncHa
 
   const [process] = await db.insert(automations).values({
     organisationId: null,
-    workflowEngineId: workflowEngineId ?? null,
+    automationEngineId: automationEngineId ?? null,
     name,
     description: description ?? null,
     webhookPath,
@@ -67,7 +67,7 @@ router.patch('/api/system/automations/:id', authenticate, requireSystemAdmin, as
 
   if (!existing) throw { statusCode: 404, message: 'System process not found' };
 
-  const allowed = ['name', 'description', 'webhookPath', 'inputSchema', 'outputSchema', 'configSchema', 'defaultConfig', 'requiredConnections', 'workflowEngineId'] as const;
+  const allowed = ['name', 'description', 'webhookPath', 'inputSchema', 'outputSchema', 'configSchema', 'defaultConfig', 'requiredConnections', 'automationEngineId'] as const;
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

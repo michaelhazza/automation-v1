@@ -285,7 +285,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
       name: automations.name,
       status: automations.status,
       scope: automations.scope,
-      workflowEngineId: automations.workflowEngineId,
+      automationEngineId: automations.automationEngineId,
       requiredConnections: automations.requiredConnections,
     })
     .from(automations)
@@ -301,7 +301,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
     name: p.name,
     status: p.status,
     scope: p.scope,
-    workflowEngineId: p.workflowEngineId,
+    automationEngineId: p.automationEngineId,
     requiredConnections: p.requiredConnections,
   }));
 

@@ -16,7 +16,7 @@ export const engineResolutionService = {
    * Resolve the engine for a given process and subaccount context.
    *
    * Priority:
-   * 1. Process-specific engine (automation.workflowEngineId)
+   * 1. Process-specific engine (automation.automationEngineId)
    * 2. Subaccount-scoped engine
    * 3. Organisation-scoped engine
    * 4. System-scoped engine
@@ -27,11 +27,11 @@ export const engineResolutionService = {
     orgId: string
   ): Promise<AutomationEngine> {
     // 1. Process has a specific engine assigned
-    if (automation.workflowEngineId) {
+    if (automation.automationEngineId) {
       const [engine] = await db.select()
         .from(automationEngines)
         .where(and(
-          eq(automationEngines.id, automation.workflowEngineId),
+          eq(automationEngines.id, automation.automationEngineId),
           eq(automationEngines.status, 'active'),
           isNull(automationEngines.deletedAt)
         ));

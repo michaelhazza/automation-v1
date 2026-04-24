@@ -2,7 +2,7 @@
  * processNoEngine.ts — Brain Tree OS adoption P4 detector.
  *
  * Triggers a critical finding when a non-system process has no
- * workflowEngineId set. Org and subaccount processes need an engine to
+ * automationEngineId set. Org and subaccount processes need an engine to
  * execute; without one the process is unrunnable.
  */
 
@@ -12,7 +12,7 @@ export const processNoEngine: Detector = (ctx) => {
   const findings: WorkspaceHealthFinding[] = [];
   for (const p of ctx.automations) {
     if (p.scope === 'system') continue;
-    if (p.workflowEngineId) continue;
+    if (p.automationEngineId) continue;
 
     findings.push({
       detector: 'process.no_engine',
