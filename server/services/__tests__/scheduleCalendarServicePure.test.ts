@@ -272,7 +272,7 @@ await test('sortOccurrences: time asc, then source priority, then sourceId lex',
   const items: ScheduleOccurrence[] = [
     mkOcc({ occurrenceId: 'a', scheduledAt: '2026-05-01T10:00:00Z', source: 'cron', sourceId: 'z' }),
     mkOcc({ occurrenceId: 'b', scheduledAt: '2026-05-01T10:00:00Z', source: 'heartbeat', sourceId: 'y' }),
-    mkOcc({ occurrenceId: 'c', scheduledAt: '2026-05-01T09:00:00Z', source: 'playbook', sourceId: 'a' }),
+    mkOcc({ occurrenceId: 'c', scheduledAt: '2026-05-01T09:00:00Z', source: 'workflow', sourceId: 'a' }),
     mkOcc({ occurrenceId: 'd', scheduledAt: '2026-05-01T10:00:00Z', source: 'cron', sourceId: 'a' }),
   ];
   const sorted = sortOccurrences(items);

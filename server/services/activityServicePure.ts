@@ -48,7 +48,7 @@ export function mapAgentRunTriggerType(
 // ---------------------------------------------------------------------------
 // addNullAdditiveFields — returns the null-valued additive fields for activity
 // types that do not carry run/user context (review_item, health_finding,
-// inbox_item, playbook_run).  Exported for unit testing.
+// inbox_item, workflow_run).  Exported for unit testing.
 // ---------------------------------------------------------------------------
 
 export function addNullAdditiveFields(): {

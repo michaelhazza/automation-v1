@@ -1,10 +1,10 @@
-import { pgTable, uuid, jsonb, timestamp, index, unique } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, jsonb, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 
 /**
- * onboarding_bundle_configs — per-org override of the onboarding playbook bundle.
+ * onboarding_bundle_configs — per-org override of the onboarding Workflow bundle.
  *
- * One row per organisation. `playbookSlugs` is the ordered list of playbooks
+ * One row per organisation. `workflowSlugs` is the ordered list of Workflows
  * autostarted during subaccount onboarding. Defaults to the platform-wide
  * DEFAULT_ONBOARDING_BUNDLE ([intelligence-briefing, weekly-digest]).
  *
@@ -17,7 +17,7 @@ export const onboardingBundleConfigs = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
-    playbookSlugs: jsonb('playbook_slugs')
+    workflowSlugs: jsonb('workflow_slugs')
       .notNull()
       .default(['intelligence-briefing', 'weekly-digest'])
       .$type<string[]>(),

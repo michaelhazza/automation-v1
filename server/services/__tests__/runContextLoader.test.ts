@@ -1,4 +1,4 @@
-/**
+﻿/**
  * runContextLoader smoke tests — runnable via:
  *   npx tsx server/services/__tests__/runContextLoader.test.ts
  *
@@ -8,7 +8,7 @@
  * `LoadedDataSource[]` fixtures directly and call processContextPool.
  *
  * The repo doesn't have Jest / Vitest configured, so we follow the same
- * lightweight pattern as server/lib/playbook/__tests__/playbook.test.ts.
+ * lightweight pattern as server/lib/Workflow/__tests__/Workflow.test.ts.
  */
 
 // Imports the PURE module (runContextLoaderPure.ts), which has zero

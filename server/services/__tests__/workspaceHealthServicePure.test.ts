@@ -46,8 +46,8 @@ function emptyCtx(): DetectorContext {
     systemAgentStaleThresholdDays: 60,
     agents: [],
     subaccountAgents: [],
-    processes: [],
-    processConnectionMappings: [],
+    automations: [],
+    automationConnectionMappings: [],
     systemAgentLinks: [],
     nowMs: FIXED_NOW,
   };
@@ -165,19 +165,19 @@ test('subaccount_agent.no_schedule — fires when both heartbeat and cron disabl
 
 test('process.broken_connection_mapping — fires when required slot is missing', () => {
   const ctx = emptyCtx();
-  ctx.processes.push({
+  ctx.automations.push({
     id: 'p-1',
     name: 'Send GHL note',
     status: 'active',
     scope: 'organisation',
-    workflowEngineId: 'eng-1',
+    automationEngineId:'eng-1',
     requiredConnections: [
       { key: 'ghl_account', provider: 'ghl', required: true },
       { key: 'gmail_account', provider: 'gmail', required: true },
     ],
   });
   // Mapping for one slot only
-  ctx.processConnectionMappings.push({
+  ctx.automationConnectionMappings.push({
     processId: 'p-1',
     subaccountId: 'sub-1',
     subaccountName: 'Acme',
@@ -192,17 +192,17 @@ test('process.broken_connection_mapping — fires when required slot is missing'
 
 test('process.broken_connection_mapping — composite resourceId distinguishes the same process across subaccounts', () => {
   const ctx = emptyCtx();
-  ctx.processes.push({
+  ctx.automations.push({
     id: 'p-multi',
     name: 'Send GHL note',
     status: 'active',
     scope: 'organisation',
-    workflowEngineId: 'eng-1',
+    automationEngineId:'eng-1',
     requiredConnections: [{ key: 'ghl_account', provider: 'ghl', required: true }],
   });
   // Two subaccounts both link the process but neither maps the required slot
   // (each has a mapping for some unrelated key so the pair is "linked").
-  ctx.processConnectionMappings.push(
+  ctx.automationConnectionMappings.push(
     { processId: 'p-multi', subaccountId: 'sub-A', subaccountName: 'Acme', connectionKey: 'unrelated' },
     { processId: 'p-multi', subaccountId: 'sub-B', subaccountName: 'Beta', connectionKey: 'unrelated' },
   );
@@ -216,15 +216,15 @@ test('process.broken_connection_mapping — composite resourceId distinguishes t
 
 test('process.broken_connection_mapping — does NOT fire when all required slots are mapped', () => {
   const ctx = emptyCtx();
-  ctx.processes.push({
+  ctx.automations.push({
     id: 'p-2',
     name: 'Configured',
     status: 'active',
     scope: 'organisation',
-    workflowEngineId: 'eng-1',
+    automationEngineId:'eng-1',
     requiredConnections: [{ key: 'gmail_account', provider: 'gmail', required: true }],
   });
-  ctx.processConnectionMappings.push({
+  ctx.automationConnectionMappings.push({
     processId: 'p-2',
     subaccountId: 'sub-1',
     subaccountName: 'Acme',
@@ -239,12 +239,12 @@ test('process.broken_connection_mapping — does NOT fire when all required slot
 
 test('process.no_engine — fires for org process with null engine', () => {
   const ctx = emptyCtx();
-  ctx.processes.push({
+  ctx.automations.push({
     id: 'p-3',
     name: 'No engine',
     status: 'active',
     scope: 'organisation',
-    workflowEngineId: null,
+    automationEngineId:null,
     requiredConnections: null,
   });
   const f = runDetectors(ctx);
@@ -254,12 +254,12 @@ test('process.no_engine — fires for org process with null engine', () => {
 
 test('process.no_engine — does NOT fire for system processes', () => {
   const ctx = emptyCtx();
-  ctx.processes.push({
+  ctx.automations.push({
     id: 'p-4',
     name: 'System',
     status: 'active',
     scope: 'system',
-    workflowEngineId: null,
+    automationEngineId:null,
     requiredConnections: null,
   });
   const f = runDetectors(ctx);

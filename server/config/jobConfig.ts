@@ -351,49 +351,49 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const,
   },
 
-  // ── Playbooks engine (multi-step automation, migration 0076) ────
-  // Spec: tasks/playbooks-spec.md §5.6 (concurrency) + §5.7 (watchdog).
+  // ── Workflows engine (multi-step automation, migration 0076) ────
+  // Spec: tasks/workflows-spec.md §5.6 (concurrency) + §5.7 (watchdog).
   // Tick jobs are enqueued with singletonKey: runId so multiple step
   // completions collapse into one tick. Watchdog runs every 60s as
   // self-healing for missed ticks.
-  'playbook-run-tick': {
+  'workflow-run-tick': {
     retryLimit: 3,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
-    deadLetter: 'playbook-run-tick__dlq',
+    deadLetter: 'workflow-run-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: runId
   },
-  'playbook-watchdog': {
+  'workflow-watchdog': {
     retryLimit: 1,
     retryDelay: 10,
     retryBackoff: false,
     expireInSeconds: 60,
-    deadLetter: 'playbook-watchdog__dlq',
+    deadLetter: 'workflow-watchdog__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep reads current state
   },
   // Async dispatch queue for prompt + agent_call step types. The engine
   // tick handler enqueues onto this; a worker picks it up and runs the
   // existing agentExecutionService.executeRun synchronously.
   // Spec §5.2 dispatch case + §5.5 idempotency keys.
-  'playbook-agent-step': {
+  'workflow-agent-step': {
     retryLimit: 2,
     retryDelay: 10,
     retryBackoff: true,
     expireInSeconds: 600,
-    deadLetter: 'playbook-agent-step__dlq',
-    idempotencyStrategy: 'singleton-key' as const, // playbook-step:<sr.id>:<attempt>
+    deadLetter: 'workflow-agent-step__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // workflow-step:<sr.id>:<attempt>
   },
   // ── Sprint 4 P3.1: Bulk parent completion check ───────────────────────────
   // When a bulk child completes, it enqueues a tick on the parent to
   // check whether all children are terminal. Uses singletonKey on the
   // parent runId so multiple child completions collapse into one check.
-  'playbook-bulk-parent-check': {
+  'workflow-bulk-parent-check': {
     retryLimit: 2,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 60,
-    deadLetter: 'playbook-bulk-parent-check__dlq',
+    deadLetter: 'workflow-bulk-parent-check__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
   },
 

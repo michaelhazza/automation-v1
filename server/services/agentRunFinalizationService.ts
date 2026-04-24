@@ -121,7 +121,7 @@ export async function finaliseAgentRunFromIeeRun(
     // IMPORTANT: this transaction deliberately does NOT invoke the normal
     // post-completion hooks that the non-IEE path runs in
     // agentExecutionService (buildHandoffForRun, memoryCitationDetector,
-    // notifyPlaybookEngineOnAgentRunComplete, toolCallsLog snapshot write).
+    // notifyWorkflowEngineOnAgentRunComplete, toolCallsLog snapshot write).
     // IEE-delegated runs do not currently receive handoffs, memory-
     // citation scoring, or playbook completion notifications. Tracked as
     // a known gap; see docs/iee-delegation-lifecycle-spec.md "Out of

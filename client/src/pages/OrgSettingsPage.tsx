@@ -611,7 +611,7 @@ function PermissionsTab() {
 // ─── Permission group friendly metadata ───────────────────────────────────────
 
 const GROUP_META: Record<string, { label: string; description: string }> = {
-  'org.processes':    { label: 'Processes',    description: 'Control who can view, create, edit, delete and run automation processes for this organisation.' },
+  'org.automations':  { label: 'Automations',  description: 'Control who can view, create, edit, delete and run automations for this organisation.' },
   'org.connections':  { label: 'Connections',  description: 'Access to view integration and connection status across subaccounts.' },
   'org.executions':   { label: 'Executions',   description: 'Access to view execution history and logs across the organisation.' },
   'org.users':        { label: 'Users',        description: 'Manage team members — invite, view roles, and remove users from the organisation.' },

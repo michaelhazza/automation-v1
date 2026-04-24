@@ -632,7 +632,7 @@ export async function attachBlock(
 
 // ─── Phase D2 — playbook-driven upsert ───────────────────────────────────────
 
-export interface UpsertFromPlaybookParams {
+export interface UpsertFromWorkflowParams {
   organisationId: string;
   subaccountId: string;
   /** Memory Block label (matches the `name` column). */
@@ -643,7 +643,7 @@ export interface UpsertFromPlaybookParams {
   /** The playbookRun.id firing the binding. */
   sourceRunId: string;
   /** Slug of the playbook whose run is firing. */
-  playbookSlug: string;
+  workflowSlug: string;
   /** The agent that owns the write (typically the Configuration Assistant). */
   actorAgentId: string | null;
   /** 'low' on firstRunOnly bindings, 'normal' otherwise. */
@@ -658,7 +658,7 @@ export interface UpsertFromPlaybookParams {
   autoAttach?: boolean;
 }
 
-export type UpsertFromPlaybookResult =
+export type UpsertFromWorkflowResult =
   | { kind: 'created'; blockId: string; truncated: boolean }
   | { kind: 'updated'; blockId: string; truncated: boolean; mergeFallback: boolean }
   | { kind: 'skipped'; reason: 'hitl_overwrite'; blockId: string; previewContent: string }
@@ -666,7 +666,7 @@ export type UpsertFromPlaybookResult =
   | { kind: 'skipped'; reason: 'empty_output' };
 
 /**
- * Playbook-driven upsert. Called by `finaliseRun()` for each `knowledgeBinding`
+ * Workflow-driven upsert. Called by `finaliseRun()` for each `knowledgeBinding`
  * whose source step completed successfully. Applies:
  *   - the 10-per-run rate limit (§7.5)
  *   - the HITL overwrite rule against human-edited blocks (§7.5)
@@ -676,9 +676,9 @@ export type UpsertFromPlaybookResult =
  * wrapper only fetches the existing row, counts prior writes for the run,
  * and persists the decided outcome.
  */
-export async function upsertFromPlaybook(
-  params: UpsertFromPlaybookParams,
-): Promise<UpsertFromPlaybookResult> {
+export async function upsertFromWorkflow(
+  params: UpsertFromWorkflowParams,
+): Promise<UpsertFromWorkflowResult> {
   const {
     organisationId,
     subaccountId,
@@ -686,7 +686,7 @@ export async function upsertFromPlaybook(
     content,
     mergeStrategy,
     sourceRunId,
-    playbookSlug,
+    workflowSlug,
     actorAgentId,
     confidence,
   } = params;
@@ -726,14 +726,14 @@ export async function upsertFromPlaybook(
           id: existingRow.id,
           content: existingRow.content,
           lastEditedByAgentId: existingRow.lastEditedByAgentId,
-          lastWrittenByPlaybookSlug: existingRow.lastWrittenByPlaybookSlug,
+          lastWrittenByWorkflowSlug: existingRow.lastWrittenByWorkflowSlug,
           sourceRunId: existingRow.sourceRunId,
         }
       : null,
     label,
     incomingContent: content,
     mergeStrategy,
-    playbookSlug,
+    workflowSlug,
     blocksUpsertedThisRun: Number(blocksUpsertedThisRun),
   });
 
@@ -764,7 +764,7 @@ export async function upsertFromPlaybook(
             isReadOnly: false,
             sourceRunId,
             lastEditedByAgentId: actorAgentId,
-            lastWrittenByPlaybookSlug: playbookSlug,
+            lastWrittenByWorkflowSlug: workflowSlug,
             confidence,
             autoAttach,
           })
@@ -776,8 +776,8 @@ export async function upsertFromPlaybook(
         await wvr({
           blockId: created.id,
           content: decision.content,
-          changeSource: 'playbook_upsert',
-          notes: `Created by playbook ${playbookSlug}`,
+          changeSource: 'workflow_upsert',
+          notes: `Created by playbook ${workflowSlug}`,
           tx,
         });
       });
@@ -798,7 +798,7 @@ export async function upsertFromPlaybook(
             content: decision.content,
             sourceRunId,
             lastEditedByAgentId: actorAgentId,
-            lastWrittenByPlaybookSlug: playbookSlug,
+            lastWrittenByWorkflowSlug: workflowSlug,
             // Do not touch `confidence` on update — a previously-'low' block can
             // remain 'low' until a human saves it manually. Spec §8.4 last bullet.
             updatedAt: new Date(),
@@ -812,8 +812,8 @@ export async function upsertFromPlaybook(
         await wvrUpdate({
           blockId: updated.id,
           content: decision.content,
-          changeSource: 'playbook_upsert',
-          notes: `Updated by playbook ${playbookSlug}`,
+          changeSource: 'workflow_upsert',
+          notes: `Updated by playbook ${workflowSlug}`,
           tx,
         });
       });

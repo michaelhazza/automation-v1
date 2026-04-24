@@ -85,7 +85,7 @@ The page is mounted at `/` by this spec. The current `/ → /admin/pulse` redire
 
 ### §1.4 Activity feed unifies six types in one table
 
-Two separate tables on the current home dashboard (Recent Activity + implicit run list) are replaced by one `UnifiedActivityFeed` component that covers all six `activityService` types: `agent_run`, `review_item`, `health_finding`, `inbox_item`, `playbook_run`, `workflow_execution`. The actor column distinguishes humans, agents, and system events visually.
+Two separate tables on the current home dashboard (Recent Activity + implicit run list) are replaced by one `UnifiedActivityFeed` component that covers all six `activityService` types: `agent_run`, `review_item`, `health_finding`, `inbox_item`, `workflow_run`, `workflow_execution`. The actor column distinguishes humans, agents, and system events visually. (Note: `workflow_run` was previously `playbook_run`; renamed in Riley Observations W1.)
 
 ### §1.5 Run detail is the existing `AgentRunLivePage`
 
@@ -442,7 +442,7 @@ Without the tiebreaker, rows with identical timestamps appear in non-determinist
 ```typescript
 interface ActivityItem {
   id: string;
-  type: 'agent_run' | 'review_item' | 'health_finding' | 'inbox_item' | 'playbook_run' | 'workflow_execution';
+  type: 'agent_run' | 'review_item' | 'health_finding' | 'inbox_item' | 'workflow_run' | 'workflow_execution';
   status: 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
   subject: string;
   actor: string;

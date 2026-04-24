@@ -7,13 +7,13 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowEngines } from '../db/schema/index.js';
+import { automationEngines } from '../db/schema/index.js';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
-function sanitizeEngine(engine: typeof workflowEngines.$inferSelect) {
+function sanitizeEngine(engine: typeof automationEngines.$inferSelect) {
   const { hmacSecret, apiKey, ...rest } = engine;
   return rest;
 }
@@ -21,9 +21,9 @@ function sanitizeEngine(engine: typeof workflowEngines.$inferSelect) {
 // List all system engines
 router.get('/api/system/engines', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const rows = await db.select()
-    .from(workflowEngines)
-    .where(and(eq(workflowEngines.scope, 'system'), isNull(workflowEngines.deletedAt)))
-    .orderBy(desc(workflowEngines.createdAt));
+    .from(automationEngines)
+    .where(and(eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)))
+    .orderBy(desc(automationEngines.createdAt));
   res.json(rows.map(sanitizeEngine));
 }));
 
@@ -37,7 +37,7 @@ router.post('/api/system/engines', authenticate, requireSystemAdmin, asyncHandle
 
   const hmacSecret = crypto.randomBytes(32).toString('hex');
 
-  const [engine] = await db.insert(workflowEngines).values({
+  const [engine] = await db.insert(automationEngines).values({
     organisationId: null,
     name,
     engineType,
@@ -55,8 +55,8 @@ router.post('/api/system/engines', authenticate, requireSystemAdmin, asyncHandle
 // Get system engine
 router.get('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [engine] = await db.select()
-    .from(workflowEngines)
-    .where(and(eq(workflowEngines.id, req.params.id), eq(workflowEngines.scope, 'system'), isNull(workflowEngines.deletedAt)));
+    .from(automationEngines)
+    .where(and(eq(automationEngines.id, req.params.id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
 
   if (!engine) throw { statusCode: 404, message: 'System engine not found' };
   res.json(sanitizeEngine(engine));
@@ -65,8 +65,8 @@ router.get('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncHan
 // Update system engine
 router.patch('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(workflowEngines)
-    .where(and(eq(workflowEngines.id, req.params.id), eq(workflowEngines.scope, 'system'), isNull(workflowEngines.deletedAt)));
+    .from(automationEngines)
+    .where(and(eq(automationEngines.id, req.params.id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System engine not found' };
 
@@ -76,9 +76,9 @@ router.patch('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncH
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
 
-  const [updated] = await db.update(workflowEngines)
+  const [updated] = await db.update(automationEngines)
     .set(updates)
-    .where(eq(workflowEngines.id, req.params.id))
+    .where(eq(automationEngines.id, req.params.id))
     .returning();
 
   res.json(sanitizeEngine(updated));
@@ -87,14 +87,14 @@ router.patch('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncH
 // Delete system engine (soft)
 router.delete('/api/system/engines/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(workflowEngines)
-    .where(and(eq(workflowEngines.id, req.params.id), eq(workflowEngines.scope, 'system'), isNull(workflowEngines.deletedAt)));
+    .from(automationEngines)
+    .where(and(eq(automationEngines.id, req.params.id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System engine not found' };
 
-  await db.update(workflowEngines)
+  await db.update(automationEngines)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(workflowEngines.id, req.params.id));
+    .where(eq(automationEngines.id, req.params.id));
 
   res.json({ success: true });
 }));

@@ -83,6 +83,9 @@ export const EVENT_NAMES = [
   'llm.inflight.active_count',
   // §1 provisional 'started' row — concurrent-call reconciliation signal
   'llm.router.reconciliation_required',
+  // invoke_automation step telemetry (spec §5.9)
+  'workflow.step.automation.dispatched',
+  'workflow.step.automation.completed',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

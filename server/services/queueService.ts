@@ -1,9 +1,9 @@
 import { db } from '../db/index.js';
-import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
+import { executions, executionPayloads, executionFiles, budgetReservations, automationEngines, users } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
-import { processResolutionService } from './processResolutionService.js';
+import { automationResolutionService } from './automationResolutionService.js';
 import { env } from '../lib/env.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
@@ -169,7 +169,7 @@ async function processExecution(executionId: string): Promise<void> {
 
   // ------------------------------------------------------------------
   // Resolve execution context via the three-level framework.
-  // If subaccountId is set, use processResolutionService for full
+  // If subaccountId is set, use automationResolutionService for full
   // connection/engine/config resolution. Otherwise fall back to legacy.
   // ------------------------------------------------------------------
   let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null = null;
@@ -179,7 +179,7 @@ async function processExecution(executionId: string): Promise<void> {
 
   if (execution.subaccountId && execution.organisationId) {
     try {
-      const context = await processResolutionService.resolveForExecution(
+      const context = await automationResolutionService.resolveForExecution(
         execution.processId,
         execution.subaccountId,
         execution.organisationId,
@@ -206,10 +206,10 @@ async function processExecution(executionId: string): Promise<void> {
   } else {
     // Legacy path: look up engine from process snapshot
     const [legacyEngine] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.id, processSnapshot.workflowEngineId as string),
-        eq(workflowEngines.organisationId, execution.organisationId),
+        eq(automationEngines.id, processSnapshot.automationEngineId as string),
+        eq(automationEngines.organisationId, execution.organisationId),
       ));
 
     if (!legacyEngine) {
@@ -479,8 +479,8 @@ export const queueService = {
     }
 
     // Synchronous fallback — resume inline (no restart resilience, but functional)
-    const { resumeWorkflow } = await import('./workflowExecutorService.js');
-    resumeWorkflow(params.workflowRunId, {
+    const { resumeFlow } = await import('./flowExecutorService.js');
+    resumeFlow(params.workflowRunId, {
       organisationId: params.organisationId,
       subaccountId: params.subaccountId,
       agentId: params.agentId,
@@ -985,9 +985,9 @@ export const queueService = {
               agentRunId?: string;
             };
 
-          const { resumeWorkflow } = await import('./workflowExecutorService.js');
+          const { resumeFlow } = await import('./flowExecutorService.js');
           await withTimeout(
-            resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
+            resumeFlow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
             270_000, // 300 - 30
           );
         } catch (err) {

@@ -14,7 +14,7 @@ export type WorkspaceHealthSeverity = 'info' | 'warning' | 'critical';
 export type WorkspaceHealthResourceKind =
   | 'agent'
   | 'subaccount_agent'
-  | 'process'
+  | 'automation'
   | 'subaccount'
   | 'org'
   | 'connection';
@@ -49,16 +49,16 @@ export interface DetectorContextSubaccountAgent {
   scheduleCron: string | null;
 }
 
-export interface DetectorContextProcess {
+export interface DetectorContextAutomation {
   id: string;
   name: string;
   status: string;
   scope: string;
-  workflowEngineId: string | null;
+  automationEngineId: string | null;
   requiredConnections: Array<{ key: string; provider: string; required: boolean }> | null;
 }
 
-export interface DetectorContextProcessConnectionMapping {
+export interface DetectorContextAutomationConnectionMapping {
   processId: string;
   subaccountId: string;
   subaccountName: string;
@@ -86,8 +86,8 @@ export interface DetectorContext {
   systemAgentStaleThresholdDays: number;
   agents: DetectorContextAgent[];
   subaccountAgents: DetectorContextSubaccountAgent[];
-  processes: DetectorContextProcess[];
-  processConnectionMappings: DetectorContextProcessConnectionMapping[];
+  automations: DetectorContextAutomation[];
+  automationConnectionMappings: DetectorContextAutomationConnectionMapping[];
   systemAgentLinks: DetectorContextSystemAgentLink[];
   /** Override for the "now" anchor; tests pin this to a fixed value. */
   nowMs?: number;

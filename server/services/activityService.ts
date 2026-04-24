@@ -8,7 +8,7 @@ import {
   reviewItems,
   actions,
   executions,
-  playbookRuns,
+  workflowRuns,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
 import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
@@ -25,7 +25,7 @@ export type ActivityType =
   | 'review_item'
   | 'health_finding'
   | 'inbox_item'
-  | 'playbook_run'
+  | 'workflow_run'
   | 'workflow_execution';
 
 export type NormalisedStatus =
@@ -133,7 +133,7 @@ function normaliseExecutionStatus(s: string): NormalisedStatus {
   }
 }
 
-function normalisePlaybookStatus(s: string): NormalisedStatus {
+function normaliseWorkflowStatus(s: string): NormalisedStatus {
   switch (s) {
     case 'pending':
     case 'running':
@@ -380,7 +380,7 @@ async function fetchInboxItems(
   }));
 }
 
-async function fetchPlaybookRuns(
+async function fetchWorkflowRuns(
   scope: ActivityScope,
   filters: ActivityFilters,
 ): Promise<ActivityItem[]> {
@@ -388,28 +388,28 @@ async function fetchPlaybookRuns(
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [];
 
-  if (orgId) conditions.push(eq(playbookRuns.organisationId, orgId));
-  if (subId) conditions.push(eq(playbookRuns.subaccountId, subId));
-  if (filters.from) conditions.push(gte(playbookRuns.createdAt, new Date(filters.from)));
-  if (filters.to) conditions.push(lte(playbookRuns.createdAt, new Date(filters.to)));
+  if (orgId) conditions.push(eq(workflowRuns.organisationId, orgId));
+  if (subId) conditions.push(eq(workflowRuns.subaccountId, subId));
+  if (filters.from) conditions.push(gte(workflowRuns.createdAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(workflowRuns.createdAt, new Date(filters.to)));
 
   const rows = await db
     .select({
-      run: playbookRuns,
+      run: workflowRuns,
       subaccountName: subaccounts.name,
     })
-    .from(playbookRuns)
-    .leftJoin(subaccounts, eq(subaccounts.id, playbookRuns.subaccountId))
+    .from(workflowRuns)
+    .leftJoin(subaccounts, eq(subaccounts.id, workflowRuns.subaccountId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(playbookRuns.createdAt), desc(playbookRuns.id))
+    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
     .limit(200);
 
   return rows.map(({ run, subaccountName }) => ({
     id: run.id,
-    type: 'playbook_run' as const,
-    status: normalisePlaybookStatus(run.status),
-    subject: `Playbook run (${run.runMode})`,
-    actor: 'Playbook',
+    type: 'workflow_run' as const,
+    status: normaliseWorkflowStatus(run.status),
+    subject: `Workflow run (${run.runMode})`,
+    actor: 'Workflow',
     subaccountId: run.subaccountId,
     subaccountName,
     agentId: null,
@@ -417,7 +417,7 @@ async function fetchPlaybookRuns(
     severity: run.status === 'failed' ? 'warning' as const : null,
     createdAt: (run.createdAt ?? new Date()).toISOString(),
     updatedAt: (run.updatedAt ?? run.createdAt ?? new Date()).toISOString(),
-    detailUrl: `/subaccounts/${run.subaccountId}/playbook-runs/${run.id}`,
+    detailUrl: `/subaccounts/${run.subaccountId}/workflow-runs/${run.id}`,
     ...addNullAdditiveFields(),
   }));
 }
@@ -518,14 +518,14 @@ export async function listActivityItems(
     reviewItemRows,
     healthFindingRows,
     inboxItemRows,
-    playbookRunRows,
+    workflowRunRows,
     workflowExecRows,
   ] = await Promise.all([
     shouldFetch('agent_run') ? fetchAgentRuns(scope, filters) : [],
     shouldFetch('review_item') ? fetchReviewItems(scope, filters) : [],
     shouldFetch('health_finding') ? fetchHealthFindings(scope, filters) : [],
     shouldFetch('inbox_item') ? fetchInboxItems(scope, filters) : [],
-    shouldFetch('playbook_run') ? fetchPlaybookRuns(scope, filters) : [],
+    shouldFetch('workflow_run') ? fetchWorkflowRuns(scope, filters) : [],
     shouldFetch('workflow_execution') ? fetchWorkflowExecutions(scope, filters) : [],
   ]);
 
@@ -535,7 +535,7 @@ export async function listActivityItems(
     ...reviewItemRows,
     ...healthFindingRows,
     ...inboxItemRows,
-    ...playbookRunRows,
+    ...workflowRunRows,
     ...workflowExecRows,
   ];
 

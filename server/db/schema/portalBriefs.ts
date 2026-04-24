@@ -1,16 +1,16 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
-import { playbookRuns } from './playbookRuns';
+import { workflowRuns } from './workflowRuns';
 
 // ---------------------------------------------------------------------------
-// Portal Briefs — published output from config_publish_playbook_output_to_portal
+// Portal Briefs — published output from config_publish_workflow_output_to_portal
 //
-// Phase G — onboarding-playbooks-spec §11.6.
+// Phase G — onboarding-Workflows-spec §11.6.
 //
 // One row per run + slug combination. The portal card (§9.4) reads the most
-// recent non-retracted row per (subaccount_id, playbook_slug).  Admin can
+// recent non-retracted row per (subaccount_id, workflow_slug).  Admin can
 // retract a brief by setting `retractedAt`; this hides it from the portal
 // without deleting the audit trail.
 // ---------------------------------------------------------------------------
@@ -25,11 +25,11 @@ export const portalBriefs = pgTable(
     subaccountId: uuid('subaccount_id')
       .notNull()
       .references(() => subaccounts.id),
-    /** The playbook run that produced this brief. */
+    /** The Workflow run that produced this brief. */
     runId: uuid('run_id')
       .notNull()
-      .references(() => playbookRuns.id),
-    playbookSlug: text('playbook_slug').notNull(),
+      .references(() => workflowRuns.id),
+    workflowSlug: text('workflow_slug').notNull(),
     title: text('title').notNull().default(''),
     /** Headline bullet points shown on the portal card. */
     bullets: text('bullets').array().notNull().default(sql`'{}'::text[]`),
@@ -48,7 +48,7 @@ export const portalBriefs = pgTable(
     /** Fast lookup for the canonical portal-card query. */
     subaccountSlugIdx: index('portal_briefs_subaccount_slug_idx').on(
       table.subaccountId,
-      table.playbookSlug,
+      table.workflowSlug,
       table.publishedAt,
     ).where(sql`${table.retractedAt} IS NULL`),
   }),

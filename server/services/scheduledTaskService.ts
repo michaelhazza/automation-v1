@@ -73,7 +73,7 @@ export const scheduledTaskService = {
       endsAfterRuns?: number;
       // Phase B2 — onboarding-playbooks spec §5.4.1, §5.4.2.
       taskSlug?: string;
-      createdByPlaybookSlug?: string;
+      createdByWorkflowSlug?: string;
       firstRunAt?: Date;
       firstRunAtTz?: string;
       /**
@@ -119,7 +119,7 @@ export const scheduledTaskService = {
         timezone: data.timezone ?? 'UTC',
         scheduleTime: data.scheduleTime,
         taskSlug: data.taskSlug ?? null,
-        createdByPlaybookSlug: data.createdByPlaybookSlug ?? null,
+        createdByWorkflowSlug: data.createdByWorkflowSlug ?? null,
         firstRunAt: data.firstRunAt ?? null,
         firstRunAtTz: data.firstRunAtTz ?? null,
         retryPolicy: data.retryPolicy ?? DEFAULT_RETRY_POLICY,
@@ -180,8 +180,8 @@ export const scheduledTaskService = {
    * Used by lifecycle-management paths (retirement, offboarding).
    * Spec §5.4.2 lifecycle-manageability invariant.
    */
-  async listByPlaybookSlug(
-    playbookSlug: string,
+  async listByWorkflowSlug(
+    workflowSlug: string,
     organisationId: string,
   ): Promise<(typeof scheduledTasks.$inferSelect)[]> {
     return db
@@ -190,7 +190,7 @@ export const scheduledTaskService = {
       .where(
         and(
           eq(scheduledTasks.organisationId, organisationId),
-          eq(scheduledTasks.createdByPlaybookSlug, playbookSlug),
+          eq(scheduledTasks.createdByWorkflowSlug, workflowSlug),
           eq(scheduledTasks.isActive, true),
         ),
       );
@@ -203,8 +203,8 @@ export const scheduledTaskService = {
    * RRULE-based scheduler is in-process and the `isActive: false` flag is
    * honoured by `fireOccurrence`, so deactivation is already effective.
    */
-  async deactivateByPlaybookSlug(
-    playbookSlug: string,
+  async deactivateByWorkflowSlug(
+    workflowSlug: string,
     subaccountId: string,
   ): Promise<void> {
     const rows = await db
@@ -213,7 +213,7 @@ export const scheduledTaskService = {
       .where(
         and(
           eq(scheduledTasks.subaccountId, subaccountId),
-          eq(scheduledTasks.createdByPlaybookSlug, playbookSlug),
+          eq(scheduledTasks.createdByWorkflowSlug, workflowSlug),
           eq(scheduledTasks.isActive, true),
         ),
       );
@@ -229,7 +229,7 @@ export const scheduledTaskService = {
         snapshot: { ...(r as unknown as Record<string, unknown>), isActive: false },
         changedBy: null,
         changeSource: 'api',
-        changeSummary: `Deactivated as part of playbook '${playbookSlug}' retirement`,
+        changeSummary: `Deactivated as part of playbook '${workflowSlug}' retirement`,
       });
     }
   },

@@ -55,7 +55,7 @@ router.post(
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
       // Plumb the initiating user through to SkillExecutionContext.userId
-      // so user-scoped tools (Playbook Studio propose_save) can enforce
+      // so user-scoped tools (Workflow Studio propose_save) can enforce
       // ownership. Review finding #3.
       userId: req.user!.id,
     });

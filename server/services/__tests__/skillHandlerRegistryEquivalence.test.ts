@@ -69,11 +69,11 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'update_task',
   'read_inbox',
   'fetch_url',
-  'playbook_read_existing',
-  'playbook_validate',
-  'playbook_simulate',
-  'playbook_estimate_cost',
-  'playbook_propose_save',
+  'workflow_read_existing',
+  'workflow_validate',
+  'workflow_simulate',
+  'workflow_estimate_cost',
+  'workflow_propose_save',
   'send_email',
   'update_record',
   'request_approval',
@@ -168,7 +168,7 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'geo_llmstxt',
   'geo_compare',
   'generic_methodology',
-  // Phase A–G: Onboarding Playbooks config handlers
+  // Phase A–G: Onboarding Workflows config handlers
   'config_create_agent',
   'config_update_agent',
   'config_activate_agent',
@@ -197,14 +197,14 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'config_run_health_check',
   'config_preview_plan',
   'config_view_history',
-  'config_publish_playbook_output_to_portal',
-  'config_send_playbook_email_digest',
+  'config_publish_workflow_output_to_portal',
+  'config_send_workflow_email_digest',
   // Feature 3 — n8n Workflow Import
   'import_n8n_workflow',
-  // Phase 3 — Weekly Digest + Playbook Delivery
+  // Phase 3 — Weekly Digest + Workflow Delivery
   'weekly_digest_gather',
   'config_weekly_digest_gather',
-  'config_deliver_playbook_output',
+  'config_deliver_workflow_output',
   // ClientPulse session-1/2 additions (14 handlers folded in over multiple merges)
   'compute_staff_activity_pulse',
   'scan_integration_fingerprints',
