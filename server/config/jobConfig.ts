@@ -334,19 +334,31 @@ export const JOB_CONFIG = {
   },
 
   // ── Skill Analyzer (migration 0092) ─────────────────────────────
-  // One-shot: one job per analysis session. Retry safety handled by the
-  // handler itself (deletes results before re-processing). Max 1 retry
-  // with 5-minute delay — long enough for transient API failures to clear.
-  // expireInSeconds set to 3600 (60 min): with up to 50 skills × 180s
-  // per-skill timeout at concurrency 3, worst-case is ceil(50/3) × 180s
-  // ≈ 51 minutes (no-retry path). The one-shot retry-on-timeout is rare
-  // enough that sizing for it would be wasteful. 3600 gives ~18% headroom
-  // over the normal worst case.
+  // One-shot: one job per analysis session. Handler is crash-resumable —
+  // Stage 5 reads existing skill_analyzer_results rows and skips already-
+  // paid LLM calls, so a re-enqueue of the same jobId costs ~0 LLM spend.
+  //
+  // expireInSeconds is a circuit breaker for truly-dead workers, NOT a
+  // performance target. Every external call inside the handler has its own
+  // per-call timeout (OpenAI embeddings 30s, classify LLM 180s, Haiku
+  // routing inherits routeCall limits) so this outer cap only ever fires
+  // when something has genuinely gone catastrophically wrong (SIGKILL,
+  // OOM, hung fetch that somehow bypassed AbortSignal). 14400 (4 hours)
+  // gives ~2× headroom above the hard 500-candidate × 45s-observed-avg
+  // ceiling at concurrency 3 ≈ 7500s, without being so large that a
+  // truly-dead worker holds the queue slot indefinitely. If a user hits
+  // this cap they use the POST /resume endpoint — the handler picks up
+  // where the previous run left off.
+  //
+  // NOTE: callers MUST pass getJobConfig('skill-analyzer') to boss.send()
+  // so these options actually reach the queue. Prior to Apr 2026 the
+  // skill-analyzer enqueue site dropped the config and pg-boss applied
+  // its default 15-min expireIn, killing otherwise-healthy runs.
   'skill-analyzer': {
     retryLimit: 1,
     retryDelay: 300,
     retryBackoff: false,
-    expireInSeconds: 3600,
+    expireInSeconds: 14400,
     deadLetter: 'skill-analyzer__dlq',
     idempotencyStrategy: 'one-shot' as const,
   },

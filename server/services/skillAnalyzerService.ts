@@ -62,6 +62,7 @@ function toErrorMessage(err: unknown): string {
 }
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
 import { skillParserService } from './skillParserService.js';
 // Phase 1 of skill-analyzer-v2: the analyzer is system-only. The
 // org-skill skillService import was removed; executeApproved now writes
@@ -130,13 +131,95 @@ export async function createJob(params: {
 
   const jobId = rows[0].id;
 
-  // Enqueue pg-boss job
+  // Enqueue pg-boss job. Passing getJobConfig so the queue actually
+  // respects the retry/expire settings declared in jobConfig.ts; without
+  // this, pg-boss defaults applied (notably a 15-min expireIn) which
+  // killed otherwise-healthy long runs mid-Stage-5. singletonKey stays
+  // undefined — one-shot enqueue per jobId.
   const boss = await getPgBoss();
   await boss.send('skill-analyzer', { jobId }, {
+    ...getJobConfig('skill-analyzer'),
     singletonKey: undefined,
   });
 
   return { jobId };
+}
+
+/** Re-enqueue a previously-started analysis job that failed or stalled.
+ *  The handler is crash-resumable: Stage 1 reuses stored parsedCandidates,
+ *  Stage 5 skips already-classified candidateIndices, and Stage 6 hits
+ *  the agent-embedding cache when content hashes match. So resuming is
+ *  effectively free on LLM spend.
+ *
+ *  Safety guards:
+ *    - Refuses if job.status === 'completed' (work already done)
+ *    - Refuses if an alive pg-boss queue entry for this jobId still
+ *      exists (would cause double-processing and Stage 8 race conditions)
+ *
+ *  Intermediate status (e.g. 'classifying') is accepted and reset — this
+ *  is the common case where a worker was SIGKILL'd mid-pipeline and left
+ *  the row in an in-flight state. */
+export async function resumeJob(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}): Promise<{ ok: true }> {
+  const { jobId, organisationId } = params;
+
+  const [job] = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(
+      eq(skillAnalyzerJobs.id, jobId),
+      eq(skillAnalyzerJobs.organisationId, organisationId),
+    ));
+
+  if (!job) throw { statusCode: 404, message: 'Analysis job not found.' };
+  if (job.status === 'completed') {
+    throw { statusCode: 409, message: 'Analysis already completed — nothing to resume.' };
+  }
+
+  // Guard against double-enqueue: if pg-boss already has a live row for
+  // this jobId, resuming would run the handler twice in parallel and both
+  // copies would fight over the Stage-8 insert set.
+  // drizzle-orm/postgres-js returns db.execute() as the row array directly
+  // (NOT { rows }) — see server/services/jobQueueHealthService.ts for the
+  // established cast pattern.
+  const aliveRows = await db.execute(sql`
+    SELECT COUNT(*)::int AS n
+    FROM pgboss.job
+    WHERE name = 'skill-analyzer'
+      AND data->>'jobId' = ${jobId}
+      AND state IN ('created', 'retry', 'active')
+  `);
+  const aliveCount = (aliveRows as unknown as Array<{ n: number }>)[0]?.n ?? 0;
+  if (aliveCount > 0) {
+    throw { statusCode: 409, message: 'Analysis is already queued or running.' };
+  }
+
+  // Reset the intermediate row state so the progress UI reflects the
+  // resume and the handler's stage-entry updates don't look like regressions.
+  // Everything the handler needs to resume (parsedCandidates, configSnapshot,
+  // classifyState, existing skill_analyzer_results rows) is preserved —
+  // those are the inputs to Stage 5's skip-already-classified logic.
+  await db
+    .update(skillAnalyzerJobs)
+    .set({
+      status: 'pending',
+      errorMessage: null,
+      progressMessage: 'Resuming analysis...',
+      updatedAt: new Date(),
+    })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+
+  const boss = await getPgBoss();
+  await boss.send('skill-analyzer', { jobId }, {
+    ...getJobConfig('skill-analyzer'),
+    singletonKey: undefined,
+  });
+
+  logger.info('skill_analyzer.resume_enqueued', { jobId, organisationId });
+  return { ok: true };
 }
 
 /** Shape of `matchedSkillContent` attached to result rows in the GET response.
@@ -2283,6 +2366,7 @@ export async function bulkRetryFailedClassifications(
 
 export const skillAnalyzerService = {
   createJob,
+  resumeJob,
   getJob,
   listJobs,
   setResultAction,
