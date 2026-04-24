@@ -7,6 +7,7 @@ import EmailAuthoringEditor from './EmailAuthoringEditor';
 import SendSmsEditor from './SendSmsEditor';
 import CreateTaskEditor from './CreateTaskEditor';
 import OperatorAlertEditor from './OperatorAlertEditor';
+import SparklineChart from './SparklineChart';
 
 export type InterventionActionType =
   | 'crm.fire_automation'
@@ -40,6 +41,14 @@ interface Props {
   onSubmitted: (action: { id: string; actionType: string }) => void;
 }
 
+const BAND_SCORES: Record<string, number> = {
+  healthy: 80,
+  watch: 60,
+  at_risk: 35,
+  atRisk: 35,
+  critical: 10,
+};
+
 const ACTION_OPTIONS: Array<{ type: InterventionActionType; label: string; description: string }> = [
   { type: 'crm.fire_automation', label: 'Fire automation', description: "Trigger an existing CRM workflow on a contact." },
   { type: 'crm.send_email', label: 'Send email', description: "Author + send an email to a contact." },
@@ -52,6 +61,7 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
   const [context, setContext] = useState<InterventionContext | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [picked, setPicked] = useState<InterventionActionType | null>(null);
+  const [bandHistory, setBandHistory] = useState<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +70,30 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
       .catch((err) => {
         console.error('intervention-context failed', err);
         if (!cancelled) setContextError(err?.response?.data?.message ?? 'Unable to load context');
+      });
+    return () => { cancelled = true; };
+  }, [subaccountId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/api/clientpulse/subaccounts/${subaccountId}/band-transitions?windowDays=90`)
+      .then((res) => {
+        if (cancelled) return;
+        const transitions = (res.data as { transitions: Array<{ fromBand: string; toBand: string; changedAt: string }> }).transitions;
+        if (!transitions?.length) return;
+        const scores: number[] = [];
+        if (transitions[0]) {
+          const first = BAND_SCORES[transitions[0].fromBand];
+          if (first != null) scores.push(first);
+        }
+        for (const t of transitions) {
+          const score = BAND_SCORES[t.toBand];
+          if (score != null) scores.push(score);
+        }
+        setBandHistory(scores.slice(-12));
+      })
+      .catch(() => {
+        // silent — chart is optional
       });
     return () => { cancelled = true; };
   }, [subaccountId]);
@@ -141,6 +175,13 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
       return <div className="text-[12px] text-red-600">Unable to load context — {contextError}</div>;
     }
     if (!context) return <div className="text-[12px] text-slate-400">Loading context…</div>;
+    const bandColour =
+      context.band === 'healthy' ? 'text-emerald-500'
+      : context.band === 'watch' ? 'text-amber-500'
+      : context.band === 'atRisk' ? 'text-rose-500'
+      : context.band === 'critical' ? 'text-red-600'
+      : 'text-slate-400';
+
     return (
       <div className="space-y-4 text-[12.5px]">
         <div>
@@ -159,6 +200,11 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
               </span>
             )}
           </div>
+          {bandHistory.length > 0 && (
+            <div className="mt-2">
+              <SparklineChart values={bandHistory} colour={bandColour} width={80} height={20} terminalDot={false} />
+            </div>
+          )}
         </div>
 
         {context.cooldownState.blocked && (
@@ -172,9 +218,8 @@ export default function ProposeInterventionModal({ subaccountId, subaccountName,
             <div className="text-slate-500 uppercase tracking-wide text-[10px] font-bold">Top drivers</div>
             <ul className="mt-1 space-y-1">
               {context.topSignals.map((s) => (
-                <li key={s.signal} className="flex justify-between">
+                <li key={s.signal}>
                   <span className="text-slate-700">{s.signal}</span>
-                  <span className="text-slate-500 font-mono">{s.contribution}</span>
                 </li>
               ))}
             </ul>
