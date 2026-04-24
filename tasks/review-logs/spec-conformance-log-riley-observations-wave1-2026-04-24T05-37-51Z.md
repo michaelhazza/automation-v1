@@ -7,7 +7,7 @@
 **Scope:** Wave 1 only — spec §4 (Part 1 naming) + §5 (Part 2 invoke_automation composition). W2 (§6 Explore/Execute), W3 (§8 context-assembly telemetry), W4 (§7 heartbeat gate), W0 (§9 spec-authoring rule) explicitly out of scope per caller.
 **Changed-code set:** 389 files total on branch; Wave-1-relevant subset: ~180 files (M1+M2+M3 renames + Part 2 composition additions).
 **Run at:** 2026-04-24T05:37:51Z
-**Commit at finish:** `9f37b295` (local; push failed because remote has diverged — see Next step)
+**Commit at finish:** `34aa3179` (local; push failed because remote has diverged — see Next step)
 
 ---
 
