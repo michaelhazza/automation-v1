@@ -37,21 +37,21 @@ export type { IncidentInput };
 // ---------------------------------------------------------------------------
 
 const FAILURE_COUNTER_RETENTION_MS = 15 * 60 * 1000;
-const failureTimestamps: Array<{ at: Date }> = [];
+const processLocalFailureCounter: Array<{ at: Date }> = [];
 
 function recordFailure(): void {
   const now = new Date();
-  failureTimestamps.push({ at: now });
+  processLocalFailureCounter.push({ at: now });
   const cutoff = now.getTime() - FAILURE_COUNTER_RETENTION_MS;
-  while (failureTimestamps.length > 0 && failureTimestamps[0].at.getTime() < cutoff) {
-    failureTimestamps.shift();
+  while (processLocalFailureCounter.length > 0 && processLocalFailureCounter[0].at.getTime() < cutoff) {
+    processLocalFailureCounter.shift();
   }
 }
 
-/** Returns count of ingest failures in the last windowMinutes. */
+/** Returns count of ingest failures in the last windowMinutes (process-local; multi-instance deploys undercount). */
 export function getIngestFailuresInWindow(windowMinutes: number): number {
   const cutoff = Date.now() - windowMinutes * 60 * 1000;
-  return failureTimestamps.filter(f => f.at.getTime() >= cutoff).length;
+  return processLocalFailureCounter.filter(f => f.at.getTime() >= cutoff).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ let _testMode = false;
 /** Reset internal state between tests. Only callable in test environments. */
 export function __resetForTest(): void {
   if (process.env.NODE_ENV !== 'test') return;
-  failureTimestamps.length = 0;
+  processLocalFailureCounter.length = 0;
   _testMode = false;
 }
 

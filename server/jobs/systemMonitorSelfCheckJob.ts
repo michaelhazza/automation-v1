@@ -13,10 +13,23 @@ import { logger } from '../lib/logger.js';
 export const SELF_CHECK_FAILURE_THRESHOLD = 3;
 export const SELF_CHECK_WINDOW_MINUTES = 15;
 
+// Emits `self_check_process_local_only` once per process on first consultation
+// so operators surface the process-local counter limitation in the log pipeline
+// (tagged-log-as-metric). Multi-instance deploys undercount failures across
+// nodes — persisted-store replacement is tracked in Phase 0.75.
+let hasWarnedProcessLocal = false;
+
 export async function runSystemMonitorSelfCheck(): Promise<{
   failuresInWindow: number;
   incidentSurfaced: boolean;
 }> {
+  if (!hasWarnedProcessLocal) {
+    hasWarnedProcessLocal = true;
+    logger.warn('self_check_process_local_only', {
+      windowMinutes: SELF_CHECK_WINDOW_MINUTES,
+      threshold: SELF_CHECK_FAILURE_THRESHOLD,
+    });
+  }
   const failuresInWindow = getIngestFailuresInWindow(SELF_CHECK_WINDOW_MINUTES);
 
   logger.info('system_monitor_self_check', {
