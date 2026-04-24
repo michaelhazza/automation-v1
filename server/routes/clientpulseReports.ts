@@ -1,7 +1,13 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { reportService } from '../services/reportService.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import {
+  getPrioritisedClients,
+  applyFilters,
+  applyPagination,
+} from '../services/clientPulseHighRiskService.js';
 
 const router = Router();
 
@@ -75,10 +81,50 @@ router.get('/api/clientpulse/health-summary', authenticate, asyncHandler(async (
 }));
 
 /** GET /api/clientpulse/high-risk — high-risk clients for dashboard widget */
-router.get('/api/clientpulse/high-risk', authenticate, asyncHandler(async (req, res) => {
-  // TODO: Derive from latest report metadata or a dedicated health-score table.
-  // For now, return empty to unblock the dashboard UI.
-  res.json({ clients: [] });
-}));
+router.get(
+  '/api/clientpulse/high-risk',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) {
+      throw { statusCode: 400, message: 'Organisation context required' };
+    }
+
+    // ── Parse query params ──────────────────────────────────────────────────
+    const limitRaw = Number.parseInt(String(req.query.limit ?? '7'), 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 7;
+
+    const band = typeof req.query.band === 'string' ? req.query.band : 'all';
+    const q    = typeof req.query.q    === 'string' ? req.query.q    : undefined;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : null;
+
+    // ── Validate band param ────────────────────────────────────────────────
+    const VALID_BANDS = ['all', 'critical', 'at_risk', 'watch', 'healthy'];
+    if (!VALID_BANDS.includes(band)) {
+      res.status(400).json({ errorCode: 'INVALID_BAND', message: `band must be one of: ${VALID_BANDS.join(', ')}` });
+      return;
+    }
+
+    // ── Fetch + filter + paginate ──────────────────────────────────────────
+    const allRows = await getPrioritisedClients(orgId);
+    const filtered = applyFilters(allRows, { band, q });
+    const { rows: page, nextCursor, cursorError } = applyPagination(filtered, { limit, cursor, orgId });
+
+    if (cursorError) {
+      res.status(400).json({ errorCode: 'INVALID_CURSOR', message: 'The provided cursor is invalid or has been tampered with.' });
+      return;
+    }
+
+    // ── Shape response ─────────────────────────────────────────────────────
+    const response = {
+      clients: page,
+      hasMore: nextCursor !== null,
+      nextCursor,
+    };
+
+    res.json(response);
+  }),
+);
 
 export default router;
