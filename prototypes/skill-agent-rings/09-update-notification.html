@@ -1,0 +1,91 @@
+<!doctype html>
+<!--
+  Mock 09 / 09 — Agency-facing update notification (strict)
+  ==============================================================
+  Shown after a system revision reaches prod and is applied to an agency.
+  In-app banner (top) and email variant (below). One sentence of context,
+  one link to see what changed. That's all.
+
+  Consumer-simple budget. Zero KPI tiles. No version numbers in the
+  primary copy — only "updated" and a "What changed" link.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 09 — Update notification</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[720px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 09 · Customer update notification</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- IN-APP TOAST / BANNER -->
+  <div class="mb-6">
+    <div class="text-[11px] uppercase tracking-[0.14em] text-slate-500 font-semibold mb-2">In-app banner</div>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <!-- simulated top nav -->
+      <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-4 text-[13px] text-slate-600">
+        <div class="font-bold text-slate-900">Synthetos</div>
+        <div class="flex-1"></div>
+        <div class="text-slate-400">Search…</div>
+        <div class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-600 text-[12px] font-bold flex items-center justify-center">BL</div>
+      </div>
+
+      <!-- the banner -->
+      <div class="px-5 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center gap-3">
+        <div class="w-6 h-6 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">✓</div>
+        <div class="flex-1 text-[13.5px] text-slate-800">
+          <b class="text-slate-900">Outreach Agent updated</b> · it now references recent account signals more specifically.
+        </div>
+        <a href="#" class="text-[12.5px] text-indigo-700 font-semibold no-underline">What changed →</a>
+        <button class="text-slate-400 hover:text-slate-700 text-[14px] leading-none">✕</button>
+      </div>
+
+      <!-- rest of page — truncated -->
+      <div class="px-6 py-8 text-[12px] text-slate-400 italic">
+        …rest of dashboard page below…
+      </div>
+    </div>
+  </div>
+
+  <!-- EMAIL VARIANT -->
+  <div>
+    <div class="text-[11px] uppercase tracking-[0.14em] text-slate-500 font-semibold mb-2">Weekly email · same event, batched</div>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <!-- simulated email chrome -->
+      <div class="px-6 py-3 border-b border-slate-100 text-[12px] text-slate-500">
+        <div>From: <span class="text-slate-700">Synthetos &lt;updates@synthetos.ai&gt;</span></div>
+        <div>Subject: <span class="text-slate-900 font-semibold">This week's system agent updates · 1 change</span></div>
+      </div>
+      <div class="px-8 py-6">
+        <h2 class="text-[18px] font-bold text-slate-900 mb-2">What changed this week</h2>
+        <p class="text-[14px] text-slate-600 leading-relaxed mb-5">Small improvements rolled out to your system agents. No action needed — your agent is already running the new version.</p>
+
+        <div class="border-t border-slate-100 pt-4">
+          <div class="text-[15px] font-semibold text-slate-900">Outreach Agent</div>
+          <p class="text-[13.5px] text-slate-600 mt-1 leading-relaxed">Now references a specific signal from the last 30 days in every email (event attended, page viewed, content downloaded). Reduces generic openers and improves reply rate.</p>
+          <a href="#" class="inline-block mt-2 text-[13px] text-indigo-600 font-semibold no-underline">See example →</a>
+        </div>
+
+        <div class="mt-8 pt-4 border-t border-slate-100 text-[12px] text-slate-500">
+          Updates roll out after automated safety checks — your runs never see an untested version. <a href="#" class="text-indigo-600 no-underline">Manage notifications</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-5 leading-relaxed">
+    Two surfaces, same event. The in-app banner appears the next time the operator logs in after a system-agent revision reaches them. The email batches week's changes so it's sales-story-quality — something an agency can forward to their own client. Consumer copy: "updated" not "rev 45 promoted to prod"; revision numbers stay on the admin side.
+  </p>
+</div>
+
+</body>
+</html>
