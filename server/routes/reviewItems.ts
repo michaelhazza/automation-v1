@@ -134,9 +134,11 @@ router.post(
     const result = await reviewService.approveItem(req.params.id, req.orgId!, req.user!.id, edits);
 
     // Only record audit and enqueue workflow resume on a real (non-idempotent)
-    // transition. Guard using isPending to avoid double-audit on idempotent
-    // replays (where the service already returned without side effects).
-    if (isPending) {
+    // transition. Gate on result.wasIdempotent (not the pre-read isPending) so
+    // concurrent callers that both read isPending=true before the first write
+    // completes cannot both enter this block — the service's race guard
+    // ensures exactly one caller gets wasIdempotent=false.
+    if (!result.wasIdempotent) {
       reviewAuditService.record({
         actionId: action.id,
         organisationId: req.orgId!,
@@ -197,15 +199,15 @@ router.post(
     }
 
     const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);
-    const isPending =
-      reviewItem.reviewStatus === 'pending' || reviewItem.reviewStatus === 'edited_pending';
 
     const action = await actionService.getAction(reviewItem.actionId, req.orgId!);
 
     const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.user!.id, comment);
 
-    // Only record audit on a real (non-idempotent) transition.
-    if (isPending) {
+    // Only record audit on a real (non-idempotent) transition. Gate on
+    // result.wasIdempotent (not a pre-read status) to prevent concurrent
+    // callers from both entering this block.
+    if (!result.wasIdempotent) {
       reviewAuditService.record({
         actionId: action.id,
         organisationId: req.orgId!,

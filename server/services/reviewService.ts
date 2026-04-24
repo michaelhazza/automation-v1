@@ -101,7 +101,7 @@ export const reviewService = {
     if (idempotencyOutcome === 'idempotent') {
       // Already approved (or completed after execution). Return the current row
       // as-is — no audit, no workflow resume, no socket emit.
-      return { actionId: preCheck.actionId };
+      return { actionId: preCheck.actionId, wasIdempotent: true as const };
     }
 
     if (idempotencyOutcome === 'conflict') {
@@ -178,7 +178,7 @@ export const reviewService = {
 
     // If the race produced an idempotent result, short-circuit here too.
     if ('_idempotentRace' in item && item._idempotentRace) {
-      return { actionId: item.actionId };
+      return { actionId: item.actionId, wasIdempotent: true as const };
     }
 
     if (edits) {
@@ -248,7 +248,7 @@ export const reviewService = {
       editedArgs: edits,
     });
 
-    return { actionId: item.actionId };
+    return { actionId: item.actionId, wasIdempotent: false as const };
   },
 
   /**
@@ -284,7 +284,7 @@ export const reviewService = {
     if (idempotencyOutcome === 'idempotent') {
       // Already rejected. Return the current row as-is — no audit, no
       // regression-capture enqueue, no socket emit.
-      return { actionId: preCheck.actionId };
+      return { actionId: preCheck.actionId, wasIdempotent: true as const };
     }
 
     if (idempotencyOutcome === 'conflict') {
@@ -348,7 +348,7 @@ export const reviewService = {
 
     // If the race produced an idempotent result, short-circuit here too.
     if ('_idempotentRace' in item && item._idempotentRace) {
-      return { actionId: item.actionId };
+      return { actionId: item.actionId, wasIdempotent: true as const };
     }
 
     await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);
@@ -391,7 +391,7 @@ export const reviewService = {
         /* queueService already logs */
       });
 
-    return { actionId: item.actionId };
+    return { actionId: item.actionId, wasIdempotent: false as const };
   },
 
   /**
