@@ -3,7 +3,7 @@
  *
  * Spec: tasks/playbooks-spec.md invariant 14 — the save endpoint never
  * trusts client-supplied fileContents. The server is the only producer
- * of the .playbook.ts file body, and renderWorkflowFile() is that
+ * of the .workflow.ts file body, and renderWorkflowFile() is that
  * single source of truth.
  *
  * This module is intentionally pure — no database, no env, no I/O. It
@@ -18,7 +18,7 @@
  * `outputSchema` for presence (not Zod identity). Studio-authored
  * playbooks rely on the structural definition for shape, not on
  * runtime Zod parsing. Hand-authored playbooks (e.g.
- * server/playbooks/event-creation.playbook.ts) continue to use real
+ * server/workflows/event-creation.workflow.ts) continue to use real
  * Zod schemas; both formats coexist because both are valid TS that
  * imports defineWorkflow.
  */

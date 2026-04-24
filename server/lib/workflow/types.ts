@@ -7,7 +7,7 @@
  *
  * Spec: tasks/workflows-spec.md §3.
  *
- * Authoring lives in server/playbooks/<slug>.playbook.ts files using the
+ * Authoring lives in server/workflows/<slug>.workflow.ts files using the
  * defineWorkflow() helper from ./defineWorkflow.ts. The seeder
  * (server/scripts/seedWorkflows.ts) loads and validates each file via
  * playbookTemplateService.upsertSystemTemplate().
@@ -345,7 +345,7 @@ export interface WorkflowPortalPresentation {
 }
 
 export interface WorkflowDefinition {
-  /** Matches filename: server/playbooks/<slug>.playbook.ts */
+  /** Matches filename: server/workflows/<slug>.workflow.ts */
   slug: string;
   name: string;
   description: string;
