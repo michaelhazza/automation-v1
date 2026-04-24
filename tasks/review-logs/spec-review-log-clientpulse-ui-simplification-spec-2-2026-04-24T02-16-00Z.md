@@ -66,4 +66,4 @@ After reading through the revised spec I spotted no new contradictions, load-bea
 - Reclassified → directional:    0
 - Autonomous decisions:          0
 
-Spec commit after iteration: _will fill after commit_
+Spec commit after iteration: 21f20b6

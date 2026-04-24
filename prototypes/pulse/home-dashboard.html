@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Synthetos · Home dashboard (proposed)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner a { color: #78350f; text-decoration: underline; font-weight: 600; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 32px 60px; }
+
+  /* Greeting */
+  .greeting { margin-bottom: 24px; }
+  .greeting h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+  .greeting .sub { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .greeting .sub strong { color: #0f172a; font-weight: 600; }
+
+  /* Top metric tiles (reuse current-main visual language) */
+  .metric-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin: 0 0 24px;
+  }
+  .metric-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px;
+    text-decoration: none; color: inherit; cursor: pointer;
+    transition: border-color 0.1s, transform 0.1s;
+    display: block;
+  }
+  .metric-card:hover { border-color: #c7d2fe; }
+  .metric-card .mc-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .metric-card .mc-label {
+    font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .metric-card .mc-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .mc-icon.indigo { background: #eef2ff; color: #6366f1; }
+  .mc-icon.amber { background: #fffbeb; color: #f59e0b; }
+  .mc-icon.emerald { background: #ecfdf5; color: #10b981; }
+  .mc-icon.blue { background: #eff6ff; color: #3b82f6; }
+  .metric-card .mc-value { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; line-height: 1; }
+  .metric-card .mc-sub { font-size: 11px; color: #94a3b8; margin-top: 6px; }
+  .metric-card.urgent { border-color: #fca5a5; background: #fef2f2; }
+  .metric-card.urgent .mc-value { color: #b91c1c; }
+
+  /* Section head */
+  .section-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 28px 0 14px;
+  }
+  .section-head h2 { font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px; }
+  .section-head .h-sub { font-size: 12px; color: #64748b; font-weight: 500; margin-left: 8px; }
+  .section-head a { font-size: 13px; color: #4f46e5; font-weight: 600; }
+  .section-head a:hover { text-decoration: underline; }
+
+  /* Pending approval cards (fixed — no nested anchors) */
+  .pending-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+
+  .pend-card {
+    background: #fff; border: 1.5px solid #c7d2fe; border-radius: 12px;
+    padding: 18px 20px;
+    display: grid; grid-template-columns: 14px 1fr 220px; gap: 18px; align-items: center;
+    box-shadow: 0 1px 3px rgba(67, 56, 202, 0.06);
+    transition: box-shadow 0.1s, transform 0.1s;
+  }
+  .pend-card:hover { box-shadow: 0 6px 16px rgba(67, 56, 202, 0.08); }
+  .pend-card.major { border-color: #fde68a; box-shadow: 0 1px 3px rgba(180, 83, 9, 0.06); }
+  .pend-card.major:hover { box-shadow: 0 6px 16px rgba(180, 83, 9, 0.09); }
+  .pend-card.internal { border-color: #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  .pend-card.internal:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.05); }
+
+  .p-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; }
+  .p-dot.critical { background: #b91c1c; }
+  .p-dot.at-risk { background: #dc2626; }
+  .p-dot.major { background: #d97706; }
+  .p-dot.internal { background: #9ca3af; }
+
+  .p-main { min-width: 0; }
+  .p-top {
+    font-size: 12px; color: #64748b; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .p-top .p-feature {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px;
+    border-radius: 3px; text-transform: uppercase;
+  }
+  .p-top .p-feature.clientpulse { background: #eef2ff; color: #4338ca; }
+  .p-top .p-feature.config { background: #fef3c7; color: #92400e; }
+  .p-top .p-feature.agent { background: #f1f5f9; color: #475569; }
+  .p-top .p-client-name { color: #0f172a; font-weight: 600; font-size: 13px; }
+
+  .p-action { font-size: 15px; font-weight: 600; line-height: 1.4; margin-bottom: 6px; color: #0f172a; }
+  .p-why { font-size: 13px; color: #475569; line-height: 1.55; }
+  .p-why strong { color: #334155; font-weight: 600; }
+
+  .p-open-context {
+    font-size: 12px; color: #4f46e5; font-weight: 500; margin-top: 10px; display: inline-block;
+  }
+  .p-open-context:hover { text-decoration: underline; }
+
+  .pend-actions {
+    display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+    justify-self: end; width: 100%; max-width: 200px;
+  }
+  .btn-approve {
+    padding: 9px 16px; font-size: 13px; font-weight: 700;
+    background: #4f46e5; color: #fff; border: 1px solid #4338ca;
+    border-radius: 6px; cursor: pointer; text-align: center; display: block;
+  }
+  .btn-approve:hover { background: #4338ca; }
+  .btn-reject {
+    padding: 7px 16px; font-size: 13px; font-weight: 600;
+    background: #fff; color: #991b1b; border: 1px solid #fecaca;
+    border-radius: 6px; cursor: pointer; text-align: center; display: block;
+  }
+  .btn-reject:hover { background: #fef2f2; }
+  .btn-defer {
+    padding: 2px 4px; font-size: 11px; color: #94a3b8; font-weight: 500;
+    background: none; border: none; cursor: pointer; text-align: center; display: block;
+    margin-top: 2px;
+  }
+  .btn-defer:hover { color: #4f46e5; text-decoration: underline; }
+
+  /* Feature workspace cards */
+  .feature-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .feature-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 18px 20px; cursor: pointer;
+    transition: all 0.12s;
+    display: flex; flex-direction: column; gap: 12px;
+    text-decoration: none; color: inherit;
+  }
+  .feature-card:hover {
+    border-color: #c7d2fe; transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.04);
+  }
+
+  .fc-head { display: flex; align-items: center; gap: 12px; }
+  .fc-icon {
+    width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+    background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+  }
+  .fc-title { font-size: 15px; font-weight: 700; color: #0f172a; flex: 1; }
+  .fc-link { font-size: 12px; color: #4f46e5; font-weight: 600; }
+
+  .fc-dist-visual {
+    display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #f1f5f9;
+    margin-bottom: 8px;
+  }
+  .fc-dist-visual .seg.critical { background: #b91c1c; }
+  .fc-dist-visual .seg.at-risk { background: #dc2626; }
+  .fc-dist-visual .seg.watch { background: #d97706; }
+  .fc-dist-visual .seg.healthy { background: #16a34a; }
+
+  .fc-pill-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fc-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  }
+  .fc-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .fc-pill.critical { background: #fef2f2; color: #991b1b; }
+  .fc-pill.critical .dot { background: #b91c1c; }
+  .fc-pill.at-risk { background: #fef2f2; color: #b91c1c; }
+  .fc-pill.at-risk .dot { background: #dc2626; }
+  .fc-pill.watch { background: #fffbeb; color: #92400e; }
+  .fc-pill.watch .dot { background: #d97706; }
+  .fc-pill.healthy { background: #ecfdf5; color: #065f46; }
+  .fc-pill.healthy .dot { background: #16a34a; }
+
+  .fc-muted { font-size: 12.5px; color: #64748b; line-height: 1.55; }
+  .fc-muted strong { color: #0f172a; font-weight: 600; }
+
+  /* ── Unified activity feed ─────────────────────────────── */
+  .feed-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+  }
+  .feed-table { width: 100%; border-collapse: collapse; }
+  .feed-table thead th {
+    padding: 9px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.4px; color: #94a3b8; text-align: left;
+    border-bottom: 1px solid #f1f2f4; background: #fafbfc; white-space: nowrap;
+  }
+  .feed-table tbody tr { border-bottom: 1px solid #f1f2f4; transition: background 0.07s; }
+  .feed-table tbody tr:last-child { border-bottom: none; }
+  .feed-table tbody tr:hover { background: #fafbfc; }
+  .feed-table tbody td { padding: 10px 16px; vertical-align: middle; }
+
+  /* Activity description cell */
+  .act-cell { min-width: 0; }
+  .act-main {
+    font-size: 13px; font-weight: 500; color: #0f172a; line-height: 1.4;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .act-sub { font-size: 11.5px; color: #94a3b8; margin-top: 1px; }
+  .act-log-link {
+    font-size: 11px; color: #4338ca; font-weight: 600; white-space: nowrap;
+    margin-left: 6px;
+  }
+  .act-log-link:hover { text-decoration: underline; }
+
+  /* By column — human vs agent vs system */
+  .by-cell { white-space: nowrap; }
+  .by-human { display: inline-flex; align-items: center; gap: 7px; }
+  .by-human .avatar {
+    width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; color: #fff; line-height: 1;
+  }
+  .by-human .avatar.sarah { background: #6366f1; }
+  .by-human .avatar.ben   { background: #10b981; }
+  .by-human .name { font-size: 13px; font-weight: 500; color: #334155; }
+  .by-human .trigger-method { font-size: 11px; color: #94a3b8; }
+
+  .by-agent { display: inline-flex; align-items: flex-start; flex-direction: column; gap: 1px; }
+  .by-agent .agent-name { font-size: 13px; font-weight: 500; color: #4338ca; }
+  .by-agent .trigger-method { font-size: 11px; color: #94a3b8; }
+
+  .by-system { font-size: 13px; color: #94a3b8; font-style: italic; }
+
+  /* Status badge */
+  .st-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .st-badge .b-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .st-badge.completed  { background: #ecfdf5; color: #065f46; }
+  .st-badge.completed  .b-dot { background: #10b981; }
+  .st-badge.failed     { background: #fef2f2; color: #991b1b; }
+  .st-badge.failed     .b-dot { background: #ef4444; }
+  .st-badge.running    { background: #eff6ff; color: #1d4ed8; }
+  .st-badge.running    .b-dot { background: #3b82f6; }
+  .st-badge.waiting    { background: #fffbeb; color: #92400e; }
+  .st-badge.waiting    .b-dot { background: #f59e0b; }
+  .st-badge.approved   { background: #ecfdf5; color: #065f46; }
+  .st-badge.approved   .b-dot { background: #10b981; }
+  .st-badge.rejected   { background: #f1f5f9; color: #475569; }
+  .st-badge.rejected   .b-dot { background: #94a3b8; }
+  .st-badge.info       { background: #f0f9ff; color: #075985; }
+  .st-badge.info       .b-dot { background: #38bdf8; }
+
+  .dur-cell  { font-family: 'Fira Mono', monospace; font-size: 12px; color: #64748b; white-space: nowrap; }
+  .when-cell { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  PROPOSED · Home dashboard (route <code>/</code>) · cross-feature approval hub + feature summary cards.
+  Separate from the ClientPulse-specific dashboard at <code>/clientpulse</code>.
+</div>
+
+<div class="container">
+
+  <div class="greeting">
+    <h1>Good morning, Ben</h1>
+    <div class="sub">Monday, 20 April · <strong>3 items</strong> need your attention today</div>
+  </div>
+
+  <!-- Top metric tiles (preserves current-main's visual language) -->
+  <div class="metric-grid">
+    <a class="metric-card urgent" href="#pending">
+      <div class="mc-head">
+        <span class="mc-label">Pending approval</span>
+        <span class="mc-icon indigo">⚑</span>
+      </div>
+      <div class="mc-value">3</div>
+      <div class="mc-sub">2 client · 1 config · 1 agent</div>
+    </a>
+    <a class="metric-card" href="clientpulse-mockup-dashboard.html">
+      <div class="mc-head">
+        <span class="mc-label">Clients needing attention</span>
+        <span class="mc-icon amber">⚠</span>
+      </div>
+      <div class="mc-value">7</div>
+      <div class="mc-sub">$4,820 MRR at risk</div>
+    </a>
+    <a class="metric-card" href="#">
+      <div class="mc-head">
+        <span class="mc-label">Active agents</span>
+        <span class="mc-icon emerald">◉</span>
+      </div>
+      <div class="mc-value">4</div>
+      <div class="mc-sub">all ready</div>
+    </a>
+    <a class="metric-card" href="#">
+      <div class="mc-head">
+        <span class="mc-label">Runs (7 days)</span>
+        <span class="mc-icon blue">▶</span>
+      </div>
+      <div class="mc-value">127</div>
+      <div class="mc-sub">↑ 12 vs yesterday</div>
+    </a>
+  </div>
+
+  <!-- PENDING APPROVALS -->
+  <div class="section-head" id="pending">
+    <div>
+      <h2 style="display:inline-block;">Pending your approval <span class="h-sub">· approve, reject, or open in context</span></h2>
+    </div>
+  </div>
+  <div class="pending-grid">
+
+    <!-- ClientPulse-originated -->
+    <div class="pend-card">
+      <span class="p-dot critical"></span>
+      <div class="p-main">
+        <div class="p-top">
+          <span class="p-feature clientpulse">ClientPulse</span>
+          <span class="p-client-name">Smith Dental</span>
+          <span>· Critical · health 28/100 · proposed 12 min ago</span>
+        </div>
+        <div class="p-action">Retention call task (assigned to Ben) — within 24h</div>
+        <div class="p-why">
+          Dropped to Critical 4d ago. Last outbound call 8d ago, SMS silent 8d.
+          Retention-call template previously improved band 2 of 3 times for dentistry.
+        </div>
+        <a class="p-open-context" href="clientpulse-mockup-drilldown.html">Open in drilldown →</a>
+      </div>
+      <div class="pend-actions">
+        <a class="btn-approve" href="#">Approve</a>
+        <a class="btn-reject" href="#">Reject</a>
+        <a class="btn-defer" href="#">Defer 24h</a>
+      </div>
+    </div>
+
+    <!-- Major — config change -->
+    <div class="pend-card major">
+      <span class="p-dot major"></span>
+      <div class="p-main">
+        <div class="p-top">
+          <span class="p-feature config">Config change</span>
+          <span>· proposed via Configuration Assistant · 1h ago</span>
+        </div>
+        <div class="p-action">Lower the At Risk alert threshold from 40 → 30</div>
+        <div class="p-why">
+          Sensitive change — could trigger more frequent alerts across the org.
+          Affects <strong>alert limits · operator alert threshold</strong>.
+        </div>
+        <a class="p-open-context" href="clientpulse-mockup-config-assistant-chat.html">Review conversation →</a>
+      </div>
+      <div class="pend-actions">
+        <a class="btn-approve" href="#">Approve</a>
+        <a class="btn-reject" href="#">Reject</a>
+      </div>
+    </div>
+
+    <!-- Internal — agent clarification -->
+    <div class="pend-card internal">
+      <span class="p-dot internal"></span>
+      <div class="p-main">
+        <div class="p-top">
+          <span class="p-feature agent">Agent clarification</span>
+          <span>· from brief run · 6h ago</span>
+        </div>
+        <div class="p-action">Which "Ben" did you mean when assigning the retention task?</div>
+        <div class="p-why">
+          2 team members match: <strong>Ben Quinlan (owner)</strong> and <strong>Ben Wong (ops)</strong>.
+          Pick one and the brief will resume.
+        </div>
+      </div>
+      <div class="pend-actions">
+        <a class="btn-approve" href="#">Answer</a>
+        <a class="btn-defer" href="#">Skip for now</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- YOUR WORKSPACES (feature summary cards) -->
+  <div class="section-head">
+    <h2>Your workspaces</h2>
+  </div>
+  <div class="feature-grid">
+
+    <a class="feature-card" href="clientpulse-mockup-dashboard.html">
+      <div class="fc-head">
+        <div class="fc-icon">📊</div>
+        <div class="fc-title">ClientPulse</div>
+        <span class="fc-link">Open →</span>
+      </div>
+      <div>
+        <div class="fc-dist-visual">
+          <div class="seg critical" style="width:2.3%;"></div>
+          <div class="seg at-risk" style="width:5.7%;"></div>
+          <div class="seg watch" style="width:14.9%;"></div>
+          <div class="seg healthy" style="width:77.1%;"></div>
+        </div>
+        <div class="fc-pill-row">
+          <span class="fc-pill critical"><span class="dot"></span>2 Critical</span>
+          <span class="fc-pill at-risk"><span class="dot"></span>5 At Risk</span>
+          <span class="fc-pill watch"><span class="dot"></span>13 Watch</span>
+          <span class="fc-pill healthy"><span class="dot"></span>67 Healthy</span>
+        </div>
+      </div>
+      <div class="fc-muted"><strong>7 clients</strong> need attention · <strong>$4,820</strong> MRR at risk.</div>
+    </a>
+
+    <a class="feature-card" href="#">
+      <div class="fc-head">
+        <div class="fc-icon">🔍</div>
+        <div class="fc-title">CRM queries</div>
+        <span class="fc-link">Ask →</span>
+      </div>
+      <div class="fc-muted">
+        Run a natural-language query across your CRM — pipeline, contacts, opportunities, activity.
+      </div>
+      <div class="fc-muted" style="font-size:12px;">
+        Last: "Which clients haven't been contacted this week?"
+      </div>
+    </a>
+
+    <a class="feature-card" href="#">
+      <div class="fc-head">
+        <div class="fc-icon">🤖</div>
+        <div class="fc-title">Agents</div>
+        <span class="fc-link">Open →</span>
+      </div>
+      <div class="fc-muted">
+        <strong>4 agents</strong> active · 2 scheduled runs this afternoon · 1 awaiting clarification (above).
+      </div>
+    </a>
+
+    <a class="feature-card" href="clientpulse-mockup-settings.html">
+      <div class="fc-head">
+        <div class="fc-icon">⚙️</div>
+        <div class="fc-title">Settings</div>
+        <span class="fc-link">Open →</span>
+      </div>
+      <div class="fc-muted">
+        <strong>3 team members</strong> · 1 blueprint override · 2 integrations connected.
+      </div>
+    </a>
+
+  </div>
+
+  <!-- RECENT ACTIVITY (unified: agent runs + human actions + system events) -->
+  <div class="section-head">
+    <h2>Recent activity</h2>
+    <a href="#">View all →</a>
+  </div>
+  <div class="feed-card">
+    <table class="feed-table">
+      <thead>
+        <tr>
+          <th style="width:38%">Activity</th>
+          <th style="width:22%">Executed by</th>
+          <th style="width:12%">Status</th>
+          <th style="width:8%">Duration</th>
+          <th style="width:10%">When</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- Human action: approval -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Approved retention call · Smith Dental</div>
+            <div class="act-sub">ClientPulse intervention · Critical client</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar sarah">S</span>
+              <div><div class="name">Sarah K.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge approved"><span class="b-dot"></span>Approved</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">12 min ago</td>
+        </tr>
+
+        <!-- Agent run: scheduled, completed -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Weekly health scoring — 87 clients scored
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">2 moved to Critical · 3 moved to At Risk</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">ClientPulse Weekly Scorer</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">1m 42s</td>
+          <td class="when-cell">1h ago</td>
+        </tr>
+
+        <!-- Agent run: manual triggered by human, completed -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Daily brief — 3 action items generated
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Priority: Smith Dental retention, Cairns Solar follow-up</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Brief Agent</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">28s</td>
+          <td class="when-cell">3h ago</td>
+        </tr>
+
+        <!-- Human action: rejection -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Rejected threshold change — At Risk 40→30</div>
+            <div class="act-sub">Config Assistant proposal · too aggressive for current portfolio</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar ben">B</span>
+              <div><div class="name">Ben Q.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge rejected"><span class="b-dot"></span>Rejected</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">5h ago</td>
+        </tr>
+
+        <!-- Agent run: manual (triggered by human conversation), completed -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Config update — churn band thresholds applied
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Watch ceiling raised from 59 → 64</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Config Assistant</span>
+              <span class="trigger-method">Manual · Ben Q.</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">12s</td>
+          <td class="when-cell">5h ago</td>
+        </tr>
+
+        <!-- System event: no log, no duration -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Cairns Solar moved Watch → At Risk</div>
+            <div class="act-sub">Health score fell from 46 → 36 over 7 days</div>
+          </td>
+          <td class="by-cell">
+            <span class="by-system">System · health detector</span>
+          </td>
+          <td><span class="st-badge info"><span class="b-dot"></span>Detected</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">Yesterday</td>
+        </tr>
+
+        <!-- Human action: answered agent clarification -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Answered clarification — "Ben Quinlan"</div>
+            <div class="act-sub">Brief Agent resumed after human disambiguation</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar ben">B</span>
+              <div><div class="name">Ben Q.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge approved"><span class="b-dot"></span>Answered</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">Yesterday</td>
+        </tr>
+
+        <!-- Agent run: scheduled, failed -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              CRM sync — contact data refresh
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">API timeout after 3 retries · HubSpot rate limit</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">CRM Sync</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge failed"><span class="b-dot"></span>Failed</span></td>
+          <td class="dur-cell">4s</td>
+          <td class="when-cell">Yesterday</td>
+        </tr>
+
+        <!-- Human action: approved + edited -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Edited and approved email draft · Cairns Solar</div>
+            <div class="act-sub">Changed tone from urgent → consultative before sending</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar ben">B</span>
+              <div><div class="name">Ben Q.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge approved"><span class="b-dot"></span>Approved</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">2 days ago</td>
+        </tr>
+
+        <!-- Agent run: playbook/campaign, manual, completed -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              At-risk nurture campaign — 5 clients contacted
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">SMS sent to 3 · email queued for 2 · awaiting review</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Nurture Playbook</span>
+              <span class="trigger-method">Manual · Sarah K.</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">4m 12s</td>
+          <td class="when-cell">2 days ago</td>
+        </tr>
+
+        <!-- Agent run: webhook-triggered -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Contact updated — Parkside Vet (Jamie Chen)
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Salesforce webhook · last contacted date refreshed in CRM</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Workflow Engine</span>
+              <span class="trigger-method">Webhook · Salesforce</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">2s</td>
+          <td class="when-cell">3 days ago</td>
+        </tr>
+
+        <!-- Human: approved scoring weight -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Approved scoring weight — Last-login recency</div>
+            <div class="act-sub">Now 15% of health score (was 8%)</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar ben">B</span>
+              <div><div class="name">Ben Q.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge approved"><span class="b-dot"></span>Approved</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">4 days ago</td>
+        </tr>
+
+        <!-- Agent run: manually re-triggered health score -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Health re-score — all 87 clients
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Triggered after scoring weight change</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">ClientPulse Weekly Scorer</span>
+              <span class="trigger-method">Manual · Ben Q.</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">55s</td>
+          <td class="when-cell">4 days ago</td>
+        </tr>
+
+        <!-- System: integration reconnected -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">HubSpot integration reconnected</div>
+            <div class="act-sub">OAuth token refreshed · CRM sync will resume next schedule</div>
+          </td>
+          <td class="by-cell">
+            <span class="by-system">System · integration monitor</span>
+          </td>
+          <td><span class="st-badge info"><span class="b-dot"></span>Info</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">5 days ago</td>
+        </tr>
+
+        <!-- Agent run: scheduled, completed (last week) -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Daily brief — 2 action items
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Highland Fitness follow-up · Outback Trades check-in</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Brief Agent</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">22s</td>
+          <td class="when-cell">7 days ago</td>
+        </tr>
+
+        <!-- Agent run: agent-chained (triggered by another agent) -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Scoring config updated — signals recalibrated
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">Config Assistant adjusted 3 signal weights after brief review</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">Config Assistant</span>
+              <span class="trigger-method">Agent chain · Brief Agent</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">8s</td>
+          <td class="when-cell">7 days ago</td>
+        </tr>
+
+        <!-- Agent run: weekly score last week -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Weekly health scoring — 87 clients scored
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">No band changes this week</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">ClientPulse Weekly Scorer</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">1m 38s</td>
+          <td class="when-cell">7 days ago</td>
+        </tr>
+
+        <!-- Human: team member added -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">Sarah K. added as team member</div>
+            <div class="act-sub">Role: Ops · access to ClientPulse and Settings</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-human">
+              <span class="avatar ben">B</span>
+              <div><div class="name">Ben Q.</div></div>
+            </div>
+          </td>
+          <td><span class="st-badge info"><span class="b-dot"></span>Info</span></td>
+          <td class="dur-cell">—</td>
+          <td class="when-cell">9 days ago</td>
+        </tr>
+
+        <!-- Agent run: CRM sync success (retry of earlier failure) -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              CRM sync — contact data refresh
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">342 contacts synced · 8 updated in CRM</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">CRM Sync</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">6s</td>
+          <td class="when-cell">9 days ago</td>
+        </tr>
+
+        <!-- Agent run: 2 weeks ago -->
+        <tr>
+          <td class="act-cell">
+            <div class="act-main">
+              Weekly health scoring — 87 clients scored
+              <a class="act-log-link" href="run-detail.html">View log →</a>
+            </div>
+            <div class="act-sub">1 moved to At Risk · Redcliffe Dental</div>
+          </td>
+          <td class="by-cell">
+            <div class="by-agent">
+              <span class="agent-name">ClientPulse Weekly Scorer</span>
+              <span class="trigger-method">Scheduled</span>
+            </div>
+          </td>
+          <td><span class="st-badge completed"><span class="b-dot"></span>Completed</span></td>
+          <td class="dur-cell">1m 51s</td>
+          <td class="when-cell">14 days ago</td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+</body>
+</html>

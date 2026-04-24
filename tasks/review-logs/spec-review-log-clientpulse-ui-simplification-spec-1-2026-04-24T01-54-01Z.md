@@ -44,7 +44,7 @@ Detailed per-finding classification is in the companion file
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             2 (both "reject" — Defer 24h button; CRM + /agents workspace cards. See tasks/todo.md)
 
-Spec commit after iteration: _filled by Step 8b commit_
+Spec commit after iteration: c1f98a8fac5a7a9972ad962a3a5cde760c73e3df
 
 ---
 
