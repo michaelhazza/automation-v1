@@ -8,6 +8,7 @@
 **Scope:** Re-verification of the 5 directional gaps from prior run (`spec-conformance-log-clientpulse-ui-simplification-2026-04-24T06-55-22Z.md`). Caller confirmed: pre-PR conformance gate, all other REQs (1–41) already PASS in prior run and no code in those surfaces has changed since.
 **Changed-code set:** 56 files since merge-base (unchanged in scope vs prior run + 2 files touched by fix commit `d6309168`: `client/src/components/Layout.tsx`, the spec file)
 **Run at:** 2026-04-24T07:09:46Z
+**Commit at finish:** `2c0dcc97b383de49ad301d5d1954c4424a719a44`
 
 ---
 
