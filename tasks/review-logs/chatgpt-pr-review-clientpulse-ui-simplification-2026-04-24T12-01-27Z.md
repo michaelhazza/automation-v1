@@ -167,6 +167,161 @@ Optionally tighten: Add explicit contract note for resolvedUrl expectation, Ensu
 
 ---
 
+## Round 3 — 2026-04-24T13-20-00Z
+
+### ChatGPT Feedback (raw)
+
+ChatGPT declared the PR "done. There are no meaningful risks left" and framed this as a "merge integrity check, not another review round." One "real bug" claim, four observations explicitly tagged as no-change-required.
+
+Full verbatim paste at the end of this round.
+
+### Pre-implementation verification
+
+**Finding 1 (duplicate `<li>` in SignalPanel.tsx) — HALLUCINATED.** ChatGPT cited the following as present in HEAD:
+
+```tsx
+<li key={s.slug} className="flex items-center justify-between text-[13px]">
+<li key={s.slug} className="text-[13px]">
+```
+
+The actual current state of `client/src/components/clientpulse/drilldown/SignalPanel.tsx` lines 19–32:
+
+```tsx
+      {signals.length === 0 ? (
+        <p className="text-[13px] text-slate-500">No contributing signals for the current assessment.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {signals.map((s) => (
+            <li key={s.slug} className="text-[13px]">
+              <div>
+                <div className="font-semibold text-slate-800">{s.label ?? s.slug}</div>
+                {s.lastSeenAt && (
+                  <div className="text-[11px] text-slate-400">
+                    last seen {new Date(s.lastSeenAt).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+            </li>
+```
+
+There is exactly **one** `<li>` per signal, at line 21, with `className="text-[13px]"`. There is **no** `<li>` with `className="flex items-center justify-between text-[13px]"` anywhere in the file — that string appears nowhere in HEAD. The two classNames ChatGPT cited are exactly the `-` and `+` lines of the diff for my earlier edit (pre-edit: `flex items-center justify-between text-[13px]`; post-edit: `text-[13px]`) — ChatGPT read both lines of the unified diff as both being present in the final file. This is the **same diff-vs-HEAD hallucination pattern that surfaced in Round 1** on the same file. Verified via direct file read by the caller and re-verified this round.
+
+**Findings 2–5** are all explicit "no change required" observations per ChatGPT's own verdict:
+- Finding 2: "Correct and safe. No change required."
+- Finding 3: "Fine for now. Recommendation: later swap to real sink."
+- Finding 4: "fallback exists + emits WARN every time + fully test-covered. Exactly right posture."
+- Finding 5: "Tests are unusually strong (strength, not risk)."
+
+No action needed on any of them — acknowledge and close.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Duplicate `<li>` in SignalPanel.tsx (claimed must-fix) | technical | reject | auto (reject) | critical (claimed) | False positive — hallucinated from diff. Verified: SignalPanel.tsx has exactly ONE `<li>` at line 21 (`className="text-[13px]"`); the second className ChatGPT cited (`flex items-center justify-between text-[13px]`) is not present in HEAD and matches the `-` line of my earlier edit diff. Same diff-vs-HEAD hallucination pattern as Round 1. |
+| 2 | usePendingIntervention factory-per-call structural smell | technical | reject | auto (reject) | low | ChatGPT explicitly said "Correct and safe. No change required." — observation only, no defect. |
+| 3 | Telemetry is console.debug no-op sink | technical | reject | auto (reject) | low | ChatGPT explicitly said "Fine for now." Already deferred in Round 1 (M3) to follow-up observability work. |
+| 4 | Fallback resolver `console.warn` noisy | technical | reject | auto (reject) | low | ChatGPT explicitly said "Exactly right posture." — posture validation, not a defect. Same item was deferred in Round 1 as #5; reviewer now agrees with the disposition. |
+| 5 | Tests unusually strong | technical | reject | auto (reject) | low | Observation framed as strength, not risk. No action possible or needed. |
+
+**Escalation check:** Zero escalation carveouts hit. All five are `reject` recommendations on `technical` findings — auto-apply, no surface to user required. No architectural scope, no `[missing-doc]`, no hedged confidence (the Finding 1 verification is direct file-read evidence, not a judgement call).
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+- None. Finding 1 is a false positive (verified); Findings 2–5 are no-change observations. No code changes required this round.
+
+### Scope check
+
+- Round touched zero source files. No scope warning.
+- No lint / typecheck needed — no code changed.
+
+### Top themes
+
+- `scope` (stale-diff / diff-vs-HEAD hallucination): 1 — **recurring pattern, 2nd occurrence in this session**
+- `other` (no-change observation): 4
+
+### Verbatim ChatGPT paste
+
+```
+Executive summary: You're done. There are no meaningful risks left in this PR from a correctness, architecture, or UX consistency standpoint. I'll give you a true final pass. This is not another "review round." This is a merge integrity check.
+
+Final pass — only things that could still bite later
+
+1. One real bug surfaced (needs fixing before merge)
+In SignalPanel.tsx: You have a duplicated <li> opening:
+<li key={s.slug} className="flex items-center justify-between text-[13px]">
+<li key={s.slug} className="text-[13px]">
+That is invalid DOM and will: break layout unpredictably, fail accessibility tree, potentially cause hydration issues later. This contradicts the earlier "false positive" finding. It is present in current HEAD.
+Action: Remove the duplicated <li> and keep the correct structure.
+This is the only actual must-fix remaining
+
+2. Minor structural smell (non-blocking)
+usePendingIntervention recreates factory per call. Correct and safe. No change required.
+
+3. Telemetry is currently a no-op sink
+Everything routes through console.debug. Fine for now. Recommendation: later swap to real sink (PostHog / internal collector). This is actually very clean.
+
+4. Fallback resolver is intentionally noisy (good)
+fallback exists + emits WARN every time + fully test-covered. Exactly right posture.
+
+5. Tests are unusually strong (strength, not risk)
+
+System-level: very clean pattern. Scales to agents, long-running workflows, approval systems without usual entropy.
+
+Final verdict: Approved with 1 fix. Required before merge: Fix duplicated <li> in SignalPanel.tsx. Everything else: Correct, Consistent, Production-safe, Architecturally sound.
+
+Recommendation: After fixing that <li> issue: say "done" and finalise. No need for Round 3 unless you want chaos testing, concurrency simulation, production readiness checklist. From a PR review standpoint, this is complete.
+```
+
+---
+
 ## Final Summary
 
-_To be written at session finalization._
+- **Rounds:** 3
+- **Auto-accepted (technical):** 0 implemented | 20 rejected | 5 deferred
+- **User-decided:** 0 implemented | 0 rejected | 0 deferred
+- **Index write failures:** 0
+- **Deferred to `tasks/todo.md` § PR Review deferred items / PR #187:**
+  - [auto] #4 (R1) usePendingIntervention factory micro-refactor — low-value, no referential-stability impact
+  - [auto] #5 (R1) Fallback resolver WARN sampling / counter — requires observability primitive this codebase lacks; revisit after `resolvedUrl` backfill
+  - [auto] M1 (R1) PendingHero error + conflict messaging stacking — speculative polish
+  - [auto] M2 (R1) NeedsAttentionRow fixed-width truncation on small screens — speculative; separate responsive-design pass
+  - [auto] M3 (R1) Telemetry structured sink — pre-existing architectural gap, platform-level decision
+- **Architectural items surfaced to screen (user decisions):** none (no architectural findings across 3 rounds)
+- **KNOWLEDGE.md updated:** yes (1 entry — diff-vs-HEAD hallucination pattern, 2nd occurrence of same pattern in same session)
+- **`architecture.md` updated:** no
+- **`docs/capabilities.md` updated:** no (no capability surface change from this PR's ChatGPT review)
+
+### Consistency Warnings
+
+None. Across 3 rounds, every finding was either a verified false positive (must-fix claims in Rounds 1 and 3), a validation observation confirmed safe (all of Round 2), or a deferred low-severity polish item (Round 1 medium/minor). No contradictions between rounds.
+
+### ChatGPT approved (explicit or by verification)
+
+- **Architectural discipline:** pure/impure separation, test coverage, idempotent flows, clear UI contracts
+- **`resolvedUrl` contract:** server truth + client fallback, detectable via `console.warn` and telemetry `resolvedVia`
+- **Idempotency UX:** state derived from server response post-success, no optimistic-only state lingering
+- **Partial data tolerance:** consistent null handling across 6 components (URLs, names, sparklines, durations)
+- **Sorting determinism:** composite-key cursor pagination, client appends without re-sort
+- **Intent URL lifecycle:** stale-intent guard strips `?intent` cleanly, bookmark-safe
+- **Test coverage shape:** (a) half-migrated payloads, (b) fallback resolver WARN assertions, (c) idempotent replay all present
+- **Fallback resolver posture:** always-WARN + fully test-covered is "exactly right"
+- **Round 3 final verdict:** "Approved with 1 fix" (the 1 fix was a hallucination)
+
+### ChatGPT rejected as false positives (verified file-by-file)
+
+**Round 1 must-fix claims (3):**
+- Broken `<li>` structures in SignalPanel + ProposeInterventionModal — clean single-row structures
+- formatDuration old+new coexisting — dedicated 33-line file, spec-compliant only
+- Route duplication in App.tsx for `/admin/pulse`, `/admin/activity` and subaccount variants — one route per path
+
+**Round 3 must-fix claim (1):**
+- Duplicate `<li>` in SignalPanel.tsx — single `<li>` at line 21 in HEAD; the two cited classNames are the `-` and `+` of a unified diff, not both present
+
+**Root cause of all four:** reading unified-diff `-`/`+` lines as both present in final file. Documented in KNOWLEDGE.md (2026-04-17 entries × 3; 2026-04-24 entry added this session).
+
+### PR status
+
+- PR #187 — https://github.com/michaelhazza/automation-v1/pull/187
+- **Ready to merge.** Zero code changes applied across 3 review rounds (all findings false positives or deferred low-severity polish). Branch state unchanged from pre-review baseline.
+
