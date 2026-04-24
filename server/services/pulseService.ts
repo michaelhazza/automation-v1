@@ -46,6 +46,7 @@ export interface PulseItem {
   agentName: string | null;
   createdAt: string;
   detailUrl: string;
+  resolvedUrl: string | null;
   actionType: string | null;
   runId: string | null;
 }
@@ -75,6 +76,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error('PULSE_TIMEOUT')), ms),
     ),
   ]);
+}
+
+function resolveUrlForItem(
+  kind: string,
+  id: string,
+  subaccountId: string | null | undefined,
+): string | null {
+  switch (kind) {
+    case 'review':
+      return subaccountId ? `/clientpulse/clients/${subaccountId}` : null;
+    case 'task':
+      return subaccountId ? `/admin/subaccounts/${subaccountId}/workspace` : null;
+    case 'failed_run':
+      return `/runs/${id}/live`;
+    case 'health_finding':
+      return '/admin/health';
+    default:
+      return null;
+  }
 }
 
 async function getSubaccountIdsForScope(scope: PulseScope): Promise<string[]> {
@@ -384,6 +404,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
       agentName: null,
       createdAt: review.createdAt.toISOString(),
       detailUrl: `review:${review.id}`,
+      resolvedUrl: resolveUrlForItem('review', review.id, review.subaccountId),
       actionType: action.actionType,
       runId: runId || null,
     });
@@ -411,6 +432,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
       agentName: task.assignedAgentId ? agentNameMap.get(task.assignedAgentId) || null : null,
       createdAt: task.createdAt.toISOString(),
       detailUrl: `task:${task.id}`,
+      resolvedUrl: resolveUrlForItem('task', task.id, task.subaccountId),
       actionType: null,
       runId: null,
     });
@@ -438,6 +460,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
       agentName: agentNameMap.get(run.agentId) || null,
       createdAt: run.createdAt.toISOString(),
       detailUrl: `run:${run.id}`,
+      resolvedUrl: resolveUrlForItem('failed_run', run.id, run.subaccountId),
       actionType: null,
       runId: run.id,
     });
@@ -464,6 +487,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
       agentName: null,
       createdAt: finding.detectedAt.toISOString(),
       detailUrl: `health:${finding.id}`,
+      resolvedUrl: resolveUrlForItem('health_finding', finding.id, null),
       actionType: null,
       runId: null,
     });
@@ -553,6 +577,7 @@ export async function getItem(
       subaccountId: row.subaccountId || '', subaccountName: subName,
       agentId: null, agentName: null,
       createdAt: row.createdAt.toISOString(), detailUrl: `review:${row.id}`,
+      resolvedUrl: resolveUrlForItem('review', row.id, row.subaccountId),
       actionType: action.actionType, runId: row.agentRunId || null,
     };
   }
@@ -571,7 +596,8 @@ export async function getItem(
       ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
       subaccountId: row.subaccountId, subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
       agentId: row.assignedAgentId, agentName: null, createdAt: row.createdAt.toISOString(),
-      detailUrl: `task:${row.id}`, actionType: null, runId: null,
+      detailUrl: `task:${row.id}`, resolvedUrl: resolveUrlForItem('task', row.id, row.subaccountId),
+      actionType: null, runId: null,
     };
   }
 
@@ -590,7 +616,9 @@ export async function getItem(
       estimatedCostMinor: null, reversible: true, ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
       subaccountId: row.subaccountId || '', subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
       agentId: row.agentId, agentName: agMap.get(row.agentId) || null,
-      createdAt: row.createdAt.toISOString(), detailUrl: `run:${row.id}`, actionType: null, runId: row.id,
+      createdAt: row.createdAt.toISOString(), detailUrl: `run:${row.id}`,
+      resolvedUrl: resolveUrlForItem('failed_run', row.id, row.subaccountId),
+      actionType: null, runId: row.id,
     };
   }
 
@@ -606,7 +634,9 @@ export async function getItem(
       reasoning: row.recommendation, evidence: null, costSummary: '', estimatedCostMinor: null,
       reversible: true, ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
       subaccountId: '', subaccountName: '', agentId: null, agentName: null,
-      createdAt: row.detectedAt.toISOString(), detailUrl: `health:${row.id}`, actionType: null, runId: null,
+      createdAt: row.detectedAt.toISOString(), detailUrl: `health:${row.id}`,
+      resolvedUrl: resolveUrlForItem('health_finding', row.id, null),
+      actionType: null, runId: null,
     };
   }
 
