@@ -33,7 +33,7 @@ export default function DashboardPage({ user }: { user: User }) {
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/agents'),
+      api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
       api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: null }; }),
       api.get('/api/pulse/attention').catch((err) => { console.error('[Dashboard] Failed to fetch pulse attention:', err); return { data: null }; }),
       api.get('/api/clientpulse/health-summary').catch(() => { return { data: null }; }),
@@ -107,7 +107,6 @@ export default function DashboardPage({ user }: { user: User }) {
             </svg>
           }
           iconBg="bg-rose-50" iconColor="text-rose-500"
-          loading={loading}
         />
 
         <MetricCard
@@ -121,7 +120,6 @@ export default function DashboardPage({ user }: { user: User }) {
             </svg>
           }
           iconBg="bg-amber-50" iconColor="text-amber-500"
-          loading={loading}
         />
 
         <MetricCard
@@ -186,22 +184,26 @@ export default function DashboardPage({ user }: { user: User }) {
             summary={
               healthSummary ? (
                 <div className="flex flex-col gap-1.5">
-                  <div className="flex h-1.5 rounded-full overflow-hidden gap-0.5">
-                    {healthSummary.totalClients > 0 ? (
-                      <>
-                        {healthSummary.healthy > 0 && (
-                          <div className="bg-emerald-400 rounded-full" style={{ width: `${(healthSummary.healthy / healthSummary.totalClients) * 100}%` }} />
-                        )}
-                        {healthSummary.attention > 0 && (
-                          <div className="bg-amber-400 rounded-full" style={{ width: `${(healthSummary.attention / healthSummary.totalClients) * 100}%` }} />
-                        )}
-                        {healthSummary.atRisk > 0 && (
-                          <div className="bg-rose-500 rounded-full" style={{ width: `${(healthSummary.atRisk / healthSummary.totalClients) * 100}%` }} />
-                        )}
-                      </>
-                    ) : (
-                      <div className="bg-slate-200 rounded-full w-full" />
-                    )}
+                  <div className="flex h-1.5 rounded-full overflow-hidden">
+                    {(() => {
+                      const knownTotal = healthSummary.healthy + healthSummary.attention + healthSummary.atRisk;
+                      const barBase = knownTotal > 0 ? knownTotal : 1;
+                      return knownTotal > 0 ? (
+                        <>
+                          {healthSummary.healthy > 0 && (
+                            <div className="bg-emerald-400" style={{ width: `${(healthSummary.healthy / barBase) * 100}%` }} />
+                          )}
+                          {healthSummary.attention > 0 && (
+                            <div className="bg-amber-400" style={{ width: `${(healthSummary.attention / barBase) * 100}%` }} />
+                          )}
+                          {healthSummary.atRisk > 0 && (
+                            <div className="bg-rose-500" style={{ width: `${(healthSummary.atRisk / barBase) * 100}%` }} />
+                          )}
+                        </>
+                      ) : (
+                        <div className="bg-slate-200 w-full" />
+                      );
+                    })()}
                   </div>
                   <span className="text-[13px] text-slate-500">
                     {healthSummary.healthy} healthy · {healthSummary.attention} need attention · {healthSummary.atRisk} at risk
