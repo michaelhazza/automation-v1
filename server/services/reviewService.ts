@@ -8,7 +8,7 @@ import { auditService } from './auditService.js';
 import { emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 import { postReviewItemToSlack } from './slackConversationService.js';
-import { checkIdempotency } from './reviewServicePure.js';
+import { checkIdempotency, type ReviewStatus } from './reviewServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Review Service — manages human review queue for gated actions
@@ -90,7 +90,8 @@ export const reviewService = {
       .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
 
     const idempotencyOutcome = checkIdempotency(
-      preCheck?.reviewStatus as Parameters<typeof checkIdempotency>[0],
+      // Drizzle schema and ReviewStatus union are identical; cast is a TS narrowing assist
+      preCheck?.reviewStatus as ReviewStatus | undefined,
       'approve',
     );
 
@@ -147,13 +148,14 @@ export const reviewService = {
         }
 
         const raceOutcome = checkIdempotency(
-          raceCheck.reviewStatus as Parameters<typeof checkIdempotency>[0],
+          // Drizzle schema and ReviewStatus union are identical; cast is a TS narrowing assist
+          raceCheck.reviewStatus as ReviewStatus,
           'approve',
         );
 
         if (raceOutcome === 'idempotent') {
           // Concurrent approve won the race — treat as idempotent.
-          return { ...raceCheck, _idempotentRace: true as const };
+          return { kind: 'idempotent_race' as const, row: raceCheck };
         }
 
         throw Object.assign(
@@ -173,20 +175,23 @@ export const reviewService = {
         }).where(eq(actions.id, updated.actionId));
       }
 
-      return updated;
+      return { kind: 'updated' as const, row: updated };
     });
 
     // If the race produced an idempotent result, short-circuit here too.
-    if ('_idempotentRace' in item && item._idempotentRace) {
-      return { actionId: item.actionId, wasIdempotent: true as const };
+    if (item.kind === 'idempotent_race') {
+      return { actionId: item.row.actionId, wasIdempotent: true as const };
     }
 
+    // item.kind === 'updated' from here onward
+    const updatedRow = item.row;
+
     if (edits) {
-      await actionService.emitEvent(item.actionId, organisationId, 'edited_and_approved', userId);
+      await actionService.emitEvent(updatedRow.actionId, organisationId, 'edited_and_approved', userId);
     }
 
     // Transition action to approved
-    await actionService.transitionState(item.actionId, organisationId, 'approved', userId);
+    await actionService.transitionState(updatedRow.actionId, organisationId, 'approved', userId);
 
     auditService.log({
       organisationId,
@@ -195,7 +200,7 @@ export const reviewService = {
       action: 'agent_approved',
       entityType: 'review_item',
       entityId: reviewItemId,
-      metadata: { actionId: item.actionId, edited: !!edits },
+      metadata: { actionId: updatedRow.actionId, edited: !!edits },
     });
 
     // Dispatch execution outside the approval transaction
@@ -207,7 +212,7 @@ export const reviewService = {
     // raw config_* skill handler (bypassing a duplicate audit row), marks
     // the action completed / failed on the same row, and resumes the
     // playbook step run via the engine.
-    const actionForBranch = await actionService.getAction(item.actionId, organisationId);
+    const actionForBranch = await actionService.getAction(updatedRow.actionId, organisationId);
     const branchMeta = (actionForBranch.metadataJson ?? null) as Record<string, unknown> | null;
     const isPlaybookActionCall = branchMeta?.source === 'playbook_action_call';
     try {
@@ -220,19 +225,19 @@ export const reviewService = {
         execResult = resumed ?? null;
         await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
       } else {
-        execResult = await executionLayerService.executeAction(item.actionId, organisationId);
+        execResult = await executionLayerService.executeAction(updatedRow.actionId, organisationId);
         // Mark review item as completed after successful execution
         await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
       }
     } catch (err) {
       // Execution failure is recorded on the action — review item stays approved
-      console.error(`[ReviewService] Execution failed for action ${item.actionId}:`, err);
+      console.error(`[ReviewService] Execution failed for action ${updatedRow.actionId}:`, err);
     }
 
     // Write durable resume event
-    const action = await actionService.getAction(item.actionId, organisationId);
+    const action = await actionService.getAction(updatedRow.actionId, organisationId);
     await db.insert(actionResumeEvents).values({
-      actionId: item.actionId,
+      actionId: updatedRow.actionId,
       organisationId,
       subaccountId: action.subaccountId!,
       eventType: edits ? 'edited' : 'approved',
@@ -242,13 +247,13 @@ export const reviewService = {
     });
 
     // Unblock the agent's awaiting promise (if still in-process)
-    hitlService.resolveDecision(item.actionId, {
+    hitlService.resolveDecision(updatedRow.actionId, {
       approved: true,
       result: execResult,
       editedArgs: edits,
     });
 
-    return { actionId: item.actionId, wasIdempotent: false as const };
+    return { actionId: updatedRow.actionId, wasIdempotent: false as const };
   },
 
   /**
@@ -273,7 +278,8 @@ export const reviewService = {
       .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
 
     const idempotencyOutcome = checkIdempotency(
-      preCheck?.reviewStatus as Parameters<typeof checkIdempotency>[0],
+      // Drizzle schema and ReviewStatus union are identical; cast is a TS narrowing assist
+      preCheck?.reviewStatus as ReviewStatus | undefined,
       'reject',
     );
 
@@ -324,12 +330,13 @@ export const reviewService = {
         }
 
         const raceOutcome = checkIdempotency(
-          raceCheck.reviewStatus as Parameters<typeof checkIdempotency>[0],
+          // Drizzle schema and ReviewStatus union are identical; cast is a TS narrowing assist
+          raceCheck.reviewStatus as ReviewStatus,
           'reject',
         );
 
         if (raceOutcome === 'idempotent') {
-          return { ...raceCheck, _idempotentRace: true as const };
+          return { kind: 'idempotent_race' as const, row: raceCheck };
         }
 
         throw Object.assign(
@@ -343,15 +350,18 @@ export const reviewService = {
         updatedAt: new Date(),
       }).where(eq(actions.id, updated.actionId));
 
-      return updated;
+      return { kind: 'updated' as const, row: updated };
     });
 
     // If the race produced an idempotent result, short-circuit here too.
-    if ('_idempotentRace' in item && item._idempotentRace) {
-      return { actionId: item.actionId, wasIdempotent: true as const };
+    if (item.kind === 'idempotent_race') {
+      return { actionId: item.row.actionId, wasIdempotent: true as const };
     }
 
-    await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);
+    // item.kind === 'updated' from here onward
+    const updatedRow = item.row;
+
+    await actionService.transitionState(updatedRow.actionId, organisationId, 'rejected', userId);
 
     auditService.log({
       organisationId,
@@ -360,13 +370,13 @@ export const reviewService = {
       action: 'agent_rejected',
       entityType: 'review_item',
       entityId: reviewItemId,
-      metadata: { actionId: item.actionId, comment: rejectionComment },
+      metadata: { actionId: updatedRow.actionId, comment: rejectionComment },
     });
 
     // Write durable resume event
-    const action = await actionService.getAction(item.actionId, organisationId);
+    const action = await actionService.getAction(updatedRow.actionId, organisationId);
     await db.insert(actionResumeEvents).values({
-      actionId: item.actionId,
+      actionId: updatedRow.actionId,
       organisationId,
       subaccountId: action.subaccountId!,
       eventType: 'rejected',
@@ -376,7 +386,7 @@ export const reviewService = {
     });
 
     // Unblock the agent's awaiting promise with the denial
-    hitlService.resolveDecision(item.actionId, {
+    hitlService.resolveDecision(updatedRow.actionId, {
       approved: false,
       comment: rejectionComment,
     });
@@ -391,7 +401,7 @@ export const reviewService = {
         /* queueService already logs */
       });
 
-    return { actionId: item.actionId, wasIdempotent: false as const };
+    return { actionId: updatedRow.actionId, wasIdempotent: false as const };
   },
 
   /**
