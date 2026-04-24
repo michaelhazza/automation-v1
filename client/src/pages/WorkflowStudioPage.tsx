@@ -23,10 +23,11 @@
  * agent would use.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
 import WorkflowRunModal from '../components/WorkflowRunModal';
+import AutomationPickerDrawer from '../components/AutomationPickerDrawer';
 
 interface Session {
   id: string;
@@ -101,9 +102,10 @@ export default function WorkflowStudioPage(_props: { user: User }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [existingSlugs, setExistingSlugs] = useState<string[]>([]);
-  // Spec §9.1/§9.2 — "Run Workflow" button on reference-Workflow rows opens
-  // the four-step run modal. Null when the modal is closed.
   const [runModalSlug, setRunModalSlug] = useState<string | null>(null);
+  const [stepPickerOpen, setStepPickerOpen] = useState(false);
+  const [automationDrawerOpen, setAutomationDrawerOpen] = useState(false);
+  const stepPickerRef = useRef<HTMLDivElement>(null);
 
   async function loadSessions() {
     try {
@@ -314,6 +316,32 @@ export default function WorkflowStudioPage(_props: { user: User }) {
     }
   }
 
+  function handleAutomationConfirm(config: { automationId: string; inputMapping: Record<string, string> }) {
+    const snippet = {
+      id: `call_automation_${Date.now()}`,
+      name: 'Call Automation',
+      type: 'invoke_automation',
+      dependsOn: [],
+      sideEffectType: 'reversible',
+      automationId: config.automationId,
+      inputMapping: config.inputMapping,
+      outputSchema: {},
+    };
+    try {
+      const parsed = JSON.parse(definitionJson);
+      if (Array.isArray(parsed.steps)) {
+        parsed.steps.push(snippet);
+      } else {
+        parsed.steps = [snippet];
+      }
+      setDefinitionJson(JSON.stringify(parsed, null, 2));
+    } catch {
+      // If JSON is malformed, append raw snippet as comment
+      setDefinitionJson((prev) => prev + '\n// invoke_automation step:\n// ' + JSON.stringify(snippet));
+    }
+    setAutomationDrawerOpen(false);
+  }
+
   if (loading) {
     return <div className="p-6 text-slate-500">Loading Workflow Studio…</div>;
   }
@@ -430,6 +458,43 @@ export default function WorkflowStudioPage(_props: { user: User }) {
         <div className="border-t border-slate-200 p-3 bg-slate-50 space-y-2">
           <div className="flex items-center gap-2 text-xs">
             <span className="text-slate-500">Definition JSON (for validate / simulate / estimate):</span>
+            <div className="relative ml-auto" ref={stepPickerRef}>
+              <button
+                onClick={() => setStepPickerOpen((o) => !o)}
+                className="px-2 py-1 text-xs rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1"
+              >
+                Add step ▾
+              </button>
+              {stepPickerOpen && (
+                <div className="absolute right-0 mt-1 w-44 rounded border border-slate-200 bg-white shadow-lg z-10 text-xs">
+                  {(['prompt','agent_call','user_input','approval','action_call'] as const).map((t) => (
+                    <button
+                      key={t}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                      onClick={() => {
+                        setDefinitionJson((prev) => {
+                          try {
+                            const p = JSON.parse(prev);
+                            if (!Array.isArray(p.steps)) p.steps = [];
+                            p.steps.push({ id: `${t}_${Date.now()}`, name: t, type: t, dependsOn: [], sideEffectType: 'none', outputSchema: {} });
+                            return JSON.stringify(p, null, 2);
+                          } catch { return prev; }
+                        });
+                        setStepPickerOpen(false);
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                  <button
+                    className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700 font-medium"
+                    onClick={() => { setStepPickerOpen(false); setAutomationDrawerOpen(true); }}
+                  >
+                    Call Automation
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <textarea
             value={definitionJson}
@@ -546,6 +611,11 @@ export default function WorkflowStudioPage(_props: { user: User }) {
           onClose={() => setRunModalSlug(null)}
         />
       )}
+      <AutomationPickerDrawer
+        open={automationDrawerOpen}
+        onClose={() => setAutomationDrawerOpen(false)}
+        onConfirm={handleAutomationConfirm}
+      />
     </div>
   );
 }

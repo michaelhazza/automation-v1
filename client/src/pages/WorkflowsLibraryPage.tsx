@@ -125,76 +125,62 @@ export default function WorkflowsLibraryPage(_props: { user: User }) {
     );
   }
 
-  const allEmpty = systemTemplates.length === 0 && orgTemplates.length === 0;
+  const allTemplates = [
+    ...systemTemplates.map((t) => ({ ...t, kind: 'system' as const })),
+    ...orgTemplates.map((t) => ({ ...t, kind: 'org' as const })),
+  ];
 
   return (
-    <div className="p-6 max-w-6xl">
-      <h1 className="text-2xl font-semibold mb-1">Workflows</h1>
-      <p className="text-slate-500 mb-6">
-        Multi-step automated workflows. Pick a template and start a run against a subaccount.
-      </p>
-
-      {allEmpty && (
-        <div className="rounded border border-slate-200 bg-slate-50 p-6 text-slate-700">
-          No Workflow templates available yet. System admins can author them via the seeder
-          (server/Workflows/*.Workflow.ts) or via the Workflow Studio.
+    <div className="p-6 max-w-4xl">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-[22px] font-bold text-slate-900">Workflows</h1>
+          <p className="text-[13px] text-slate-500 mt-1">Multi-step flows your agents run.</p>
         </div>
-      )}
+        <Link
+          to="/system/workflow-studio"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-md inline-flex items-center gap-1.5"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          New Workflow
+        </Link>
+      </div>
 
-      {systemTemplates.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-lg font-medium mb-3">System templates</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {systemTemplates.map((t) => (
-              <div key={t.id} className="rounded-lg border border-slate-200 p-4 bg-white">
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium">{t.name}</h3>
-                  <span className="text-xs text-slate-500">v{t.latestVersion}</span>
-                </div>
-                <p className="text-sm text-slate-600 mb-3 line-clamp-3">{t.description}</p>
+      {allTemplates.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-8 text-center text-slate-600 text-[13px]">
+          No workflows yet. System admins can author them via the Workflow Studio.
+        </div>
+      ) : (
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-3 grid grid-cols-12 gap-4 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+            <div className="col-span-6">Name</div>
+            <div className="col-span-3">Type</div>
+            <div className="col-span-3">Version</div>
+          </div>
+          {allTemplates.map((t) => (
+            <div
+              key={t.id}
+              className="px-4 py-3.5 border-b border-slate-100 last:border-0 grid grid-cols-12 gap-4 items-center hover:bg-slate-50"
+            >
+              <div className="col-span-6">
+                <div className="text-[13.5px] font-medium text-slate-900">{t.name}</div>
+                {t.description && (
+                  <div className="text-[12px] text-slate-500 mt-0.5 truncate">{t.description}</div>
+                )}
+              </div>
+              <div className="col-span-3 text-[12.5px] text-slate-600 capitalize">{t.kind}</div>
+              <div className="col-span-2 text-[12px] text-slate-500">v{t.latestVersion}</div>
+              <div className="col-span-1 flex justify-end">
                 <button
-                  onClick={() =>
-                    setStartTarget({ kind: 'system', slug: t.slug, name: t.name })
-                  }
-                  className="px-3 py-1.5 text-sm rounded bg-slate-900 text-white hover:bg-slate-800"
+                  onClick={() => setStartTarget({ kind: t.kind, slug: 'slug' in t ? t.slug : undefined, id: t.id, name: t.name })}
+                  className="px-3 py-1.5 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md"
                 >
-                  Start run
+                  Run
                 </button>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {orgTemplates.length > 0 && (
-        <section>
-          <h2 className="text-lg font-medium mb-3">Org templates</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {orgTemplates.map((t) => (
-              <div key={t.id} className="rounded-lg border border-slate-200 p-4 bg-white">
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium">{t.name}</h3>
-                  <span className="text-xs text-slate-500">v{t.latestVersion}</span>
-                </div>
-                <p className="text-sm text-slate-600 mb-3 line-clamp-3">{t.description}</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setStartTarget({ kind: 'org', id: t.id, name: t.name })}
-                    className="px-3 py-1.5 text-sm rounded bg-slate-900 text-white hover:bg-slate-800"
-                  >
-                    Start run
-                  </button>
-                  <Link
-                    to={`/Workflow-templates/${t.id}`}
-                    className="px-3 py-1.5 text-sm rounded border border-slate-200 hover:bg-slate-50"
-                  >
-                    View
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+            </div>
+          ))}
+        </div>
       )}
 
       {startTarget && (

@@ -286,6 +286,47 @@ export function validateDefinition(
           }
         }
         break;
+      case 'invoke_automation':
+        if (!step.automationId) {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `invoke_automation step '${step.id}' must declare automationId. Error code: workflow_composition_invalid.`,
+          });
+        }
+        if (!step.inputMapping || typeof step.inputMapping !== 'object') {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `invoke_automation step '${step.id}' must declare inputMapping (may be {}). Error code: workflow_composition_invalid.`,
+          });
+        }
+        if (step.gateLevel && step.gateLevel !== 'auto' && step.gateLevel !== 'review') {
+          errors.push({
+            rule: 'invalid_field',
+            stepId: step.id,
+            message: `invoke_automation step '${step.id}' gateLevel must be 'auto' or 'review' (block is not supported for Automation steps). Error code: workflow_composition_invalid.`,
+          });
+        }
+        if (
+          step.automationRetryPolicy?.maxAttempts !== undefined &&
+          step.automationRetryPolicy.maxAttempts > 3
+        ) {
+          errors.push({
+            rule: 'retry_ceiling_exceeded',
+            stepId: step.id,
+            message: `invoke_automation step '${step.id}' has automationRetryPolicy.maxAttempts > 3. The engine enforces a hard ceiling of 3. Reduce maxAttempts or leave it to the engine default.`,
+          });
+        }
+        break;
+      default: {
+        const exhaustiveCheck: never = step.type as never;
+        errors.push({
+          rule: 'unknown_step_type',
+          stepId: step.id,
+          message: `unknown step type '${exhaustiveCheck}' on step '${step.id}'. workflow_composition_invalid.`,
+        });
+      }
     }
 
     // ── referenceBinding validation (§G8) ────────────────────────────────────

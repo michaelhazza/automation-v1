@@ -22,7 +22,8 @@ export type StepType =
   | 'approval'
   | 'conditional'
   | 'agent_decision'
-  | 'action_call';
+  | 'action_call'
+  | 'invoke_automation';
 
 export type SideEffectType =
   | 'none'
@@ -62,6 +63,27 @@ export interface StepRetryPolicy {
   backoffStrategy?: BackoffStrategy;
   /** Closed list of failure reasons that should trigger retry. */
   retryOn?: string[];
+}
+
+/** Retry policy extension for invoke_automation steps. §5.4a rule 3. */
+export interface AutomationStepRetryPolicy extends StepRetryPolicy {
+  /**
+   * When true, the engine retries this step even when the Automation declares
+   * `idempotent: false`. Author-asserted escape hatch — logged and warned in UI.
+   * Hard ceiling of maxAttempts ≤ 3 still applies. §5.4a rule 3.
+   */
+  overrideNonIdempotentGuard?: boolean;
+}
+
+/** Standardised error shape for every invoke_automation failure. §5.7. */
+export interface AutomationStepError {
+  /** §5.7 error_code vocabulary. */
+  code: string;
+  /** Error class — drives retryability and error-handler routing. */
+  type: 'validation' | 'execution' | 'timeout' | 'external' | 'unknown';
+  message: string;
+  /** True only when retryable AND the non-idempotent guard allows it. */
+  retryable: boolean;
 }
 
 /**
@@ -190,6 +212,36 @@ export interface WorkflowStep {
    */
   final?: boolean;
 
+  // ── type: invoke_automation ───────────────────────────────────────────────
+  /**
+   * References `automations.id`. Resolved at dispatch time against the run's
+   * scope (§5.8). Validator rejects a missing automationId at authoring time.
+   */
+  automationId?: string;
+  /**
+   * Template expressions resolved against run context and sent as the webhook
+   * body. Same `{{ steps.X.output.Y }}` syntax as all other Workflow step inputs.
+   * Validator rejects a missing/non-object inputMapping at authoring time.
+   */
+  inputMapping?: Record<string, string>;
+  /**
+   * Optional projection: maps keys from the webhook response to Workflow variable
+   * space (`{{ steps.{stepId}.output.{mappedKey} }}`). When absent, full response
+   * is available as `{{ steps.{stepId}.output.response }}`. §5.5.
+   */
+  outputMapping?: Record<string, string>;
+  /**
+   * Gate level override for this step. When omitted, resolved from the
+   * Automation's `side_effects` column: read_only → 'auto'; mutating|unknown → 'review'.
+   * 'block' is rejected by the validator. §5.4a rule 1, §5.6.
+   */
+  gateLevel?: 'auto' | 'review';
+  /**
+   * Retry policy for invoke_automation steps. Hard ceiling: maxAttempts ≤ 3
+   * engine-enforced regardless of authoring. §5.4a rule 3.
+   */
+  automationRetryPolicy?: AutomationStepRetryPolicy;
+
   // ── type: user_input (reference binding) ──────────────────────────────────
   /**
    * When set on a `user_input` step, the engine writes the named form field's
@@ -237,6 +289,19 @@ export type ActionCallStep = WorkflowStep & {
   actionSlug: string;
   /** `{}` is allowed; `undefined` is not after validation. */
   actionInputs: Record<string, string>;
+};
+
+/**
+ * Narrowed view of a WorkflowStep for `invoke_automation` steps. §5.3.
+ * Required fields are enforced by the authoring-time validator.
+ */
+export type InvokeAutomationStep = WorkflowStep & {
+  type: 'invoke_automation';
+  automationId: string;
+  inputMapping: Record<string, string>;
+  outputMapping?: Record<string, string>;
+  gateLevel?: 'auto' | 'review';
+  automationRetryPolicy?: AutomationStepRetryPolicy;
 };
 
 /**
@@ -360,7 +425,11 @@ export type ValidationRule =
   | 'reference_binding_wrong_step_type'
   | 'reference_binding_field_not_in_schema'
   // portalPresentation rules (onboarding-workflows-spec §9.4)
-  | 'portal_presentation_step_not_found';
+  | 'portal_presentation_step_not_found'
+  // invoke_automation step rules (§5.3 / §5.4a / §5.10a)
+  | 'invalid_field'
+  | 'retry_ceiling_exceeded'
+  | 'unknown_step_type';
 
 export interface ValidationError {
   rule: ValidationRule;

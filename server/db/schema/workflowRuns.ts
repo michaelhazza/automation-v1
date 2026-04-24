@@ -118,7 +118,8 @@ export type WorkflowStepType =
   | 'approval'
   | 'conditional'
   | 'agent_decision'
-  | 'action_call';
+  | 'action_call'
+  | 'invoke_automation';
 
 export type WorkflowStepRunStatus =
   | 'pending'

@@ -144,6 +144,22 @@ export function renderWorkflowFile(
     if (step.falseOutput !== undefined) {
       lines.push(`      falseOutput: ${JSON.stringify(step.falseOutput)},`);
     }
+    // ── invoke_automation ────────────────────────────────────────────────────
+    if (step.automationId !== undefined) {
+      lines.push(`      automationId: ${JSON.stringify(String(step.automationId))},`);
+    }
+    if (step.inputMapping !== undefined) {
+      lines.push(`      inputMapping: ${JSON.stringify(step.inputMapping)},`);
+    }
+    if (step.outputMapping !== undefined) {
+      lines.push(`      outputMapping: ${JSON.stringify(step.outputMapping)},`);
+    }
+    if (step.gateLevel !== undefined) {
+      lines.push(`      gateLevel: ${JSON.stringify(step.gateLevel)},`);
+    }
+    if (step.automationRetryPolicy !== undefined) {
+      lines.push(`      automationRetryPolicy: ${JSON.stringify(step.automationRetryPolicy)},`);
+    }
     lines.push('      outputSchema: z.any(),');
     lines.push('    },');
   }
