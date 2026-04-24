@@ -97,6 +97,18 @@ export const ORG_PERMISSIONS = {
   DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
 } as const;
 
+// ─── System-level permissions (sysadmin-only surfaces) ───────────────────────
+// In Phase 0.5 all incident endpoints require requireSystemAdmin directly so
+// these keys exist primarily for audit-trail labels and future delegation.
+
+export const SYSTEM_PERMISSIONS = {
+  INCIDENT_VIEW: 'system:incident:view',
+  INCIDENT_ACK: 'system:incident:ack',
+  INCIDENT_RESOLVE: 'system:incident:resolve',
+  INCIDENT_SUPPRESS: 'system:incident:suppress',
+  INCIDENT_ESCALATE: 'system:incident:escalate',
+} as const;
+
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
 
 export const SUBACCOUNT_PERMISSIONS = {
