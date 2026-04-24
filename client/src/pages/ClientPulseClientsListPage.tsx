@@ -59,6 +59,7 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [band, setBand] = useState<string>('all');
@@ -89,6 +90,7 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
     setClients([]);
     setHasMore(false);
     setNextCursor(null);
@@ -99,12 +101,15 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
         setClients(data.clients);
         setHasMore(data.hasMore);
         setNextCursor(data.nextCursor);
+      } else {
+        setError('Failed to load clients. Please try again.');
       }
       setLoading(false);
     });
 
     return () => { cancelled = true; };
-  }, [band, debouncedQ, fetchPage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [band, debouncedQ]);
 
   // ── Load more ──────────────────────────────────────────────────────────────
   const handleLoadMore = async () => {
@@ -115,6 +120,8 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
       setClients((prev) => [...prev, ...data.clients]);
       setHasMore(data.hasMore);
       setNextCursor(data.nextCursor);
+    } else {
+      setError('Failed to load more clients. Please try again.');
     }
     setLoadingMore(false);
   };
@@ -162,6 +169,13 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
           </button>
         ))}
       </div>
+
+      {/* Error banner */}
+      {error && !loading && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 mb-4">
+          {error}
+        </div>
+      )}
 
       {/* Client list */}
       <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
