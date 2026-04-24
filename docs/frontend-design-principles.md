@@ -52,6 +52,36 @@ Work through these in order. An unchecked box is a design finding; every uncheck
 - **The result of the last action taken** — inline confirmation (e.g. "attached · 2m ago"), not a history table.
 - **One sidebar callout at most** — only if it's load-bearing for completing the primary task (e.g. a required field's help text).
 - **Empty states with one next action** — "No bundles yet. [Create bundle]". Not a tour, not tips, not a chart of nothing.
+- **Load-bearing inline visuals** — status dots, band pills, sparklines next to names, outcome badges, a single hero visualisation where *understanding trajectory IS the primary task*. These communicate state faster than text and are *encouraged*, not deferred. See [Visuals as simplicity](#visuals-as-simplicity) below.
+
+---
+
+## Visuals as simplicity
+
+A common misread of this document is "cut all visuals to ship faster". That is wrong. **Visuals are how consumer-simple products communicate state.** A status dot beats a paragraph. A sparkline beats three lines of trend prose. A single hero chart on a drilldown where *understanding the trajectory* is the primary task beats five lines explaining the same number.
+
+**The test is never "is there a visual?" — it's "is this visual load-bearing for the primary task?"**
+
+| Ship | Don't ship |
+|---|---|
+| Status dots inline on list rows (band, health, run outcome) | A row of five KPI tiles at the top of every page |
+| Sparklines next to a client name showing 4-week trajectory | Multi-series comparison charts nobody asked for |
+| Band pills, severity pills, outcome badges | 7/30/90-day toggle charts as decoration |
+| A single hero trend visualisation on a drilldown page | Trend dashboards that duplicate content visible inline below |
+| Progress indicators on active flows | Observability explorers on primary user journeys |
+| Micro-gauges, subtle colour accents for state | Multi-panel dashboards when the task is *operating*, not *monitoring* |
+
+A sparkline communicating a trend in 60 pixels earns its place. A KPI tile row showing four numbers the user already sees in the list below does not. A hero chart on a page whose primary task *is* "read the trajectory" earns its place. A hero chart on a page whose primary task is "pick one and act" is decoration.
+
+### Aesthetic quality is not negotiable
+
+Pages must be **aesthetically beautiful**, not just functional. Plain-text lists with no visual hierarchy read as unfinished. Every surface should feel intentional: confident type hierarchy, generous whitespace, colour accents for state, small visual signals that communicate faster than words.
+
+**Consumer-simple means *beautiful and obvious*, not *stripped and bare*.**
+
+If a screen is entirely text, pause and ask: *is there a visual that would communicate this state faster?* Usually yes. Ship it. A list of clients without trend sparklines is harder to scan than one with. A drilldown without a health-score visualisation hides the single most important thing the operator is there to see.
+
+The caps in the [complexity budget](#complexity-budget-per-screen) below are about **defaulting away from the dashboard-of-dashboards anti-pattern** — rows of tiles, multi-chart explorers, observability sprawl. They are *not* a mandate against visual richness. Sparklines, inline gauges, status indicators, outcome badges, and load-bearing single hero visualisations are never counted against those caps.
 
 ---
 
@@ -59,8 +89,8 @@ Work through these in order. An unchecked box is a design finding; every uncheck
 
 Everything below is **deferred out of v1 unless explicitly requested for a specific user workflow**. Not "maybe v2" — actively cut from the v1 artifact.
 
-- Metric dashboards, KPI boards, tile rows of numbers.
-- Trend charts over time windows (7-day / 30-day / 90-day).
+- Metric dashboards and KPI tile rows — the "four-to-seven big numbers at the top of every page" anti-pattern. Inline single-metric signals (a sparkline next to a name, a band pill, a status dot) are different — ship those freely. See [Visuals as simplicity](#visuals-as-simplicity).
+- Trend-chart decks with 7/30/90-day toggles as decoration at the top of pages. A single hero trend visualisation on a drilldown where *understanding trajectory IS the primary task* is different — ship that.
 - Diagnostic panels that expose internal identifiers (prefix hashes, snapshot IDs, idempotency keys, correlation IDs).
 - Aggregated cost rollups, per-tenant financial breakdowns, spend-saved calculations, cost-split donuts.
 - Observability explorers ("Usage Explorer", "Bundle Lens", "Model Lens", "Feature Lens").

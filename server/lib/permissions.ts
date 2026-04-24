@@ -9,13 +9,13 @@
 // ─── Org-level permissions ────────────────────────────────────────────────────
 
 export const ORG_PERMISSIONS = {
-  // Processes (workflow definitions)
-  PROCESSES_VIEW: 'org.processes.view',
-  PROCESSES_CREATE: 'org.processes.create',
-  PROCESSES_EDIT: 'org.processes.edit',
-  PROCESSES_DELETE: 'org.processes.delete',
-  PROCESSES_ACTIVATE: 'org.processes.activate',
-  PROCESSES_TEST: 'org.processes.test',
+  // Automations
+  AUTOMATIONS_VIEW: 'org.automations.view',
+  AUTOMATIONS_CREATE: 'org.automations.create',
+  AUTOMATIONS_EDIT: 'org.automations.edit',
+  AUTOMATIONS_DELETE: 'org.automations.delete',
+  AUTOMATIONS_ACTIVATE: 'org.automations.activate',
+  AUTOMATIONS_TEST: 'org.automations.test',
   // Executions
   EXECUTIONS_VIEW: 'org.executions.view',
   EXECUTIONS_MANAGE: 'org.executions.manage',
@@ -27,13 +27,13 @@ export const ORG_PERMISSIONS = {
   // Workflow engines
   ENGINES_VIEW: 'org.engines.view',
   ENGINES_MANAGE: 'org.engines.manage',
-  // System process visibility
-  PROCESSES_VIEW_SYSTEM: 'org.processes.view_system',
-  PROCESSES_CLONE: 'org.processes.clone',
+  // System automation visibility
+  AUTOMATIONS_VIEW_SYSTEM: 'org.automations.view_system',
+  AUTOMATIONS_CLONE: 'org.automations.clone',
   // Org-level connections
   CONNECTIONS_VIEW: 'org.connections.view',
   CONNECTIONS_MANAGE: 'org.connections.manage',
-  // Process categories
+  // Automation categories
   CATEGORIES_VIEW: 'org.categories.view',
   CATEGORIES_MANAGE: 'org.categories.manage',
   // Subaccounts
@@ -65,15 +65,15 @@ export const ORG_PERMISSIONS = {
   MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'org.billing.iee.view',
-  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
-  PLAYBOOK_TEMPLATES_READ: 'org.playbook_templates.read',
-  PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
-  PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
-  PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
-  // Org-scope playbook runs (migration 0171 / ClientPulse §13.3). Distinct from
-  // SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START because org-scope runs operate
+  // ── Workflows (multi-step automation; spec §8.1) ────────────────────────
+  WORKFLOW_TEMPLATES_READ: 'org.workflow_templates.read',
+  WORKFLOW_TEMPLATES_WRITE: 'org.workflow_templates.write',
+  WORKFLOW_TEMPLATES_PUBLISH: 'org.workflow_templates.publish',
+  WORKFLOW_STUDIO_ACCESS: 'org.workflow_studio.access',
+  // Org-scope workflow runs (migration 0171 / ClientPulse §13.3). Distinct from
+  // SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START because org-scope runs operate
   // across the whole organisation rather than a single subaccount.
-  PLAYBOOK_RUNS_START: 'org.playbook_runs.start',
+  WORKFLOW_RUNS_START: 'org.workflow_runs.start',
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
@@ -100,12 +100,12 @@ export const ORG_PERMISSIONS = {
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
 
 export const SUBACCOUNT_PERMISSIONS = {
-  // Processes (workflow definitions)
-  PROCESSES_VIEW: 'subaccount.processes.view',
-  PROCESSES_EXECUTE: 'subaccount.processes.execute',
-  PROCESSES_CREATE: 'subaccount.processes.create',
-  PROCESSES_EDIT: 'subaccount.processes.edit',
-  PROCESSES_DELETE: 'subaccount.processes.delete',
+  // Automations
+  AUTOMATIONS_VIEW: 'subaccount.automations.view',
+  AUTOMATIONS_EXECUTE: 'subaccount.automations.execute',
+  AUTOMATIONS_CREATE: 'subaccount.automations.create',
+  AUTOMATIONS_EDIT: 'subaccount.automations.edit',
+  AUTOMATIONS_DELETE: 'subaccount.automations.delete',
   // Executions
   EXECUTIONS_VIEW: 'subaccount.executions.view',
   EXECUTIONS_VIEW_ALL: 'subaccount.executions.view_all',
@@ -120,9 +120,9 @@ export const SUBACCOUNT_PERMISSIONS = {
   // Connections
   CONNECTIONS_VIEW: 'subaccount.connections.view',
   CONNECTIONS_MANAGE: 'subaccount.connections.manage',
-  // Process configuration (connection mappings, config overrides)
-  PROCESSES_CLONE: 'subaccount.processes.clone',
-  PROCESSES_CONFIGURE: 'subaccount.processes.configure',
+  // Automation configuration (connection mappings, config overrides)
+  AUTOMATIONS_CLONE: 'subaccount.automations.clone',
+  AUTOMATIONS_CONFIGURE: 'subaccount.automations.configure',
   // Settings
   SETTINGS_EDIT: 'subaccount.settings.edit',
   // Workspace
@@ -133,12 +133,12 @@ export const SUBACCOUNT_PERMISSIONS = {
   REVIEW_APPROVE: 'subaccount.review.approve',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'subaccount.billing.iee.view',
-  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
-  PLAYBOOK_RUNS_READ: 'subaccount.playbook_runs.read',
-  PLAYBOOK_RUNS_START: 'subaccount.playbook_runs.start',
-  PLAYBOOK_RUNS_CANCEL: 'subaccount.playbook_runs.cancel',
-  PLAYBOOK_RUNS_EDIT_OUTPUT: 'subaccount.playbook_runs.edit_output',
-  PLAYBOOK_RUNS_APPROVE: 'subaccount.playbook_runs.approve',
+  // ── Workflows (multi-step automation; spec §8.1) ────────────────────────
+  WORKFLOW_RUNS_READ: 'subaccount.workflow_runs.read',
+  WORKFLOW_RUNS_START: 'subaccount.workflow_runs.start',
+  WORKFLOW_RUNS_CANCEL: 'subaccount.workflow_runs.cancel',
+  WORKFLOW_RUNS_EDIT_OUTPUT: 'subaccount.workflow_runs.edit_output',
+  WORKFLOW_RUNS_APPROVE: 'subaccount.workflow_runs.approve',
   // Skills (subaccount-scoped skill management; migration 0117)
   SKILLS_VIEW: 'subaccount.skills.view',
   SKILLS_MANAGE: 'subaccount.skills.manage',
@@ -155,16 +155,16 @@ export type PermissionKey = OrgPermissionKey | SubaccountPermissionKey;
 // ─── Full permission catalogue (for DB seeding) ───────────────────────────────
 
 export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupName: string }> = [
-  // org.processes
-  { key: ORG_PERMISSIONS.PROCESSES_VIEW,     description: 'View org processes',              groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_CREATE,   description: 'Create org processes',            groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_EDIT,     description: 'Edit org processes',              groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_DELETE,   description: 'Delete org processes',            groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_ACTIVATE, description: 'Activate/deactivate processes',   groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_TEST,     description: 'Test-execute processes',          groupName: 'org.processes' },
-  // org.processes (system visibility + clone)
-  { key: ORG_PERMISSIONS.PROCESSES_VIEW_SYSTEM, description: 'View system processes available to this org', groupName: 'org.processes' },
-  { key: ORG_PERMISSIONS.PROCESSES_CLONE,       description: 'Clone a system process into the org',        groupName: 'org.processes' },
+  // org.automations
+  { key: ORG_PERMISSIONS.AUTOMATIONS_VIEW,     description: 'View org automations',              groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_CREATE,   description: 'Create org automations',            groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_EDIT,     description: 'Edit org automations',              groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_DELETE,   description: 'Delete org automations',            groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_ACTIVATE, description: 'Activate/deactivate automations',   groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_TEST,     description: 'Test-execute automations',          groupName: 'org.automations' },
+  // org.automations (system visibility + clone)
+  { key: ORG_PERMISSIONS.AUTOMATIONS_VIEW_SYSTEM, description: 'View system automations available to this org', groupName: 'org.automations' },
+  { key: ORG_PERMISSIONS.AUTOMATIONS_CLONE,       description: 'Clone a system automation into the org',        groupName: 'org.automations' },
   // org.connections
   { key: ORG_PERMISSIONS.CONNECTIONS_VIEW,   description: 'View connection status across subaccounts', groupName: 'org.connections' },
   { key: ORG_PERMISSIONS.CONNECTIONS_MANAGE, description: 'Create/edit/revoke org-level connections', groupName: 'org.connections' },
@@ -180,7 +180,7 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.ENGINES_VIEW,   description: 'View workflow engines',       groupName: 'org.engines' },
   { key: ORG_PERMISSIONS.ENGINES_MANAGE, description: 'Create/edit/delete engines',  groupName: 'org.engines' },
   // org.categories
-  { key: ORG_PERMISSIONS.CATEGORIES_VIEW,   description: 'View org process categories',         groupName: 'org.categories' },
+  { key: ORG_PERMISSIONS.CATEGORIES_VIEW,   description: 'View org automation categories',         groupName: 'org.categories' },
   { key: ORG_PERMISSIONS.CATEGORIES_MANAGE, description: 'Create/edit/delete org categories', groupName: 'org.categories' },
   // org.subaccounts
   { key: ORG_PERMISSIONS.SUBACCOUNTS_VIEW,   description: 'View subaccounts',               groupName: 'org.subaccounts' },
@@ -201,12 +201,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE,
     description: 'Manage data sources (reference files, URLs) attached to scheduled tasks',
     groupName: 'org.agents' },
-  // org.playbooks (multi-step automation; spec §8.1)
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_READ,    description: 'View Playbook templates',                       groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_RUNS_START,        description: 'Start org-scope Playbook runs',                 groupName: 'org.playbooks' },
+  // org.workflows (multi-step automation; spec §8.1)
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_READ,    description: 'View Workflow templates',                       groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_WRITE,   description: 'Create / fork / delete Workflow templates',     groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_PUBLISH, description: 'Publish a new version of a Workflow template', groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_STUDIO_ACCESS,     description: 'Access the Workflow Studio chat authoring UI', groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_START,        description: 'Start org-scope Workflow runs',                 groupName: 'org.workflows' },
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
@@ -227,18 +227,18 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ,         description: 'View document bundles and their members',                                  groupName: 'document_bundles' },
   { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_WRITE,        description: 'Create, edit, promote, and delete document bundles',                       groupName: 'document_bundles' },
   { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_ATTACH,       description: 'Attach document bundles to agents, tasks, and scheduled tasks',            groupName: 'document_bundles' },
-  // subaccount.processes
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE,  description: 'Create subaccount-specific processes',       groupName: 'subaccount.processes' },
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT,    description: 'Edit subaccount processes',                  groupName: 'subaccount.processes' },
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_DELETE,  description: 'Delete subaccount processes',                groupName: 'subaccount.processes' },
+  // subaccount.automations
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW,    description: 'View automations in portal',                  groupName: 'subaccount.automations' },
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE, description: 'Execute automations in portal',                groupName: 'subaccount.automations' },
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CREATE,  description: 'Create subaccount-specific automations',       groupName: 'subaccount.automations' },
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EDIT,    description: 'Edit subaccount automations',                  groupName: 'subaccount.automations' },
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_DELETE,  description: 'Delete subaccount automations',                groupName: 'subaccount.automations' },
   // subaccount.connections
   { key: SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW,   description: 'View connections for this subaccount',         groupName: 'subaccount.connections' },
   { key: SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE, description: 'Create/edit/revoke connections',               groupName: 'subaccount.connections' },
-  // subaccount.processes (clone + configure)
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CLONE,     description: 'Clone org/system process into subaccount',    groupName: 'subaccount.processes' },
-  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE, description: 'Configure connection mappings and overrides', groupName: 'subaccount.processes' },
+  // subaccount.automations (clone + configure)
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CLONE,     description: 'Clone org/system automation into subaccount',    groupName: 'subaccount.automations' },
+  { key: SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CONFIGURE, description: 'Configure connection mappings and overrides', groupName: 'subaccount.automations' },
   // subaccount.executions
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,     description: 'View own execution history',         groupName: 'subaccount.executions' },
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL, description: 'View all subaccount executions',     groupName: 'subaccount.executions' },
@@ -267,12 +267,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.mcp_servers
   { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
   { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
-  // subaccount.playbooks (multi-step automation; spec §8.1)
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ,        description: 'View Playbook runs for this subaccount',     groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START,       description: 'Start Playbook runs and submit user input',  groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_CANCEL,      description: 'Cancel running Playbooks',                   groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_APPROVE,     description: 'Decide on Playbook approval gates',          groupName: 'subaccount.playbooks' },
+  // subaccount.workflows (multi-step automation; spec §8.1)
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ,        description: 'View Workflow runs for this subaccount',     groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START,       description: 'Start Workflow runs and submit user input',  groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_CANCEL,      description: 'Cancel running Workflows',                   groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_APPROVE,     description: 'Decide on Workflow approval gates',          groupName: 'subaccount.workflows' },
   // subaccount.skills (subaccount-scoped skill management; migration 0117)
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,   description: 'View subaccount-scoped skills',                          groupName: 'subaccount.skills' },
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE, description: 'Create, edit, and delete subaccount-scoped skills',      groupName: 'subaccount.skills' },
@@ -295,19 +295,19 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
 }> = [
   {
     name: 'Org Admin',
-    description: 'Full control over the organisation, including engines, processes, users, subaccounts and permission sets.',
+    description: 'Full control over the organisation, including engines, automations, users, subaccounts and permission sets.',
     permissionKeys: Object.values(ORG_PERMISSIONS),
   },
   {
     name: 'Org Manager',
-    description: 'Operational access: manage processes and users, view subaccounts and executions.',
+    description: 'Operational access: manage automations and users, view subaccounts and executions.',
     permissionKeys: [
-      ORG_PERMISSIONS.PROCESSES_VIEW,
-      ORG_PERMISSIONS.PROCESSES_CREATE,
-      ORG_PERMISSIONS.PROCESSES_EDIT,
-      ORG_PERMISSIONS.PROCESSES_DELETE,
-      ORG_PERMISSIONS.PROCESSES_ACTIVATE,
-      ORG_PERMISSIONS.PROCESSES_TEST,
+      ORG_PERMISSIONS.AUTOMATIONS_VIEW,
+      ORG_PERMISSIONS.AUTOMATIONS_CREATE,
+      ORG_PERMISSIONS.AUTOMATIONS_EDIT,
+      ORG_PERMISSIONS.AUTOMATIONS_DELETE,
+      ORG_PERMISSIONS.AUTOMATIONS_ACTIVATE,
+      ORG_PERMISSIONS.AUTOMATIONS_TEST,
       ORG_PERMISSIONS.EXECUTIONS_VIEW,
       ORG_PERMISSIONS.EXECUTIONS_MANAGE,
       ORG_PERMISSIONS.USERS_VIEW,
@@ -327,9 +327,9 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Org Viewer',
-    description: 'Read-only access to processes, executions, users and subaccounts.',
+    description: 'Read-only access to automations, executions, users and subaccounts.',
     permissionKeys: [
-      ORG_PERMISSIONS.PROCESSES_VIEW,
+      ORG_PERMISSIONS.AUTOMATIONS_VIEW,
       ORG_PERMISSIONS.EXECUTIONS_VIEW,
       ORG_PERMISSIONS.USERS_VIEW,
       ORG_PERMISSIONS.CATEGORIES_VIEW,
@@ -343,17 +343,17 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Subaccount Admin',
-    description: 'Full control over a subaccount: processes, members, categories and settings.',
+    description: 'Full control over a subaccount: automations, members, categories and settings.',
     permissionKeys: Object.values(SUBACCOUNT_PERMISSIONS),
   },
   {
     name: 'Subaccount Manager',
-    description: 'Manage subaccount processes, view all executions and manage members.',
+    description: 'Manage subaccount automations, view all executions and manage members.',
     permissionKeys: [
-      SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,
-      SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE,
-      SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE,
-      SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CREATE,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EDIT,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL,
       SUBACCOUNT_PERMISSIONS.USERS_VIEW,
@@ -368,10 +368,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Subaccount User',
-    description: 'Basic portal access: execute processes and view own execution history.',
+    description: 'Basic portal access: execute automations and view own execution history.',
     permissionKeys: [
-      SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,
-      SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW,
+      SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
       SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
       // Portal-specific grant for the "Upcoming Work" card — clients can see

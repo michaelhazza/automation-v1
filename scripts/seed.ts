@@ -6,7 +6,7 @@
  *
  *   - scripts/seed-system.ts                  → Phases 1, 2
  *   - scripts/seed-local.ts                   → Phase 5 (partial — dev org + user)
- *   - scripts/seed-playbook-author.ts         → Phase 3
+ *   - scripts/seed-workflow-author.ts         → Phase 3
  *   - scripts/seed-playbooks.ts               → Phase 4 (discovery + upsert)
  *   - scripts/seed-portfolio-health-playbook.ts → Phase 4 (portfolio-health template)
  *   - scripts/seed-42macro-reporting-agent.ts → Phase 5 (reporting agent + integrations)
@@ -27,13 +27,13 @@
  *         - sets up the reportsTo hierarchy
  *
  *   [3/5] Playbook Author system agent (separate — Studio tool runner)
- *         - reads server/agents/playbook-author/master-prompt.md
+ *         - reads server/agents/workflow-author/master-prompt.md
  *         - upserts a 17th system_agents row (isSystemManaged: true)
  *         - wires the 5 playbook_* Studio tool skills
  *
  *   [4/5] Playbook templates
- *         - discovers server/playbooks/*.playbook.ts, imports each, and upserts
- *           via playbookTemplateService (DAG-validated)
+ *         - discovers server/workflows/*.workflow.ts, imports each, and upserts
+ *           via WorkflowTemplateService (DAG-validated)
  *         - seeds the portfolio-health-sweep template directly (non-standard
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
@@ -86,8 +86,8 @@ import {
 import { modules } from '../server/db/schema/modules.js';
 import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
 import { classifySkill } from './lib/skillClassification.js';
-import { playbookTemplateService } from '../server/services/playbookTemplateService.js';
-import type { PlaybookDefinition } from '../server/lib/playbook/types.js';
+import { WorkflowTemplateService } from '../server/services/workflowTemplateService.js';
+import type { WorkflowDefinition } from '../server/lib/workflow/types.js';
 import { seedConfigAgentGuidelinesAll } from './seedConfigAgentGuidelines.js';
 
 // ---------------------------------------------------------------------------
@@ -443,8 +443,8 @@ async function phase2_systemAgents(): Promise<void> {
 async function phase3_playbookAuthor(): Promise<void> {
   logPhase(3, 6, 'Playbook Author system agent');
 
-  const SLUG = 'playbook-author';
-  const PROMPT_PATH = resolve(process.cwd(), 'server/agents/playbook-author/master-prompt.md');
+  const SLUG = 'workflow-author';
+  const PROMPT_PATH = resolve(process.cwd(), 'server/agents/workflow-author/master-prompt.md');
   const TOOL_SKILLS = [
     'playbook_read_existing',
     'playbook_validate',
@@ -558,16 +558,16 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
 }
 
 async function seedPlaybookFiles(): Promise<void> {
-  const PLAYBOOKS_GLOB = 'server/playbooks/*.playbook.ts';
+  const WORKFLOWS_GLOB = 'server/workflows/*.workflow.ts';
   const cwd = process.cwd();
-  const files = (await glob(PLAYBOOKS_GLOB, { cwd, absolute: true })).sort();
+  const files = (await glob(WORKFLOWS_GLOB, { cwd, absolute: true })).sort();
 
   if (files.length === 0) {
-    log(`  [skip] no playbook files at ${PLAYBOOKS_GLOB}`);
+    log(`  [skip] no workflow files at ${WORKFLOWS_GLOB}`);
     return;
   }
 
-  log(`  Discovered ${files.length} playbook file(s)`);
+  log(`  Discovered ${files.length} workflow file(s)`);
 
   const summary = { created: 0, updated: 0, skipped: 0, failed: 0 };
   const failures: { file: string; error: string }[] = [];
@@ -576,9 +576,9 @@ async function seedPlaybookFiles(): Promise<void> {
     const relPath = file.replace(cwd + '/', '').replace(/\\/g, '/');
     try {
       const mod = await import(pathToFileURL(file).href);
-      const def: PlaybookDefinition | undefined = mod.default;
+      const def: WorkflowDefinition | undefined = mod.default;
       if (!def) throw new Error('file has no default export');
-      const outcome = await playbookTemplateService.upsertSystemTemplate(def);
+      const outcome = await WorkflowTemplateService.upsertSystemTemplate(def);
       summary[outcome] += 1;
     } catch (err) {
       summary.failed += 1;

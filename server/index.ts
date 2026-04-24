@@ -34,7 +34,7 @@ import organisationsRouter from './routes/organisations.js';
 import usersRouter from './routes/users.js';
 import enginesRouter from './routes/engines.js';
 import categoriesRouter from './routes/categories.js';
-import processesRouter from './routes/processes.js';
+import automationsRouter from './routes/automations.js';
 import executionsRouter from './routes/executions.js';
 import filesRouter from './routes/files.js';
 import systemUsersRouter from './routes/systemUsers.js';
@@ -64,16 +64,16 @@ import agentTriggersRouter from './routes/agentTriggers.js';
 import scheduledTasksRouter from './routes/scheduledTasks.js';
 import reviewItemsRouter from './routes/reviewItems.js';
 import actionsRouter from './routes/actions.js';
-import systemProcessesRouter from './routes/systemProcesses.js';
+import systemAutomationsRouter from './routes/systemAutomations.js';
 import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
-import playbookTemplatesRouter from './routes/playbookTemplates.js';
-import playbookRunsRouter from './routes/playbookRuns.js';
-import playbookStudioRouter from './routes/playbookStudio.js';
+import workflowTemplatesRouter from './routes/workflowTemplates.js';
+import workflowRunsRouter from './routes/workflowRuns.js';
+import workflowStudioRouter from './routes/workflowStudio.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
-import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
+import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
 import workspaceHealthRouter from './routes/workspaceHealth.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
@@ -245,7 +245,7 @@ app.use(organisationsRouter);
 app.use(usersRouter);
 app.use(enginesRouter);
 app.use(categoriesRouter);
-app.use(processesRouter);
+app.use(automationsRouter);
 app.use(executionsRouter);
 app.use(filesRouter);
 app.use(systemUsersRouter);
@@ -285,16 +285,16 @@ app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);
 app.use(reviewItemsRouter);
 app.use(actionsRouter);
-app.use(systemProcessesRouter);
+app.use(systemAutomationsRouter);
 app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
-app.use(playbookTemplatesRouter);
-app.use(playbookRunsRouter);
-app.use(playbookStudioRouter);
+app.use(workflowTemplatesRouter);
+app.use(workflowRunsRouter);
+app.use(workflowStudioRouter);
 app.use(subaccountOnboardingRouter);
-app.use(processConnectionMappingsRouter);
+app.use(automationConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -434,13 +434,13 @@ async function start() {
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
-  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  // Workflow engine workers (tick + watchdog cron) — spec §5.2 + §5.7
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
-      const { playbookEngineService } = await import('./services/playbookEngineService.js');
-      await playbookEngineService.registerWorkers();
+      const { WorkflowEngineService } = await import('./services/workflowEngineService.js');
+      await WorkflowEngineService.registerWorkers();
     } catch (err) {
-      console.error('[boot] failed to register playbook engine workers', err);
+      console.error('[boot] failed to register workflow engine workers', err);
     }
   }
   // Skill Analyzer worker (migration 0092)

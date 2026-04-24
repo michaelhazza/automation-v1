@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Org intelligence briefing (simplified, tight)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  .email-wrap {
+    max-width: 640px; margin: 24px auto 40px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .email-head {
+    padding: 14px 24px; border-bottom: 1px solid #eef0f3; background: #fafbfc;
+    font-size: 12px; color: #6b7280;
+  }
+  .email-head .from { color: #1a1d23; font-weight: 500; }
+
+  .email-body { padding: 28px 28px 32px; }
+  .email-body h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .email-body .subline { font-size: 13px; color: #6b7280; margin-bottom: 22px; }
+
+  .tldr {
+    padding: 14px 16px; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 6px; color: #3730a3; font-size: 13px; line-height: 1.6;
+    margin-bottom: 24px;
+  }
+  .tldr strong { color: #1e1b4b; }
+
+  .sect-label {
+    font-size: 11px; font-weight: 700; color: #6b7280; margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+
+  .focus-list { list-style: none; padding: 0; margin-bottom: 22px; }
+  .focus-list li {
+    padding: 10px 0; border-bottom: 1px solid #f1f2f4;
+    font-size: 13px; line-height: 1.55; display: grid; grid-template-columns: 26px 1fr; gap: 8px;
+  }
+  .focus-list li:last-child { border-bottom: none; }
+  .focus-list li .num {
+    width: 22px; height: 22px; border-radius: 50%; background: #eef2ff;
+    color: #4338ca; font-weight: 700; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .focus-list li strong { color: #1a1d23; }
+
+  .email-cta {
+    display: inline-block; margin-top: 6px;
+    padding: 10px 20px; background: #4f46e5; color: #fff;
+    border-radius: 6px; font-weight: 600; font-size: 14px;
+    text-decoration: none;
+  }
+
+  .email-foot {
+    padding: 14px 24px; border-top: 1px solid #eef0f3;
+    font-size: 11px; color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Intelligence briefing (org-level, simplified) · TL;DR + 3–5 focus bullets. No KPI tiles, no per-account sub-lists, no dollar forecasts.
+</div>
+
+<div class="email-wrap">
+  <div class="email-head">
+    <div><span class="from">Synthetos</span> &lt;ping@synthetos.io&gt;</div>
+    <div style="margin-top:4px;">to Ben Quinlan · Monday 07:00</div>
+    <div style="margin-top:4px;"><strong style="color:#1a1d23;">Subject:</strong> Your week · 3 clients need attention</div>
+  </div>
+
+  <div class="email-body">
+    <h1>Your week ahead</h1>
+    <div class="subline">Monday briefing · Week of 20 April 2026</div>
+
+    <div class="tldr">
+      <strong>3 clients need attention this week.</strong>
+      Smith Dental dropped to Critical, Cairns Solar and Highland Fitness are sliding into At Risk.
+      All three have been quiet on outbound communication.
+    </div>
+
+    <div class="sect-label">Focus this week</div>
+    <ul class="focus-list">
+      <li>
+        <span class="num">1</span>
+        <span><strong>Call Smith Dental.</strong> Critical for 4 days. Retention-call task is open but hasn't moved. Suggest a 15-min check-in today.</span>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <span><strong>Check in with Cairns Solar and Highland Fitness.</strong> Both entering At Risk. A short SMS from their account manager usually reverses the trend.</span>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <span><strong>Review 2 pending interventions.</strong> ClientPulse has proposed actions for Smith Dental and Cairns Solar — waiting on your approval.</span>
+      </li>
+    </ul>
+
+    <a href="#" class="email-cta">Open dashboard →</a>
+  </div>
+
+  <div class="email-foot">
+    87 clients monitored · 3 needing attention · <a href="#" style="color:#4338ca;">Pause briefings</a> · <a href="#" style="color:#4338ca;">Change schedule</a>
+  </div>
+</div>
+
+</body>
+</html>

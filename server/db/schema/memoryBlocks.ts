@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -60,15 +60,15 @@ export const memoryBlocks = pgTable(
     // so the Knowledge page can surface "review recommended". Reset to
     // 'normal' on any human save.
     confidence: text('confidence').notNull().default('normal').$type<'low' | 'normal'>(),
-    // Backlink to the playbookRun that last wrote this block; drives the
+    // Backlink to the WorkflowRun that last wrote this block; drives the
     // per-run rate limit (§7.5 — 10 blocks per run).
     sourceRunId: uuid('source_run_id'),
     // Null = last-edited by a human (Knowledge page). Non-null = last-edited
-    // by an agent/playbook. Drives the HITL overwrite rule (§7.5).
+    // by an agent/Workflow. Drives the HITL overwrite rule (§7.5).
     lastEditedByAgentId: uuid('last_edited_by_agent_id').references(() => agents.id),
-    // Slug of the playbook that last wrote this block. A playbook can freely
+    // Slug of the Workflow that last wrote this block. A Workflow can freely
     // rewrite its own blocks without tripping the HITL overwrite rule.
-    lastWrittenByPlaybookSlug: text('last_written_by_playbook_slug'),
+    lastWrittenByWorkflowSlug: text('last_written_by_workflow_slug'),
     // Phase G / spec §7.4 / G7.1 — when true, creating this block or linking
     // a new agent to the sub-account materialises read-only attachments for
     // every linked agent, tagged `source='auto_attach'`. Added in migration 0125.

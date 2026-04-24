@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Per-client forward-looking briefing (richer — D1 decision)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fde68a 0%, #fcd34d 100%);
+    color: #78350f; padding: 10px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .decide-note {
+    max-width: 720px; margin: 16px auto 0; padding: 14px 16px;
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;
+    color: #1e40af; font-size: 13px; line-height: 1.6;
+  }
+  .decide-note strong { color: #1e3a8a; }
+
+  .email-wrap {
+    max-width: 640px; margin: 24px auto 40px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+  }
+
+  .email-head {
+    padding: 14px 24px; border-bottom: 1px solid #eef0f3; background: #fafbfc;
+    font-size: 12px; color: #6b7280;
+  }
+  .email-head .from { color: #1a1d23; font-weight: 500; }
+
+  .email-body { padding: 28px 28px 32px; }
+  .email-body h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.3px; }
+  .email-body .subline { font-size: 13px; color: #6b7280; margin-bottom: 20px; }
+
+  .band-hero {
+    padding: 16px 18px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca;
+    margin-bottom: 18px;
+  }
+  .band-hero .hero-row { display: flex; align-items: center; gap: 16px; }
+  .band-hero .hero-score { font-size: 40px; font-weight: 700; color: #991b1b; line-height: 1; letter-spacing: -0.8px; }
+  .band-hero .hero-band {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+    padding: 3px 9px; background: #991b1b; color: #fff; border-radius: 4px; text-transform: uppercase;
+  }
+  .band-hero .hero-delta { font-size: 13px; color: #991b1b; margin-top: 4px; font-weight: 500; }
+
+  .trend-inline {
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid #fecaca;
+  }
+  .trend-inline svg { display: block; width: 100%; height: 48px; }
+  .trend-inline .tr-meta {
+    display: flex; justify-content: space-between; font-size: 10px; color: #991b1b; margin-top: 4px;
+  }
+
+  .sect-label {
+    font-size: 11px; font-weight: 700; color: #6b7280; margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .section { margin-bottom: 22px; }
+
+  .signal-line {
+    padding: 10px 0; border-bottom: 1px solid #f1f2f4;
+    display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center;
+    font-size: 13px;
+  }
+  .signal-line:last-child { border-bottom: none; }
+  .signal-line .sd {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .signal-line .sd.down { background: #fef2f2; color: #b91c1c; }
+  .signal-line .sd.up { background: #ecfdf5; color: #15803d; }
+  .signal-line .sn { font-weight: 500; }
+  .signal-line .sg { font-size: 11px; color: #6b7280; margin-left: 4px; }
+  .signal-line .spark { display: block; }
+
+  .upcoming-item {
+    padding: 10px 12px; background: #fafbfc; border: 1px solid #eef0f3;
+    border-left: 3px solid #6366f1; border-radius: 5px; margin-bottom: 8px;
+    font-size: 13px; color: #4b5563;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .upcoming-item strong { color: #1a1d23; font-weight: 600; }
+  .upcoming-item .when { font-size: 11px; color: #6b7280; }
+
+  .pending-item {
+    padding: 10px 12px; background: #fef3c7; border: 1px solid #fde68a;
+    border-radius: 5px; font-size: 13px; color: #78350f; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .pending-item strong { color: #451a03; }
+
+  .action-card {
+    padding: 14px 16px; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 8px; margin-bottom: 18px;
+  }
+  .action-card .a-label {
+    font-size: 11px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.6px;
+    margin-bottom: 6px;
+  }
+  .action-card .a-text { font-size: 14px; color: #1a1d23; line-height: 1.55; }
+  .action-card .a-text strong { color: #4338ca; }
+
+  .email-cta {
+    display: inline-block; margin-top: 4px;
+    padding: 10px 22px; background: #4f46e5; color: #fff;
+    border-radius: 6px; font-weight: 600; font-size: 14px;
+    text-decoration: none;
+  }
+
+  .email-foot {
+    padding: 14px 24px; border-top: 1px solid #eef0f3;
+    font-size: 11px; color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  D1 DECISION · RICHER per-client Monday briefing (forward-looking).
+  Approve to ship this, or tell me to delete the feature entirely.
+</div>
+
+<div class="decide-note">
+  <strong>Revised richer variant of the per-client forward-looking briefing.</strong>
+  Now includes: mini trend chart, top signals driving risk, upcoming events, items already pending your approval, and the suggested action.
+  Everything here reinforces the primary task — <em>walk into Monday knowing what needs a human hand</em>.
+  <br><br>
+  Still worth shipping given the dashboard already shows the client in red? That's what you're deciding.
+</div>
+
+<div class="email-wrap">
+  <div class="email-head">
+    <div><span class="from">Synthetos</span> &lt;ping@synthetos.io&gt;</div>
+    <div style="margin-top:4px;">to Ben Quinlan · Monday 07:00</div>
+    <div style="margin-top:4px;"><strong style="color:#1a1d23;">Subject:</strong> Smith Dental needs a retention call this week</div>
+  </div>
+
+  <div class="email-body">
+    <h1>Smith Dental · this week</h1>
+    <div class="subline">Monday briefing · Week of 20 April</div>
+
+    <!-- Hero band + trend -->
+    <div class="band-hero">
+      <div class="hero-row">
+        <span class="hero-score">28</span>
+        <div>
+          <span class="hero-band">Critical</span>
+          <div class="hero-delta">↓ 12 points · last 7 days · dropped from At Risk 4 days ago</div>
+        </div>
+      </div>
+      <div class="trend-inline">
+        <svg viewBox="0 0 280 48" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#991b1b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            points="6,10 30,12 54,11 78,15 102,18 126,16 150,22 174,26 198,32 222,36 246,40 270,44"/>
+          <circle cx="270" cy="44" r="2.5" fill="#991b1b"/>
+        </svg>
+        <div class="tr-meta"><span>13 weeks ago</span><span>now</span></div>
+      </div>
+    </div>
+
+    <!-- Suggested action (primary) -->
+    <div class="action-card">
+      <div class="a-label">Suggested this week</div>
+      <div class="a-text"><strong>Call James Smith within 24 hours.</strong> Outbound silence is the main driver — 8 days since last call, 8 days since last SMS. A short retention call typically reverses this pattern for dentistry clients.</div>
+    </div>
+
+    <!-- Why this matters -->
+    <div class="section">
+      <div class="sect-label">Why this matters — top signals</div>
+      <div class="signal-line">
+        <span class="sd down">↓</span>
+        <span>
+          <span class="sn">Inbound calls</span>
+          <span class="sg">8d since last · baseline 2d</span>
+        </span>
+        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
+          <polyline points="2,4 10,5 18,7 26,9 34,10 42,12 50,13 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="signal-line">
+        <span class="sd down">↓</span>
+        <span>
+          <span class="sn">Outbound SMS</span>
+          <span class="sg">silent 8d · team avg 2d</span>
+        </span>
+        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
+          <polyline points="2,3 10,5 18,7 26,9 34,11 42,13 50,14 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="signal-line">
+        <span class="sd down">↓</span>
+        <span>
+          <span class="sn">Pipeline value</span>
+          <span class="sg">$647 → $347 this week</span>
+        </span>
+        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
+          <polyline points="2,2 10,3 18,4 26,6 34,8 42,11 50,13 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Already pending -->
+    <div class="section">
+      <div class="sect-label">Already awaiting your approval</div>
+      <div class="pending-item">
+        <span><strong>Retention call task</strong> · assigned to Ben · proposed 4d ago</span>
+        <span style="color:#78350f; font-size:12px; font-weight:500;">In review queue →</span>
+      </div>
+    </div>
+
+    <!-- Upcoming -->
+    <div class="section">
+      <div class="sect-label">Upcoming on Smith Dental</div>
+      <div class="upcoming-item">
+        <span><strong>Renewal conversation window opens</strong> · contract expires in 38 days</span>
+        <span class="when">in 3 days</span>
+      </div>
+      <div class="upcoming-item">
+        <span><strong>James Smith's birthday</strong> · opportunity for a personal touch</span>
+        <span class="when">in 6 days</span>
+      </div>
+    </div>
+
+    <a href="#" class="email-cta">Open Smith Dental →</a>
+  </div>
+
+  <div class="email-foot">
+    One of 2 clients in your portfolio needing attention this week.
+    <a href="#" style="color:#4338ca;">Pause these briefings</a> · <a href="#" style="color:#4338ca;">Change schedule</a>
+  </div>
+</div>
+
+</body>
+</html>

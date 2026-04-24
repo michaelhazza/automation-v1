@@ -633,7 +633,7 @@ export const PLAN_MODE_SKILL_COUNT_THRESHOLD = 15;
  */
 export const CRITIQUE_GATE_SHADOW_MODE = true;
 
-// ── Playbook agent_decision step ─────────────────────────────────────────────
+// ── Workflow agent_decision step ─────────────────────────────────────────────
 
 /**
  * Maximum number of times the engine will retry a decision step whose agent

@@ -6,9 +6,9 @@ import { db } from '../db/index.js';
 import {
   subaccounts,
   subaccountCategories,
-  subaccountProcessLinks,
+  subaccountAutomationLinks,
   subaccountUserAssignments,
-  processes,
+  automations,
   users,
   permissionSets,
 } from '../db/schema/index.js';
@@ -120,7 +120,7 @@ router.post(
     // flow so a failing enqueue never blocks subaccount creation (§5.8 pattern).
     if (req.user?.id) {
       subaccountOnboardingService
-        .autoStartOwedOnboardingPlaybooks({
+        .autoStartOwedOnboardingWorkflows({
           organisationId,
           subaccountId: sa.id,
           startedByUserId: req.user.id,
@@ -451,43 +451,43 @@ router.delete(
 // ─── Subaccount process links ─────────────────────────────────────────────────
 
 /**
- * GET /api/subaccounts/:subaccountId/processes
- * List all processes visible to this subaccount:
- *   - Org processes linked via subaccount_process_links
- *   - Subaccount-native processes (processes.subaccount_id = subaccountId)
+ * GET /api/subaccounts/:subaccountId/automations
+ * List all automations visible to this subaccount:
+ *   - Org automations linked via subaccount_process_links
+ *   - Subaccount-native automations (automations.subaccount_id = subaccountId)
  */
 router.get(
-  '/api/subaccounts/:subaccountId/processes',
+  '/api/subaccounts/:subaccountId/automations',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
-    // Linked org processes
+    // Linked org automations
     const links = await db
       .select({
-        linkId: subaccountProcessLinks.id,
-        processId: subaccountProcessLinks.processId,
-        subaccountCategoryId: subaccountProcessLinks.subaccountCategoryId,
-        isActive: subaccountProcessLinks.isActive,
-        linkCreatedAt: subaccountProcessLinks.createdAt,
-        processName: processes.name,
-        processStatus: processes.status,
-        processDescription: processes.description,
-        processWebhookPath: processes.webhookPath,
+        linkId: subaccountAutomationLinks.id,
+        processId: subaccountAutomationLinks.processId,
+        subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
+        isActive: subaccountAutomationLinks.isActive,
+        linkCreatedAt: subaccountAutomationLinks.createdAt,
+        processName: automations.name,
+        processStatus: automations.status,
+        processDescription: automations.description,
+        processWebhookPath: automations.webhookPath,
       })
-      .from(subaccountProcessLinks)
-      .innerJoin(processes, eq(processes.id, subaccountProcessLinks.processId))
-      .where(eq(subaccountProcessLinks.subaccountId, req.params.subaccountId));
+      .from(subaccountAutomationLinks)
+      .innerJoin(automations, eq(automations.id, subaccountAutomationLinks.processId))
+      .where(eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId));
 
-    // Subaccount-native processes
+    // Subaccount-native automations
     const nativeProcesses = await db
       .select()
-      .from(processes)
+      .from(automations)
       .where(
         and(
-          eq(processes.subaccountId, req.params.subaccountId),
-          isNull(processes.deletedAt)
+          eq(automations.subaccountId, req.params.subaccountId),
+          isNull(automations.deletedAt)
         )
       );
 
@@ -499,12 +499,12 @@ router.get(
 );
 
 /**
- * POST /api/subaccounts/:subaccountId/processes
+ * POST /api/subaccounts/:subaccountId/automations
  * Link an org-level process to this subaccount.
  * Body: { processId, subaccountCategoryId? }
  */
 router.post(
-  '/api/subaccounts/:subaccountId/processes',
+  '/api/subaccounts/:subaccountId/automations',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -519,22 +519,22 @@ router.post(
     // Verify process belongs to this org
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, processId), eq(processes.organisationId, req.orgId!), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, processId), eq(automations.organisationId, req.orgId!), isNull(automations.deletedAt)));
 
     if (!process) {
       res.status(404).json({ error: 'Process not found or not accessible' });
       return;
     }
 
-    // Only org-level processes (no subaccount_id) can be linked
+    // Only org-level automations (no subaccount_id) can be linked
     if (process.subaccountId !== null) {
-      res.status(400).json({ error: 'Subaccount-native processes cannot be linked; they already belong to a subaccount' });
+      res.status(400).json({ error: 'Subaccount-native automations cannot be linked; they already belong to a subaccount' });
       return;
     }
 
     const [link] = await db
-      .insert(subaccountProcessLinks)
+      .insert(subaccountAutomationLinks)
       .values({
         subaccountId: req.params.subaccountId,
         processId,
@@ -550,11 +550,11 @@ router.post(
 );
 
 /**
- * PATCH /api/subaccounts/:subaccountId/processes/:linkId
+ * PATCH /api/subaccounts/:subaccountId/automations/:linkId
  * Update a process link (toggle isActive, change category).
  */
 router.patch(
-  '/api/subaccounts/:subaccountId/processes/:linkId',
+  '/api/subaccounts/:subaccountId/automations/:linkId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -563,11 +563,11 @@ router.patch(
 
     const [link] = await db
       .select()
-      .from(subaccountProcessLinks)
+      .from(subaccountAutomationLinks)
       .where(
         and(
-          eq(subaccountProcessLinks.id, req.params.linkId),
-          eq(subaccountProcessLinks.subaccountId, req.params.subaccountId)
+          eq(subaccountAutomationLinks.id, req.params.linkId),
+          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId)
         )
       );
 
@@ -581,9 +581,9 @@ router.patch(
     if (subaccountCategoryId !== undefined) update.subaccountCategoryId = subaccountCategoryId;
 
     const [updated] = await db
-      .update(subaccountProcessLinks)
+      .update(subaccountAutomationLinks)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(subaccountProcessLinks.id, link.id))
+      .where(eq(subaccountAutomationLinks.id, link.id))
       .returning();
 
     res.json(updated);
@@ -591,22 +591,22 @@ router.patch(
 );
 
 /**
- * DELETE /api/subaccounts/:subaccountId/processes/:linkId
+ * DELETE /api/subaccounts/:subaccountId/automations/:linkId
  * Remove a process link from this subaccount.
  */
 router.delete(
-  '/api/subaccounts/:subaccountId/processes/:linkId',
+  '/api/subaccounts/:subaccountId/automations/:linkId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const [link] = await db
       .select()
-      .from(subaccountProcessLinks)
+      .from(subaccountAutomationLinks)
       .where(
         and(
-          eq(subaccountProcessLinks.id, req.params.linkId),
-          eq(subaccountProcessLinks.subaccountId, req.params.subaccountId)
+          eq(subaccountAutomationLinks.id, req.params.linkId),
+          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId)
         )
       );
 
@@ -615,7 +615,7 @@ router.delete(
       return;
     }
 
-    await db.delete(subaccountProcessLinks).where(eq(subaccountProcessLinks.id, link.id));
+    await db.delete(subaccountAutomationLinks).where(eq(subaccountAutomationLinks.id, link.id));
     res.json({ message: 'Process link removed' });
   })
 );

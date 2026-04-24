@@ -1,6 +1,6 @@
 import { eq, and, isNull, gte, lte, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, executionFiles, executionPayloads, processes } from '../db/schema/index.js';
+import { executions, executionFiles, executionPayloads, automations } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Execution } from '../db/schema/executions.js';
@@ -86,14 +86,14 @@ export class ExecutionService {
       configOverrides?: Record<string, unknown>;
     }
   ) {
-    // Load process — support system processes (no organisationId) and org/subaccount processes
+    // Load process — support system automations (no organisationId) and org/subaccount automations
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, data.processId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, data.processId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found or not accessible' };
-    // For org/subaccount processes, verify org ownership
+    // For org/subaccount automations, verify org ownership
     if (process.organisationId && process.organisationId !== organisationId) {
       throw { statusCode: 404, message: 'Process not found or not accessible' };
     }

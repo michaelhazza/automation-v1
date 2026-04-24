@@ -1,15 +1,15 @@
 import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowEngines } from '../db/schema/index.js';
+import { automationEngines } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
 
 export class EngineService {
   async listEngines(organisationId: string, params: { status?: string }) {
     const rows = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     let result = rows;
     if (params.status) result = result.filter((e) => e.status === params.status);
@@ -31,7 +31,7 @@ export class EngineService {
     const hmacSecret = crypto.randomBytes(32).toString('hex');
 
     const [engine] = await db
-      .insert(workflowEngines)
+      .insert(automationEngines)
       .values({
         organisationId,
         name: data.name,
@@ -57,8 +57,8 @@ export class EngineService {
   async getEngine(id: string, organisationId: string) {
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) {
       throw { statusCode: 404, message: 'Workflow engine not found' };
@@ -82,8 +82,8 @@ export class EngineService {
   ) {
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) {
       throw { statusCode: 404, message: 'Workflow engine not found' };
@@ -96,9 +96,9 @@ export class EngineService {
     if (data.status !== undefined) update.status = data.status;
 
     const [updated] = await db
-      .update(workflowEngines)
+      .update(automationEngines)
       .set(update)
-      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)))
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)))
       .returning();
 
     return {
@@ -111,15 +111,15 @@ export class EngineService {
   async deleteEngine(id: string, organisationId: string) {
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) {
       throw { statusCode: 404, message: 'Workflow engine not found' };
     }
 
     const now = new Date();
-    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
+    await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
 
     return { message: 'Workflow engine deleted successfully' };
   }
@@ -127,8 +127,8 @@ export class EngineService {
   async testEngineConnection(id: string, organisationId: string) {
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) {
       throw { statusCode: 404, message: 'Workflow engine not found' };
@@ -145,14 +145,14 @@ export class EngineService {
       const success = response.ok || response.status < 500;
 
       await db
-        .update(workflowEngines)
+        .update(automationEngines)
         .set({
           lastTestedAt: new Date(),
           lastTestStatus: success ? 'success' : 'failed',
           status: success ? 'active' : engine.status,
           updatedAt: new Date(),
         })
-        .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
+        .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
 
       return {
         success,
@@ -162,9 +162,9 @@ export class EngineService {
     } catch (err: unknown) {
       const responseTimeMs = Date.now() - start;
       await db
-        .update(workflowEngines)
+        .update(automationEngines)
         .set({ lastTestedAt: new Date(), lastTestStatus: 'failed', updatedAt: new Date() })
-        .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
+        .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
 
       const message = err instanceof Error ? err.message : 'Connection failed';
       throw { statusCode: 503, message: `Engine connection test failed: ${message}` };

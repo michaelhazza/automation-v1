@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Org-admin onboarding (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .screens { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1100px; margin: 24px auto; padding: 0 24px; }
+
+  .screen {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .screen-head {
+    padding: 10px 16px; background: #fafbfc; border-bottom: 1px solid #eef0f3;
+    font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+  }
+  .screen-body { padding: 20px 22px; }
+
+  /* Email */
+  .email-body { padding: 28px 28px; font-size: 14px; line-height: 1.6; color: #1a1d23; }
+  .email-body h1 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+  .email-body p { margin-bottom: 14px; color: #4b5563; }
+  .email-cta {
+    display: inline-block; padding: 10px 22px; background: #4f46e5; color: #fff;
+    border-radius: 6px; font-weight: 600; font-size: 14px; text-decoration: none;
+    margin: 8px 0 16px;
+  }
+  .email-sig { font-size: 13px; color: #6b7280; margin-top: 12px; }
+
+  /* Wizard step */
+  .wiz-step {
+    padding: 24px;
+  }
+  .wiz-step h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+  .wiz-step .stepno {
+    display: inline-block; padding: 2px 8px; background: #eef2ff; color: #4338ca;
+    border-radius: 3px; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .wiz-step .desc { font-size: 13px; color: #6b7280; margin-bottom: 20px; }
+
+  .connect-card {
+    padding: 16px 18px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafbfc;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  }
+  .connect-card .left { font-size: 13px; }
+  .connect-card .left .name { font-weight: 600; font-size: 14px; }
+  .connect-card .left .desc { color: #6b7280; margin-top: 2px; font-size: 12px; }
+  .btn-primary {
+    padding: 8px 16px; background: #4f46e5; color: #fff; border: 1px solid #4338ca;
+    border-radius: 5px; font-weight: 600; font-size: 13px; cursor: pointer;
+  }
+  .btn-primary:hover { background: #4338ca; }
+
+  /* Sync progress */
+  .sync-steps { margin-top: 14px; }
+  .sync-step {
+    padding: 12px 0; font-size: 13px; border-bottom: 1px solid #f1f2f4;
+    display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center;
+  }
+  .sync-step:last-child { border-bottom: none; }
+  .sync-step .icon-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #fff; font-weight: 700;
+  }
+  .sync-step.done .icon-dot { background: #16a34a; }
+  .sync-step.in-progress .icon-dot { background: #4338ca; }
+  .sync-step.pending .icon-dot { background: #d1d5db; color: #9ca3af; }
+  .sync-step .label { font-weight: 500; color: #1a1d23; }
+  .sync-step.pending .label { color: #6b7280; font-weight: 400; }
+  .sync-step .status { font-size: 12px; color: #6b7280; }
+
+  /* Celebration */
+  .done-card {
+    text-align: center; padding: 36px 24px;
+  }
+  .done-card .check {
+    font-size: 40px; color: #16a34a; margin-bottom: 10px;
+  }
+  .done-card h2 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .done-card p { font-size: 14px; color: #4b5563; margin-bottom: 22px; }
+  .done-card .btn-primary { padding: 10px 24px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Org-admin onboarding (simplified) · 3 screens. Invite email reads like a welcome (no weight/threshold/template-slug leak).
+  Sync step reduced to 3 with no raw counts. Celebration: one CTA, no KPI tiles.
+</div>
+
+<div class="screens">
+
+  <!-- Screen 1: Invite email -->
+  <div class="screen">
+    <div class="screen-head">Screen 1 · Invite email</div>
+    <div class="email-body">
+      <h1>Welcome to Synthetos ClientPulse, Ben 👋</h1>
+      <p>Your agency workspace is ready. In the next 5 minutes you'll be able to see which of your clients are at risk of churning — before they do.</p>
+      <p>Click below to set up your workspace and connect your CRM.</p>
+      <a href="#" class="email-cta">Set up ClientPulse →</a>
+      <div class="email-sig">
+        — The Synthetos team<br>
+        <span style="color:#9ca3af;">synthetos.io · this invite expires in 7 days</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen 2: Connect CRM -->
+  <div class="screen">
+    <div class="screen-head">Screen 2 · Connect CRM</div>
+    <div class="wiz-step">
+      <span class="stepno">Step 1 of 3</span>
+      <h2>Connect your CRM</h2>
+      <div class="desc">ClientPulse reads signals from your CRM to score each client's health.</div>
+
+      <div class="connect-card">
+        <div class="left">
+          <div class="name">GoHighLevel</div>
+          <div class="desc">Sub-accounts, contacts, opportunities</div>
+        </div>
+        <button class="btn-primary">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen 3: Sync progress -->
+  <div class="screen">
+    <div class="screen-head">Screen 3 · Syncing</div>
+    <div class="wiz-step">
+      <span class="stepno">Step 2 of 3</span>
+      <h2>Syncing your data</h2>
+      <div class="desc">This takes a minute — we're pulling your clients and their recent activity.</div>
+
+      <div class="sync-steps">
+        <div class="sync-step done">
+          <span class="icon-dot">✓</span>
+          <span class="label">Sub-accounts</span>
+          <span class="status">Done</span>
+        </div>
+        <div class="sync-step in-progress">
+          <span class="icon-dot">●</span>
+          <span class="label">Contacts & recent activity</span>
+          <span class="status">In progress…</span>
+        </div>
+        <div class="sync-step pending">
+          <span class="icon-dot">○</span>
+          <span class="label">Initial health scoring</span>
+          <span class="status">Pending</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen 4: Celebration -->
+  <div class="screen">
+    <div class="screen-head">Screen 4 · Ready</div>
+    <div class="done-card">
+      <div class="check">✓</div>
+      <h2>Your workspace is ready</h2>
+      <p>ClientPulse is now monitoring your clients. Open the dashboard to see who needs attention.</p>
+      <button class="btn-primary">Open dashboard →</button>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

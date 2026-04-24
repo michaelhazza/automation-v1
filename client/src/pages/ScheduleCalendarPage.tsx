@@ -73,7 +73,7 @@ export default function ScheduleCalendarPage({
   }, [startISO, endISO]);
 
   const onClick = (occ: ScheduleOccurrence) => {
-    if (occ.source === 'scheduled_task' || occ.source === 'playbook') {
+    if (occ.source === 'scheduled_task' || occ.source === 'workflow') {
       navigate(`/admin/subaccounts/${occ.subaccountId}/scheduled-tasks/${occ.sourceId}`);
     } else if (occ.agentId) {
       navigate(`/admin/subaccounts/${occ.subaccountId}/agents/${occ.sourceId}/manage`);
@@ -86,7 +86,7 @@ export default function ScheduleCalendarPage({
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Scheduled runs — all subaccounts</h1>
           <p className="text-sm text-slate-500">
-            Portfolio-wide view of every scheduled agent, cron, playbook, and scheduled task in your organisation.
+            Portfolio-wide view of every scheduled agent, cron, workflow, and scheduled task in your organisation.
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 text-xs">

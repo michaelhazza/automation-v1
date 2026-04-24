@@ -439,3 +439,68 @@ When a reviewer flags a bug in a feature that has two functionally-equivalent co
 At Stage 5 start, `classify_state.queue` is written once and used by the UI to control the stable display order of AI-classifying skills in `SkillAnalyzerProcessingStep`. On a resume, if the queue is seeded with only the remaining unclassified slugs (e.g. 4 of 19), two UI bugs follow: (1) the 4 resumed skills jump to the top of the list because the stable-order logic is keyed on queue position; (2) after Stage 6/7 writes all result rows to the DB, hash-matched `DUPLICATE` skills appear as phantom entries in the `doneOnly` fallback path.
 
 **Fix:** `classify_state.queue` is always set from the full `llmQueue` (all AI-classified candidates from Stage 4, in their original order), regardless of how many are remaining on resume. In the UI, `displaySlugs` was simplified to just `classifyQueue` — `DUPLICATE` skills are intentionally excluded because they resolve in Stage 6/7 and have no per-skill progress to show in the classifier view.
+
+### 2026-04-24 Pattern — Discriminator-trust contract for half-migrated payloads
+
+When a payload type adds optional structured fields alongside a legacy regex/string-shape fallback, the field-presence check (`if (!field) fall back to regex`) is the wrong gate. It conflates "emitter hasn't migrated" (`field === undefined`) with "emitter has migrated and explicitly says unknown" (`field === null`). The result: half-migrated emitters that explicitly set `null` for an unknown value silently get their human summary re-parsed by the regex bridge, producing the wrong answer or a phantom value.
+
+**Rule:** the gate for the legacy fallback path should be the **structural discriminator**, not the field presence. If `payload.skillType === 'automation'` (or whatever the discriminator is), trust the structured payload entirely — including any `null`/`undefined` for unknown-but-structured values. The regex / legacy bridge only fires when no discriminator is present at all.
+
+```ts
+// Wrong — half-migrated emitters fall through to regex
+let provider = p.provider;
+if (!provider && p.resultSummary) { /* regex */ }
+
+// Right — emitter's discriminator decides which contract applies
+let provider = p.provider ?? undefined;
+const isStructured = p.skillType === 'automation';
+if (!isStructured && !provider && p.resultSummary) { /* regex */ }
+```
+
+**Detection heuristic.** In any "structured fields with legacy fallback" mapper, grep for falsy-checks on optional fields that decide whether to use the fallback (`if (!provider)`, `if (!errorCode)`, `if (!amountCents)`). If the check doesn't ALSO check the discriminator, half-migrated emitters will silently take the legacy path even though they meant the new contract.
+
+**Applied to:** `client/src/components/agentRunLog/eventRowPure.ts:mapInvokeAutomationFailedViewModel` (Riley Wave 1 PR #186 round 3 R3-5). Generalises to every "v1 → v2 with bridge" mapper — billing event normalisers, webhook payload mappers, agent-result parsers, anything with optional structured fields + a string-summary fallback.
+
+### 2026-04-24 Pattern — Migration-endgame phasing for "introduce → fallback → warn → measure → remove"
+
+When you ship a forward-compatible migration that keeps a fallback alongside the new contract, the fallback rots into permanence unless you explicitly document the removal criteria up-front. Without a stated endgame, future maintainers preserve the fallback "just in case" — and the new contract never becomes the only contract.
+
+**Rule:** every "introduce builder + keep fallback" PR must include a JSDoc block at the top of the affected module spelling out four phases:
+
+```
+Phase 1 (DONE): Builder + fallback shipped together
+Phase 2 (DONE): Warn-on-fallback emits stable codes ops can grep
+Phase 3 (PENDING): Wire counter metric when infra lands
+Phase 4 (REMOVAL CRITERIA): When warn rate has been zero for ≥30 days, delete:
+  (a) <specific fallback branch>
+  (b) <specific bridge code>
+  (c) <make optional fields required>
+DO NOT preserve the fallbacks "just in case" — keeping them silently re-permits drift.
+```
+
+The "DO NOT preserve" line is load-bearing. Without it, the next maintainer reads the warn-on-fallback observability and concludes the fallback is "monitored, therefore safe to keep" — exactly backwards. The observability exists *to enable removal*, not to make the fallback permanent.
+
+**Detection heuristic.** When reviewing a PR that adds a fallback path, ask: *"Where in the code is the deletion criteria written?"* If it's only in a slack thread, a PR description, or "I'll remember", the answer is wrong. It must be in the source file next to the fallback code — that's the only place the next maintainer is guaranteed to read.
+
+**Applied to:** Module-level JSDoc in `client/src/components/agentRunLog/eventRowPure.ts` (Riley Wave 1 PR #186 round 3 R3-2 + R3-6). Generalises to every additive deprecation: shimmed schemas, dual-write database migrations, v1/v2 API endpoints, feature flag rollouts.
+
+### 2026-04-24 Pattern — Stable warn codes with surface.signal namespacing for observable migrations
+
+A migration with a fallback layer is only safe to remove if you can *prove* the fallback is unused in production. "Prove" requires either log-grepping for a stable string or a counter metric — both of which need a stable, queryable identifier per fallback branch. Free-form `console.warn('legacy provider parse')` messages don't satisfy this: log aggregators key on prefix patterns, not human strings, and a re-worded message silently breaks the alerting query.
+
+**Rule:** when adding warn-on-fallback observability, define the codes in a `const FALLBACK_WARN_CODES = { ... } as const` block so they're typed, importable by tests, and grep-able in production logs. Use the dot-namespaced `<surface>.<signal>` shape:
+
+```ts
+export const FALLBACK_WARN_CODES = {
+  legacySkillSlugDetection: 'event_row.legacy_skill_slug_detection',
+  legacyProviderRegex: 'event_row.legacy_provider_regex',
+} as const;
+```
+
+The surface prefix (`event_row.*`) lets log aggregation queries filter the entire surface with one pattern; the signal suffix is the specific fallback branch. Underscore-only codes (`event_row_legacy_provider_regex_used`) lose the prefix-filter affordance and risk collisions across surfaces.
+
+Inject the warn sink as a parameter (`warn: WarnSink = defaultWarnSink`) so tests can capture calls without polluting test output, and assert on the stable code rather than the message text.
+
+**Detection heuristic.** Grep the codebase for `console.warn(` with a string-literal first argument that contains the words "legacy", "fallback", "deprecated", or "transitional". If the string isn't drawn from a centralised `const` block, the migration's removal-readiness is unmeasurable — which means the migration will never end.
+
+**Applied to:** `client/src/components/agentRunLog/eventRowPure.ts` `FALLBACK_WARN_CODES` constant + `WarnSink` type + injectable default (Riley Wave 1 PR #186 rounds 2 R2-1 and 3 R3-3). Generalises to every observable deprecation — billing-pipeline shims, schema-version branches, retry-policy migrations.

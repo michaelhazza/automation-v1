@@ -58,6 +58,6 @@ CREATE POLICY reference_document_versions_org_isolation ON reference_document_ve
     EXISTS (
       SELECT 1 FROM reference_documents rd
       WHERE rd.id = document_id
-        AND rd.organisation_id = current_setting('app.current_organisation_id', true)::uuid
+        AND rd.organisation_id = current_setting('app.organisation_id', true)::uuid
     )
   );

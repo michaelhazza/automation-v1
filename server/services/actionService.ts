@@ -1,7 +1,7 @@
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { actions, actionEvents, tasks, workflowRuns } from '../db/schema/index.js';
+import { actions, actionEvents, tasks, flowRuns } from '../db/schema/index.js';
 import {
   getActionDefinition,
   LEGAL_TRANSITIONS,
@@ -476,19 +476,19 @@ export const actionService = {
     ];
 
     // Fetch workflow runs in bulk (if any)
-    const workflowRunsMap = new Map<string, typeof workflowRuns.$inferSelect>();
+    const flowRunsMap = new Map<string, typeof flowRuns.$inferSelect>();
     if (workflowRunIds.length > 0) {
       const runs = await db
         .select()
-        .from(workflowRuns)
+        .from(flowRuns)
         .where(
           and(
-            inArray(workflowRuns.id, workflowRunIds),
-            eq(workflowRuns.organisationId, organisationId),
+            inArray(flowRuns.id, workflowRunIds),
+            eq(flowRuns.organisationId, organisationId),
           ),
         );
       for (const run of runs) {
-        workflowRunsMap.set(run.id, run);
+        flowRunsMap.set(run.id, run);
       }
     }
 
@@ -497,7 +497,7 @@ export const actionService = {
       const p = action.payloadJson as Record<string, unknown> | null;
       const workflowRunId = (p?.workflowRunId as string | undefined) ?? null;
       const workflowStepId = (p?.workflowStepId as string | undefined) ?? null;
-      const workflowRun = workflowRunId ? workflowRunsMap.get(workflowRunId) ?? null : null;
+      const workflowRun = workflowRunId ? flowRunsMap.get(workflowRunId) ?? null : null;
 
       return {
         ...action,

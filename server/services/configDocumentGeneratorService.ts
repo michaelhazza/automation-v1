@@ -16,8 +16,8 @@
  */
 
 import type { ConfigQuestion } from '../types/configSchema.js';
-import { INTELLIGENCE_BRIEFING_SCHEMA } from '../playbooks/intelligence-briefing.schema.js';
-import { WEEKLY_DIGEST_SCHEMA } from '../playbooks/weekly-digest.schema.js';
+import { INTELLIGENCE_BRIEFING_SCHEMA } from '../workflows/intelligence-briefing.schema.js';
+import { WEEKLY_DIGEST_SCHEMA } from '../workflows/weekly-digest.schema.js';
 
 // ---------------------------------------------------------------------------
 // Schema registry — playbook slug → ConfigQuestion[]

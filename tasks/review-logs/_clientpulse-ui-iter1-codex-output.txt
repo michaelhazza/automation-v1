@@ -1,0 +1,687 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd32-90bd-72a3-bc84-c22bf36a8bf4
+--------
+user
+current changes
+2026-04-24T01:55:08.319938Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git status --short && echo '---DIFF-STAGED---' && git diff --staged --no-ext-diff --unified=3 && echo '---DIFF-UNSTAGED---' && git diff --no-ext-diff --unified=3 && echo '---UNTRACKED---' && git ls-files --others --exclude-standard"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git status --short && echo '---DIFF-STAGED---' && git diff --staged --no-ext-diff --unified=3 && echo '---DIFF-UNSTAGED---' && git diff --no-ext-diff --unified=3 && echo '---UNTRACKED---' && git ls-files --others --exclude-standard" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git status --short && echo '---DIFF-STAGED---' && git diff --staged --no-ext-diff --unified=3 && echo '---DIFF-UNSTAGED---' && git diff --no-ext-diff --unified=3 && echo '---UNTRACKED---' && git ls-files --others --exclude-standard"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 224ms:
+ M docs/frontend-design-principles.md
+RM tasks/clientpulse-mockup-briefing-per-client.html -> prototypes/pulse/clientpulse-mockup-briefing-per-client.html
+RM tasks/clientpulse-mockup-config-assistant-chat.html -> prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
+RM tasks/clientpulse-mockup-create-task.html -> prototypes/pulse/clientpulse-mockup-create-task.html
+RM tasks/clientpulse-mockup-dashboard.html -> prototypes/pulse/clientpulse-mockup-dashboard.html
+RM tasks/clientpulse-mockup-digest-per-client.html -> prototypes/pulse/clientpulse-mockup-digest-per-client.html
+RM tasks/clientpulse-mockup-drilldown.html -> prototypes/pulse/clientpulse-mockup-drilldown.html
+RM tasks/clientpulse-mockup-email-authoring.html -> prototypes/pulse/clientpulse-mockup-email-authoring.html
+RM tasks/clientpulse-mockup-fire-automation.html -> prototypes/pulse/clientpulse-mockup-fire-automation.html
+RM tasks/clientpulse-mockup-intelligence-briefing.html -> prototypes/pulse/clientpulse-mockup-intelligence-briefing.html
+RM tasks/clientpulse-mockup-onboarding-orgadmin.html -> prototypes/pulse/clientpulse-mockup-onboarding-orgadmin.html
+RM tasks/clientpulse-mockup-onboarding-sysadmin.html -> prototypes/pulse/clientpulse-mockup-onboarding-sysadmin.html
+RM tasks/clientpulse-mockup-operator-alert-received.html -> prototypes/pulse/clientpulse-mockup-operator-alert-received.html
+RM tasks/clientpulse-mockup-operator-alert.html -> prototypes/pulse/clientpulse-mockup-operator-alert.html
+RM tasks/clientpulse-mockup-organisation-templates.html -> prototypes/pulse/clientpulse-mockup-organisation-templates.html
+RM tasks/clientpulse-mockup-propose-intervention.html -> prototypes/pulse/clientpulse-mockup-propose-intervention.html
+RM tasks/clientpulse-mockup-send-sms.html -> prototypes/pulse/clientpulse-mockup-send-sms.html
+RM tasks/clientpulse-mockup-settings.html -> prototypes/pulse/clientpulse-mockup-settings.html
+RM tasks/clientpulse-mockup-subaccount-blueprints.html -> prototypes/pulse/clientpulse-mockup-subaccount-blueprints.html
+ D tasks/clientpulse-mockup-capability-showcase.html
+ D tasks/clientpulse-mockup-inline-edit.html
+ D tasks/clientpulse-mockup-template-editor.html
+ D tasks/clientpulse-mockup-weekly-digest.html
+?? docs/superpowers/specs/2026-04-24-clientpulse-ui-simplification-spec.md
+?? prototypes/pulse/clientpulse-mockup-clients-list.html
+?? prototypes/pulse/current-clientpulse-dashboard.html
+?? prototypes/pulse/current-main-dashboard.html
+?? prototypes/pulse/home-dashboard.html
+?? prototypes/pulse/run-detail.html
+?? tasks/builds/clientpulse-ui-simplification/
+?? tasks/review-logs/_clientpulse-ui-iter1-codex-output.txt
+?? tasks/review-logs/spec-review-plan-2026-04-24T01-54-01Z.md
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --staged --no-ext-diff --unified=3' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 227ms:
+diff --git a/tasks/clientpulse-mockup-briefing-per-client.html b/prototypes/pulse/clientpulse-mockup-briefing-per-client.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-briefing-per-client.html
+rename to prototypes/pulse/clientpulse-mockup-briefing-per-client.html
+diff --git a/tasks/clientpulse-mockup-config-assistant-chat.html b/prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-config-assistant-chat.html
+rename to prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
+diff --git a/tasks/clientpulse-mockup-create-task.html b/prototypes/pulse/clientpulse-mockup-create-task.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-create-task.html
+rename to prototypes/pulse/clientpulse-mockup-create-task.html
+diff --git a/tasks/clientpulse-mockup-dashboard.html b/prototypes/pulse/clientpulse-mockup-dashboard.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-dashboard.html
+rename to prototypes/pulse/clientpulse-mockup-dashboard.html
+diff --git a/tasks/clientpulse-mockup-digest-per-client.html b/prototypes/pulse/clientpulse-mockup-digest-per-client.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-digest-per-client.html
+rename to prototypes/pulse/clientpulse-mockup-digest-per-client.html
+diff --git a/tasks/clientpulse-mockup-drilldown.html b/prototypes/pulse/clientpulse-mockup-drilldown.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-drilldown.html
+rename to prototypes/pulse/clientpulse-mockup-drilldown.html
+diff --git a/tasks/clientpulse-mockup-email-authoring.html b/prototypes/pulse/clientpulse-mockup-email-authoring.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-email-authoring.html
+rename to prototypes/pulse/clientpulse-mockup-email-authoring.html
+diff --git a/tasks/clientpulse-mockup-fire-automation.html b/prototypes/pulse/clientpulse-mockup-fire-automation.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-fire-automation.html
+rename to prototypes/pulse/clientpulse-mockup-fire-automation.html
+diff --git a/tasks/clientpulse-mockup-intelligence-briefing.html b/prototypes/pulse/clientpulse-mockup-intelligence-briefing.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-intelligence-briefing.html
+rename to prototypes/pulse/clientpulse-mockup-intelligence-briefing.html
+diff --git a/tasks/clientpulse-mockup-onboarding-orgadmin.html b/prototypes/pulse/clientpulse-mockup-onboarding-orgadmin.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-onboarding-orgadmin.html
+rename to prototypes/pulse/clientpulse-mockup-onboarding-orgadmin.html
+diff --git a/tasks/clientpulse-mockup-onboarding-sysadmin.html b/prototypes/pulse/clientpulse-mockup-onboarding-sysadmin.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-onboarding-sysadmin.html
+rename to prototypes/pulse/clientpulse-mockup-onboarding-sysadmin.html
+diff --git a/tasks/clientpulse-mockup-operator-alert-received.html b/prototypes/pulse/clientpulse-mockup-operator-alert-received.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-operator-alert-received.html
+rename to prototypes/pulse/clientpulse-mockup-operator-alert-received.html
+diff --git a/tasks/clientpulse-mockup-operator-alert.html b/prototypes/pulse/clientpulse-mockup-operator-alert.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-operator-alert.html
+rename to prototypes/pulse/clientpulse-mockup-operator-alert.html
+diff --git a/tasks/clientpulse-mockup-organisation-templates.html b/prototypes/pulse/clientpulse-mockup-organisation-templates.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-organisation-templates.html
+rename to prototypes/pulse/clientpulse-mockup-organisation-templates.html
+diff --git a/tasks/clientpulse-mockup-propose-intervention.html b/prototypes/pulse/clientpulse-mockup-propose-intervention.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-propose-intervention.html
+rename to prototypes/pulse/clientpulse-mockup-propose-intervention.html
+diff --git a/tasks/clientpulse-mockup-send-sms.html b/prototypes/pulse/clientpulse-mockup-send-sms.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-send-sms.html
+rename to prototypes/pulse/clientpulse-mockup-send-sms.html
+diff --git a/tasks/clientpulse-mockup-settings.html b/prototypes/pulse/clientpulse-mockup-settings.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-settings.html
+rename to prototypes/pulse/clientpulse-mockup-settings.html
+diff --git a/tasks/clientpulse-mockup-subaccount-blueprints.html b/prototypes/pulse/clientpulse-mockup-subaccount-blueprints.html
+similarity index 100%
+rename from tasks/clientpulse-mockup-subaccount-blueprints.html
+rename to prototypes/pulse/clientpulse-mockup-subaccount-blueprints.html
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-ext-diff --unified=3' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 237ms:
+diff --git a/docs/frontend-design-principles.md b/docs/frontend-design-principles.md
+index 29248bd..1e478ee 100644
+--- a/docs/frontend-design-principles.md
++++ b/docs/frontend-design-principles.md
+@@ -52,6 +52,36 @@ Work through these in order. An unchecked box is a design finding; every uncheck
+ - **The result of the last action taken** — inline confirmation (e.g. "attached · 2m ago"), not a history table.
+ - **One sidebar callout at most** — only if it's load-bearing for completing the primary task (e.g. a required field's help text).
+ - **Empty states with one next action** — "No bundles yet. [Create bundle]". Not a tour, not tips, not a chart of nothing.
++- **Load-bearing inline visuals** — status dots, band pills, sparklines next to names, outcome badges, a single hero visualisation where *understanding trajectory IS the primary task*. These communicate state faster than text and are *encouraged*, not deferred. See [Visuals as simplicity](#visuals-as-simplicity) below.
++
++---
++
++## Visuals as simplicity
++
++A common misread of this document is "cut all visuals to ship faster". That is wrong. **Visuals are how consumer-simple products communicate state.** A status dot beats a paragraph. A sparkline beats three lines of trend prose. A single hero chart on a drilldown where *understanding the trajectory* is the primary task beats five lines explaining the same number.
++
++**The test is never "is there a visual?" — it's "is this visual load-bearing for the primary task?"**
++
++| Ship | Don't ship |
++|---|---|
++| Status dots inline on list rows (band, health, run outcome) | A row of five KPI tiles at the top of every page |
++| Sparklines next to a client name showing 4-week trajectory | Multi-series comparison charts nobody asked for |
++| Band pills, severity pills, outcome badges | 7/30/90-day toggle charts as decoration |
++| A single hero trend visualisation on a drilldown page | Trend dashboards that duplicate content visible inline below |
++| Progress indicators on active flows | Observability explorers on primary user journeys |
++| Micro-gauges, subtle colour accents for state | Multi-panel dashboards when the task is *operating*, not *monitoring* |
++
++A sparkline communicating a trend in 60 pixels earns its place. A KPI tile row showing four numbers the user already sees in the list below does not. A hero chart on a page whose primary task *is* "read the trajectory" earns its place. A hero chart on a page whose primary task is "pick one and act" is decoration.
++
++### Aesthetic quality is not negotiable
++
++Pages must be **aesthetically beautiful**, not just functional. Plain-text lists with no visual hierarchy read as unfinished. Every surface should feel intentional: confident type hierarchy, generous whitespace, colour accents for state, small visual signals that communicate faster than words.
++
++**Consumer-simple means *beautiful and obvious*, not *stripped and bare*.**
++
++If a screen is entirely text, pause and ask: *is there a visual that would communicate this state faster?* Usually yes. Ship it. A list of clients without trend sparklines is harder to scan than one with. A drilldown without a health-score visualisation hides the single most important thing the operator is there to see.
++
++The caps in the [complexity budget](#complexity-budget-per-screen) below are about **defaulting away from the dashboard-of-dashboards anti-pattern** — rows of tiles, multi-chart explorers, observability sprawl. They are *not* a mandate against visual richness. Sparklines, inline gauges, status indicators, outcome badges, and load-bearing single hero visualisations are never counted against those caps.
+ 
+ ---
+ 
+@@ -59,8 +89,8 @@ Work through these in order. An unchecked box is a design finding; every uncheck
+ 
+ Everything below is **deferred out of v1 unless explicitly requested for a specific user workflow**. Not "maybe v2" — actively cut from the v1 artifact.
+ 
+-- Metric dashboards, KPI boards, tile rows of numbers.
+-- Trend charts over time windows (7-day / 30-day / 90-day).
++- Metric dashboards and KPI tile rows — the "four-to-seven big numbers at the top of every page" anti-pattern. Inline single-metric signals (a sparkline next to a name, a band pill, a status dot) are different — ship those freely. See [Visuals as simplicity](#visuals-as-simplicity).
++- Trend-chart decks with 7/30/90-day toggles as decoration at the top of pages. A single hero trend visualisation on a drilldown where *understanding trajectory IS the primary task* is different — ship that.
+ - Diagnostic panels that expose internal identifiers (prefix hashes, snapshot IDs, idempotency keys, correlation IDs).
+ - Aggregated cost rollups, per-tenant financial breakdowns, spend-saved calculations, cost-split donuts.
+ - Observability explorers ("Usage Explorer", "Bundle Lens", "Model Lens", "Feature Lens").
+diff --git a/prototypes/pulse/clientpulse-mockup-briefing-per-client.html b/prototypes/pulse/clientpulse-mockup-briefing-per-client.html
+index a2aa9f3..fb71f3f 100644
+--- a/prototypes/pulse/clientpulse-mockup-briefing-per-client.html
++++ b/prototypes/pulse/clientpulse-mockup-briefing-per-client.html
+@@ -2,295 +2,237 @@
+ <html lang="en">
+ <head>
+ <meta charset="UTF-8">
+-<title>Monday Briefing — Bright Marketing Co (per-client)</title>
++<title>Per-client forward-looking briefing (richer — D1 decision)</title>
+ <style>
+   * { box-sizing: border-box; margin: 0; padding: 0; }
+   body {
+     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+-    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
++    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+   }
+   .annot-banner {
+-    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+-    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
++    background: linear-gradient(90deg, #fde68a 0%, #fcd34d 100%);
++    color: #78350f; padding: 10px 16px; font-size: 12px; text-align: center; font-weight: 500;
+   }
+-  .email-wrap { max-width: 680px; margin: 24px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
++  .decide-note {
++    max-width: 720px; margin: 16px auto 0; padding: 14px 16px;
++    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;
++    color: #1e40af; font-size: 13px; line-height: 1.6;
++  }
++  .decide-note strong { color: #1e3a8a; }
+ 
+-  .inbox-strip {
+-    background: #fafbfc; padding: 12px 24px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;
+-    display: flex; justify-content: space-between; align-items: center;
++  .email-wrap {
++    max-width: 640px; margin: 24px auto 40px;
++    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+   }
+-  .inbox-strip .from strong { color: #1a1d23; font-weight: 600; }
+ 
+-  /* Header banner — client-specific, teal/cyan palette to differentiate from org-level briefing */
+-  .banner {
+-    background: linear-gradient(135deg, #134e4a 0%, #0e7490 100%);
+-    color: #fff; padding: 24px;
++  .email-head {
++    padding: 14px 24px; border-bottom: 1px solid #eef0f3; background: #fafbfc;
++    font-size: 12px; color: #6b7280;
+   }
+-  .banner h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 4px; }
+-  .banner .sub { font-size: 13px; color: #a5f3fc; }
+-  .banner .sub strong { color: #fff; }
++  .email-head .from { color: #1a1d23; font-weight: 500; }
+ 
+-  .section { padding: 24px; border-bottom: 1px solid #f0f1f3; }
+-  .section:last-child { border-bottom: none; }
+-  .section h2 {
+-    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+-    color: #6b7280; margin-bottom: 12px;
++  .email-body { padding: 28px 28px 32px; }
++  .email-body h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.3px; }
++  .email-body .subline { font-size: 13px; color: #6b7280; margin-bottom: 20px; }
++
++  .band-hero {
++    padding: 16px 18px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca;
++    margin-bottom: 18px;
+   }
+-  .section h2 .badge {
+-    background: #ccfbf1; color: #115e59; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-left: 8px;
++  .band-hero .hero-row { display: flex; align-items: center; gap: 16px; }
++  .band-hero .hero-score { font-size: 40px; font-weight: 700; color: #991b1b; line-height: 1; letter-spacing: -0.8px; }
++  .band-hero .hero-band {
++    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
++    padding: 3px 9px; background: #991b1b; color: #fff; border-radius: 4px; text-transform: uppercase;
+   }
+-  .section h2 .band {
+-    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 8px;
+-    background: #fff7ed; color: #c2410c;
++  .band-hero .hero-delta { font-size: 13px; color: #991b1b; margin-top: 4px; font-weight: 500; }
++
++  .trend-inline {
++    margin-top: 12px; padding-top: 12px; border-top: 1px solid #fecaca;
++  }
++  .trend-inline svg { display: block; width: 100%; height: 48px; }
++  .trend-inline .tr-meta {
++    display: flex; justify-content: space-between; font-size: 10px; color: #991b1b; margin-top: 4px;
+   }
+ 
+-  .tldr {
+-    background: #ecfeff; border-left: 4px solid #06b6d4; padding: 16px 20px; border-radius: 6px;
+-    margin-bottom: 18px;
++  .sect-label {
++    font-size: 11px; font-weight: 700; color: #6b7280; margin-bottom: 10px;
++    text-transform: uppercase; letter-spacing: 0.6px;
+   }
+-  .tldr h3 { font-size: 13px; font-weight: 700; color: #155e75; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+-  .tldr p { font-size: 14px; color: #1f2937; line-height: 1.6; }
+-  .tldr p strong { color: #0c4a6e; }
++  .section { margin-bottom: 22px; }
+ 
+-  /* Priority list (the action items for the week) */
+-  .priority-list { display: flex; flex-direction: column; gap: 10px; }
+-  .priority-item {
+-    padding: 14px; border: 1px solid #f0f1f3; background: #fafbfc; border-radius: 6px;
+-    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: flex-start;
++  .signal-line {
++    padding: 10px 0; border-bottom: 1px solid #f1f2f4;
++    display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center;
++    font-size: 13px;
+   }
+-  .priority-item .marker {
+-    width: 28px; height: 28px; border-radius: 50%;
+-    background: #06b6d4; color: #fff; font-weight: 700; font-size: 13px;
++  .signal-line:last-child { border-bottom: none; }
++  .signal-line .sd {
++    width: 18px; height: 18px; border-radius: 50%;
+     display: flex; align-items: center; justify-content: center;
++    font-size: 11px; font-weight: 700;
+   }
+-  .priority-item .info .title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+-  .priority-item .info .why { font-size: 12px; color: #4b5563; }
+-  .priority-item .info .why strong { color: #1a1d23; }
+-  .priority-item .due { font-size: 11px; color: #b45309; font-weight: 600; white-space: nowrap; padding-top: 4px; }
+-
+-  /* Event list */
+-  .event-list { display: flex; flex-direction: column; gap: 6px; }
+-  .event-item {
+-    padding: 10px 12px; background: #fafbfc; border-radius: 4px;
+-    display: grid; grid-template-columns: 60px 1fr auto; gap: 12px; align-items: center;
+-    font-size: 13px;
++  .signal-line .sd.down { background: #fef2f2; color: #b91c1c; }
++  .signal-line .sd.up { background: #ecfdf5; color: #15803d; }
++  .signal-line .sn { font-weight: 500; }
++  .signal-line .sg { font-size: 11px; color: #6b7280; margin-left: 4px; }
++  .signal-line .spark { display: block; }
++
++  .upcoming-item {
++    padding: 10px 12px; background: #fafbfc; border: 1px solid #eef0f3;
++    border-left: 3px solid #6366f1; border-radius: 5px; margin-bottom: 8px;
++    font-size: 13px; color: #4b5563;
++    display: flex; justify-content: space-between; align-items: center;
+   }
+-  .event-item .day { font-weight: 700; color: #0e7490; font-size: 12px; letter-spacing: 0.3px; }
+-  .event-item .type { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; }
++  .upcoming-item strong { color: #1a1d23; font-weight: 600; }
++  .upcoming-item .when { font-size: 11px; color: #6b7280; }
+ 
+-  /* Health snapshot */
+-  .snapshot {
+-    display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center;
+-    background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 18px;
++  .pending-item {
++    padding: 10px 12px; background: #fef3c7; border: 1px solid #fde68a;
++    border-radius: 5px; font-size: 13px; color: #78350f; margin-bottom: 8px;
++    display: flex; justify-content: space-between; align-items: center;
+   }
+-  .snapshot .score { font-size: 42px; font-weight: 700; color: #c2410c; line-height: 1; }
+-  .snapshot .score-label { font-size: 11px; color: #9a3412; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; font-weight: 600; }
+-  .snapshot .trend { font-size: 13px; color: #c2410c; font-weight: 600; }
+-  .snapshot .signals { font-size: 12px; color: #7c2d12; margin-top: 6px; line-height: 1.5; }
+-  .snapshot .signals span { display: inline-block; background: #fee2e2; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-top: 4px; color: #991b1b; }
++  .pending-item strong { color: #451a03; }
+ 
+-  /* Pending review CTA */
+-  .pending-cta {
+-    background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 14px;
+-    display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit;
++  .action-card {
++    padding: 14px 16px; background: #eef2ff; border: 1px solid #c7d2fe;
++    border-radius: 8px; margin-bottom: 18px;
+   }
+-  .pending-cta:hover { background: #fed7aa; }
+-  .pending-cta .icon { font-size: 22px; }
+-  .pending-cta .body { flex: 1; }
+-  .pending-cta .body strong { display: block; font-size: 13px; color: #9a3412; margin-bottom: 2px; }
+-  .pending-cta .body span { font-size: 12px; color: #7c2d12; }
+-  .pending-cta .arrow { font-size: 18px; color: #9a3412; font-weight: 700; }
+-
+-  .cta-bar { text-align: center; padding: 24px; background: #fafbfc; }
+-  .cta-bar a {
+-    display: inline-block; padding: 12px 24px; background: #06b6d4; color: #fff;
+-    text-decoration: none; font-weight: 600; font-size: 14px; border-radius: 6px;
++  .action-card .a-label {
++    font-size: 11px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.6px;
++    margin-bottom: 6px;
++  }
++  .action-card .a-text { font-size: 14px; color: #1a1d23; line-height: 1.55; }
++  .action-card .a-text strong { color: #4338ca; }
++
++  .email-cta {
++    display: inline-block; margin-top: 4px;
++    padding: 10px 22px; background: #4f46e5; color: #fff;
++    border-radius: 6px; font-weight: 600; font-size: 14px;
++    text-decoration: none;
+   }
+-  .cta-bar a:hover { background: #0891b2; }
+ 
+-  .footer { padding: 16px 24px; background: #1a1d23; color: #9ca3af; font-size: 11px; text-align: center; }
+-  .footer a { color: #a5f3fc; text-decoration: none; }
++  .email-foot {
++    padding: 14px 24px; border-top: 1px solid #eef0f3;
++    font-size: 11px; color: #9ca3af;
++  }
+ </style>
+ </head>
+ <body>
+-<div class="annot-banner">📐 MOCKUP · DELIVERED BY existing playbook <code>intelligence-briefing.playbook.ts</code> · <code>scope: 'subaccount'</code> · Runs Mon 07:00 with <code>run.entity = subaccount</code> (ONE client) · Single-client focus; operator-view render · ClientPulse snapshot gated by <code>skipWhen: !modules.client_pulse.enabled</code> · Forward-looking content only.</div>
+ 
+-<div class="email-wrap">
++<div class="annot-banner">
++  D1 DECISION · RICHER per-client Monday briefing (forward-looking).
++  Approve to ship this, or tell me to delete the feature entirely.
++</div>
+ 
+-  <!-- Inbox preview strip -->
+-  <div class="inbox-strip">
+-    <div class="from"><strong>Synthetos &lt;briefings@synthetos.app&gt;</strong> → kel@productivityhub.com</div>
+-    <div class="date">Mon 17 Apr · 07:00</div>
+-  </div>
++<div class="decide-note">
++  <strong>Revised richer variant of the per-client forward-looking briefing.</strong>
++  Now includes: mini trend chart, top signals driving risk, upcoming events, items already pending your approval, and the suggested action.
++  Everything here reinforces the primary task — <em>walk into Monday knowing what needs a human hand</em>.
++  <br><br>
++  Still worth shipping given the dashboard already shows the client in red? That's what you're deciding.
++</div>
+ 
+-  <!-- Header -->
+-  <div class="banner">
+-    <h1>Bright Marketing Co — Monday Briefing</h1>
+-    <div class="sub">Week of <strong>17–23 April 2026</strong> · ClientPulse band: <strong>At Risk (28)</strong> · Your client since Aug 2024</div>
++<div class="email-wrap">
++  <div class="email-head">
++    <div><span class="from">Synthetos</span> &lt;ping@synthetos.io&gt;</div>
++    <div style="margin-top:4px;">to Ben Quinlan · Monday 07:00</div>
++    <div style="margin-top:4px;"><strong style="color:#1a1d23;">Subject:</strong> Smith Dental needs a retention call this week</div>
+   </div>
+ 
+-  <!-- TL;DR -->
+-  <div class="section">
+-    <h2>The week ahead — 30-second read</h2>
+-    <div class="tldr">
+-      <h3>What to do for Bright Marketing this week</h3>
+-      <p>
+-        <strong>Retention call window closes Friday</strong> — 89 days since the $647→$347 downgrade; historical pattern shows 73% of clients downgrade again within 90 days if no human touch.
+-        <strong>2 opportunities stalled 12+ days in "Proposal Sent"</strong> — Ben needs a nudge or they'll die.
+-        <strong>1 intervention awaiting your approval:</strong> retention-call task for the VA.
+-        Staff activity trajectory is −6/week and projected to enter <strong>Critical (22)</strong> by Wednesday without intervention.
+-      </p>
+-    </div>
+-  </div>
++  <div class="email-body">
++    <h1>Smith Dental · this week</h1>
++    <div class="subline">Monday briefing · Week of 20 April</div>
+ 
+-  <!-- ClientPulse snapshot -->
+-  <div class="section">
+-    <h2>ClientPulse snapshot <span class="badge">forward-looking</span></h2>
+-    <div class="snapshot">
+-      <div>
+-        <div class="score">28</div>
+-        <div class="score-label">At Risk</div>
+-      </div>
+-      <div>
+-        <div class="trend">↓ Projected 22 by Wed · Critical band</div>
+-        <div class="signals">
+-          <span>Staff activity −6/wk for 3 weeks</span>
+-          <span>1 funnel (none edited 21d)</span>
+-          <span>Calendar 3/3 ✓</span>
+-          <span>CloseBot · 42 msgs/30d (−55%)</span>
+-          <span>Tier ↓ $647→$347 (89d ago)</span>
++    <!-- Hero band + trend -->
++    <div class="band-hero">
++      <div class="hero-row">
++        <span class="hero-score">28</span>
++        <div>
++          <span class="hero-band">Critical</span>
++          <div class="hero-delta">↓ 12 points · last 7 days · dropped from At Risk 4 days ago</div>
+         </div>
+       </div>
++      <div class="trend-inline">
++        <svg viewBox="0 0 280 48" preserveAspectRatio="none">
++          <polyline fill="none" stroke="#991b1b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
++            points="6,10 30,12 54,11 78,15 102,18 126,16 150,22 174,26 198,32 222,36 246,40 270,44"/>
++          <circle cx="270" cy="44" r="2.5" fill="#991b1b"/>
++        </svg>
++        <div class="tr-meta"><span>13 weeks ago</span><span>now</span></div>
++      </div>
+     </div>
+-  </div>
+ 
+-  <!-- Priorities this week (FORWARD) -->
+-  <div class="section">
+-    <h2>Priorities for this client this week</h2>
+-    <div class="priority-list">
+-      <div class="priority-item">
+-        <div class="marker">1</div>
+-        <div class="info">
+-          <div class="title">Book the retention call — window closes Friday</div>
+-          <div class="why">
+-            Bright downgraded $647→$347 on 18 Jan. We're at day 89 of the typical 90-day re-downgrade window.
+-            <strong>Ben (owner) responds best to text, not email.</strong> Last touchpoint was 12 days ago.
+-          </div>
+-        </div>
+-        <div class="due">Due Fri</div>
+-      </div>
++    <!-- Suggested action (primary) -->
++    <div class="action-card">
++      <div class="a-label">Suggested this week</div>
++      <div class="a-text"><strong>Call James Smith within 24 hours.</strong> Outbound silence is the main driver — 8 days since last call, 8 days since last SMS. A short retention call typically reverses this pattern for dentistry clients.</div>
++    </div>
+ 
+-      <div class="priority-item">
+-        <div class="marker">2</div>
+-        <div class="info">
+-          <div class="title">Nudge 2 stalled opportunities in "Proposal Sent"</div>
+-          <div class="why">
+-            <strong>Chavez Auto Group</strong> (12 days, $4,200) and
+-            <strong>Mountain Ridge Clinic</strong> (14 days, $2,800) have not been touched.
+-            Historical win rate drops 48% after 14 days at this stage.
+-          </div>
+-        </div>
+-        <div class="due">This week</div>
++    <!-- Why this matters -->
++    <div class="section">
++      <div class="sect-label">Why this matters — top signals</div>
++      <div class="signal-line">
++        <span class="sd down">↓</span>
++        <span>
++          <span class="sn">Inbound calls</span>
++          <span class="sg">8d since last · baseline 2d</span>
++        </span>
++        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
++          <polyline points="2,4 10,5 18,7 26,9 34,10 42,12 50,13 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
++        </svg>
+       </div>
+-
+-      <div class="priority-item">
+-        <div class="marker">3</div>
+-        <div class="info">
+-          <div class="title">Review + approve the retention-call task proposal</div>
+-          <div class="why">
+-            Orchestrator has drafted a VA task: "Call Ben re: plan fit, offer 30-day free done-for-you funnel audit."
+-            Awaiting your one-click approval in the intervention queue.
+-          </div>
+-        </div>
+-        <div class="due">Today</div>
++      <div class="signal-line">
++        <span class="sd down">↓</span>
++        <span>
++          <span class="sn">Outbound SMS</span>
++          <span class="sg">silent 8d · team avg 2d</span>
++        </span>
++        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
++          <polyline points="2,3 10,5 18,7 26,9 34,11 42,13 50,14 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
++        </svg>
+       </div>
+-
+-      <div class="priority-item">
+-        <div class="marker">4</div>
+-        <div class="info">
+-          <div class="title">Revive the dormant funnel</div>
+-          <div class="why">
+-            The "Homepage → Consult" funnel hasn't been edited in 21 days. Conversion has dropped to 1.8% (was 3.4%).
+-            <strong>Suggested:</strong> refresh hero copy + add social proof block.
+-          </div>
+-        </div>
+-        <div class="due">This week</div>
++      <div class="signal-line">
++        <span class="sd down">↓</span>
++        <span>
++          <span class="sn">Pipeline value</span>
++          <span class="sg">$647 → $347 this week</span>
++        </span>
++        <svg class="spark" width="60" height="16" viewBox="0 0 60 16">
++          <polyline points="2,2 10,3 18,4 26,6 34,8 42,11 50,13 58,15" fill="none" stroke="#b91c1c" stroke-width="1.3" stroke-linecap="round"/>
++        </svg>
+       </div>
+     </div>
+-  </div>
+ 
+-  <!-- Pending intervention -->
+-  <div class="section">
+-    <h2>Awaiting your approval</h2>
+-    <a class="pending-cta" href="clientpulse-mockup-dashboard.html">
+-      <div class="icon">⏳</div>
+-      <div class="body">
+-        <strong>1 intervention queued for Bright Marketing</strong>
+-        <span>Retention-call task · VA · 30-day DFY funnel audit offer · 30s to review</span>
++    <!-- Already pending -->
++    <div class="section">
++      <div class="sect-label">Already awaiting your approval</div>
++      <div class="pending-item">
++        <span><strong>Retention call task</strong> · assigned to Ben · proposed 4d ago</span>
++        <span style="color:#78350f; font-size:12px; font-weight:500;">In review queue →</span>
+       </div>
+-      <div class="arrow">→</div>
+-    </a>
+-  </div>
++    </div>
+ 
+-  <!-- Upcoming events this week -->
+-  <div class="section">
+-    <h2>Upcoming this week</h2>
+-    <div class="event-list">
+-      <div class="event-item">
+-        <div class="day">TUE</div>
+-        <div>
+-          <strong>Onboarding call — Mountain Ridge Clinic</strong>
+-          <div class="type">APPOINTMENT · 14:00</div>
+-        </div>
+-        <div style="font-size:11px;color:#6b7280;">Ben owner</div>
++    <!-- Upcoming -->
++    <div class="section">
++      <div class="sect-label">Upcoming on Smith Dental</div>
++      <div class="upcoming-item">
++        <span><strong>Renewal conversation window opens</strong> · contract expires in 38 days</span>
++        <span class="when">in 3 days</span>
+       </div>
+-      <div class="event-item">
+-        <div class="day">WED</div>
+-        <div>
+-          <strong>April Newsletter — scheduled send</strong>
+-          <div class="type">EMAIL CAMPAIGN · 10:00 · 1,240 contacts</div>
+-        </div>
+-        <div style="font-size:11px;color:#6b7280;">Draft ready</div>
+-      </div>
+-      <div class="event-item">
+-        <div class="day">THU</div>
+-        <div>
+-          <strong>Facebook ad budget ends — "Spring Promo"</strong>
+-          <div class="type">AD CAMPAIGN · Uphex</div>
+-        </div>
+-        <div style="font-size:11px;color:#6b7280;">$340/day</div>
+-      </div>
+-      <div class="event-item">
+-        <div class="day">FRI</div>
+-        <div>
+-          <strong>Retention-call window closes</strong>
+-          <div class="type">CLIENTPULSE DEADLINE</div>
+-        </div>
+-        <div style="font-size:11px;color:#b45309;font-weight:600;">Act today</div>
++      <div class="upcoming-item">
++        <span><strong>James Smith's birthday</strong> · opportunity for a personal touch</span>
++        <span class="when">in 6 days</span>
+       </div>
+     </div>
+-  </div>
+ 
+-  <!-- Team note -->
+-  <div class="section">
+-    <h2>What your team might be forgetting</h2>
+-    <p style="font-size:13px;color:#4b5563;line-height:1.6;">
+-      The last outbound SMS from your team to any Bright contact was <strong>Sarah (account manager), 8 days ago</strong>.
+-      Every other client of theirs with healthy retention has weekly staff-to-contact SMS. This client's silence is your silence.
+-    </p>
++    <a href="#" class="email-cta">Open Smith Dental →</a>
+   </div>
+ 
+-  <!-- CTA -->
+-  <div class="cta-bar">
+-    <a href="clientpulse-mockup-drilldown.html">Open Bright Marketing dashboard →</a>
++  <div class="email-foot">
++    One of 2 clients in your portfolio needing attention this week.
++    <a href="#" style="color:#4338ca;">Pause these briefings</a> · <a href="#" style="color:#4338ca;">Change schedule</a>
+   </div>
+-
+-  <!-- Footer -->
+-  <div class="footer">
+-    Synthetos Intelligence Briefing · Bright Marketing Co · Productivity Hub (SaaS)<br>
+-    <a href="#">Configure this briefing</a> · <a href="#">Unsubscribe from per-client briefings</a>
+-  </div>
+-
+ </div>
+ 
+ </body>
+diff --git a/prototypes/pulse/clientpulse-mockup-config-assistant-chat.html b/prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
+index 3f89566..e3a350d 100644
+--- a/prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
++++ b/prototypes/pulse/clientpulse-mockup-config-assistant-chat.html
+@@ -2,7 +2,7 @@
+ <html lang="en">
+ <head>
+ <meta charset="UTF-8">
+-<title>Configuration Assistant chat — popup (mockup)</title>
++<title>Configuration Assistant · chat (simplified)</title>
+ <style>
+   * { box-sizing: border-box; margin: 0; padding: 0; }
+   body {
+@@ -13,339 +13,167 @@
+     background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+     color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+   }
+-
+-  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1; }
+-  .bg-hint {
+-    position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none;
+-    font-size: 11px; color: #9ca3af;
+-  }
+-
+-  /* Chat popup (floating on the bottom-right) */
+-  .chat-popup {
+-    position: fixed;

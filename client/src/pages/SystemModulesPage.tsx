@@ -13,18 +13,18 @@ interface Module {
   displayName: string;
   allowAllAgents: boolean;
   allowedAgentSlugs: string[] | null;
-  onboardingPlaybookSlugs: string[];
+  onboardingWorkflowSlugs: string[];
   createdAt: string;
 }
 
-interface SystemPlaybookTemplate {
+interface SystemWorkflowTemplate {
   id: string;
   slug: string;
   name: string;
   latestVersion: number;
 }
 
-interface OrgPlaybookTemplate {
+interface OrgWorkflowTemplate {
   id: string;
   slug: string;
   name: string;
@@ -61,7 +61,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
     const load = async () => {
       const options: { slug: string; name: string; source: 'system' | 'org' }[] = [];
       try {
-        const sys = await api.get<{ templates: SystemPlaybookTemplate[] }>('/api/system/playbook-templates');
+        const sys = await api.get<{ templates: SystemWorkflowTemplate[] }>('/api/system/workflow-templates');
         for (const t of sys.data.templates ?? []) {
           if (t.latestVersion > 0) options.push({ slug: t.slug, name: t.name, source: 'system' });
         }
@@ -69,7 +69,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
         // silent — org admin may not have scope to list system templates on this env
       }
       try {
-        const org = await api.get<{ templates: OrgPlaybookTemplate[] }>('/api/playbook-templates');
+        const org = await api.get<{ templates: OrgWorkflowTemplate[] }>('/api/workflow-templates');
         for (const t of org.data.templates ?? []) {
           if (t.latestVersion > 0 && !options.some((o) => o.slug === t.slug)) {
             options.push({ slug: t.slug, name: t.name, source: 'org' });
@@ -85,7 +85,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
 
   const beginEdit = (mod: Module) => {
     setEditingModuleId(mod.id);
-    setEditSelection(new Set(mod.onboardingPlaybookSlugs ?? []));
+    setEditSelection(new Set(mod.onboardingWorkflowSlugs ?? []));
   };
 
   const cancelEdit = () => {
@@ -105,9 +105,9 @@ export default function SystemModulesPage({ user: _user }: Props) {
     setSaving(true);
     try {
       await api.patch(`/api/system/modules/${editingModuleId}`, {
-        onboardingPlaybookSlugs: Array.from(editSelection),
+        onboardingWorkflowSlugs: Array.from(editSelection),
       });
-      toast.success('Onboarding playbooks updated');
+      toast.success('onboarding workflows updated');
       cancelEdit();
       await loadModules();
     } catch (e: any) {
@@ -140,8 +140,8 @@ export default function SystemModulesPage({ user: _user }: Props) {
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Agent access</th>
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   <span className="inline-flex items-center gap-1.5">
-                    Onboarding playbooks
-                    <HelpHint text="Sub-accounts that enable this module will be prompted to run these playbooks during setup." />
+                    onboarding workflows
+                    <HelpHint text="Sub-accounts that enable this module will be prompted to run these workflows during setup." />
                   </span>
                 </th>
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Created</th>
@@ -189,9 +189,9 @@ export default function SystemModulesPage({ user: _user }: Props) {
                             ))
                           )}
                         </div>
-                      ) : mod.onboardingPlaybookSlugs?.length ? (
+                      ) : mod.onboardingWorkflowSlugs?.length ? (
                         <div className="flex flex-wrap gap-1">
-                          {mod.onboardingPlaybookSlugs.map((s) => (
+                          {mod.onboardingWorkflowSlugs.map((s) => (
                             <code
                               key={s}
                               className="text-[11px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded"

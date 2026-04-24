@@ -37,7 +37,7 @@ router.post(
       rrule, timezone, scheduleTime, retryPolicy, tokenBudgetPerRun,
       endsAt, endsAfterRuns,
       // Phase B2 — SchedulePicker adoption (spec §5.4–§5.6).
-      taskSlug, createdByPlaybookSlug, firstRunAt, firstRunAtTz, runNow,
+      taskSlug, createdByWorkflowSlug, firstRunAt, firstRunAtTz, runNow,
     } = req.body;
 
     if (!title || !assignedAgentId || !rrule || !scheduleTime) {
@@ -54,7 +54,7 @@ router.post(
         endsAt: endsAt ? new Date(endsAt) : undefined,
         endsAfterRuns,
         taskSlug,
-        createdByPlaybookSlug,
+        createdByWorkflowSlug,
         firstRunAt: firstRunAt ? new Date(firstRunAt) : undefined,
         firstRunAtTz,
         runNow: runNow === true,
