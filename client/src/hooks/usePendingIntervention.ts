@@ -15,7 +15,7 @@
  *   other errors → generic error
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import api from '../lib/api';
 import {
   createPendingInterventionActions,
@@ -39,8 +39,15 @@ export function usePendingIntervention(
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Stable reference — options is spread via stable setters so we don't need
-  // the options object itself in the dependency array.
+  // Keep a ref to the latest options so callbacks always read the current value
+  // without options appearing in their dependency arrays. This prevents inline
+  // object literals passed by the caller from recreating approve/reject on
+  // every parent render.
+  const optionsRef = useRef(options ?? {});
+  useEffect(() => {
+    optionsRef.current = options ?? {};
+  });
+
   const approve = useCallback(
     (reviewItemId: string) => {
       const actions = createPendingInterventionActions({
@@ -49,12 +56,11 @@ export function usePendingIntervention(
         setIsPending,
         setConflict,
         setError,
-        options: options ?? {},
+        options: optionsRef.current,
       });
       return actions.approve(reviewItemId);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPending, options],
+    [isPending],
   );
 
   const reject = useCallback(
@@ -65,12 +71,11 @@ export function usePendingIntervention(
         setIsPending,
         setConflict,
         setError,
-        options: options ?? {},
+        options: optionsRef.current,
       });
       return actions.reject(reviewItemId, comment);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPending, options],
+    [isPending],
   );
 
   return { approve, reject, isPending, conflict, error };
