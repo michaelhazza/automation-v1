@@ -36,7 +36,7 @@ export default function FireAutomationEditor({ subaccountId, onCancel, onSubmit 
           renderItem={(a) => (
             <div>
               <div className="font-semibold text-slate-900">{a.name}</div>
-              <div className="text-[11px] text-slate-500">{a.id} · {a.status}</div>
+              <div className="text-[11px] text-slate-500">{a.status}</div>
             </div>
           )}
           itemKey={(a) => a.id}

@@ -1,6 +1,7 @@
 import { eq, and, desc, gte, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations, agentExecutionEvents } from '../db/schema/index.js';
+import { coerceEventCount } from './agentActivityServicePure.js';
 
 const MAX_CHAIN_NODES = 50;
 
@@ -132,6 +133,14 @@ export const agentActivityService = {
             })),
           };
 
+    // Event count — single aggregate query (not per-row) scoped by run_id.
+    const [eventCountRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(agentExecutionEvents)
+      .where(eq(agentExecutionEvents.runId, runId));
+
+    const eventCount = coerceEventCount(eventCountRow?.count);
+
     // ieeRunId is now a denormalised column on agent_runs (migration
     // 0176) written by agentExecutionService at delegation time. No
     // JOIN or subquery needed at read time — the value is already on
@@ -142,6 +151,7 @@ export const agentActivityService = {
       agentSlug: row.agentSlug,
       subaccountName: row.subaccountName,
       mcpCallSummary,
+      eventCount,
     };
   },
 

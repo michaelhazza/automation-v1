@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import {
   agentRuns,
   agents,
+  users,
   subaccounts,
   reviewItems,
   actions,
@@ -10,6 +11,10 @@ import {
   workflowRuns,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
+import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
+import type { TriggerType } from './activityServicePure.js';
+
+const VALID_TRIGGER_TYPES = new Set<string>(['manual', 'scheduled', 'webhook', 'agent', 'system']);
 
 // ---------------------------------------------------------------------------
 // Activity Service — unified activity feed across all data sources
@@ -44,6 +49,12 @@ export type ActivityItem = {
   createdAt: string;
   updatedAt: string;
   detailUrl: string;
+  // ── Task 1.3 additive fields (all nullable) ──────────────────────────────
+  triggeredByUserId: string | null;
+  triggeredByUserName: string | null;
+  triggerType: TriggerType | null;
+  durationMs: number | null;
+  runId: string | null;
 };
 
 export type ActivityScope =
@@ -144,19 +155,6 @@ function normaliseWorkflowStatus(s: string): NormalisedStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Severity ordering for sort
-// ---------------------------------------------------------------------------
-
-const SEVERITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 };
-const STATUS_ORDER: Record<NormalisedStatus, number> = {
-  attention_needed: 0,
-  failed: 1,
-  active: 2,
-  completed: 3,
-  cancelled: 4,
-};
-
-// ---------------------------------------------------------------------------
 // Org ID resolver for scope
 // ---------------------------------------------------------------------------
 
@@ -206,15 +204,20 @@ async function fetchAgentRuns(
       run: agentRuns,
       agentName: agents.name,
       subaccountName: subaccounts.name,
+      triggeredByUserId: agentRuns.actingAsUserId,
+      triggeredByUserName: users.firstName,
+      triggeredByUserLastName: users.lastName,
     })
     .from(agentRuns)
     .innerJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
+    // LEFT JOIN users — deleted user yields null, does NOT drop the row
+    .leftJoin(users, eq(users.id, agentRuns.actingAsUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(agentRuns.createdAt))
+    .orderBy(desc(agentRuns.createdAt), desc(agentRuns.id))
     .limit(200);
 
-  return rows.map(({ run, agentName, subaccountName }) => ({
+  return rows.map(({ run, agentName, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
     id: run.id,
     type: 'agent_run' as const,
     status: normaliseAgentRunStatus(run.status),
@@ -230,6 +233,16 @@ async function fetchAgentRuns(
     detailUrl: run.subaccountId
       ? `/subaccounts/${run.subaccountId}/agents/${run.agentId}/runs/${run.id}`
       : `/admin/agents/${run.agentId}/runs/${run.id}`,
+    // ── Additive fields ────────────────────────────────────────────────────
+    triggeredByUserId: triggeredByUserId ?? null,
+    triggeredByUserName: triggeredByUserName != null
+      ? (triggeredByUserLastName != null
+          ? `${triggeredByUserName} ${triggeredByUserLastName}`
+          : triggeredByUserName)
+      : null,
+    triggerType: mapAgentRunTriggerType(run.runType, run.runSource ?? null),
+    durationMs: run.durationMs ?? null,
+    runId: run.id,
   }));
 }
 
@@ -258,7 +271,7 @@ async function fetchReviewItems(
     .leftJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, reviewItems.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(reviewItems.createdAt))
+    .orderBy(desc(reviewItems.createdAt), desc(reviewItems.id))
     .limit(200);
 
   return rows.map(({ item, actionType, agentName, subaccountName }) => ({
@@ -277,6 +290,7 @@ async function fetchReviewItems(
     detailUrl: item.subaccountId
       ? `/subaccounts/${item.subaccountId}/review`
       : `/admin/review`,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -297,7 +311,7 @@ async function fetchHealthFindings(
     .select()
     .from(workspaceHealthFindings)
     .where(and(...conditions))
-    .orderBy(desc(workspaceHealthFindings.detectedAt))
+    .orderBy(desc(workspaceHealthFindings.detectedAt), desc(workspaceHealthFindings.id))
     .limit(200);
 
   return rows.map((f) => ({
@@ -314,6 +328,7 @@ async function fetchHealthFindings(
     createdAt: (f.detectedAt ?? new Date()).toISOString(),
     updatedAt: (f.detectedAt ?? new Date()).toISOString(),
     detailUrl: '/admin/health',
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -342,7 +357,7 @@ async function fetchInboxItems(
     .innerJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, actions.subaccountId), isNull(subaccounts.deletedAt)))
     .where(and(...conditions))
-    .orderBy(desc(actions.createdAt))
+    .orderBy(desc(actions.createdAt), desc(actions.id))
     .limit(200);
 
   return rows.map(({ action, agentName, subaccountName }) => ({
@@ -361,6 +376,7 @@ async function fetchInboxItems(
     detailUrl: action.subaccountId
       ? `/subaccounts/${action.subaccountId}/agent-inbox`
       : `/admin/agent-inbox`,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -385,7 +401,7 @@ async function fetchWorkflowRuns(
     .from(workflowRuns)
     .leftJoin(subaccounts, eq(subaccounts.id, workflowRuns.subaccountId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(workflowRuns.createdAt))
+    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
     .limit(200);
 
   return rows.map(({ run, subaccountName }) => ({
@@ -401,7 +417,8 @@ async function fetchWorkflowRuns(
     severity: run.status === 'failed' ? 'warning' as const : null,
     createdAt: (run.createdAt ?? new Date()).toISOString(),
     updatedAt: (run.updatedAt ?? run.createdAt ?? new Date()).toISOString(),
-    detailUrl: `/subaccounts/${run.subaccountId}/playbook-runs/${run.id}`,
+    detailUrl: `/subaccounts/${run.subaccountId}/workflow-runs/${run.id}`,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -423,14 +440,19 @@ async function fetchWorkflowExecutions(
     .select({
       exec: executions,
       subaccountName: subaccounts.name,
+      triggeredByUserId: executions.triggeredByUserId,
+      triggeredByUserName: users.firstName,
+      triggeredByUserLastName: users.lastName,
     })
     .from(executions)
     .leftJoin(subaccounts, eq(subaccounts.id, executions.subaccountId))
+    // LEFT JOIN users — deleted user yields null, does NOT drop the row
+    .leftJoin(users, eq(users.id, executions.triggeredByUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(executions.createdAt))
+    .orderBy(desc(executions.createdAt), desc(executions.id))
     .limit(200);
 
-  return rows.map(({ exec, subaccountName }) => ({
+  return rows.map(({ exec, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
     id: exec.id,
     type: 'workflow_execution' as const,
     status: normaliseExecutionStatus(exec.status),
@@ -444,6 +466,18 @@ async function fetchWorkflowExecutions(
     createdAt: (exec.createdAt ?? new Date()).toISOString(),
     updatedAt: (exec.updatedAt ?? exec.createdAt ?? new Date()).toISOString(),
     detailUrl: `/executions/${exec.id}`,
+    // ── Additive fields ────────────────────────────────────────────────────
+    triggeredByUserId: triggeredByUserId ?? null,
+    triggeredByUserName: triggeredByUserName != null
+      ? (triggeredByUserLastName != null
+          ? `${triggeredByUserName} ${triggeredByUserLastName}`
+          : triggeredByUserName)
+      : null,
+    triggerType: (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
+      ? (exec.triggerType as TriggerType)
+      : null,
+    durationMs: exec.durationMs ?? null,
+    runId: exec.id,
   }));
 }
 
@@ -452,30 +486,7 @@ async function fetchWorkflowExecutions(
 // ---------------------------------------------------------------------------
 
 function sortItems(items: ActivityItem[], sort: string): ActivityItem[] {
-  return [...items].sort((a, b) => {
-    switch (sort) {
-      case 'newest':
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      case 'oldest':
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      case 'severity': {
-        const sa = SEVERITY_ORDER[a.severity ?? 'info'] ?? 3;
-        const sb = SEVERITY_ORDER[b.severity ?? 'info'] ?? 3;
-        if (sa !== sb) return sa - sb;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-      case 'attention_first':
-      default: {
-        const oa = STATUS_ORDER[a.status];
-        const ob = STATUS_ORDER[b.status];
-        if (oa !== ob) return oa - ob;
-        const sa = SEVERITY_ORDER[a.severity ?? 'info'] ?? 3;
-        const sb = SEVERITY_ORDER[b.severity ?? 'info'] ?? 3;
-        if (sa !== sb) return sa - sb;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-    }
-  });
+  return sortActivityItems(items, sort);
 }
 
 function filterByStatus(items: ActivityItem[], statuses: string[]): ActivityItem[] {
@@ -507,7 +518,7 @@ export async function listActivityItems(
     reviewItemRows,
     healthFindingRows,
     inboxItemRows,
-    playbookRunRows,
+    workflowRunRows,
     workflowExecRows,
   ] = await Promise.all([
     shouldFetch('agent_run') ? fetchAgentRuns(scope, filters) : [],
@@ -524,7 +535,7 @@ export async function listActivityItems(
     ...reviewItemRows,
     ...healthFindingRows,
     ...inboxItemRows,
-    ...playbookRunRows,
+    ...workflowRunRows,
     ...workflowExecRows,
   ];
 

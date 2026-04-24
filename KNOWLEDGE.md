@@ -611,3 +611,25 @@ const visible = allProposals
 **Detection heuristic.** Grep for `.filter(` predicates that OR a boolean state field (`p.selected`, `p.pinned`, `p.resolved`) with a threshold comparison. For each hit, check whether the downstream render iterates in the filter's order. If yes and there's no sort applied, the list is a candidate for a visibility improvement.
 
 **Applied to:** `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` `AgentChipBlock` — appended `.sort((a, b) => Number(b.selected) - Number(a.selected))` to the `proposals` derivation alongside the round-1 `p.selected ||` filter predicate (PR #185 chatgpt-pr-review round 2 finding 5). Generalises to any chip list, row list, or card list where user-selected items should be surfaced before unselected peers.
+
+### 2026-04-24 Gotcha — ChatGPT reviewers hallucinate "duplicate line" bugs by reading unified diffs as final state (seen 2 times in this review)
+
+**Signature pattern.** ChatGPT (and similar LLM reviewers) cite what looks like two adjacent JSX / code lines in HEAD, both keyed identically, with *slightly different attributes*. When you verify against the actual file, only one line is present — the other is the `-` side of a unified diff for an edit that replaced the first with the second. The reviewer read both sides of a diff hunk as coexisting in the final file.
+
+**Example (PR #187, ChatGPT review rounds 1 and 3 against the SAME file `SignalPanel.tsx`, same branch, within hours):**
+```
+Round 1 claim: "broken <li> — stray <span> duplicated outside structure"
+Round 3 claim: "duplicated <li> opening — className 'flex items-center justify-between text-[13px]' and className 'text-[13px]' both present in HEAD"
+```
+Current file: exactly one `<li>` at one line, with `className="text-[13px]"`. The other className was the pre-edit value; both appear in the PR's cumulative diff as `-` / `+` lines, not both in HEAD.
+
+**Why this matters here and not for a human reviewer.** A human reading `git diff main...HEAD` reads the `-`/`+` markers correctly; an LLM reviewer fed the diff as raw text can miss the markers when the two lines differ by only a few words and the surrounding context repeats the same key (`key={s.slug}`). The failure mode is *visual similarity without syntactic markers*.
+
+**Review-agent response.** When ChatGPT flags "duplicated line" or "two versions coexist" in a file, **always verify directly against HEAD with `Read`** before taking action:
+1. Read the specific lines called out.
+2. Grep for *both* cited strings in the file (if only one is present, the other is a diff artefact).
+3. Include the verbatim file excerpt in the Round block as rejection evidence — reviewers that hallucinate don't back down on hearsay.
+
+**Same-session recurrence.** When the same hallucination pattern surfaces a second time in the same session on the same file, that is signal: the reviewer is anchored on the diff, not HEAD. No further rounds will recover signal from that anchor. Finalise the session rather than opening another round.
+
+**Prior entries on this pattern:** 2026-04-17 Gotcha (rebase with merge conflicts), 2026-04-17 Correction (verify against PR diff perspective), 2026-04-17 Gotcha (GitHub unified diff commonly misread). This is now **4 occurrences across 2 PRs** — it is a structural failure mode of LLM PR review, not a one-off. The right mitigation is in the review-agent contract (always verify with `Read` before acting), not in the codebase.

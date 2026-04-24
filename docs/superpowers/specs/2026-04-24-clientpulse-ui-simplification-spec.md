@@ -85,7 +85,7 @@ The page is mounted at `/` by this spec. The current `/ → /admin/pulse` redire
 
 ### §1.4 Activity feed unifies six types in one table
 
-Two separate tables on the current home dashboard (Recent Activity + implicit run list) are replaced by one `UnifiedActivityFeed` component that covers all six `activityService` types: `agent_run`, `review_item`, `health_finding`, `inbox_item`, `playbook_run`, `workflow_execution`. The actor column distinguishes humans, agents, and system events visually.
+Two separate tables on the current home dashboard (Recent Activity + implicit run list) are replaced by one `UnifiedActivityFeed` component that covers all six `activityService` types: `agent_run`, `review_item`, `health_finding`, `inbox_item`, `workflow_run`, `workflow_execution`. The actor column distinguishes humans, agents, and system events visually. (Note: `workflow_run` was previously `playbook_run`; renamed in Riley Observations W1.)
 
 ### §1.5 Run detail is the existing `AgentRunLivePage`
 
@@ -144,7 +144,7 @@ resolvedUrl: string | null;   // fully qualified SPA path e.g. "/clientpulse/cli
 
 | Token kind | `resolvedUrl` value |
 |---|---|
-| `review:<id>` | `/admin/subaccounts/<subaccountId>/pulse` (when `subaccountId` present) or `null` |
+| `review:<id>` | `/clientpulse/clients/<subaccountId>` (subaccount drilldown, when `subaccountId` present) or `null` — reconciled with §7.1 retirement of `/admin/subaccounts/<id>/pulse` |
 | `task:<id>` | existing task detail path (whatever `TaskCard` currently navigates to) |
 | `run:<id>` | `/runs/<id>/live` |
 | `health:<id>` | `/clientpulse/clients/<subaccountId>` (subaccount drilldown) |
@@ -442,7 +442,7 @@ Without the tiebreaker, rows with identical timestamps appear in non-determinist
 ```typescript
 interface ActivityItem {
   id: string;
-  type: 'agent_run' | 'review_item' | 'health_finding' | 'inbox_item' | 'playbook_run' | 'workflow_execution';
+  type: 'agent_run' | 'review_item' | 'health_finding' | 'inbox_item' | 'workflow_run' | 'workflow_execution';
   status: 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
   subject: string;
   actor: string;
@@ -620,11 +620,13 @@ interface PendingHeroProps {
     rationale: string;          // one-line why
   } | null;
   onApprove: (reviewItemId: string) => Promise<void>;
-  onReject: (reviewItemId: string) => Promise<void>;
+  onReject: (reviewItemId: string, comment: string) => Promise<void>;
 }
 ```
 
 The banner renders only when `pendingIntervention` is non-null; parents pass `null` when no intervention is pending.
+
+**Reject flow — inline comment capture.** The backend intervention-reject endpoint requires a non-empty `comment` (the `COMMENT_REQUIRED` error code). PendingHero owns the comment-capture UI: the Reject button toggles open an inline textarea + Submit rejection button, and only then calls `onReject(reviewItemId, comment)` with the operator-supplied reason. Parents do not surface their own rejection modal for this flow.
 
 **Backend data additions:** `GET /api/clientpulse/drilldown/:subaccountId` (or whichever drilldown endpoint `ClientPulseDrilldownPage` currently consumes) must be extended to return a `pendingIntervention` object with the shape above (or `null`). The endpoint must pull the most recent `review_item` with status `pending` / `edited_pending` scoped to the subaccount. The route + service change is part of the §10 inventory.
 
@@ -843,6 +845,7 @@ Single source of truth for everything the spec mentions but does NOT ship in thi
 - **MRR / revenue-at-risk on the ClientPulse workspace card.** §2.3 drops the "$X MRR at risk" line because `GET /api/clientpulse/health-summary` does not expose a revenue field today. Extending the summary endpoint is a scope expansion not covered by this UI pass. Ship when (a) subaccount revenue is available in canonical data AND (b) an operator explicitly asks for an MRR-at-risk signal on the home screen.
 - **§6.8 Onboarding audit.** `OnboardingWizardPage.tsx` and `OnboardingCelebrationPage.tsx` are AUDIT-ONLY in this spec — no file edits are pre-committed. If the audit finds specific edits to make, promote the files to §10 "To modify" at that time. Otherwise, no changes ship under this spec.
 - **CRM Queries workspace card.** Deferred until `/crm` is a real route with a landing page. Re-open §2.3 to add the card when the route exists.
+- **`?intent` auto-open on non-review destinations.** The `?intent=approve|reject` URL contract (§6.2.1, G16) is shipped only on `ClientPulseDrilldownPage` for `review:<id>` destinations. For `task:<id>` and `failed_run:<id>` destinations, the operator still reaches the target page via the resolvedUrl redirect but the auto-focus / auto-open behaviour is not wired (the `WorkspaceBoardPage` and `AgentRunLivePage` do not read `?intent`). G16's "at most one additional click" requirement holds for `review` today; extending it to `task` and `failed_run` requires per-page focus semantics (which button / field to focus, what the reject-equivalent is for a failed run) that are out of scope for this simplification pass. Ship when a concrete operator flow demands it.
 - **Agents workspace card.** Deferred until `/agents` is a real landing page (it currently redirects to `/`). Re-open §2.3 to add the card when the route exists.
 - **90-day portfolio trend chart.** §3.4 describes an org-level health-band distribution chart below the Latest Report widget. Ship only if an operator explicitly asks "how is my portfolio trending overall?"
 - **Two-column layout on `AgentRunLivePage`.** §5.1 lists this as MAY ship (no gate). Optional polish; not part of this session's baseline deliverable.

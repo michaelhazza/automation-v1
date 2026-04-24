@@ -681,14 +681,14 @@ export default function Layout({ user, children }: LayoutProps) {
                 <span className="flex-1">New Brief</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to={activeClientId ? `/admin/subaccounts/${activeClientId}/pulse` : '/admin/pulse'} icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
+                <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} />
               )}
             </>
           )}
 
           {/* ── Fallback when no client selected */}
           {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/admin/pulse" exact icon={<Icons.inbox />} label="Pulse" />
+            <NavItem to="/" icon={<Icons.inbox />} label="Home" />
           )}
 
           {/* ── Work section */}
@@ -864,7 +864,7 @@ export default function Layout({ user, children }: LayoutProps) {
         <div className="h-[42px] pr-4 pl-6 flex items-center bg-white border-b border-slate-200 shrink-0 text-[13px] gap-1.5">
           <div className="flex-1 flex items-center gap-1.5">
             {breadcrumbs.length === 0
-              ? <span className="text-slate-900 font-semibold">Pulse</span>
+              ? <span className="text-slate-900 font-semibold">Home</span>
               : breadcrumbs.map((crumb, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-slate-300">›</span>}

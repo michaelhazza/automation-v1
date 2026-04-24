@@ -699,3 +699,108 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
 
 - [ ] **[user] Resume response contract as tagged union with UI branching.** `POST /api/system/skill-analyser/jobs/:id/resume` currently returns the job object on success and throws 409 on conflict; the UI shows the extracted error message as a toast. ChatGPT round-1 finding 3 suggested a richer contract: return `{ status: 'resumed' | 'already_running' | 'rejected', job?, reason? }` so the UI can branch per outcome (e.g. "Already running — tailing" vs "Cannot resume — <reason>") instead of relying on error-message extraction. Scope: server route in `server/routes/skillAnalyzerSystem.ts` + `resumeJob` service response type in `server/services/skillAnalyzerService.ts` + mirror type in client `SkillAnalyzerWizard.tsx` / `mergeTypes.ts` + `SkillAnalyzerProcessingStep.tsx` branching + tests. User-facing architectural change — defer to a dedicated PR, not appropriate for the current bug-fix batch. Current behaviour is correct, just less explicit than it could be.
 - [ ] **[user] Extract `SkillAnalyzerProcessingStep` polling lifecycle to a state machine or custom hook.** ChatGPT round-2 finding 4 (reviewer observation, explicitly "do nothing now"): the component is dense — `pollVersion`, `initialJob` vs `currentJob`, `lastProgressAt`, multiple terminal-state guards, stalled-UI threshold, resume button lifecycle, retry/pause/redirect branches. Stability-first shape is correct for the current bug-fix round; a clean extraction (e.g. `useAnalyzerJobLifecycle(jobId, initialJob)` returning a discriminated-union state or an xstate machine) is a meaningful refactor with non-trivial blast radius. Flagged for a future polish / DX pass, not for this PR. Complements the round-1 finding 3 deferral (which also scopes `SkillAnalyzerProcessingStep` branching) — both should likely land together.
+
+## Deferred — Blueprint/template "Browse library" modal integration
+
+**Captured**: 2026-04-24  
+**Branch**: `feat/clientpulse-ui-simplification`
+
+### Task 5.6 — Table column trims + "Browse shared library" demotion
+
+The header-level "Browse Shared Library" buttons have been removed from both pages as part of the ClientPulse UI simplification (Task 5.6):
+- `SubaccountBlueprintsPage.tsx`: removed button from header; empty-state version preserved
+- `SystemOrganisationTemplatesPage.tsx`: removed button from header; empty-state version preserved
+
+Full "Browse library" modal UX integration deferred to a follow-up task:
+- [ ] **SubaccountBlueprintsPage**: merge "Browse Shared Library" into "+ New Template" modal as first step (tabbed choice: "Create from scratch" vs "Browse library")
+- [ ] **SystemOrganisationTemplatesPage**: same pattern — integrate "Browse library" into the import flow
+
+**Why deferred**: Maintains simplification goal (remove header clutter) while preserving discovery (empty-state button remains). Modal integration requires UX/interaction design for the tabbed flow, which is out of scope for the column-trim task.
+
+---
+
+## Deferred from spec-conformance review — clientpulse-ui-simplification (2026-04-24)
+
+**Captured:** 2026-04-24T06:55:22Z
+**Source log:** `tasks/review-logs/spec-conformance-log-clientpulse-ui-simplification-2026-04-24T06-55-22Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-24-clientpulse-ui-simplification-spec.md`
+
+- [x] REQ 42 — `pulseService` `review:<id>` resolves to `/clientpulse/clients/:subaccountId`, not `/admin/subaccounts/:id/pulse` as stated in §2.2 table
+  - Spec section: §2.2 Backend resolution rules table
+  - Gap: spec resolver table still points at `/admin/subaccounts/<subaccountId>/pulse`, which §7.1 retires (now redirects to `/`). Implementation correctly resolves directly to the drilldown. Spec table is internally inconsistent.
+  - Suggested approach: patch §2.2 resolver table row for `review:<id>` to `/clientpulse/clients/<subaccountId>` (matches retirement + tests + §11 deferred note); no code change needed.
+
+- [x] REQ 43 — `PendingHero` `onReject` prop signature includes a `comment` parameter that is not in the spec contract
+  - Spec section: §6.2.1 Component contract
+  - Gap: spec signature is `(reviewItemId: string) => Promise<void>`; implementation is `(reviewItemId: string, comment: string) => Promise<void>`. Backend requires a non-empty comment (`COMMENT_REQUIRED`). The omission in the spec caused a prior `reject(id,'')` bug during build.
+  - Suggested approach: patch §6.2.1 contract to add `comment: string` to the `onReject` signature; no code change needed.
+
+- [x] REQ 44 — `?intent` destination contract is not implemented on the `task` and `failed_run` destination pages (deferred in §11)
+  - Spec section: §2.2 `?intent` destination-page contract + G16 ship gate
+  - Gap: only `ClientPulseDrilldownPage` reads `?intent`. `WorkspaceBoardPage` (`task:`) and `AgentRunLivePage` (`failed_run:`) do not. For those kinds, clicking Approve/Reject on a pending card will navigate without auto-opening an approval UI, violating G16's "at most one additional click" guarantee. §11 Deferred Items does not cover this.
+  - Suggested approach: decide per kind — either (a) add intent detection to both destination pages (architectural change, touches 2 files + potentially their modal/UI state mgmt) OR (b) extend §11 Deferred Items with a named entry for `task` and `failed_run` intent contract. Escalate the choice to the user; pick one direction before PR.
+
+- [x] REQ 45 — Layout.tsx breadcrumb default label reads "Pulse" when breadcrumbs list is empty
+  - Spec section: §7.1 router retirement (implicit — retired surface's label leaked forward)
+  - Gap: `client/src/components/Layout.tsx:867` renders `<span …>Pulse</span>` when `breadcrumbs.length === 0`. With home dashboard now at `/`, the home page shows a stale "Pulse" breadcrumb. Low-urgency UX inconsistency; not spec-enumerated but flows from §7.1 intent.
+  - Suggested approach: change default label to "Home" (or omit the fallback span entirely and only render the breadcrumb bar when breadcrumbs exist). One-line edit.
+
+- [ ] REQ 46 — §7.1 router transition manual QA checks not yet verified
+  - Spec section: §7.1 Router transition guarantees table
+  - Gap: spec requires five runtime checks (static grep ✓; browser back from approval; deep-link redirect; subaccount-scoped redirect; no React error boundary on redirect paths). Only the static grep has been confirmed. The remaining four require a manual browser pass.
+  - Suggested approach: run the four runtime checks in a browser against the build output; record results in `tasks/builds/clientpulse-ui-simplification/progress.md` under a new "G6 manual QA" heading. Does not block PR creation if runtime smoke checks pass, but should complete before merge.
+
+## Deferred from pr-reviewer review — clientpulse-ui-simplification (2026-04-24)
+
+**Captured:** 2026-04-24T07:55:00Z
+**Source log:** `tasks/review-logs/pr-review-log-clientpulse-ui-simplification-2026-04-24T07-55-00Z.md`
+**Branch:** `feat/clientpulse-ui-simplification`
+
+Strong Recommendations and Non-Blocking observations from PR review. Blocking findings (B1-B3) and S1 already addressed in commit `b1b16b72`.
+
+- [ ] S2 — `PULSE_CURSOR_SECRET` fallback warning fires on every `/api/clientpulse/high-risk` request when unset
+  - File: `server/services/clientPulseHighRiskService.ts` lines 162-169
+  - Fix: one-shot process-level warning (module-init check + cached flag) or startup assertion in production
+
+- [ ] S3 — DashboardPage + ClientPulseDashboardPage error states are silent
+  - Files: `client/src/pages/DashboardPage.tsx` lines 34-46; `client/src/pages/ClientPulseDashboardPage.tsx` lines 57-71
+  - Every fetch swallows errors with console.error and returns null; user sees zero-state identical to real empty. Track hasError per source; surface inline retry banner
+
+- [ ] S4 — DashboardPage telemetry fires before navigation, even if user backs out
+  - File: `client/src/pages/DashboardPage.tsx` lines 62-65
+  - Rename events to `pending_card_approve_clicked` / `_reject_clicked` OR move fire site into actual approve/reject success handler
+
+- [ ] S5 — UnifiedActivityFeed receives unused `orgId` prop
+  - File: `client/src/components/UnifiedActivityFeed.tsx` line 229
+  - Remove prop from `UnifiedActivityFeedProps` (line 52) and caller in `DashboardPage.tsx` line 229
+
+- [ ] S6 — No test coverage for idempotent approve/reject backend race path
+  - File: `server/services/reviewService.ts` lines 83-183 / 274-395
+  - Add integration tests for `idempotent_race` branch; spec §6.2.1 GWTs are not exercised
+
+- [ ] S7 — ClientPulseDashboardPage socket merge validation missing
+  - File: `client/src/pages/ClientPulseDashboardPage.tsx` lines 74-79
+  - Validate keys against HealthSummary's known set before merging; only toast when at least one relevant field changed
+
+- [ ] N1 — DashboardPage greeting hour computed once at render (stale past midnight/noon/17:00)
+- [ ] N2 — `formatLastAction` produces "create_task · 0d ago" for today — awkward copy
+- [ ] N3 — NeedsAttentionRow shows `↑0 / 7d` when delta is 0 — noisy
+- [ ] N4 — PendingApprovalCard renders three disabled buttons when `isDisabled` — could split into empty-state variant
+- [ ] N5 — WorkspaceFeatureCard CTA arrow always rendered even for minimal summary
+- [ ] N6 — `resolvePulseDetailUrl.ts` WARN on every call (intentional; noise only if server regresses)
+- [ ] N7 — `clientPulseHighRiskService.getPrioritisedClients` has 6 sequential DB round-trips; could parallelise with Promise.all after subIds known
+- [ ] N8 — `resolvePulseDetailUrl` (client) and `pulseService._resolveUrlForItem` (server) have slightly different prefix shapes (`run` vs `failed_run`, `health` vs `health_finding`) — could share a single constant
+
+## Deferred from chatgpt-pr-review — PR #187 clientpulse-ui-simplification (2026-04-24)
+
+**Captured:** 2026-04-24T13:20:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-clientpulse-ui-simplification-2026-04-24T12-01-27Z.md`
+**PR:** #187 — https://github.com/michaelhazza/automation-v1/pull/187
+**Branch:** `feat/clientpulse-ui-simplification`
+
+Low-severity polish items from Round 1 that are genuine observations but out-of-scope for this PR. Rounds 2 and 3 produced zero additional backlog items (all findings were either validation-only observations confirmed safe, or false positives). Item overlapping PR-review N6 (fallback WARN sampling) not duplicated here.
+
+- [ ] [auto] **usePendingIntervention factory recreated per call** — `client/src/hooks/usePendingIntervention.ts`. Micro-refactor candidate: hoist the action factory or stabilise with `useMemo`. Current behaviour is safe (no referential-stability consequence for consumers — `approve`/`reject` are stable via `useCallback([isPending])` with `optionsRef` capture). No measurable impact; defer until a concrete need surfaces.
+- [ ] [auto] **PendingHero error + conflict messaging can stack** — `client/src/components/clientpulse/drilldown/PendingHero.tsx`. Speculative; no specific scenario or reproduction. Revisit if users report confusing double-banners on simultaneous error + conflict.
+- [ ] [auto] **NeedsAttentionRow fixed-width columns may truncate on small screens** — `client/src/components/clientpulse/NeedsAttentionRow.tsx`. Responsive-design pass — combine with a broader client-screen audit rather than spot-fix.
+- [ ] [auto] **Telemetry is `console.debug` only; no structured sink** — pre-existing architectural gap (PostHog / internal collector integration). Not introduced by this PR. Platform-level decision — pair with the observability-primitive work referenced in PR-review N6 (fallback WARN sampling) so both land together.

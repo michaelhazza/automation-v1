@@ -19,6 +19,7 @@ router.get(
     const summary = await drilldownService.getSummary({
       organisationId: orgId,
       subaccountId: sub.id,
+      subaccountName: sub.name,
     });
     res.json({ subaccount: { id: sub.id, name: sub.name }, ...summary });
   }),
@@ -51,10 +52,16 @@ router.get(
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
     const sub = await resolveSubaccount(req.params.subaccountId, orgId);
     const windowDays = Number.parseInt(String(req.query.windowDays ?? '90'), 10);
+    if (!Number.isFinite(windowDays) || windowDays < 1 || windowDays > 365) {
+      throw Object.assign(
+        new Error('windowDays must be between 1 and 365'),
+        { statusCode: 400, errorCode: 'INVALID_WINDOW_DAYS' },
+      );
+    }
     const transitions = await drilldownService.getBandTransitions({
       organisationId: orgId,
       subaccountId: sub.id,
-      windowDays: Number.isFinite(windowDays) ? windowDays : 90,
+      windowDays,
     });
     res.json({ transitions });
   }),
@@ -70,10 +77,16 @@ router.get(
     if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
     const sub = await resolveSubaccount(req.params.subaccountId, orgId);
     const limit = Number.parseInt(String(req.query.limit ?? '50'), 10);
+    if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
+      throw Object.assign(
+        new Error('limit must be between 1 and 200'),
+        { statusCode: 400, errorCode: 'INVALID_LIMIT' },
+      );
+    }
     const interventions = await drilldownService.getInterventionHistory({
       organisationId: orgId,
       subaccountId: sub.id,
-      limit: Number.isFinite(limit) ? limit : 50,
+      limit,
     });
     res.json({ interventions });
   }),
