@@ -156,8 +156,8 @@ function renderActor(item: ActivityItem): JSX.Element {
     );
   }
 
-  // Case 4: fallback — system / unknown
-  const actorLabel = item.agentName ?? item.actor;
+  // Case 4: fallback — system / unknown (agentName is null here; Case 3 exits earlier)
+  const actorLabel = item.actor;
   return (
     <span className="text-[13px] text-slate-500 italic">
       System · {actorLabel}
@@ -234,6 +234,7 @@ export default function UnifiedActivityFeed({
   // Column visibility is locked after first fetch — never recomputed on pagination
   const [colVis, setColVis] = useState<ColumnVisibility | null>(null);
   const colVisLocked = useRef(false);
+  const telemetryFired = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -256,9 +257,12 @@ export default function UnifiedActivityFeed({
           setColVis(computeColumnVisibility(fetched));
         }
 
-        // Telemetry: activity log viewed
-        const typesPresent = [...new Set(fetched.map((i) => i.type))];
-        trackActivityLogViewed({ rowCount: fetched.length, typesPresent });
+        // Telemetry: activity log viewed — fire once on first successful fetch only
+        if (!telemetryFired.current) {
+          telemetryFired.current = true;
+          const typesPresent = [...new Set(fetched.map((i) => i.type))];
+          trackActivityLogViewed({ rowCount: fetched.length, typesPresent });
+        }
       } catch {
         // §2.6: silent error — render empty state
         if (!cancelled) {
