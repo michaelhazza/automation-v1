@@ -681,14 +681,14 @@ export default function Layout({ user, children }: LayoutProps) {
                 <span className="flex-1">New Brief</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to={activeClientId ? `/admin/subaccounts/${activeClientId}/pulse` : '/admin/pulse'} icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
+                <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} />
               )}
             </>
           )}
 
           {/* ── Fallback when no client selected */}
           {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/admin/pulse" exact icon={<Icons.inbox />} label="Pulse" />
+            <NavItem to="/" icon={<Icons.inbox />} label="Home" />
           )}
 
           {/* ── Work section */}
