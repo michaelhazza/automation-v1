@@ -284,3 +284,43 @@ Reviewer is reading the GitHub PR diff view, which shows the *deleted* state of 
 | R3-6 | technical | accept | Combined with R3-2 JSDoc — explicit removal criteria |
 
 3 technical fixes auto-applied; 1 architectural deferred (no infra yet); 1 already-deferred (rein); 1 documentation merged with R3-2.
+
+---
+
+## Final closeout — APPROVED FOR MERGE
+
+**Status:** Merge-ready
+**Final HEAD:** `bf46addc` (post-`origin/main` merge — 1 conflict in `tasks/todo.md`, additive resolution)
+**PR:** https://github.com/michaelhazza/automation-v1/pull/186
+**Closeout date:** 2026-04-24
+
+### Round-by-round summary
+
+| Round | Findings | Auto-applied (technical) | User-decided | Rejected | Deferred | Verdict |
+|---|---|---|---|---|---|---|
+| Round 1 | 7 | 5 fix | 1 (Option A approved) | 1 | 0 | Approve with minor fixes |
+| Round 2 | 5 | 2 fix | 0 | 2 (factually wrong) | 1 | Approve |
+| Round 3 | 6 | 3 fix | 0 | 0 | 1 architectural + 1 already-deferred (R2-5) | **Approve and merge** |
+| **Total** | **18** | **10 fix** | **1 user-decided** | **3 rejected** | **2 deferred + 1 doc-merged + 1 already-deferred** | — |
+
+### Merge-readiness checklist
+
+- [x] All blocking findings from spec-conformance, pr-reviewer, dual-reviewer, and 3 rounds of ChatGPT review are addressed.
+- [x] All deferred items are captured in `tasks/todo.md` with full trigger conditions (W1-52/53 product call; R2-5 / R3-4 server-side retry guard; R3-1 metrics counter; dual-review iter-2/iter-3 architectural items).
+- [x] 111/111 Riley-relevant tests passing (23 dispatcher + 18 workspace-health + 39 workflow-lib + 31 eventRowPure).
+- [x] Server typecheck: zero new errors (76 pre-existing on main; we net-fixed 2 rename-drift issues).
+- [x] `origin/main` merged into branch; conflicts resolved (1 file: `tasks/todo.md`, additive).
+- [x] Migration files: 0219 / 0220 / 0221 / 0222 paired with `_down/` reversals.
+- [x] KNOWLEDGE.md updated with 3 generalisable patterns (discriminator-trust contract, migration-endgame phasing, stable warn-code namespacing).
+- [x] `tasks/builds/riley-observations/progress.md` closeout doc written.
+- [x] `tasks/current-focus.md` updated to point at PR #186 ready-to-merge state.
+
+### What stays open after merge (tracked in `tasks/todo.md`)
+
+1. Mock 08/09 library posture (W1-52/53) — product/UX call.
+2. Server-side non-idempotent retry guard (R2-5 / R3-4) — design constraint for the future "Retry step" backend endpoint.
+3. Wire fallback warn codes to a counter metric (R3-1) — when client metrics infrastructure lands.
+4. Review-gated `invoke_automation` steps don't dispatch after approval (dual-review iter 2) — pre-existing cross-cutting architectural pattern.
+5. Late-completion invalidation race in tick switch (dual-review iter 3) — pre-existing cross-cutting pattern.
+
+None of these block merge.
