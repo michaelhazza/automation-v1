@@ -164,13 +164,13 @@ export async function invokeAutomationStep(
   const automationEngineId = automation.automationEngineId;
   if (!automationEngineId) {
     const error: AutomationStepError = {
-      code: 'automation_execution_error',
+      code: 'automation_composition_invalid',
       type: 'execution',
       message: `Automation '${step.automationId}' has no engine assigned.`,
       retryable: false,
     };
     createEvent('workflow.step.automation.completed', {
-      ...baseEventPayload, status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
+      ...baseEventPayload, status: 'automation_composition_invalid', retryAttempt: 1, latencyMs: 0, error,
     });
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
@@ -192,13 +192,13 @@ export async function invokeAutomationStep(
 
   if (!engine) {
     const error: AutomationStepError = {
-      code: 'automation_execution_error',
+      code: 'automation_composition_invalid',
       type: 'execution',
       message: `Automation engine for '${step.automationId}' could not be resolved.`,
       retryable: false,
     };
     createEvent('workflow.step.automation.completed', {
-      ...baseEventPayload, status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
+      ...baseEventPayload, status: 'automation_composition_invalid', retryAttempt: 1, latencyMs: 0, error,
     });
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
