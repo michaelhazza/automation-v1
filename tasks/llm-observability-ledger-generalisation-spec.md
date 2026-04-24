@@ -1,9 +1,9 @@
 # LLM Observability & Ledger Generalisation — Implementation Spec
 
 **Date:** 2026-04-20
-**Status:** Draft v1 — pending `spec-reviewer` pass
+**Status:** Shipped 2026-04-24 — P1–P5 delivered. Migrations `0185_llm_requests_generalisation.sql`, `0186_cost_aggregates_source_type_dimension.sql`, `0187_llm_requests_new_status_values.sql`, `0188_llm_requests_archive.sql`, `0189_llm_requests_all_view.sql`, `0190_llm_requests_started_status.sql`, `0191_llm_inflight_history.sql` are on `main`. See §15 for phase mapping. Retained as a reference spec; deferred items in §17 remain deferred by design.
 **Classification:** Significant (new admin UI, schema additions on a financial-audit table, cross-cutting adapter + router changes)
-**Branch:** `bugfixes-april26`
+**Branch:** `bugfixes-april26` (merged)
 **Author:** Main session (Claude Opus 4.7 1M)
 
 ---
