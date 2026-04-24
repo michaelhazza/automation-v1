@@ -19,6 +19,7 @@ router.get(
     const summary = await drilldownService.getSummary({
       organisationId: orgId,
       subaccountId: sub.id,
+      subaccountName: sub.name,
     });
     res.json({ subaccount: { id: sub.id, name: sub.name }, ...summary });
   }),
