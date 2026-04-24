@@ -10,6 +10,7 @@ import {
   validateMergeOutput,
   buildClassifyPromptWithMerge,
   buildClassificationPrompt,
+  rationaleArguesAgainstMerge,
 } from '../skillAnalyzerServicePure.js';
 import type { MergeWarning } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
@@ -485,6 +486,76 @@ test('buildClassificationPrompt (legacy path) also surfaces cross-ref hint', () 
   const candidate = makeCandidate('For downloadable content lead magnets, see Create Lead Magnet.');
   const { userMessage } = buildClassificationPrompt(candidate, SAMPLE_LIBRARY, 'ambiguous');
   assert(/Author-intent signal/i.test(userMessage), 'legacy path should mirror the hint');
+});
+
+// ---------------------------------------------------------------------------
+// v7-B prompt edits — Rule 6a (superset-by-union) + self-contradiction check
+// ---------------------------------------------------------------------------
+
+test('system prompt includes Rule 6a (superset-by-union anti-pattern)', () => {
+  const { system } = buildClassifyPromptWithMerge(
+    makeCandidate('A sample skill description.'),
+    SAMPLE_LIBRARY,
+    'ambiguous',
+  );
+  assert(/superset-by-union/i.test(system), 'Rule 6a missing — should mention superset-by-union');
+  assert(/discriminator enum/i.test(system), 'Rule 6a should warn about discriminator enums');
+});
+
+test('system prompt includes Examples 7 + 8 for Rule 6a', () => {
+  const { system } = buildClassifyPromptWithMerge(
+    makeCandidate('A sample skill description.'),
+    SAMPLE_LIBRARY,
+    'ambiguous',
+  );
+  assert(/Example 7: DISTINCT — superset-by-union anti-pattern/i.test(system), 'Example 7 missing');
+  assert(/Example 8: DISTINCT — superset-by-union with task enum/i.test(system), 'Example 8 missing');
+});
+
+test('rationaleArguesAgainstMerge: catches "neither fully replaces the other"', () => {
+  assert(rationaleArguesAgainstMerge('Both skills overlap. Neither fully replaces the other.'), 'should fire');
+  assert(rationaleArguesAgainstMerge('Neither skill replaces the other.'), 'variant should fire');
+});
+
+test('rationaleArguesAgainstMerge: catches "produce different artifacts" variants', () => {
+  assert(rationaleArguesAgainstMerge('They produce different artifacts.'), 'plain form');
+  assert(rationaleArguesAgainstMerge('They produce different artifact types.'), 'with adjective');
+  assert(rationaleArguesAgainstMerge('Generate distinct outputs.'), 'distinct outputs variant');
+  assert(rationaleArguesAgainstMerge('Returns different deliverables.'), 'returns variant');
+});
+
+test('rationaleArguesAgainstMerge: catches "fundamentally different (artifact|workflow|...)"', () => {
+  assert(rationaleArguesAgainstMerge('They have fundamentally different purposes.'), 'purposes');
+  assert(rationaleArguesAgainstMerge('Fundamentally different artifacts produced.'), 'artifacts');
+  assert(rationaleArguesAgainstMerge('fundamentally different workflows'), 'workflows');
+  assert(rationaleArguesAgainstMerge('completely different artifact types'), 'completely different');
+});
+
+test('rationaleArguesAgainstMerge: catches "differ significantly in scope and artifact type"', () => {
+  // From actual cold-email rationale verbatim.
+  const real = 'They differ significantly in scope and artifact type. The existing skill is a tool.';
+  assert(rationaleArguesAgainstMerge(real), 'real rationale should fire');
+});
+
+test('rationaleArguesAgainstMerge: does NOT fire on benign rationales', () => {
+  assert(!rationaleArguesAgainstMerge('Both skills produce ad copy variants for similar platforms.'), 'similar topic');
+  assert(!rationaleArguesAgainstMerge('The merge combines both into one cleaner output.'), 'merge-positive');
+  assert(!rationaleArguesAgainstMerge('They are different skills serving similar purposes.'), 'different/similar');
+  assert(!rationaleArguesAgainstMerge('Slightly different approaches.'), 'too generic to fire');
+  assert(!rationaleArguesAgainstMerge(null), 'null safe');
+  assert(!rationaleArguesAgainstMerge(''), 'empty safe');
+  assert(!rationaleArguesAgainstMerge(undefined), 'undefined safe');
+});
+
+test('rationaleArguesAgainstMerge: catches the actual v7-A email-sequence rationale', () => {
+  // Pulled verbatim from DB (job_id of the v7-A run).
+  const real = "produces strategy documents and full copy frameworks rather than a parameterized draft for a specific contact. Neither fully replaces the other";
+  assert(rationaleArguesAgainstMerge(real), 'real email-sequence rationale should fire');
+});
+
+test('rationaleArguesAgainstMerge: catches the actual v7-A cold-email rationale', () => {
+  const real = "they differ significantly in scope and artifact type. The existing skill (draft_sequence) is a structured tool";
+  assert(rationaleArguesAgainstMerge(real), 'real cold-email rationale should fire');
 });
 
 // ---------------------------------------------------------------------------

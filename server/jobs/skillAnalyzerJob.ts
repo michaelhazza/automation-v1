@@ -1057,6 +1057,28 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             }
           }
 
+          // v7-B Fix #3a: self-contradiction check. If the LLM's own merge
+          // rationale contains phrases like "neither fully replaces the other"
+          // or "produce different artifacts", the model is arguing against its
+          // own classification. Flip to DISTINCT before persistence so the
+          // reviewer never sees a low-confidence merge with a rationale that
+          // disqualifies it. Runs BEFORE the cross-reference check so the
+          // classifier's most explicit self-contradiction wins; the cross-ref
+          // path picks up cases where the rationale doesn't say it but the
+          // candidate description does.
+          if (
+            (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT') &&
+            skillAnalyzerServicePure.rationaleArguesAgainstMerge(finalResult.reasoning)
+          ) {
+            finalResult = {
+              classification: 'DISTINCT',
+              confidence: Math.max(finalResult.confidence, 0.80),
+              reasoning: `v7-B self-contradiction check: classifier returned ${finalResult.classification} but its own rationale argues against the merge — auto-flipped to DISTINCT. Original reasoning: ${finalResult.reasoning}`,
+              proposedMerge: null,
+            };
+            classifierFallbackApplied = false;
+          }
+
           // v6 Fix 5: post-classifier DISTINCT_FALLBACK. If the LLM returned
           // PARTIAL_OVERLAP but the incoming skill explicitly cross-references
           // the matched library skill as a separate tool ("see X", "for X, use Y"),

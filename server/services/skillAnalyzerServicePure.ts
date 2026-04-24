@@ -134,6 +134,8 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 4. If uncertain between DUPLICATE and IMPROVEMENT, prefer IMPROVEMENT (conservative).
 5. If uncertain between PARTIAL_OVERLAP and DISTINCT, prefer PARTIAL_OVERLAP (conservative).
 6. **Artifact-type divergence overrides vocabulary overlap.** When two skills produce fundamentally different artifact types — a strategy/planning document vs. a generated tool output, an audit/diagnostic report vs. a drafted creative asset, a one-shot analysis vs. an iterative production pipeline, a short structured output vs. a long-form authored document — prefer DISTINCT (or PARTIAL_OVERLAP at most) even when the skills share heavy domain vocabulary. Shared vocabulary like "lead", "ad", "copy", "campaign", "seo", "content", "email" is a routing signal between related skills, not evidence that they should be merged. Two skills that both touch "ad copy" but where one produces 30-character RSA headlines and the other produces a website's full landing-page strategy do NOT belong as one merged tool.
+
+   **6a. Reject the superset-by-union anti-pattern.** If the only way to combine the two skills is to add a discriminator enum to the input schema — a "mode", "task", "type", "action", "phase", or similar field that switches the skill between fundamentally different behaviours (produce vs. plan, implement vs. audit, generate vs. analyze, strategy vs. execution, draft vs. score) — that is evidence of artifact-type divergence, NOT a legitimate superset. Two skills sharing one file behind a mode switch is the worst of both worlds: the file gets twice as large, the agent invoking it has to read mode-dependent instructions to figure out which branch applies, and the two halves cannot evolve independently. When you find yourself reaching for a discriminator enum during the merge, that is a signal to STOP merging and classify DISTINCT instead. The acceptable place for "mode"-style enums is when the modes share core behaviour and only differ in formatting/output detail (e.g. an "output_format: markdown|json" enum); the unacceptable place is when the modes select between separate workflows.
 7. **Author cross-reference is intent.** When the incoming skill's description or instructions explicitly references another named skill — phrases like "see other-skill", "for topic, use other-skill", "other-skill handles topic", "distinct from other-skill" — the author is telling you they intend two skills, not one. Treat this as strong evidence for DISTINCT, even at high similarity. The merged-skill output also fails the author's stated intent.
 
 ## Few-Shot Examples
@@ -173,6 +175,20 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 **Incoming:** "free-tool-strategy — Strategy for designing free interactive tools (calculators, generators, audits) as growth levers. *For downloadable content lead magnets (ebooks, checklists, templates), see lead-magnets.*"
 **Classification:** DISTINCT (the incoming description literally directs the reader to "see lead-magnets" for the existing skill's scope — explicit author intent that these are two skills, not one.)
 **Confidence:** 0.90
+
+### Example 7: DISTINCT — superset-by-union anti-pattern (Rule 6a)
+**Existing:** "create_lead_magnet — Produces downloadable lead-magnet assets (ebooks, checklists, templates) for email capture. Tool returns finished assets ready to ship; required input includes asset_format, audience, and topic."
+**Incoming:** "lead-magnets — Strategic framework for choosing which lead magnet types fit a given audience and funnel stage. Provides decision criteria, gating strategy, and distribution recommendations."
+**Tempting (but wrong) merge:** add a discriminator enum like mode: "strategy" | "produce" | "both" to the merged schema; in "strategy" mode produce the decision framework, in "produce" mode generate the asset, in "both" do both. Reasoning: "they share lead-magnet vocabulary, so they belong as one skill with two modes."
+**Classification:** DISTINCT (the merge above is the textbook superset-by-union anti-pattern — the discriminator enum exists precisely because the two skills produce different artifacts in different workflows. Reaching for a mode enum here is the signal to NOT merge, not the signal to merge cleverly. Keep both as separate skills with cross-references.)
+**Confidence:** 0.88
+
+### Example 8: DISTINCT — superset-by-union with task enum (Rule 6a)
+**Existing:** "schema_markup_audit — Scores a page's existing schema.org JSON-LD markup against best-practice rules. Produces an audit report with severity-ranked findings and a numeric score."
+**Incoming:** "schema-markup — Implementation guide for adding schema.org markup to a page from scratch. Covers common types (Article, Product, FAQ, HowTo, BreadcrumbList) with template snippets and required-property checklists."
+**Tempting (but wrong) merge:** add a discriminator enum like task: "implement" | "audit" | "fix" | "optimize"; switch the skill body based on the value. Reasoning: "schema markup is one domain, so one skill can cover all four operations on it."
+**Classification:** DISTINCT (auditing existing markup vs. implementing new markup are fundamentally different workflows producing fundamentally different artifacts — one returns a report, the other returns code snippets. The shared schema-markup domain is a routing signal between two skills, not a merge justification. The task enum would split the file into four mode-dependent halves the agent has to read selectively.)
+**Confidence:** 0.85
 
 ## Output Format
 
@@ -2281,6 +2297,40 @@ export function buildClassifierFailureOutcome(
   };
 }
 
+/** v7-B Fix #3a — detect when a classifier's own merge rationale argues
+ *  against the merge it returned. The LLM frequently writes phrases like
+ *  "neither fully replaces the other" or "produce different artifacts"
+ *  inside a PARTIAL_OVERLAP / IMPROVEMENT rationale — that's the model
+ *  contradicting its own classification. When this fires the caller flips
+ *  the classification to DISTINCT (with a logged reasoning prefix).
+ *
+ *  Patterns kept conservative to avoid false positives on benign rationales
+ *  that happen to use the words "different" or "replace" in passing. Each
+ *  pattern requires the disqualifying intent (replacement-failure, artifact
+ *  divergence, fundamental-purpose split) to be the rationale's own claim. */
+const RATIONALE_CONTRADICTION_PATTERNS: RegExp[] = [
+  // "neither fully replaces the other", "neither skill replaces the other"
+  /\bneither\s+(fully\s+)?(skill\s+)?replaces?\s+the\s+other\b/i,
+  // "produce different artifacts", "produces different artifact types"
+  /\b(produce|produces|generate|generates|return|returns)\s+(\w+\s+)?(different|distinct)\s+(artifact|output|deliverable)s?\b/i,
+  // "fundamentally different (purposes|artifacts|outputs|workflows|behaviours)"
+  /\bfundamentally\s+different\s+(purpose|artifact|output|workflow|behaviou?r|use\s+case)s?\b/i,
+  // "completely different (purposes|artifacts|outputs)"
+  /\bcompletely\s+different\s+(purpose|artifact|output|workflow|use\s+case)s?\b/i,
+  // "(differ|different) significantly in (scope|artifact|purpose) and"
+  /\bdiffer(s|ed)?\s+significantly\s+in\s+\w+(\s+and\s+\w+)+\b/i,
+];
+
+/** Returns true if the LLM's reasoning text contains language that
+ *  argues against its own merge — a strong signal the classification
+ *  should have been DISTINCT. Used after the classifier returns
+ *  PARTIAL_OVERLAP / IMPROVEMENT to flip clearly-self-contradicting
+ *  rows to DISTINCT before persistence. */
+export function rationaleArguesAgainstMerge(reasoning: string | null | undefined): boolean {
+  if (!reasoning) return false;
+  return RATIONALE_CONTRADICTION_PATTERNS.some(re => re.test(reasoning));
+}
+
 /** Returns true when the candidate description cross-references the library
  *  skill by name or slug in a "see X" / "use X" / "for X" context — a signal
  *  that the incoming skill treats the library skill as a separate, distinct
@@ -3227,6 +3277,7 @@ export const skillAnalyzerServicePure = {
   buildAgentClusterRecommendationPrompt,
   parseAgentClusterRecommendationResponse,
   crossReferencesLibrarySkill,
+  rationaleArguesAgainstMerge,
   classifyDemotedFields,
   parseDemotedFieldStatuses,
   adjustClassifierConfidence,
