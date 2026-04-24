@@ -504,3 +504,89 @@ Inject the warn sink as a parameter (`warn: WarnSink = defaultWarnSink`) so test
 **Detection heuristic.** Grep the codebase for `console.warn(` with a string-literal first argument that contains the words "legacy", "fallback", "deprecated", or "transitional". If the string isn't drawn from a centralised `const` block, the migration's removal-readiness is unmeasurable — which means the migration will never end.
 
 **Applied to:** `client/src/components/agentRunLog/eventRowPure.ts` `FALLBACK_WARN_CODES` constant + `WarnSink` type + injectable default (Riley Wave 1 PR #186 rounds 2 R2-1 and 3 R3-3). Generalises to every observable deprecation — billing-pipeline shims, schema-version branches, retry-policy migrations.
+
+### 2026-04-24 Pattern — Display-threshold filters must preserve state-bearing items
+
+When a UI list is filtered to hide "low-signal" entries (scores below a threshold, recommendations below a confidence bar, results below a relevance cutoff), the filter is correct only if the predicate also preserves any item that carries user-visible state — `selected`, `pinned`, `acknowledged`, `resolved`, `dismissed`. Hiding a state-bearing item below the threshold silently traps the state with no UI affordance to reverse it: the user cannot see the selection, cannot deselect it, and often doesn't know it exists.
+
+**Wrong:**
+```ts
+// Hides low-score proposals — but also hides a below-threshold proposal
+// that was already selected, so the user can't deselect it.
+const proposals = allProposals.filter(
+  (p) => p.isProposedNewAgent || p.score >= DISPLAY_THRESHOLD,
+);
+```
+
+**Right:**
+```ts
+// State-bearing items pass through regardless of score.
+const proposals = allProposals.filter(
+  (p) => p.selected || p.isProposedNewAgent || p.score >= DISPLAY_THRESHOLD,
+);
+```
+
+**Rule:** whenever a filter predicate uses a score/relevance/confidence threshold, ask "does any item in the source list carry user-visible state that survives renders?" If yes, the state predicate must appear in the OR alongside the threshold predicate.
+
+**Detection heuristic.** Grep for `.filter(` predicates that contain `>= `, `>`, `< `, `<=` against a numeric score/confidence field. For each hit, check whether the same list carries a boolean state field (`selected`, `pinned`, `resolved`, `acknowledged`, `expanded`). If yes and the predicate doesn't reference that state field, the filter is a candidate trap.
+
+**Applied to:** `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` `AgentChipBlock` — added `p.selected ||` to the `proposals` filter alongside the existing `AGENT_SCORE_DISPLAY_THRESHOLD` guard (PR #185 chatgpt-pr-review round 1 finding 1). Generalises to any approval / selection / pinning UI where items are hidden below a relevance threshold.
+
+### 2026-04-24 Pattern — Dev-time invariant at module load catches partition/enum drift without runtime cost
+
+When a module exports multiple partition sets that must jointly cover an enum (e.g. `FORMATTING_WARNING_CODES` vs the primary warning tier in a warning classifier, mid-flight vs terminal status subsets in a state machine), the partition and the enum live in separate files and drift apart silently as new enum members land. A new warning code added to `mergeTypes.ts` but not classified into either set falls into the default primary bucket — miscategorised, but with no compile error and no runtime signal.
+
+**Rule:** at module load time, in non-production only, walk the enum and assert every member appears in exactly one partition. Use `console.warn` (not `throw`) so a partition drift doesn't hard-crash production even if it somehow slipped past build — but make the warning loud and specific enough that a developer running the app locally sees it immediately.
+
+```ts
+// At module scope, not inside a component.
+if (process.env.NODE_ENV !== 'production') {
+  for (const [code, tier] of Object.entries(DEFAULT_WARNING_TIER_MAP)) {
+    if (tier === 'informational' && !FORMATTING_WARNING_CODES.has(code as WarnCode)) {
+      console.warn(
+        `[MergeReviewBlock] invariant violation: "${code}" is informational-tier ` +
+        `but not in FORMATTING_WARNING_CODES — update the partition or reclassify the tier.`,
+      );
+    }
+  }
+}
+```
+
+**Why this is the right layer.** Type-level enforcement (union types, `satisfies`) can catch this at compile time but requires every enum consumer to opt into the type discipline, and TypeScript's narrowing doesn't always extend to `Set` membership. A unit test can catch it but only runs in CI — local dev changes that introduce drift won't surface until CI fails. A module-load check splits the difference: zero runtime cost in production, immediate feedback the moment a developer opens a page that imports the module.
+
+**Detection heuristic.** Grep for `const FOO_SET = new Set([...])` or `const FOO_CODES = [...] as const` declarations that define a subset of a broader enum. If the enum lives in a separate file and there's no module-load check that cross-references them, the partition is a candidate for drift.
+
+**Applied to:** `client/src/components/skill-analyzer/MergeReviewBlock.tsx` — added a dev-time loop at module load that warns if any informational-tier `MergeWarningCode` is missing from `FORMATTING_WARNING_CODES` (PR #185 chatgpt-pr-review round 1 finding 6). Generalises to every "enum-subset-as-partition" module: status classifiers, permission tier maps, event priority maps, alert severity partitions.
+
+### 2026-04-24 Gotcha — Stale-job sweep window leaves a recovery-blocked gap for resume
+
+A background sweep that marks ghost/stale jobs as `failed` after a threshold (e.g. 15 min of no heartbeat) interacts with a resume endpoint that checks the local row's status before force-expiring the worker-queue ghost lock. If the resume endpoint's force-expire branch only fires when `status === 'failed'`, there's a window — from the moment the worker dies until the sweep promotes the row — during which the local row is still mid-flight, the pg-boss ghost is still `active`, and the resume endpoint throws 409 "already running." The user sees a dead job that can't be resumed for up to `sweepThresholdMs`.
+
+**Rule:** the resume endpoint's force-expire branch must cover both conditions — (a) the local row is already `failed` (sweep ran), and (b) the local row is still mid-flight but `updated_at` is older than a conservative stale bound (e.g. 2× the sweep threshold). Condition (b) closes the sweep-window gap without racing the sweep: if the sweep hasn't run yet but the row is clearly abandoned by any reasonable heartbeat standard, allow the force-expire. Add a structured log event (`<service>.resume_force_expired_ghost`) so ops can see when the gap-recovery path fires in production.
+
+**Detection heuristic.** For any async job subsystem with (1) a "running/queued → failed" background sweep and (2) a resume endpoint that checks status before recovering from a worker-queue ghost state: read the resume endpoint's status check and ask "what does this do between the moment the worker dies and the moment the sweep promotes?" If the answer is "reject with a 409," there's a gap bug.
+
+**Applied to:** `server/services/skillAnalyzerService.ts:resumeJob` force-expire branch — broadened to also cover mid-flight rows whose `updated_at` is older than 30 min (2× `STALLED_THRESHOLD_MS`), with a `skill_analyzer.resume_force_expired_ghost` log event (PR #185 chatgpt-pr-review round 1 finding 7). Complements the existing 2026-04-24 pg-boss ghost `active` lock gotcha above: that entry documents the ghost lock; this one documents the sweep-window gap in the recovery path.
+
+### 2026-04-24 Pattern — Diff rendering must branch explicitly on empty-string inputs
+
+Text diff libraries (`diffWordsWithSpace`, `diffChars`, etc.) handle empty-string inputs technically correctly but produce output that confuses downstream "did anything change?" checks. For `diffWordsWithSpace("", "foo")` the result is `[{added: "foo"}]` — which is right in principle, but any fallback path that asks "did at least one token survive unchanged?" flips to false and renders a misleading empty-strikethrough block ("nothing removed, nothing unchanged → must be a full replacement from X to Y"). The fallback is designed for genuine full replacements, not for the one-side-empty case.
+
+**Rule:** before delegating to any diff library, branch explicitly on empty inputs. Empty baseline + non-empty value → render as pure addition. Non-empty baseline + empty value → render as pure removal. Both empty → render nothing. Only fall through to the library when both sides have content.
+
+```ts
+function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
+  if (baseline === '' && value === '') return null;
+  if (baseline === '') return <Added>{value}</Added>;
+  if (value === '') return <Removed>{baseline}</Removed>;
+  // Both sides non-empty — library's edge cases are well-behaved here.
+  const parts = diffWordsWithSpace(baseline, value);
+  // ...
+}
+```
+
+**Why the guard is not "just a polish."** The empty-string case is hit routinely — deleting a field, clearing an optional description, a newly-added value that didn't exist before. Every one of those flows through the fallback branch if the guard is missing, and the fallback renders incorrectly (empty strikethrough where pure addition is correct, or vice versa). This isn't a theoretical edge case; it's the normal code path for any add-or-remove field in a merge review UI.
+
+**Detection heuristic.** Grep for `diffWordsWithSpace`, `diffChars`, `diffLines`, or any call to a diff primitive. For each hit, read the surrounding logic and check whether the empty-input cases are handled before the library call. If the code goes straight into `const parts = diff...()` without an empty guard, it's a candidate bug.
+
+**Applied to:** `client/src/components/skill-analyzer/MergeReviewBlock.tsx` `InlineDiff` — added explicit empty-baseline and empty-value branches before the `diffWordsWithSpace` call (PR #185 chatgpt-pr-review round 1 finding 5). Generalises to any merge / review / before-after UI that diffs strings.

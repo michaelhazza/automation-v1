@@ -131,8 +131,13 @@ function AgentChipBlock({
   // Filter out existing-agent proposals below the display threshold — they
   // signal "no match" rather than a real recommendation and add noise.
   // Proposed-new-agent entries always show regardless of score.
+  // Selected proposals ALSO always show regardless of score: once a user
+  // (or auto-selection) has picked an agent it must remain visible so the
+  // user can see the current selection and deselect it if they change their
+  // mind. Hiding a selected-but-low-score proposal silently traps the
+  // selection with no UI to undo it.
   const proposals = allProposals.filter(
-    (p) => p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+    (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
   );
   const hasAnyMeaningfulExistingAgent = allProposals.some(
     (p) => !p.isProposedNewAgent && p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,

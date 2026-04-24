@@ -79,3 +79,44 @@ Findings 2, 4, 5, 6, 7 = technical auto-implement.
 - `npx tsx server/services/__tests__/skillAnalyzerServicePure*.test.ts`: 149/150 pass; 1 pre-existing failure in `remediateTables` verified present on baseline (unrelated to this round).
 - No `lint` script defined in package.json; typecheck + targeted tests cover the changes.
 
+### User decisions (logged after recommendation block)
+
+- **Finding 1 — IMPLEMENT.** User confirmed this is a real correctness bug, not polish: hiding a selected-but-low-score agent proposal silently traps the selection with no UI to undo it. Verified that `addableAgents` (line 143-146) and both empty-state messages (lines 194-204) already use `allProposals`, not the filtered `proposals` — the reviewer's note is correct, no further changes needed on those lines. The fix is scoped to the single filter predicate on line 134-136.
+- **Finding 3 — DEFER.** User confirmed the current 409-throw + error-message-extraction behaviour is functionally correct; the tagged-union contract improvement is polish for a dedicated PR, out of scope for this bug-fix batch. Routed to `tasks/todo.md` under new dated section `## Deferred from chatgpt-pr-review — PR #185 (bugfixes-april26)`.
+
+### Implemented (user-approved user-facing — round 1, final)
+
+- [user/1] `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` — added `p.selected ||` to the `AgentChipBlock` proposals filter. Selected proposals now always render regardless of score, so a user who auto-selected a below-threshold agent (or whose agent fell below the threshold after a score recompute) can still see and deselect it. Added a comment explaining the state-preservation rationale.
+
+```diff
+   const proposals = allProposals.filter(
+-    (p) => p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
++    (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+   );
+```
+
+### Deferred (user-facing defer, routed to tasks/todo.md — round 1, final)
+
+- Finding 3 — written to `tasks/todo.md` under new section `## Deferred from chatgpt-pr-review — PR #185 (bugfixes-april26)` with full scope description (server route + `resumeJob` response type + client `SkillAnalyzerWizard` / `mergeTypes` mirror type + `SkillAnalyzerProcessingStep` branching + tests).
+
+### Verification (post user-approved fix)
+
+- Client `tsc -p client/tsconfig.json --noEmit`: 11 errors → 11 errors (zero net added; same pre-existing errors in `ClarificationInbox.tsx` and `SkillAnalyzerExecuteStep.tsx` unrelated to this change).
+- `npx tsx server/services/__tests__/skillAnalyzerServicePure.test.ts`: 29/29 pass.
+- `npx tsx server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts`: 11/11 pass (agent-ranking is the closest surface to the filter change; tests exercise the proposal ranking that feeds `agentProposals`).
+
+### KNOWLEDGE.md pattern extraction (round 1)
+
+Reviewed KNOWLEDGE.md against the 7 round-1 findings. Four novel reusable patterns captured:
+
+- **Display-threshold filters must preserve state-bearing items** — finding 1. Generalises to any UI that hides low-signal items below a score/confidence/relevance threshold when those items can carry user-visible state (`selected`, `pinned`, `resolved`). No existing entry covered this.
+- **Dev-time invariant at module load catches partition/enum drift** — finding 6. Generalises to any "enum-subset-as-partition" module: status classifiers, permission tiers, event priority maps. No existing entry.
+- **Stale-job sweep window leaves a recovery-blocked gap for resume** — finding 7. Complements the existing 2026-04-24 pg-boss ghost lock entry (line 427) which documents the ghost lock; this new entry documents the sweep-window gap in the recovery path itself. Distinct and reusable.
+- **Diff rendering must branch explicitly on empty-string inputs** — finding 5. Generalises to any merge / review / before-after UI that diffs strings. No existing entry.
+
+Skipped:
+
+- Finding 2 (centralise status enums across files) — the pattern is substantively covered by the existing line 327 engine-drift entry and line 504 stable-codes entry. Appending a narrower entry would duplicate existing guidance.
+- Finding 3 (resume response contract as tagged union) — user-facing product decision, not a reusable engineering pattern.
+- Finding 4 (single `isTerminal` helper) — the pattern is pure DRY against an existing codebase pattern (`shared/runStatus.ts`); no durable lesson to extract.
+
