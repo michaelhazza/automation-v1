@@ -7,7 +7,8 @@
 import { db } from '../db/index.js';
 import { automations } from '../db/schema/automations.js';
 import { automationEngines } from '../db/schema/automationEngines.js';
-import { eq, and, isNull, or } from 'drizzle-orm';
+import { automationConnectionMappings } from '../db/schema/automationConnectionMappings.js';
+import { eq, and, isNull, or, inArray } from 'drizzle-orm';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { logger } from '../lib/logger.js';
 import { createEvent } from '../lib/tracing.js';
@@ -123,9 +124,45 @@ export async function invokeAutomationStep(
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
+  // Required-connection check (§5.8) — only when run is subaccount-scoped
+  if (run.subaccountId) {
+    const requiredKeys = (automation.requiredConnections ?? [])
+      .filter((c) => c.required)
+      .map((c) => c.key);
+
+    if (requiredKeys.length > 0) {
+      const mappings = await db
+        .select({ connectionKey: automationConnectionMappings.connectionKey })
+        .from(automationConnectionMappings)
+        .where(
+          and(
+            eq(automationConnectionMappings.processId, automation.id),
+            eq(automationConnectionMappings.subaccountId, run.subaccountId),
+            inArray(automationConnectionMappings.connectionKey, requiredKeys),
+          ),
+        );
+
+      const foundKeys = new Set(mappings.map((m) => m.connectionKey));
+      const missingKeys = requiredKeys.filter((k) => !foundKeys.has(k));
+
+      if (missingKeys.length > 0) {
+        const error: AutomationStepError = {
+          code: 'automation_missing_connection',
+          type: 'execution',
+          message: `Automation '${step.automationId}' requires connections that are not configured: ${missingKeys.join(', ')}.`,
+          retryable: false,
+        };
+        createEvent('workflow.step.automation.completed', {
+          ...baseEventPayload, status: 'missing_connection', retryAttempt: 1, latencyMs: 0, error,
+        });
+        return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
+      }
+    }
+  }
+
   // Load engine — scoped to automation's org (or system), soft-delete guarded
-  const workflowEngineId = automation.workflowEngineId;
-  if (!workflowEngineId) {
+  const automationEngineId = automation.automationEngineId;
+  if (!automationEngineId) {
     const error: AutomationStepError = {
       code: 'automation_execution_error',
       type: 'execution',
@@ -143,7 +180,7 @@ export async function invokeAutomationStep(
     .from(automationEngines)
     .where(
       and(
-        eq(automationEngines.id, workflowEngineId),
+        eq(automationEngines.id, automationEngineId),
         isNull(automationEngines.deletedAt),
         // Enforce org scope — engine must belong to the automation's org or be system-scoped
         or(
