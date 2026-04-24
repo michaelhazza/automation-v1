@@ -590,3 +590,24 @@ function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
 **Detection heuristic.** Grep for `diffWordsWithSpace`, `diffChars`, `diffLines`, or any call to a diff primitive. For each hit, read the surrounding logic and check whether the empty-input cases are handled before the library call. If the code goes straight into `const parts = diff...()` without an empty guard, it's a candidate bug.
 
 **Applied to:** `client/src/components/skill-analyzer/MergeReviewBlock.tsx` `InlineDiff` — added explicit empty-baseline and empty-value branches before the `diffWordsWithSpace` call (PR #185 chatgpt-pr-review round 1 finding 5). Generalises to any merge / review / before-after UI that diffs strings.
+
+### 2026-04-24 Pattern — State-bearing items should surface first, not just pass the filter
+
+Complement to the round-1 "Display-threshold filters must preserve state-bearing items" entry above. That rule ensures state-bearing items (selected, pinned, acknowledged) don't get silently hidden by a score threshold. This entry covers the visual corollary: once a state-bearing item has passed the filter, it should also render at the top of the list, not buried among unselected peers in the order the filter produced.
+
+**Rule:** for any list that mixes selected + unselected (or pinned + unpinned, resolved + unresolved) items after filtering, sort state-bearing items to the top. Use `Array.prototype.sort` — stable in ES2019+ — so the secondary ordering (score, recency, alphabetic) is preserved within each group.
+
+```ts
+const visible = allProposals
+  .filter((p) => p.selected || p.score >= DISPLAY_THRESHOLD)
+  .sort((a, b) => Number(b.selected) - Number(a.selected));
+// Selected chips render first; unselected preserve their score-ranked order.
+```
+
+**Why it matters.** The round-1 filter fix prevents silent state loss but doesn't solve discoverability: a selected below-threshold item that passes the filter can still render at position 12 of 15 chips, where a user searching for "what did I select?" won't see it without scanning. Sorting lifts it to the front.
+
+**Pairing rule.** Whenever you add a state-predicate to a threshold filter (the round-1 rule), apply this sort rule in the same change. The two rules are complementary: the filter keeps state-bearing items from being hidden; the sort keeps them from being buried.
+
+**Detection heuristic.** Grep for `.filter(` predicates that OR a boolean state field (`p.selected`, `p.pinned`, `p.resolved`) with a threshold comparison. For each hit, check whether the downstream render iterates in the filter's order. If yes and there's no sort applied, the list is a candidate for a visibility improvement.
+
+**Applied to:** `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` `AgentChipBlock` — appended `.sort((a, b) => Number(b.selected) - Number(a.selected))` to the `proposals` derivation alongside the round-1 `p.selected ||` filter predicate (PR #185 chatgpt-pr-review round 2 finding 5). Generalises to any chip list, row list, or card list where user-selected items should be surfaced before unselected peers.

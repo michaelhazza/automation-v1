@@ -136,9 +136,17 @@ function AgentChipBlock({
   // user can see the current selection and deselect it if they change their
   // mind. Hiding a selected-but-low-score proposal silently traps the
   // selection with no UI to undo it.
-  const proposals = allProposals.filter(
-    (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
-  );
+  // Sort selected proposals to the top so the user's current selection is
+  // always the first chip they see — helpful when a block has many below-
+  // threshold proposals that are only visible because they're selected.
+  // Array.prototype.sort is stable in ES2019+, so the relative order of
+  // unselected proposals is preserved from allProposals (which is already
+  // score-ranked upstream).
+  const proposals = allProposals
+    .filter(
+      (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+    )
+    .sort((a, b) => Number(b.selected) - Number(a.selected));
   const hasAnyMeaningfulExistingAgent = allProposals.some(
     (p) => !p.isProposedNewAgent && p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
   );

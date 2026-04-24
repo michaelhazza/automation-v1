@@ -120,3 +120,91 @@ Skipped:
 - Finding 3 (resume response contract as tagged union) — user-facing product decision, not a reusable engineering pattern.
 - Finding 4 (single `isTerminal` helper) — the pattern is pure DRY against an existing codebase pattern (`shared/runStatus.ts`); no durable lesson to extract.
 
+---
+
+## Round 2 — 2026-04-24T13-30-00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: effectively done — merge-ready. Fixes are correct, architectural direction is clean, no hidden regressions in the diff. Only remaining items are optional hardening and one small consistency check.
+
+1. **Resume path vs UI contract (sanity check only)** — deferred tagged union is fine; `resumeJob` now has three outcomes (success / 409 / force-expire ghost→success) and UI behaviour (resumeError string + optimistic reset) is internally consistent. **No action required.**
+2. **Status source-of-truth mirroring (minor risk check)** — server canonical vs client mirror both contain identical strings. Confirmed from diff. Documented as future drift point. **No change needed.**
+3. **Stale sweep + resume interplay (important but already handled)** — 5 min UI stalled, 15 min sweep auto-fail, 30 min resume force-expire — well-designed layered model. Mild edge: UI says "worker may have crashed after 5 min" but resume might still 409 until 30 min (rare). Broadened force-expire mitigates. **Acceptable tradeoff. Not worth changing now.**
+4. **ProcessingStep complexity (non-blocking observation)** — still dense (pollVersion, initialJob vs currentJob, lastProgressAt, multiple guards). Stability-first implementation. Future extraction candidate (state machine or hook). **Do nothing now.**
+5. **One tiny improvement (optional, 2 min change)** — In AgentChipBlock, current fixed filter is `allProposals.filter((p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD)`. Optional: append `.sort((a, b) => Number(b.selected) - Number(a.selected))` so selected always renders first. Not required, but improves UX clarity slightly.
+
+Final verdict: No correctness bugs remain. No architectural blockers. No hidden regressions. Deferred item correctly scoped. Clear to merge. **✅ done.**
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | scope_signal | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|--------------|----------------|----------------|----------|-----------|
+| 1 | Resume path vs UI contract — sanity check, no action | user-facing | standard | reject (no-op — reviewer observation) | reject (no-op — reviewer observation) | low | Reviewer explicitly marked "no action required." Already handled via round-1 deferral of the tagged-union contract (routed to tasks/todo.md). No new work. |
+| 2 | Status source-of-truth mirror — identical strings confirmed, minor future drift risk | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer marked "no change needed." Client mirror is intentional (browser-safe) and already protected at round 1 finding 2 by centralising the server canonical list. Future drift already caught by the module-load invariant pattern introduced in round 1 finding 6 if we apply it to the status enum later; not worth adding speculatively. |
+| 3 | Stale sweep + resume interplay — acceptable tradeoff, already handled | technical | standard | reject (no-op — reviewer observation) | auto (reject) | low | Reviewer marked "not worth changing now." The layered model (5/15/30 min) is deliberate: UI hint at 5 min, sweep auto-fail at 15 min, resume force-expire at 30 min. Tightening the UI copy to match the 30 min force-expire window would mislead more often than it helps. |
+| 4 | ProcessingStep complexity — observation, defer | technical | architectural | defer | defer (escalated — scope_signal architectural) | low | Reviewer marked "do nothing now." Extraction (state machine or hook) is a meaningful refactor with non-trivial blast radius (polling lifecycle, progress tracking, terminal-state guards in multiple places). Escalated per the architectural-scope carveout — surface to user via the deferred backlog rather than auto-apply. |
+| 5 | AgentChipBlock — sort selected proposals first | user-facing | standard | implement | implement | low | Visible reorder (chips move to top when selected). One-line change using stable `Array.prototype.sort` (ES2019+). `p.selected: boolean` → `Number()` coerces to 0/1 — type-safe. No risk. Meaningfully aids discoverability when many below-threshold proposals are visible because they're selected. User said "apply if recommend implement" — implementing. |
+
+### Implemented (user-approved user-facing — round 2, final)
+
+- [user/5] `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` — appended `.sort((a, b) => Number(b.selected) - Number(a.selected))` to the `AgentChipBlock` `proposals` derivation. Selected chips now render at the top of the chip list, improving discoverability when below-threshold proposals are visible because they're selected. Added a block comment explaining stability semantics (`Array.prototype.sort` is stable in ES2019+, so the relative order of unselected proposals is preserved from the score-ranked `allProposals` input).
+
+```diff
+-  const proposals = allProposals.filter(
+-    (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+-  );
++  const proposals = allProposals
++    .filter(
++      (p) => p.selected || p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
++    )
++    .sort((a, b) => Number(b.selected) - Number(a.selected));
+```
+
+### Deferred (routed to tasks/todo.md — round 2)
+
+- Finding 4 — ProcessingStep extraction (state machine or hook). Reviewer observation marked "do nothing now." Appended to existing `## Deferred from chatgpt-pr-review — PR #185 (bugfixes-april26)` section rather than opening a new section — same review, same PR.
+
+### Verification (round 2)
+
+- Client `tsc -p client/tsconfig.json --noEmit`: 11 errors → 11 errors (zero net added; same pre-existing errors in `ClarificationInbox.tsx` and `SkillAnalyzerExecuteStep.tsx` unrelated to this change).
+- No client-side test suite exists for `SkillAnalyzerResultsStep.tsx`. The change is purely presentational (reorder existing array, identical render path). Typecheck clean + no behaviour change in the downstream chip-render loop = green.
+- No `lint` script defined in package.json.
+
+### Top themes (finding_type vocabulary)
+
+- reviewer_observation (findings 1, 2, 3)
+- architecture (finding 4 — escalated defer)
+- other (finding 5 — UX sort-order polish)
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 5 implemented | 2 rejected | 0 deferred
+  - Round 1: findings 2, 4, 5, 6, 7 implemented (5 technical auto-implements)
+  - Round 2: findings 2, 3 rejected (reviewer no-ops on technical observations)
+- User-decided: 2 implemented | 1 rejected | 2 deferred
+  - Round 1: finding 1 implemented (user-facing filter bug fix), finding 3 deferred (user-facing architectural)
+  - Round 2: finding 5 implemented (user-facing UX sort polish), finding 1 rejected (user-facing no-op reviewer observation), finding 4 deferred (technical escalated via architectural scope signal)
+- Index write failures: 0 (clean — finalize pass writes round-1 + round-2 entries)
+- Deferred to tasks/todo.md § Deferred from chatgpt-pr-review — PR #185:
+  - [user] Resume response contract as tagged union with UI branching (round 1 finding 3)
+  - [user] ProcessingStep complexity — extract polling lifecycle to state machine or hook (round 2 finding 4)
+- Architectural items surfaced to user (user decisions):
+  - Round 1 finding 3 — defer (user-approved)
+  - Round 2 finding 4 — defer (escalated for architectural scope; user pre-authorised "defer → tasks/todo.md" via round-2 instructions)
+- KNOWLEDGE.md updated:
+  - Round 1: yes (4 durable patterns — display-threshold filters, module-load invariants, stale-sweep recovery window, diff empty-string branching)
+  - Round 2: no (all round-2 findings were either reviewer no-ops or one-line UX polish — no durable pattern to extract beyond what round 1 already captured)
+- architecture.md updated: no
+- PR: #185 — ready to merge at https://github.com/michaelhazza/michaelhazza/automation-v1/pull/185
+
+### Consistency Warnings
+
+None. All decisions are internally consistent across rounds:
+- Round 2 finding 1 explicitly ratifies the round-1 defer on the resume contract (user-facing / defer both rounds).
+- Round 2 finding 2 is consistent with round-1 finding 2 implementation (centralise server statuses; client mirror accepted as intentional).
+- Round 2 finding 3 is consistent with round-1 finding 7 implementation (broadened force-expire).
+- Round 2 finding 5 builds on round-1 finding 1 (filter change + sort change on the same `proposals` derivation — same surface, same direction).
