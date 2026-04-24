@@ -104,10 +104,10 @@ function DiffView({ result }: { result: AnalysisResult }) {
 }
 
 /** Minimum cosine similarity score to display an existing-agent proposal chip.
- *  Proposals below this threshold are noise — they signal "no match found"
- *  rather than a real recommendation. Proposed-new-agent chips are always shown
- *  regardless of score (their score is hardcoded 1.0). */
-const AGENT_SCORE_DISPLAY_THRESHOLD = 0.30;
+ *  Below this threshold scores are noise — they signal "no match found" rather
+ *  than a useful recommendation. Raised from 0.30 to 0.45 so only genuinely
+ *  informative suggestions are shown (v4 Fix 5). */
+const AGENT_SCORE_DISPLAY_THRESHOLD = 0.45;
 
 /** Agent chip block on a DISTINCT card. Renders one chip per agentProposals
  *  entry — pre-checked when proposal.selected is true, click toggles selection
@@ -199,7 +199,7 @@ function AgentChipBlock({
       )}
       {proposals.length === 0 && allProposals.length > 0 && (
         <p className="text-slate-400 italic mb-2 text-[11px]">
-          No existing agent has meaningful overlap with this skill. Consider assigning to a proposed new agent (if available) or adding one below.
+          No existing agent has strong overlap with this skill. Consider assigning to the proposed Growth Marketing Agent (if available) or creating a new agent.
         </p>
       )}
       <div className="flex flex-wrap gap-1.5 mb-2">

@@ -20,7 +20,10 @@ export type MergeWarningCode =
   | 'WARNINGS_TRUNCATED'
   | 'CLASSIFIER_FALLBACK'
   | 'NAME_MISMATCH'
-  | 'SKILL_GRAPH_COLLISION';
+  | 'SKILL_GRAPH_COLLISION'
+  | 'SOURCE_FORK'
+  | 'NEAR_REPLACEMENT'
+  | 'CONTENT_OVERLAP';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -50,6 +53,9 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   TABLE_ROWS_DROPPED:       'informational',
   OUTPUT_FORMAT_LOST:       'informational',
   WARNINGS_TRUNCATED:       'informational',
+  SOURCE_FORK:              'decision_required',
+  NEAR_REPLACEMENT:         'standard',
+  CONTENT_OVERLAP:          'standard',
 };
 
 export type WarningResolutionKind =
@@ -229,6 +235,9 @@ export function warningLabel(code: MergeWarningCode): string {
     case 'CLASSIFIER_FALLBACK':      return 'Classifier fallback — low confidence';
     case 'NAME_MISMATCH':            return 'Name mismatch';
     case 'SKILL_GRAPH_COLLISION':    return 'Skill graph collision';
+    case 'SOURCE_FORK':              return 'Source fork — overlapping merges';
+    case 'NEAR_REPLACEMENT':         return 'Near-replacement (low source retention)';
+    case 'CONTENT_OVERLAP':          return 'Content overlap with another skill';
   }
 }
 
@@ -247,5 +256,8 @@ export function warningBadgeClass(code: MergeWarningCode): string {
     case 'CLASSIFIER_FALLBACK':      return 'bg-red-100 text-red-800';
     case 'NAME_MISMATCH':            return 'bg-red-100 text-red-800';
     case 'SKILL_GRAPH_COLLISION':    return 'bg-orange-100 text-orange-800';
+    case 'SOURCE_FORK':              return 'bg-orange-100 text-orange-800';
+    case 'NEAR_REPLACEMENT':         return 'bg-amber-100 text-amber-800';
+    case 'CONTENT_OVERLAP':          return 'bg-orange-100 text-orange-800';
   }
 }

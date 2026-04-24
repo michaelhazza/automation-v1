@@ -310,7 +310,10 @@ export type MergeWarningCode =
   // v2 fix-cycle additions
   | 'CLASSIFIER_FALLBACK'
   | 'NAME_MISMATCH'
-  | 'SKILL_GRAPH_COLLISION';
+  | 'SKILL_GRAPH_COLLISION'
+  | 'SOURCE_FORK'
+  | 'NEAR_REPLACEMENT'
+  | 'CONTENT_OVERLAP';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -344,6 +347,9 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   TABLE_ROWS_DROPPED:       'informational',
   OUTPUT_FORMAT_LOST:       'informational',
   WARNINGS_TRUNCATED:       'informational',
+  SOURCE_FORK:              'decision_required',
+  NEAR_REPLACEMENT:         'standard',
+  CONTENT_OVERLAP:          'standard',
 };
 
 /** Severity priority used when sorting warnings before MAX-count truncation.
@@ -456,6 +462,9 @@ const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = 
   TABLE_ROWS_DROPPED:       [],
   OUTPUT_FORMAT_LOST:       [],
   WARNINGS_TRUNCATED:       [],
+  SOURCE_FORK:              ['acknowledge_warning'],
+  NEAR_REPLACEMENT:         ['acknowledge_warning'],
+  CONTENT_OVERLAP:          ['acknowledge_warning'],
 };
 
 /** Parse demoted field list out of a REQUIRED_FIELD_DEMOTED warning's detail.
@@ -1182,18 +1191,92 @@ function firstColumnKey(rowLine: string): string {
 /** Whether a row already carries a [SOURCE: ...] marker (skip to prevent
  *  recursive inflation on retries). */
 function hasSourceMarker(rowLine: string): boolean {
-  return /\[SOURCE:\s*(library|incoming)\]/i.test(rowLine);
+  return /\[SOURCE:\s*(library|incoming)/i.test(rowLine);
 }
 
-/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row. */
-function withSourceMarker(rowLine: string, source: 'library' | 'incoming'): string {
+/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row.
+ *  When `sourceKey` is provided (heading-qualified headerKey of the source
+ *  table), it is embedded in the annotation so decontaminateSectionRows can
+ *  detect cross-section row pollution. */
+function withSourceMarker(
+  rowLine: string,
+  source: 'library' | 'incoming',
+  sourceKey?: string,
+): string {
   const trimmed = rowLine.trimEnd();
   if (hasSourceMarker(trimmed)) return trimmed;
-  // Find position before the trailing pipe (if any) to inject marker cleanly.
+  const marker = sourceKey
+    ? `[SOURCE: ${source} "${sourceKey}"]`
+    : `[SOURCE: ${source}]`;
   if (trimmed.endsWith('|')) {
-    return trimmed.slice(0, -1).trimEnd() + ` [SOURCE: ${source}] |`;
+    return trimmed.slice(0, -1).trimEnd() + ` ${marker} |`;
   }
-  return `${trimmed} [SOURCE: ${source}]`;
+  return `${trimmed} ${marker}`;
+}
+
+// ---------------------------------------------------------------------------
+// Post-remediation cleanup — decontamination + annotation strip
+// ---------------------------------------------------------------------------
+
+/** Remove table rows that were appended by remediateTables into the wrong
+ *  section. Detects misplacement by comparing the source section key
+ *  embedded in the annotation against the current section context.
+ *
+ *  Only rows with an extended annotation `[SOURCE: ... "key"]` are examined;
+ *  legacy bare `[SOURCE: library]` rows are left for stripSourceAnnotations.
+ *
+ *  Domain-agnostic: comparison is pure string match on heading keys; no
+ *  hardcoded platform names.
+ *
+ *  Idempotent: running twice on the same text produces the same result. */
+export function decontaminateSectionRows(instructions: string): string {
+  const lines = instructions.split('\n');
+  let contextKey = '';
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Update current section heading whenever we see a heading-level line.
+    // We DON'T require !inTable here because headings inside remediateTables
+    // output can follow a table with no blank line separator.
+    if (/^#{1,4}\s+/.test(trimmed)) {
+      contextKey = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
+
+    if (trimmed.startsWith('|')) {
+      // Check for extended SOURCE annotation with an embedded section key.
+      const match = trimmed.match(/\[SOURCE:\s*(?:library|incoming)\s+"([^"]+)"\]/i);
+      if (match) {
+        const sourceKey = match[1];
+        // Source key format: "<heading>><columns>" — extract heading part.
+        const sourceHeading = sourceKey.includes('>') ? sourceKey.split('>')[0] : sourceKey;
+        // If source heading differs from current section heading, this row
+        // was appended into the wrong section — discard it.
+        if (contextKey && sourceHeading && sourceHeading !== contextKey) {
+          continue;
+        }
+      }
+    }
+
+    result.push(line);
+  }
+  return result.join('\n');
+}
+
+/** Strip all [SOURCE: library] / [SOURCE: incoming] annotations from table
+ *  rows. These are internal merge-process artifacts and must not appear in
+ *  the user-facing merged output.
+ *
+ *  Removes both the legacy bare form and the extended keyed form:
+ *    [SOURCE: library]
+ *    [SOURCE: incoming "meta ads>element|limit|notes"]
+ *
+ *  Idempotent. */
+export function stripSourceAnnotations(instructions: string): string {
+  return instructions.replace(
+    /\s*\[SOURCE:\s*(?:library|incoming)(?:\s+"[^"]*")?\]/gi,
+    '',
+  );
 }
 
 export interface RemediateTablesInput {
@@ -1267,7 +1350,7 @@ export function remediateTables(input: RemediateTablesInput): RemediateTablesOut
     // Collect candidate rows to append, skipping those whose first-column
     // key is already present (or conflicts across sources).
     const seenSourceKey = new Map<string, 'library' | 'incoming'>();
-    const toAppend: Array<{ row: string; source: 'library' | 'incoming' }> = [];
+    const toAppend: Array<{ row: string; source: 'library' | 'incoming'; sourceTableKey: string }> = [];
     for (const { source, table } of sources) {
       for (const row of table.rows) {
         if (hasSourceMarker(row)) continue;
@@ -1281,14 +1364,19 @@ export function remediateTables(input: RemediateTablesInput): RemediateTablesOut
           continue;
         }
         seenSourceKey.set(key, source);
-        toAppend.push({ row, source });
+        // Include source table's headerKey so decontaminateSectionRows can
+        // detect rows appended into the wrong section.
+        toAppend.push({ row, source, sourceTableKey: table.headerKey });
       }
     }
 
     if (toAppend.length === 0) continue;
 
-    // Append the new rows to the merged table in-place.
-    const markedRows = toAppend.map(({ row, source }) => withSourceMarker(row, source));
+    // Append the new rows with extended SOURCE annotations that encode the
+    // source table's heading context for downstream decontamination.
+    const markedRows = toAppend.map(({ row, source, sourceTableKey }) =>
+      withSourceMarker(row, source, sourceTableKey),
+    );
     // Splice after the last merged-table row (mergedTable.endLineIndex).
     lines.splice(mergedTable.endLineIndex, 0, ...markedRows);
     autoRecovered += markedRows.length;
@@ -1629,6 +1717,25 @@ export function validateMergeOutput(
     });
   }
 
+  // --- Fix 4 (v4): NEAR_REPLACEMENT — merged retains < 25% of source structure ---
+  const retentionScore = computeSourceRetention(base, merged, sourceLookup, mergedByHeader);
+  if (retentionScore < 0.25) {
+    const defRet = computeDefinitionRetention(base, merged);
+    const tblRet = computeTableRetention(sourceLookup, mergedByHeader);
+    const instrRet = wordOverlapRatio(base.instructions, merged.instructions);
+    warnings.push({
+      code: 'NEAR_REPLACEMENT',
+      severity: 'warning',
+      message: `This merge retains only ~${Math.round(retentionScore * 100)}% of the library skill's structure. Consider treating as a new skill rather than a merge.`,
+      detail: JSON.stringify({
+        retentionScore: Math.round(retentionScore * 100),
+        definitionRetentionPct: Math.round(defRet * 100),
+        tableRetentionPct: Math.round(tblRet * 100),
+        instructionRetentionPct: Math.round(instrRet * 100),
+      }),
+    });
+  }
+
   // Safety cap: prevent unbounded warning list from malformed input.
   // Sort by severity + tier priority so critical codes survive truncation,
   // then cap.
@@ -1842,7 +1949,8 @@ function mergeInstructionsRuleBased(
     const mergedBlock = extractInvocationBlock(result);
     const isAtTop = mergedBlock !== null && result.trimStart().startsWith(mergedBlock.trimStart());
     if (!isAtTop) {
-      result = `${secondaryInvocation.trimEnd()}\n\n${result.trimStart()}`;
+      const separator = startsWithPersonaOpener(result) ? '\n\n---\n\n' : '\n\n';
+      result = `${secondaryInvocation.trimEnd()}${separator}${result.trimStart()}`;
     }
   }
 
@@ -2305,6 +2413,251 @@ export function parseAgentClusterRecommendationResponse(response: string): Agent
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fix 4 helpers — source retention scoring (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Word-overlap ratio: what fraction of the source's significant words
+ *  (length > 3) appear somewhere in the merged text. */
+export function wordOverlapRatio(source: string | null, merged: string | null): number {
+  if (!source || !merged) return source ? 0 : 1;
+  const sourceWords = new Set(
+    source.toLowerCase().split(/\s+/).filter(w => w.length > 3),
+  );
+  if (sourceWords.size === 0) return 1;
+  const mergedLower = merged.toLowerCase();
+  let matches = 0;
+  for (const word of sourceWords) {
+    if (mergedLower.includes(word)) matches++;
+  }
+  return matches / sourceWords.size;
+}
+
+function computeDefinitionRetention(
+  base: { definition: object | null },
+  merged: ProposedMerge,
+): number {
+  const baseReq = ((base.definition as Record<string, unknown> | null)?.input_schema as Record<string, unknown> | undefined)?.required;
+  const mergedReq = ((merged.definition as Record<string, unknown> | null)?.input_schema as Record<string, unknown> | undefined)?.required;
+  const baseArr = Array.isArray(baseReq) ? (baseReq as string[]) : [];
+  const mergedArr = Array.isArray(mergedReq) ? (mergedReq as string[]) : [];
+  if (baseArr.length === 0) return 1;
+  return baseArr.filter(f => mergedArr.includes(f)).length / baseArr.length;
+}
+
+function computeTableRetention(
+  sourceLookup: Map<string, number>,
+  mergedByHeader: Map<string, number>,
+): number {
+  if (sourceLookup.size === 0) return 1;
+  let total = 0;
+  for (const [header, sourceRows] of sourceLookup) {
+    const mergedRows = mergedByHeader.get(header) ?? 0;
+    total += sourceRows > 0 ? Math.min(1, mergedRows / sourceRows) : 1;
+  }
+  return total / sourceLookup.size;
+}
+
+function computeSourceRetention(
+  base: { definition: object | null; instructions: string | null },
+  merged: ProposedMerge,
+  sourceLookup: Map<string, number>,
+  mergedByHeader: Map<string, number>,
+): number {
+  const defRet   = computeDefinitionRetention(base, merged);
+  const tblRet   = computeTableRetention(sourceLookup, mergedByHeader);
+  const instrRet = wordOverlapRatio(base.instructions, merged.instructions);
+  return defRet * 0.3 + tblRet * 0.3 + instrRet * 0.4;
+}
+
+// ---------------------------------------------------------------------------
+// Fix 2 — table drop recovery appendix (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** When TABLE_ROWS_DROPPED warnings fire for tables with < 50% rows retained,
+ *  append the original source table as a clearly-labelled reference appendix
+ *  at the end of the merged instructions (before any Related Skills section).
+ *
+ *  Domain-agnostic. Only tables with headerKey present in sourceTables and
+ *  with mergedRows < sourceRows * 0.5 are recovered. Idempotent: tables
+ *  already in the appendix (heading contains "Reference:") are skipped. */
+export function recoverDroppedTableRows(
+  mergedInstructions: string,
+  baseInstructions: string | null,
+  nonBaseInstructions: string | null,
+): string {
+  const baseTables   = extractTablesWithRows(baseInstructions);
+  const nonBaseTables = extractTablesWithRows(nonBaseInstructions);
+  const mergedTables = extractTablesWithRows(mergedInstructions);
+
+  const mergedByHeader = new Map(mergedTables.map(t => [t.headerKey, t.rows.length]));
+
+  // Collect the best source table per header (most rows wins).
+  const sourceBest = new Map<string, ExtractedTableRows>();
+  for (const t of [...baseTables, ...nonBaseTables]) {
+    const existing = sourceBest.get(t.headerKey);
+    if (!existing || t.rows.length > existing.rows.length) {
+      sourceBest.set(t.headerKey, t);
+    }
+  }
+
+  const appendixBlocks: string[] = [];
+  for (const [headerKey, sourceTable] of sourceBest) {
+    const mergedRows = mergedByHeader.get(headerKey) ?? 0;
+    const sourceRows = sourceTable.rows.length;
+    if (sourceRows === 0 || mergedRows >= sourceRows * 0.5) continue;
+    // Skip tables whose heading already says "Reference:" to prevent recursion.
+    if (/reference:/i.test(headerKey)) continue;
+
+    const headingPart = headerKey.includes('>')
+      ? headerKey.split('>')[0].replace(/\b\w/g, c => c.toUpperCase())
+      : headerKey.replace(/\b\w/g, c => c.toUpperCase());
+    const block = [
+      `### Reference: ${headingPart} (preserved from source — ${sourceRows} rows)`,
+      sourceTable.headerLine,
+      sourceTable.separatorLine,
+      // Strip any [SOURCE: ...] annotations from original rows.
+      ...sourceTable.rows.map(r => stripSourceAnnotations(r)),
+    ].join('\n');
+    appendixBlocks.push(block);
+  }
+
+  if (appendixBlocks.length === 0) return mergedInstructions;
+
+  // Insert before "## Related Skills" if present, otherwise append.
+  const relatedIdx = mergedInstructions.search(/^##\s+related\s+skills\b/im);
+  const appendix = '\n\n' + appendixBlocks.join('\n\n');
+  if (relatedIdx !== -1) {
+    return mergedInstructions.slice(0, relatedIdx).trimEnd() + appendix + '\n\n' + mergedInstructions.slice(relatedIdx);
+  }
+  return mergedInstructions.trimEnd() + appendix + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Fix 6 — persona opener detection (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Pattern for persona opener lines ("You are an expert…", "Your goal is…").
+ *  Distinct from invocation triggers so the merger can order them correctly. */
+const PERSONA_OPENER_RE =
+  /^\s*(You\s+are\s+(an?\s+)?|Your\s+goal\s+is\s+(to\s+)?|You\s+speciali[sz]e\s+in\b|Act\s+as\s+(an?\s+)?)/i;
+
+/** Returns true if the text opens with a persona statement rather than an
+ *  invocation trigger. */
+export function startsWithPersonaOpener(text: string | null): boolean {
+  if (!text) return false;
+  return PERSONA_OPENER_RE.test(text.trimStart());
+}
+
+// ---------------------------------------------------------------------------
+// Fix 7 — output format block recovery (v4 brief)
+// ---------------------------------------------------------------------------
+
+const OUTPUT_FORMAT_SECTION_RE =
+  /^#{1,4}\s+(output\s+format|response\s+format|output\s+template|format)\b/im;
+
+/** Extract the output format section from instructions, including everything
+ *  from the section heading to the next same-or-higher level heading. */
+export function extractOutputFormatSection(text: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(OUTPUT_FORMAT_SECTION_RE);
+  if (!match || match.index === undefined) return null;
+  const start = match.index;
+  // Find the end: next heading at the same or higher level.
+  const headingLevel = match[0].match(/^#+/)![0].length;
+  const afterHeading = text.slice(start + match[0].length);
+  const nextHeadingRe = new RegExp(`^#{1,${headingLevel}}\\s+`, 'm');
+  const nextMatch = afterHeading.match(nextHeadingRe);
+  const end = nextMatch?.index !== undefined
+    ? start + match[0].length + nextMatch.index
+    : text.length;
+  return text.slice(start, end).trim();
+}
+
+/** When the merged output lacks an output format block but a source has one,
+ *  append the source's format section at the end (before Related Skills). */
+export function recoverOutputFormat(
+  mergedInstructions: string,
+  baseInstructions: string | null,
+  nonBaseInstructions: string | null,
+): string {
+  if (hasOutputFormatBlock(mergedInstructions)) return mergedInstructions;
+  const sourceBlock =
+    extractOutputFormatSection(baseInstructions) ??
+    extractOutputFormatSection(nonBaseInstructions);
+  if (!sourceBlock) return mergedInstructions;
+
+  const preserved =
+    '### Output Format (preserved from source)\n\n' + sourceBlock.replace(/^#{1,4}\s+[^\n]+\n+/, '');
+
+  const relatedIdx = mergedInstructions.search(/^##\s+related\s+skills\b/im);
+  if (relatedIdx !== -1) {
+    return mergedInstructions.slice(0, relatedIdx).trimEnd() + '\n\n' + preserved + '\n\n' + mergedInstructions.slice(relatedIdx);
+  }
+  return mergedInstructions.trimEnd() + '\n\n' + preserved + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Fix 8 — content overlap detection across in-batch merges (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Extract H3+ section headings and their content from instructions. */
+function extractH3Sections(text: string | null): Array<{ heading: string; body: string }> {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const sections: Array<{ heading: string; body: string }> = [];
+  let current: { heading: string; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    const h = line.match(/^#{3,}\s+(.+?)\s*$/);
+    if (h) {
+      if (current) sections.push({ heading: current.heading, body: current.lines.join('\n').trim() });
+      current = { heading: h[1].toLowerCase().trim(), lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) sections.push({ heading: current.heading, body: current.lines.join('\n').trim() });
+  return sections;
+}
+
+export interface ContentOverlapResult {
+  candidateSlugA: string;
+  candidateSlugB: string;
+  overlappingHeading: string;
+  similarityPct: number;
+}
+
+/** Detect when two in-batch merged skills share an H3+ section heading with
+ *  similar content (> `threshold` word-overlap ratio). Returns findings for
+ *  all pairs above the threshold. */
+export function detectContentOverlap(
+  skills: ReadonlyArray<{ slug: string; instructions: string | null }>,
+  threshold = 0.70,
+): ContentOverlapResult[] {
+  const results: ContentOverlapResult[] = [];
+  for (let i = 0; i < skills.length; i++) {
+    const sectionsA = extractH3Sections(skills[i].instructions);
+    for (let j = i + 1; j < skills.length; j++) {
+      const sectionsB = extractH3Sections(skills[j].instructions);
+      for (const sa of sectionsA) {
+        const sb = sectionsB.find(s => s.heading === sa.heading);
+        if (!sb || !sa.body || !sb.body) continue;
+        const ratio = wordOverlapRatio(sa.body, sb.body);
+        if (ratio >= threshold) {
+          results.push({
+            candidateSlugA: skills[i].slug,
+            candidateSlugB: skills[j].slug,
+            overlappingHeading: sa.heading,
+            similarityPct: Math.round(ratio * 100),
+          });
+        }
+      }
+    }
+  }
+  return results;
 }
 
 export const skillAnalyzerServicePure = {

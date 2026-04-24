@@ -50,6 +50,12 @@ import {
   buildRuleBasedMerge,
   buildClassifierFailureOutcome,
   remediateTables,
+  decontaminateSectionRows,
+  stripSourceAnnotations,
+  recoverDroppedTableRows,
+  recoverOutputFormat,
+  startsWithPersonaOpener,
+  detectContentOverlap,
   detectSkillGraphCollision,
   type LibrarySkillSummary,
   type MergeWarning,
@@ -1081,6 +1087,19 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   skippedDueToKeyConflict: remediated.skippedDueToKeyConflict,
                 });
               }
+              // Always strip [SOURCE: ...] annotations regardless of whether
+              // rows were recovered — they are internal merge artifacts that
+              // must never appear in the user-facing stored merge.
+              // decontaminateSectionRows first removes rows appended into the
+              // wrong section (cross-section table pollution); stripSourceAnnotations
+              // then removes all remaining annotation markers.
+              if (storedMerge!.instructions) {
+                const decontaminated = decontaminateSectionRows(storedMerge!.instructions);
+                const stripped = stripSourceAnnotations(decontaminated);
+                if (stripped !== storedMerge!.instructions) {
+                  storedMerge = { ...storedMerge!, instructions: stripped };
+                }
+              }
             }
 
             // Issue A remediation: if either source had an invocation block but
@@ -1093,9 +1112,15 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               const isAtTop = mergedBlock !== null
                 && storedMerge!.instructions.trimStart().startsWith(mergedBlock.trimStart());
               if (!isAtTop) {
+                // Fix 6 (v4): if the merged output opens with a persona statement
+                // ("You are an expert…"), insert `---` separator so the invocation
+                // trigger and the persona are visually distinct.
+                const separator = startsWithPersonaOpener(storedMerge!.instructions)
+                  ? '\n\n---\n\n'
+                  : '\n\n';
                 storedMerge = {
                   ...storedMerge!,
-                  instructions: `${sourceInvocation.trimEnd()}\n\n${storedMerge!.instructions.trimStart()}`,
+                  instructions: `${sourceInvocation.trimEnd()}${separator}${storedMerge!.instructions.trimStart()}`,
                 };
                 logger.info('skill_analyzer_invocation_block_prepended', {
                   candidateSlug: candidate.slug,
@@ -1115,6 +1140,42 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               validationThresholds,
               candidate.name,
             );
+
+            // Fix 2 (v4): append source tables as reference appendix when
+            // tables were dropped (merged rows < 50% of source rows).
+            if (storedMerge!.instructions) {
+              const recovered = recoverDroppedTableRows(
+                storedMerge!.instructions,
+                baseSkill.instructions,
+                nonBaseSkill.instructions,
+              );
+              if (recovered !== storedMerge!.instructions) {
+                storedMerge = { ...storedMerge!, instructions: recovered };
+                logger.info('skill_analyzer_table_drop_recovery', { candidateSlug: candidate.slug });
+              }
+            }
+
+            // Fix 7 (v4): recover output format block when OUTPUT_FORMAT_LOST fires.
+            if (
+              storedMerge!.instructions &&
+              mergeWarnings.some(w => w.code === 'OUTPUT_FORMAT_LOST')
+            ) {
+              const recovered = recoverOutputFormat(
+                storedMerge!.instructions,
+                baseSkill.instructions,
+                nonBaseSkill.instructions,
+              );
+              if (recovered !== storedMerge!.instructions) {
+                storedMerge = { ...storedMerge!, instructions: recovered };
+                // Update warning text to indicate recovery happened.
+                mergeWarnings = mergeWarnings.map(w =>
+                  w.code === 'OUTPUT_FORMAT_LOST'
+                    ? { ...w, message: 'Output format block was missing in merge. Recovered and appended as reference section.' }
+                    : w,
+                );
+                logger.info('skill_analyzer_output_format_recovered', { candidateSlug: candidate.slug });
+              }
+            }
 
             // Prepend CLASSIFIER_FALLBACK when the rule-based path ran, so
             // the UI banner + approval gate both activate.
@@ -1309,6 +1370,74 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
       if (batchWarningsBySlug.size > 0) {
         await appendBatchCollisionWarnings(jobId, batchWarningsBySlug);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 5c: Source fork detection (v4 Fix 3) + content overlap (v4 Fix 8)
+  // -------------------------------------------------------------------------
+  {
+    // Fix 3: group PARTIAL_OVERLAP / IMPROVEMENT candidates by matched library
+    // skill ID — multiple candidates mapping to the same library skill produce
+    // overlapping merged tools with no disambiguation.
+    const byLibraryId = new Map<string, typeof classifiedResults>();
+    for (const r of classifiedResults) {
+      if (!r.libraryId) continue;
+      if (r.classification !== 'PARTIAL_OVERLAP' && r.classification !== 'IMPROVEMENT') continue;
+      const group = byLibraryId.get(r.libraryId) ?? [];
+      group.push(r);
+      byLibraryId.set(r.libraryId, group);
+    }
+    const forkWarningsBySlug = new Map<string, MergeWarning[]>();
+    for (const group of byLibraryId.values()) {
+      if (group.length < 2) continue;
+      const names = group.map(r => r.candidate.name);
+      for (const r of group) {
+        const others = names.filter(n => n !== r.candidate.name);
+        forkWarningsBySlug.set(r.candidate.slug, [{
+          code: 'SOURCE_FORK',
+          severity: 'warning',
+          message: `Source fork detected: this skill and ${others.length} other(s) (${others.join(', ')}) all merged from the same library skill. Approving multiple forks creates overlapping tools.`,
+          detail: JSON.stringify({ librarySkillId: r.libraryId, forkCandidates: names }),
+        }]);
+      }
+    }
+    if (forkWarningsBySlug.size > 0) {
+      await appendBatchCollisionWarnings(jobId, forkWarningsBySlug);
+      logger.info('skill_analyzer_source_forks_detected', {
+        jobId, forkCount: forkWarningsBySlug.size,
+      });
+    }
+
+    // Fix 8: content overlap — flag pairs of in-batch merges that share H3+
+    // section headings with > 70% content similarity.
+    const mergesForOverlap = classifiedResults
+      .filter(r => r.proposedMerge && (r.classification === 'PARTIAL_OVERLAP' || r.classification === 'IMPROVEMENT'))
+      .map(r => ({
+        slug: r.candidate.slug,
+        instructions: (r.proposedMerge as ProposedMerge | null)?.instructions ?? null,
+      }));
+
+    if (mergesForOverlap.length >= 2) {
+      const overlaps = detectContentOverlap(mergesForOverlap);
+      if (overlaps.length > 0) {
+        const overlapWarningsBySlug = new Map<string, MergeWarning[]>();
+        for (const o of overlaps) {
+          const msg = `Content overlap with "${o.candidateSlugB}": section "${o.overlappingHeading}" is ~${o.similarityPct}% similar. Ensure each skill has a distinct scope.`;
+          const existing = overlapWarningsBySlug.get(o.candidateSlugA) ?? [];
+          existing.push({ code: 'CONTENT_OVERLAP', severity: 'warning', message: msg, detail: JSON.stringify(o) });
+          overlapWarningsBySlug.set(o.candidateSlugA, existing);
+
+          const msgB = `Content overlap with "${o.candidateSlugA}": section "${o.overlappingHeading}" is ~${o.similarityPct}% similar.`;
+          const existingB = overlapWarningsBySlug.get(o.candidateSlugB) ?? [];
+          existingB.push({ code: 'CONTENT_OVERLAP', severity: 'warning', message: msgB, detail: JSON.stringify(o) });
+          overlapWarningsBySlug.set(o.candidateSlugB, existingB);
+        }
+        await appendBatchCollisionWarnings(jobId, overlapWarningsBySlug);
+        logger.info('skill_analyzer_content_overlaps_detected', {
+          jobId, overlapCount: overlaps.length,
+        });
       }
     }
   }
