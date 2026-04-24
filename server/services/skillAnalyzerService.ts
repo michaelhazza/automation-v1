@@ -2361,8 +2361,38 @@ export async function retryClassification(
     isSystem: true,
   };
 
-  const { result: classification, classificationFailed, classificationFailureReason } =
+  const { result: classificationRaw, classificationFailed, classificationFailureReason } =
     await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId, organisationId);
+
+  // v6 Fix 5 (mirror): post-classifier DISTINCT_FALLBACK. Mirrors
+  // skillAnalyzerJob.ts:1060-1091 so retries stay in lockstep with the main
+  // classify path. When the LLM returned PARTIAL_OVERLAP/IMPROVEMENT but the
+  // candidate cross-references the matched library skill AND similarity is
+  // below 70%, reclassify as DISTINCT — merging would produce a confused
+  // hybrid. Higher-similarity cross-references remain as merges; the main
+  // path flags them via validation and that flagging is not mirrored on
+  // retry (see note above about validate/remediate scope).
+  let classification = classificationRaw;
+  if (
+    (classification.classification === 'PARTIAL_OVERLAP' ||
+      classification.classification === 'IMPROVEMENT') &&
+    skillAnalyzerServicePure.crossReferencesLibrarySkill(
+      candidate.description,
+      matchedLib.name,
+      matchedLib.slug,
+    ) &&
+    result.similarityScore < 0.70
+  ) {
+    classification = {
+      classification: 'DISTINCT',
+      confidence: 0.5,
+      reasoning:
+        `${classification.reasoning} — post-classifier DISTINCT_FALLBACK: incoming skill cross-references "${matchedLib.name}" as a separate tool (similarity ${Math.round(result.similarityScore * 100)}%), so the merge was discarded in favour of presenting this as a new skill.`,
+      proposedMerge: null,
+      mergeRationale: null,
+      classifierFallbackApplied: false,
+    };
+  }
 
   const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
@@ -2491,28 +2521,50 @@ export async function appendBatchCollisionWarnings(
   }
 }
 
-/** v6 Fix 4 follow-up — apply an incremental confidence deduction to rows
- *  whose warnings were augmented post-Stage-5 (SOURCE_FORK, CONTENT_OVERLAP).
- *  The per-candidate `adjustClassifierConfidence` runs before Stage 5c, so
- *  batch-level warnings never influence the originally-persisted confidence.
- *  This helper closes that gap by deducting a fixed amount per batch warning,
- *  floored at 0.20. */
-export async function applyBatchConfidenceDeductions(
+/** v6 Fix 4 follow-up (Codex iter-2 review) — atomic deduction + warning append
+ *  for the SOURCE_FORK case (extensible to CONTENT_OVERLAP / future batch
+ *  signals). The per-candidate `adjustClassifierConfidence` runs before
+ *  Stage 5c, so batch-level warnings never influence the originally-persisted
+ *  confidence; this helper closes that gap by deducting and marking in one
+ *  statement.
+ *
+ *  Idempotency across crash-resume: Stage 5c re-runs on every resume. One
+ *  atomic UPDATE per slug sets `confidence` AND appends the marker warning
+ *  to `mergeWarnings`. The WHERE clause rejects rows that already carry the
+ *  marker, so re-runs over already-processed rows are no-ops. Because the
+ *  two column writes commit together, a worker crash between them is
+ *  impossible — the earlier non-atomic pair (separate deduct + append calls)
+ *  left a narrow window where the deduction committed without the marker,
+ *  causing a second deduction on resume. */
+export async function applyBatchDeductionAndWarningAtomic(
   jobId: string,
-  deductionBySlug: Map<string, number>,
+  slugEntries: Array<{ slug: string; deduction: number; warning: MergeWarning }>,
+  markerWarningCode: string,
 ): Promise<void> {
-  if (deductionBySlug.size === 0) return;
-  for (const [candidateSlug, deduction] of deductionBySlug.entries()) {
+  if (slugEntries.length === 0) return;
+  for (const { slug, deduction, warning } of slugEntries) {
     if (deduction <= 0) continue;
+    const warningJson = JSON.stringify([warning]);
     await db
       .update(skillAnalyzerResults)
       .set({
         confidence: sql`GREATEST(0.20, COALESCE(${skillAnalyzerResults.confidence}, 0.5) - ${deduction})`,
+        mergeWarnings: sql`
+          CASE
+            WHEN ${skillAnalyzerResults.mergeWarnings} IS NULL
+            THEN ${warningJson}::jsonb
+            ELSE ${skillAnalyzerResults.mergeWarnings} || ${warningJson}::jsonb
+          END
+        `,
       })
       .where(
         and(
           eq(skillAnalyzerResults.jobId, jobId),
-          eq(skillAnalyzerResults.candidateSlug, candidateSlug),
+          eq(skillAnalyzerResults.candidateSlug, slug),
+          // Same marker-based idempotency guard — row must not already
+          // carry the marker warning. Combined with the atomic UPDATE,
+          // this eliminates the crash-between-two-statements window.
+          sql`NOT COALESCE(${skillAnalyzerResults.mergeWarnings} @> ${JSON.stringify([{ code: markerWarningCode }])}::jsonb, false)`,
         ),
       );
   }
@@ -2545,5 +2597,5 @@ export const skillAnalyzerService = {
   updateResultAgentProposals,
   updateJobAgentRecommendation,
   appendBatchCollisionWarnings,
-  applyBatchConfidenceDeductions,
+  applyBatchDeductionAndWarningAtomic,
 };

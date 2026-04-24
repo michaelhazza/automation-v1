@@ -39,7 +39,7 @@ import {
   updateResultAgentProposals,
   updateJobAgentRecommendation,
   appendBatchCollisionWarnings,
-  applyBatchConfidenceDeductions,
+  applyBatchDeductionAndWarningAtomic,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -1479,31 +1479,36 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       group.push(r);
       byLibraryId.set(r.libraryId, group);
     }
-    const forkWarningsBySlug = new Map<string, MergeWarning[]>();
+    const forkEntries: Array<{ slug: string; deduction: number; warning: MergeWarning }> = [];
     for (const group of byLibraryId.values()) {
       if (group.length < 2) continue;
       const names = group.map(r => r.candidate.name);
       for (const r of group) {
         const others = names.filter(n => n !== r.candidate.name);
-        forkWarningsBySlug.set(r.candidate.slug, [{
-          code: 'SOURCE_FORK',
-          severity: 'warning',
-          message: `Source fork detected: this skill and ${others.length} other(s) (${others.join(', ')}) all merged from the same library skill. Approving multiple forks creates overlapping tools.`,
-          detail: JSON.stringify({ librarySkillId: r.libraryId, forkCandidates: names }),
-        }]);
+        forkEntries.push({
+          slug: r.candidate.slug,
+          // v6 Fix 4 follow-up — coefficient mirrors adjustClassifierConfidence.
+          deduction: 0.05,
+          warning: {
+            code: 'SOURCE_FORK',
+            severity: 'warning',
+            message: `Source fork detected: this skill and ${others.length} other(s) (${others.join(', ')}) all merged from the same library skill. Approving multiple forks creates overlapping tools.`,
+            detail: JSON.stringify({ librarySkillId: r.libraryId, forkCandidates: names }),
+          },
+        });
       }
     }
-    if (forkWarningsBySlug.size > 0) {
-      await appendBatchCollisionWarnings(jobId, forkWarningsBySlug);
-      // v6 Fix 4 follow-up: post-Stage-5c confidence deduction. The per-
-      // candidate adjustClassifierConfidence ran before Stage 5c finished,
-      // so SOURCE_FORK membership never fed the confidence. Apply -0.05 per
-      // forked slug here (mirrors the coefficient inside adjustClassifierConfidence).
-      const forkDeductions = new Map<string, number>();
-      for (const slug of forkWarningsBySlug.keys()) forkDeductions.set(slug, 0.05);
-      await applyBatchConfidenceDeductions(jobId, forkDeductions);
+    if (forkEntries.length > 0) {
+      // v6 Fix 4 follow-up (Codex iter-2 review): single atomic UPDATE per
+      // slug sets confidence AND appends the SOURCE_FORK warning together.
+      // Separating the two calls left a crash window where the deduction
+      // committed without the marker, causing the same slug to be deducted
+      // again on resume. The atomic helper closes that window AND keeps the
+      // marker-based idempotency guard so re-runs over already-marked rows
+      // are no-ops.
+      await applyBatchDeductionAndWarningAtomic(jobId, forkEntries, 'SOURCE_FORK');
       logger.info('skill_analyzer_source_forks_detected', {
-        jobId, forkCount: forkWarningsBySlug.size,
+        jobId, forkCount: forkEntries.length,
       });
     }
 

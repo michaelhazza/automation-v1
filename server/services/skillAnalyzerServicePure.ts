@@ -2886,40 +2886,91 @@ function extractInformativeTokens(text: string): string[] {
   return tokens;
 }
 
-/** Extract informative tokens from the first `limit` non-empty cells of a row. */
-function extractRowKeyTokens(rowLine: string, limit = 2): string[] {
+/** Return the cleaned, lowercased, non-empty cells of a markdown table row.
+ *  Used by both the token-set scorer (via `extractRowKeyTokens`) and the
+ *  low-token fallback in `mergedOutputCoversTableData`. */
+function extractRowCells(rowLine: string): string[] {
   const trimmed = rowLine.trim().replace(/^\||\|$/g, '');
-  const nonEmptyCells: string[] = [];
+  const cells: string[] = [];
   for (const cell of trimmed.split('|')) {
     const cleaned = cleanCellForMatch(cell);
-    if (cleaned.length > 0) nonEmptyCells.push(cleaned);
-    if (nonEmptyCells.length >= limit) break;
+    if (cleaned.length > 0) cells.push(cleaned);
   }
-  return nonEmptyCells.flatMap(extractInformativeTokens);
+  return cells;
+}
+
+/** Extract informative tokens from all non-empty cells of a row (v6 follow-up
+ *  to Codex review: widening from first-2-cells catches rows whose leading
+ *  cells are intentionally the same across the table — e.g. "Phase 1 | 30d",
+ *  "Phase 2 | 60d" — where only later cells differentiate rows). */
+function extractRowKeyTokens(rowLine: string): string[] {
+  return extractRowCells(rowLine).flatMap(extractInformativeTokens);
 }
 
 /** Returns true if the merged instructions already contain table data that
- *  covers at least `coverageThreshold` of the source table's rows. v6 Fix 1:
- *  for each row, extract informative tokens from its first ~2 cells (stemmed,
- *  stopwords removed), then count the row "covered" when ≥50% of those tokens
- *  appear as whole tokens anywhere in the merged instructions. The outer
- *  80%-row-coverage guard controls false positives. */
+ *  covers at least `coverageThreshold` of the source table's rows. v6 Fix 1
+ *  (follow-up: tightened after Codex review): for each row, extract
+ *  informative tokens from all cells (stemmed, stopwords removed), then count
+ *  the row "covered" when ≥50% of those tokens appear as whole tokens
+ *  anywhere in the merged instructions AND at least 2 distinct tokens match.
+ *  The absolute-minimum guard prevents rows that collapse to one token
+ *  ("headline", "phase") from being marked covered by a single haystack hit.
+ *  For low-token rows (<2 distinct informative tokens, e.g. `| Banner | 1 |`)
+ *  the token-set scorer has insufficient signal; fall back to requiring the
+ *  row's cell content to appear literally in the lowercased merged text
+ *  (terse rows can't be restructured by LLMs, so exact match is appropriate).
+ *  The outer 80%-row-coverage guard controls false positives. */
 function mergedOutputCoversTableData(
   sourceTable: ExtractedTableRows,
   mergedInstructions: string,
   coverageThreshold = 0.80,
   rowTokenThreshold = 0.50,
+  rowTokenAbsoluteMin = 2,
 ): { covered: boolean; matchedRows: number; totalRows: number } {
   const haystackTokens = new Set(extractInformativeTokens(mergedInstructions));
+  const haystackLower = mergedInstructions.toLowerCase();
   let matched = 0;
   let scoreable = 0;
 
   for (const row of sourceTable.rows) {
-    const rowTokens = extractRowKeyTokens(row, 2);
+    const cells = extractRowCells(row);
+    if (cells.length === 0) continue;
+    const rowTokens = cells.flatMap(extractInformativeTokens);
     if (rowTokens.length === 0) continue;
+    const distinctTokens = new Set(rowTokens).size;
     scoreable++;
-    const present = rowTokens.filter(t => haystackTokens.has(t)).length;
-    if (present / rowTokens.length >= rowTokenThreshold) matched++;
+
+    if (distinctTokens < rowTokenAbsoluteMin) {
+      // Low-token fallback: terse row. Require every meaningful cell to
+      // appear as a substring of the merged text. Terse rows can't be
+      // restructured (nothing to rephrase); exact match is the appropriate
+      // signal. Cells shorter than 3 chars (single letters, single digits)
+      // are skipped in the presence check — a standalone "1" would match
+      // anywhere and produce false positives.
+      const substantiveCells = cells.filter(c => c.length >= 3);
+      if (substantiveCells.length === 0) {
+        // No substantive content — can't score, undo the scoreable bump.
+        scoreable--;
+        continue;
+      }
+      const allCellsPresent = substantiveCells.every(c => haystackLower.includes(c));
+      if (allCellsPresent) matched++;
+      continue;
+    }
+
+    // Count distinct present tokens so a token repeated across cells doesn't
+    // double-count toward the match threshold.
+    const presentSet = new Set<string>();
+    for (const t of rowTokens) {
+      if (haystackTokens.has(t)) presentSet.add(t);
+    }
+    const present = presentSet.size;
+    if (
+      present >= rowTokenAbsoluteMin &&
+      present / distinctTokens >= rowTokenThreshold
+    ) {
+      matched++;
+    }
   }
 
   if (scoreable === 0) return { covered: false, matchedRows: 0, totalRows: 0 };
