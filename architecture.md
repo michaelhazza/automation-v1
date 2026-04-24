@@ -3044,3 +3044,84 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
 - **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
+
+---
+
+## Hierarchical Agent Delegation
+
+Full contract: `docs/hierarchical-delegation-dev-spec.md`.
+
+### Root-agent contract
+
+Each subaccount has **exactly one** active root agent (`parentSubaccountAgentId IS NULL AND isActive = true`) at rest.
+
+- **Upper bound (≤ 1)** — a partial unique index in `server/db/schema/subaccountAgents.ts` enforces uniqueness at the DB layer.
+- **Lower bound (≥ 1)** — `subaccountAgentService.updateLink` and `subaccountAgentService.unlinkAgent` reject mutations that would deactivate, unlink, or re-parent the last active root (`errorCode: 'last_root_protected'`). Callers must activate another root first, or go through `hierarchyTemplateService.applyTemplate`'s atomic swap.
+- **Atomic swaps** — `hierarchyTemplateService.applyTemplate` bypasses the service-layer mutation check by doing its own transactional swap (deactivate all → apply new tree) inside a `pg_advisory_xact_lock`-protected transaction. This is the only supported path for transient 0-root states.
+- **Post-hoc detection** — the `subaccountNoRoot` and `subaccountMultipleRoots` workspace-health detectors surface DB-level anomalies that slipped past the service guards (e.g. direct SQL writes, legacy data).
+- **Brief routing fallback** — if at runtime no subaccount-scoped root exists, routing falls back to the org-level orchestrator via `hierarchyRouteResolverService.ts` with `fallback: 'degraded'` (misconfiguration signal, not routine behaviour).
+
+### Hierarchy context (`HierarchyContext`)
+
+Built once per run by `hierarchyContextBuilderService.ts` before the skill resolver executes in `agentExecutionService.ts`. The snapshot is immutable for the lifetime of the run (INV-4). Consumers (`skillExecutor.ts`, `skillService.ts`) receive it via `SkillExecutionContext.hierarchy`; they never rebuild or rewrite it. The context carries: `agentId`, `parentId | null`, `childIds[]`, `rootId`, `depth` (see `shared/types/delegation.ts`).
+
+### `DelegationScope` enum
+
+`'children' | 'descendants' | 'subaccount'`. Scope is a per-call parameter passed to `spawn_sub_agents`, `reassign_task`, and the three `config_list_*` read skills. The value is persisted on `agent_runs.delegation_scope` and `delegation_outcomes.delegation_scope` for the run; it is NOT stored on `subaccount_agents`. Execution semantics:
+
+- `children` — spawned sub-agents must be direct children of the calling agent.
+- `descendants` — spawned sub-agents can be any node in the subtree rooted at the caller.
+- `subaccount` — full cross-tree delegation permitted (root-level escape hatch).
+
+The adaptive default: if `delegationScope` is null, the resolver uses `children` when `childIds.length > 0`, and `subaccount` otherwise (any leaf agent — including non-root leaves with explicit skill attachment).
+
+### Derived delegation skills
+
+When `hierarchyContext.childIds.length > 0`, `skillService.resolveSkillsForAgent` automatically adds `config_list_agents`, `spawn_sub_agents`, and `reassign_task` to the agent's effective skill set. Derived resolution only adds; it never removes explicit attachments. Explicit attachment (`skillSlugs` on `subaccount_agents`) remains a supported escape hatch for no-child agents (§6.5).
+
+### Structured errors and dual-write contract
+
+Three delegation-specific error codes emitted as `agent_execution_events` rows (via `insertExecutionEventSafe`, best-effort per INV-3):
+
+- `delegation_out_of_scope` — target agent is not within the caller's scope.
+- `cross_subtree_not_permitted` — cross-subtree delegation attempted without `subaccount` scope.
+- `hierarchy_context_missing` — hierarchy snapshot absent when delegation skill is invoked.
+
+The dual-write contract (`delegationOutcomeService.ts`): for every spawn or handoff attempt, a `delegation_outcomes` row is written (fire-and-forget via `insertOutcomeSafe`). Failures are swallowed — they never surface to the caller. This preserves the synchronous delegation path even under transient DB pressure.
+
+Observability: `insertOutcomeSafe` wraps the DB write with `softBreakerPure.ts` (same primitive as `llmInflightRegistry.persistHistoryEvent`) so that sustained DB pressure does not produce a per-call log firehose. Signals:
+
+- Per-failure WARN with tag `delegation_outcome_write_failed` (log pipeline counts occurrences as the metric).
+- Exactly one WARN with tag `delegation_outcome_breaker_opened` per trip; once open, subsequent calls drop silently for `DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs` and a half-open probe reopens or closes the breaker.
+- Construction-bug branches (shape validation, actor-id mismatch, subaccount mismatch) do NOT feed the breaker — those are deterministic errors, not pressure signals, and should not cause the breaker to trip against a healthy DB.
+
+Idempotency: the insert is guarded by a partial unique index `delegation_outcomes_idempotency_idx` on `(run_id, caller_agent_id, target_agent_id, delegation_scope, outcome)` (migration 0218). `insertOutcomeSafe` uses `.onConflictDoNothing()` so retries, async writes, and soft-breaker half-open probes that replay the same logical delegation event collapse silently rather than producing duplicate rows. Matches the `mcp_tool_invocations` dedup pattern.
+
+### Run-trace delegation graph
+
+`GET /api/agent-runs/:id/delegation-graph` returns a DAG (not a tree): nodes are runs, spawn edges come from `parentRunId + isSubAgent = true`, handoff edges come from `handoffSourceRunId`. A single run can have both a spawn parent and a handoff parent. Implemented in `server/services/delegationGraphService.ts` (impure BFS walker) and `server/services/delegationGraphServicePure.ts` (pure assembly). The UI renders the graph as a collapsible tree in `client/src/components/run-trace/DelegationGraphView.tsx` under the "Delegation Graph" tab of `RunTraceViewerPage`.
+
+### Composition with capability-aware routing
+
+Hierarchy enforcement and capability-aware routing are orthogonal. Hierarchy enforcement (`skillExecutor.ts` scope validation) constrains *which agents* the caller may delegate to. Capability-aware routing (`hierarchyRouteResolverService.ts`) chooses the *best agent within the admissible set* for a given brief. They compose without coupling: hierarchy narrows the candidate set; routing picks the winner.
+
+### Composition with cached-context infrastructure
+
+**Contract (locked):** every run — including delegated children (spawn and handoff) — resolves its own `bundleResolutionSnapshot` independently via `cachedContextOrchestrator`. Delegation does NOT transfer context state from parent to child. The child is an independent `agent_runs` row; its `bundleSnapshotIds`, `variableInputHash`, and budget accounting are scoped to that row alone.
+
+Rationale:
+- `cachedContextOrchestrator` has no awareness of `isSubAgent`, `parentRunId`, `parentSpawnRunId`, or `handoffSourceRunId` — the two subsystems intentionally do not cross-reference at the service layer.
+- Each delegated run may need a different agent, scope, or brief shape; inheriting the parent's snapshot would force them to share context even when that's wrong (e.g. a children-scope delegation to an agent with different skill set).
+- Budgets are easier to reason about per-run than per-chain: `model_tier_budget_policies` applies row-by-row.
+
+When inheritance would help (future opt-in): a scenario where an Orchestrator delegates to a child purely to execute a sub-task within the same contextual frame. That is a future optimization — it requires an explicit opt-in on the delegation skill (e.g. a `reuseParentContext: true` argument on `spawn_sub_agents`) that propagates `bundleSnapshotIds` into the child's `agent_runs` row at insert time. Not in v1. Until then, the contract above is absolute.
+
+Runtime implication for ops: a chain of N delegated runs produces N independent bundle resolutions, N independent prefix hashes, and N separate LLM cache-lookups. That is the intended cost profile.
+
+### Workspace health detectors
+
+Three detectors for the delegation subsystem (all in `server/services/workspaceHealth/detectors/`):
+
+- `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
+- `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
+- `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.

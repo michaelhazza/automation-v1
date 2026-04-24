@@ -8,7 +8,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**In-flight spec:** `none` — cached-context-infrastructure PR #183 (branch `claude/implementation-plan-Y622C`) approved for merge following two rounds of ChatGPT PR review plus `spec-conformance` and `dual-reviewer` passes. Awaiting merge into `main`. Next spec not yet chosen — pick from the queue below.
+**In-flight spec:** `docs/hierarchical-delegation-dev-spec.md` — Paperclip Hierarchy PR #182 (branch `claude/build-paperclip-hierarchy-ymgPW`) approved for merge following 3 rounds of ChatGPT PR review. Phase 1–4 chunks all implemented, `spec-conformance` whole-branch pass completed (1 architectural item routed to `tasks/todo.md`), `main` merged in cleanly (cached-context-infrastructure + spec-conformance-agent updates), all Round 1–3 review findings processed (10 implement / 1 reject / 3 defer). Session log: `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`. Awaiting merge into `main`. Next spec not yet chosen — pick from the queue below.
 
 **Pick-next queue:** See `tasks/todo.md` for the durable backlog. Highest-value unblocked items at the time of writing:
   1. **LAEL-P1-1** — `llmRouter` `llm.requested` / `llm.completed` emission + `agent_run_llm_payloads` writer integration. Without it the Live Agent Execution Log shows no "doing" phase.

@@ -81,7 +81,7 @@ export async function createBrief(input: {
         isSubTask: false,
         createdByAgentId: null,
         description: input.text,
-      }),
+      }, { scope: fastPathDecision.scope }),
     ).catch((err: unknown) => {
       logger.error('briefCreationService.orchestrator_enqueue_failed', {
         briefId,

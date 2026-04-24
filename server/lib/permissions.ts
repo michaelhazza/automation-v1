@@ -86,6 +86,8 @@ export const ORG_PERMISSIONS = {
   RULES_READ: 'org.rules.read',
   RULES_WRITE: 'org.rules.write',
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
+  // ── Observability (delegation outcomes; paperclip-hierarchy spec) ───────────
+  ORG_OBSERVABILITY_VIEW: 'org.observability.view',
   // ── Cached Context Infrastructure ────────────────────────────────────────
   REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
   REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
@@ -278,6 +280,10 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.SCHEDULE_VIEW_CALENDAR,
     description: 'View the upcoming-runs calendar via the client portal',
     groupName: 'subaccount.schedule' },
+  // org.observability (delegation outcomes; paperclip-hierarchy spec)
+  { key: ORG_PERMISSIONS.ORG_OBSERVABILITY_VIEW,
+    description: 'View delegation outcomes and observability data',
+    groupName: 'org.observability' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

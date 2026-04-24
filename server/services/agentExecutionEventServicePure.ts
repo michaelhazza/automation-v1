@@ -323,6 +323,15 @@ export function validateEventPayload(
       }
       return { ok: true };
 
+    case 'tool.error': {
+      if (!isRecord(p.error)) return { ok: false, reason: 'tool.error_error_not_object' };
+      const e = p.error as Record<string, unknown>;
+      if (!isStr(e.code) || !isStr(e.message) || !isRecord(e.context)) {
+        return { ok: false, reason: 'tool.error_missing_fields' };
+      }
+      return { ok: true };
+    }
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

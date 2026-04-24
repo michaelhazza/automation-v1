@@ -1,10 +1,49 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
 import { logger } from '../lib/logger.js';
+
+// ─── Last-root invariant ────────────────────────────────────────────────────
+// Invariant: every subaccount that has ever had a root agent must always have
+// at least one active root (parent_subaccount_agent_id IS NULL AND is_active =
+// true). The partial unique index (migration 0214) enforces "at most one";
+// this helper enforces "at least one" at the service-layer mutation boundary.
+//
+// Transient 0-root states are allowed only during low-level transactional
+// flows that bypass these service methods (e.g. hierarchyTemplateService
+// .applyTemplate manages its own atomic swap). User-facing mutations that
+// flow through updateLink / unlinkAgent MUST keep at least one root alive.
+async function assertAnotherActiveRootExistsInSubaccount(
+  organisationId: string,
+  subaccountId: string,
+  excludeLinkId: string,
+): Promise<void> {
+  const others = await db
+    .select({ id: subaccountAgents.id })
+    .from(subaccountAgents)
+    .where(and(
+      eq(subaccountAgents.organisationId, organisationId),
+      eq(subaccountAgents.subaccountId, subaccountId),
+      isNull(subaccountAgents.parentSubaccountAgentId),
+      eq(subaccountAgents.isActive, true),
+      ne(subaccountAgents.id, excludeLinkId),
+    ))
+    .limit(1);
+
+  if (others.length === 0) {
+    throw {
+      statusCode: 409,
+      errorCode: 'last_root_protected',
+      message:
+        'Cannot deactivate, unlink, or re-parent the last active root agent of a subaccount. ' +
+        'Activate another root (parentSubaccountAgentId: null, isActive: true) before removing this one, ' +
+        'or apply a hierarchy template to atomically replace the tree.',
+    };
+  }
+}
 
 export const subaccountAgentService = {
   async listSubaccountAgents(organisationId: string, subaccountId: string) {
@@ -137,6 +176,15 @@ export const subaccountAgentService = {
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
 
+    // Guard last-root invariant — cannot hard-delete the last active root.
+    if (link.parentSubaccountAgentId === null && link.isActive) {
+      await assertAnotherActiveRootExistsInSubaccount(
+        organisationId,
+        link.subaccountId,
+        link.id,
+      );
+    }
+
     await configHistoryService.recordHistory({
       entityType: 'subaccount_agent',
       entityId: link.id,
@@ -250,6 +298,24 @@ export const subaccountAgentService = {
       .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
+
+    // Guard last-root invariant — if this link is currently an active root
+    // and the caller is trying to deactivate it or re-parent it (away from
+    // root status), require another active root to exist first.
+    const isCurrentlyActiveRoot = link.parentSubaccountAgentId === null && link.isActive;
+    const wouldDeactivate = data.isActive === false;
+    const wouldReparentAwayFromRoot =
+      'parentSubaccountAgentId' in data &&
+      data.parentSubaccountAgentId !== null &&
+      data.parentSubaccountAgentId !== undefined;
+
+    if (isCurrentlyActiveRoot && (wouldDeactivate || wouldReparentAwayFromRoot)) {
+      await assertAnotherActiveRootExistsInSubaccount(
+        organisationId,
+        link.subaccountId,
+        link.id,
+      );
+    }
 
     await configHistoryService.recordHistory({
       entityType: 'subaccount_agent',

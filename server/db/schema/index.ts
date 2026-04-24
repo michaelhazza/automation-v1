@@ -225,3 +225,6 @@ export * from './modelTierBudgetPolicies.js';
 
 // Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
 export * from './bundleSuggestionDismissals.js';
+
+// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0217, renumbered from 0205 post-merge)
+export * from './delegationOutcomes.js';

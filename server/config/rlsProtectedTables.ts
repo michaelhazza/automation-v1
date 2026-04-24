@@ -510,6 +510,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0212_bundle_suggestion_dismissals.sql',
     rationale: 'Per-user dismissals of bundle-save suggestions — reveals which document sets a user has seen and ignored. Cross-tenant leak exposes user behaviour patterns.',
   },
+  // Paperclip Hierarchy: delegation outcomes telemetry (migration 0217, renumbered from 0205 post-merge)
+  {
+    tableName: 'delegation_outcomes',
+    schemaFile: 'delegationOutcomes.ts',
+    policyMigration: '0217_delegation_outcomes.sql',
+    rationale: 'Per-run delegation decision log — caller/target agent ids and scope reveal agent hierarchy topology; cross-tenant leak would expose one org\'s agent structure to another.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

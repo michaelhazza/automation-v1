@@ -7,7 +7,7 @@ visibility: none
 
 ## Parameters
 
-None.
+- scope: string (optional) — Delegation scope filter. Values: `children | descendants | subaccount`. Adaptive default: `children` if the calling agent has direct reports, `subaccount` otherwise. `children` returns only direct reports; `descendants` returns the full subtree; `subaccount` returns all agents in the subaccount regardless of hierarchy position.
 
 ## Instructions
 

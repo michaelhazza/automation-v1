@@ -8,6 +8,7 @@ visibility: none
 ## Parameters
 
 - subaccountId: string (required) — ID of the subaccount to list links for
+- scope: string (optional) — Accepted for signature consistency across list skills; has no filter effect in v1.
 
 ## Instructions
 

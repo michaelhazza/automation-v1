@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import type { DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -48,6 +49,10 @@ export const tasks = pgTable(
     // M-10: proper boolean (was integer 0/1)
     isSubTask: boolean('is_sub_task').notNull().default(false),
     parentTaskId: uuid('parent_task_id'),
+
+    // ── Delegation tracking (Paperclip Hierarchy — migration 0215) ────────
+    // Populated by reassign_task when hierarchy is active.
+    delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

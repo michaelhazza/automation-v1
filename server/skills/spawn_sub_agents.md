@@ -8,6 +8,7 @@ visibility: none
 ## Parameters
 
 - sub_tasks: string (required) — JSON array of objects, each with keys: "title" (string), "brief" (string), "assigned_agent_id" (string). Array of 2-3 sub-tasks to execute in parallel
+- delegationScope: string (optional) — Delegation scope: `children` | `descendants`. Default: adaptive (children if you have direct reports, descendants otherwise). `subaccount` is not accepted for spawn. Use this to route tasks within your own team; for cross-team work use `reassign_task`.
 
 ## Instructions
 

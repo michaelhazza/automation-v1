@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import { AGENT_RUN_STATUS, isTerminalRunStatus } from '../lib/runStatus';
@@ -8,6 +8,7 @@ import TraceChainSidebar from '../components/TraceChainSidebar';
 import TraceChainTimeline from '../components/TraceChainTimeline';
 import ExecutionPlanPane from '../components/ExecutionPlanPane';
 import RunTraceView, { type RunDetail } from '../components/runs/RunTraceView';
+import DelegationGraphView from '../components/run-trace/DelegationGraphView';
 
 /**
  * IEE Phase 0 — while a run is in the `delegated` state we poll the worker-
@@ -46,6 +47,7 @@ const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const { subaccountId, runId: routeRunId } = useParams<{ subaccountId: string; runId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeRunId, setActiveRunId] = useState(routeRunId ?? '');
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +57,12 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
     status: string; startedAt: string | null; completedAt: string | null;
     durationMs: number | null; totalTokens: number | null;
   }>>([]);
+
+  const [activeTab, setActiveTab] = useState<'trace' | 'delegation-graph'>(
+    (location.state as { initialTab?: string } | null)?.initialTab === 'delegation-graph'
+      ? 'delegation-graph'
+      : 'trace',
+  );
 
   useEffect(() => { if (routeRunId) setActiveRunId(routeRunId); }, [routeRunId]);
 
@@ -295,7 +303,37 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
           </div>
         )}
 
-        <RunTraceView run={run} toolCallsRef={toolCallsRef} />
+        {/* Tab bar */}
+        <div className="flex gap-0 border-b border-slate-200 mb-4">
+          <button
+            className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors ${
+              activeTab === 'trace'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+            onClick={() => setActiveTab('trace')}
+          >
+            Trace
+          </button>
+          <button
+            className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors ${
+              activeTab === 'delegation-graph'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+            onClick={() => setActiveTab('delegation-graph')}
+          >
+            Delegation Graph
+          </button>
+        </div>
+
+        {activeTab === 'trace' && <RunTraceView run={run} toolCallsRef={toolCallsRef} />}
+
+        {activeTab === 'delegation-graph' && (
+          <div className="bg-white rounded-xl border border-slate-200 px-5 py-4">
+            <DelegationGraphView runId={activeRunId} />
+          </div>
+        )}
       </div>
 
       <ExecutionPlanPane

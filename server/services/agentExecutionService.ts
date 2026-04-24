@@ -61,6 +61,8 @@ import { agentBriefingService } from './agentBriefingService.js';
 import { agentBeliefService } from './agentBeliefService.js';
 import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
 import { triggerService } from './triggerService.js';
+import { buildForRun as buildHierarchyForRun, HierarchyContextBuildError } from './hierarchyContextBuilderService.js';
+import type { HierarchyContext, DelegationScope, DelegationDirection } from '../../shared/types/delegation.js';
 import {
   createDefaultPipeline,
   hashToolCall,
@@ -247,6 +249,13 @@ export interface AgentRunRequest {
     idempotencyKey: string;
     routingSource: 'rule' | 'llm' | 'fallback';
   };
+  /**
+   * Paperclip Hierarchy — delegation telemetry (Chunk 4a).
+   * Populated by spawn_sub_agents and reassign_task when hierarchy is active.
+   * Stored on agent_runs.delegation_scope / agent_runs.delegation_direction.
+   */
+  delegationScope?: DelegationScope;
+  delegationDirection?: DelegationDirection;
 }
 
 export interface AgentRunResult {
@@ -394,6 +403,8 @@ export const agentExecutionService = {
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         playbookStepRunId: request.playbookStepRunId ?? null,
         isTestRun: request.isTestRun ?? false,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
@@ -611,6 +622,43 @@ export const agentExecutionService = {
       // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
+      // ── 4.5. Build immutable hierarchy snapshot (INV-4) ──────────────────
+      // Must complete before skill resolution so Phase 4's derived-skill
+      // resolver can read context.hierarchy.childIds.
+      let hierarchyContext: Readonly<HierarchyContext> | undefined;
+      if (request.subaccountId && request.subaccountAgentId) {
+        try {
+          hierarchyContext = await buildHierarchyForRun({
+            agentId: request.subaccountAgentId,
+            subaccountId: request.subaccountId,
+            organisationId: request.organisationId,
+          });
+          // Persist hierarchy_depth on the run row (non-critical: catch and log)
+          db.update(agentRuns)
+            .set({ hierarchyDepth: hierarchyContext.depth, updatedAt: new Date() })
+            .where(eq(agentRuns.id, run.id))
+            .catch((err: unknown) => {
+              logger.warn('[agentExecutionService] Failed to persist hierarchy_depth', {
+                runId: run.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+        } catch (err) {
+          if (err instanceof HierarchyContextBuildError) {
+            logger.warn('[agentExecutionService] hierarchy_not_built_for_run', {
+              runId: run.id,
+              code: err.code,
+              agentId: request.agentId,
+              subaccountAgentId: request.subaccountAgentId,
+            });
+            // Leave hierarchyContext undefined — read skills fall through (Chunk 3b),
+            // write skills fail closed (Chunk 4a). Do not abort the run for a build failure.
+          } else {
+            throw err;
+          }
+        }
+      }
+
       // ── 5. Resolve skills → tools + instructions (3-layer) ─────────────
       // Layer 1: System skills (from system agent, if linked)
       let systemSkillTools: AnthropicTool[] = [];
@@ -634,6 +682,7 @@ export const agentExecutionService = {
         skillSlugs,
         request.organisationId,
         request.subaccountId,
+        request.subaccountAgentId ? hierarchyContext : undefined,  // Pass hierarchy only in subaccount context
       );
       if (skillInstructionsTruncated) {
         logger.warn('[agentExecutionService] Skill instructions were truncated — agent may have reduced capability', {
@@ -1251,6 +1300,7 @@ export const agentExecutionService = {
             runContextData,
             isOrgSubaccountRun,
             agentDomain,
+            hierarchyContext,
             // Sprint 3 P2.1 Sprint 3A — stable fingerprint of the resolved
             // config, stamped onto every checkpoint so the resume path can
             // refuse to resume runs whose config has drifted.
@@ -2004,6 +2054,12 @@ interface LoopParams {
   isOrgSubaccountRun?: boolean;
   /** Phase 2C: agent's memory domain derived from agentRole. */
   agentDomain?: string;
+  /**
+   * Pre-built hierarchy snapshot (INV-4). Built once in executeRun BEFORE skill
+   * resolution and threaded into SkillExecutionContext. Undefined when the agent
+   * has no subaccount context or when buildForRun raised HierarchyContextBuildError.
+   */
+  hierarchyContext?: Readonly<HierarchyContext>;
 }
 
 interface LoopResult {
@@ -2028,7 +2084,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     runId, agent, routerCtx, systemPrompt, tools: initialTools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
-    configVersion, agentDomain,
+    configVersion, agentDomain, hierarchyContext,
   } = params;
   const startingIteration = params.startingIteration ?? 0;
 
@@ -2075,6 +2131,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
     readDataSourceCallCount: 0,
+    hierarchy: hierarchyContext,
   };
 
   // Throttle trace events to prevent event floods (max 2/sec)

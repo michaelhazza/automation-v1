@@ -326,6 +326,16 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #182 — claude/build-paperclip-hierarchy-ymgPW (2026-04-23 — ChatGPT review rounds 2 & 3)
+
+- [ ] [user] **Split `agent_runs` into `agent_runs_core` / `agent_runs_context` / `agent_runs_delegation`** — ChatGPT reviewer flagged that `agent_runs` is now a high-width, high-churn table (cached-context fields + delegation telemetry + execution metadata), approaching TS inference limits. We hit it once during the merge (`handoffSourceRunId` self-reference made the whole table `any`) and fixed it surgically by dropping the Drizzle-side `.references()` clause. Reviewer explicitly said "not now, but soon." Triggers for revisiting: (a) a second TS-inference wall we can't fix by dropping one FK declaration, (b) `agent_runs` column count crosses ~40, (c) we introduce a new subsystem that wants to add a fourth column group. The split itself is a weeks-of-work refactor — migration sequence, view-compatibility shim, audit of ≈40+ consumers that read across column groups, query-planner overhead on hot paths. Don't trigger pre-emptively. Source: ChatGPT review round 2 (2026-04-23); session log `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`.
+- [ ] [auto] **Designate a canonical source of truth for delegation analytics** (round 3 — future, not now). We now have two observability layers for delegation: `agent_runs` (inline telemetry columns — `delegationScope`, `delegationDirection`, `hierarchyDepth`, `handoffSourceRunId`) and `delegation_outcomes` (the event stream). They can drift under failure scenarios (outcome write fails → run still shows delegation happened, or vice versa). Trigger to resolve: before any analytics surface (admin dashboard, cost-attribution report, audit export) ships that reads delegation data, pick one as canonical and document. Recommended direction: `delegation_outcomes` is canonical for "what decisions were attempted and what was the outcome"; `agent_runs` telemetry columns are the per-run snapshot for joins, not authoritative history. Source: ChatGPT review round 3 (2026-04-23); session log `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`.
+- [ ] [auto] **Monitor cached-context cost under multi-level delegation chains** (round 3 — monitor, not act). The contract locked in round 2 says every delegated run resolves its own bundle snapshot. That's correct for isolation but means an N-deep delegation chain produces N bundle resolutions + N independent LLM cache lookups. Under deep chains with heavy context (20+ documents per run), cumulative cost could grow quadratically if chains themselves grow super-linearly. Trigger to act: (a) multi-level chains become a common production pattern, AND (b) cached-context observability shows repeated identical bundle resolutions across sibling runs. Potential fix (deferred): add the `reuseParentContext: true` opt-in on `spawn_sub_agents` as noted in `architecture.md` § Composition with cached-context infrastructure. Do not implement pre-emptively — current cost profile is the intended design. Source: ChatGPT review round 3 (2026-04-23); session log `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`.
+
+### paperclip-hierarchy
+
+- [ ] **REQ #C4a-6 — Return-shape contract for delegation errors (architectural).** `spawn_sub_agents` and `reassign_task` return `{ success: false, error: <string code>, context }` but spec §4.3 mandates `{ success: false, error: { code, message, context } }`. The telemetry event payloads already use the spec-correct nested envelope; only the skill handler return values diverge. Fixing this either (a) introduces return-shape inconsistency across the ~40 other skills in `skillExecutor.ts` that return `error: string`, or (b) implies a broader migration of the string-error pattern. Architect decision needed: is the legacy string pattern grandfathered and spec §4.3 describes only new-delegation-skills-only contracts, or must all three codes adopt the nested envelope? If nested, audit `executeWithActionAudit`, LLM-facing serialisation, and agent prompt parsing for breakage. Source: spec §4.3 lines 316–322; `spec-conformance-log-paperclip-hierarchy-chunk-4a-2026-04-24T00-00-00Z.md`.
+
 ### PR #171 — claude-md-updates (2026-04-22)
 
 - [ ] Add non-goals enforcement gate to spec-reviewer — valid improvement but requires spec-reviewer to reason about product strategy (not just structural spec quality); out of scope for this PR; revisit when spec-reviewer is next revised.
@@ -514,3 +524,114 @@ Decisions the spec-reviewer committed autonomously during review round 1. Human 
 - [ ] **AUTO-DECIDED (option a) — No auto-creation of subaccount-level roots during Phase 2 migration (§16.3).** Committed option (a): operators opt in to per-subaccount CEOs by assigning a root when they want one; the `subaccountNoRoot` detector is the nudge. No auto-cloning of org-Orchestrator into every subaccount. §16.3 marked RESOLVED.
 - [ ] **AUTO-DECIDED (option a) — Pure function (not recursive CTE) for descendants-scope subtree computation (§16.4).** Committed option (a): reuses `hierarchyContextBuilderService`'s downward walk over the active roster. §6.2 updated to remove "recursive CTE" language. §16.4 marked RESOLVED.
 - [ ] **Permission-set seed file location (§14.1).** Spec lists the location as TBD by the implementer. The permission *key* lives in `server/lib/permissions.ts` (new `ORG_OBSERVABILITY_VIEW` export). The seed that grants it to `org_admin` needs its home pinned at implementation start — likely also `server/lib/permissions.ts` in the existing `ORG_ADMIN_PERMISSIONS` block, or wherever permission-set seeding currently lives. Resolve before Phase 1 coding starts.
+
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-3b (2026-04-23)
+
+**Captured:** 2026-04-23T00-00-00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-3b-2026-04-23T00-00-00Z.md`
+**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` § Chunk 3b
+**Branch:** `claude/build-paperclip-hierarchy-ymgPW`
+
+All four items below form a single coherent finding: **behavioral tests for `executeConfigListAgents` are missing.** Only the pure helpers (`computeDescendantIds`, `mapSubaccountAgentIdsToAgentIds`) are tested. The handler-level adaptive/override/warn/fallthrough behaviour has no runtime assertion.
+
+Classified DIRECTIONAL rather than MECHANICAL because adding these tests requires a design choice between (a) extracting a new pure helper `resolveEffectiveScope({ rawScope, hierarchy })` and unit-testing it, (b) introducing a new behavioral-test harness with mocks for `agentService` / `db` / `logger` in a file that currently follows `runtime_tests: pure_function_only`, or (c) accepting the current pure-only coverage. The spec does not name the approach.
+
+- [ ] REQ #3 — Test: adaptive default with children → `children`.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test exercises the adaptive-default-with-children branch of `executeConfigListAgents`.
+  - Suggested approach: Extract adaptive logic into a pure helper in `configSkillHandlersPure.ts` and unit-test, or add a behavioral integration test with mocks.
+- [ ] REQ #4 — Test: adaptive default without children → `subaccount`.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test exercises the adaptive-default-without-children branch.
+  - Suggested approach: Same as REQ #3.
+- [ ] REQ #5 — Test: explicit scope overrides adaptive.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test asserts that an explicit `scope: 'subaccount'` on an agent with children returns the full roster.
+  - Suggested approach: Same as REQ #3.
+- [ ] REQ #6 — Test: missing-hierarchy fallthrough + WARN log assertion.
+  - Spec section: `plan.md` line 508.
+  - Gap: No test asserts the `hierarchy_missing_read_skill_fallthrough` WARN fires when `context.hierarchy` is undefined, nor that the handler falls through to unfiltered behaviour.
+  - Suggested approach: Needs a logger mock plus either a behavioral test or a pure helper that returns `{ effectiveScope, shouldWarn }` for pure assertion.
+
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4a (2026-04-23)
+
+**Captured:** 2026-04-23T00:00:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4a-2026-04-24T00-00-00Z.md`
+**Spec:** `docs/hierarchical-delegation-dev-spec.md` (§4.3, §6.3, §6.4, §12.2) + `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4a, lines 567–625)
+
+- [ ] REQ #C4a-1 — `spawn_sub_agents` test: `effectiveScope === 'subaccount'` path rejects with `cross_subtree_not_permitted`.
+  - Spec section: `plan.md` line 573; spec §6.3 step 2.
+  - Gap: The pure-helper test file `skillExecutor.spawnSubAgents.test.ts` only exercises `classifySpawnTargets` + `resolveWriteSkillScope`. The subaccount-scope rejection lives in the outer `executeSpawnSubAgents` handler and has no coverage.
+  - Suggested approach: Either extract the subaccount-gate branch into a pure helper (e.g. `evaluateSpawnPolicy({ effectiveScope, ... })`) and unit-test it, or add a behavioral integration test with DB + logger mocks. Pure-helper extraction is consistent with the existing `skillExecutorDelegationPure.ts` shape.
+
+- [ ] REQ #C4a-2 — `spawn_sub_agents` test: `context.handoffDepth >= MAX_HANDOFF_DEPTH` rejects with `max_handoff_depth_exceeded`.
+  - Spec section: `plan.md` line 573; spec §6.3 step 4.
+  - Gap: No test asserts depth-limit enforcement in the full spawn handler. The spec §12.2 / Chunk 4a plan explicitly names this case.
+  - Suggested approach: Same as REQ #C4a-1 — behavioural integration test, or pull the depth-gate into a pure helper alongside `classifySpawnTargets`.
+
+- [ ] REQ #C4a-3 — `spawn_sub_agents` test: `context.hierarchy` undefined → `hierarchy_context_missing`.
+  - Spec section: `plan.md` line 573; spec §4.3 "producer" bullet.
+  - Gap: The pure test file does not cover the hierarchy-missing branch of the full handler.
+  - Suggested approach: Behavioural test with a minimal `context` fixture (no `hierarchy` field). Assert both (a) the returned `{ success: false, error: 'hierarchy_context_missing', ... }` shape, and (b) that `insertExecutionEventSafe` is invoked with the `tool.error` envelope.
+
+- [ ] REQ #C4a-4 — `spawn_sub_agents` test: adaptive default for a leaf caller resolves to `subaccount` and therefore the entire spawn is rejected.
+  - Spec section: `plan.md` line 573.
+  - Gap: `resolveWriteSkillScope` is tested in isolation and returns `subaccount` for a childless caller, but no test chains that into the spawn handler's rejection path (end-to-end "no children → subaccount → reject").
+  - Suggested approach: Behavioural integration test combining `resolveWriteSkillScope` + the subaccount-gate rejection.
+
+- [ ] REQ #C4a-5 — `reassign_task` test: `context.hierarchy` undefined → `hierarchy_context_missing`.
+  - Spec section: `plan.md` line 574; spec §4.3.
+  - Gap: The pure-helper test file does not cover the hierarchy-missing branch of `executeReassignTask`.
+  - Suggested approach: Behavioural test — same pattern as REQ #C4a-3.
+
+- [ ] REQ #C4a-6 — Return-shape contract: skill handlers return `{ success: false, error: <string code>, context }` but spec §4.3 mandates `{ success: false, error: { code, message, context } }`.
+  - Spec section: spec §4.3 "Uniform contract" (lines 316–322 of the spec); applies to all three new codes (`hierarchy_context_missing`, `cross_subtree_not_permitted`, `delegation_out_of_scope`) in both handlers.
+  - Gap: Current return value has `error` as a flat string and `context` hoisted to the top level. The telemetry event writes (`insertExecutionEventSafe` payloads) use the spec-correct nested envelope, so the split is return-value-only.
+  - Suggested approach: This is a contract change. Legacy `skillExecutor` skills throughout the file return `error: string`, so moving delegation errors to a nested envelope either (a) introduces inconsistency across skills, or (b) implies a broader migration. Decide with architect whether the legacy string pattern is grandfathered and spec §4.3 describes the new-delegation-skills-only envelope, or whether the return shape should be changed and downstream consumers (agent prompts, action-audit wrapper `executeWithActionAudit`, any LLM-facing serialization) must be audited for breakage.
+
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4b (2026-04-24)
+
+**Captured:** 2026-04-24T00:00:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-2026-04-24T00-00-00Z.md`
+**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4b, lines 627–661) + `docs/hierarchical-delegation-dev-spec.md` (§6.5, §12.2)
+
+- [x] REQ #C4b-1 — Pure test file `skillService.resolver.test.ts` does not cover the "WARN logged" assertion called out in the plan's Files-New bullet.
+  - Spec section: `plan.md` line 632 ("`context.hierarchy` undefined → no derived skills, WARN logged"); acceptance criterion line 661 ("logs WARN `hierarchy_missing_at_resolver_time` once").
+  - Gap: The pure test file only covers the "returns `[]`" half of the plan's undefined-hierarchy case. WARN emission lives inside the impure `resolveSkillsForAgent`; the test file explicitly notes (lines 7–10) that this case was deferred to integration-level coverage because it requires a logger mock plus DB scaffolding. No such integration test exists yet in this chunk.
+  - Suggested approach: Either (a) mock the `logger` module and assert WARN in a thin integration test against `resolveSkillsForAgent` (will need to stub the `skills` table query or use an empty `skillSlugs` input so the DB path short-circuits on line 127's early return), or (b) refactor the WARN decision into a pure helper returning `{ derivedSlugs, warn: boolean, reason }` so the pure test can assert the boolean alongside the slug output. Option (b) is the cleaner pure-helper shape and keeps `skillServicePure.ts` authoritative for Chunk 4b's logic.
+  - Closed 2026-04-24 (commit `8c68d8a9`): option (b) taken — `shouldWarnMissingHierarchy({ hierarchy, subaccountId })` extracted into `skillServicePure.ts`; `resolveSkillsForAgent` calls it; three new pure tests assert the full decision table (undefined/undefined, undefined/provided, present/provided). Re-verified by `spec-conformance` re-run — see `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-recheck-2026-04-24T01-00-00Z.md`.
+
+## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4c (2026-04-24)
+
+**Captured:** 2026-04-23T22:05:43Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4c-2026-04-24T22-05-43Z.md`
+**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4c, lines 663–699) + `docs/hierarchical-delegation-dev-spec.md` §7.2, §8.2
+
+- [ ] REQ #C4c-10 — Direction colour/style is applied to a text badge beside each node name, not to the edge connecting parent and child.
+  - Spec section: `plan.md` line 671 ("Direction-colour: `'down'` green solid, `'up'` amber dashed, `'lateral'` amber dotted (spec §8.2)"); dev-spec §8.2 ("Arrow colour / icon coding by `delegationDirection`").
+  - Gap: `DelegationGraphView.tsx` renders edges as a plain text label (`→ spawn` / `⇢ handoff`) between nodes with no colour or stroke styling, and puts the direction colour / style (`down` green solid, `up` amber dashed, `lateral` amber dotted) on a small node-adjacent badge (`DirectionBadge` at lines 51–66). Spec §8.2 places direction coding on the arrow itself. Functionally the information is available; visually the hierarchy is wrong.
+  - Suggested approach: Either (a) render proper SVG arrows (or CSS-drawn connector lines) between parent and child and move the direction styling onto the connector, or (b) treat the node-badge as the canonical direction carrier and amend spec §8.2 to match the simplified rendering decision. Option (b) is cheaper and consistent with the "inline state beats dashboards" principle in `CLAUDE.md` § Frontend Design Principles; the spec edit would narrowly document that direction lives on the node, not the edge.
+
+- [ ] REQ #C4c-11 — Clicking a node navigates via React Router to a new URL, which remounts `RunTraceViewerPage`; the active tab resets to `trace` and the user loses the Delegation Graph view.
+  - Spec section: `plan.md` line 671 ("Click node → navigate to that run's trace tab (in-place)"); dev-spec §8.2 ("Click a node → navigate to that run's trace tab (in-place, preserves the graph selection)").
+  - Gap: `DelegationGraphView.tsx:194–203` calls `navigate(...)` to a different URL. `RunTraceViewerPage.tsx:60` initialises `activeTab` to `'trace'` on every mount, so the graph tab selection is not preserved. The spec's phrase "preserves the graph selection" implies the graph tab should remain active (or at minimum the graph's collapse state should survive).
+  - Suggested approach: Lift `activeTab` into the URL query string (`?tab=delegation-graph`) so a re-mount preserves it, or alternatively swap the runId in-place without triggering a full `RunTraceViewerPage` re-mount (pass `runId` as a prop + update it via `setActiveRunId` only, no `navigate`). The second approach matches "in-place" more literally. Either path is a small UI change, not a contract change.
+
+- [ ] REQ #C4c-12 — Initial collapse state auto-expands the root AND its depth-1 direct children; spec says only the root should be expanded.
+  - Spec section: `plan.md` line 671 ("Root expanded by default; descendants collapsed").
+  - Gap: `DelegationGraphView.tsx:90` initialises `collapsed` with `useState(depth > 1)` — depth 0 (root) AND depth 1 (direct children) start expanded; only depth 2+ starts collapsed.
+  - Suggested approach: Change the initial state to `useState(depth > 0)` so only the root is expanded by default. One-line fix; holding as directional because the UX author may have made this choice deliberately for first-landing legibility.
+
+- [ ] REQ #C4c-15 — Plan's "third tab ... Existing tabs (Trace, Payload) unchanged" language contradicts the pre-chunk state of `RunTraceViewerPage.tsx`, which had no tabs at all. Implementation introduced a two-tab surface (Trace + Delegation Graph).
+  - Spec section: `plan.md` line 675.
+  - Gap: Spec presumes a two-tab baseline (Trace + Payload) that did not exist in `main`. Implementation decided to add exactly two tabs (Trace + Delegation Graph). Labelled the first "Trace" (title-case matches spec); labelled the second "Delegation Graph" (title-case — spec says "Delegation graph", lowercase `g`). This is a spec-vs-reality contradiction, not an implementation defect.
+  - Suggested approach: Human call required. Three options: (a) accept the two-tab surface as final and edit the plan to remove the ghost "Payload" tab reference; (b) introduce a genuine "Payload" tab that renders some run-payload view (would need its own spec — the plan does not define Payload tab contents); (c) amend the plan to make the third-tab phrasing a typo and confirm two tabs is the shape. Recommend (a) or (c).
+
+## Deferred from spec-conformance review — paperclip-hierarchy (2026-04-23)
+
+**Captured:** 2026-04-23T23:05:56Z
+**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`
+**Spec:** `docs/hierarchical-delegation-dev-spec.md` (whole-branch pass — all four phases)
+**Branch:** `claude/build-paperclip-hierarchy-ymgPW`
+
+- [ ] **REQ #WB-1 — INV-1.2 `agent_runs.handoff_source_run_id` is never written; handoff edges cannot render in the delegation graph (architectural).** The spec's run-id continuity invariant (§10.6 clause 2) requires every handoff-created `agent_runs` row to carry `handoffSourceRunId = context.runId` of the `reassign_task` call. The column exists on the Drizzle schema (`agentRuns.ts:211`) and is read by `delegationGraphServicePure.ts:72` to produce handoff edges, but no write site populates it: `AgentRunRequest` has no `handoffSourceRunId` field, `agentExecutionService`'s `agent_runs` INSERT (lines ~395–412) does not set it, and the handoff worker at `agentScheduleService.ts:127` routes `sourceRunId → parentRunId` instead. Consequences: (1) handoff edges are invisible in the `/api/agent-runs/:id/delegation-graph` response (spawn edges still render because `parentRunId + isSubAgent` gate); (2) INV-1.3 "both pointers when both caused it" is unreachable; (3) INV-1.4 "`delegation_outcomes.runId === child.handoffSourceRunId` for handoffs" is structurally broken. Because `parentRunId` is currently reused for handoff chains by pre-existing code (the trace-session logic at `agentExecutionService.ts:1226-1232` and `agentActivityService.getRunChain` read `parentRunId` for handoff chains), the fix is cross-cutting — it requires a design call (keep `parentRunId` for handoff runs alongside the new `handoffSourceRunId`, or clear it and migrate downstream chain logic to the new column). Deferring as architectural. Suggested approach: (a) add `handoffSourceRunId?: string` to `AgentRunRequest`; (b) propagate it into the `agent_runs` INSERT in `agentExecutionService.executeRun`; (c) extend the `agent-handoff-run` worker payload and pass it through; (d) decide whether `parentRunId` is ALSO set (backward-compat) or null for handoff runs, and update pure graph emission + run-chain consumers accordingly. Source: `docs/hierarchical-delegation-dev-spec.md` §5.3 + §7.2 + §10.6; log `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`.

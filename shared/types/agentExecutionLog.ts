@@ -75,7 +75,8 @@ export type AgentExecutionEventType =
   | 'handoff.decided'
   | 'clarification.requested'
   | 'run.event_limit_reached'
-  | 'run.completed';
+  | 'run.completed'
+  | 'tool.error';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -208,6 +209,16 @@ export type AgentExecutionEventPayload =
       totalCostCents: number;
       totalDurationMs: number;
       eventCount: number;
+    }
+  | {
+      /** Delegation-scope / hierarchy errors emitted by skill handlers (INV-2, INV-3). */
+      eventType: 'tool.error';
+      critical: false;
+      error: {
+        code: string;
+        message: string;
+        context: Record<string, unknown>;
+      };
     };
 
 // ---------------------------------------------------------------------------
@@ -235,6 +246,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'clarification.requested': false,
   'run.event_limit_reached': true,
   'run.completed': true,
+  'tool.error': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

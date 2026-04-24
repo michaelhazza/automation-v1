@@ -1,8 +1,10 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { tasks, subaccountAgents, systemAgents, agents } from '../db/schema/index.js';
+import { tasks, conversations } from '../db/schema/index.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { taskService } from '../services/taskService.js';
+import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
+import { writeConversationMessage } from '../services/briefConversationWriter.js';
 import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -18,13 +20,13 @@ import { logger } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 
 export const ORCHESTRATOR_FROM_TASK_QUEUE = 'orchestrator-from-task';
-const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';
 const MIN_DESCRIPTION_CHARS = 10;
 
 export interface OrchestratorFromTaskPayload {
   taskId: string;
   organisationId: string;
   triggerId?: string;
+  scope?: 'subaccount' | 'org' | 'system';
 }
 
 // ---------------------------------------------------------------------------
@@ -70,17 +72,24 @@ export function isEligibleForOrchestratorRouting(task: TaskLike): boolean {
  * task meets the eligibility criteria. Non-throwing — caller fires and
  * forgets. Safe to call on every task creation.
  */
-export async function enqueueOrchestratorRoutingIfEligible(task: TaskLike): Promise<void> {
+export async function enqueueOrchestratorRoutingIfEligible(
+  task: TaskLike,
+  opts?: { scope?: 'subaccount' | 'org' | 'system' },
+): Promise<void> {
   if (!isEligibleForOrchestratorRouting(task)) return;
   if (!orchestratorJobSender) {
     logger.warn('orchestratorFromTask.no_sender', { taskId: task.id });
     return;
   }
   try {
-    await orchestratorJobSender(ORCHESTRATOR_FROM_TASK_QUEUE, {
+    const payload: OrchestratorFromTaskPayload = {
       taskId: task.id,
       organisationId: task.organisationId,
-    } satisfies OrchestratorFromTaskPayload);
+    };
+    if (opts?.scope !== undefined) {
+      payload.scope = opts.scope;
+    }
+    await orchestratorJobSender(ORCHESTRATOR_FROM_TASK_QUEUE, payload);
   } catch (err) {
     logger.error('orchestratorFromTask.enqueue_failed', {
       taskId: task.id,
@@ -126,82 +135,92 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
-  // 3. Resolve the Orchestrator's subaccount-agent link for this org.
-  const [systemAgent] = await db
-    .select({ id: systemAgents.id })
-    .from(systemAgents)
-    .where(eq(systemAgents.slug, ORCHESTRATOR_AGENT_SLUG))
-    .limit(1);
+  // 3. Determine scope from payload — default to 'subaccount' for all
+  //    enqueue paths that do not supply an explicit scope (e.g. taskService).
+  //    This is a compatibility shim, not a policy. New enqueue paths must
+  //    explicitly choose a scope. See plan R9 (tasks/builds/paperclip-hierarchy/plan.md).
+  const scope = payload.scope ?? 'subaccount';
 
-  if (!systemAgent) {
-    logger.error('orchestratorFromTask.system_agent_missing', { slug: ORCHESTRATOR_AGENT_SLUG });
+  // 4. Resolve the root subaccount-agent link for this scope.
+  //
+  //    The resolver queries systemAgents for 'orchestrator' as the org-level
+  //    fallback. See spec §6.6 and hierarchyRouteResolverService for the full
+  //    decision tree.
+  const resolvedRoot = await resolveRootForScope({
+    organisationId,
+    subaccountId: task.subaccountId ?? null,
+    scope,
+  });
+
+  if (resolvedRoot === null) {
+    if (scope === 'system') {
+      // System-scope briefs are not routable — write an error artefact
+      // to the brief's conversation so the user gets feedback.
+      try {
+        const [conv] = await db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.scopeType, 'brief'),
+              eq(conversations.scopeId, taskId),
+            ),
+          )
+          .limit(1);
+        if (conv) {
+          await writeConversationMessage({
+            conversationId: conv.id,
+            briefId: taskId,
+            organisationId,
+            role: 'assistant',
+            content: '',
+            artefacts: [
+              {
+                artefactId: `system-scope-error:${taskId}`,
+                kind: 'error',
+                errorCode: 'unsupported_query',
+                message:
+                  'System-scope Briefs are not yet routable. Please re-submit directed at a subaccount or your organisation.',
+              },
+            ],
+          });
+        }
+      } catch (writeErr) {
+        logger.warn('orchestratorFromTask.system_scope_error_write_failed', {
+          taskId,
+          organisationId,
+          error: writeErr instanceof Error ? writeErr.message : String(writeErr),
+        });
+      }
+      return;
+    }
+    logger.warn('orchestratorFromTask.no_root_found', { taskId, organisationId, scope });
     return;
   }
 
-  // Resolve the Orchestrator's subaccount_agents link for this org.
-  //
-  // Per the seeded architecture (migration 0157 + spec §6.6), the
-  // Orchestrator is linked ONCE per org, attached to that org's sentinel
-  // subaccount — not per-client-subaccount. The task's own subaccountId
-  // is passed into the run as triggerContext so downstream capability
-  // queries still scope correctly, but the Orchestrator itself runs
-  // from its org-level link regardless of which subaccount the task
-  // belongs to.
-  //
-  // Resolution strategy (supports both the common case and a future
-  // per-subaccount Orchestrator model):
-  //   1. If the task has a subaccountId, prefer an Orchestrator link on
-  //      that exact subaccount (lets an org opt into per-subaccount
-  //      Orchestrators in the future without code changes).
-  //   2. Fall back to ANY active Orchestrator link for this org — this
-  //      is the sentinel-subaccount case and the normal path today.
-  const baseConditions = [
-    eq(subaccountAgents.organisationId, organisationId),
-    eq(agents.systemAgentId, systemAgent.id),
-    eq(subaccountAgents.isActive, true),
-  ];
-
-  let orchestratorLink: { subaccountAgentId: string; subaccountId: string; agentId: string } | undefined;
-
-  if (task.subaccountId) {
-    const [exact] = await db
-      .select({
-        subaccountAgentId: subaccountAgents.id,
-        subaccountId: subaccountAgents.subaccountId,
-        agentId: subaccountAgents.agentId,
-      })
-      .from(subaccountAgents)
-      .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
-      .where(and(...baseConditions, eq(subaccountAgents.subaccountId, task.subaccountId)))
-      .limit(1);
-    orchestratorLink = exact;
+  // Log only the misconfigured case at WARN — the `'expected'` branch is the
+  // routine scope:subaccount-with-null-subaccountId flow and should not flood
+  // the log. `'degraded'` means the subaccount exists but has zero root agents
+  // (the `subaccountNoRoot` detector will surface it in workspace-health).
+  if (resolvedRoot.fallback === 'degraded') {
+    logger.warn('orchestratorFromTask.fallback_degraded', {
+      tag: 'orchestratorFromTask.fallback_degraded',
+      taskId,
+      organisationId,
+      subaccountId: task.subaccountId,
+      scope,
+      reason: 'subaccount has no active root agent — routed to org-level link',
+    });
+  } else if (resolvedRoot.fallback === 'expected') {
+    logger.info('orchestratorFromTask.fallback_expected', {
+      taskId,
+      organisationId,
+      subaccountId: task.subaccountId,
+      scope,
+    });
   }
 
-  if (!orchestratorLink) {
-    // Deterministic selection: in the intended model there is exactly one
-    // active Orchestrator link per org (the sentinel). If somehow multiple
-    // are present we pick the oldest so routing is stable across restarts.
-    const [any] = await db
-      .select({
-        subaccountAgentId: subaccountAgents.id,
-        subaccountId: subaccountAgents.subaccountId,
-        agentId: subaccountAgents.agentId,
-      })
-      .from(subaccountAgents)
-      .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
-      .where(and(...baseConditions))
-      .orderBy(subaccountAgents.createdAt, subaccountAgents.id)
-      .limit(1);
-    orchestratorLink = any;
-  }
-
-  if (!orchestratorLink) {
-    logger.warn('orchestratorFromTask.no_orchestrator_link', { organisationId });
-    // Org has not yet enabled the Orchestrator — silently drop.
-    return;
-  }
-
-  // 4. Dispatch the Orchestrator run with the task as context.
+  // 5. Dispatch the Orchestrator run with the task as context.
   // Versioned idempotency key: includes task.updatedAt so retries after a
   // user edits the task description produce a fresh run rather than silently
   // dedup-ing against the stale one. Pure job replays (same taskId + same
@@ -213,13 +232,14 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     // lands inside the run's own timeline rather than after run.completed.
     // Spec: tasks/live-agent-execution-log-spec.md §5.3.
     await agentExecutionService.executeRun({
-      agentId: orchestratorLink.agentId,
-      subaccountAgentId: orchestratorLink.subaccountAgentId,
-      // The Orchestrator runs from its own link (typically the org sentinel
-      // subaccount). The task's subaccount is passed in triggerContext so
-      // the Orchestrator can scope downstream capability queries to the
-      // target subaccount without needing a per-subaccount link.
-      subaccountId: orchestratorLink.subaccountId,
+      agentId: resolvedRoot.agentId,
+      subaccountAgentId: resolvedRoot.subaccountAgentId,
+      // The Orchestrator runs from its resolved link (typically the org sentinel
+      // subaccount, or the subaccount root for scope:'subaccount'). The task's
+      // own subaccountId is passed into triggerContext so the Orchestrator can
+      // scope downstream capability queries to the target subaccount without
+      // needing a per-subaccount link.
+      subaccountId: resolvedRoot.subaccountId,
       organisationId,
       runType: 'triggered',
       runSource: 'trigger',
@@ -234,13 +254,13 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
       idempotencyKey,
       orchestratorDispatch: {
         taskId,
-        chosenAgentId: orchestratorLink.agentId,
+        chosenAgentId: resolvedRoot.agentId,
         idempotencyKey,
         routingSource: 'rule',
       },
     });
 
-    logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: orchestratorLink.subaccountAgentId });
+    logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: resolvedRoot.subaccountAgentId, scope, fallback: resolvedRoot.fallback });
   } catch (err) {
     logger.error('orchestratorFromTask.dispatch_failed', {
       taskId,
