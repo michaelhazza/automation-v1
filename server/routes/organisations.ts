@@ -15,6 +15,7 @@ router.get('/api/organisations', authenticate, requireSystemAdmin, asyncHandler(
     status: req.query.status as string | undefined,
     limit: parsePositiveInt(req.query.limit),
     offset: parsePositiveInt(req.query.offset),
+    includeSystemOrg: true, // sysadmin listing includes the System Operations org
   });
   res.json(result);
 }));

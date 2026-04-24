@@ -9,8 +9,14 @@ import crypto from 'crypto';
 import { env } from '../lib/env.js';
 
 export class OrganisationService {
-  async listOrganisations(params: { status?: string; limit?: number; offset?: number }) {
-    const conditions = [isNull(organisations.deletedAt)];
+  async listOrganisations(params: { status?: string; limit?: number; offset?: number; includeSystemOrg?: boolean }) {
+    const conditions = [
+      isNull(organisations.deletedAt),
+      // Filter out the seeded System Operations org from non-sysadmin views.
+      // The org is only visible to sysadmins via the dedicated system admin
+      // routes; listing it here would expose a mystery org to all tenant users.
+      ...(params.includeSystemOrg ? [] : [eq(organisations.isSystemOrg, false)]),
+    ];
     if (params.status) conditions.push(eq(organisations.status, params.status as 'active' | 'suspended'));
 
     const limit = params.limit ?? 50;
