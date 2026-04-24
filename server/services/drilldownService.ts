@@ -83,7 +83,7 @@ export async function getPendingIntervention(params: {
       and(
         eq(reviewItems.organisationId, params.organisationId),
         eq(reviewItems.subaccountId, params.subaccountId),
-        sql`${reviewItems.reviewStatus} IN ('pending', 'edited_pending')`,
+        inArray(reviewItems.reviewStatus, ['pending', 'edited_pending']),
       ),
     )
     .orderBy(desc(actions.createdAt))
