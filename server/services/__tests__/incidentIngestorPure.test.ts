@@ -71,6 +71,18 @@ test('normaliseMessage — strips ISO timestamps', () => {
   assert(result.includes('<timestamp>'), 'timestamp placeholder missing');
 });
 
+test('normaliseMessage — timestamps stripped before large numbers (ordering)', () => {
+  // If numbers were stripped before timestamps, "2024" would become "<num>"
+  // and the ISO timestamp regex would never match.
+  const msg = 'Error at 2024-03-10T08:15:30Z count 99999';
+  const result = normaliseMessage(msg);
+  // The whole ISO timestamp should be one <timestamp>, not <num>-03-10T...
+  assert(result.includes('<timestamp>'), 'ISO timestamp replaced as <timestamp>');
+  assert(!result.includes('2024'), 'year not left in place by early number-strip');
+  // The trailing large number should also be gone
+  assert(result.includes('<num>'), 'standalone large number replaced as <num>');
+});
+
 test('normaliseMessage — preserves meaningful words', () => {
   const result = normaliseMessage('Connection refused by database');
   assert(result.includes('Connection refused'), 'meaningful text stripped');
@@ -176,8 +188,15 @@ test('validateFingerprintOverride — rejects domain:error only (needs 2+ colons
   assert(!validateFingerprintOverride('agent:orchestrator'), 'two-part should be rejected (needs ≥3 parts)');
 });
 
-test('validateFingerprintOverride — rejects uppercase', () => {
-  assert(!validateFingerprintOverride('Agent:Orchestrator:FAIL'), 'uppercase should be rejected');
+test('validateFingerprintOverride — rejects uppercase domain prefix', () => {
+  // Domain (first segment) must be lowercase; error-id segments may be uppercase.
+  assert(!validateFingerprintOverride('Agent:orchestrator:FAIL'), 'uppercase domain should be rejected');
+});
+
+test('validateFingerprintOverride — accepts uppercase in error-id segments', () => {
+  // e.g. test:manual:sysadmin:trigger, agent:llm:CLASSIFICATION_PARSE_FAILURE
+  assert(validateFingerprintOverride('agent:llm:CLASSIFICATION_PARSE_FAILURE'), 'uppercase error-id should be accepted');
+  assert(validateFingerprintOverride('test:manual:sysadmin:trigger'), 'test override should be accepted');
 });
 
 test('validateFingerprintOverride — rejects spaces', () => {

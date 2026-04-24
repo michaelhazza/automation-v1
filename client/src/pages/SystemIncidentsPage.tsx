@@ -126,7 +126,7 @@ function IncidentDetailDrawer({
   const [showSuppress, setShowSuppress] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [suppressReason, setSuppressReason] = useState('');
-  const [suppressHours, setSuppressHours] = useState('24');
+  const [suppressDuration, setSuppressDuration] = useState<'24h' | '7d' | '30d' | 'permanent'>('24h');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -152,7 +152,7 @@ function IncidentDetailDrawer({
   const resolve = useCallback(async () => {
     setSubmitting(true);
     try {
-      await api.post(`/api/system/incidents/${incident.id}/resolve`, { note: resolveNote || undefined });
+      await api.post(`/api/system/incidents/${incident.id}/resolve`, { resolutionNote: resolveNote || undefined });
       setShowResolve(false);
       onRefresh();
       onClose();
@@ -166,10 +166,9 @@ function IncidentDetailDrawer({
   const suppress = useCallback(async () => {
     setSubmitting(true);
     try {
-      const hours = parseInt(suppressHours, 10);
       await api.post(`/api/system/incidents/${incident.id}/suppress`, {
         reason: suppressReason || 'Manual suppression',
-        expiresInHours: isNaN(hours) ? undefined : hours,
+        duration: suppressDuration,
       });
       setShowSuppress(false);
       onRefresh();
@@ -178,7 +177,7 @@ function IncidentDetailDrawer({
     } finally {
       setSubmitting(false);
     }
-  }, [incident.id, suppressReason, suppressHours, onRefresh]);
+  }, [incident.id, suppressReason, suppressDuration, onRefresh]);
 
   return (
     <>
@@ -294,14 +293,17 @@ function IncidentDetailDrawer({
               className="w-full text-[13px] border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <div>
-              <label className="text-[12px] text-slate-600 block mb-1">Expires after (hours, blank = never)</label>
-              <input
-                value={suppressHours}
-                onChange={(e) => setSuppressHours(e.target.value)}
-                type="number"
-                min="1"
-                className="w-24 text-[13px] border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+              <label className="text-[12px] text-slate-600 block mb-1">Duration</label>
+              <select
+                value={suppressDuration}
+                onChange={(e) => setSuppressDuration(e.target.value as '24h' | '7d' | '30d' | 'permanent')}
+                className="w-full text-[13px] border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="24h">24 hours</option>
+                <option value="7d">7 days</option>
+                <option value="30d">30 days</option>
+                <option value="permanent">Permanent</option>
+              </select>
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowSuppress(false)} className="px-3 py-1.5 text-[13px] text-slate-600 hover:text-slate-900">Cancel</button>
@@ -352,7 +354,7 @@ export default function SystemIncidentsPage() {
 
   const allSources = [...new Set(incidents.map((i) => i.source))].sort();
   const allSeverities = ['critical', 'high', 'medium', 'low'];
-  const allStatuses = ['open', 'investigating', 'remediating', 'escalated', 'resolved'];
+  const allStatuses = ['open', 'investigating', 'remediating', 'escalated', 'resolved', 'suppressed'];
 
   function toggleFilter<T>(set: Set<T>, value: T): Set<T> {
     const next = new Set(set);

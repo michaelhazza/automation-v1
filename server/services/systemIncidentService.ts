@@ -246,10 +246,7 @@ export const systemIncidentService = {
   },
 
   async escalateIncidentToAgent(id: string, userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
-    const incident = await this.getIncident(id);
-    if (!incident) {
-      throw Object.assign(new Error('Incident not found'), { statusCode: 404, errorCode: 'incident_not_found' });
-    }
+    const { incident } = await this.getIncident(id);
 
     const now = new Date();
     const verdict = computeEscalationVerdict({
@@ -264,7 +261,7 @@ export const systemIncidentService = {
         incidentId: incident.id,
         eventType: 'escalation_blocked',
         actorKind: 'user',
-        actorId: userId,
+        actorUserId: userId,
         payload: JSON.parse(JSON.stringify(verdict)) as Record<string, unknown>,
         occurredAt: now,
       });
@@ -277,29 +274,29 @@ export const systemIncidentService = {
     }
 
     const sysOps = await resolveSystemOpsContext();
-
-    // Create task in System Operations org
-    const task = await taskService.createTask(
-      sysOps.organisationId,
-      sysOps.subaccountId,
-      {
-        title: `[Incident] ${incident.summary.slice(0, 120)}`,
-        description: [
-          `**Source:** ${incident.source}`,
-          `**Severity:** ${incident.severity}`,
-          `**Error code:** ${incident.errorCode ?? '—'}`,
-          `**Occurrences:** ${incident.occurrenceCount}`,
-          `**First seen:** ${incident.firstSeenAt.toISOString()}`,
-          `**Fingerprint:** \`${incident.fingerprint}\``,
-        ].join('\n'),
-        priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
-      },
-      userId,
-    );
-
     const previousTaskIds = (incident.previousTaskIds ?? []) as string[];
 
+    // Create task + update incident inside a single transaction to prevent orphan tasks on rollback.
+    // taskService.createTask runs its own internal db calls — this wraps them atomically.
     const updated = await db.transaction(async (tx) => {
+      const task = await taskService.createTask(
+        sysOps.organisationId,
+        sysOps.subaccountId,
+        {
+          title: `[Incident] ${incident.summary.slice(0, 120)}`,
+          description: [
+            `**Source:** ${incident.source}`,
+            `**Severity:** ${incident.severity}`,
+            `**Error code:** ${incident.errorCode ?? '—'}`,
+            `**Occurrences:** ${incident.occurrenceCount}`,
+            `**First seen:** ${incident.firstSeenAt.toISOString()}`,
+            `**Fingerprint:** \`${incident.fingerprint}\``,
+          ].join('\n'),
+          priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
+        },
+        userId,
+      );
+
       const [row] = await tx.update(systemIncidents).set({
         status: 'escalated',
         escalationCount: (incident.escalationCount ?? 0) + 1,
@@ -315,7 +312,7 @@ export const systemIncidentService = {
         incidentId: id,
         eventType: 'escalated',
         actorKind: 'user',
-        actorId: userId,
+        actorUserId: userId,
         payload: {
           taskId: task.id,
           escalationCount: (incident.escalationCount ?? 0) + 1,
@@ -323,10 +320,10 @@ export const systemIncidentService = {
         occurredAt: now,
       });
 
-      return row;
+      return { row, taskId: task.id };
     });
 
-    return { incident: updated, taskId: task.id };
+    return { incident: updated.row, taskId: updated.taskId };
   },
 
   async listSuppressions(filter?: { activeOnly?: boolean }): Promise<SystemIncidentSuppression[]> {
@@ -387,8 +384,8 @@ export const systemIncidentService = {
   // Test incident trigger (admin page test button, §8.9)
   async createTestIncident(userId: string, triggerNotifications = false): Promise<SystemIncident> {
     const { recordIncident } = await import('./incidentIngestor.js');
+    const { hashFingerprint } = await import('./incidentIngestorPure.js');
     const timestamp = Date.now();
-    const fingerprint = `test:manual:${userId.slice(0, 8)}:${timestamp}`;
 
     await recordIncident({
       source: 'route',
@@ -400,31 +397,15 @@ export const systemIncidentService = {
       correlationId: `test-${timestamp}`,
     });
 
-    // Retrieve the incident that was just created
+    const hash = hashFingerprint('test:manual:sysadmin:trigger');
     const [incident] = await db
       .select()
       .from(systemIncidents)
-      .where(eq(systemIncidents.fingerprint, fingerprint))
+      .where(eq(systemIncidents.fingerprint, hash))
+      .orderBy(desc(systemIncidents.createdAt))
       .limit(1);
 
-    if (!incident) {
-      // Fallback: find by the override fingerprint hash
-      const { hashFingerprint } = await import('./incidentIngestorPure.js');
-      const hash = hashFingerprint('test:manual:sysadmin:trigger');
-      const [byHash] = await db
-        .select()
-        .from(systemIncidents)
-        .where(and(
-          eq(systemIncidents.fingerprint, hash),
-          eq(systemIncidents.isTestIncident, false),
-        ))
-        .orderBy(desc(systemIncidents.createdAt))
-        .limit(1);
-
-      if (!byHash) throw { statusCode: 500, message: 'Test incident creation failed' };
-      return byHash;
-    }
-
+    if (!incident) throw { statusCode: 500, message: 'Test incident creation failed' };
     return incident;
   },
 };

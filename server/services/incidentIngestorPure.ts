@@ -175,7 +175,6 @@ export function shouldNotify(
   severity: SystemIncidentSeverity,
   milestonesEnv?: string,
 ): boolean {
-  if (severity === 'user_fault' as unknown as SystemIncidentSeverity) return false;
   if (severity === 'low') return wasInserted; // only on first occurrence for low severity
 
   const milestones = milestonesEnv

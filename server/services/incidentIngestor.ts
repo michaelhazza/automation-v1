@@ -164,9 +164,13 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
       errorCode: input.errorCode,
     });
 
-  // 3. Upsert incident + append event + enqueue notify — all in one transaction
-  // so a tx rollback cannot leave a phantom pg-boss notify job in flight.
+  // 3. Upsert incident + append event in one transaction.
+  // NOTE: boss.send is intentionally called AFTER the transaction commits —
+  // calling it inside db.transaction would not enlist in the Drizzle tx and
+  // could leave orphan notify jobs if the tx rolled back.
   const notifyMilestones = process.env.SYSTEM_INCIDENT_NOTIFY_MILESTONES;
+
+  let notifyPayload: { incidentId: string; fingerprint: string; severity: SystemIncidentSeverity; occurrenceCount: number; correlationId: string | null } | null = null;
 
   await db.transaction(async (tx) => {
     // Raw SQL upsert using partial unique index — Drizzle's onConflictDoUpdate
@@ -249,16 +253,22 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
       )
     `);
 
-    // 5. Enqueue notify job if milestone threshold crossed
+    // Capture notify payload to send after transaction commits (boss.send must
+    // not run inside the Drizzle tx — it uses its own connection pool).
     if (shouldNotify(occurrenceCount, wasInserted, currentSeverity, notifyMilestones)) {
-      const boss = await getPgBoss();
-      await boss.send('system-monitor-notify', {
+      notifyPayload = {
         incidentId,
         fingerprint,
         severity: currentSeverity,
         occurrenceCount,
         correlationId: input.correlationId ?? null,
-      });
+      };
     }
   });
+
+  // 5. Enqueue notify job after the transaction has committed.
+  if (notifyPayload) {
+    const boss = await getPgBoss();
+    await boss.send('system-monitor-notify', notifyPayload);
+  }
 }

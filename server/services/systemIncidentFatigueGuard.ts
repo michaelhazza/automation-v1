@@ -13,19 +13,19 @@ export class SystemIncidentFatigueGuard extends AlertFatigueGuardBase {
     super(limits);
   }
 
-  protected async queryTodayCount(fingerprint: string): Promise<number> {
+  protected async queryTodayCount(_fingerprint: string): Promise<number> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    // Count notification_surfaced events for this fingerprint today
+    // NOTE: Counts ALL notification_surfaced events today (not scoped to _fingerprint).
+    // Filtering by fingerprint requires a JOIN to system_incidents — deferred to Phase 0.75.
+    // Phase 0.5 never invokes this guard, so global over-counting is harmless for now.
     const [result] = await db
       .select({ count: count() })
       .from(systemIncidentEvents)
       .where(and(
         eq(systemIncidentEvents.eventType, 'notification_surfaced'),
         gte(systemIncidentEvents.occurredAt, todayStart),
-        // Use SQL for the join: fingerprint lives on system_incidents, not system_incident_events.
-        // For Phase 0.75 this can be refined; Phase 0.5 never calls this method.
       ));
 
     return Number(result?.count ?? 0);

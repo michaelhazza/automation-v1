@@ -2,7 +2,7 @@
 // Seeded by migration 0225 (is_system_org=true, slug='system-ops').
 // This resolver is used by escalateIncidentToAgent so tasks are created
 // in the correct org context.
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations, subaccounts } from '../db/schema/index.js';
 
@@ -32,7 +32,7 @@ export async function resolveSystemOpsContext(): Promise<SystemOpsContext> {
   const [sub] = await db
     .select({ id: subaccounts.id })
     .from(subaccounts)
-    .where(and(eq(subaccounts.organisationId, org.id)))
+    .where(and(eq(subaccounts.organisationId, org.id), isNull(subaccounts.deletedAt)))
     .limit(1);
 
   if (!sub) {
