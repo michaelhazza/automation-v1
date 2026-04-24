@@ -116,7 +116,11 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
       return;
     }
 
-    // Step 4 — insert
+    // Step 4 — insert with idempotency guard (migration 0218). Retries, async
+    // writes, and soft-breaker half-open probes that replay the same logical
+    // delegation event get silently collapsed rather than creating duplicate
+    // rows. ON CONFLICT DO NOTHING matches the mcp_tool_invocations pattern
+    // (architecture.md §mcp_tool_invocations).
     await db.insert(delegationOutcomes).values({
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
@@ -127,7 +131,7 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
       outcome: input.outcome as 'accepted' | 'rejected',
       reason: input.reason ?? null,
       delegationDirection: input.delegationDirection as 'down' | 'up' | 'lateral',
-    });
+    }).onConflictDoNothing();
 
     recordBreakerOutcome(outcomeBreakerState, true, Date.now());
   } catch (err) {

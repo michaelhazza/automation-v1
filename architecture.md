@@ -3095,6 +3095,8 @@ Observability: `insertOutcomeSafe` wraps the DB write with `softBreakerPure.ts` 
 - Exactly one WARN with tag `delegation_outcome_breaker_opened` per trip; once open, subsequent calls drop silently for `DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs` and a half-open probe reopens or closes the breaker.
 - Construction-bug branches (shape validation, actor-id mismatch, subaccount mismatch) do NOT feed the breaker — those are deterministic errors, not pressure signals, and should not cause the breaker to trip against a healthy DB.
 
+Idempotency: the insert is guarded by a partial unique index `delegation_outcomes_idempotency_idx` on `(run_id, caller_agent_id, target_agent_id, delegation_scope, outcome)` (migration 0218). `insertOutcomeSafe` uses `.onConflictDoNothing()` so retries, async writes, and soft-breaker half-open probes that replay the same logical delegation event collapse silently rather than producing duplicate rows. Matches the `mcp_tool_invocations` dedup pattern.
+
 ### Run-trace delegation graph
 
 `GET /api/agent-runs/:id/delegation-graph` returns a DAG (not a tree): nodes are runs, spawn edges come from `parentRunId + isSubAgent = true`, handoff edges come from `handoffSourceRunId`. A single run can have both a spawn parent and a handoff parent. Implemented in `server/services/delegationGraphService.ts` (impure BFS walker) and `server/services/delegationGraphServicePure.ts` (pure assembly). The UI renders the graph as a collapsible tree in `client/src/components/run-trace/DelegationGraphView.tsx` under the "Delegation Graph" tab of `RunTraceViewerPage`.
@@ -3102,6 +3104,19 @@ Observability: `insertOutcomeSafe` wraps the DB write with `softBreakerPure.ts` 
 ### Composition with capability-aware routing
 
 Hierarchy enforcement and capability-aware routing are orthogonal. Hierarchy enforcement (`skillExecutor.ts` scope validation) constrains *which agents* the caller may delegate to. Capability-aware routing (`hierarchyRouteResolverService.ts`) chooses the *best agent within the admissible set* for a given brief. They compose without coupling: hierarchy narrows the candidate set; routing picks the winner.
+
+### Composition with cached-context infrastructure
+
+**Contract (locked):** every run — including delegated children (spawn and handoff) — resolves its own `bundleResolutionSnapshot` independently via `cachedContextOrchestrator`. Delegation does NOT transfer context state from parent to child. The child is an independent `agent_runs` row; its `bundleSnapshotIds`, `variableInputHash`, and budget accounting are scoped to that row alone.
+
+Rationale:
+- `cachedContextOrchestrator` has no awareness of `isSubAgent`, `parentRunId`, `parentSpawnRunId`, or `handoffSourceRunId` — the two subsystems intentionally do not cross-reference at the service layer.
+- Each delegated run may need a different agent, scope, or brief shape; inheriting the parent's snapshot would force them to share context even when that's wrong (e.g. a children-scope delegation to an agent with different skill set).
+- Budgets are easier to reason about per-run than per-chain: `model_tier_budget_policies` applies row-by-row.
+
+When inheritance would help (future opt-in): a scenario where an Orchestrator delegates to a child purely to execute a sub-task within the same contextual frame. That is a future optimization — it requires an explicit opt-in on the delegation skill (e.g. a `reuseParentContext: true` argument on `spawn_sub_agents`) that propagates `bundleSnapshotIds` into the child's `agent_runs` row at insert time. Not in v1. Until then, the contract above is absolute.
+
+Runtime implication for ops: a chain of N delegated runs produces N independent bundle resolutions, N independent prefix hashes, and N separate LLM cache-lookups. That is the intended cost profile.
 
 ### Workspace health detectors
 

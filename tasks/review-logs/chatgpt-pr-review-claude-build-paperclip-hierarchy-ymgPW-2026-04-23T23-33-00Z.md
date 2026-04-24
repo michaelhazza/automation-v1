@@ -110,6 +110,66 @@ Must fix before merge: Architect TodoWrite contradiction; Delegation graph cycle
 
 - **#6** — `delegationDirection` is already enforced (see `skillExecutor.ts:3553` upward-escalation gate) and already derived-only (computed by `computeReassignDirection`, never user-set). The reviewer's two suggested fixes are the current implementation — no code change needed.
 
+---
+
+## Round 2 — 2026-04-23T23-33-00Z (second ChatGPT feedback pass, post-merge-with-main)
+
+### ChatGPT Feedback (raw)
+
+Executive summary — crossed the line from "merge-ready" into production-grade system coherence. Merge with cached-context didn't break the hierarchy model. What remains: two real issues (one important) plus sharp edges.
+
+Findings:
+1. Architect instruction contradiction still not actually resolved — still competing "first steps" framed as mandatory. Clean fix: strict numbered execution order (1. TodoWrite skeleton → 2. Load context → 3. Expand TodoWrite with full plan), remove all other "before any output" phrasing.
+2. Cached-context + delegation missing integration signal — two orthogonal systems coexist but don't explicitly compose. Does a delegated child inherit parent's bundleResolutionSnapshot or recompute? Currently undefined. Lock the contract either way.
+3. delegation_outcomes missing idempotency guard — nothing prevents duplicate inserts for the same event under retries / async writes / soft breaker reopening. Add UNIQUE constraint or deterministic attempt_id.
+4. agent_runs schema drift risk — self-reference broke TS inference once; fix was correct. Approaching inference limits. Recommendation (not now, but soon): split into agent_runs_core / agent_runs_context / agent_runs_delegation.
+5. spec-conformance design revert was correct — no change needed.
+6. Migration sequencing clean — no change.
+7. Soft-breaker pattern reused correctly — no change.
+
+Final verdict: Approve.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Architect TodoWrite/context ordering still ambiguous | technical | implement | auto (implement) | medium | Internal agent-prompt wording; no UX impact; reviewer's proposed structure is strict numbered steps |
+| 2 | Delegation ↔ cached-context contract undefined | technical | implement (docs-only) | auto (implement) | medium | Lock what the code already does: every run resolves its own snapshot independently. Runtime verified: `cachedContextOrchestrator` has zero awareness of delegation primitives |
+| 3 | delegation_outcomes missing idempotency guard | technical | implement | auto (implement) | medium | Adds partial unique index on (run_id, caller, target, scope, outcome) + `onConflictDoNothing()` in the service. Matches the mcp_tool_invocations dedup pattern. Reviewer's suggested key `(run_id, caller, target, created_at)` wouldn't work because `created_at` uses `now()` (changes per write) |
+| 4 | `agent_runs` schema split into core/context/delegation | technical-escalated (defer + architectural) | defer | defer | medium | Escalated per triage rules (defer on technical). User approved defer. Routed to tasks/todo.md under § PR Review deferred items. Reviewer explicitly said "not now"; table split is a weeks-of-work refactor with high downstream consumer breakage; trigger condition is a second TS-inference wall we can't fix surgically |
+| 5 | spec-conformance revert correct | — | — | acknowledgment | — | No action (reviewer confirming our Round 1.5 decision) |
+| 6 | Migration sequencing clean | — | — | acknowledgment | — | No action |
+| 7 | Soft-breaker reuse correct | — | — | acknowledgment | — | No action |
+
+### Implemented (auto-applied technical — 3 findings)
+
+- **[auto] #1 — `.claude/agents/architect.md`** — restructured the agent's opening into a strict five-step "Execution order" block (TodoWrite skeleton → load context → expand TodoWrite → execute list → finish). Removed the competing `Context Loading` and `Task Tracking (mandatory)` sections that had competing "first step" phrasings. Consolidated the minimum TodoWrite skeleton and context files into their own clearly-labelled sections that the Execution order references. Single "before any" phrasing remains, scoped to Step 1 only.
+- **[auto] #2 — `architecture.md` §Hierarchical Agent Delegation** — added a new subsection "Composition with cached-context infrastructure" locking the contract: every run (including delegated children) resolves its own `bundleResolutionSnapshot` independently via `cachedContextOrchestrator`. Explicit rationale, named the runtime implication (N delegated runs → N bundle resolutions + N LLM cache lookups), and called out the future inheritance-opt-in path (`reuseParentContext: true` on `spawn_sub_agents`) as deferred.
+- **[auto] #3 — Migration `0218_delegation_outcomes_idempotency.sql` + `server/services/delegationOutcomeService.ts` + `architecture.md`** — new partial unique index `delegation_outcomes_idempotency_idx` on `(run_id, caller_agent_id, target_agent_id, delegation_scope, outcome)`. `insertOutcomeSafe` now uses `.onConflictDoNothing()` so retries / async replays / soft-breaker half-open probes that replay the same logical delegation event collapse silently. architecture.md §dual-write contract updated to document the idempotency guard and references the mcp_tool_invocations precedent.
+
+### User-decided (1 finding)
+
+- **[user] #4 — defer** — added to `tasks/todo.md` under `## PR Review deferred items / ### PR #182` with explicit trigger conditions for when to revisit.
+
+### Files modified by this round
+
+- `.claude/agents/architect.md`
+- `architecture.md`
+- `migrations/0218_delegation_outcomes_idempotency.sql` (new)
+- `server/services/delegationOutcomeService.ts`
+- `tasks/todo.md`
+- `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md` (this file)
+
+### Top themes
+
+`architecture` (#2 composition contract, #4 deferred structural split), `null_check`-adjacent (#3 DB-level idempotency), `other` (#1 agent-prompt clarity).
+
+### Verification
+
+Typecheck skipped for this round per user instruction. Pre-existing type errors in main's code and our branch's code are unchanged by these edits — only `delegationOutcomeService.ts` touched compiled code, and the change is additive (`.onConflictDoNothing()` is a Drizzle-supported builder method).
+
+---
+
 ### Verification
 
 - `npm run build:server` (repository uses `build:server` as typecheck surface; there is no `typecheck` script) — ran on full working tree. All errors returned are in files not touched by this round: `pulseService.ts`, `regressionCaptureService.ts`, `skillExecutor.ts` at lines outside the delegation paths, `systemPnlService.ts`, `taskService.ts`, `workspaceMemoryService.ts`, `capabilityDiscoveryHandlers.ts`, `requestFeatureHandler.ts`. Filtering the output to any file edited by this round (`hierarchyRouteResolverServicePure`, `delegationOutcomeService`, `delegationGraphServicePure`, `subaccountAgentService`, `orchestratorFromTaskJob`, `shared/types/delegation`, `DelegationGraphView`, `StartingTeamPicker`, `architect.md`) returned zero errors.
