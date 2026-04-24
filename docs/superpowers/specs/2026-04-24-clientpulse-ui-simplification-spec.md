@@ -43,7 +43,7 @@ ClientPulse shipped in Sessions 1 and 2 before `docs/frontend-design-principles.
 - Any change to the backend scoring engine, intervention state machine, or data model
 - New intervention primitives
 - Any behavioural change to the agent execution pipeline
-- Briefing/digest per-client email templates (deferred — see §7)
+- Briefing/digest per-client email templates (deferred — see §11)
 
 **Mockup set** (all in `prototypes/pulse/`):
 - Current-state references: `current-main-dashboard.html`, `current-clientpulse-dashboard.html`
@@ -110,42 +110,56 @@ No new run-detail page is built. The existing `AgentRunLivePage` (route `/runs/:
 
 Renders only when the returned list is non-empty. If empty, the section is hidden entirely — no empty-state panel.
 
-**Data source:** existing `GET /api/pulse/attention` (backed by `pulseService.getAttention()`). This endpoint already returns items from `review_item` (status `pending` / `edited_pending`) and `inbox_item` (status `pending_approval`) classified into `client | major | internal` lanes, which matches the priority order below. No new endpoint is introduced.
+**Data source:** existing `GET /api/pulse/attention` (backed by `pulseService.getAttention()` in `server/services/pulseService.ts`). The endpoint returns items with `kind: 'review' | 'task' | 'failed_run' | 'health_finding'` classified into `client | major | internal` lanes. No new endpoint is introduced.
 
-**Priority sort:** Critical client-health items first (lane = `client`), then major config proposals (lane = `major`), then internal agent clarifications (lane = `internal`). Within each lane, newest-first by `createdAt`.
+**Priority sort:** the server already returns items grouped into `lanes: { client: [...], major: [...], internal: [...] }`. The section flattens them in that order. Within each lane, newest-first by `createdAt` (server-side; client does no re-sort).
 
 Each card shows:
-- Colour-coded left dot (critical = dark red, major = amber, internal = slate)
-- Feature badge pill (ClientPulse / Config change / Agent clarification)
+- Colour-coded left dot (client lane = dark red, major lane = amber, internal lane = slate)
+- Feature badge pill (ClientPulse / Config change / Agent clarification — mapped from `kind` + lane)
 - Client name if applicable (from `pulseItem.subaccountName`)
 - One-line action description (bold)
 - One-line rationale (secondary text)
-- "Open in context" link → the item's `detailUrl` returned by `pulseService.getAttention()` (drilldown for client items; config-assistant popup route for major items; inbox item page for internal)
-- Approve / Reject buttons (right column). **Defer is NOT shipped in v1** — the backend has no defer state and introducing one is out of scope for this UI pass (see §11 Deferred Items).
+- "Open in context" button → routes the user to the real URL for the item
+- Approve / Reject buttons (right column). **Defer is NOT shipped in v1** (see §11 Deferred Items).
 
-**Approve / Reject endpoints (by lane):**
-- Client-health items (`review_item`): use the existing review approve / reject endpoints in `server/routes/`. Name the endpoint at implementation time from the `pulseItem` detail URL the server returns; do not hard-code a path in this spec.
-- Major config items: reuse the existing config-assistant approval flow that `PulsePage` already dispatches.
-- Internal clarifications (`inbox_item`): reuse the existing inbox item approve / reject endpoints.
+**`detailUrl` resolution.** `pulseService.getAttention()` returns `detailUrl` as an opaque token (e.g. `review:<id>`, `task:<id>`, `run:<id>`, `health:<id>`) — NOT a real route. The home dashboard owns a client-side resolver that maps tokens to real paths:
 
-The pending section does NOT introduce any new approve/reject routes. If any of the three item types lacks an approve/reject endpoint today, that surface is out of scope for v1 and the button is disabled with a tooltip ("Open in context to act") — not silently broken.
+| Token | Real route |
+|---|---|
+| `review:<id>` | `/admin/subaccounts/<subaccountId>/pulse` — scoped drilldown target (if `subaccountId` present) or a new review-detail page (deferred — see §11) |
+| `task:<id>` | existing task detail route (whatever `TaskCard` currently navigates to on click) |
+| `run:<id>` | `/runs/<id>/live` (the live run page) |
+| `health:<id>` | subaccount drilldown `/admin/subaccounts/<subaccountId>/...` |
+
+The resolver is a small pure function co-located with `DashboardPage.tsx`. If a token cannot be resolved (e.g. subaccountId missing), the "Open in context" button is disabled with a tooltip "Cannot open in-place — item has no resolvable context yet".
+
+**Approve / Reject contract (narrowed in v1).** The pending card does NOT attempt to reproduce the full approve/reject flow for every item type. Two distinct UX modes are used, chosen by `kind`:
+
+1. **In-place approve/reject** — only for item types whose backend supports button-only approval (no comment, no acknowledgement modal). As of this spec, that is limited to: NONE confirmed to be button-only. The default posture is mode (2).
+2. **Context-flow approve/reject** — the Approve and Reject buttons navigate to the item's resolved detail URL with a `?intent=approve` or `?intent=reject` query param, so the existing context flow (which already owns the rejection-comment modal, the major-acknowledgement modal, etc.) handles the actual submission. This is the default for v1.
+
+G13 (see §9) verifies mode-2 behaviour specifically: clicking Approve or Reject from the pending card lands the operator in the item's existing context flow with the intent preserved; the existing flow completes the submission.
+
+If any `kind` value graduates to mode-1 during implementation (e.g. `task` has a true button-only approval today), add it explicitly to this table — do not silently upgrade.
 
 Cards are `<div>` containers — not `<a>` elements — to avoid nested-interactive-element bugs (see §8.3).
 
-**Primary task:** Approve or reject pending agent proposals without leaving the home screen.
+**Primary task:** Triage pending items from the home screen and land in the right context flow in one click, without hunting through nav.
 
 ### §2.2.1 Component contract — `PendingApprovalCard`
 
 ```typescript
 interface PendingApprovalCardProps {
-  item: PulseAttentionItem;   // shape already returned by pulseService.getAttention()
-  onApprove: (item: PulseAttentionItem) => Promise<void>;
-  onReject: (item: PulseAttentionItem) => Promise<void>;
-  onOpenInContext: (item: PulseAttentionItem) => void;
+  item: PulseItem;                                 // shape exported from server/services/pulseService.ts
+  resolveDetailUrl: (detailUrl: string) => string | null;  // from the home-dashboard resolver
+  onAct: (item: PulseItem, intent: 'approve' | 'reject' | 'open') => void;
 }
 ```
 
-Card is a `<div>` (not `<a>`) — interactive child buttons/links mandate the nested-anchor rule in §8.3. The lane colour, feature badge, rationale text, and action routing are all derived from `item` — the card has no per-lane branching logic baked in.
+The card does NOT invoke approve/reject HTTP calls directly. All three buttons call `onAct(item, intent)` — the parent (DashboardPage) navigates to the resolved URL with the intent preserved, and the existing context flow handles submission. This keeps the card UI-only and matches the mode-2 contract above. If a future `kind` graduates to mode-1 (in-place approve), the card contract gains optional `onApproveInPlace` / `onRejectInPlace` props at that time.
+
+Card is a `<div>` (not `<a>`) — interactive child buttons/links mandate the nested-anchor rule in §8.3. The lane colour, feature badge, and rationale text are all derived from `item` — the card has no per-lane branching logic baked in beyond those derivations.
 
 ### §2.3 Workspace feature cards
 
@@ -153,10 +167,10 @@ Hard-coded v1 card set — 2-card horizontal grid (responsive: 2 columns on wide
 
 | Card | Data shown | Link |
 |---|---|---|
-| ClientPulse | Health distribution bar (4-band) + pill counts + "N clients need attention · $X MRR at risk" | `/clientpulse` |
+| ClientPulse | Health distribution bar (3-band) + pill counts ("N healthy · N need attention · N at risk") | `/clientpulse` |
 | Settings | Team member count + integration status | `/clientpulse/settings` |
 
-The ClientPulse card data comes from `GET /api/clientpulse/health-summary` (already used by `ClientPulseDashboardPage`). The Settings card uses static text + integration status pulled from the existing org context.
+The ClientPulse card data comes from `GET /api/clientpulse/health-summary` (already used by `ClientPulseDashboardPage`) which exposes `healthy | attention | atRisk` counts. MRR / revenue-at-risk is NOT rendered — the health-summary endpoint does not expose a revenue field today, and extending it is a scope expansion not covered by this UI pass (see §11). The Settings card uses static text + integration status pulled from the existing org context.
 
 **Deferred cards (see §11):**
 - **CRM Queries card** — deferred until `/crm` route exists.
@@ -232,9 +246,18 @@ The "Propose" button is removed from this list view — intervention proposals a
 
 The proposed mockup shows a 90-day portfolio trend chart below the Latest Report widget. This is deferred to a follow-on session. The chart would show the org-level health band distribution over time — a genuine navigational aid, not a decoration. Defer gate: only add if an operator explicitly asks "how is my portfolio trending overall?" See §11 Deferred Items.
 
-### §3.5 Backend data additions required by §3.2
+### §3.5 Backend data additions required by §3.2 and §6.3
 
-The current `GET /api/clientpulse/high-risk` (in `server/routes/clientpulseReports.ts`) returns `{ clients: [] }` with a TODO — it is not wired to any data source. This spec requires that endpoint to be implemented with the response contract below. The route + any new service helpers are part of the §10 inventory as modifications.
+The current `GET /api/clientpulse/high-risk` (in `server/routes/clientpulseReports.ts`) returns `{ clients: [] }` with a TODO — it is not wired to any data source. This spec requires that endpoint to be implemented with the response contract below, which backs BOTH the dashboard Needs Attention list (§3.2) and the full clients-list page (§6.3). This is the single source of truth for the endpoint; §6.3 references this contract rather than restating it.
+
+**Query parameters:**
+
+| Param | Type | Default | Purpose |
+|---|---|---|---|
+| `limit` | integer | 7 (dashboard) / 25 (clients list) | Max rows returned. Server enforces a hard max of 25. |
+| `band` | `all \| critical \| at_risk \| watch \| healthy` | `all` | Filters to the selected band. When `band=all`, Healthy clients are excluded (dashboard default). When `band=healthy`, ONLY healthy clients are returned (opt-in, used by the clients-list page's Healthy chip). All other band values return only that band. |
+| `q` | string | unset | Case-insensitive substring match on `subaccountName`. Applied before sort + limit. |
+| `cursor` | opaque string | unset | Load-more cursor. The server signs the cursor so forward pagination is stable even when rows are inserted. |
 
 **Response contract:**
 
@@ -251,12 +274,12 @@ interface HighRiskClientsResponse {
     hasPendingIntervention: boolean;    // derived from review_item / action status
     drilldownUrl: string;               // e.g. "/clientpulse/clients/:subaccountId"
   }>;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 ```
 
-**Sort order:** the server MUST apply the §3.2 sort (PENDING first, then Critical, then At Risk, then Watch) so the client can trust the order. Healthy clients MUST NOT appear in the response.
-
-**Row cap:** the server honours a `limit` query param (default 7, max 25) so this endpoint can also back the clients-list page (§6.3) without duplication.
+**Sort order:** the server applies the §3.2 sort (PENDING first, then Critical, then At Risk, then Watch, then Healthy if `band=healthy`) so the client can trust the order regardless of which surface is consuming it.
 
 ### §3.6 Component contracts — `NeedsAttentionRow`, `SparklineChart`
 
@@ -471,11 +494,7 @@ The banner renders only when `pendingIntervention` is non-null; parents pass `nu
 **Built file:** Not built (new page). Route: `/clientpulse/clients`
 **What to build:** Filterable list of all clients with health-band filter chips (All / Critical / At Risk / Watch / Healthy) + search input. Each row: colour dot, client name, sparkline, health score + delta, last action, arrow link to drilldown. Pagination: load-more pattern (not offset pagination).
 
-**Data source:** reuses the same `GET /api/clientpulse/high-risk` endpoint defined in §3.5, invoked with `limit=25` and a `band` query param that maps to the active filter chip (`all | critical | at_risk | watch | healthy`). When the Healthy chip is active, the endpoint's "no healthy clients" rule in §3.5 is relaxed by passing `band=healthy` — this is an opt-in mode, not the default. The endpoint's sort order remains PENDING first → Critical → At Risk → Watch → (Healthy when requested).
-
-**Search input:** the `q` query param filters by `subaccountName` substring (case-insensitive). Server applies the filter before sort + limit so load-more pages are consistent.
-
-**Load-more pagination:** the response includes `{ clients: [...], hasMore: boolean, nextCursor: string | null }`. Cursor is an opaque server-signed token; the client passes it as `?cursor=...` to fetch the next page. No offset pagination — cursor only, so inserted rows don't skip.
+**Data source:** reuses the `GET /api/clientpulse/high-risk` endpoint defined in §3.5. The page invokes it with `limit=25` and whichever `band` / `q` / `cursor` params the UI state requires. The full endpoint contract (query params, response shape, sort rules, pagination model) lives in §3.5 — do not restate it here. The clients-list page is a pure consumer of that contract.
 
 ### §6.4 Propose intervention modal
 
@@ -569,7 +588,7 @@ Both surfaces render `s.contribution` as a decimal float (e.g. `0.34` in the mod
 | **G3** | Unified activity feed renders rows for all six activity types without crashing. | Manual: seed one row of each `type` value via the DB or a stub endpoint response; visit the home dashboard; visually confirm each renders without a React error. No unit test required. |
 | **G4** | Activity feed "View log →" link appears only for `agent_run` / `workflow_execution` rows with a non-null `runId`. Human-action rows have no link. | Manual: visual check across seeded rows covering all six types. No unit test required. |
 | **G5** | `AgentRunLivePage` shows the run meta bar (agent name, status, duration, event count, started timestamp). | Manual: open any completed run → meta bar visible with all 5 fields. |
-| **G6** | `/admin/pulse` and `/admin/subaccounts/:subaccountId/pulse` redirect to `/` in the SPA (client-side `<Navigate>`). | Manual: visit both URLs in a browser after login → UI lands on the home dashboard without a 404. |
+| **G6** | `/admin/pulse` and `/admin/subaccounts/:subaccountId/pulse` redirect to `/` in the SPA. Sidebar "Pulse" nav and BriefDetailPage back-link land on the home dashboard, not on a 404 or stale route. | Manual: (a) visit both `/admin/pulse` URLs directly → UI lands on home without a 404. (b) Click the sidebar nav item that formerly said "Pulse" → lands on home. (c) Open a brief detail page and click `← Back` → lands on home. No `/admin/pulse` references remain in `grep -rn "/admin/pulse" client/src/`. |
 | **G7** | ClientPulse Needs Attention list shows PENDING chip on clients with pending interventions; those rows sort first. | Manual: approve all → no chips. Propose one → chip appears on that client row, row moves to top. |
 | **G8** | Inline sparklines render correct colour per health band (Critical = dark red, At Risk = red, Watch = amber, Healthy = green). | Visual check against mockup. |
 | **G9** | `FireAutomationEditor` no longer renders `a.id`. `ProposeInterventionModal` AND `SignalPanel` no longer render `s.contribution`. | `grep -rn "\ba\.id\b" client/src/components/clientpulse/FireAutomationEditor.tsx` returns no matches in the picker render (line ~39). `grep -rn "s\.contribution" client/src/components/clientpulse/` returns no matches in the modal or signal panel. |
@@ -610,7 +629,9 @@ Both surfaces render `s.contribution` as a decimal float (e.g. `0.34` in the mod
 | `client/src/components/clientpulse/FireAutomationEditor.tsx` | Remove `a.id` render per §8.1 |
 | `client/src/components/clientpulse/ProposeInterventionModal.tsx` | Remove `s.contribution` render per §8.2; add 90-day trend mini-chart in modal header (§6.4) |
 | `client/src/components/clientpulse/drilldown/SignalPanel.tsx` | Remove `s.contribution` render per §8.2 |
-| `client/src/App.tsx` | Repoint `/` at `DashboardPage` (remove current `/ → /admin/pulse` redirect); remove `/admin/pulse` and `/admin/subaccounts/:subaccountId/pulse` PulsePage routes; add `<Navigate to="/" replace />` redirects for both retired paths; add `/clientpulse/clients` route for the new clients-list page |
+| `client/src/App.tsx` | Repoint `/` at `DashboardPage` (remove current `/ → /admin/pulse` redirect); remove `/admin/pulse` and `/admin/subaccounts/:subaccountId/pulse` PulsePage routes; add `<Navigate to="/" replace />` redirects for both retired paths; review all other `<Navigate to="/admin/pulse" ... />` entries (e.g. `/inbox`, `/admin/activity`, `/admin/subaccounts/:id/inbox`, `/admin/subaccounts/:id/activity`) and repoint them to `/` where the redirect is semantically "take me home"; add `/clientpulse/clients` route for the new clients-list page |
+| `client/src/components/Layout.tsx` | Remove or repoint the "Pulse" nav items that point at `/admin/pulse` (line ~684 for subaccount-scoped) and `/admin/pulse` (line ~691 for org-scoped). The nav becomes a "Home" link pointing at `/` instead, since the pending-approval surface now lives on the home dashboard. |
+| `client/src/pages/BriefDetailPage.tsx` | Repoint the `← Back` link from `/admin/pulse` to `/` (line ~157). |
 | `server/routes/activity.ts` | Extend `ActivityItem` additive fields (`triggeredByUserId`, `triggeredByUserName`, `triggerType`, `durationMs`, `runId`) per §4.2 — the service and the denormalising joins change, not the route surface |
 | `server/services/activityService.ts` | Back the additive `ActivityItem` fields end-to-end (joins, type export) — see §4.2 |
 | `server/routes/clientpulseReports.ts` | Implement `GET /api/clientpulse/high-risk` per the §3.5 contract (currently returns `{ clients: [] }` with TODO); back the `/clientpulse/clients` list page's filter/search/load-more semantics (§6.3) |
@@ -639,6 +660,10 @@ All in `prototypes/pulse/`. Current-state references: `current-main-dashboard.ht
 Single source of truth for everything the spec mentions but does NOT ship in this session. An item is in scope if and only if it is NOT in this list.
 
 - **Defer 24h behaviour for pending approval cards.** The home dashboard pending cards (§2.2) and the drilldown PendingHero (§6.2.1) show Approve / Reject only — no Defer. Backend has no defer state and adding one is a scope expansion (new column + endpoint + state semantics). Ship only if an operator explicitly asks for "snooze this decision for a day".
+- **In-place approve/reject mode for pending cards.** §2.2's v1 contract uses mode-2 only: Approve/Reject buttons on the home dashboard pending card navigate to the item's existing context flow (which owns rejection-comment and major-acknowledgement modals). A mode-1 in-place button-only submission path is deferred until a `kind` is confirmed to have a true button-only approve/reject primitive on the backend. Ship mode-1 for that `kind` at that time; do not pre-build mode-1 speculatively.
+- **Token resolver for `review:<id>` items.** §2.2's client-side resolver maps `pulseService` tokens to real URLs. For `review:<id>` tokens, the current fallback is the subaccount-scoped drilldown (when `subaccountId` is present) or a disabled "Cannot open in-place" tooltip. A dedicated review-detail page (e.g. `/reviews/:id`) is deferred — ship only if an operator explicitly asks for a direct deep-link to a review without going through the subaccount drilldown.
+- **MRR / revenue-at-risk on the ClientPulse workspace card.** §2.3 drops the "$X MRR at risk" line because `GET /api/clientpulse/health-summary` does not expose a revenue field today. Extending the summary endpoint is a scope expansion not covered by this UI pass. Ship when (a) subaccount revenue is available in canonical data AND (b) an operator explicitly asks for an MRR-at-risk signal on the home screen.
+- **§6.8 Onboarding audit.** `OnboardingWizardPage.tsx` and `OnboardingCelebrationPage.tsx` are AUDIT-ONLY in this spec — no file edits are pre-committed. If the audit finds specific edits to make, promote the files to §10 "To modify" at that time. Otherwise, no changes ship under this spec.
 - **CRM Queries workspace card.** Deferred until `/crm` is a real route with a landing page. Re-open §2.3 to add the card when the route exists.
 - **Agents workspace card.** Deferred until `/agents` is a real landing page (it currently redirects to `/`). Re-open §2.3 to add the card when the route exists.
 - **90-day portfolio trend chart.** §3.4 describes an org-level health-band distribution chart below the Latest Report widget. Ship only if an operator explicitly asks "how is my portfolio trending overall?"
