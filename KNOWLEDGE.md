@@ -412,6 +412,34 @@ Undefined composition boundaries become production bugs once real usage hits the
 
 **Generalises to any multi-subsystem PR.** Hierarchy × context (this case), routing × hierarchy, observability × billing, feature flags × A/B experiments, auth × delegation. Every seam is either an explicit contract or a future incident waiting for real usage.
 
+### 2026-04-24 Correction — Consolidate duplicated code paths in situ, don't patch one path
+
+When a reviewer flags a bug in a feature that has two functionally-equivalent code paths (e.g. a primary pipeline path and a retry/manual-invoke path), the instinct to fix only the broken path is wrong — the user's correction was *"should never be two code paths — fix this while you're looking at this"*. The underlying defect is the duplication itself; patching one path locks in the divergence and guarantees the next change cycle reintroduces the same bug. Classic example from this session: `skillAnalyzerJob.ts` Fix-1 fallback got updated (commit `55d8c089`) but the parallel `skillAnalyzerService.ts:classifySingleCandidate` retry path silently stayed on the old null-merge stub — reviewer retries produced "Proposal unavailable" for months. Fix was to extract `buildClassifierFailureOutcome` in `skillAnalyzerServicePure.ts` as the single source of truth and point both paths at it.
+
+**Why:** Two paths producing the same outcome is an invitation for divergence on the next edit. Every future fix to one path must be mirrored to the other; it never is. The duplication is the bug.
+
+**How to apply:** When the first bug finding in a feature is "path A works, path B doesn't," don't just fix path B. Read both paths, find the shared primitive (the thing they're both computing), lift it to a pure helper, route both callers through it. Run tests, commit together. If the larger consolidation risks scope creep (validation pipeline on retry, etc.), fix the immediate divergence and file the remaining consolidation as a tagged todo — but always do the immediate consolidation, not a one-path patch.
+
+### 2026-04-24 Gotcha — `node --watch` restart silently kills in-flight long-running LLM jobs
+
+`node --watch` drops all open TCP connections when it restarts (triggered by any file save on a watched path). In-flight Anthropic API calls are recorded by Anthropic as 499 "Client disconnected" and exit immediately. The pg-boss job entry stays in `active` state because the error handler in the worker never ran (process was killed mid-execution). This produces two symptoms: (1) the UI shows skills stuck mid-classification indefinitely; (2) the Resume button never appears because the DB job is still `classifying`, not `failed`. Production fix: don't run long-running classification jobs under `node --watch` — always use a stable process (e.g. `node dist/server.js`) for any batch that takes >30 seconds.
+
+**Gotcha layer 2 — pg-boss ghost `active` lock.** After the worker dies, pg-boss keeps the job in `active` state until `expireInSeconds` (14400 = 4 hours). Any `resumeJob` call during that window throws 409 "already running." Fix in `skillAnalyzerService.ts:resumeJob`: when the DB job is `failed` but pg-boss still shows `active`, issue a direct UPDATE to `pgboss.job` to expire the ghost row, then proceed with resume.
+
+### 2026-04-24 Gotcha — Resume seeding contract must declare all Stage 5c consumers of `libraryId`/`proposedMerge`
+
+`skillAnalyzerJob.ts` Stage 5 resume seeding (the block that reconstructs `classifiedResults` from DB) historically set `libraryId: null` and `proposedMerge: null` with the comment *"safe — downstream consumers only read candidateIndex and classification."* That contract was accurate when written, but Stage 5c (`SOURCE_FORK`, `NEAR_REPLACEMENT`, `CONTENT_OVERLAP` checks) is an undocumented consumer of both fields. Setting `libraryId: null` caused Stage 5c to `continue` over all resumed entries, silently producing zero fork/overlap warnings.
+
+**Fix:** The resume seeding block now calls the extended `listResultIndicesForJob` which returns `matchedSkillId` and `proposedMergedInstructions`/`proposedMergedName` from the DB, then hydrates both fields. The contract comment was updated to reflect all known consumers.
+
+**Rule:** whenever Stage 5 reads a field from `classifiedResults` that seeding sets to `null`, that field must appear in the resume seeding block. Audit the seeding object against all Stage 5 field accesses before shipping any new Stage 5 check.
+
+### 2026-04-24 Gotcha — Always seed `classify_state.queue` from the full `llmQueue`, not just the remaining subset
+
+At Stage 5 start, `classify_state.queue` is written once and used by the UI to control the stable display order of AI-classifying skills in `SkillAnalyzerProcessingStep`. On a resume, if the queue is seeded with only the remaining unclassified slugs (e.g. 4 of 19), two UI bugs follow: (1) the 4 resumed skills jump to the top of the list because the stable-order logic is keyed on queue position; (2) after Stage 6/7 writes all result rows to the DB, hash-matched `DUPLICATE` skills appear as phantom entries in the `doneOnly` fallback path.
+
+**Fix:** `classify_state.queue` is always set from the full `llmQueue` (all AI-classified candidates from Stage 4, in their original order), regardless of how many are remaining on resume. In the UI, `displaySlugs` was simplified to just `classifyQueue` — `DUPLICATE` skills are intentionally excluded because they resolve in Stage 6/7 and have no per-skill progress to show in the classifier view.
+
 ### 2026-04-24 Pattern — Discriminator-trust contract for half-migrated payloads
 
 When a payload type adds optional structured fields alongside a legacy regex/string-shape fallback, the field-presence check (`if (!field) fall back to regex`) is the wrong gate. It conflates "emitter hasn't migrated" (`field === undefined`) with "emitter has migrated and explicitly says unknown" (`field === null`). The result: half-migrated emitters that explicitly set `null` for an unknown value silently get their human summary re-parsed by the regex bridge, producing the wrong answer or a phantom value.
@@ -477,6 +505,113 @@ Inject the warn sink as a parameter (`warn: WarnSink = defaultWarnSink`) so test
 
 **Applied to:** `client/src/components/agentRunLog/eventRowPure.ts` `FALLBACK_WARN_CODES` constant + `WarnSink` type + injectable default (Riley Wave 1 PR #186 rounds 2 R2-1 and 3 R3-3). Generalises to every observable deprecation — billing-pipeline shims, schema-version branches, retry-policy migrations.
 
+### 2026-04-24 Pattern — Display-threshold filters must preserve state-bearing items
+
+When a UI list is filtered to hide "low-signal" entries (scores below a threshold, recommendations below a confidence bar, results below a relevance cutoff), the filter is correct only if the predicate also preserves any item that carries user-visible state — `selected`, `pinned`, `acknowledged`, `resolved`, `dismissed`. Hiding a state-bearing item below the threshold silently traps the state with no UI affordance to reverse it: the user cannot see the selection, cannot deselect it, and often doesn't know it exists.
+
+**Wrong:**
+```ts
+// Hides low-score proposals — but also hides a below-threshold proposal
+// that was already selected, so the user can't deselect it.
+const proposals = allProposals.filter(
+  (p) => p.isProposedNewAgent || p.score >= DISPLAY_THRESHOLD,
+);
+```
+
+**Right:**
+```ts
+// State-bearing items pass through regardless of score.
+const proposals = allProposals.filter(
+  (p) => p.selected || p.isProposedNewAgent || p.score >= DISPLAY_THRESHOLD,
+);
+```
+
+**Rule:** whenever a filter predicate uses a score/relevance/confidence threshold, ask "does any item in the source list carry user-visible state that survives renders?" If yes, the state predicate must appear in the OR alongside the threshold predicate.
+
+**Detection heuristic.** Grep for `.filter(` predicates that contain `>= `, `>`, `< `, `<=` against a numeric score/confidence field. For each hit, check whether the same list carries a boolean state field (`selected`, `pinned`, `resolved`, `acknowledged`, `expanded`). If yes and the predicate doesn't reference that state field, the filter is a candidate trap.
+
+**Applied to:** `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` `AgentChipBlock` — added `p.selected ||` to the `proposals` filter alongside the existing `AGENT_SCORE_DISPLAY_THRESHOLD` guard (PR #185 chatgpt-pr-review round 1 finding 1). Generalises to any approval / selection / pinning UI where items are hidden below a relevance threshold.
+
+### 2026-04-24 Pattern — Dev-time invariant at module load catches partition/enum drift without runtime cost
+
+When a module exports multiple partition sets that must jointly cover an enum (e.g. `FORMATTING_WARNING_CODES` vs the primary warning tier in a warning classifier, mid-flight vs terminal status subsets in a state machine), the partition and the enum live in separate files and drift apart silently as new enum members land. A new warning code added to `mergeTypes.ts` but not classified into either set falls into the default primary bucket — miscategorised, but with no compile error and no runtime signal.
+
+**Rule:** at module load time, in non-production only, walk the enum and assert every member appears in exactly one partition. Use `console.warn` (not `throw`) so a partition drift doesn't hard-crash production even if it somehow slipped past build — but make the warning loud and specific enough that a developer running the app locally sees it immediately.
+
+```ts
+// At module scope, not inside a component.
+if (process.env.NODE_ENV !== 'production') {
+  for (const [code, tier] of Object.entries(DEFAULT_WARNING_TIER_MAP)) {
+    if (tier === 'informational' && !FORMATTING_WARNING_CODES.has(code as WarnCode)) {
+      console.warn(
+        `[MergeReviewBlock] invariant violation: "${code}" is informational-tier ` +
+        `but not in FORMATTING_WARNING_CODES — update the partition or reclassify the tier.`,
+      );
+    }
+  }
+}
+```
+
+**Why this is the right layer.** Type-level enforcement (union types, `satisfies`) can catch this at compile time but requires every enum consumer to opt into the type discipline, and TypeScript's narrowing doesn't always extend to `Set` membership. A unit test can catch it but only runs in CI — local dev changes that introduce drift won't surface until CI fails. A module-load check splits the difference: zero runtime cost in production, immediate feedback the moment a developer opens a page that imports the module.
+
+**Detection heuristic.** Grep for `const FOO_SET = new Set([...])` or `const FOO_CODES = [...] as const` declarations that define a subset of a broader enum. If the enum lives in a separate file and there's no module-load check that cross-references them, the partition is a candidate for drift.
+
+**Applied to:** `client/src/components/skill-analyzer/MergeReviewBlock.tsx` — added a dev-time loop at module load that warns if any informational-tier `MergeWarningCode` is missing from `FORMATTING_WARNING_CODES` (PR #185 chatgpt-pr-review round 1 finding 6). Generalises to every "enum-subset-as-partition" module: status classifiers, permission tier maps, event priority maps, alert severity partitions.
+
+### 2026-04-24 Gotcha — Stale-job sweep window leaves a recovery-blocked gap for resume
+
+A background sweep that marks ghost/stale jobs as `failed` after a threshold (e.g. 15 min of no heartbeat) interacts with a resume endpoint that checks the local row's status before force-expiring the worker-queue ghost lock. If the resume endpoint's force-expire branch only fires when `status === 'failed'`, there's a window — from the moment the worker dies until the sweep promotes the row — during which the local row is still mid-flight, the pg-boss ghost is still `active`, and the resume endpoint throws 409 "already running." The user sees a dead job that can't be resumed for up to `sweepThresholdMs`.
+
+**Rule:** the resume endpoint's force-expire branch must cover both conditions — (a) the local row is already `failed` (sweep ran), and (b) the local row is still mid-flight but `updated_at` is older than a conservative stale bound (e.g. 2× the sweep threshold). Condition (b) closes the sweep-window gap without racing the sweep: if the sweep hasn't run yet but the row is clearly abandoned by any reasonable heartbeat standard, allow the force-expire. Add a structured log event (`<service>.resume_force_expired_ghost`) so ops can see when the gap-recovery path fires in production.
+
+**Detection heuristic.** For any async job subsystem with (1) a "running/queued → failed" background sweep and (2) a resume endpoint that checks status before recovering from a worker-queue ghost state: read the resume endpoint's status check and ask "what does this do between the moment the worker dies and the moment the sweep promotes?" If the answer is "reject with a 409," there's a gap bug.
+
+**Applied to:** `server/services/skillAnalyzerService.ts:resumeJob` force-expire branch — broadened to also cover mid-flight rows whose `updated_at` is older than 30 min (2× `STALLED_THRESHOLD_MS`), with a `skill_analyzer.resume_force_expired_ghost` log event (PR #185 chatgpt-pr-review round 1 finding 7). Complements the existing 2026-04-24 pg-boss ghost `active` lock gotcha above: that entry documents the ghost lock; this one documents the sweep-window gap in the recovery path.
+
+### 2026-04-24 Pattern — Diff rendering must branch explicitly on empty-string inputs
+
+Text diff libraries (`diffWordsWithSpace`, `diffChars`, etc.) handle empty-string inputs technically correctly but produce output that confuses downstream "did anything change?" checks. For `diffWordsWithSpace("", "foo")` the result is `[{added: "foo"}]` — which is right in principle, but any fallback path that asks "did at least one token survive unchanged?" flips to false and renders a misleading empty-strikethrough block ("nothing removed, nothing unchanged → must be a full replacement from X to Y"). The fallback is designed for genuine full replacements, not for the one-side-empty case.
+
+**Rule:** before delegating to any diff library, branch explicitly on empty inputs. Empty baseline + non-empty value → render as pure addition. Non-empty baseline + empty value → render as pure removal. Both empty → render nothing. Only fall through to the library when both sides have content.
+
+```ts
+function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
+  if (baseline === '' && value === '') return null;
+  if (baseline === '') return <Added>{value}</Added>;
+  if (value === '') return <Removed>{baseline}</Removed>;
+  // Both sides non-empty — library's edge cases are well-behaved here.
+  const parts = diffWordsWithSpace(baseline, value);
+  // ...
+}
+```
+
+**Why the guard is not "just a polish."** The empty-string case is hit routinely — deleting a field, clearing an optional description, a newly-added value that didn't exist before. Every one of those flows through the fallback branch if the guard is missing, and the fallback renders incorrectly (empty strikethrough where pure addition is correct, or vice versa). This isn't a theoretical edge case; it's the normal code path for any add-or-remove field in a merge review UI.
+
+**Detection heuristic.** Grep for `diffWordsWithSpace`, `diffChars`, `diffLines`, or any call to a diff primitive. For each hit, read the surrounding logic and check whether the empty-input cases are handled before the library call. If the code goes straight into `const parts = diff...()` without an empty guard, it's a candidate bug.
+
+**Applied to:** `client/src/components/skill-analyzer/MergeReviewBlock.tsx` `InlineDiff` — added explicit empty-baseline and empty-value branches before the `diffWordsWithSpace` call (PR #185 chatgpt-pr-review round 1 finding 5). Generalises to any merge / review / before-after UI that diffs strings.
+
+### 2026-04-24 Pattern — State-bearing items should surface first, not just pass the filter
+
+Complement to the round-1 "Display-threshold filters must preserve state-bearing items" entry above. That rule ensures state-bearing items (selected, pinned, acknowledged) don't get silently hidden by a score threshold. This entry covers the visual corollary: once a state-bearing item has passed the filter, it should also render at the top of the list, not buried among unselected peers in the order the filter produced.
+
+**Rule:** for any list that mixes selected + unselected (or pinned + unpinned, resolved + unresolved) items after filtering, sort state-bearing items to the top. Use `Array.prototype.sort` — stable in ES2019+ — so the secondary ordering (score, recency, alphabetic) is preserved within each group.
+
+```ts
+const visible = allProposals
+  .filter((p) => p.selected || p.score >= DISPLAY_THRESHOLD)
+  .sort((a, b) => Number(b.selected) - Number(a.selected));
+// Selected chips render first; unselected preserve their score-ranked order.
+```
+
+**Why it matters.** The round-1 filter fix prevents silent state loss but doesn't solve discoverability: a selected below-threshold item that passes the filter can still render at position 12 of 15 chips, where a user searching for "what did I select?" won't see it without scanning. Sorting lifts it to the front.
+
+**Pairing rule.** Whenever you add a state-predicate to a threshold filter (the round-1 rule), apply this sort rule in the same change. The two rules are complementary: the filter keeps state-bearing items from being hidden; the sort keeps them from being buried.
+
+**Detection heuristic.** Grep for `.filter(` predicates that OR a boolean state field (`p.selected`, `p.pinned`, `p.resolved`) with a threshold comparison. For each hit, check whether the downstream render iterates in the filter's order. If yes and there's no sort applied, the list is a candidate for a visibility improvement.
+
+**Applied to:** `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` `AgentChipBlock` — appended `.sort((a, b) => Number(b.selected) - Number(a.selected))` to the `proposals` derivation alongside the round-1 `p.selected ||` filter predicate (PR #185 chatgpt-pr-review round 2 finding 5). Generalises to any chip list, row list, or card list where user-selected items should be surfaced before unselected peers.
+
 ### 2026-04-24 Gotcha — ChatGPT reviewers hallucinate "duplicate line" bugs by reading unified diffs as final state (seen 2 times in this review)
 
 **Signature pattern.** ChatGPT (and similar LLM reviewers) cite what looks like two adjacent JSX / code lines in HEAD, both keyed identically, with *slightly different attributes*. When you verify against the actual file, only one line is present — the other is the `-` side of a unified diff for an edit that replaced the first with the second. The reviewer read both sides of a diff hunk as coexisting in the final file.
@@ -498,3 +633,15 @@ Current file: exactly one `<li>` at one line, with `className="text-[13px]"`. Th
 **Same-session recurrence.** When the same hallucination pattern surfaces a second time in the same session on the same file, that is signal: the reviewer is anchored on the diff, not HEAD. No further rounds will recover signal from that anchor. Finalise the session rather than opening another round.
 
 **Prior entries on this pattern:** 2026-04-17 Gotcha (rebase with merge conflicts), 2026-04-17 Correction (verify against PR diff perspective), 2026-04-17 Gotcha (GitHub unified diff commonly misread). This is now **4 occurrences across 2 PRs** — it is a structural failure mode of LLM PR review, not a one-off. The right mitigation is in the review-agent contract (always verify with `Read` before acting), not in the codebase.
+
+### 2026-04-24 Convention — Don't spot-fix a string if a deferred refactor already replaces the pathway
+
+During round 3 of a ChatGPT PR review, the reviewer suggested rewriting a user-visible error copy ("already running" → "Worker is still shutting down — try again shortly") in `SkillAnalyzerProcessingStep.tsx` — the string extraction path that parses the 409 response body. The suggestion is valid in isolation. What made it a reject-not-defer is that a round-1 deferral already scoped a tagged-union response contract (`{ status: 'resumed' | 'already_running' | 'rejected', reason? }`) which replaces the error-string-parsing pathway entirely. Applying the copy fix now produces a spot-fix that must be reverted when the contract lands — pure rework.
+
+**Rule:** before accepting a reviewer's polish suggestion on a code path, check the deferred backlog (`tasks/todo.md § Deferred from...` sections) for any entry that replaces or restructures that same pathway. If the deferred refactor will obsolete the line you're being asked to change, reject the polish with a pointer to the deferred item — do not queue both.
+
+**Detection heuristic.** When a reviewer suggests a small-scoped copy / string / error-message change, grep `tasks/todo.md` for the file name or the adjacent function name. If a deferred item mentions the same surface, the polish is almost certainly a duplicate — reject and note the overlap in the round's Decisions table.
+
+**Why this is a convention, not a gotcha.** The backlog is authoritative for "things already planned" regardless of whether the planner is the same reviewer or a prior one. Ignoring it produces PR-level churn (apply → revert → apply different version) and a split commit history that obscures the refactor's intent. Applies to every review-agent loop: ChatGPT PR review, Codex dual-reviewer, human reviewers.
+
+**Applied to:** PR #185 ChatGPT review round 3 finding 6 — rejected the "already running" error-string rewrite because round-1 finding 3 had already deferred the resume tagged-union contract (see `tasks/todo.md § Deferred from chatgpt-pr-review — PR #185`). Session log: `tasks/review-logs/chatgpt-pr-review-bugfixes-april26-2026-04-24T11-55-28Z.md`.

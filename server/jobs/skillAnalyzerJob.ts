@@ -38,6 +38,8 @@ import {
   unmarkSkillInFlight,
   updateResultAgentProposals,
   updateJobAgentRecommendation,
+  appendBatchCollisionWarnings,
+  applyBatchDeductionAndWarningAtomic,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -47,10 +49,18 @@ import {
   extractInvocationBlock,
   richnessScore,
   buildRuleBasedMerge,
+  buildClassifierFailureOutcome,
   remediateTables,
+  decontaminateSectionRows,
+  stripSourceAnnotations,
+  recoverDroppedTableRows,
+  recoverOutputFormat,
+  startsWithPersonaOpener,
+  detectContentOverlap,
   detectSkillGraphCollision,
   type LibrarySkillSummary,
   type MergeWarning,
+  type ProposedMerge,
   type ValidationThresholds,
 } from '../services/skillAnalyzerServicePure.js';
 import { effectiveTierMap } from '../services/skillAnalyzerConfigService.js';
@@ -515,10 +525,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
     classifyState: {
-      // Only the remaining (un-classified) slugs belong in the live queue; the
-      // inFlight map is always reset — any entries from a prior crashed
-      // process refer to calls that are definitively dead.
-      queue: resumedLlmQueue.map((m) => candidates[m.candidateIndex].slug),
+      // Full LLM-candidate list (not just remaining) so the UI can show all
+      // skills in stable original order. Already-classified ones render as
+      // 'done' via deriveRowStatus; the inFlight map is reset — any entries
+      // from a prior crashed process refer to calls that are definitively dead.
+      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
       inFlight: {},
     },
   });
@@ -592,11 +603,20 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         confidence:                    0,
         similarityScore:               null,
         classificationReasoning:       null,
-        libraryId:                     null,
+        // v5 infra: hydrate libraryId + proposedMerge from DB so Stage 5c
+        // fork/overlap detection works correctly on resumed runs.
+        libraryId:                     existing.matchedSkillId ?? null,
         librarySlug:                   null,
         libraryName:                   null,
         diffSummary:                   null,
-        proposedMerge:                 null,
+        proposedMerge:                 existing.proposedMergedInstructions != null
+          ? {
+              name:        existing.proposedMergedName ?? '',
+              description: '',
+              definition:  {},
+              instructions: existing.proposedMergedInstructions,
+            }
+          : null,
         classificationFailed:          false,
         classificationFailureReason:   null,
       });
@@ -712,6 +732,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           librarySkills,
           excludedId,
           validationThresholds,
+          candidate.name,
         ),
       ];
 
@@ -764,12 +785,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
     });
   } else {
-    // Concurrency 2: even 3 concurrent PARTIAL_OVERLAP/IMPROVEMENT calls
-    // can exhaust the rolling TPM budget on the current Anthropic tier,
-    // causing all in-flight calls to stall together on 429 backoff. 2 keeps
-    // meaningful parallelism while halving peak token draw; drop to 1 if
-    // stalls still occur on marketing-heavy imports.
-    const limit = await getPLimit(2);
+    // Concurrency 3: all classify calls run in parallel. Drop to 2 if
+    // 429 rate-limit stalls occur on large marketing-heavy imports.
+    const limit = await getPLimit(3);
     // Resume-aware progress: start the counter at the number of candidates
     // that were already classified by a prior run so the UI percentage doesn't
     // regress after a worker restart.
@@ -992,28 +1010,106 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classifierFallbackApplied = true;
             }
           } else {
-            // LLM call failed or parse error — synth rule-based merge.
-            const fallback = buildRuleBasedMerge({
-              candidate: {
-                name: candidate.name,
-                description: candidate.description,
-                definition: (candidate.definition as object | null) ?? null,
-                instructions: candidate.instructions ?? null,
-              },
-              library: {
-                name: matchedLib.name,
-                description: matchedLib.description,
-                definition: (matchedLib.definition as object | null) ?? null,
-                instructions: matchedLib.instructions ?? null,
-              },
-            });
+            // v5 Fix 6: if similarity < 70% AND incoming cross-references the
+            // library skill explicitly, the LLM would likely have said DISTINCT.
+            // Avoid a low-quality merge by classifying as DISTINCT instead.
+            const isDistinctFallback =
+              (match.similarity ?? 1) < 0.70 &&
+              skillAnalyzerServicePure.crossReferencesLibrarySkill(
+                candidate.description,
+                matchedLib.name,
+                matchedLib.slug,
+              );
+
+            if (isDistinctFallback) {
+              finalResult = {
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                reasoning: `Classifier unavailable. Matched at ${Math.round((match.similarity ?? 0) * 100)}% with "${matchedLib.name}" but incoming skill cross-references it as a separate tool — treated as distinct. Review manually.`,
+                proposedMerge: null,
+              };
+            } else {
+              // LLM call failed or parse error — route through the shared
+              // buildClassifierFailureOutcome helper so the job path and the
+              // retry path (skillAnalyzerService.ts → classifySingleCandidate)
+              // emit identical fallback state.
+              const fallback = buildClassifierFailureOutcome({
+                candidate: {
+                  name: candidate.name,
+                  description: candidate.description,
+                  definition: (candidate.definition as object | null) ?? null,
+                  instructions: candidate.instructions ?? null,
+                },
+                library: {
+                  name: matchedLib.name,
+                  description: matchedLib.description,
+                  definition: (matchedLib.definition as object | null) ?? null,
+                  instructions: matchedLib.instructions ?? null,
+                },
+              });
+              finalResult = {
+                classification: fallback.classification,
+                confidence: fallback.confidence,
+                reasoning: fallback.reasoning,
+                proposedMerge: { ...fallback.proposedMerge, mergeRationale: fallback.mergeRationale },
+              };
+              classifierFallbackApplied = true;
+            }
+          }
+
+          // v7-B Fix #3a: self-contradiction check. If the LLM's own merge
+          // rationale contains phrases like "neither fully replaces the other"
+          // or "produce different artifacts", the model is arguing against its
+          // own classification. Flip to DISTINCT before persistence so the
+          // reviewer never sees a low-confidence merge with a rationale that
+          // disqualifies it. Runs BEFORE the cross-reference check so the
+          // classifier's most explicit self-contradiction wins; the cross-ref
+          // path picks up cases where the rationale doesn't say it but the
+          // candidate description does.
+          if (
+            (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT') &&
+            skillAnalyzerServicePure.rationaleArguesAgainstMerge(finalResult.reasoning)
+          ) {
             finalResult = {
-              classification: 'PARTIAL_OVERLAP' as const,
-              confidence: 0.3,
-              reasoning: 'LLM classification failed — rule-based fallback merge applied for human review.',
-              proposedMerge: { ...fallback.merge, mergeRationale: fallback.mergeRationale },
+              classification: 'DISTINCT',
+              confidence: Math.max(finalResult.confidence, 0.80),
+              reasoning: `v7-B self-contradiction check: classifier returned ${finalResult.classification} but its own rationale argues against the merge — auto-flipped to DISTINCT. Original reasoning: ${finalResult.reasoning}`,
+              proposedMerge: null,
             };
-            classifierFallbackApplied = true;
+            classifierFallbackApplied = false;
+          }
+
+          // v6 Fix 5: post-classifier DISTINCT_FALLBACK. If the LLM returned
+          // PARTIAL_OVERLAP but the incoming skill explicitly cross-references
+          // the matched library skill as a separate tool ("see X", "for X, use Y"),
+          // the incoming is positioning itself as distinct — merging would produce
+          // a confused hybrid. Reclassify if similarity is also below 70%; for
+          // high-similarity cross-references we keep the merge but add an
+          // informational warning so the reviewer is aware.
+          let crossRefKeptAsPartialOverlap = false;
+          if (
+            (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT') &&
+            skillAnalyzerServicePure.crossReferencesLibrarySkill(
+              candidate.description,
+              matchedLib.name,
+              matchedLib.slug,
+            )
+          ) {
+            const similarity = match.similarity ?? 1;
+            if (similarity < 0.70) {
+              finalResult = {
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                reasoning:
+                  `${finalResult.reasoning} — post-classifier DISTINCT_FALLBACK: incoming skill cross-references "${matchedLib.name}" as a separate tool (similarity ${Math.round(similarity * 100)}%), so the merge was discarded in favour of presenting this as a new skill.`,
+                proposedMerge: null,
+              };
+              classifierFallbackApplied = false;
+            } else {
+              // Similarity ≥ 70% → keep PARTIAL_OVERLAP but flag for the
+              // informational warning emitted after validation.
+              crossRefKeptAsPartialOverlap = true;
+            }
           }
 
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
@@ -1074,6 +1170,46 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   skippedDueToKeyConflict: remediated.skippedDueToKeyConflict,
                 });
               }
+              // Always strip [SOURCE: ...] annotations regardless of whether
+              // rows were recovered — they are internal merge artifacts that
+              // must never appear in the user-facing stored merge.
+              // decontaminateSectionRows first removes rows appended into the
+              // wrong section (cross-section table pollution); stripSourceAnnotations
+              // then removes all remaining annotation markers.
+              if (storedMerge!.instructions) {
+                const decontaminated = decontaminateSectionRows(storedMerge!.instructions);
+                const stripped = stripSourceAnnotations(decontaminated);
+                if (stripped !== storedMerge!.instructions) {
+                  storedMerge = { ...storedMerge!, instructions: stripped };
+                }
+              }
+            }
+
+            // Issue A remediation: if either source had an invocation block but
+            // the merged output doesn't start with one, prepend the source's
+            // canonical block. This handles the LLM case where the incoming
+            // skill's persona opener displaces the library's invocation trigger.
+            const sourceInvocation = baseInvocation ?? nonBaseInvocation;
+            if (sourceInvocation && storedMerge!.instructions) {
+              const mergedBlock = extractInvocationBlock(storedMerge!.instructions);
+              const isAtTop = mergedBlock !== null
+                && storedMerge!.instructions.trimStart().startsWith(mergedBlock.trimStart());
+              if (!isAtTop) {
+                // Fix 6 (v4): if the merged output opens with a persona statement
+                // ("You are an expert…"), insert `---` separator so the invocation
+                // trigger and the persona are visually distinct.
+                const separator = startsWithPersonaOpener(storedMerge!.instructions)
+                  ? '\n\n---\n\n'
+                  : '\n\n';
+                storedMerge = {
+                  ...storedMerge!,
+                  instructions: `${sourceInvocation.trimEnd()}${separator}${storedMerge!.instructions.trimStart()}`,
+                };
+                logger.info('skill_analyzer_invocation_block_prepended', {
+                  candidateSlug: candidate.slug,
+                  source: baseInvocation ? 'base' : 'nonBase',
+                });
+              }
             }
 
             mergeWarnings = validateMergeOutput(
@@ -1085,7 +1221,44 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               librarySkills,
               excludedId,
               validationThresholds,
+              candidate.name,
             );
+
+            // Fix 2 (v4): append source tables as reference appendix when
+            // tables were dropped (merged rows < 50% of source rows).
+            if (storedMerge!.instructions) {
+              const recovered = recoverDroppedTableRows(
+                storedMerge!.instructions,
+                baseSkill.instructions,
+                nonBaseSkill.instructions,
+              );
+              if (recovered !== storedMerge!.instructions) {
+                storedMerge = { ...storedMerge!, instructions: recovered };
+                logger.info('skill_analyzer_table_drop_recovery', { candidateSlug: candidate.slug });
+              }
+            }
+
+            // Fix 7 (v4): recover output format block when OUTPUT_FORMAT_LOST fires.
+            if (
+              storedMerge!.instructions &&
+              mergeWarnings.some(w => w.code === 'OUTPUT_FORMAT_LOST')
+            ) {
+              const recovered = recoverOutputFormat(
+                storedMerge!.instructions,
+                baseSkill.instructions,
+                nonBaseSkill.instructions,
+              );
+              if (recovered !== storedMerge!.instructions) {
+                storedMerge = { ...storedMerge!, instructions: recovered };
+                // Update warning text to indicate recovery happened.
+                mergeWarnings = mergeWarnings.map(w =>
+                  w.code === 'OUTPUT_FORMAT_LOST'
+                    ? { ...w, message: 'Output format block was missing in merge. Recovered and appended as reference section.' }
+                    : w,
+                );
+                logger.info('skill_analyzer_output_format_recovered', { candidateSlug: candidate.slug });
+              }
+            }
 
             // Prepend CLASSIFIER_FALLBACK when the rule-based path ran, so
             // the UI banner + approval gate both activate.
@@ -1128,6 +1301,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               });
             }
 
+            // v6 Fix 5: informational warning when an incoming skill cross-
+            // references the matched library skill but similarity is ≥ 70%, so
+            // the merge is kept. Reviewer should know the incoming was
+            // designed to live alongside the library skill.
+            if (crossRefKeptAsPartialOverlap) {
+              mergeWarnings.push({
+                code: 'CROSS_REFERENCES_DISTINCT',
+                severity: 'warning',
+                message: `This skill cross-references "${matchedLib.name}" as a separate tool, but similarity (${Math.round((match.similarity ?? 0) * 100)}%) was high enough to keep the merge. Review whether the two should remain distinct.`,
+              });
+            }
+
             if (mergeWarnings.length > 0) {
               console.info('[SkillAnalyzer] merge_warnings_summary', {
                 candidateSlug: candidate.slug,
@@ -1136,6 +1321,23 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               });
             }
           }
+
+          // v6 Fix 4: calibrate the classifier's self-reported confidence with
+          // structural signals from validation. Applied after all warnings are
+          // computed so the adjustment sees REQUIRED_FIELD_DEMOTED field
+          // counts, SOURCE_FORK membership, table drop / restructure state,
+          // and self-referencing Related Skills sections.
+          const adjustedConfidence = skillAnalyzerServicePure.adjustClassifierConfidence(
+            finalResult.confidence,
+            mergeWarnings,
+            {
+              mergedInstructions: storedMerge?.instructions ?? null,
+              mergedName: storedMerge?.name ?? candidate.name,
+              candidateSlug: candidate.slug,
+              librarySlug: matchedLib.slug,
+            },
+          );
+          finalResult = { ...finalResult, confidence: adjustedConfidence };
 
           classifiedResults.push({
             candidateIndex: match.candidateIndex,
@@ -1212,6 +1414,156 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         })
       )
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 5b: Cross-batch collision detection (v3 Fix 3)
+  // -------------------------------------------------------------------------
+  // After all per-skill merges are written, compare each in-batch merged skill
+  // against every other in-batch merged skill to catch intra-batch capability
+  // overlaps (e.g. cold-email and email-sequence both owning cold outreach).
+  // Library-level collisions were already detected per-skill in Stage 5;
+  // this pass only handles candidate-vs-candidate collisions.
+  {
+    const batchMergeResults = classifiedResults.filter(
+      (r) =>
+        r.proposedMerge &&
+        (r.classification === 'PARTIAL_OVERLAP' || r.classification === 'IMPROVEMENT'),
+    );
+
+    if (batchMergeResults.length >= 2) {
+      const batchCatalog = batchMergeResults.map((r) => {
+        const pm = r.proposedMerge as ProposedMerge;
+        return {
+          id: null as string | null,
+          slug: r.candidate.slug,
+          name: pm.name,
+          instructions: pm.instructions ?? null,
+        };
+      });
+
+      const batchWarningsBySlug = new Map<string, MergeWarning[]>();
+
+      for (const result of batchMergeResults) {
+        const catalogExcludingSelf = batchCatalog.filter(
+          (b) => b.slug !== result.candidate.slug,
+        );
+        if (catalogExcludingSelf.length === 0) continue;
+
+        const batchCollisions = detectSkillGraphCollision({
+          merged: result.proposedMerge as ProposedMerge,
+          libraryCatalog: catalogExcludingSelf,
+          excludedId: null,
+        });
+
+        if (batchCollisions.length === 0) continue;
+
+        const newWarnings: MergeWarning[] = batchCollisions.map((c) => ({
+          code: 'SKILL_GRAPH_COLLISION' as const,
+          severity: 'warning' as const,
+          message: `Merged skill overlaps ~${Math.round(c.overlapRatio * 100)}% with incoming batch skill "${c.collidingName}".`,
+          detail: JSON.stringify({
+            collidingSkillId: null,
+            collidingSlug: c.collidingSlug,
+            collidingName: c.collidingName,
+            overlapRatio: c.overlapRatio,
+            overlappingFragments: c.overlappingFragments,
+            batchCollision: true,
+          }),
+        }));
+
+        batchWarningsBySlug.set(result.candidate.slug, newWarnings);
+        logger.info('skill_analyzer_batch_collision', {
+          jobId,
+          candidateSlug: result.candidate.slug,
+          collidingSlugs: batchCollisions.map((c) => c.collidingSlug),
+        });
+      }
+
+      if (batchWarningsBySlug.size > 0) {
+        await appendBatchCollisionWarnings(jobId, batchWarningsBySlug);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 5c: Source fork detection (v4 Fix 3) + content overlap (v4 Fix 8)
+  // -------------------------------------------------------------------------
+  {
+    // Fix 3: group PARTIAL_OVERLAP / IMPROVEMENT candidates by matched library
+    // skill ID — multiple candidates mapping to the same library skill produce
+    // overlapping merged tools with no disambiguation.
+    const byLibraryId = new Map<string, typeof classifiedResults>();
+    for (const r of classifiedResults) {
+      if (!r.libraryId) continue;
+      if (r.classification !== 'PARTIAL_OVERLAP' && r.classification !== 'IMPROVEMENT') continue;
+      const group = byLibraryId.get(r.libraryId) ?? [];
+      group.push(r);
+      byLibraryId.set(r.libraryId, group);
+    }
+    const forkEntries: Array<{ slug: string; deduction: number; warning: MergeWarning }> = [];
+    for (const group of byLibraryId.values()) {
+      if (group.length < 2) continue;
+      const names = group.map(r => r.candidate.name);
+      for (const r of group) {
+        const others = names.filter(n => n !== r.candidate.name);
+        forkEntries.push({
+          slug: r.candidate.slug,
+          // v6 Fix 4 follow-up — coefficient mirrors adjustClassifierConfidence.
+          deduction: 0.05,
+          warning: {
+            code: 'SOURCE_FORK',
+            severity: 'warning',
+            message: `Source fork detected: this skill and ${others.length} other(s) (${others.join(', ')}) all merged from the same library skill. Approving multiple forks creates overlapping tools.`,
+            detail: JSON.stringify({ librarySkillId: r.libraryId, forkCandidates: names }),
+          },
+        });
+      }
+    }
+    if (forkEntries.length > 0) {
+      // v6 Fix 4 follow-up (Codex iter-2 review): single atomic UPDATE per
+      // slug sets confidence AND appends the SOURCE_FORK warning together.
+      // Separating the two calls left a crash window where the deduction
+      // committed without the marker, causing the same slug to be deducted
+      // again on resume. The atomic helper closes that window AND keeps the
+      // marker-based idempotency guard so re-runs over already-marked rows
+      // are no-ops.
+      await applyBatchDeductionAndWarningAtomic(jobId, forkEntries, 'SOURCE_FORK');
+      logger.info('skill_analyzer_source_forks_detected', {
+        jobId, forkCount: forkEntries.length,
+      });
+    }
+
+    // Fix 8: content overlap — flag pairs of in-batch merges that share H3+
+    // section headings with > 70% content similarity.
+    const mergesForOverlap = classifiedResults
+      .filter(r => r.proposedMerge && (r.classification === 'PARTIAL_OVERLAP' || r.classification === 'IMPROVEMENT'))
+      .map(r => ({
+        slug: r.candidate.slug,
+        instructions: (r.proposedMerge as ProposedMerge | null)?.instructions ?? null,
+      }));
+
+    if (mergesForOverlap.length >= 2) {
+      const overlaps = detectContentOverlap(mergesForOverlap, 0.60);
+      if (overlaps.length > 0) {
+        const overlapWarningsBySlug = new Map<string, MergeWarning[]>();
+        for (const o of overlaps) {
+          const msg = `Content overlap with "${o.candidateSlugB}": section "${o.overlappingHeading}" is ~${o.similarityPct}% similar. Ensure each skill has a distinct scope.`;
+          const existing = overlapWarningsBySlug.get(o.candidateSlugA) ?? [];
+          existing.push({ code: 'CONTENT_OVERLAP', severity: 'warning', message: msg, detail: JSON.stringify(o) });
+          overlapWarningsBySlug.set(o.candidateSlugA, existing);
+
+          const msgB = `Content overlap with "${o.candidateSlugA}": section "${o.overlappingHeading}" is ~${o.similarityPct}% similar.`;
+          const existingB = overlapWarningsBySlug.get(o.candidateSlugB) ?? [];
+          existingB.push({ code: 'CONTENT_OVERLAP', severity: 'warning', message: msgB, detail: JSON.stringify(o) });
+          overlapWarningsBySlug.set(o.candidateSlugB, existingB);
+        }
+        await appendBatchCollisionWarnings(jobId, overlapWarningsBySlug);
+        logger.info('skill_analyzer_content_overlaps_detected', {
+          jobId, overlapCount: overlaps.length,
+        });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1408,14 +1760,36 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // Haiku calls are cheaper but share the same API key quota.
     const agentEnrichLimit = await getPLimit(3);
 
+    // Heartbeat — bump `updated_at` every HEARTBEAT_EVERY enriched skills so
+    // the stale-analyzer-job sweep can distinguish a slow Stage 7b from a
+    // dead worker. Without this, Stage 7b updates progress once at start
+    // and stays silent until Stage 8 — a 10+ min legitimate window that
+    // the 15-min sweep threshold would otherwise have to absorb.
+    //
+    // Concurrency safety: enrichedCount is incremented inside per-task
+    // `finally` blocks running under p-limit(3). JS is single-threaded;
+    // `enrichedCount++` then `enrichedCount % HEARTBEAT_EVERY === 0` runs
+    // atomically per microtask, so no heartbeat can be skipped due to
+    // interleaving. The `|| enrichedCount === totalToEnrich` clause covers
+    // the degenerate `totalToEnrich < HEARTBEAT_EVERY` case.
+    const HEARTBEAT_EVERY = 5;
+    const totalToEnrich = distinctIndicesToEnrich.size;
+    let enrichedCount = 0;
+
     await Promise.all(
       [...distinctIndicesToEnrich].map((candidateIndex) =>
         agentEnrichLimit(async () => {
           const candidate = candidates[candidateIndex];
-          if (!candidate) return;
+          if (!candidate) {
+            enrichedCount++;
+            return;
+          }
 
           const existingProposals = agentProposalsByCandidateIndex.get(candidateIndex) ?? [];
-          if (existingProposals.length === 0) return;
+          if (existingProposals.length === 0) {
+            enrichedCount++;
+            return;
+          }
 
           try {
             const { system, userMessage } = skillAnalyzerServicePure.buildAgentSuggestionPrompt(
@@ -1522,6 +1896,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               slug: candidate.slug,
               error: err instanceof Error ? err.message : String(err),
             });
+          } finally {
+            enrichedCount++;
+            // Heartbeat: bump `updated_at` every HEARTBEAT_EVERY tasks (and
+            // always on the last one) so the stale-job sweep can tell a
+            // working Stage 7b from a dead one. Best-effort — a heartbeat
+            // failure must not abort enrichment.
+            if (enrichedCount % HEARTBEAT_EVERY === 0 || enrichedCount === totalToEnrich) {
+              try {
+                await updateJobProgress(jobId, {
+                  progressPct: 92,
+                  progressMessage: `Refining agent assignments with AI… ${enrichedCount}/${totalToEnrich}`,
+                });
+              } catch (heartbeatErr) {
+                logger.warn('skill_analyzer_stage7b_heartbeat_failed', {
+                  jobId,
+                  enrichedCount,
+                  error: heartbeatErr instanceof Error ? heartbeatErr.message : String(heartbeatErr),
+                });
+              }
+            }
           }
         })
       )

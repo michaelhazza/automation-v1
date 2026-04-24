@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
 import type { AnalysisJob, AnalysisResult } from './SkillAnalyzerWizard';
+import { isTerminalAnalyzerStatus } from './analyzerStatus';
 
 interface Props {
   jobId: string;
@@ -32,10 +33,11 @@ function deriveRowStatus(
   if (result) return result.classificationFailed ? 'failed' : 'done';
   const startedAt = inFlight[slug];
   if (startedAt !== undefined) {
-    // 120s threshold: per-call classify budget is 180s (SKILL_CLASSIFY_TIMEOUT_MS)
-    // with a one-shot retry, so anything under 2 min is still well inside the
-    // normal envelope — flagging earlier just creates false-alarm noise.
-    return nowMs - startedAt > 120_000 ? 'stale' : 'classifying';
+    // 210s threshold: per-call classify budget is 180s (SKILL_CLASSIFY_TIMEOUT_MS)
+    // with a one-shot retry, so a skill can legitimately be in flight up to
+    // ~180s before we should expect a result. 210s (3.5 min) gives a comfortable
+    // 30s margin above the per-call budget before flagging as stale.
+    return nowMs - startedAt > 210_000 ? 'stale' : 'classifying';
   }
   return 'queued';
 }
@@ -49,12 +51,31 @@ function failureReasonLabel(reason: string | null | undefined): string {
   }
 }
 
+// Threshold for treating an in-flight job as "stuck". The worker publishes
+// progress every time it advances a candidate through Stage 5 (classify) or
+// enters a new stage, so 5 min of true silence means the worker has died
+// (SIGKILL / OOM / pg-boss expireIn fired) or has been wedged on a call that
+// somehow bypassed its own per-call timeout. At that point we surface the
+// Resume button — the backend will refuse if pg-boss still has a live entry.
+const STALLED_THRESHOLD_MS = 5 * 60_000;
+
 export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onComplete, onStartNew }: Props) {
   const [currentJob, setCurrentJob] = useState<AnalysisJob>(initialJob);
   const [pollErrorCount, setPollErrorCount] = useState(0);
   const [liveResults, setLiveResults] = useState<AnalysisResult[]>([]);
   const [nowMs, setNowMs] = useState<number>(Date.now());
-  const [lastProgressAt, setLastProgressAt] = useState<number>(Date.now());
+  // Seed from initialJob.updatedAt so the stalled-detection threshold is
+  // measured against the server's last real progress tick — not against
+  // page-mount. A job that's been silent for 60 min before the user opens
+  // the tab must flip to "stalled" immediately, not 5 min later.
+  const [lastProgressAt, setLastProgressAt] = useState<number>(
+    () => new Date(initialJob.updatedAt).getTime(),
+  );
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  // Bumped on successful Resume to re-arm the polling loop below (which
+  // halts itself on terminal 'failed' state).
+  const [pollVersion, setPollVersion] = useState(0);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1_000);
@@ -63,7 +84,10 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
 
   useEffect(() => {
     // Terminal state at mount — no polling needed.
-    if (initialJob.status === 'completed' || initialJob.status === 'failed') return;
+    // (On pollVersion > 0 this effect was re-run by Resume, so don't early-out
+    // based on initialJob anymore — use currentJob.)
+    const snapshot = pollVersion === 0 ? initialJob : currentJob;
+    if (isTerminalAnalyzerStatus(snapshot.status)) return;
 
     // Local `cancelled` flag instead of a ref — refs + StrictMode double-mount
     // leave the cleanup-set ref stuck at false across the second mount, which
@@ -102,14 +126,58 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
       clearInterval(interval);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [jobId, pollVersion]);
 
   const isFailed = currentJob.status === 'failed';
+  const isTerminal = isTerminalAnalyzerStatus(currentJob.status);
   const pct = currentJob.progressPct ?? 0;
-  const showPollWarning = !isFailed && currentJob.status !== 'completed' && pollErrorCount >= 2;
+  const showPollWarning = !isTerminal && pollErrorCount >= 2;
+  // Stalled = worker likely died silently mid-pipeline. Job row still says
+  // 'classifying'/'embedding'/etc., but no progress message in 5+ min.
+  const isStalled =
+    !isTerminal
+    && currentJob.status !== 'pending'
+    && nowMs - lastProgressAt > STALLED_THRESHOLD_MS;
+  const canResume = isFailed || isStalled;
+
+  async function handleResume() {
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await api.post(`/api/system/skill-analyser/jobs/${jobId}/resume`);
+      // Optimistically reset local state so the UI flips out of the
+      // failed/stalled view immediately; the next poll tick replaces this
+      // with the authoritative row written by the handler.
+      setCurrentJob((j) => ({
+        ...j,
+        status: 'pending',
+        errorMessage: null,
+        progressMessage: 'Resuming analysis...',
+      }));
+      setLastProgressAt(Date.now());
+      setPollErrorCount(0);
+      // Re-arm the main polling effect (it halted itself on terminal state).
+      setPollVersion((v) => v + 1);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Failed to resume analysis.';
+      setResumeError(msg);
+    } finally {
+      setResuming(false);
+    }
+  }
 
   const classifyQueue = currentJob.classifyState?.queue ?? [];
   const inFlight = currentJob.classifyState?.inFlight ?? {};
+
+  // The queue is the full LLM-candidate list in original import order,
+  // set once at Stage 5 start and never shrunk. Already-classified skills
+  // render as ✓ done via deriveRowStatus; in-flight and queued ones show
+  // their live state. Hash-matched (DUPLICATE) skills are never in the queue
+  // and intentionally don't appear here — this view is the AI-classify view.
+  const displaySlugs = classifyQueue;
+  const showSkillList = !isTerminal && displaySlugs.length > 0;
 
   return (
     <div className="space-y-4">
@@ -129,18 +197,33 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
           )}
         </div>
         {isFailed && (
-          <button
-            onClick={onStartNew}
-            className="shrink-0 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            Start New Analysis
-          </button>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={handleResume}
+              disabled={resuming}
+              className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {resuming ? 'Resuming…' : 'Resume analysis'}
+            </button>
+            <button
+              onClick={onStartNew}
+              className="px-4 py-2 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Start New
+            </button>
+          </div>
         )}
       </div>
 
       {isFailed && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {currentJob.errorMessage || 'An unexpected error occurred during processing.'}
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 space-y-2">
+          <p>{currentJob.errorMessage || 'An unexpected error occurred during processing.'}</p>
+          <p className="text-xs text-red-600">
+            Resuming picks up from the last persisted step — classifications already completed are not re-run, so no extra AI cost.
+          </p>
+          {resumeError && (
+            <p className="text-xs font-medium text-red-800">{resumeError}</p>
+          )}
         </div>
       )}
 
@@ -161,18 +244,54 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
               <span className="text-xs text-slate-500">{pct}%</span>
             </div>
 
-            {!(currentJob.status === 'classifying' && classifyQueue.length > 0) && (
+            {!showSkillList && (
               <div className="flex justify-center mt-4">
                 <div className="w-6 h-6 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
               </div>
             )}
           </div>
 
+          {/* Progress warnings — kept directly under the progress bar so they
+              stay above the fold regardless of how many skills are in the queue. */}
+          {isStalled && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span className="shrink-0">⚠</span>
+              <div className="flex-1 space-y-2">
+                <p>
+                  No progress for over 5 minutes. The worker may have crashed or been timed out.
+                  Classifications already completed are safe on the server — resuming picks up
+                  from where it stopped without re-running any AI calls.
+                </p>
+                {resumeError && (
+                  <p className="text-xs font-medium text-amber-900">{resumeError}</p>
+                )}
+                <button
+                  onClick={handleResume}
+                  disabled={resuming}
+                  className="px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {resuming ? 'Resuming…' : 'Resume analysis'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {currentJob.status === 'classifying' && nowMs - lastProgressAt > 210_000 && !isStalled && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <span className="shrink-0">⚠</span>
+              <span>
+                No progress for over 3 min — one or more classification calls may be stalled.
+                The job will recover automatically; any calls that don&apos;t complete fall back
+                to a rule-based merge for reviewer triage.
+              </span>
+            </div>
+          )}
+
           {/* Per-skill classification rows */}
-          {currentJob.status === 'classifying' && classifyQueue.length > 0 && (
+          {showSkillList && (
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="space-y-px">
-                {classifyQueue.map((slug) => {
+                {displaySlugs.map((slug) => {
                   const status = deriveRowStatus(slug, liveResults, inFlight, nowMs);
                   const result = liveResults.find((r) => r.candidateSlug === slug);
                   return (
@@ -215,17 +334,6 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
                   })()}
                 </p>
               </div>
-            </div>
-          )}
-
-          {currentJob.status === 'classifying' && nowMs - lastProgressAt > 120_000 && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <span className="shrink-0">⚠</span>
-              <span>
-                No progress for over 2 min — one or more classification calls may be stalled.
-                The job will recover automatically; any calls that don&apos;t complete fall back
-                to a rule-based merge for reviewer triage.
-              </span>
             </div>
           )}
 

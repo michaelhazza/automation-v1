@@ -9,8 +9,8 @@ import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
-import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind, ProposedMerge, SkillAnalyzerJobStatus } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
 import { createHash, randomUUID } from 'crypto';
@@ -62,6 +62,7 @@ function toErrorMessage(err: unknown): string {
 }
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
 import { skillParserService } from './skillParserService.js';
 // Phase 1 of skill-analyzer-v2: the analyzer is system-only. The
 // org-skill skillService import was removed; executeApproved now writes
@@ -77,9 +78,19 @@ import { configBackupService } from './configBackupService.js';
 // Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
 // ---------------------------------------------------------------------------
 
-export type SkillAnalyzerJobStatus =
-  | 'pending' | 'parsing' | 'hashing' | 'embedding'
-  | 'comparing' | 'classifying' | 'completed' | 'failed';
+// Status union is defined once in skillAnalyzerServicePure.ts alongside the
+// mid-flight and terminal subsets. Re-export here so existing callers keep
+// their import path.
+export {
+  SKILL_ANALYZER_JOB_STATUSES,
+  SKILL_ANALYZER_MID_FLIGHT_STATUSES,
+  SKILL_ANALYZER_TERMINAL_STATUSES,
+  isSkillAnalyzerTerminalStatus,
+  isSkillAnalyzerMidFlightStatus,
+  type SkillAnalyzerJobStatus,
+  type SkillAnalyzerMidFlightStatus,
+  type SkillAnalyzerTerminalStatus,
+} from './skillAnalyzerServicePure.js';
 
 /** Create a new analysis job and enqueue it for background processing.
  *  For paste/github, rawInput is the text/url string.
@@ -130,13 +141,142 @@ export async function createJob(params: {
 
   const jobId = rows[0].id;
 
-  // Enqueue pg-boss job
+  // Enqueue pg-boss job. Passing getJobConfig so the queue actually
+  // respects the retry/expire settings declared in jobConfig.ts; without
+  // this, pg-boss defaults applied (notably a 15-min expireIn) which
+  // killed otherwise-healthy long runs mid-Stage-5. singletonKey stays
+  // undefined — one-shot enqueue per jobId.
   const boss = await getPgBoss();
   await boss.send('skill-analyzer', { jobId }, {
+    ...getJobConfig('skill-analyzer'),
     singletonKey: undefined,
   });
 
   return { jobId };
+}
+
+/** Re-enqueue a previously-started analysis job that failed or stalled.
+ *  The handler is crash-resumable: Stage 1 reuses stored parsedCandidates,
+ *  Stage 5 skips already-classified candidateIndices, and Stage 6 hits
+ *  the agent-embedding cache when content hashes match. So resuming is
+ *  effectively free on LLM spend.
+ *
+ *  Safety guards:
+ *    - Refuses if job.status === 'completed' (work already done)
+ *    - Refuses if an alive pg-boss queue entry for this jobId still
+ *      exists (would cause double-processing and Stage 8 race conditions)
+ *
+ *  Intermediate status (e.g. 'classifying') is accepted and reset — this
+ *  is the common case where a worker was SIGKILL'd mid-pipeline and left
+ *  the row in an in-flight state. */
+
+/** How long a mid-flight row must be silent before resume will force-expire
+ *  a lingering pg-boss `active` entry. 2× the stale-sweep threshold so
+ *  this path only trips on jobs that are clearly dead but haven't yet been
+ *  reaped by the periodic sweep. See Round 1 Finding 7. */
+const RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS = 30 * 60_000;
+
+export async function resumeJob(params: {
+  jobId: string;
+  organisationId: string;
+  userId: string;
+}): Promise<{ ok: true }> {
+  const { jobId, organisationId } = params;
+
+  const [job] = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(
+      eq(skillAnalyzerJobs.id, jobId),
+      eq(skillAnalyzerJobs.organisationId, organisationId),
+    ));
+
+  if (!job) throw { statusCode: 404, message: 'Analysis job not found.' };
+  if (job.status === 'completed') {
+    throw { statusCode: 409, message: 'Analysis already completed — nothing to resume.' };
+  }
+
+  // Guard against double-enqueue: if pg-boss already has a live row for
+  // this jobId, resuming would run the handler twice in parallel and both
+  // copies would fight over the Stage-8 insert set.
+  //
+  // Exception: a lingering 'active' pg-boss entry combined with EITHER
+  //   (a) our DB row is 'failed', or
+  //   (b) our DB row is mid-flight but has been silent past the stale
+  //       resume threshold (2× the sweep threshold = 30 min by default),
+  // means the worker process died without pg-boss detecting it (pg-boss's
+  // own lock only expires after expireInSeconds, which is 4 hours). Force-
+  // expire the ghost so resume can proceed rather than blocking the user
+  // for hours on a dead worker.
+  //
+  // Case (b) matters because the sweep runs periodically; between worker
+  // death and the next sweep tick a user clicking Resume would otherwise
+  // get "already queued or running" for up to 15 min despite nothing
+  // actually running. See ChatGPT PR review Round 1 Finding 7.
+  //
+  // drizzle-orm/postgres-js returns db.execute() as the row array directly
+  // (NOT { rows }) — see server/services/jobQueueHealthService.ts for the
+  // established cast pattern.
+  const aliveRows = await db.execute(sql`
+    SELECT COUNT(*)::int AS n
+    FROM pgboss.job
+    WHERE name = 'skill-analyzer'
+      AND data->>'jobId' = ${jobId}
+      AND state IN ('created', 'retry', 'active')
+  `);
+  const aliveCount = (aliveRows as unknown as Array<{ n: number }>)[0]?.n ?? 0;
+  if (aliveCount > 0) {
+    const jobUpdatedMs = job.updatedAt instanceof Date
+      ? job.updatedAt.getTime()
+      : new Date(job.updatedAt as unknown as string).getTime();
+    const silenceMs = Date.now() - jobUpdatedMs;
+    const midFlightStale = isSkillAnalyzerMidFlightStatus(job.status)
+      && silenceMs > RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS;
+    if (job.status === 'failed' || midFlightStale) {
+      // Dead worker left a ghost active entry — expire it so we can re-enqueue.
+      await db.execute(sql`
+        UPDATE pgboss.job
+        SET state = 'failed',
+            completedon = NOW(),
+            output = '{"error":"Expired by resume — worker process died"}'::jsonb
+        WHERE name = 'skill-analyzer'
+          AND data->>'jobId' = ${jobId}
+          AND state = 'active'
+      `);
+      logger.info('skill_analyzer.resume_force_expired_ghost', {
+        jobId,
+        dbStatus: job.status,
+        silenceMs,
+        reason: job.status === 'failed' ? 'db_failed' : 'mid_flight_stale',
+      });
+    } else {
+      throw { statusCode: 409, message: 'Analysis is already queued or running.' };
+    }
+  }
+
+  // Reset the intermediate row state so the progress UI reflects the
+  // resume and the handler's stage-entry updates don't look like regressions.
+  // Everything the handler needs to resume (parsedCandidates, configSnapshot,
+  // classifyState, existing skill_analyzer_results rows) is preserved —
+  // those are the inputs to Stage 5's skip-already-classified logic.
+  await db
+    .update(skillAnalyzerJobs)
+    .set({
+      status: 'pending',
+      errorMessage: null,
+      progressMessage: 'Resuming analysis...',
+      updatedAt: new Date(),
+    })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+
+  const boss = await getPgBoss();
+  await boss.send('skill-analyzer', { jobId }, {
+    ...getJobConfig('skill-analyzer'),
+    singletonKey: undefined,
+  });
+
+  logger.info('skill_analyzer.resume_enqueued', { jobId, organisationId });
+  return { ok: true };
 }
 
 /** Shape of `matchedSkillContent` attached to result rows in the GET response.
@@ -1891,23 +2031,37 @@ export async function insertSingleResult(
  *  row between runs. */
 export async function listResultIndicesForJob(
   jobId: string,
-): Promise<Array<{ candidateIndex: number; classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT' }>> {
-  const rows = await db
-    .select({
-      candidateIndex: skillAnalyzerResults.candidateIndex,
-      classification: skillAnalyzerResults.classification,
-    })
-    .from(skillAnalyzerResults)
-    .where(eq(skillAnalyzerResults.jobId, jobId))
-    .orderBy(
-      skillAnalyzerResults.candidateIndex,
-      desc(skillAnalyzerResults.createdAt),
-      desc(skillAnalyzerResults.id),
-    );
+): Promise<Array<{
+  candidateIndex: number;
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  matchedSkillId: string | null;
+  proposedMergedName: string | null;
+  proposedMergedInstructions: string | null;
+}>> {
+  // Raw SQL used to extract JSONB sub-fields without pulling the full JSONB blob.
+  const rawRows = await db.execute(sql`
+    SELECT
+      candidate_index        AS "candidateIndex",
+      classification,
+      matched_skill_id       AS "matchedSkillId",
+      proposed_merged_content->>'name'         AS "proposedMergedName",
+      proposed_merged_content->>'instructions' AS "proposedMergedInstructions"
+    FROM skill_analyzer_results
+    WHERE job_id = ${jobId}
+    ORDER BY candidate_index ASC, created_at DESC, id DESC
+  `);
+
+  type RawRow = {
+    candidateIndex: number;
+    classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+    matchedSkillId: string | null;
+    proposedMergedName: string | null;
+    proposedMergedInstructions: string | null;
+  };
 
   const seen = new Set<number>();
-  const deduped: typeof rows = [];
-  for (const row of rows) {
+  const deduped: RawRow[] = [];
+  for (const row of rawRows as unknown as RawRow[]) {
     if (seen.has(row.candidateIndex)) continue;
     seen.add(row.candidateIndex);
     deduped.push(row);
@@ -2016,8 +2170,13 @@ export async function updateJobAgentRecommendation(
 
   if (updated.length === 0) {
     // Row was skipped — recommendation already written on a previous run.
+    // Do NOT return early: the retro-inject below must still run. On resumed
+    // or re-triggered jobs the agentRecommendation column is already set
+    // (idempotency guard blocks the write) but the per-result agentProposals
+    // may be empty if the inject was missed on a prior run (e.g. before Fix 5
+    // was deployed, or if the inject was aborted mid-loop). The per-row
+    // duplicate guard at line ~2123 prevents double-injection.
     logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
-    return;
   }
 
   // Retro-inject synthetic proposed-new-agent entries into affected
@@ -2067,12 +2226,17 @@ function slugifyName(name: string): string {
 // Classification retry helpers
 // ---------------------------------------------------------------------------
 
-/** Classification outcome returned by the LLM classify stage. */
+/** Classification outcome returned by the LLM classify stage.
+ *  `mergeRationale` is populated on the rule-based fallback path (same helper
+ *  as skillAnalyzerJob.ts Stage 5) so the retry path can persist it to the
+ *  `merge_rationale` column. */
 type ClassificationOutcome = {
   classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
   confidence: number;
   reasoning: string;
-  proposedMerge: object | null;
+  proposedMerge: ProposedMerge | null;
+  mergeRationale: string | null;
+  classifierFallbackApplied: boolean;
 };
 
 /** Run LLM classification for a single candidate/library pair.
@@ -2135,17 +2299,54 @@ async function classifySingleCandidate(
   }
 
   const classificationFailed = parsed === null;
+
+  // On failure: route through the same fallback helper the Stage-5 job uses so
+  // the reviewer sees a concrete rule-based proposal instead of "Proposal
+  // unavailable." Both code paths MUST go through buildClassifierFailureOutcome
+  // so the failure behaviour stays in lockstep.
+  if (classificationFailed) {
+    const fallback = buildClassifierFailureOutcome({
+      candidate: {
+        name: candidate.name,
+        description: candidate.description,
+        definition: (candidate.definition as object | null) ?? null,
+        instructions: candidate.instructions ?? null,
+      },
+      library: {
+        name: matchedLib.name,
+        description: matchedLib.description,
+        definition: (matchedLib.definition as object | null) ?? null,
+        instructions: matchedLib.instructions ?? null,
+      },
+    });
+    return {
+      result: {
+        classification: fallback.classification,
+        confidence: fallback.confidence,
+        reasoning: fallback.reasoning,
+        proposedMerge: fallback.proposedMerge,
+        mergeRationale: fallback.mergeRationale,
+        classifierFallbackApplied: true,
+      },
+      classificationFailed: true,
+      classificationFailureReason:
+        skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null),
+    };
+  }
+
+  // Success path: the LLM gave us a parseable result. It may or may not
+  // include a proposedMerge (DUPLICATE / DISTINCT legitimately return null).
   return {
-    result: parsed ?? {
-      classification: 'PARTIAL_OVERLAP',
-      confidence: 0.3,
-      reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
-      proposedMerge: null,
+    result: {
+      classification: parsed!.classification,
+      confidence: parsed!.confidence,
+      reasoning: parsed!.reasoning,
+      proposedMerge: (parsed!.proposedMerge as ProposedMerge | null) ?? null,
+      mergeRationale: (parsed!.proposedMerge as ProposedMerge | null)?.mergeRationale ?? null,
+      classifierFallbackApplied: false,
     },
-    classificationFailed,
-    classificationFailureReason: classificationFailed
-      ? skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null)
-      : null,
+    classificationFailed: false,
+    classificationFailureReason: null,
   };
 }
 
@@ -2200,10 +2401,54 @@ export async function retryClassification(
     isSystem: true,
   };
 
-  const { result: classification, classificationFailed, classificationFailureReason } =
+  const { result: classificationRaw, classificationFailed, classificationFailureReason } =
     await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId, organisationId);
 
+  // v6 Fix 5 (mirror): post-classifier DISTINCT_FALLBACK. Mirrors
+  // skillAnalyzerJob.ts:1060-1091 so retries stay in lockstep with the main
+  // classify path. When the LLM returned PARTIAL_OVERLAP/IMPROVEMENT but the
+  // candidate cross-references the matched library skill AND similarity is
+  // below 70%, reclassify as DISTINCT — merging would produce a confused
+  // hybrid. Higher-similarity cross-references remain as merges; the main
+  // path flags them via validation and that flagging is not mirrored on
+  // retry (see note above about validate/remediate scope).
+  let classification = classificationRaw;
+  if (
+    (classification.classification === 'PARTIAL_OVERLAP' ||
+      classification.classification === 'IMPROVEMENT') &&
+    skillAnalyzerServicePure.crossReferencesLibrarySkill(
+      candidate.description,
+      matchedLib.name,
+      matchedLib.slug,
+    ) &&
+    result.similarityScore < 0.70
+  ) {
+    classification = {
+      classification: 'DISTINCT',
+      confidence: 0.5,
+      reasoning:
+        `${classification.reasoning} — post-classifier DISTINCT_FALLBACK: incoming skill cross-references "${matchedLib.name}" as a separate tool (similarity ${Math.round(result.similarityScore * 100)}%), so the merge was discarded in favour of presenting this as a new skill.`,
+      proposedMerge: null,
+      mergeRationale: null,
+      classifierFallbackApplied: false,
+    };
+  }
+
   const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+  // Strip mergeRationale before persisting to proposed_merged_content — the
+  // rationale lives in its own DB column (same contract as the Stage-5 job).
+  const storedMerge: ProposedMerge | null = classification.proposedMerge
+    ? { ...classification.proposedMerge, mergeRationale: undefined }
+    : null;
+
+  // When the fallback path ran, surface CLASSIFIER_FALLBACK so the UI banner
+  // + approval gate activate (mirrors skillAnalyzerJob.ts:1092-1101). Full
+  // validateMergeOutput / remediateTables re-validation on retry is tracked
+  // separately — retry currently persists just the fallback marker.
+  const mergeWarnings: MergeWarning[] | null = classification.classifierFallbackApplied
+    ? [CLASSIFIER_FALLBACK_WARNING]
+    : null;
 
   await db
     .update(skillAnalyzerResults)
@@ -2212,12 +2457,15 @@ export async function retryClassification(
       confidence: classification.confidence,
       classificationReasoning: classification.reasoning,
       diffSummary,
-      proposedMergedContent: classification.proposedMerge ?? null,
+      proposedMergedContent: storedMerge,
+      mergeRationale: classification.mergeRationale,
+      mergeWarnings,
+      classifierFallbackApplied: classification.classifierFallbackApplied,
       // Only seed the immutable original if it has never been set — retries
       // must not overwrite it, otherwise "Reset to AI suggestion" would
       // restore the retry's output rather than the original job output.
-      ...(result.originalProposedMerge === null && classification.proposedMerge !== null
-        ? { originalProposedMerge: classification.proposedMerge }
+      ...(result.originalProposedMerge === null && storedMerge !== null
+        ? { originalProposedMerge: storedMerge }
         : {}),
       classificationFailed,
       classificationFailureReason,
@@ -2281,8 +2529,90 @@ export async function bulkRetryFailedClassifications(
   return { retried: failedResults.length, stillFailed: remaining.length };
 }
 
+/** Append SKILL_GRAPH_COLLISION warnings produced by the cross-batch collision
+ *  pass (Stage 5b) to already-written result rows. Uses JSONB concatenation so
+ *  the existing library-level warnings (from Stage 5) are preserved. */
+export async function appendBatchCollisionWarnings(
+  jobId: string,
+  warningsBySlug: Map<string, MergeWarning[]>,
+): Promise<void> {
+  if (warningsBySlug.size === 0) return;
+
+  for (const [candidateSlug, newWarnings] of warningsBySlug.entries()) {
+    if (newWarnings.length === 0) continue;
+    const newWarningsJson = JSON.stringify(newWarnings);
+    await db
+      .update(skillAnalyzerResults)
+      .set({
+        mergeWarnings: sql`
+          CASE
+            WHEN ${skillAnalyzerResults.mergeWarnings} IS NULL
+            THEN ${newWarningsJson}::jsonb
+            ELSE ${skillAnalyzerResults.mergeWarnings} || ${newWarningsJson}::jsonb
+          END
+        `,
+      })
+      .where(
+        and(
+          eq(skillAnalyzerResults.jobId, jobId),
+          eq(skillAnalyzerResults.candidateSlug, candidateSlug),
+        ),
+      );
+  }
+}
+
+/** v6 Fix 4 follow-up (Codex iter-2 review) — atomic deduction + warning append
+ *  for the SOURCE_FORK case (extensible to CONTENT_OVERLAP / future batch
+ *  signals). The per-candidate `adjustClassifierConfidence` runs before
+ *  Stage 5c, so batch-level warnings never influence the originally-persisted
+ *  confidence; this helper closes that gap by deducting and marking in one
+ *  statement.
+ *
+ *  Idempotency across crash-resume: Stage 5c re-runs on every resume. One
+ *  atomic UPDATE per slug sets `confidence` AND appends the marker warning
+ *  to `mergeWarnings`. The WHERE clause rejects rows that already carry the
+ *  marker, so re-runs over already-processed rows are no-ops. Because the
+ *  two column writes commit together, a worker crash between them is
+ *  impossible — the earlier non-atomic pair (separate deduct + append calls)
+ *  left a narrow window where the deduction committed without the marker,
+ *  causing a second deduction on resume. */
+export async function applyBatchDeductionAndWarningAtomic(
+  jobId: string,
+  slugEntries: Array<{ slug: string; deduction: number; warning: MergeWarning }>,
+  markerWarningCode: string,
+): Promise<void> {
+  if (slugEntries.length === 0) return;
+  for (const { slug, deduction, warning } of slugEntries) {
+    if (deduction <= 0) continue;
+    const warningJson = JSON.stringify([warning]);
+    await db
+      .update(skillAnalyzerResults)
+      .set({
+        confidence: sql`GREATEST(0.20, COALESCE(${skillAnalyzerResults.confidence}, 0.5) - ${deduction})`,
+        mergeWarnings: sql`
+          CASE
+            WHEN ${skillAnalyzerResults.mergeWarnings} IS NULL
+            THEN ${warningJson}::jsonb
+            ELSE ${skillAnalyzerResults.mergeWarnings} || ${warningJson}::jsonb
+          END
+        `,
+      })
+      .where(
+        and(
+          eq(skillAnalyzerResults.jobId, jobId),
+          eq(skillAnalyzerResults.candidateSlug, slug),
+          // Same marker-based idempotency guard — row must not already
+          // carry the marker warning. Combined with the atomic UPDATE,
+          // this eliminates the crash-between-two-statements window.
+          sql`NOT COALESCE(${skillAnalyzerResults.mergeWarnings} @> ${JSON.stringify([{ code: markerWarningCode }])}::jsonb, false)`,
+        ),
+      );
+  }
+}
+
 export const skillAnalyzerService = {
   createJob,
+  resumeJob,
   getJob,
   listJobs,
   setResultAction,
@@ -2306,4 +2636,6 @@ export const skillAnalyzerService = {
   unmarkSkillInFlight,
   updateResultAgentProposals,
   updateJobAgentRecommendation,
+  appendBatchCollisionWarnings,
+  applyBatchDeductionAndWarningAtomic,
 };

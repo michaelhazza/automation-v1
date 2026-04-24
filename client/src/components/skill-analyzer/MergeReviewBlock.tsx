@@ -8,6 +8,8 @@ import {
   warningBadgeClass,
   evaluateApprovalState,
   parseDemotedFields,
+  parseDemotedFieldStatuses,
+  DEFAULT_WARNING_TIER_MAP,
   type MergeWarning,
   type MergeWarningCode,
   type WarningResolution,
@@ -82,7 +84,28 @@ function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
     if (baseline === value) {
       return [{ kind: 'unchanged' as const, value }];
     }
-    return diffWordsWithSpace(baseline, value).map((part) => ({
+    // Explicit empty-string handling so an empty side renders as a pure
+    // addition or removal rather than tripping the "no shared tokens"
+    // fallback below with a misleading strikethrough of "". See ChatGPT
+    // PR review Round 1 Finding 5.
+    if (!baseline) {
+      return [{ kind: 'added' as const, value }];
+    }
+    if (!value) {
+      return [{ kind: 'removed' as const, value: baseline }];
+    }
+    const parts = diffWordsWithSpace(baseline, value);
+    // When the two strings share no unchanged tokens the word diff produces a
+    // garbled concatenation (e.g. "Draft Ad Copyad-creative"). Fall back to a
+    // simple two-token display: old value struck-through, new value highlighted.
+    const hasUnchanged = parts.some((p) => !p.added && !p.removed);
+    if (!hasUnchanged) {
+      return [
+        { kind: 'removed' as const, value: baseline },
+        { kind: 'added' as const, value: value },
+      ];
+    }
+    return parts.map((part) => ({
       kind: part.added ? ('added' as const) : part.removed ? ('removed' as const) : ('unchanged' as const),
       value: part.value,
     }));
@@ -624,7 +647,10 @@ function WarningResolutionBlock({
       <p className="font-semibold text-slate-800 mb-2">
         Merge warnings {approvalState.blocked && <span className="text-red-700">· Action required before approval</span>}
       </p>
-      {warnings.map((w, i) => (
+      {/* v6 Fix 2: split warnings into a primary data-integrity group and a
+          secondary "formatting & notes" group (name mismatch, cross-reference
+          hints). Keeps the critical list short and de-noises the primary area. */}
+      {warnings.filter(w => !FORMATTING_WARNING_CODES.has(w.code)).map((w, i) => (
         <WarningItem
           key={`${w.code}-${i}`}
           warning={w}
@@ -634,8 +660,59 @@ function WarningResolutionBlock({
           criticalPhrase={criticalPhrase}
         />
       ))}
+      {warnings.some(w => FORMATTING_WARNING_CODES.has(w.code)) && (
+        <div className="mt-3 pt-2 border-t border-slate-300/60">
+          <p className="font-medium text-slate-600 mb-2 text-[11px] uppercase tracking-wide">
+            Formatting & notes
+          </p>
+          {warnings.filter(w => FORMATTING_WARNING_CODES.has(w.code)).map((w, i) => (
+            <WarningItem
+              key={`fmt-${w.code}-${i}`}
+              warning={w}
+              isLocked={isLocked}
+              isResolved={isResolved}
+              onResolve={resolveWarning}
+              criticalPhrase={criticalPhrase}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Warning codes rendered in the secondary "Formatting & notes" section
+ *  (v6 Fix 2). Kept adjacent to the partition logic so the two can't drift. */
+const FORMATTING_WARNING_CODES = new Set<MergeWarningCode>([
+  'NAME_MISMATCH',
+  'CROSS_REFERENCES_DISTINCT',
+]);
+
+// Dev-time guard: the partition is implicit — anything NOT in
+// FORMATTING_WARNING_CODES renders in the primary list. A new warning code
+// added in mergeTypes.ts will silently land in the primary group if this
+// file isn't updated. Catch that at module load in non-production builds
+// by walking DEFAULT_WARNING_TIER_MAP (exhaustive `Record<MergeWarningCode,
+// …>`, so adding a code without adding a tier is already a compile error).
+// Informational-tier codes are the ones that most naturally belong in the
+// Formatting & notes group — warn if a new informational code was added
+// without being classified here. See ChatGPT PR review Round 1 Finding 6.
+if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+  const unclassifiedInformational = (Object.entries(DEFAULT_WARNING_TIER_MAP) as Array<
+    [MergeWarningCode, string]
+  >)
+    .filter(([code, tier]) => tier === 'informational' && !FORMATTING_WARNING_CODES.has(code))
+    .map(([code]) => code);
+  if (unclassifiedInformational.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[MergeReviewBlock] Informational warning codes not classified into '
+        + 'FORMATTING_WARNING_CODES — will render in the primary list. '
+        + 'Review the partition and update FORMATTING_WARNING_CODES if '
+        + 'any of these should be secondary: '
+        + unclassifiedInformational.join(', '),
+    );
+  }
 }
 
 function WarningItem({
@@ -670,22 +747,40 @@ function WarningItem({
 
   if (warning.code === 'REQUIRED_FIELD_DEMOTED') {
     const fields = parseDemotedFields(warning.detail);
+    // v6 Fix 3: per-field status gives the reviewer the context to know
+    // whether a field was deleted entirely, made optional (still in schema),
+    // or possibly replaced by a similarly-named property.
+    const statuses = parseDemotedFieldStatuses(warning.detail);
     return (
       <div className="mb-2">
         {header}
         <ul className="ml-4 space-y-1">
           {fields.map((field) => {
             const current = isResolved('REQUIRED_FIELD_DEMOTED', field);
+            const fieldStatus = statuses[field];
+            let statusLabel: string | null = null;
+            let acceptText = 'Accept removal';
+            if (fieldStatus?.status === 'made_optional') {
+              statusLabel = 'made optional — still in schema';
+              acceptText = 'Accept optional';
+            } else if (fieldStatus?.status === 'replaced_by') {
+              statusLabel = `possibly replaced by ${fieldStatus.replacement}`;
+            } else if (fieldStatus?.status === 'removed_entirely') {
+              statusLabel = 'removed from schema';
+            }
             return (
-              <li key={field} className="flex items-center gap-2 text-[11px]">
+              <li key={field} className="flex flex-wrap items-center gap-2 text-[11px]">
                 <code className="text-slate-600">{field}</code>
+                {statusLabel && (
+                  <span className="text-slate-500 italic">{statusLabel}</span>
+                )}
                 <button
                   type="button"
                   disabled={disabled}
                   onClick={() => onResolve('REQUIRED_FIELD_DEMOTED', 'accept_removal', { field })}
                   className={`px-2 py-0.5 rounded border ${current === 'accept_removal' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
-                  Accept removal
+                  {acceptText}
                 </button>
                 <button
                   type="button"

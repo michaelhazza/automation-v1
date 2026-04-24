@@ -6,6 +6,57 @@ import { ParsedSkill, contentHash } from './skillParserServicePure.js';
 // Zero DB/env/service imports. Fully testable in isolation.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Job status — single source of truth
+// ---------------------------------------------------------------------------
+// Canonical definition of skill_analyzer_jobs.status values. MUST stay in
+// sync with the `$type<>` union in server/db/schema/skillAnalyzerJobs.ts.
+// Prior to centralisation this list was redeclared in three places
+// (service type alias, schema `$type<>`, sweep module) which let the sweep
+// silently diverge — the original `matching` typo missed an entire stage.
+// See tasks/review-logs/chatgpt-pr-review-bugfixes-april26-*.md Round 1
+// Finding 2.
+
+/** Statuses the pipeline writes while actively working a job. A worker
+ *  crash in any of these states leaves a row that the stale-job sweep
+ *  must reap. Excludes `pending` (queued, no worker to die) and the
+ *  terminals (`completed`, `failed`). */
+export const SKILL_ANALYZER_MID_FLIGHT_STATUSES = [
+  'parsing',
+  'hashing',
+  'embedding',
+  'comparing',
+  'classifying',
+] as const;
+
+/** Terminal statuses — no further work will occur. */
+export const SKILL_ANALYZER_TERMINAL_STATUSES = ['completed', 'failed'] as const;
+
+/** All valid values of `skill_analyzer_jobs.status`. */
+export const SKILL_ANALYZER_JOB_STATUSES = [
+  'pending',
+  ...SKILL_ANALYZER_MID_FLIGHT_STATUSES,
+  ...SKILL_ANALYZER_TERMINAL_STATUSES,
+] as const;
+
+export type SkillAnalyzerMidFlightStatus =
+  typeof SKILL_ANALYZER_MID_FLIGHT_STATUSES[number];
+export type SkillAnalyzerTerminalStatus =
+  typeof SKILL_ANALYZER_TERMINAL_STATUSES[number];
+export type SkillAnalyzerJobStatus = typeof SKILL_ANALYZER_JOB_STATUSES[number];
+
+export function isSkillAnalyzerTerminalStatus(
+  status: string,
+): status is SkillAnalyzerTerminalStatus {
+  return (SKILL_ANALYZER_TERMINAL_STATUSES as readonly string[]).includes(status);
+}
+
+export function isSkillAnalyzerMidFlightStatus(
+  status: string,
+): status is SkillAnalyzerMidFlightStatus {
+  return (SKILL_ANALYZER_MID_FLIGHT_STATUSES as readonly string[]).includes(status);
+}
+
 /** Summary of a library skill (system or org) for comparison. */
 export interface LibrarySkillSummary {
   id: string | null;           // null for system skills
@@ -133,6 +184,10 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 3. A skill with a better-structured definition but identical purpose is IMPROVEMENT.
 4. If uncertain between DUPLICATE and IMPROVEMENT, prefer IMPROVEMENT (conservative).
 5. If uncertain between PARTIAL_OVERLAP and DISTINCT, prefer PARTIAL_OVERLAP (conservative).
+6. **Artifact-type divergence overrides vocabulary overlap.** When two skills produce fundamentally different artifact types — a strategy/planning document vs. a generated tool output, an audit/diagnostic report vs. a drafted creative asset, a one-shot analysis vs. an iterative production pipeline, a short structured output vs. a long-form authored document — prefer DISTINCT (or PARTIAL_OVERLAP at most) even when the skills share heavy domain vocabulary. Shared vocabulary like "lead", "ad", "copy", "campaign", "seo", "content", "email" is a routing signal between related skills, not evidence that they should be merged. Two skills that both touch "ad copy" but where one produces 30-character RSA headlines and the other produces a website's full landing-page strategy do NOT belong as one merged tool.
+
+   **6a. Reject the superset-by-union anti-pattern.** If the only way to combine the two skills is to add a discriminator enum to the input schema — a "mode", "task", "type", "action", "phase", or similar field that switches the skill between fundamentally different behaviours (produce vs. plan, implement vs. audit, generate vs. analyze, strategy vs. execution, draft vs. score) — that is evidence of artifact-type divergence, NOT a legitimate superset. Two skills sharing one file behind a mode switch is the worst of both worlds: the file gets twice as large, the agent invoking it has to read mode-dependent instructions to figure out which branch applies, and the two halves cannot evolve independently. When you find yourself reaching for a discriminator enum during the merge, that is a signal to STOP merging and classify DISTINCT instead. The acceptable place for "mode"-style enums is when the modes share core behaviour and only differ in formatting/output detail (e.g. an "output_format: markdown|json" enum); the unacceptable place is when the modes select between separate workflows.
+7. **Author cross-reference is intent.** When the incoming skill's description or instructions explicitly references another named skill — phrases like "see other-skill", "for topic, use other-skill", "other-skill handles topic", "distinct from other-skill" — the author is telling you they intend two skills, not one. Treat this as strong evidence for DISTINCT, even at high similarity. The merged-skill output also fails the author's stated intent.
 
 ## Few-Shot Examples
 
@@ -159,6 +214,32 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 **Incoming:** "monitor_api_health — Checks API endpoints for availability and latency."
 **Classification:** DISTINCT (different purposes entirely)
 **Confidence:** 0.97
+
+### Example 5: DISTINCT despite high vocabulary overlap (Rule 6 — artifact-type divergence)
+**Existing:** "draft_ad_copy — Generates ad copy variants (30-char headlines, 90-char descriptions, CTAs) for paid platforms (Google, Meta, LinkedIn). Returns short copy strings ready for upload."
+**Incoming:** "copywriting — Strategic framework for landing page copy, sales pages, and brand voice development. Provides messaging hierarchy, voice guides, and conversion-focused page structures."
+**Classification:** DISTINCT (both involve "copy" but produce fundamentally different artifacts — ad variants ≤90 chars vs. multi-section landing-page strategy. Each has independent value; merging would produce a confused hybrid. The shared vocabulary is a routing hint, not a merge signal.)
+**Confidence:** 0.85
+
+### Example 6: DISTINCT triggered by author cross-reference (Rule 7)
+**Existing:** "create_lead_magnet — Produces downloadable lead-magnet assets (ebooks, checklists, templates) for email capture."
+**Incoming:** "free-tool-strategy — Strategy for designing free interactive tools (calculators, generators, audits) as growth levers. *For downloadable content lead magnets (ebooks, checklists, templates), see lead-magnets.*"
+**Classification:** DISTINCT (the incoming description literally directs the reader to "see lead-magnets" for the existing skill's scope — explicit author intent that these are two skills, not one.)
+**Confidence:** 0.90
+
+### Example 7: DISTINCT — superset-by-union anti-pattern (Rule 6a)
+**Existing:** "create_lead_magnet — Produces downloadable lead-magnet assets (ebooks, checklists, templates) for email capture. Tool returns finished assets ready to ship; required input includes asset_format, audience, and topic."
+**Incoming:** "lead-magnets — Strategic framework for choosing which lead magnet types fit a given audience and funnel stage. Provides decision criteria, gating strategy, and distribution recommendations."
+**Tempting (but wrong) merge:** add a discriminator enum like mode: "strategy" | "produce" | "both" to the merged schema; in "strategy" mode produce the decision framework, in "produce" mode generate the asset, in "both" do both. Reasoning: "they share lead-magnet vocabulary, so they belong as one skill with two modes."
+**Classification:** DISTINCT (the merge above is the textbook superset-by-union anti-pattern — the discriminator enum exists precisely because the two skills produce different artifacts in different workflows. Reaching for a mode enum here is the signal to NOT merge, not the signal to merge cleverly. Keep both as separate skills with cross-references.)
+**Confidence:** 0.88
+
+### Example 8: DISTINCT — superset-by-union with task enum (Rule 6a)
+**Existing:** "schema_markup_audit — Scores a page's existing schema.org JSON-LD markup against best-practice rules. Produces an audit report with severity-ranked findings and a numeric score."
+**Incoming:** "schema-markup — Implementation guide for adding schema.org markup to a page from scratch. Covers common types (Article, Product, FAQ, HowTo, BreadcrumbList) with template snippets and required-property checklists."
+**Tempting (but wrong) merge:** add a discriminator enum like task: "implement" | "audit" | "fix" | "optimize"; switch the skill body based on the value. Reasoning: "schema markup is one domain, so one skill can cover all four operations on it."
+**Classification:** DISTINCT (auditing existing markup vs. implementing new markup are fundamentally different workflows producing fundamentally different artifacts — one returns a report, the other returns code snippets. The shared schema-markup domain is a routing signal between two skills, not a merge justification. The task enum would split the file into four mode-dependent halves the agent has to read selectively.)
+**Confidence:** 0.85
 
 ## Output Format
 
@@ -200,7 +281,18 @@ export function buildClassificationPrompt(
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
-  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship.`;
+  // Mirror of the cross-ref hint in buildClassifyPromptWithMerge — see that
+  // function for the full rationale (Rule 7 in the system prompt).
+  const crossRefDetected = crossReferencesLibrarySkill(
+    candidate.description,
+    librarySkill.name,
+    librarySkill.slug,
+  );
+  const crossRefHint = crossRefDetected
+    ? `\n\n**Author-intent signal (Rule 7):** the incoming description references "${librarySkill.name}" / "${librarySkill.slug}" in a "see X" / "for X, use Y" pattern. The author intends two separate skills — strongly prefer DISTINCT.`
+    : '';
+
+  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}${crossRefHint}\n\nClassify their relationship.`;
 
   return { system: CLASSIFICATION_SYSTEM_PROMPT, userMessage };
 }
@@ -310,7 +402,12 @@ export type MergeWarningCode =
   // v2 fix-cycle additions
   | 'CLASSIFIER_FALLBACK'
   | 'NAME_MISMATCH'
-  | 'SKILL_GRAPH_COLLISION';
+  | 'SKILL_GRAPH_COLLISION'
+  | 'SOURCE_FORK'
+  | 'NEAR_REPLACEMENT'
+  | 'CONTENT_OVERLAP'
+  // v6 fix-cycle additions
+  | 'CROSS_REFERENCES_DISTINCT';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -344,6 +441,10 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   TABLE_ROWS_DROPPED:       'informational',
   OUTPUT_FORMAT_LOST:       'informational',
   WARNINGS_TRUNCATED:       'informational',
+  SOURCE_FORK:              'decision_required',
+  NEAR_REPLACEMENT:         'standard',
+  CONTENT_OVERLAP:          'standard',
+  CROSS_REFERENCES_DISTINCT: 'informational',
 };
 
 /** Severity priority used when sorting warnings before MAX-count truncation.
@@ -456,6 +557,10 @@ const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = 
   TABLE_ROWS_DROPPED:       [],
   OUTPUT_FORMAT_LOST:       [],
   WARNINGS_TRUNCATED:       [],
+  SOURCE_FORK:              ['acknowledge_warning'],
+  NEAR_REPLACEMENT:         ['acknowledge_warning'],
+  CONTENT_OVERLAP:          ['acknowledge_warning'],
+  CROSS_REFERENCES_DISTINCT: [],
 };
 
 /** Parse demoted field list out of a REQUIRED_FIELD_DEMOTED warning's detail.
@@ -472,6 +577,217 @@ export function parseDemotedFields(detail: string | undefined): string[] {
     }
   }
   return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+/** Status for a demoted required field. v6 Fix 3 distinguishes:
+ *   - `made_optional`: field still exists in merged properties, just not required
+ *   - `replaced_by`: field was replaced by a similarly-named property
+ *   - `removed_entirely`: field is gone from the merged schema */
+export type DemotedFieldStatus =
+  | { status: 'made_optional' }
+  | { status: 'replaced_by'; replacement: string }
+  | { status: 'removed_entirely' };
+
+/** Parse the per-field status map out of a REQUIRED_FIELD_DEMOTED detail.
+ *  Returns an empty map for legacy details (pre-v6) so callers fall back to
+ *  the plain demoted-field list. */
+export function parseDemotedFieldStatuses(
+  detail: string | undefined,
+): Record<string, DemotedFieldStatus> {
+  if (!detail) return {};
+  const trimmed = detail.trim();
+  if (!trimmed.startsWith('{')) return {};
+  try {
+    const parsed = JSON.parse(trimmed) as { fieldStatus?: Record<string, DemotedFieldStatus> };
+    const map = parsed?.fieldStatus;
+    if (!map || typeof map !== 'object') return {};
+    const out: Record<string, DemotedFieldStatus> = {};
+    for (const [field, s] of Object.entries(map)) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.status === 'made_optional' || s.status === 'removed_entirely') {
+        out[field] = { status: s.status };
+      } else if (s.status === 'replaced_by' && typeof s.replacement === 'string') {
+        out[field] = { status: 'replaced_by', replacement: s.replacement };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Tokenise a snake_case field name into a set of informative tokens. */
+function fieldNameTokens(name: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of name.toLowerCase().split(/[_\s-]+/)) {
+    if (raw.length < 2) continue;
+    out.add(stemToken(raw));
+  }
+  return out;
+}
+
+/** Classify each demoted required field based on whether it still exists in
+ *  the merged properties, was replaced by a similarly-named field, or was
+ *  removed entirely. Used to build the REQUIRED_FIELD_DEMOTED warning detail.
+ *
+ *  The replacement heuristic tokenises the field name on `_` / `-` / spaces,
+ *  stems each token, and scores each candidate property by the size of the
+ *  shared informative-token set. Requires ≥ 2 shared tokens OR a single
+ *  shared token paired with a pluralisation/suffix signal to guard against
+ *  spurious matches (e.g. "user_name" matching "user_agent"). */
+export function classifyDemotedFields(
+  demotedFields: string[],
+  mergedDefinition: object | null,
+): Record<string, DemotedFieldStatus> {
+  const out: Record<string, DemotedFieldStatus> = {};
+  const properties =
+    (mergedDefinition as Record<string, unknown> | null)?.input_schema &&
+    (((mergedDefinition as Record<string, Record<string, unknown>>).input_schema as Record<string, unknown>).properties as Record<string, unknown> | undefined);
+  const propertyNames = properties && typeof properties === 'object' ? Object.keys(properties) : [];
+  const propertyNameSet = new Set(propertyNames);
+
+  for (const field of demotedFields) {
+    if (propertyNameSet.has(field)) {
+      out[field] = { status: 'made_optional' };
+      continue;
+    }
+
+    const fieldTokens = fieldNameTokens(field);
+    if (fieldTokens.size === 0) {
+      out[field] = { status: 'removed_entirely' };
+      continue;
+    }
+    // Pluralisation / suffix family signals. Two fields from the same family
+    // (e.g. competitor_name → competitor_urls) are treated as likely-related
+    // even if the shared-token set is small.
+    const fieldFamily = field.replace(/(_urls?|_names?|s)$/i, '');
+
+    let best: { name: string; shared: number; sameFamily: boolean } | null = null;
+    for (const p of propertyNames) {
+      if (p === field) continue;
+      const propTokens = fieldNameTokens(p);
+      let shared = 0;
+      for (const t of fieldTokens) if (propTokens.has(t)) shared++;
+      const pFamily = p.replace(/(_urls?|_names?|s)$/i, '');
+      const sameFamily = fieldFamily.length >= 3 && fieldFamily === pFamily;
+      const qualifies = shared >= 2 || (shared >= 1 && sameFamily);
+      if (!qualifies) continue;
+      // Prefer higher shared count, then same-family, then shorter name.
+      const score = shared * 10 + (sameFamily ? 5 : 0) - p.length * 0.01;
+      const bestScore = best ? best.shared * 10 + (best.sameFamily ? 5 : 0) - best.name.length * 0.01 : -Infinity;
+      if (score > bestScore) best = { name: p, shared, sameFamily };
+    }
+
+    if (best) {
+      out[field] = { status: 'replaced_by', replacement: best.name };
+    } else {
+      out[field] = { status: 'removed_entirely' };
+    }
+  }
+  return out;
+}
+
+/** v6 Fix 4 — adjust the LLM-reported classifier confidence with structural
+ *  signals so the UI differentiates high-quality merges from borderline ones.
+ *
+ *  The LLM tends to cluster on a small number of confidence values (observed
+ *  11/14 partial overlaps at exactly 0.85 on the marketingskills batch).
+ *  Validation produces richer signals than the classifier sees — required
+ *  fields demoted, scope expansion, forks, self-referencing Related Skills
+ *  sections — so we apply per-signal deductions on top of the LLM's score.
+ *
+ *  Deductions are additive, capped per code, floored at 0.20. The goal is
+ *  differentiation, not re-ranking: clean merges stay near their original
+ *  score; structurally weaker merges drop proportional to their issues. */
+export function adjustClassifierConfidence(
+  llmConfidence: number,
+  warnings: MergeWarning[],
+  opts: {
+    mergedInstructions: string | null;
+    mergedName: string;
+    candidateSlug: string;
+    librarySlug: string;
+  },
+): number {
+  if (!Number.isFinite(llmConfidence)) return 0.5;
+  // No-op for rows that have nothing to adjust. Prevents the 0.20 floor from
+  // clamping low-confidence DISTINCT/DUPLICATE rows that carry no warnings
+  // and no merge. Deliberate behaviour change vs. applying the floor blindly.
+  if (warnings.length === 0 && !opts.mergedInstructions) return llmConfidence;
+
+  let score = llmConfidence;
+
+  // Required field demotions — weighted by per-field status from Fix 3 so
+  // "made optional" counts softer than "removed entirely". Reads fieldStatus
+  // out of the warning's detail JSON; falls back to -0.05/field for legacy
+  // details that only carry a demotedFields list.
+  const reqWarning = warnings.find(w => w.code === 'REQUIRED_FIELD_DEMOTED');
+  if (reqWarning) {
+    const fields = parseDemotedFields(reqWarning.detail);
+    const statuses = parseDemotedFieldStatuses(reqWarning.detail);
+    let deduction = 0;
+    for (const field of fields) {
+      const s = statuses[field];
+      if (!s) { deduction += 0.05; continue; } // legacy detail
+      if (s.status === 'removed_entirely') deduction += 0.05;
+      else if (s.status === 'replaced_by')  deduction += 0.03;
+      else if (s.status === 'made_optional') deduction += 0.01;
+    }
+    score -= Math.min(0.15, deduction);
+  }
+
+  // Name change: -0.03 when the incoming renamed the skill.
+  if (warnings.some(w => w.code === 'NAME_MISMATCH')) score -= 0.03;
+
+  // Source fork: -0.05. NOTE: SOURCE_FORK warnings are emitted in Stage 5c
+  // (batch-level, after per-candidate Stage 5 finishes). This per-candidate
+  // call of adjustClassifierConfidence runs before Stage 5c, so this branch
+  // only fires when a SOURCE_FORK warning has been attached via the
+  // post-batch confidence re-adjustment pass (see skillAnalyzerJob.ts
+  // finaliseForkConfidences).
+  if (warnings.some(w => w.code === 'SOURCE_FORK')) score -= 0.05;
+
+  // Critical scope expansion: -0.05 on top of NAME_MISMATCH / table checks.
+  if (warnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL')) score -= 0.05;
+
+  // Genuine table drops (not restructured): -0.02 per code, capped at -0.08.
+  // Restructured tables have `"restructured": true` in the JSON detail — Fix 1
+  // downgrades those to informational-ish, so they don't contribute here.
+  const tableDropCount = warnings.filter(w => {
+    if (w.code !== 'TABLE_ROWS_DROPPED') return false;
+    if (!w.detail) return true;
+    try {
+      const parsed = JSON.parse(w.detail) as { restructured?: boolean };
+      return parsed?.restructured !== true;
+    } catch {
+      return true;
+    }
+  }).length;
+  score -= Math.min(0.08, tableDropCount * 0.02);
+
+  // Self-reference: merged instructions reference the incoming skill's own
+  // slug inside a Related Skills section — signal that the incoming was
+  // designed to live alongside the library skill, not replace it. Uses a
+  // word-boundary regex to avoid false positives on short slugs (e.g. "ads"
+  // matching inside "Google Ads"), gated by a ≥5-char minimum to keep the
+  // match distinctive.
+  if (opts.mergedInstructions) {
+    const relIdx = opts.mergedInstructions.search(/^##\s+related\s+skills\b/im);
+    if (relIdx !== -1) {
+      const relatedSection = opts.mergedInstructions.slice(relIdx);
+      const slug = opts.candidateSlug.toLowerCase();
+      if (slug.length >= 5) {
+        const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hyphenated = slug.replace(/_/g, '-');
+        const escapedHyphen = hyphenated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b(${escaped}|${escapedHyphen})\\b`, 'i');
+        if (re.test(relatedSection)) score -= 0.10;
+      }
+    }
+  }
+
+  if (!Number.isFinite(score)) return 0.2;
+  return Math.max(0.20, Math.min(1.0, score));
 }
 
 /** Return true if a resolution satisfies a given warning/field pair. */
@@ -789,7 +1105,22 @@ export function buildClassifyPromptWithMerge(
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
-  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
+  // Author cross-reference hint (system prompt Rule 7 enforcement). Detect
+  // whether the incoming description contains "see X" / "for X, use Y"
+  // language that names this library skill — the author's explicit signal
+  // that they intend two separate skills. Surfacing this to the LLM lets
+  // Rule 7 fire on the actual signal instead of relying on the LLM to
+  // notice and apply the rule on its own.
+  const crossRefDetected = crossReferencesLibrarySkill(
+    candidate.description,
+    librarySkill.name,
+    librarySkill.slug,
+  );
+  const crossRefHint = crossRefDetected
+    ? `\n\n**Author-intent signal (Rule 7):** the incoming skill's description explicitly references "${librarySkill.name}" (or its slug "${librarySkill.slug}") in a "see X" / "for X, use Y" pattern. The author has stated these are two separate skills. Strongly prefer DISTINCT — only choose PARTIAL_OVERLAP / IMPROVEMENT if the cross-reference language is clearly stale or out-of-date, and document why in \`reasoning\`.`
+    : '';
+
+  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}${crossRefHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
 
   return { system: CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT, userMessage };
 }
@@ -987,10 +1318,17 @@ export interface NameMismatch {
   topLevel: string;
   schemaName: string | null;
   distinctNames: string[];
-  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions'>;
+  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions' | 'incoming_skill'>;
 }
 
-export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
+export function detectNameMismatch(
+  merged: ProposedMerge,
+  /** The incoming candidate's original name. When the rule-based merger (or LLM)
+   *  adopts the library name as default, the rename would otherwise be silent.
+   *  Passing the incoming name here surfaces it as a NAME_MISMATCH so the
+   *  reviewer explicitly confirms or overrides the rename (v3 Fix 7). */
+  incomingName?: string,
+): NameMismatch | null {
   const topLevel = (merged.name ?? '').trim();
   const schemaNameRaw = (merged.definition as Record<string, unknown> | null | undefined)?.name;
   const schemaName = typeof schemaNameRaw === 'string' && schemaNameRaw.trim().length > 0
@@ -1003,6 +1341,13 @@ export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
   if (topLevel) candidates.add(normalise(topLevel));
   if (schemaName) candidates.add(normalise(schemaName));
 
+  // If the incoming skill had a different name (merger defaulted to library name),
+  // surface it as an additional candidate so the reviewer sees and resolves the rename.
+  const normIncoming = incomingName ? normalise(incomingName) : null;
+  if (normIncoming && topLevel && normIncoming !== normalise(topLevel)) {
+    candidates.add(normIncoming);
+  }
+
   // Look for either name used as a bare identifier in description / instructions.
   // Only flag when a DIFFERENT name appears there, not the same one.
   const allBareNames = collectBareNames(merged.description)
@@ -1014,11 +1359,12 @@ export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
 
   if (candidates.size < 2) return null;
 
-  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions'> = [];
+  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions' | 'incoming_skill'> = [];
   if (topLevel) sources.push('top_level');
   if (schemaName) sources.push('schema');
   if (merged.description && collectBareNames(merged.description).length > 0) sources.push('description');
   if (merged.instructions && collectBareNames(merged.instructions).length > 0) sources.push('instructions');
+  if (normIncoming && topLevel && normIncoming !== normalise(topLevel)) sources.push('incoming_skill');
 
   return {
     topLevel,
@@ -1046,7 +1392,11 @@ function collectBareNames(text: string | null | undefined): string[] {
 }
 
 /** Extract markdown tables from text, keyed by their normalized header row.
- *  headerKey is used for matching across source and merged text. */
+ *  headerKey is context-qualified: "{nearest-heading}>{columns}" when a
+ *  heading is present, otherwise just "{columns}". This prevents platform-
+ *  spec tables that share identical column schemas (e.g. "element|limit|notes"
+ *  appearing under Meta, LinkedIn, TikTok, and Twitter/X sections) from
+ *  collapsing into a single bucket and cross-polluting each other's rows. */
 export function extractTables(text: string | null): ExtractedTable[] {
   if (!text) return [];
   const lines = text.split('\n');
@@ -1055,14 +1405,21 @@ export function extractTables(text: string | null): ExtractedTable[] {
   let headerKey: string | null = null;
   let rowCount = 0;
   let lineIndex = 0;
+  let contextHeading = '';
 
   for (const line of lines) {
     const trimmed = line.trim();
+    // Track the nearest heading so tables with identical column schemas but
+    // under different section headings get distinct keys.
+    if (!inTable && /^#{1,4}\s+/.test(trimmed)) {
+      contextHeading = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
     if (trimmed.startsWith('|')) {
       if (!inTable) {
         inTable = true;
-        headerKey = trimmed.replace(/^\||\|$/g, '').split('|')
+        const rawKey = trimmed.replace(/^\||\|$/g, '').split('|')
           .map(c => c.trim().toLowerCase()).join('|');
+        headerKey = contextHeading ? `${contextHeading}>${rawKey}` : rawKey;
         rowCount = 0;
         lineIndex = 0;
       } else {
@@ -1095,23 +1452,29 @@ interface ExtractedTableRows {
   endLineIndex: number;         // line index of last row (exclusive)
 }
 
-/** Extract tables with full row content, keyed by normalized header. */
+/** Extract tables with full row content, keyed by context-qualified header.
+ *  See extractTables for the heading-context rationale. */
 export function extractTablesWithRows(text: string | null): ExtractedTableRows[] {
   if (!text) return [];
   const lines = text.split('\n');
   const tables: ExtractedTableRows[] = [];
   let current: ExtractedTableRows | null = null;
   let linePos = 0;
+  let contextHeading = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+    if (!current && /^#{1,4}\s+/.test(trimmed)) {
+      contextHeading = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
     if (trimmed.startsWith('|')) {
       if (!current) {
         const headerCells = trimmed.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        const rawKey = headerCells.map(c => c.toLowerCase()).join('|');
         current = {
           headerLine: line,
-          headerKey: headerCells.map(c => c.toLowerCase()).join('|'),
+          headerKey: contextHeading ? `${contextHeading}>${rawKey}` : rawKey,
           separatorLine: '',
           columnCount: headerCells.length,
           rows: [],
@@ -1150,18 +1513,92 @@ function firstColumnKey(rowLine: string): string {
 /** Whether a row already carries a [SOURCE: ...] marker (skip to prevent
  *  recursive inflation on retries). */
 function hasSourceMarker(rowLine: string): boolean {
-  return /\[SOURCE:\s*(library|incoming)\]/i.test(rowLine);
+  return /\[SOURCE:\s*(library|incoming)/i.test(rowLine);
 }
 
-/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row. */
-function withSourceMarker(rowLine: string, source: 'library' | 'incoming'): string {
+/** Append a `[SOURCE: ...]` marker to the last non-empty cell of a row.
+ *  When `sourceKey` is provided (heading-qualified headerKey of the source
+ *  table), it is embedded in the annotation so decontaminateSectionRows can
+ *  detect cross-section row pollution. */
+function withSourceMarker(
+  rowLine: string,
+  source: 'library' | 'incoming',
+  sourceKey?: string,
+): string {
   const trimmed = rowLine.trimEnd();
   if (hasSourceMarker(trimmed)) return trimmed;
-  // Find position before the trailing pipe (if any) to inject marker cleanly.
+  const marker = sourceKey
+    ? `[SOURCE: ${source} "${sourceKey}"]`
+    : `[SOURCE: ${source}]`;
   if (trimmed.endsWith('|')) {
-    return trimmed.slice(0, -1).trimEnd() + ` [SOURCE: ${source}] |`;
+    return trimmed.slice(0, -1).trimEnd() + ` ${marker} |`;
   }
-  return `${trimmed} [SOURCE: ${source}]`;
+  return `${trimmed} ${marker}`;
+}
+
+// ---------------------------------------------------------------------------
+// Post-remediation cleanup — decontamination + annotation strip
+// ---------------------------------------------------------------------------
+
+/** Remove table rows that were appended by remediateTables into the wrong
+ *  section. Detects misplacement by comparing the source section key
+ *  embedded in the annotation against the current section context.
+ *
+ *  Only rows with an extended annotation `[SOURCE: ... "key"]` are examined;
+ *  legacy bare `[SOURCE: library]` rows are left for stripSourceAnnotations.
+ *
+ *  Domain-agnostic: comparison is pure string match on heading keys; no
+ *  hardcoded platform names.
+ *
+ *  Idempotent: running twice on the same text produces the same result. */
+export function decontaminateSectionRows(instructions: string): string {
+  const lines = instructions.split('\n');
+  let contextKey = '';
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Update current section heading whenever we see a heading-level line.
+    // We DON'T require !inTable here because headings inside remediateTables
+    // output can follow a table with no blank line separator.
+    if (/^#{1,4}\s+/.test(trimmed)) {
+      contextKey = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
+
+    if (trimmed.startsWith('|')) {
+      // Check for extended SOURCE annotation with an embedded section key.
+      const match = trimmed.match(/\[SOURCE:\s*(?:library|incoming)\s+"([^"]+)"\]/i);
+      if (match) {
+        const sourceKey = match[1];
+        // Source key format: "<heading>><columns>" — extract heading part.
+        const sourceHeading = sourceKey.includes('>') ? sourceKey.split('>')[0] : sourceKey;
+        // If source heading differs from current section heading, this row
+        // was appended into the wrong section — discard it.
+        if (contextKey && sourceHeading && sourceHeading !== contextKey) {
+          continue;
+        }
+      }
+    }
+
+    result.push(line);
+  }
+  return result.join('\n');
+}
+
+/** Strip all [SOURCE: library] / [SOURCE: incoming] annotations from table
+ *  rows. These are internal merge-process artifacts and must not appear in
+ *  the user-facing merged output.
+ *
+ *  Removes both the legacy bare form and the extended keyed form:
+ *    [SOURCE: library]
+ *    [SOURCE: incoming "meta ads>element|limit|notes"]
+ *
+ *  Idempotent. */
+export function stripSourceAnnotations(instructions: string): string {
+  return instructions.replace(
+    /\s*\[SOURCE:\s*(?:library|incoming)(?:\s+"[^"]*")?\]/gi,
+    '',
+  );
 }
 
 export interface RemediateTablesInput {
@@ -1235,7 +1672,7 @@ export function remediateTables(input: RemediateTablesInput): RemediateTablesOut
     // Collect candidate rows to append, skipping those whose first-column
     // key is already present (or conflicts across sources).
     const seenSourceKey = new Map<string, 'library' | 'incoming'>();
-    const toAppend: Array<{ row: string; source: 'library' | 'incoming' }> = [];
+    const toAppend: Array<{ row: string; source: 'library' | 'incoming'; sourceTableKey: string }> = [];
     for (const { source, table } of sources) {
       for (const row of table.rows) {
         if (hasSourceMarker(row)) continue;
@@ -1249,14 +1686,19 @@ export function remediateTables(input: RemediateTablesInput): RemediateTablesOut
           continue;
         }
         seenSourceKey.set(key, source);
-        toAppend.push({ row, source });
+        // Include source table's headerKey so decontaminateSectionRows can
+        // detect rows appended into the wrong section.
+        toAppend.push({ row, source, sourceTableKey: table.headerKey });
       }
     }
 
     if (toAppend.length === 0) continue;
 
-    // Append the new rows to the merged table in-place.
-    const markedRows = toAppend.map(({ row, source }) => withSourceMarker(row, source));
+    // Append the new rows with extended SOURCE annotations that encode the
+    // source table's heading context for downstream decontamination.
+    const markedRows = toAppend.map(({ row, source, sourceTableKey }) =>
+      withSourceMarker(row, source, sourceTableKey),
+    );
     // Splice after the last merged-table row (mergedTable.endLineIndex).
     lines.splice(mergedTable.endLineIndex, 0, ...markedRows);
     autoRecovered += markedRows.length;
@@ -1430,6 +1872,9 @@ export function validateMergeOutput(
   allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
   excludedId: string | null,
   thresholds: ValidationThresholds = {},
+  /** Optional: the incoming candidate's original name, used by detectNameMismatch
+   *  to surface rename decisions the merger made silently. */
+  candidateName?: string,
 ): MergeWarning[] {
   const warnings: MergeWarning[] = [];
   const scopeStd = Math.round((thresholds.scopeExpansionStandardPct ?? 0.30) * 100);
@@ -1450,14 +1895,21 @@ export function validateMergeOutput(
   const allSourceRequired = [...new Set([...baseRequired, ...nonBaseRequired])];
   const demoted = allSourceRequired.filter(f => !mergedRequired.includes(f));
   if (demoted.length > 0) {
+    // v6 Fix 3: classify each demoted field so the reviewer sees "made
+    // optional" vs "removed entirely" vs "possibly replaced by X" in the UI.
+    // The fieldStatus map is additive — parseDemotedFields (legacy) still
+    // reads the demotedFields array, so older clients keep working.
+    const fieldStatus = classifyDemotedFields(demoted, merged.definition);
+    const madeOptional = demoted.filter(f => fieldStatus[f]?.status === 'made_optional').length;
+    const removed = demoted.length - madeOptional;
+    const messageParts: string[] = [];
+    if (madeOptional > 0) messageParts.push(`${madeOptional} made optional`);
+    if (removed > 0) messageParts.push(`${removed} removed`);
     warnings.push({
       code: 'REQUIRED_FIELD_DEMOTED',
       severity: 'critical',
-      message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
-      // Structured detail so the client can render per-field Accept/Restore UI.
-      // parseDemotedFields() still accepts the legacy comma-delimited form for
-      // backwards compatibility.
-      detail: JSON.stringify({ demotedFields: demoted }),
+      message: `${demoted.length} required field(s) from the source skills ${messageParts.join(', ')}.`,
+      detail: JSON.stringify({ demotedFields: demoted, fieldStatus }),
     });
   }
 
@@ -1517,6 +1969,13 @@ export function validateMergeOutput(
   }
 
   // --- Bug 10: Table completeness ---
+  // v6 Fix 1: when the LLM restructured a source table inline (split it into
+  // sub-tables, merged multiple tables, or reordered columns), the header-key
+  // comparison below treats it as "dropped". Before emitting the warning,
+  // verify whether the row data is still present in the merged text. If
+  // ≥80% of source rows are covered by substring match, downgrade the message
+  // from "rows dropped" to "table restructured — N/M rows verified present"
+  // and skip the paired reference appendix in recoverDroppedTableRows.
   const baseTables = extractTables(base.instructions);
   const nonBaseTables = extractTables(nonBase.instructions);
   const mergedTables = extractTables(merged.instructions);
@@ -1526,9 +1985,37 @@ export function validateMergeOutput(
     const existing = sourceLookup.get(t.headerKey) ?? 0;
     if (t.rowCount > existing) sourceLookup.set(t.headerKey, t.rowCount);
   }
+  // Source rows by headerKey for content verification (only computed for
+  // tables that look dropped — avoid the cost on the happy path).
+  const sourceRowsByHeader = new Map<string, ExtractedTableRows>();
+  for (const t of [...extractTablesWithRows(base.instructions), ...extractTablesWithRows(nonBase.instructions)]) {
+    const existing = sourceRowsByHeader.get(t.headerKey);
+    if (!existing || t.rows.length > existing.rows.length) {
+      sourceRowsByHeader.set(t.headerKey, t);
+    }
+  }
   for (const [headerKey, sourceRows] of sourceLookup) {
     const mergedRows = mergedByHeader.get(headerKey) ?? 0;
-    if (mergedRows < sourceRows) {
+    if (mergedRows >= sourceRows) continue;
+    const sourceWithRows = sourceRowsByHeader.get(headerKey);
+    const coverage = sourceWithRows && merged.instructions
+      ? mergedOutputCoversTableData(sourceWithRows, merged.instructions)
+      : { covered: false, matchedRows: 0, totalRows: sourceRows };
+    if (coverage.covered) {
+      warnings.push({
+        code: 'TABLE_ROWS_DROPPED',
+        severity: 'warning',
+        message: `Table "${headerKey}" was restructured in the merge — ${coverage.matchedRows}/${coverage.totalRows} source rows verified present.`,
+        detail: JSON.stringify({
+          header: headerKey,
+          sourceRows,
+          mergedRows,
+          restructured: true,
+          matchedRows: coverage.matchedRows,
+          totalRows: coverage.totalRows,
+        }),
+      });
+    } else {
       warnings.push({
         code: 'TABLE_ROWS_DROPPED',
         severity: 'warning',
@@ -1579,7 +2066,7 @@ export function validateMergeOutput(
   }
 
   // --- Fix 7: Name mismatch across file name / schema name / references ---
-  const mismatch = detectNameMismatch(merged);
+  const mismatch = detectNameMismatch(merged, candidateName);
   if (mismatch) {
     warnings.push({
       code: 'NAME_MISMATCH',
@@ -1590,6 +2077,25 @@ export function validateMergeOutput(
         schemaName: mismatch.schemaName,
         distinctNames: mismatch.distinctNames,
         candidates: mismatch.candidates,
+      }),
+    });
+  }
+
+  // --- Fix 4 (v4/v5): NEAR_REPLACEMENT — merged retains < 30% of source structure ---
+  const retentionScore = computeSourceRetention(base, merged, sourceLookup, mergedByHeader);
+  if (retentionScore < 0.30) {
+    const defRet = computeDefinitionRetention(base, merged);
+    const tblRet = computeTableRetention(sourceLookup, mergedByHeader);
+    const instrRet = wordOverlapRatio(base.instructions, merged.instructions);
+    warnings.push({
+      code: 'NEAR_REPLACEMENT',
+      severity: 'warning',
+      message: `This merge retains only ~${Math.round(retentionScore * 100)}% of the library skill's structure. Consider treating as a new skill rather than a merge.`,
+      detail: JSON.stringify({
+        retentionScore: Math.round(retentionScore * 100),
+        definitionRetentionPct: Math.round(defRet * 100),
+        tableRetentionPct: Math.round(tblRet * 100),
+        instructionRetentionPct: Math.round(instrRet * 100),
       }),
     });
   }
@@ -1706,10 +2212,210 @@ export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput)
   };
 }
 
+// ---------------------------------------------------------------------------
+// Classification-failure outcome — single source of truth
+// ---------------------------------------------------------------------------
+//
+// Both the Stage-5 job path (skillAnalyzerJob.ts) and the per-row retry path
+// (skillAnalyzerService.ts → classifySingleCandidate) enter the same state
+// when the LLM classify call errors or the response can't be parsed. Before
+// this helper existed, the two paths diverged: the job applied the rule-based
+// fallback (§11.4), while the retry path returned a null-merge stub —
+// surfacing "Proposal unavailable" in the UI on every retry. This helper is
+// the single authority for the classification-failure outcome so the two
+// paths stay in lockstep.
+
+/** Standard copy used when the classifier fails; match this across both
+ *  paths so debugging can key off a single string. */
+export const CLASSIFIER_FALLBACK_REASONING =
+  'LLM classification failed — rule-based fallback merge applied for human review.';
+
+/** Standard CLASSIFIER_FALLBACK warning — prepended to every mergeWarnings
+ *  array on the fallback path. */
+export const CLASSIFIER_FALLBACK_WARNING: MergeWarning = {
+  code: 'CLASSIFIER_FALLBACK',
+  severity: 'warning',
+  message: 'Rule-based fallback merge applied — classifier unavailable. Review carefully.',
+};
+
+export interface ClassifierFailureOutcome {
+  classification: 'PARTIAL_OVERLAP';
+  confidence: number;
+  reasoning: string;
+  proposedMerge: ProposedMerge;
+  mergeRationale: string;
+  classifierFallbackApplied: true;
+}
+
+/** Build the complete outcome returned whenever classification fails.
+ *  Wraps `buildRuleBasedMerge` with standard reasoning copy, a low-confidence
+ *  score (clamped to `fallbackConfidence`, default 0.3), and the
+ *  `classifierFallbackApplied` flag. Validation (merge warnings) is applied
+ *  separately by the caller — the job and retry paths each compose this
+ *  outcome with their own validateMergeOutput / remediateTables plumbing. */
+/** Known ad-platform identifiers that the library skill's enum may omit. */
+const PLATFORM_PATTERNS: Array<{ pattern: RegExp; enumValue: string }> = [
+  { pattern: /\btiktok\b/i,            enumValue: 'tiktok_ads' },
+  { pattern: /\btwitter\b|\btwitter\/x\b|\bx ads\b/i, enumValue: 'twitter_x_ads' },
+  { pattern: /\bsnapchat\b/i,          enumValue: 'snapchat_ads' },
+  { pattern: /\byoutube\b/i,           enumValue: 'youtube_ads' },
+  { pattern: /\bpinterest\b/i,         enumValue: 'pinterest_ads' },
+];
+
+/** Return a copy of `definition` with any new platform enum values from
+ *  `incomingInstructions` injected into the first `enum` field found under
+ *  `input_schema.properties`. No-ops if the definition has no enum. */
+function expandPlatformEnum(
+  definition: object,
+  incomingInstructions: string | null,
+): object {
+  if (!incomingInstructions) return definition;
+  const def = definition as Record<string, unknown>;
+  const props = (def.input_schema as Record<string, unknown> | undefined)?.properties;
+  if (!props || typeof props !== 'object') return definition;
+
+  const propsObj = props as Record<string, unknown>;
+  const platformPropKey = Object.keys(propsObj).find(k => {
+    const p = propsObj[k] as Record<string, unknown> | undefined;
+    return Array.isArray(p?.enum) && (p.enum as string[]).some(v => v.includes('_ads') || v.includes('ads_'));
+  });
+  if (!platformPropKey) return definition;
+
+  const prop = propsObj[platformPropKey] as Record<string, unknown>;
+  const existing = new Set<string>(prop.enum as string[]);
+  const toAdd: string[] = [];
+  for (const { pattern, enumValue } of PLATFORM_PATTERNS) {
+    if (!existing.has(enumValue) && pattern.test(incomingInstructions)) toAdd.push(enumValue);
+  }
+  if (toAdd.length === 0) return definition;
+
+  return {
+    ...def,
+    input_schema: {
+      ...(def.input_schema as object),
+      properties: {
+        ...propsObj,
+        [platformPropKey]: { ...prop, enum: [...(prop.enum as string[]), ...toAdd] },
+      },
+    },
+  };
+}
+
+export function buildClassifierFailureOutcome(
+  input: RuleBasedMergeInput & { fallbackConfidence?: number },
+): ClassifierFailureOutcome {
+  const fallback = buildRuleBasedMerge({
+    candidate: input.candidate,
+    library: input.library,
+  });
+
+  // v5 Fix 1: use incoming name + description; keep library definition but
+  // expand any platform enums it has; show clear boundary in instructions.
+  const incomingName = input.candidate.name?.trim() ?? '';
+  const useName = incomingName || input.library.name?.trim() || fallback.merge.name;
+
+  const incomingDesc = input.candidate.description?.trim() ?? '';
+  const useDescription = incomingDesc.length > 50 ? incomingDesc : fallback.merge.description;
+
+  const libInstr  = input.library.instructions?.trim() ?? '';
+  const candInstr = input.candidate.instructions?.trim() ?? '';
+  let useInstructions: string | null;
+  if (libInstr && candInstr) {
+    useInstructions = `${libInstr}\n\n---\n\n## Extended Capabilities (from incoming skill)\n\n${candInstr}`;
+  } else {
+    useInstructions = libInstr || candInstr || fallback.merge.instructions;
+  }
+
+  const expandedDef = expandPlatformEnum(fallback.merge.definition, input.candidate.instructions);
+  const defWithName = (expandedDef as Record<string, unknown>).name !== undefined
+    ? { ...(expandedDef as Record<string, unknown>), name: useName }
+    : expandedDef;
+
+  const merge: typeof fallback.merge = {
+    name: useName,
+    description: useDescription,
+    definition: defWithName as object,
+    instructions: useInstructions,
+  };
+
+  return {
+    classification: 'PARTIAL_OVERLAP',
+    confidence: input.fallbackConfidence ?? 0.3,
+    reasoning: CLASSIFIER_FALLBACK_REASONING,
+    proposedMerge: merge,
+    mergeRationale: fallback.mergeRationale,
+    classifierFallbackApplied: true,
+  };
+}
+
+/** v7-B Fix #3a — detect when a classifier's own merge rationale argues
+ *  against the merge it returned. The LLM frequently writes phrases like
+ *  "neither fully replaces the other" or "produce different artifacts"
+ *  inside a PARTIAL_OVERLAP / IMPROVEMENT rationale — that's the model
+ *  contradicting its own classification. When this fires the caller flips
+ *  the classification to DISTINCT (with a logged reasoning prefix).
+ *
+ *  Patterns kept conservative to avoid false positives on benign rationales
+ *  that happen to use the words "different" or "replace" in passing. Each
+ *  pattern requires the disqualifying intent (replacement-failure, artifact
+ *  divergence, fundamental-purpose split) to be the rationale's own claim. */
+const RATIONALE_CONTRADICTION_PATTERNS: RegExp[] = [
+  // "neither fully replaces the other", "neither skill replaces the other"
+  /\bneither\s+(fully\s+)?(skill\s+)?replaces?\s+the\s+other\b/i,
+  // "produce different artifacts", "produces different artifact types"
+  /\b(produce|produces|generate|generates|return|returns)\s+(\w+\s+)?(different|distinct)\s+(artifact|output|deliverable)s?\b/i,
+  // "fundamentally different (purposes|artifacts|outputs|workflows|behaviours)"
+  /\bfundamentally\s+different\s+(purpose|artifact|output|workflow|behaviou?r|use\s+case)s?\b/i,
+  // "completely different (purposes|artifacts|outputs)"
+  /\bcompletely\s+different\s+(purpose|artifact|output|workflow|use\s+case)s?\b/i,
+  // "(differ|different) significantly in (scope|artifact|purpose) and"
+  /\bdiffer(s|ed)?\s+significantly\s+in\s+\w+(\s+and\s+\w+)+\b/i,
+];
+
+/** Returns true if the LLM's reasoning text contains language that
+ *  argues against its own merge — a strong signal the classification
+ *  should have been DISTINCT. Used after the classifier returns
+ *  PARTIAL_OVERLAP / IMPROVEMENT to flip clearly-self-contradicting
+ *  rows to DISTINCT before persistence. */
+export function rationaleArguesAgainstMerge(reasoning: string | null | undefined): boolean {
+  if (!reasoning) return false;
+  return RATIONALE_CONTRADICTION_PATTERNS.some(re => re.test(reasoning));
+}
+
+/** Returns true when the candidate description cross-references the library
+ *  skill by name or slug in a "see X" / "use X" / "for X" context — a signal
+ *  that the incoming skill treats the library skill as a separate, distinct
+ *  tool rather than an extension of it. Used for DISTINCT_FALLBACK (v5 Fix 6). */
+export function crossReferencesLibrarySkill(
+  candidateDescription: string | null,
+  libraryName: string,
+  librarySlug: string,
+): boolean {
+  if (!candidateDescription) return false;
+  const desc  = candidateDescription.toLowerCase();
+  const lName = libraryName.toLowerCase();
+  const lSlug = librarySlug.toLowerCase().replace(/_/g, '-');
+  // Match "see X", "use X", "refer to X", or "for X" where X contains the library label
+  const seeRe = /\b(see|use|refer to|for)\b(.{0,60})/g;
+  let m: RegExpExecArray | null;
+  while ((m = seeRe.exec(desc)) !== null) {
+    const ctx = m[2];
+    if (ctx.includes(lName) || ctx.includes(lSlug)) return true;
+  }
+  return false;
+}
+
 /** Merge two instruction bodies by (a) taking the dominant text as base and
  *  (b) appending any `## heading` sections from the secondary that the
- *  dominant doesn't already contain (case-insensitive heading match). Keeps
- *  the dominant's invocation block at the top untouched. */
+ *  dominant doesn't already contain (case-insensitive heading match).
+ *
+ *  Invocation-block invariant (Issue A): if either source opens with an
+ *  invocation trigger block, the merged output must also open with one. When
+ *  the dominant lacks a block but the secondary has one, prepend it. This
+ *  handles the common case where the incoming skill (richer, dominant) opens
+ *  with a persona line ("You are an expert in…") while the library skill
+ *  opens with "Invoke this skill when…" — the library's invocation block
+ *  would otherwise be silently dropped by splitH2Sections. */
 function mergeInstructionsRuleBased(
   dominant: string | null,
   secondary: string | null,
@@ -1732,8 +2438,22 @@ function mergeInstructionsRuleBased(
       appendParts.push(section.body);
     }
   }
-  if (appendParts.length === 0) return base;
-  return `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+  let result = appendParts.length === 0 ? base : `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+
+  // Invocation-block invariant: if the secondary had a block but the dominant
+  // didn't, prepend the secondary's block to the merged output.
+  const dominantInvocation = extractInvocationBlock(dominant);
+  const secondaryInvocation = extractInvocationBlock(secondary);
+  if (!dominantInvocation && secondaryInvocation) {
+    const mergedBlock = extractInvocationBlock(result);
+    const isAtTop = mergedBlock !== null && result.trimStart().startsWith(mergedBlock.trimStart());
+    if (!isAtTop) {
+      const separator = startsWithPersonaOpener(result) ? '\n\n---\n\n' : '\n\n';
+      result = `${secondaryInvocation.trimEnd()}${separator}${result.trimStart()}`;
+    }
+  }
+
+  return result.trim() + '\n';
 }
 
 function normaliseHeading(h: string): string {
@@ -2194,6 +2914,402 @@ export function parseAgentClusterRecommendationResponse(response: string): Agent
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fix 4 helpers — source retention scoring (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Word-overlap ratio: what fraction of the source's significant words
+ *  (length > 3) appear somewhere in the merged text. */
+export function wordOverlapRatio(source: string | null, merged: string | null): number {
+  if (!source || !merged) return source ? 0 : 1;
+  const sourceWords = new Set(
+    source.toLowerCase().split(/\s+/).filter(w => w.length > 3),
+  );
+  if (sourceWords.size === 0) return 1;
+  const mergedLower = merged.toLowerCase();
+  let matches = 0;
+  for (const word of sourceWords) {
+    if (mergedLower.includes(word)) matches++;
+  }
+  return matches / sourceWords.size;
+}
+
+function computeDefinitionRetention(
+  base: { definition: object | null },
+  merged: ProposedMerge,
+): number {
+  const baseReq = ((base.definition as Record<string, unknown> | null)?.input_schema as Record<string, unknown> | undefined)?.required;
+  const mergedReq = ((merged.definition as Record<string, unknown> | null)?.input_schema as Record<string, unknown> | undefined)?.required;
+  const baseArr = Array.isArray(baseReq) ? (baseReq as string[]) : [];
+  const mergedArr = Array.isArray(mergedReq) ? (mergedReq as string[]) : [];
+  if (baseArr.length === 0) return 1;
+  return baseArr.filter(f => mergedArr.includes(f)).length / baseArr.length;
+}
+
+function computeTableRetention(
+  sourceLookup: Map<string, number>,
+  mergedByHeader: Map<string, number>,
+): number {
+  if (sourceLookup.size === 0) return 1;
+  let total = 0;
+  for (const [header, sourceRows] of sourceLookup) {
+    const mergedRows = mergedByHeader.get(header) ?? 0;
+    total += sourceRows > 0 ? Math.min(1, mergedRows / sourceRows) : 1;
+  }
+  return total / sourceLookup.size;
+}
+
+function computeSourceRetention(
+  base: { definition: object | null; instructions: string | null },
+  merged: ProposedMerge,
+  sourceLookup: Map<string, number>,
+  mergedByHeader: Map<string, number>,
+): number {
+  const defRet   = computeDefinitionRetention(base, merged);
+  const tblRet   = computeTableRetention(sourceLookup, mergedByHeader);
+  const instrRet = wordOverlapRatio(base.instructions, merged.instructions);
+  return defRet * 0.3 + tblRet * 0.3 + instrRet * 0.4;
+}
+
+// ---------------------------------------------------------------------------
+// Fix 2 — table drop recovery appendix (v4 brief)
+// Fix 3 (v5) — suppress reference appendix when merged output already covers data
+// ---------------------------------------------------------------------------
+
+/** Clean a table cell for content-verification matching. Strips [SOURCE:] markers,
+ *  backticks, surrounding whitespace, and lowercases. Returns '' for cells that
+ *  are not useful for matching (empty, pure punctuation, very short). */
+function cleanCellForMatch(cell: string): string {
+  const cleaned = cell
+    .replace(/\[SOURCE:[^\]]*\]/g, '')
+    .replace(/[`*_]/g, '')
+    .trim()
+    .toLowerCase();
+  if (cleaned.length < 2) return '';
+  if (/^[-—–\s]+$/.test(cleaned)) return '';
+  return cleaned;
+}
+
+/** Stopwords that carry no identifying signal when comparing table cells.
+ *  Kept short — we want to preserve domain terms like "chars" that the
+ *  stemming logic handles separately. */
+const CELL_TOKEN_STOPWORDS = new Set([
+  'and', 'but', 'for', 'the', 'with', 'each', 'upto', 'up', 'to', 'max',
+  'min', 'per', 'via', 'not', 'any', 'all', 'or', 'of', 'in', 'on', 'at',
+  'by', 'as', 'is', 'are', 'if',
+]);
+
+/** Strip a common pluralisation / word-form suffix so "headlines" matches
+ *  "headline" and "chars" matches "characters". Intentionally conservative —
+ *  we want false negatives over false positives. */
+function stemToken(token: string): string {
+  let t = token;
+  if (t.length > 4 && t.endsWith('s')) t = t.slice(0, -1); // plural
+  // Normalise common word-form pairs seen in skill specs: characters↔chars,
+  // seconds↔secs, minutes↔mins. The full words and short forms both collapse
+  // to the shared prefix.
+  if (t.startsWith('character')) t = 'char';
+  else if (t.startsWith('second')) t = 'sec';
+  else if (t.startsWith('minute')) t = 'min';
+  return t;
+}
+
+/** Extract distinctive tokens from a string — length-≥3, non-stopword, stemmed.
+ *  Used for row-level coverage matching where exact substring fails on LLM
+ *  restructurings ("30 chars each, up to 15" vs "30 characters | Up to 15"). */
+function extractInformativeTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const raw of text.toLowerCase().split(/[\s,/|\-()[\]:;"]+/)) {
+    if (raw.length < 3) continue;
+    if (CELL_TOKEN_STOPWORDS.has(raw)) continue;
+    tokens.push(stemToken(raw));
+  }
+  return tokens;
+}
+
+/** Return the cleaned, lowercased, non-empty cells of a markdown table row.
+ *  Used by both the token-set scorer (via `extractRowKeyTokens`) and the
+ *  low-token fallback in `mergedOutputCoversTableData`. */
+function extractRowCells(rowLine: string): string[] {
+  const trimmed = rowLine.trim().replace(/^\||\|$/g, '');
+  const cells: string[] = [];
+  for (const cell of trimmed.split('|')) {
+    const cleaned = cleanCellForMatch(cell);
+    if (cleaned.length > 0) cells.push(cleaned);
+  }
+  return cells;
+}
+
+/** Extract informative tokens from all non-empty cells of a row (v6 follow-up
+ *  to Codex review: widening from first-2-cells catches rows whose leading
+ *  cells are intentionally the same across the table — e.g. "Phase 1 | 30d",
+ *  "Phase 2 | 60d" — where only later cells differentiate rows). */
+function extractRowKeyTokens(rowLine: string): string[] {
+  return extractRowCells(rowLine).flatMap(extractInformativeTokens);
+}
+
+/** Returns true if the merged instructions already contain table data that
+ *  covers at least `coverageThreshold` of the source table's rows. v6 Fix 1
+ *  (follow-up: tightened after Codex review): for each row, extract
+ *  informative tokens from all cells (stemmed, stopwords removed), then count
+ *  the row "covered" when ≥50% of those tokens appear as whole tokens
+ *  anywhere in the merged instructions AND at least 2 distinct tokens match.
+ *  The absolute-minimum guard prevents rows that collapse to one token
+ *  ("headline", "phase") from being marked covered by a single haystack hit.
+ *  For low-token rows (<2 distinct informative tokens, e.g. `| Banner | 1 |`)
+ *  the token-set scorer has insufficient signal; fall back to requiring the
+ *  row's cell content to appear literally in the lowercased merged text
+ *  (terse rows can't be restructured by LLMs, so exact match is appropriate).
+ *  The outer 80%-row-coverage guard controls false positives. */
+function mergedOutputCoversTableData(
+  sourceTable: ExtractedTableRows,
+  mergedInstructions: string,
+  coverageThreshold = 0.80,
+  rowTokenThreshold = 0.50,
+  rowTokenAbsoluteMin = 2,
+): { covered: boolean; matchedRows: number; totalRows: number } {
+  const haystackTokens = new Set(extractInformativeTokens(mergedInstructions));
+  const haystackLower = mergedInstructions.toLowerCase();
+  let matched = 0;
+  let scoreable = 0;
+
+  for (const row of sourceTable.rows) {
+    const cells = extractRowCells(row);
+    if (cells.length === 0) continue;
+    const rowTokens = cells.flatMap(extractInformativeTokens);
+    if (rowTokens.length === 0) continue;
+    const distinctTokens = new Set(rowTokens).size;
+    scoreable++;
+
+    if (distinctTokens < rowTokenAbsoluteMin) {
+      // Low-token fallback: terse row. Require every meaningful cell to
+      // appear as a substring of the merged text. Terse rows can't be
+      // restructured (nothing to rephrase); exact match is the appropriate
+      // signal. Cells shorter than 3 chars (single letters, single digits)
+      // are skipped in the presence check — a standalone "1" would match
+      // anywhere and produce false positives.
+      const substantiveCells = cells.filter(c => c.length >= 3);
+      if (substantiveCells.length === 0) {
+        // No substantive content — can't score, undo the scoreable bump.
+        scoreable--;
+        continue;
+      }
+      const allCellsPresent = substantiveCells.every(c => haystackLower.includes(c));
+      if (allCellsPresent) matched++;
+      continue;
+    }
+
+    // Count distinct present tokens so a token repeated across cells doesn't
+    // double-count toward the match threshold.
+    const presentSet = new Set<string>();
+    for (const t of rowTokens) {
+      if (haystackTokens.has(t)) presentSet.add(t);
+    }
+    const present = presentSet.size;
+    if (
+      present >= rowTokenAbsoluteMin &&
+      present / distinctTokens >= rowTokenThreshold
+    ) {
+      matched++;
+    }
+  }
+
+  if (scoreable === 0) return { covered: false, matchedRows: 0, totalRows: 0 };
+  return {
+    covered: matched / scoreable >= coverageThreshold,
+    matchedRows: matched,
+    totalRows: scoreable,
+  };
+}
+
+/** When TABLE_ROWS_DROPPED warnings fire for tables with < 50% rows retained,
+ *  append the original source table as a clearly-labelled reference appendix
+ *  at the end of the merged instructions (before any Related Skills section).
+ *
+ *  Domain-agnostic. Only tables with headerKey present in sourceTables and
+ *  with mergedRows < sourceRows * 0.5 are recovered. Idempotent: tables
+ *  already in the appendix (heading contains "Reference:") are skipped. */
+export function recoverDroppedTableRows(
+  mergedInstructions: string,
+  baseInstructions: string | null,
+  nonBaseInstructions: string | null,
+): string {
+  const baseTables   = extractTablesWithRows(baseInstructions);
+  const nonBaseTables = extractTablesWithRows(nonBaseInstructions);
+  const mergedTables = extractTablesWithRows(mergedInstructions);
+
+  const mergedByHeader = new Map(mergedTables.map(t => [t.headerKey, t.rows.length]));
+
+  // Collect the best source table per header (most rows wins).
+  const sourceBest = new Map<string, ExtractedTableRows>();
+  for (const t of [...baseTables, ...nonBaseTables]) {
+    const existing = sourceBest.get(t.headerKey);
+    if (!existing || t.rows.length > existing.rows.length) {
+      sourceBest.set(t.headerKey, t);
+    }
+  }
+
+  const appendixBlocks: string[] = [];
+  for (const [headerKey, sourceTable] of sourceBest) {
+    const mergedRows = mergedByHeader.get(headerKey) ?? 0;
+    const sourceRows = sourceTable.rows.length;
+    if (sourceRows === 0 || mergedRows >= sourceRows * 0.5) continue;
+    // Skip tables whose heading already says "Reference:" to prevent recursion.
+    if (/reference:/i.test(headerKey)) continue;
+    // v6 Fix 1: skip if the merged instructions already contain ≥80% of the
+    // source rows (by first-2-cols substring match). Avoids duplicate reference
+    // appendices when the LLM restructured the table inline.
+    if (mergedOutputCoversTableData(sourceTable, mergedInstructions).covered) continue;
+
+    const headingPart = headerKey.includes('>')
+      ? headerKey.split('>')[0].replace(/\b\w/g, c => c.toUpperCase())
+      : headerKey.replace(/\b\w/g, c => c.toUpperCase());
+    const block = [
+      `### Reference: ${headingPart} (preserved from source — ${sourceRows} rows)`,
+      sourceTable.headerLine,
+      sourceTable.separatorLine,
+      // Strip any [SOURCE: ...] annotations from original rows.
+      ...sourceTable.rows.map(r => stripSourceAnnotations(r)),
+    ].join('\n');
+    appendixBlocks.push(block);
+  }
+
+  if (appendixBlocks.length === 0) return mergedInstructions;
+
+  // Insert before "## Related Skills" if present, otherwise append.
+  const relatedIdx = mergedInstructions.search(/^##\s+related\s+skills\b/im);
+  const appendix = '\n\n' + appendixBlocks.join('\n\n');
+  if (relatedIdx !== -1) {
+    return mergedInstructions.slice(0, relatedIdx).trimEnd() + appendix + '\n\n' + mergedInstructions.slice(relatedIdx);
+  }
+  return mergedInstructions.trimEnd() + appendix + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Fix 6 — persona opener detection (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Pattern for persona opener lines ("You are an expert…", "Your goal is…").
+ *  Distinct from invocation triggers so the merger can order them correctly. */
+const PERSONA_OPENER_RE =
+  /^\s*(You\s+are\s+(an?\s+)?|Your\s+goal\s+is\s+(to\s+)?|You\s+speciali[sz]e\s+in\b|Act\s+as\s+(an?\s+)?)/i;
+
+/** Returns true if the text opens with a persona statement rather than an
+ *  invocation trigger. */
+export function startsWithPersonaOpener(text: string | null): boolean {
+  if (!text) return false;
+  return PERSONA_OPENER_RE.test(text.trimStart());
+}
+
+// ---------------------------------------------------------------------------
+// Fix 7 — output format block recovery (v4 brief)
+// ---------------------------------------------------------------------------
+
+const OUTPUT_FORMAT_SECTION_RE =
+  /^#{1,4}\s+(output\s+format|response\s+format|output\s+template|format)\b/im;
+
+/** Extract the output format section from instructions, including everything
+ *  from the section heading to the next same-or-higher level heading. */
+export function extractOutputFormatSection(text: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(OUTPUT_FORMAT_SECTION_RE);
+  if (!match || match.index === undefined) return null;
+  const start = match.index;
+  // Find the end: next heading at the same or higher level.
+  const headingLevel = match[0].match(/^#+/)![0].length;
+  const afterHeading = text.slice(start + match[0].length);
+  const nextHeadingRe = new RegExp(`^#{1,${headingLevel}}\\s+`, 'm');
+  const nextMatch = afterHeading.match(nextHeadingRe);
+  const end = nextMatch?.index !== undefined
+    ? start + match[0].length + nextMatch.index
+    : text.length;
+  return text.slice(start, end).trim();
+}
+
+/** When the merged output lacks an output format block but a source has one,
+ *  append the source's format section at the end (before Related Skills). */
+export function recoverOutputFormat(
+  mergedInstructions: string,
+  baseInstructions: string | null,
+  nonBaseInstructions: string | null,
+): string {
+  if (hasOutputFormatBlock(mergedInstructions)) return mergedInstructions;
+  const sourceBlock =
+    extractOutputFormatSection(baseInstructions) ??
+    extractOutputFormatSection(nonBaseInstructions);
+  if (!sourceBlock) return mergedInstructions;
+
+  const preserved =
+    '### Output Format (preserved from source)\n\n' + sourceBlock.replace(/^#{1,4}\s+[^\n]+\n+/, '');
+
+  const relatedIdx = mergedInstructions.search(/^##\s+related\s+skills\b/im);
+  if (relatedIdx !== -1) {
+    return mergedInstructions.slice(0, relatedIdx).trimEnd() + '\n\n' + preserved + '\n\n' + mergedInstructions.slice(relatedIdx);
+  }
+  return mergedInstructions.trimEnd() + '\n\n' + preserved + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Fix 8 — content overlap detection across in-batch merges (v4 brief)
+// ---------------------------------------------------------------------------
+
+/** Extract H3+ section headings and their content from instructions. */
+function extractH3Sections(text: string | null): Array<{ heading: string; body: string }> {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const sections: Array<{ heading: string; body: string }> = [];
+  let current: { heading: string; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    const h = line.match(/^#{3,}\s+(.+?)\s*$/);
+    if (h) {
+      if (current) sections.push({ heading: current.heading, body: current.lines.join('\n').trim() });
+      current = { heading: h[1].toLowerCase().trim(), lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) sections.push({ heading: current.heading, body: current.lines.join('\n').trim() });
+  return sections;
+}
+
+export interface ContentOverlapResult {
+  candidateSlugA: string;
+  candidateSlugB: string;
+  overlappingHeading: string;
+  similarityPct: number;
+}
+
+/** Detect when two in-batch merged skills share an H3+ section heading with
+ *  similar content (> `threshold` word-overlap ratio). Returns findings for
+ *  all pairs above the threshold. */
+export function detectContentOverlap(
+  skills: ReadonlyArray<{ slug: string; instructions: string | null }>,
+  threshold = 0.70,
+): ContentOverlapResult[] {
+  const results: ContentOverlapResult[] = [];
+  for (let i = 0; i < skills.length; i++) {
+    const sectionsA = extractH3Sections(skills[i].instructions);
+    for (let j = i + 1; j < skills.length; j++) {
+      const sectionsB = extractH3Sections(skills[j].instructions);
+      for (const sa of sectionsA) {
+        const sb = sectionsB.find(s => s.heading === sa.heading);
+        if (!sb || !sa.body || !sb.body) continue;
+        const ratio = wordOverlapRatio(sa.body, sb.body);
+        if (ratio >= threshold) {
+          results.push({
+            candidateSlugA: skills[i].slug,
+            candidateSlugB: skills[j].slug,
+            overlappingHeading: sa.heading,
+            similarityPct: Math.round(ratio * 100),
+          });
+        }
+      }
+    }
+  }
+  return results;
+}
+
 export const skillAnalyzerServicePure = {
   cosineSimilarity,
   classifyBand,
@@ -2211,6 +3327,11 @@ export const skillAnalyzerServicePure = {
   parseAgentSuggestionResponse,
   buildAgentClusterRecommendationPrompt,
   parseAgentClusterRecommendationResponse,
+  crossReferencesLibrarySkill,
+  rationaleArguesAgainstMerge,
+  classifyDemotedFields,
+  parseDemotedFieldStatuses,
+  adjustClassifierConfidence,
   AGENT_RECOMMENDATION_THRESHOLD,
   AGENT_RECOMMENDATION_MIN_SKILLS,
 };

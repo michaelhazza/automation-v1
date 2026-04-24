@@ -10,6 +10,9 @@ import {
 } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { users } from './users';
+// Canonical status union lives in the pure service module so the sweep, the
+// service, and the schema cannot drift. See skillAnalyzerServicePure.ts.
+import type { SkillAnalyzerJobStatus } from '../../services/skillAnalyzerServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Jobs — tracks import/analysis sessions (one row per import)
@@ -45,7 +48,7 @@ export const skillAnalyzerJobs = pgTable(
     status: text('status')
       .notNull()
       .default('pending')
-      .$type<'pending' | 'parsing' | 'hashing' | 'embedding' | 'comparing' | 'classifying' | 'completed' | 'failed'>(),
+      .$type<SkillAnalyzerJobStatus>(),
     progressPct: integer('progress_pct').notNull().default(0),
     progressMessage: text('progress_message'),
     errorMessage: text('error_message'),
