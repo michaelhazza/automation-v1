@@ -267,8 +267,24 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
   });
 
   // 5. Enqueue notify job after the transaction has committed.
+  // Failures here are logged but NOT rethrown: the incident row + occurrence
+  // event are already durable. In async ingest mode (SYSTEM_INCIDENT_INGEST_MODE=async)
+  // a rethrow would cause pg-boss to retry the ingest job, which would re-run
+  // ingestInline and double-increment occurrence_count / append a duplicate
+  // occurrence event on the conflict path. Notification is best-effort — the
+  // incident is recorded either way, and the sysadmin UI polls the list every
+  // 10s independently of the notify pipeline.
   if (notifyPayload) {
-    const boss = await getPgBoss();
-    await boss.send('system-monitor-notify', notifyPayload);
+    try {
+      const boss = await getPgBoss();
+      await boss.send('system-monitor-notify', notifyPayload);
+    } catch (err) {
+      logger.error('incident_notify_enqueue_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        incidentId: notifyPayload.incidentId,
+        fingerprint: notifyPayload.fingerprint,
+        severity: notifyPayload.severity,
+      });
+    }
   }
 }

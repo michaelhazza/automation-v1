@@ -23,8 +23,12 @@ export const systemIncidentSuppressions = pgTable(
   },
   (table) => ({
     fingerprintIdx: index('system_incident_suppressions_fingerprint_idx').on(table.fingerprint, table.expiresAt),
-    // One suppression rule per fingerprint per org-or-global scope
-    fpOrgUnique: uniqueIndex('system_incident_suppressions_fp_org_unique').on(table.fingerprint, table.organisationId),
+    // One suppression rule per fingerprint per org-or-global scope.
+    // .nullsNotDistinct() mirrors migration 0226 — without it the Drizzle
+    // schema drifts from the DB and a future drizzle-kit generate would try
+    // to recreate the index with the old (NULLS DISTINCT) semantics, silently
+    // reverting the fix that makes ON CONFLICT work for global suppressions.
+    fpOrgUnique: uniqueIndex('system_incident_suppressions_fp_org_unique').on(table.fingerprint, table.organisationId).nullsNotDistinct(),
   })
 );
 
