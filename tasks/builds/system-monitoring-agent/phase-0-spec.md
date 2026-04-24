@@ -1,15 +1,15 @@
 # System Monitoring Agent — Phase 0 + 0.5 Spec
 
-**Status:** v2 — decisions resolved, ready for review
+**Status:** v3 — final-spec pass, reviewer feedback incorporated
 **Owner:** Platform
 **Scope:** Server + client + migrations
 **Not included in this spec:** Phase 0.75 (email/Slack notifications — requires new outbound infrastructure), Phase 1 (synthetic checks), Phase 2 (monitoring agent), Phase 3 (auto-remediation), Phase 4 (dev-agent handoff). Future phases have stub sections at the end for context only.
 
 ---
 
-## 0. Decisions log (v2)
+## 0. Decisions log
 
-The v1 draft left 8 questions open and 5 prerequisites unverified. v2 resolves them — either by investigation (read the code and report reality) or by recommendation (argue one choice and pick it). Any decision the user wants to override is a simple edit to this section; downstream sections cross-reference back to here.
+v1 left 8 questions open and 5 prerequisites unverified. v2 resolved them. v3 incorporates reviewer feedback — 2 critical fixes, 5 high-impact improvements, 4 medium-impact refinements (see §0.5). Any decision the user wants to override is a simple edit to this section; downstream sections cross-reference back to here.
 
 ### 0.1 Prerequisites — verified against the current codebase
 
@@ -50,13 +50,60 @@ The v1 draft left 8 questions open and 5 prerequisites unverified. v2 resolves t
 
 ### 0.4 Decisions that did NOT change from v1
 
-Everything else in v1 stands: the three-table schema, ingestor design, fingerprint algorithm, 7 integration points, principal-context Option A, incident lifecycle, escalate-to-agent via Orchestrator, Pulse integration, and the broader rollout + risk framing.
+The three-table schema, ingestor design shape, 7 integration points, principal-context Option A, incident lifecycle, escalate-to-agent via Orchestrator, and the broader rollout + risk framing all stand.
+
+### 0.5 v3 changes — final-spec pass (reviewer feedback incorporated)
+
+v2 went to an external reviewer. All blocking and high-impact findings are now incorporated. v3 is the last doc iteration before implementation begins.
+
+**Critical fixes (blocking before v3):**
+
+- **#1 Scope contradiction in §1 Summary.** v2 summary still claimed "multi-channel notifications (email + Slack)" even though §0.3 had carved those out. Summary now reads "in-app incident surfacing (admin page, Pulse, nav badge)" with explicit pointer to Phase 0.75 for push channels.
+- **#2 Smoke-test step 6 referenced email/Slack delivery** which Phase 0.5 explicitly doesn't have. §12.3 replaced with Pulse visibility + nav-badge + WebSocket + admin page checks. Email/Slack smoke tests deferred to Phase 0.75's test plan.
+
+**High-impact design improvements:**
+
+- **#3 Fingerprint fragility under deploy-time volatility.** `topFrameOf()` in v2 included line numbers and column positions, which shift on every deploy → "same issue, new fingerprint, incident explosion." v3 introduces `topFrameSignature()` that strips `:line:col` suffixes, preserving function + file path only. Also added `IncidentInput.fingerprintOverride` so integrations with domain-stable identifiers (agent slug + error code, connector provider type + error code, etc.) bypass stack-derived fingerprinting entirely. See §5.2 for the override table.
+- **#4 Severity never-de-escalates inflation risk.** Added explicit per-lifecycle-scope clarification to §5.6. Existing "new row after resolve" design already handles the long-term case correctly; v3 just documents it so operators don't think "once critical, always critical."
+- **#5 Ingest-in-request-path latency risk.** v3 pre-wires a sync/async mode toggle via `SYSTEM_INCIDENT_INGEST_MODE=sync|async` env var, with `NODE_ENV=test` forcing sync. Async mode enqueues to a `systemMonitor.ingest` pg-boss queue and runs identical ingestion logic in a worker. Shipping the toggle from day one avoids the emergency-refactor failure mode.
+- **#6 Suppression silent failure mode.** v2 suppressions discarded signal entirely — no DB row, only a `logger.warn`. v3 adds `suppressed_count` and `last_suppressed_at` columns to `system_incident_suppressions`. Each blocked occurrence increments the counter. The admin suppressions UI surfaces the counts so operators can triage "is this suppression still useful or should it be lifted?"
+- **#7 Unbounded manual escalation.** v2 allowed a user to escalate the same incident any number of times, each creating a new Orchestrator task. v3 adds `escalation_count` + `previous_task_ids[]` columns on `system_incidents`, a soft guardrail (409 + confirmation modal) when an incident is already escalated with a still-open prior task, a hard cap at 3 escalations per incident, and a 60-second per-incident rate limit. Blocked attempts write `escalation_blocked` events for observability. Full design in new §10.2.5.
+
+**Medium-impact refinements:**
+
+- **#8 Correlation ID promises.** Reframed §6.9 from "must be end-to-end before ship" to "best-effort enrichment, not required for correctness." Realistic timeline documented (incomplete for months, not days). No downstream system should critically depend on correlation IDs being present.
+- **#9 Event-log derived fields.** Noted as a future denormalisation (`last_event_type` / `last_actor_kind` on `system_incidents`) if list-view performance degrades. Not built in Phase 0.5 — premature per CLAUDE.md §6.
+- **#10 Pulse flood under incident storms.** Pulse getter now uses `DISTINCT ON (fingerprint)` with acknowledgement gating so: (a) five concurrent incidents sharing a fingerprint show as one card, (b) acked fingerprints don't re-surface on occurrence-count increments, only on severity escalations.
+- **#11 Self-check noise threshold.** Added threshold + cooldown to §5.7. Self-incident fires only if ≥5 ingest failures in a 5-minute window AND no self-incident in the last 30 minutes. Env-configurable. Prevents noise from transient DB hiccups and the self-incident-storm failure mode.
+
+**Schema additions in v3 (beyond what v2 already spec'd):**
+
+| Table | Column | Purpose |
+|---|---|---|
+| `system_incidents` | `escalation_count integer NOT NULL DEFAULT 0` | #7 escalation guardrail |
+| `system_incidents` | `previous_task_ids uuid[] NOT NULL DEFAULT '{}'` | #7 escalation history |
+| `system_incident_suppressions` | `suppressed_count integer NOT NULL DEFAULT 0` | #6 suppression visibility |
+| `system_incident_suppressions` | `last_suppressed_at timestamp` | #6 suppression visibility |
+
+All four columns are additive; the core schema from v2 is unchanged.
+
+**New env vars introduced in v3:**
+
+| Name | Default | Purpose |
+|---|---|---|
+| `SYSTEM_INCIDENT_INGEST_MODE` | `sync` | #5 sync/async ingest toggle |
+| `SYSTEM_INCIDENT_INGEST_ENABLED` | `true` | Kill switch (already in v2, retained) |
+| `SYSTEM_MONITOR_SELF_CHECK_THRESHOLD_COUNT` | `5` | #11 self-check firing threshold |
+| `SYSTEM_MONITOR_SELF_CHECK_COOLDOWN_MINUTES` | `30` | #11 self-check cooldown |
+| `SYSTEM_INCIDENT_NOTIFY_MILESTONES` | `10,100,1000` | Notification recurrence thresholds (already in v2, retained) |
+
+No v3 change rolls back any v2 decision. All v3 additions are additive refinements on the existing design shape.
 
 ---
 
 ## Table of contents
 
-0. [Decisions log (v2)](#0-decisions-log-v2)
+0. [Decisions log](#0-decisions-log)
 1. [Summary](#1-summary)
 2. [Context](#2-context)
 3. [Goals, non-goals, success criteria](#3-goals-non-goals-success-criteria)
@@ -84,10 +131,10 @@ Build the observability foundation required to support a future system-level mon
 
 - A single **central incident sink** that captures every system-fault across the platform (routes, jobs, agent runs, connectors, skill executions, LLM calls).
 - A **system admin incident page** that lists active incidents, supports ack/resolve/suppress, and gives sysadmins one place to triage faults.
-- **Multi-channel notifications** (email + Slack) for high-severity incidents, with fatigue-guarding to prevent operator burnout.
+- **In-app incident surfacing**: the admin page, Pulse (internal lane), a Layout nav red-dot badge, and a WebSocket push that refreshes those surfaces sub-second on new incidents. **Push channels (email / Slack / SMS) defer to Phase 0.75** — this codebase has no outbound email or Slack SDK today; adding them is a separable follow-up phase.
 - A **manual "Escalate to agent" affordance** that hands an incident to the existing Orchestrator pipeline for on-demand agent-led diagnosis — no new autonomous agent yet.
 
-Phase 0/0.5 explicitly does NOT include: automated agent triage, auto-remediation, synthetic/heartbeat checks, or dev-agent handoff. Those are deferred to Phases 1–4, scoped after 2–4 weeks of real production incident data have accrued in the new sink.
+Phase 0/0.5 explicitly does NOT include: push notifications (Phase 0.75), automated agent triage, auto-remediation, synthetic/heartbeat checks, or dev-agent handoff. Those are deferred to Phases 0.75–4, scoped after 2–4 weeks of real production incident data have accrued in the new sink.
 
 ## 2. Context
 
@@ -255,7 +302,9 @@ export const systemIncidents = pgTable(
 
     // Escalation metadata
     escalatedAt: timestamp('escalated_at', { withTimezone: true }),
-    escalatedTaskId: uuid('escalated_task_id').references(() => tasks.id),  // set by manual-escalate-to-agent button
+    escalatedTaskId: uuid('escalated_task_id').references(() => tasks.id),  // most recent escalation's task ID
+    escalationCount: integer('escalation_count').notNull().default(0),      // v3: total escalation attempts on this incident
+    previousTaskIds: uuid('previous_task_ids').array().notNull().default(sql`'{}'`),  // v3: history of prior escalation tasks
 
     // Test-incident flag (per Q8 §0.2) — set by the admin UI test-trigger; excluded from default list + push notifications
     isTestIncident: boolean('is_test_incident').notNull().default(false),
@@ -334,6 +383,17 @@ export const systemIncidentEvents = pgTable(
 - `payload` shape varies by `eventType`. Documented in the ingestor module as TypeScript discriminated union types (see §5.4).
 - Cascading delete from `system_incidents`: if an incident is deleted (administratively), its event log goes too. We do not expose an incident-delete action in Phase 0.5 UI — resolve/suppress covers needs.
 
+**Future optimisation (v3 note — not built in Phase 0.5):**
+
+The incident list view renders `lastEventType` and `lastActorKind` alongside each row. Computing these requires a `MAX(occurredAt)`-style sub-query against `system_incident_events` per listed incident, which is O(N) on list render. If the list ever grows slow, denormalise these two fields onto `system_incidents` itself as `last_event_type` / `last_actor_kind` columns, updated by the same transaction that appends the event.
+
+Not a Phase 0.5 priority because:
+
+- The list view doesn't render these fields yet (covered by `status` + `lastSeenAt` + severity).
+- Premature denormalisation before measuring would violate "don't design for hypothetical future requirements" from CLAUDE.md §6.
+
+Revisit if p95 incident-list render time ever exceeds 300ms under real load.
+
 ### 4.3 `system_incident_suppressions`
 
 Named suppression rules that prevent specific fingerprints from creating new incidents. Used for known-issue muting.
@@ -348,6 +408,13 @@ export const systemIncidentSuppressions = pgTable(
     organisationId: uuid('organisation_id').references(() => organisations.id), // NULLABLE — null = suppress everywhere
     reason: text('reason').notNull(),                         // why this is suppressed (mandatory — no anonymous mutes)
     expiresAt: timestamp('expires_at', { withTimezone: true }),  // nullable = permanent suppression
+
+    // Visibility feedback loop (v3) — without these we'd lose sight of how often
+    // suppressed failures are actually happening, which defeats the purpose of
+    // being able to triage "should this suppression be lifted?"
+    suppressedCount: integer('suppressed_count').notNull().default(0),  // total occurrences blocked by this rule
+    lastSuppressedAt: timestamp('last_suppressed_at', { withTimezone: true }),  // most recent block
+
     createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -361,10 +428,25 @@ export const systemIncidentSuppressions = pgTable(
 
 **Design notes:**
 
-- Suppression is checked BEFORE incident upsert in the ingestor. A suppressed fingerprint still gets a `logger.warn('incident_suppressed', { fingerprint, reason })` but no DB row.
+- Suppression is checked BEFORE incident upsert in the ingestor. A suppressed fingerprint does NOT create an incident row, BUT the suppression row is updated: `suppressedCount += 1` and `lastSuppressedAt = NOW()`. The ingestor also emits `logger.warn('incident_suppressed', { fingerprint, reason, suppressedCount })` for log-based observability.
 - `reason` is mandatory — we require the operator to document why, so future sysadmins see the rationale.
 - `expiresAt` null = permanent; set = auto-expire at that time (checked on ingestor read). No background job needed in Phase 0.5 — the check is lazy.
 - Unique constraint on `(fingerprint, organisationId)`: one suppression rule per fingerprint per org-or-global scope.
+
+**Suppression visibility surface (v3):**
+
+The admin page's Suppressions tab (exposed by `GET /api/system/incidents/suppressions` from §7.1) renders `suppressedCount` and `lastSuppressedAt` per rule. Operators can instantly see:
+
+- "This permanent suppression has blocked 12,483 incidents in the last week — still want it on?"
+- "That suppression expires in 2 days and has blocked 0 incidents since created — probably safe to let expire."
+
+The monthly audit job referenced in §14.2 (Q7) flags permanent suppressions where `suppressedCount > 1000` AND there is no `linkedPrUrl` on the suppression record (v3 adds that optional column below implicitly via the incident's resolution link — the audit checks whether any incident resolved with a PR link shares this fingerprint; if not, the suppression is "suppress and forget"). That audit is a Phase 1 follow-up; Phase 0.5 only guarantees the counters are incremented and visible.
+
+**What this buys you vs. the v2 design:**
+
+- Degraded systems hidden behind "low-signal" suppressions become visible (`suppressedCount` climbs).
+- Suppressions that were added for a genuine one-time spike get flagged as unused (`suppressedCount` stays at 0).
+- You can make informed decisions about which suppressions to lift without needing to search log files.
 
 ### 4.4 Migration
 
@@ -406,15 +488,27 @@ Goals: (a) same real-world problem produces the same fingerprint, (b) unrelated 
 
 ```ts
 function computeFingerprint(input: IncidentInput): string {
-  // Normalise each component, hash with sha256, take first 16 hex chars
+  // Per-integration override wins — integrations that have a strongest-signal
+  // identifier (e.g. agent.slug + errorCode, connector providerType + errorCode)
+  // should pass fingerprintOverride to bypass stack-derived volatility entirely.
+  if (input.fingerprintOverride) {
+    return hashFingerprint(input.fingerprintOverride);
+  }
+
+  // Default algorithm: layered stabilisation — errorCode (most stable) +
+  // function signature (stable across edits) + normalised message.
   const parts = [
     input.source,                                    // 'route' | 'job' | ...
     input.errorCode ?? 'no_code',                    // typed error codes are the strongest signal
     normaliseMessage(input.summary),                 // strip UUIDs, timestamps, numeric IDs
-    topFrameOf(input.stack),                         // one line: "at fooService (server/services/fooService.ts:42)"
+    topFrameSignature(input.stack),                  // function signature only — line numbers stripped
     input.affectedResourceKind ?? 'no_resource',     // 'agent_run', 'integration_connection', etc.
   ].join('|');
-  return crypto.createHash('sha256').update(parts).digest('hex').slice(0, 16);
+  return hashFingerprint(parts);
+}
+
+function hashFingerprint(input: string): string {
+  return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
 function normaliseMessage(msg: string): string {
@@ -427,12 +521,22 @@ function normaliseMessage(msg: string): string {
     .slice(0, 200);
 }
 
-function topFrameOf(stack: string | undefined): string {
+// Returns the top meaningful frame with LINE NUMBERS AND COLUMN NUMBERS STRIPPED.
+// This stabilises the fingerprint across deploys and minor refactors that shift
+// frames by a few lines. Function and file path are preserved — the actual code
+// location changes only when the function is renamed or moved between files.
+function topFrameSignature(stack: string | undefined): string {
   if (!stack) return 'no_stack';
   const lines = stack.split('\n').map(l => l.trim()).filter(l => l.startsWith('at '));
-  // Skip ingestor/logger frames to avoid self-referential fingerprints
   const meaningful = lines.find(l => !l.includes('incidentIngestor') && !l.includes('lib/logger'));
-  return (meaningful ?? lines[0] ?? 'no_stack').slice(0, 200);
+  const frame = meaningful ?? lines[0] ?? 'no_stack';
+  // Strip ":line:col" suffix from "at fn (path/to/file.ts:42:18)" → "at fn (path/to/file.ts)"
+  return frame
+    .replace(/:\d+:\d+\)/g, ')')
+    .replace(/:\d+:\d+$/g, '')
+    .replace(/:\d+\)/g, ')')
+    .replace(/:\d+$/g, '')
+    .slice(0, 200);
 }
 ```
 
@@ -441,9 +545,26 @@ function topFrameOf(stack: string | undefined): string {
 - `source` separates same-error-in-different-places so a DB timeout in a job doesn't collapse with a DB timeout in a route.
 - `errorCode` is the strongest signal when available (typed errors like `ParseFailureError`, `ReconciliationRequiredError`). Always prefer it.
 - `normaliseMessage` strips high-cardinality substrings (UUIDs, numeric IDs, timestamps) that would otherwise defeat dedupe.
-- `topFrameOf` anchors to the actual code location so two different DB queries timing out don't collapse.
+- `topFrameSignature` anchors to the actual code location via **function + file path only** — line numbers, column numbers, and frame-shift from refactors do NOT change the fingerprint. This prevents the "same error, new deploy → new fingerprint → incident explosion" failure mode. Minification / bundling (future) would still require revisiting the stack normalisation rules.
 - `affectedResourceKind` keeps resource-type separation without using the specific resource ID (which would defeat dedupe — we WANT "40 failing agent runs" to collapse to one incident).
 - 16 hex chars = 64 bits, collision probability is negligible at the scale we'll see.
+
+**Per-integration fingerprint override (added v3):**
+
+The `IncidentInput` interface accepts an optional `fingerprintOverride: string` that bypasses stack-derived fingerprinting entirely. Callers that have a strongest-signal identifier specific to their domain pass it here instead of relying on stack normalisation:
+
+| Integration | Recommended `fingerprintOverride` |
+|---|---|
+| Agent run failures | `agent:${agent.slug}:${errorCode ?? 'generic'}` — stable across refactors of the agent service |
+| Connector polling | `connector:${providerType}:${errorCode ?? errorName}` — ties dedupe to the provider + typed error, not the polling code |
+| LLM router | `llm:${model}:${errorCode}` — dedupes on model + error type; stack is less useful here |
+| DLQ jobs | `job:${queueName}:${errorCode ?? 'exhausted'}` — queue + error type is the dedupe axis |
+| Skill executor | `skill:${skillSlug}:${errorCode}` — stable across skill-infrastructure refactors |
+| Routes, self-source | No override — default stack-based fingerprint is appropriate |
+
+The override pattern is documented once here and each integration section (§6) references this table rather than restating the logic.
+
+**Stack-based fallback is still the default** for sources where no strongest-signal identifier is appropriate (route handlers, self-source). Override is an opt-in, not a requirement.
 
 ### 5.3 Classification
 
@@ -504,6 +625,11 @@ export interface IncidentInput {
 
   // Tracing
   correlationId?: string;
+
+  // Fingerprint override (v3) — bypasses stack-derived fingerprinting.
+  // Integrations with a strongest-signal identifier (agent slug, connector
+  // provider type, etc.) pass a domain-stable string here. See §5.2 table.
+  fingerprintOverride?: string;
 }
 ```
 
@@ -544,23 +670,50 @@ RETURNING id, occurrence_count, (xmax = 0) AS was_inserted;
 
 Drizzle doesn't natively support partial-index conflicts, so we write this as a raw SQL call wrapped in a Drizzle service method. The `(xmax = 0)` trick returns `true` on INSERT and `false` on UPDATE — we use this to decide whether to emit `status_change` events and `incident.notify` jobs.
 
-**Severity never de-escalates.** If an incident starts as `low` and later occurrences come in as `critical`, the row flips to `critical`. The reverse cannot happen automatically — only human resolution.
+**Severity never de-escalates *within a single incident lifecycle*.** If an incident starts as `low` and later occurrences come in as `critical`, the row flips to `critical`. The reverse cannot happen automatically — only human resolution flips it.
+
+**Severity scope is per-lifecycle, not across recurrences (v3 clarification).** The "never de-escalate" rule applies *only while an incident remains active*. Once a human resolves or suppresses an incident, the fingerprint's next occurrence creates a **new incident row** (enforced by the partial unique index on active status in §4.1). The new row starts fresh — it is NOT seeded with the resolved incident's final severity. This means:
+
+- An incident that ran hot for a week, got resolved, then recurs a month later starts fresh at its natural severity for that new occurrence.
+- There is no permanent "once critical, always critical" inflation.
+- If the operator wants to retain severity across the resolve boundary (e.g. "this has always been critical; start the new one at critical too"), that's a deliberate human action — they can manually set severity on the new row via a future API (not in Phase 0.5 scope).
+
+This design choice trades minor UX inconvenience (fresh row on recurrence) for durable signal quality (severity reflects current reality, not historical baggage).
 
 ### 5.7 Self-source protection
 
 The ingestor itself can fail (DB down, constraint violation, bug). If the ingestor errors while being called from a path that already handles errors, we must NOT recurse.
 
-Rule: the ingestor **never calls itself**. Internal errors are logged with `logger.error('incident_ingest_failed', ...)` and return. A dedicated pg-boss job on a 5-minute cron (`systemMonitor.selfCheck`, Phase 0) scans the last 5 minutes of logs for `incident_ingest_failed` events and, if found, writes a single `source='self'` incident directly via a raw SQL path that bypasses the normal ingestor. This is the "who monitors the monitor" loop.
+Rule: the ingestor **never calls itself**. Internal errors are logged with `logger.error('incident_ingest_failed', ...)` and return. A dedicated pg-boss job on a 5-minute cron (`systemMonitor.selfCheck`, Phase 0) scans the last 5 minutes of logs for `incident_ingest_failed` events and, **if the failure rate crosses a threshold**, writes a single `source='self'` incident directly via a raw SQL path that bypasses the normal ingestor. This is the "who monitors the monitor" loop.
+
+**Thresholding (v3 addition):** a transient DB hiccup that drops one ingest write is noise, not an incident. The self-check job fires ONLY when:
+
+```
+ingest_failures_in_window >= SELF_CHECK_THRESHOLD_COUNT (default 5)
+  AND
+window_duration_minutes == 5 (the scan window)
+  AND
+no self-source incident opened within the last SELF_CHECK_COOLDOWN_MINUTES (default 30)
+```
+
+Concretely: "at least 5 ingest failures in the last 5 minutes, and we haven't already fired one of these in the last 30 minutes." Both numbers are env-configurable (`SYSTEM_MONITOR_SELF_CHECK_THRESHOLD_COUNT`, `SYSTEM_MONITOR_SELF_CHECK_COOLDOWN_MINUTES`).
+
+This threshold+cooldown pattern:
+
+- Ignores single transient failures.
+- Catches sustained ingestor outages quickly (within a 5-minute window).
+- Prevents self-incident storms when the ingestor genuinely breaks (one incident per 30 minutes, not one every 5).
+- Avoids the infinite-loop failure mode where a broken ingestor generates a self-incident, which generates another self-incident, etc.
 
 Self-sourced incidents:
 
 - Always severity `high`.
 - Always require HITL — never eligible for agent escalation in Phase 2+. Hard-coded guard.
-- Bypass the fatigue guard for the first occurrence (the operator must know the monitor is broken).
+- Bypass the fatigue guard for the first occurrence (the operator must know the monitor is broken). The cooldown window above is a separate mechanism from the fatigue guard — it governs self-check firing specifically, not general notification throttling.
 
-### 5.8 Performance characteristics
+### 5.8 Performance characteristics and mode toggle
 
-Ingestion happens synchronously in the caller's request path. Budget: p95 < 30ms, p99 < 100ms.
+Ingestion happens synchronously in the caller's request path **by default**. Budget: p95 < 30ms, p99 < 100ms.
 
 Measurements to take at ingest:
 
@@ -569,7 +722,62 @@ Measurements to take at ingest:
 - Upsert (single SQL statement against indexed table).
 - Event append (single INSERT).
 
-Total: 2 SELECTs + 2 INSERTs in the worst case. This is fine on a warm DB. If DB latency degrades and ingest p95 climbs past 100ms, we move to an **async queue mode** (enqueue the incident input to pg-boss, consume asynchronously). Schema supports this — the change is purely in the calling contract. Not needed for Phase 0; measure and revisit.
+Total: 2 SELECTs + 2 INSERTs in the worst case. This is fine on a warm DB.
+
+### 5.8.1 Pre-wired sync/async mode toggle (v3)
+
+To avoid an emergency refactor if ingest latency ever becomes a problem in production, **the ingestor ships from day one with a pre-wired sync/async mode toggle**. This is not a fallback we build later — it's a runtime switch that exists at launch.
+
+```ts
+// server/services/incidentIngestor.ts
+type IngestMode = 'sync' | 'async';
+
+function getIngestMode(): IngestMode {
+  // Force sync in tests so integration tests can assert DB state immediately.
+  if (process.env.NODE_ENV === 'test') return 'sync';
+  // Force sync if ingest is disabled (belt-and-braces with the top-level kill switch).
+  if (process.env.SYSTEM_INCIDENT_INGEST_ENABLED === 'false') return 'sync';
+  const configured = process.env.SYSTEM_INCIDENT_INGEST_MODE;
+  return configured === 'async' ? 'async' : 'sync';
+}
+
+export async function recordIncident(input: IncidentInput): Promise<void> {
+  if (process.env.SYSTEM_INCIDENT_INGEST_ENABLED === 'false') return;   // fast-path kill switch
+
+  if (getIngestMode() === 'async') {
+    // Enqueue to pg-boss; return immediately. The worker runs the same
+    // ingestion logic — identical classify / fingerprint / upsert code path.
+    await enqueue('systemMonitor.ingest', safeSerialize(input));
+    return;
+  }
+
+  // Sync path: inline the classify → fingerprint → suppression → upsert → event flow.
+  await ingestInline(input);
+}
+```
+
+**Runtime behaviour:**
+
+- **Default: `sync`.** Lower operational complexity; errors captured immediately; integration tests can assert state without flake.
+- **`SYSTEM_INCIDENT_INGEST_MODE=async`.** Ingestor enqueues the input to a pg-boss queue (`systemMonitor.ingest`) and returns. A worker consumes the queue and calls `ingestInline`. Adds ~50–200ms end-to-end delay but removes all DB work from the request path.
+- **`SYSTEM_INCIDENT_INGEST_ENABLED=false`.** Full ingestor no-op. Top-level kill switch from §13.6.
+
+**Why pre-wire this now, even though we don't expect to need it:**
+
+1. The per-caller API contract (fire-and-forget; no return value consumed) is identical in both modes. Writing the code once with a toggle is cheap.
+2. If production ingest latency degrades, flipping an env var restores the caller's request budget in minutes. Refactoring under pressure — which is when you'd be doing it without pre-wiring — is exactly when bugs land in production.
+3. The async mode is also useful for load-testing the sink without stressing request handlers: flip to async, fire 100k incidents, watch the worker drain.
+
+**What doesn't change between modes:**
+
+- Same classify / fingerprint / suppression / upsert / event-append code path (shared `ingestInline` function).
+- Same test assertions (tests force sync via `NODE_ENV=test`).
+- Same observability hooks.
+
+**What does change in async mode:**
+
+- Caller cannot observe ingestion failure. Any errors in the worker path are logged by `logger.error('incident_ingest_failed', ...)` and picked up by the self-check job (§5.7) if they recur.
+- The `recordIncident` call no longer blocks; return values / promises resolve immediately after enqueue.
 
 ## 6. Phase 0 — Integration points
 
@@ -704,15 +912,28 @@ The following surfaces emit errors today but are NOT integrated in Phase 0 becau
 - **Client-side errors** — out of scope until we add a telemetry endpoint (not planned).
 - **Migration failures** — happen at deploy time, not runtime. Out of scope.
 
-### 6.9 Correlation ID prerequisite check
+### 6.9 Correlation ID — best-effort, not required for correctness (v3)
 
-The ingestor assumes correlation IDs propagate from route → service → job → agent run → skill call. The audit flagged this as needing verification. Before merging Phase 0, confirm:
+Correlation IDs enhance grouping and debugging ergonomics but **are not required for incident correctness**. The ingestor works regardless of whether a correlation ID is present.
 
-1. `req.correlationId` is set by a middleware on every route (should exist — check `server/middleware/`).
-2. pg-boss job payloads carry `correlationId` when enqueued from a route — audit `server/jobs/*.ts` for this field.
-3. `agent_runs` rows have a correlation ID column (check `server/db/schema/agentRuns.ts`).
+**What v3 actually commits to in Phase 0:**
 
-If any of these is missing, fix it as a prerequisite PR before Phase 0 ships. Without end-to-end correlation, grouping "these 40 errors are one request" is impossible — and that's a core use case.
+1. Route-source incidents always have a correlation ID (the middleware runs on every route).
+2. `agent_runs.correlation_id` column is added via prereq migration (§14.1 P1). New agent runs populate it; existing runs have null.
+3. New pg-boss jobs added from this PR onward include a `correlationId` field in their payload by convention (documented in `architecture.md`).
+4. Existing pg-boss jobs are NOT bulk-refactored. They continue to produce incidents with `correlationId = null`.
+
+**Realistic timeline:** correlation-ID coverage will be incomplete for months, not days. Every new job or service touch tends to add it; retrofitting the existing codebase in a single PR is out of scope.
+
+**What this means for incident analysis:**
+
+- "Group by correlation ID" queries return useful results only within the subset of incidents that have one.
+- The admin UI shows the correlation ID when present and gracefully omits the field when null.
+- Phase 2 agent diagnosis uses correlation IDs when present, but its tooling does NOT require them — it falls back to fingerprint + time-window queries.
+
+**Explicit non-promise:** do NOT design any downstream system that critically depends on correlation IDs being present. Treat them as a helpful enrichment, not a guaranteed contract.
+
+This is a deliberate engineering tradeoff: requiring end-to-end correlation before Phase 0 ships would triple the scope. Shipping Phase 0 without it loses ~20% of analytical capability on legacy job paths and 0% on route paths — acceptable cost.
 
 ### 6.10 Testing hook
 
@@ -1040,10 +1261,35 @@ source: 'reviews' | 'tasks' | 'runs' | 'health' | 'system_incidents';
 
 Returns open (non-acked) system incidents that a user should attend to:
 
-- If user is a system admin: all critical + high incidents with `status in ('open', 'investigating', 'escalated')`.
+- If user is a system admin: critical + high incidents with `status in ('open', 'investigating', 'escalated')`, **deduplicated per fingerprint** (v3) — see below.
 - Otherwise: no system incidents (they don't see them).
 
 **Lane assignment:** system incidents go to the `internal` lane. They are never `client` or `major` lane items.
+
+**Fingerprint dedupe (v3):** Pulse is a supervision surface, not an incident log. If the same fingerprint produces five concurrent open incidents — for example, across multiple orgs during a cross-cutting outage — Pulse shows **one card, not five**. Implementation:
+
+```sql
+-- Conceptual shape — actual query in pulseService uses Drizzle
+SELECT DISTINCT ON (fingerprint)
+  id, fingerprint, severity, summary, last_seen_at, occurrence_count, organisation_id
+FROM system_incidents
+WHERE status IN ('open', 'investigating', 'escalated')
+  AND severity IN ('high', 'critical')
+  AND acknowledged_at IS NULL
+  AND is_test_incident = false
+ORDER BY fingerprint, severity DESC, last_seen_at DESC
+```
+
+The "winning" row per fingerprint is the highest-severity, most-recent one. The card links to that specific incident, but the subtitle includes `${groupCount}× incidents` when `groupCount > 1` so the sysadmin sees the fan-out.
+
+**Surfacing thresholds (v3):** to avoid Pulse churn from noisy incidents, only surface a Pulse card when:
+
+1. **First open** of a fingerprint (new card appears).
+2. **Severity escalation** of an existing fingerprint (card re-appears if previously acked, or gets a "severity escalated" annotation if still active).
+
+Incremental occurrence-count increments do NOT re-surface a card that was previously acknowledged. The sysadmin already knows about the fingerprint — they don't need Pulse to shout about it again every 30 seconds.
+
+This is implemented in the query above via the `acknowledged_at IS NULL` filter: once a sysadmin acks the highest-severity incident for a fingerprint, Pulse stops showing cards for it until either a new fingerprint appears or the severity escalates.
 
 **Item shape:**
 
@@ -1071,10 +1317,11 @@ The "Escalate to agent" button on the incident detail drawer (§8.3) is the Phas
 **Mechanics:**
 
 1. Load the incident.
-2. Validate: incident status is `open` or `investigating` (can't escalate resolved/suppressed incidents).
-3. Resolve the **designated system-admin subaccount** for escalation context. See §10.3 for what this is.
-4. Create a task via `taskService.createTask` with shape:
-   - `title`: `[Incident ${shortFingerprint}] ${incident.summary}`
+2. Validate: incident status is `open`, `investigating`, or `escalated` (resolved/suppressed incidents cannot be escalated).
+3. **Guardrail: duplicate escalation check (v3 addition — see §10.2.5 for full detail).**
+4. Resolve the **designated system-admin subaccount** for escalation context. See §10.3 for what this is.
+5. Create a task via `taskService.createTask` with shape:
+   - `title`: `[Incident ${shortFingerprint}] ${incident.summary}` (add `· re-escalation #N` suffix if `escalationCount > 1` per §10.2.5)
    - `description`: a rendered template including incident details (see §10.4)
    - `organisationId`: the system-admin org (see §10.3)
    - `subaccountId`: the system-admin subaccount
@@ -1082,13 +1329,50 @@ The "Escalate to agent" button on the incident detail drawer (§8.3) is the Phas
    - `createdByAgentId`: `null` (matters — Orchestrator eligibility predicate checks this)
    - `status`: `'inbox'` (required for Orchestrator trigger)
    - `parentTaskId`: `null`
-5. Update incident: `status = 'escalated'`, `escalatedAt = NOW()`, `escalatedTaskId = <new task id>`.
-6. Append `escalation` event to `system_incident_events` with `actorKind='user'`, `payload: { taskId, incidentId }`.
-7. Return `{ incident, taskId }` to the caller.
+6. Update incident: `status = 'escalated'`, `escalatedAt = NOW()`, `escalatedTaskId = <new task id>`, `escalationCount += 1` (v3).
+7. Append `escalation` event to `system_incident_events` with `actorKind='user'`, `payload: { taskId, incidentId, escalationCount, previousTaskIds: [...] }`.
+8. Return `{ incident, taskId, isReEscalation: boolean }` to the caller.
 
 The existing `orchestratorFromTaskJob.ts` job is automatically enqueued by `taskService.createTask` (per architecture.md §Orchestrator Capability-Aware Routing). It picks up the task, routes it through the four-path decision model, and either resolves it directly, hands it to an appropriate specialist agent, or opens a clarifying question back to the escalating user via the normal task UI.
 
 **Crucially: no new agent is built for Phase 0.5.** The escalation leverages existing routing infrastructure. If Orchestrator doesn't know what to do with "diagnose this incident" — which it likely won't on day one — the sysadmin will see a "no capable agent" response and learn the system's current limits. This is useful diagnostic information for designing Phase 2.
+
+### 10.2.5 Escalation guardrails (v3)
+
+The v2 design allowed unlimited escalations on a single incident, producing unbounded duplicate tasks. v3 adds explicit guardrails.
+
+**Schema addition:** `system_incidents.escalation_count integer NOT NULL DEFAULT 0`. Added in the Phase 0 migration alongside the other incident columns.
+
+**Schema addition:** `system_incidents.previous_task_ids uuid[] NOT NULL DEFAULT '{}'`. Records the history of escalated task IDs — the current `escalatedTaskId` plus every prior escalation's task ID. Supports auditing "how many times did we throw this at an agent before giving up?"
+
+**Endpoint behaviour:**
+
+`POST /api/system/incidents/:id/escalate` accepts an optional body `{ force?: boolean }`.
+
+| State | `force` | Result |
+|---|---|---|
+| `escalatedTaskId IS NULL` (first escalation) | any | Proceed. Creates task, sets `escalationCount = 1`. |
+| `escalatedTaskId IS NOT NULL`, `escalationCount < 3`, previous task is still open/in-progress | `false` / absent | **Return `409 Conflict`** with shape `{ error: { code: 'ALREADY_ESCALATED', message, existingTaskId, existingTaskStatus } }`. UI shows a confirmation modal; user must click "Escalate again anyway". |
+| Same as above | `true` | Proceed. Appends previous `escalatedTaskId` to `previous_task_ids`, creates new task, sets `escalatedTaskId = <new>`, increments `escalationCount`. |
+| `escalatedTaskId IS NOT NULL`, previous task is `completed` / `cancelled` / `closed_*` | any | Proceed automatically (previous escalation has finished; new escalation is legitimate). Updates as above. |
+| `escalationCount >= 3` | any | **Return `429 Too Many Requests`** with shape `{ error: { code: 'ESCALATION_LIMIT_REACHED', message: 'Incident has been escalated 3 times. Resolve the incident or contact a platform engineer to lift the cap.' } }`. Hard stop. Requires an admin action to reset (set `escalationCount = 0` via the API in a future phase; for Phase 0.5, an incident that hits the cap requires manual intervention — resolve it or mark it as a known issue and suppress). |
+
+**Rate limit (independent of the count cap):** per incident, one escalation request every 60 seconds. Prevents double-clicks on the Escalate button from creating two parallel tasks. Implemented as a simple DB check of `escalatedAt > NOW() - INTERVAL '60 seconds'`.
+
+**UI behaviour (admin page detail drawer):**
+
+- If `escalationCount === 0`: button reads "**Escalate to agent**".
+- If `escalationCount === 1` and previous task still open: button reads "**Escalate again**" with tooltip showing the existing task link + status.
+- If `escalationCount >= 2`: button reads "**Escalate again (N×)**" in amber; click opens a confirmation modal explicitly listing previous escalations and their outcomes.
+- If `escalationCount >= 3`: button is **disabled** with explainer tooltip: "Escalation limit reached (3). Resolve or suppress this incident, or contact a platform engineer."
+
+**Why these specific thresholds:**
+
+- **Soft limit at 1** (confirmation required): catches the accidental double-click and the "oh, I already did that" amnesia. Minor friction, prevents task-spam.
+- **Hard limit at 3**: three escalations without resolution means the incident is either unfixable by the current agent infrastructure (Phase 2 problem) or the user is misusing the button. Either way, no amount of re-escalating will help.
+- **60-second rate limit**: empirically tight enough to block UI races; loose enough that a human actually deciding to re-escalate is never blocked.
+
+**Event log:** each escalation attempt — including blocked ones — writes an event. Blocked attempts use `eventType='escalation_blocked'` with `payload: { reason: 'ALREADY_ESCALATED' | 'RATE_LIMIT' | 'LIMIT_REACHED', existingTaskId }`. This closes the observability loop: "why couldn't I escalate?" is answerable from the drawer without checking server logs.
 
 ### 10.3 Designated escalation target (per Q2 §0.2 — decided)
 
@@ -1343,15 +1627,22 @@ These are all intentional Phase 2 boundaries.
 
 ### 12.3 End-to-end smoke (manual, pre-ship)
 
-One-time scripted run after deploy:
+One-time scripted run after deploy. Phase 0.5 has no push channels (per §9 and §0.3); smoke tests validate in-app surfaces only. The email/Slack smoke steps move to Phase 0.75's test plan.
 
 1. Trigger a contrived route 500 via a test endpoint — verify incident appears on `/system/incidents`.
 2. Click Acknowledge — verify incident shows "Acknowledged" state.
 3. Click Resolve with note — verify resolved.
 4. Trigger same fingerprint again — verify NEW incident opens.
-5. Suppress it — verify next occurrence does not create a row.
-6. Trigger a critical incident, confirm email + Slack delivered.
-7. Click Escalate on an incident, confirm task appears in admin org's task board and Orchestrator picks it up.
+5. Suppress it — verify next occurrence does not create a new incident AND increments `suppressed_count` on the suppression row (per §4.3 suppression visibility).
+6. Trigger a critical system-fault incident — verify:
+    a. Appears in Pulse (`internal` lane, `system_incident` kind) for the sysadmin user.
+    b. Layout nav entry shows a red-dot badge.
+    c. Admin page receives a WebSocket `system_incident:updated` event within 1 second — no manual refresh needed.
+    d. Default admin page view shows the incident at the top of the list.
+7. Trigger an incident that's already been acked — confirm badge does NOT re-fire.
+8. Click Escalate on an incident — confirm task appears in the correct subaccount per §10.3 (own org sentinel for org-scoped, System Operations for system-level) and Orchestrator picks it up.
+9. Click Escalate again on the same incident — confirm the duplicate-escalation guardrail (§10.2.5) either blocks or requires explicit confirmation.
+10. Use the test-incident trigger (§8.9) — verify the incident is hidden from the default list, visible when "Show test incidents" is toggled, and does NOT produce a WebSocket push or Pulse card.
 
 ### 12.4 Load/performance test
 
@@ -1544,11 +1835,14 @@ Estimated size: ~3-5 days of focused work once provider choice is made. Small co
 
 ---
 
-**End of Phase 0 + 0.5 specification (v2).**
+**End of Phase 0 + 0.5 specification (v3 — final).**
 
-All v1 open questions resolved (§0.2). All v1 prerequisites verified against the codebase (§0.1). Scope adjusted: push notifications (email/Slack/SMS) carved out into Phase 0.75 because the underlying infrastructure does not yet exist; Phase 0.5 ships in-app-only.
+- v1 open questions: resolved (§0.2).
+- v1 prerequisites: verified against the live codebase (§0.1).
+- v2 scope conflict (push notifications): carved out into Phase 0.75 (§0.3, §9, §16.1).
+- v3 reviewer feedback: all 2 critical + 5 high-impact + 4 medium-impact findings incorporated (§0.5).
 
-Ready for user review. Once reviewed, next gate is `architect` for structural validation before implementation (or `spec-reviewer` if the user wants an adversarial Codex pass first — note: `spec-reviewer` requires the local Codex CLI per CLAUDE.md, and must be invoked by the user explicitly, not auto-invoked).
+Implementation-ready. Next gate is `architect` (for structural validation + file-by-file implementation plan) unless the user runs `spec-reviewer` first from a local Codex CLI session (not available in Claude Code on the web per CLAUDE.md).
 
 
 
