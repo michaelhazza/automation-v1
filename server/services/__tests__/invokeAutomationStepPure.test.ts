@@ -60,7 +60,7 @@ function makeAutomation(overrides: Partial<Automation> = {}): Automation {
     name: 'Test Automation',
     organisationId: 'org-1',
     subaccountId: null,
-    workflowEngineId: 'engine-1',
+    automationEngineId: 'engine-1',
     webhookPath: '/webhook/test',
     inputSchema: null,
     outputSchema: null,
@@ -283,6 +283,22 @@ test('projectOutputMapping with outputMapping projects fields', () => {
   const render = (_expr: string, _c: TemplateCtx) => 'projected-value';
   const result = projectOutputMapping({ id: '123' }, { contactId: '{{ response.id }}' }, render, ctx);
   assertEqual(result, { contactId: 'projected-value' }, 'projected field');
+});
+
+test('projectOutputMapping resolves {{ response.* }} from responseBody', () => {
+  // Real render that reads response.id from the merged context.
+  const realRender = (expr: string, c: TemplateCtx) => {
+    const match = expr.match(/\{\{\s*response\.(\w+)\s*\}\}/);
+    if (match) return (c.response as Record<string, unknown>)?.[match[1]];
+    return expr;
+  };
+  const result = projectOutputMapping(
+    { id: 'contact-abc', name: 'Acme' },
+    { contactId: '{{ response.id }}', contactName: '{{ response.name }}' },
+    realRender,
+    ctx,
+  );
+  assertEqual(result, { contactId: 'contact-abc', contactName: 'Acme' }, 'response fields resolved');
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────

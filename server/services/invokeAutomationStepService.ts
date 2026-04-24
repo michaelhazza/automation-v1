@@ -23,7 +23,6 @@ import {
   clampMaxAttempts,
   validateDispatchOutput,
   projectOutputMapping,
-  MAX_RETRY_ATTEMPTS,
   type RunScope,
   type TemplateCtx,
 } from './invokeAutomationStepPure.js';
@@ -182,11 +181,14 @@ export async function invokeAutomationStep(
       and(
         eq(automationEngines.id, automationEngineId),
         isNull(automationEngines.deletedAt),
-        // Enforce org scope — engine must belong to the automation's org or be system-scoped
-        or(
-          eq(automationEngines.organisationId, automation.organisationId ?? ''),
-          isNull(automationEngines.organisationId),
-        ),
+        // Enforce org scope — engine must belong to the automation's org or be system-scoped.
+        // System automations (organisationId=null) may only use system-scoped engines.
+        automation.organisationId
+          ? or(
+              eq(automationEngines.organisationId, automation.organisationId),
+              isNull(automationEngines.organisationId),
+            )
+          : isNull(automationEngines.organisationId),
       ),
     );
 

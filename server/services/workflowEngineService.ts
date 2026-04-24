@@ -74,7 +74,8 @@ import {
   resolveConfigurationAssistantAgentId,
   ActionTimeoutError,
 } from './workflowActionCallExecutor.js';
-import type { ActionCallStep } from '../lib/workflow/types.js';
+import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types.js';
+import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
@@ -1515,6 +1516,53 @@ export const WorkflowEngineService = {
           stepId: step.id,
           stepType: step.type,
         });
+        return;
+      }
+
+      case 'invoke_automation': {
+        const autoStep = step as InvokeAutomationStep;
+        const ctx = run.contextJson as unknown as RunContext;
+
+        // Mark step as running before dispatch.
+        await db
+          .update(workflowStepRuns)
+          .set({ status: 'running', startedAt: new Date(), version: sr.version + 1, updatedAt: new Date() })
+          .where(eq(workflowStepRuns.id, sr.id));
+
+        const result = await invokeAutomationStep({
+          step: autoStep,
+          runId: run.id,
+          stepRunId: sr.id,
+          run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
+          templateCtx: ctx as unknown as Record<string, unknown>,
+        });
+
+        if (result.status === 'ok') {
+          const output = result.output ?? {};
+          await this.completeStepRunInternal(sr, output, hashValue(output), 'invoke_automation');
+          return;
+        }
+
+        if (result.status === 'review_required') {
+          await WorkflowStepReviewService.requireApproval(sr, { reviewKind: 'invoke_automation_gate' });
+          return;
+        }
+
+        // error — respect failurePolicy: 'continue' so non-critical automations don't halt the run
+        const errorReason = `invoke_automation_error: ${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`;
+        if (autoStep.failurePolicy === 'continue') {
+          await this.completeStepRunInternal(sr, { error: result.error }, hashValue(result.error), 'invoke_automation_continue');
+        } else {
+          await this.failStepRunInternal(sr, errorReason);
+        }
+        return;
+      }
+
+      default: {
+        // Exhaustiveness guard — new step types must add a case above.
+        const exhaustiveCheck: never = step.type as never;
+        logger.error('workflow_dispatch_unknown_step_type', { stepType: exhaustiveCheck, runId: run.id, stepId: step.id });
+        await this.failStepRunInternal(sr, `unknown_step_type:${step.type}`);
         return;
       }
     }

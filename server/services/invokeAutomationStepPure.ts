@@ -105,9 +105,11 @@ export function projectOutputMapping(
   ctx: TemplateCtx,
 ): Record<string, unknown> {
   if (!outputMapping) return { response: responseBody };
+  // Merge responseBody into context so expressions like {{ response.id }} resolve correctly.
+  const ctxWithResponse = { ...ctx, response: responseBody };
   const projected: Record<string, unknown> = {};
   for (const [key, expr] of Object.entries(outputMapping)) {
-    projected[key] = renderTemplate(expr, ctx);
+    projected[key] = renderTemplate(expr, ctxWithResponse);
   }
   return projected;
 }
@@ -185,7 +187,8 @@ export function resolveDispatch(input: DispatchInput): DispatchOutcome {
     };
   }
 
-  const webhookUrl = `${engineBaseUrl}${automation.webhookPath}`;
+  const normalizedPath = webhookPath.startsWith('/') ? webhookPath : `/${webhookPath}`;
+  const webhookUrl = `${engineBaseUrl}${normalizedPath}`;
 
   return { kind: 'dispatch', webhookUrl, body: resolvedInput };
 }
