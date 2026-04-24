@@ -419,3 +419,23 @@ When a reviewer flags a bug in a feature that has two functionally-equivalent co
 **Why:** Two paths producing the same outcome is an invitation for divergence on the next edit. Every future fix to one path must be mirrored to the other; it never is. The duplication is the bug.
 
 **How to apply:** When the first bug finding in a feature is "path A works, path B doesn't," don't just fix path B. Read both paths, find the shared primitive (the thing they're both computing), lift it to a pure helper, route both callers through it. Run tests, commit together. If the larger consolidation risks scope creep (validation pipeline on retry, etc.), fix the immediate divergence and file the remaining consolidation as a tagged todo — but always do the immediate consolidation, not a one-path patch.
+
+### 2026-04-24 Gotcha — `node --watch` restart silently kills in-flight long-running LLM jobs
+
+`node --watch` drops all open TCP connections when it restarts (triggered by any file save on a watched path). In-flight Anthropic API calls are recorded by Anthropic as 499 "Client disconnected" and exit immediately. The pg-boss job entry stays in `active` state because the error handler in the worker never ran (process was killed mid-execution). This produces two symptoms: (1) the UI shows skills stuck mid-classification indefinitely; (2) the Resume button never appears because the DB job is still `classifying`, not `failed`. Production fix: don't run long-running classification jobs under `node --watch` — always use a stable process (e.g. `node dist/server.js`) for any batch that takes >30 seconds.
+
+**Gotcha layer 2 — pg-boss ghost `active` lock.** After the worker dies, pg-boss keeps the job in `active` state until `expireInSeconds` (14400 = 4 hours). Any `resumeJob` call during that window throws 409 "already running." Fix in `skillAnalyzerService.ts:resumeJob`: when the DB job is `failed` but pg-boss still shows `active`, issue a direct UPDATE to `pgboss.job` to expire the ghost row, then proceed with resume.
+
+### 2026-04-24 Gotcha — Resume seeding contract must declare all Stage 5c consumers of `libraryId`/`proposedMerge`
+
+`skillAnalyzerJob.ts` Stage 5 resume seeding (the block that reconstructs `classifiedResults` from DB) historically set `libraryId: null` and `proposedMerge: null` with the comment *"safe — downstream consumers only read candidateIndex and classification."* That contract was accurate when written, but Stage 5c (`SOURCE_FORK`, `NEAR_REPLACEMENT`, `CONTENT_OVERLAP` checks) is an undocumented consumer of both fields. Setting `libraryId: null` caused Stage 5c to `continue` over all resumed entries, silently producing zero fork/overlap warnings.
+
+**Fix:** The resume seeding block now calls the extended `listResultIndicesForJob` which returns `matchedSkillId` and `proposedMergedInstructions`/`proposedMergedName` from the DB, then hydrates both fields. The contract comment was updated to reflect all known consumers.
+
+**Rule:** whenever Stage 5 reads a field from `classifiedResults` that seeding sets to `null`, that field must appear in the resume seeding block. Audit the seeding object against all Stage 5 field accesses before shipping any new Stage 5 check.
+
+### 2026-04-24 Gotcha — Always seed `classify_state.queue` from the full `llmQueue`, not just the remaining subset
+
+At Stage 5 start, `classify_state.queue` is written once and used by the UI to control the stable display order of AI-classifying skills in `SkillAnalyzerProcessingStep`. On a resume, if the queue is seeded with only the remaining unclassified slugs (e.g. 4 of 19), two UI bugs follow: (1) the 4 resumed skills jump to the top of the list because the stable-order logic is keyed on queue position; (2) after Stage 6/7 writes all result rows to the DB, hash-matched `DUPLICATE` skills appear as phantom entries in the `doneOnly` fallback path.
+
+**Fix:** `classify_state.queue` is always set from the full `llmQueue` (all AI-classified candidates from Stage 4, in their original order), regardless of how many are remaining on resume. In the UI, `displaySlugs` was simplified to just `classifyQueue` — `DUPLICATE` skills are intentionally excluded because they resolve in Stage 6/7 and have no per-skill progress to show in the classifier view.

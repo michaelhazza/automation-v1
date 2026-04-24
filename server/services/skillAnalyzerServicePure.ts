@@ -313,7 +313,9 @@ export type MergeWarningCode =
   | 'SKILL_GRAPH_COLLISION'
   | 'SOURCE_FORK'
   | 'NEAR_REPLACEMENT'
-  | 'CONTENT_OVERLAP';
+  | 'CONTENT_OVERLAP'
+  // v6 fix-cycle additions
+  | 'CROSS_REFERENCES_DISTINCT';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -350,6 +352,7 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   SOURCE_FORK:              'decision_required',
   NEAR_REPLACEMENT:         'standard',
   CONTENT_OVERLAP:          'standard',
+  CROSS_REFERENCES_DISTINCT: 'informational',
 };
 
 /** Severity priority used when sorting warnings before MAX-count truncation.
@@ -465,6 +468,7 @@ const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = 
   SOURCE_FORK:              ['acknowledge_warning'],
   NEAR_REPLACEMENT:         ['acknowledge_warning'],
   CONTENT_OVERLAP:          ['acknowledge_warning'],
+  CROSS_REFERENCES_DISTINCT: [],
 };
 
 /** Parse demoted field list out of a REQUIRED_FIELD_DEMOTED warning's detail.
@@ -481,6 +485,169 @@ export function parseDemotedFields(detail: string | undefined): string[] {
     }
   }
   return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+/** Status for a demoted required field. v6 Fix 3 distinguishes:
+ *   - `made_optional`: field still exists in merged properties, just not required
+ *   - `replaced_by`: field was replaced by a similarly-named property
+ *   - `removed_entirely`: field is gone from the merged schema */
+export type DemotedFieldStatus =
+  | { status: 'made_optional' }
+  | { status: 'replaced_by'; replacement: string }
+  | { status: 'removed_entirely' };
+
+/** Parse the per-field status map out of a REQUIRED_FIELD_DEMOTED detail.
+ *  Returns an empty map for legacy details (pre-v6) so callers fall back to
+ *  the plain demoted-field list. */
+export function parseDemotedFieldStatuses(
+  detail: string | undefined,
+): Record<string, DemotedFieldStatus> {
+  if (!detail) return {};
+  const trimmed = detail.trim();
+  if (!trimmed.startsWith('{')) return {};
+  try {
+    const parsed = JSON.parse(trimmed) as { fieldStatus?: Record<string, DemotedFieldStatus> };
+    const map = parsed?.fieldStatus;
+    if (!map || typeof map !== 'object') return {};
+    const out: Record<string, DemotedFieldStatus> = {};
+    for (const [field, s] of Object.entries(map)) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.status === 'made_optional' || s.status === 'removed_entirely') {
+        out[field] = { status: s.status };
+      } else if (s.status === 'replaced_by' && typeof s.replacement === 'string') {
+        out[field] = { status: 'replaced_by', replacement: s.replacement };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Classify each demoted required field based on whether it still exists in
+ *  the merged properties, was replaced by a similarly-named field, or was
+ *  removed entirely. Used to build the REQUIRED_FIELD_DEMOTED warning detail. */
+export function classifyDemotedFields(
+  demotedFields: string[],
+  mergedDefinition: object | null,
+): Record<string, DemotedFieldStatus> {
+  const out: Record<string, DemotedFieldStatus> = {};
+  const properties =
+    (mergedDefinition as Record<string, unknown> | null)?.input_schema &&
+    (((mergedDefinition as Record<string, Record<string, unknown>>).input_schema as Record<string, unknown>).properties as Record<string, unknown> | undefined);
+  const propertyNames = properties && typeof properties === 'object' ? Object.keys(properties) : [];
+  const propertyNameSet = new Set(propertyNames);
+
+  for (const field of demotedFields) {
+    if (propertyNameSet.has(field)) {
+      out[field] = { status: 'made_optional' };
+      continue;
+    }
+    // Look for a "similar" property: matches after stripping trailing 's',
+    // '_url', '_urls', or after a common fuzz — covers competitor_name → competitor_urls / competitor_names.
+    const candidates: string[] = [];
+    const bases = new Set<string>();
+    bases.add(field);
+    bases.add(field.replace(/s$/, ''));
+    bases.add(field.replace(/_urls?$/, ''));
+    bases.add(field.replace(/_names?$/, ''));
+    for (const p of propertyNames) {
+      for (const base of bases) {
+        if (base.length < 3) continue;
+        if (p === field) continue;
+        if (p.includes(base) || base.includes(p)) {
+          candidates.push(p);
+          break;
+        }
+      }
+    }
+    if (candidates.length > 0) {
+      // Prefer the shortest candidate (most likely to be a plain rename / pluralisation).
+      candidates.sort((a, b) => a.length - b.length);
+      out[field] = { status: 'replaced_by', replacement: candidates[0] };
+    } else {
+      out[field] = { status: 'removed_entirely' };
+    }
+  }
+  return out;
+}
+
+/** v6 Fix 4 — adjust the LLM-reported classifier confidence with structural
+ *  signals so the UI differentiates high-quality merges from borderline ones.
+ *
+ *  The LLM tends to cluster on a small number of confidence values (observed
+ *  11/14 partial overlaps at exactly 0.85 on the marketingskills batch).
+ *  Validation produces richer signals than the classifier sees — required
+ *  fields demoted, scope expansion, forks, self-referencing Related Skills
+ *  sections — so we apply per-signal deductions on top of the LLM's score.
+ *
+ *  Deductions are additive, capped per code, floored at 0.20. The goal is
+ *  differentiation, not re-ranking: clean merges stay near their original
+ *  score; structurally weaker merges drop proportional to their issues. */
+export function adjustClassifierConfidence(
+  llmConfidence: number,
+  warnings: MergeWarning[],
+  opts: {
+    mergedInstructions: string | null;
+    mergedName: string;
+    candidateSlug: string;
+    librarySlug: string;
+  },
+): number {
+  if (!Number.isFinite(llmConfidence)) return 0.5;
+  let score = llmConfidence;
+
+  // Required field demotions: -0.05 per field, capped at -0.15. Uses the
+  // structured detail written by Fix 3 so a warning with 3 demoted fields
+  // deducts proportionally, not once per warning.
+  const reqWarning = warnings.find(w => w.code === 'REQUIRED_FIELD_DEMOTED');
+  if (reqWarning) {
+    const demotedCount = parseDemotedFields(reqWarning.detail).length;
+    score -= Math.min(0.15, demotedCount * 0.05);
+  }
+
+  // Name change: -0.03 when the incoming renamed the skill.
+  if (warnings.some(w => w.code === 'NAME_MISMATCH')) score -= 0.03;
+
+  // Source fork: -0.05. Being one of several incoming merges of the same
+  // library skill is a structural weakness.
+  if (warnings.some(w => w.code === 'SOURCE_FORK')) score -= 0.05;
+
+  // Critical scope expansion: -0.05 on top of NAME_MISMATCH / table checks.
+  if (warnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL')) score -= 0.05;
+
+  // Genuine table drops (not restructured): -0.02 per code, capped at -0.08.
+  // Restructured tables have `"restructured": true` in the JSON detail — Fix 1
+  // downgrades those to informational-ish, so they don't contribute here.
+  const tableDropCount = warnings.filter(w => {
+    if (w.code !== 'TABLE_ROWS_DROPPED') return false;
+    if (!w.detail) return true;
+    try {
+      const parsed = JSON.parse(w.detail) as { restructured?: boolean };
+      return parsed?.restructured !== true;
+    } catch {
+      return true;
+    }
+  }).length;
+  score -= Math.min(0.08, tableDropCount * 0.02);
+
+  // Self-reference: merged instructions reference the incoming skill's own
+  // slug or name inside a Related Skills section — signal that the incoming
+  // was designed to live alongside the library skill, not replace it.
+  if (opts.mergedInstructions) {
+    const relIdx = opts.mergedInstructions.search(/^##\s+related\s+skills\b/im);
+    if (relIdx !== -1) {
+      const relatedSection = opts.mergedInstructions.slice(relIdx).toLowerCase();
+      const slug = opts.candidateSlug.toLowerCase();
+      const hyphenated = slug.replace(/_/g, '-');
+      if (slug.length >= 3 && (relatedSection.includes(slug) || relatedSection.includes(hyphenated))) {
+        score -= 0.10;
+      }
+    }
+  }
+
+  if (!Number.isFinite(score)) return 0.2;
+  return Math.max(0.20, Math.min(1.0, score));
 }
 
 /** Return true if a resolution satisfies a given warning/field pair. */
@@ -1573,14 +1740,21 @@ export function validateMergeOutput(
   const allSourceRequired = [...new Set([...baseRequired, ...nonBaseRequired])];
   const demoted = allSourceRequired.filter(f => !mergedRequired.includes(f));
   if (demoted.length > 0) {
+    // v6 Fix 3: classify each demoted field so the reviewer sees "made
+    // optional" vs "removed entirely" vs "possibly replaced by X" in the UI.
+    // The fieldStatus map is additive — parseDemotedFields (legacy) still
+    // reads the demotedFields array, so older clients keep working.
+    const fieldStatus = classifyDemotedFields(demoted, merged.definition);
+    const madeOptional = demoted.filter(f => fieldStatus[f]?.status === 'made_optional').length;
+    const removed = demoted.length - madeOptional;
+    const messageParts: string[] = [];
+    if (madeOptional > 0) messageParts.push(`${madeOptional} made optional`);
+    if (removed > 0) messageParts.push(`${removed} removed`);
     warnings.push({
       code: 'REQUIRED_FIELD_DEMOTED',
       severity: 'critical',
-      message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
-      // Structured detail so the client can render per-field Accept/Restore UI.
-      // parseDemotedFields() still accepts the legacy comma-delimited form for
-      // backwards compatibility.
-      detail: JSON.stringify({ demotedFields: demoted }),
+      message: `${demoted.length} required field(s) from the source skills ${messageParts.join(', ')}.`,
+      detail: JSON.stringify({ demotedFields: demoted, fieldStatus }),
     });
   }
 
@@ -1640,6 +1814,13 @@ export function validateMergeOutput(
   }
 
   // --- Bug 10: Table completeness ---
+  // v6 Fix 1: when the LLM restructured a source table inline (split it into
+  // sub-tables, merged multiple tables, or reordered columns), the header-key
+  // comparison below treats it as "dropped". Before emitting the warning,
+  // verify whether the row data is still present in the merged text. If
+  // ≥80% of source rows are covered by substring match, downgrade the message
+  // from "rows dropped" to "table restructured — N/M rows verified present"
+  // and skip the paired reference appendix in recoverDroppedTableRows.
   const baseTables = extractTables(base.instructions);
   const nonBaseTables = extractTables(nonBase.instructions);
   const mergedTables = extractTables(merged.instructions);
@@ -1649,9 +1830,37 @@ export function validateMergeOutput(
     const existing = sourceLookup.get(t.headerKey) ?? 0;
     if (t.rowCount > existing) sourceLookup.set(t.headerKey, t.rowCount);
   }
+  // Source rows by headerKey for content verification (only computed for
+  // tables that look dropped — avoid the cost on the happy path).
+  const sourceRowsByHeader = new Map<string, ExtractedTableRows>();
+  for (const t of [...extractTablesWithRows(base.instructions), ...extractTablesWithRows(nonBase.instructions)]) {
+    const existing = sourceRowsByHeader.get(t.headerKey);
+    if (!existing || t.rows.length > existing.rows.length) {
+      sourceRowsByHeader.set(t.headerKey, t);
+    }
+  }
   for (const [headerKey, sourceRows] of sourceLookup) {
     const mergedRows = mergedByHeader.get(headerKey) ?? 0;
-    if (mergedRows < sourceRows) {
+    if (mergedRows >= sourceRows) continue;
+    const sourceWithRows = sourceRowsByHeader.get(headerKey);
+    const coverage = sourceWithRows && merged.instructions
+      ? mergedOutputCoversTableData(sourceWithRows, merged.instructions)
+      : { covered: false, matchedRows: 0, totalRows: sourceRows };
+    if (coverage.covered) {
+      warnings.push({
+        code: 'TABLE_ROWS_DROPPED',
+        severity: 'warning',
+        message: `Table "${headerKey}" was restructured in the merge — ${coverage.matchedRows}/${coverage.totalRows} source rows verified present.`,
+        detail: JSON.stringify({
+          header: headerKey,
+          sourceRows,
+          mergedRows,
+          restructured: true,
+          matchedRows: coverage.matchedRows,
+          totalRows: coverage.totalRows,
+        }),
+      });
+    } else {
       warnings.push({
         code: 'TABLE_ROWS_DROPPED',
         severity: 'warning',
@@ -2578,31 +2787,66 @@ function computeSourceRetention(
 // Fix 3 (v5) — suppress reference appendix when merged output already covers data
 // ---------------------------------------------------------------------------
 
-/** Returns true if the merged output already contains table data that covers
- *  at least 70% of the source table's non-header cell values. Used to prevent
- *  duplicate reference appendices when the LLM restructured the table inline. */
+/** Clean a table cell for content-verification matching. Strips [SOURCE:] markers,
+ *  backticks, surrounding whitespace, and lowercases. Returns '' for cells that
+ *  are not useful for matching (empty, pure punctuation, very short). */
+function cleanCellForMatch(cell: string): string {
+  const cleaned = cell
+    .replace(/\[SOURCE:[^\]]*\]/g, '')
+    .replace(/[`*_]/g, '')
+    .trim()
+    .toLowerCase();
+  if (cleaned.length < 2) return '';
+  if (/^[-—–\s]+$/.test(cleaned)) return '';
+  return cleaned;
+}
+
+/** Returns the first N non-empty, match-worthy cell values from a pipe-row.
+ *  "First N columns" semantics per the v6 brief — typically first two columns
+ *  carry the identifying values (e.g. "Headline | 30 chars"). For rows whose
+ *  leading cells are blank (table continuations), this reaches further right
+ *  to collect up to N distinctive cells. */
+function extractRowKeyValues(rowLine: string, limit = 2): string[] {
+  const trimmed = rowLine.trim().replace(/^\||\|$/g, '');
+  const cells = trimmed.split('|').map(cleanCellForMatch);
+  const out: string[] = [];
+  for (const c of cells) {
+    if (c.length > 0) out.push(c);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Returns true if the merged instructions already contain table data that
+ *  covers at least `coverageThreshold` of the source table's rows (by their
+ *  first 1-2 identifying cell values). v6 Fix 1: uses row-level substring
+ *  matching against the entire merged text — handles LLM restructurings
+ *  (splits, merges, column reorderings) that a header-structure comparison
+ *  would miss. Each row is "covered" if ALL of its key values (cleaned) appear
+ *  as substrings in the merged text. */
 function mergedOutputCoversTableData(
   sourceTable: ExtractedTableRows,
   mergedInstructions: string,
-  coverageThreshold = 0.70,
-): boolean {
-  const sourceCells = sourceTable.rows.flatMap(row =>
-    row.split('|')
-      .map(c => c.replace(/\[SOURCE:[^\]]*\]/g, '').trim().toLowerCase())
-      .filter(c => c.length > 1 && !/^-+$/.test(c)),
-  );
-  if (sourceCells.length === 0) return false;
+  coverageThreshold = 0.80,
+): { covered: boolean; matchedRows: number; totalRows: number } {
+  const haystack = mergedInstructions.toLowerCase();
+  let matched = 0;
+  let scoreable = 0;
 
-  const mergedCells = new Set<string>(
-    extractTablesWithRows(mergedInstructions).flatMap(t =>
-      t.rows.flatMap(row =>
-        row.split('|').map(c => c.trim().toLowerCase()).filter(c => c.length > 1),
-      ),
-    ),
-  );
+  for (const row of sourceTable.rows) {
+    const keys = extractRowKeyValues(row, 2);
+    if (keys.length === 0) continue;
+    scoreable++;
+    const allPresent = keys.every(k => haystack.includes(k));
+    if (allPresent) matched++;
+  }
 
-  const covered = sourceCells.filter(c => mergedCells.has(c)).length;
-  return covered / sourceCells.length >= coverageThreshold;
+  if (scoreable === 0) return { covered: false, matchedRows: 0, totalRows: 0 };
+  return {
+    covered: matched / scoreable >= coverageThreshold,
+    matchedRows: matched,
+    totalRows: scoreable,
+  };
 }
 
 /** When TABLE_ROWS_DROPPED warnings fire for tables with < 50% rows retained,
@@ -2639,9 +2883,10 @@ export function recoverDroppedTableRows(
     if (sourceRows === 0 || mergedRows >= sourceRows * 0.5) continue;
     // Skip tables whose heading already says "Reference:" to prevent recursion.
     if (/reference:/i.test(headerKey)) continue;
-    // v5 Fix 3: skip if the merged output already contains a table that covers
-    // ≥70% of this source table's cell values — appending would be duplicate.
-    if (mergedOutputCoversTableData(sourceTable, mergedInstructions)) continue;
+    // v6 Fix 1: skip if the merged instructions already contain ≥80% of the
+    // source rows (by first-2-cols substring match). Avoids duplicate reference
+    // appendices when the LLM restructured the table inline.
+    if (mergedOutputCoversTableData(sourceTable, mergedInstructions).covered) continue;
 
     const headingPart = headerKey.includes('>')
       ? headerKey.split('>')[0].replace(/\b\w/g, c => c.toUpperCase())
@@ -2810,6 +3055,9 @@ export const skillAnalyzerServicePure = {
   buildAgentClusterRecommendationPrompt,
   parseAgentClusterRecommendationResponse,
   crossReferencesLibrarySkill,
+  classifyDemotedFields,
+  parseDemotedFieldStatuses,
+  adjustClassifierConfidence,
   AGENT_RECOMMENDATION_THRESHOLD,
   AGENT_RECOMMENDATION_MIN_SKILLS,
 };

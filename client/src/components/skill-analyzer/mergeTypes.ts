@@ -23,7 +23,8 @@ export type MergeWarningCode =
   | 'SKILL_GRAPH_COLLISION'
   | 'SOURCE_FORK'
   | 'NEAR_REPLACEMENT'
-  | 'CONTENT_OVERLAP';
+  | 'CONTENT_OVERLAP'
+  | 'CROSS_REFERENCES_DISTINCT';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -56,6 +57,7 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   SOURCE_FORK:              'decision_required',
   NEAR_REPLACEMENT:         'standard',
   CONTENT_OVERLAP:          'standard',
+  CROSS_REFERENCES_DISTINCT: 'informational',
 };
 
 export type WarningResolutionKind =
@@ -110,6 +112,10 @@ const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = 
   TABLE_ROWS_DROPPED:       [],
   OUTPUT_FORMAT_LOST:       [],
   WARNINGS_TRUNCATED:       [],
+  SOURCE_FORK:              ['acknowledge_warning'],
+  NEAR_REPLACEMENT:         ['acknowledge_warning'],
+  CONTENT_OVERLAP:          ['acknowledge_warning'],
+  CROSS_REFERENCES_DISTINCT: [],
 };
 
 export function parseDemotedFields(detail: string | undefined): string[] {
@@ -126,6 +132,40 @@ export function parseDemotedFields(detail: string | undefined): string[] {
     }
   }
   return trimmed.split(/\s*,\s*/).filter(Boolean);
+}
+
+/** Status for a demoted required field. v6 Fix 3 mirror of the server type. */
+export type DemotedFieldStatus =
+  | { status: 'made_optional' }
+  | { status: 'replaced_by'; replacement: string }
+  | { status: 'removed_entirely' };
+
+/** Parse the per-field status map out of a REQUIRED_FIELD_DEMOTED detail.
+ *  Returns an empty map for legacy details (pre-v6) so callers fall back to
+ *  the plain demoted-field list. */
+export function parseDemotedFieldStatuses(
+  detail: string | undefined,
+): Record<string, DemotedFieldStatus> {
+  if (!detail) return {};
+  const trimmed = detail.trim();
+  if (!trimmed.startsWith('{')) return {};
+  try {
+    const parsed = JSON.parse(trimmed) as { fieldStatus?: Record<string, DemotedFieldStatus> };
+    const map = parsed?.fieldStatus;
+    if (!map || typeof map !== 'object') return {};
+    const out: Record<string, DemotedFieldStatus> = {};
+    for (const [field, s] of Object.entries(map)) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.status === 'made_optional' || s.status === 'removed_entirely') {
+        out[field] = { status: s.status };
+      } else if (s.status === 'replaced_by' && typeof s.replacement === 'string') {
+        out[field] = { status: 'replaced_by', replacement: s.replacement };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 function isResolvedBy(
@@ -238,6 +278,7 @@ export function warningLabel(code: MergeWarningCode): string {
     case 'SOURCE_FORK':              return 'Source fork — overlapping merges';
     case 'NEAR_REPLACEMENT':         return 'Near-replacement (low source retention)';
     case 'CONTENT_OVERLAP':          return 'Content overlap with another skill';
+    case 'CROSS_REFERENCES_DISTINCT': return 'Cross-references another skill';
   }
 }
 
@@ -259,5 +300,6 @@ export function warningBadgeClass(code: MergeWarningCode): string {
     case 'SOURCE_FORK':              return 'bg-orange-100 text-orange-800';
     case 'NEAR_REPLACEMENT':         return 'bg-amber-100 text-amber-800';
     case 'CONTENT_OVERLAP':          return 'bg-orange-100 text-orange-800';
+    case 'CROSS_REFERENCES_DISTINCT': return 'bg-slate-100 text-slate-700';
   }
 }

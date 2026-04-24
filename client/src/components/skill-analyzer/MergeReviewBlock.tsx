@@ -8,6 +8,7 @@ import {
   warningBadgeClass,
   evaluateApprovalState,
   parseDemotedFields,
+  parseDemotedFieldStatuses,
   type MergeWarning,
   type MergeWarningCode,
   type WarningResolution,
@@ -635,16 +636,40 @@ function WarningResolutionBlock({
       <p className="font-semibold text-slate-800 mb-2">
         Merge warnings {approvalState.blocked && <span className="text-red-700">· Action required before approval</span>}
       </p>
-      {warnings.map((w, i) => (
-        <WarningItem
-          key={`${w.code}-${i}`}
-          warning={w}
-          isLocked={isLocked}
-          isResolved={isResolved}
-          onResolve={resolveWarning}
-          criticalPhrase={criticalPhrase}
-        />
-      ))}
+      {/* v6 Fix 2: split warnings into a primary data-integrity group and a
+          secondary "formatting & notes" group (name mismatch, cross-reference
+          hints). Keeps the critical list short and de-noises the primary area. */}
+      {warnings
+        .filter(w => w.code !== 'NAME_MISMATCH' && w.code !== 'CROSS_REFERENCES_DISTINCT')
+        .map((w, i) => (
+          <WarningItem
+            key={`${w.code}-${i}`}
+            warning={w}
+            isLocked={isLocked}
+            isResolved={isResolved}
+            onResolve={resolveWarning}
+            criticalPhrase={criticalPhrase}
+          />
+        ))}
+      {warnings.some(w => w.code === 'NAME_MISMATCH' || w.code === 'CROSS_REFERENCES_DISTINCT') && (
+        <div className="mt-3 pt-2 border-t border-slate-300/60">
+          <p className="font-medium text-slate-600 mb-2 text-[11px] uppercase tracking-wide">
+            Formatting & notes
+          </p>
+          {warnings
+            .filter(w => w.code === 'NAME_MISMATCH' || w.code === 'CROSS_REFERENCES_DISTINCT')
+            .map((w, i) => (
+              <WarningItem
+                key={`fmt-${w.code}-${i}`}
+                warning={w}
+                isLocked={isLocked}
+                isResolved={isResolved}
+                onResolve={resolveWarning}
+                criticalPhrase={criticalPhrase}
+              />
+            ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -681,22 +706,40 @@ function WarningItem({
 
   if (warning.code === 'REQUIRED_FIELD_DEMOTED') {
     const fields = parseDemotedFields(warning.detail);
+    // v6 Fix 3: per-field status gives the reviewer the context to know
+    // whether a field was deleted entirely, made optional (still in schema),
+    // or possibly replaced by a similarly-named property.
+    const statuses = parseDemotedFieldStatuses(warning.detail);
     return (
       <div className="mb-2">
         {header}
         <ul className="ml-4 space-y-1">
           {fields.map((field) => {
             const current = isResolved('REQUIRED_FIELD_DEMOTED', field);
+            const fieldStatus = statuses[field];
+            let statusLabel: string | null = null;
+            let acceptText = 'Accept removal';
+            if (fieldStatus?.status === 'made_optional') {
+              statusLabel = 'made optional — still in schema';
+              acceptText = 'Accept optional';
+            } else if (fieldStatus?.status === 'replaced_by') {
+              statusLabel = `possibly replaced by ${fieldStatus.replacement}`;
+            } else if (fieldStatus?.status === 'removed_entirely') {
+              statusLabel = 'removed from schema';
+            }
             return (
-              <li key={field} className="flex items-center gap-2 text-[11px]">
+              <li key={field} className="flex flex-wrap items-center gap-2 text-[11px]">
                 <code className="text-slate-600">{field}</code>
+                {statusLabel && (
+                  <span className="text-slate-500 italic">{statusLabel}</span>
+                )}
                 <button
                   type="button"
                   disabled={disabled}
                   onClick={() => onResolve('REQUIRED_FIELD_DEMOTED', 'accept_removal', { field })}
                   className={`px-2 py-0.5 rounded border ${current === 'accept_removal' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'} disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
-                  Accept removal
+                  {acceptText}
                 </button>
                 <button
                   type="button"

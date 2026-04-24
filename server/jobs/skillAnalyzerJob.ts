@@ -1056,6 +1056,39 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             }
           }
 
+          // v6 Fix 5: post-classifier DISTINCT_FALLBACK. If the LLM returned
+          // PARTIAL_OVERLAP but the incoming skill explicitly cross-references
+          // the matched library skill as a separate tool ("see X", "for X, use Y"),
+          // the incoming is positioning itself as distinct — merging would produce
+          // a confused hybrid. Reclassify if similarity is also below 70%; for
+          // high-similarity cross-references we keep the merge but add an
+          // informational warning so the reviewer is aware.
+          let crossRefKeptAsPartialOverlap = false;
+          if (
+            (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT') &&
+            skillAnalyzerServicePure.crossReferencesLibrarySkill(
+              candidate.description,
+              matchedLib.name,
+              matchedLib.slug,
+            )
+          ) {
+            const similarity = match.similarity ?? 1;
+            if (similarity < 0.70) {
+              finalResult = {
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                reasoning:
+                  `${finalResult.reasoning} — post-classifier DISTINCT_FALLBACK: incoming skill cross-references "${matchedLib.name}" as a separate tool (similarity ${Math.round(similarity * 100)}%), so the merge was discarded in favour of presenting this as a new skill.`,
+                proposedMerge: null,
+              };
+              classifierFallbackApplied = false;
+            } else {
+              // Similarity ≥ 70% → keep PARTIAL_OVERLAP but flag for the
+              // informational warning emitted after validation.
+              crossRefKeptAsPartialOverlap = true;
+            }
+          }
+
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
           // --- Merge validation (Bugs 1–4, 7–10) ---
@@ -1245,6 +1278,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               });
             }
 
+            // v6 Fix 5: informational warning when an incoming skill cross-
+            // references the matched library skill but similarity is ≥ 70%, so
+            // the merge is kept. Reviewer should know the incoming was
+            // designed to live alongside the library skill.
+            if (crossRefKeptAsPartialOverlap) {
+              mergeWarnings.push({
+                code: 'CROSS_REFERENCES_DISTINCT',
+                severity: 'warning',
+                message: `This skill cross-references "${matchedLib.name}" as a separate tool, but similarity (${Math.round((match.similarity ?? 0) * 100)}%) was high enough to keep the merge. Review whether the two should remain distinct.`,
+              });
+            }
+
             if (mergeWarnings.length > 0) {
               console.info('[SkillAnalyzer] merge_warnings_summary', {
                 candidateSlug: candidate.slug,
@@ -1253,6 +1298,23 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               });
             }
           }
+
+          // v6 Fix 4: calibrate the classifier's self-reported confidence with
+          // structural signals from validation. Applied after all warnings are
+          // computed so the adjustment sees REQUIRED_FIELD_DEMOTED field
+          // counts, SOURCE_FORK membership, table drop / restructure state,
+          // and self-referencing Related Skills sections.
+          const adjustedConfidence = skillAnalyzerServicePure.adjustClassifierConfidence(
+            finalResult.confidence,
+            mergeWarnings,
+            {
+              mergedInstructions: storedMerge?.instructions ?? null,
+              mergedName: storedMerge?.name ?? candidate.name,
+              candidateSlug: candidate.slug,
+              librarySlug: matchedLib.slug,
+            },
+          );
+          finalResult = { ...finalResult, confidence: adjustedConfidence };
 
           classifiedResults.push({
             candidateIndex: match.candidateIndex,
