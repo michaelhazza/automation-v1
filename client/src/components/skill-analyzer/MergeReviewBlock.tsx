@@ -82,7 +82,18 @@ function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
     if (baseline === value) {
       return [{ kind: 'unchanged' as const, value }];
     }
-    return diffWordsWithSpace(baseline, value).map((part) => ({
+    const parts = diffWordsWithSpace(baseline, value);
+    // When the two strings share no unchanged tokens the word diff produces a
+    // garbled concatenation (e.g. "Draft Ad Copyad-creative"). Fall back to a
+    // simple two-token display: old value struck-through, new value highlighted.
+    const hasUnchanged = parts.some((p) => !p.added && !p.removed);
+    if (!hasUnchanged) {
+      return [
+        { kind: 'removed' as const, value: baseline },
+        { kind: 'added' as const, value: value },
+      ];
+    }
+    return parts.map((part) => ({
       kind: part.added ? ('added' as const) : part.removed ? ('removed' as const) : ('unchanged' as const),
       value: part.value,
     }));

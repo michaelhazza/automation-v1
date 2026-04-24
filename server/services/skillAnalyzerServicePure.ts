@@ -987,10 +987,17 @@ export interface NameMismatch {
   topLevel: string;
   schemaName: string | null;
   distinctNames: string[];
-  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions'>;
+  candidates: Array<'top_level' | 'schema' | 'description' | 'instructions' | 'incoming_skill'>;
 }
 
-export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
+export function detectNameMismatch(
+  merged: ProposedMerge,
+  /** The incoming candidate's original name. When the rule-based merger (or LLM)
+   *  adopts the library name as default, the rename would otherwise be silent.
+   *  Passing the incoming name here surfaces it as a NAME_MISMATCH so the
+   *  reviewer explicitly confirms or overrides the rename (v3 Fix 7). */
+  incomingName?: string,
+): NameMismatch | null {
   const topLevel = (merged.name ?? '').trim();
   const schemaNameRaw = (merged.definition as Record<string, unknown> | null | undefined)?.name;
   const schemaName = typeof schemaNameRaw === 'string' && schemaNameRaw.trim().length > 0
@@ -1003,6 +1010,13 @@ export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
   if (topLevel) candidates.add(normalise(topLevel));
   if (schemaName) candidates.add(normalise(schemaName));
 
+  // If the incoming skill had a different name (merger defaulted to library name),
+  // surface it as an additional candidate so the reviewer sees and resolves the rename.
+  const normIncoming = incomingName ? normalise(incomingName) : null;
+  if (normIncoming && topLevel && normIncoming !== normalise(topLevel)) {
+    candidates.add(normIncoming);
+  }
+
   // Look for either name used as a bare identifier in description / instructions.
   // Only flag when a DIFFERENT name appears there, not the same one.
   const allBareNames = collectBareNames(merged.description)
@@ -1014,11 +1028,12 @@ export function detectNameMismatch(merged: ProposedMerge): NameMismatch | null {
 
   if (candidates.size < 2) return null;
 
-  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions'> = [];
+  const sources: Array<'top_level' | 'schema' | 'description' | 'instructions' | 'incoming_skill'> = [];
   if (topLevel) sources.push('top_level');
   if (schemaName) sources.push('schema');
   if (merged.description && collectBareNames(merged.description).length > 0) sources.push('description');
   if (merged.instructions && collectBareNames(merged.instructions).length > 0) sources.push('instructions');
+  if (normIncoming && topLevel && normIncoming !== normalise(topLevel)) sources.push('incoming_skill');
 
   return {
     topLevel,
@@ -1046,7 +1061,11 @@ function collectBareNames(text: string | null | undefined): string[] {
 }
 
 /** Extract markdown tables from text, keyed by their normalized header row.
- *  headerKey is used for matching across source and merged text. */
+ *  headerKey is context-qualified: "{nearest-heading}>{columns}" when a
+ *  heading is present, otherwise just "{columns}". This prevents platform-
+ *  spec tables that share identical column schemas (e.g. "element|limit|notes"
+ *  appearing under Meta, LinkedIn, TikTok, and Twitter/X sections) from
+ *  collapsing into a single bucket and cross-polluting each other's rows. */
 export function extractTables(text: string | null): ExtractedTable[] {
   if (!text) return [];
   const lines = text.split('\n');
@@ -1055,14 +1074,21 @@ export function extractTables(text: string | null): ExtractedTable[] {
   let headerKey: string | null = null;
   let rowCount = 0;
   let lineIndex = 0;
+  let contextHeading = '';
 
   for (const line of lines) {
     const trimmed = line.trim();
+    // Track the nearest heading so tables with identical column schemas but
+    // under different section headings get distinct keys.
+    if (!inTable && /^#{1,4}\s+/.test(trimmed)) {
+      contextHeading = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
     if (trimmed.startsWith('|')) {
       if (!inTable) {
         inTable = true;
-        headerKey = trimmed.replace(/^\||\|$/g, '').split('|')
+        const rawKey = trimmed.replace(/^\||\|$/g, '').split('|')
           .map(c => c.trim().toLowerCase()).join('|');
+        headerKey = contextHeading ? `${contextHeading}>${rawKey}` : rawKey;
         rowCount = 0;
         lineIndex = 0;
       } else {
@@ -1095,23 +1121,29 @@ interface ExtractedTableRows {
   endLineIndex: number;         // line index of last row (exclusive)
 }
 
-/** Extract tables with full row content, keyed by normalized header. */
+/** Extract tables with full row content, keyed by context-qualified header.
+ *  See extractTables for the heading-context rationale. */
 export function extractTablesWithRows(text: string | null): ExtractedTableRows[] {
   if (!text) return [];
   const lines = text.split('\n');
   const tables: ExtractedTableRows[] = [];
   let current: ExtractedTableRows | null = null;
   let linePos = 0;
+  let contextHeading = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+    if (!current && /^#{1,4}\s+/.test(trimmed)) {
+      contextHeading = trimmed.replace(/^#+\s+/, '').trim().toLowerCase();
+    }
     if (trimmed.startsWith('|')) {
       if (!current) {
         const headerCells = trimmed.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        const rawKey = headerCells.map(c => c.toLowerCase()).join('|');
         current = {
           headerLine: line,
-          headerKey: headerCells.map(c => c.toLowerCase()).join('|'),
+          headerKey: contextHeading ? `${contextHeading}>${rawKey}` : rawKey,
           separatorLine: '',
           columnCount: headerCells.length,
           rows: [],
@@ -1430,6 +1462,9 @@ export function validateMergeOutput(
   allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
   excludedId: string | null,
   thresholds: ValidationThresholds = {},
+  /** Optional: the incoming candidate's original name, used by detectNameMismatch
+   *  to surface rename decisions the merger made silently. */
+  candidateName?: string,
 ): MergeWarning[] {
   const warnings: MergeWarning[] = [];
   const scopeStd = Math.round((thresholds.scopeExpansionStandardPct ?? 0.30) * 100);
@@ -1579,7 +1614,7 @@ export function validateMergeOutput(
   }
 
   // --- Fix 7: Name mismatch across file name / schema name / references ---
-  const mismatch = detectNameMismatch(merged);
+  const mismatch = detectNameMismatch(merged, candidateName);
   if (mismatch) {
     warnings.push({
       code: 'NAME_MISMATCH',
@@ -1706,10 +1741,75 @@ export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput)
   };
 }
 
+// ---------------------------------------------------------------------------
+// Classification-failure outcome — single source of truth
+// ---------------------------------------------------------------------------
+//
+// Both the Stage-5 job path (skillAnalyzerJob.ts) and the per-row retry path
+// (skillAnalyzerService.ts → classifySingleCandidate) enter the same state
+// when the LLM classify call errors or the response can't be parsed. Before
+// this helper existed, the two paths diverged: the job applied the rule-based
+// fallback (§11.4), while the retry path returned a null-merge stub —
+// surfacing "Proposal unavailable" in the UI on every retry. This helper is
+// the single authority for the classification-failure outcome so the two
+// paths stay in lockstep.
+
+/** Standard copy used when the classifier fails; match this across both
+ *  paths so debugging can key off a single string. */
+export const CLASSIFIER_FALLBACK_REASONING =
+  'LLM classification failed — rule-based fallback merge applied for human review.';
+
+/** Standard CLASSIFIER_FALLBACK warning — prepended to every mergeWarnings
+ *  array on the fallback path. */
+export const CLASSIFIER_FALLBACK_WARNING: MergeWarning = {
+  code: 'CLASSIFIER_FALLBACK',
+  severity: 'warning',
+  message: 'Rule-based fallback merge applied — classifier unavailable. Review carefully.',
+};
+
+export interface ClassifierFailureOutcome {
+  classification: 'PARTIAL_OVERLAP';
+  confidence: number;
+  reasoning: string;
+  proposedMerge: ProposedMerge;
+  mergeRationale: string;
+  classifierFallbackApplied: true;
+}
+
+/** Build the complete outcome returned whenever classification fails.
+ *  Wraps `buildRuleBasedMerge` with standard reasoning copy, a low-confidence
+ *  score (clamped to `fallbackConfidence`, default 0.3), and the
+ *  `classifierFallbackApplied` flag. Validation (merge warnings) is applied
+ *  separately by the caller — the job and retry paths each compose this
+ *  outcome with their own validateMergeOutput / remediateTables plumbing. */
+export function buildClassifierFailureOutcome(
+  input: RuleBasedMergeInput & { fallbackConfidence?: number },
+): ClassifierFailureOutcome {
+  const fallback = buildRuleBasedMerge({
+    candidate: input.candidate,
+    library: input.library,
+  });
+  return {
+    classification: 'PARTIAL_OVERLAP',
+    confidence: input.fallbackConfidence ?? 0.3,
+    reasoning: CLASSIFIER_FALLBACK_REASONING,
+    proposedMerge: fallback.merge,
+    mergeRationale: fallback.mergeRationale,
+    classifierFallbackApplied: true,
+  };
+}
+
 /** Merge two instruction bodies by (a) taking the dominant text as base and
  *  (b) appending any `## heading` sections from the secondary that the
- *  dominant doesn't already contain (case-insensitive heading match). Keeps
- *  the dominant's invocation block at the top untouched. */
+ *  dominant doesn't already contain (case-insensitive heading match).
+ *
+ *  Invocation-block invariant (Issue A): if either source opens with an
+ *  invocation trigger block, the merged output must also open with one. When
+ *  the dominant lacks a block but the secondary has one, prepend it. This
+ *  handles the common case where the incoming skill (richer, dominant) opens
+ *  with a persona line ("You are an expert in…") while the library skill
+ *  opens with "Invoke this skill when…" — the library's invocation block
+ *  would otherwise be silently dropped by splitH2Sections. */
 function mergeInstructionsRuleBased(
   dominant: string | null,
   secondary: string | null,
@@ -1732,8 +1832,21 @@ function mergeInstructionsRuleBased(
       appendParts.push(section.body);
     }
   }
-  if (appendParts.length === 0) return base;
-  return `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+  let result = appendParts.length === 0 ? base : `${base}\n\n${appendParts.join('\n\n')}`.trim() + '\n';
+
+  // Invocation-block invariant: if the secondary had a block but the dominant
+  // didn't, prepend the secondary's block to the merged output.
+  const dominantInvocation = extractInvocationBlock(dominant);
+  const secondaryInvocation = extractInvocationBlock(secondary);
+  if (!dominantInvocation && secondaryInvocation) {
+    const mergedBlock = extractInvocationBlock(result);
+    const isAtTop = mergedBlock !== null && result.trimStart().startsWith(mergedBlock.trimStart());
+    if (!isAtTop) {
+      result = `${secondaryInvocation.trimEnd()}\n\n${result.trimStart()}`;
+    }
+  }
+
+  return result.trim() + '\n';
 }
 
 function normaliseHeading(h: string): string {

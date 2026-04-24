@@ -103,6 +103,12 @@ function DiffView({ result }: { result: AnalysisResult }) {
   );
 }
 
+/** Minimum cosine similarity score to display an existing-agent proposal chip.
+ *  Proposals below this threshold are noise — they signal "no match found"
+ *  rather than a real recommendation. Proposed-new-agent chips are always shown
+ *  regardless of score (their score is hardcoded 1.0). */
+const AGENT_SCORE_DISPLAY_THRESHOLD = 0.30;
+
 /** Agent chip block on a DISTINCT card. Renders one chip per agentProposals
  *  entry — pre-checked when proposal.selected is true, click toggles selection
  *  via PATCH. Includes an "Add another system agent..." combobox populated
@@ -121,14 +127,23 @@ function AgentChipBlock({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedToAdd, setSelectedToAdd] = useState<string>('');
-  const proposals = result.agentProposals ?? [];
+  const allProposals = result.agentProposals ?? [];
+  // Filter out existing-agent proposals below the display threshold — they
+  // signal "no match" rather than a real recommendation and add noise.
+  // Proposed-new-agent entries always show regardless of score.
+  const proposals = allProposals.filter(
+    (p) => p.isProposedNewAgent || p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+  );
+  const hasAnyMeaningfulExistingAgent = allProposals.some(
+    (p) => !p.isProposedNewAgent && p.score >= AGENT_SCORE_DISPLAY_THRESHOLD,
+  );
 
   // Agents not already in agentProposals — eligible for the manual-add
   // combobox. Pure derivation, no state.
   const addableAgents = useMemo(() => {
-    const inProposals = new Set(proposals.map((p) => p.systemAgentId));
+    const inProposals = new Set(allProposals.map((p) => p.systemAgentId));
     return availableSystemAgents.filter((a) => !inProposals.has(a.systemAgentId));
-  }, [proposals, availableSystemAgents]);
+  }, [allProposals, availableSystemAgents]);
 
   async function patchProposal(body: {
     systemAgentId: string;
@@ -176,11 +191,16 @@ function AgentChipBlock({
   return (
     <div className="mt-3 p-3 bg-white border border-slate-200 rounded-lg text-xs">
       <p className="font-medium text-slate-600 mb-2">Assign to system agents:</p>
-      {proposals.length === 0 && availableSystemAgents.length === 0 && (
+      {allProposals.length === 0 && availableSystemAgents.length === 0 && (
         <p className="text-slate-400 italic">No system agents available.</p>
       )}
-      {proposals.length === 0 && availableSystemAgents.length > 0 && (
+      {allProposals.length === 0 && availableSystemAgents.length > 0 && (
         <p className="text-slate-400 italic mb-2">No suggested agents — add one below.</p>
+      )}
+      {proposals.length === 0 && allProposals.length > 0 && (
+        <p className="text-slate-400 italic mb-2 text-[11px]">
+          No existing agent has meaningful overlap with this skill. Consider assigning to a proposed new agent (if available) or adding one below.
+        </p>
       )}
       <div className="flex flex-wrap gap-1.5 mb-2">
         {proposals.map((proposal) => (
@@ -404,6 +424,11 @@ function ResultRow({
               <span className="shrink-0">i</span>
               <span>
                 This file has no tool definition — it is a <strong>context document</strong> rather than an executable skill. It may belong in the Knowledge Management Agent if you have one, not as a standalone skill.
+                {isDistinct && (
+                  <span className="block mt-1 font-medium">
+                    If approved, this skill will be imported as instructions-only (no structured input schema). Create a tool definition before approving if you need one.
+                  </span>
+                )}
               </span>
             </div>
           )}

@@ -38,6 +38,7 @@ import {
   unmarkSkillInFlight,
   updateResultAgentProposals,
   updateJobAgentRecommendation,
+  appendBatchCollisionWarnings,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -47,10 +48,12 @@ import {
   extractInvocationBlock,
   richnessScore,
   buildRuleBasedMerge,
+  buildClassifierFailureOutcome,
   remediateTables,
   detectSkillGraphCollision,
   type LibrarySkillSummary,
   type MergeWarning,
+  type ProposedMerge,
   type ValidationThresholds,
 } from '../services/skillAnalyzerServicePure.js';
 import { effectiveTierMap } from '../services/skillAnalyzerConfigService.js';
@@ -712,6 +715,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           librarySkills,
           excludedId,
           validationThresholds,
+          candidate.name,
         ),
       ];
 
@@ -992,8 +996,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classifierFallbackApplied = true;
             }
           } else {
-            // LLM call failed or parse error — synth rule-based merge.
-            const fallback = buildRuleBasedMerge({
+            // LLM call failed or parse error — route through the shared
+            // buildClassifierFailureOutcome helper so the job path and the
+            // retry path (skillAnalyzerService.ts → classifySingleCandidate)
+            // emit identical fallback state.
+            const fallback = buildClassifierFailureOutcome({
               candidate: {
                 name: candidate.name,
                 description: candidate.description,
@@ -1008,10 +1015,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               },
             });
             finalResult = {
-              classification: 'PARTIAL_OVERLAP' as const,
-              confidence: 0.3,
-              reasoning: 'LLM classification failed — rule-based fallback merge applied for human review.',
-              proposedMerge: { ...fallback.merge, mergeRationale: fallback.mergeRationale },
+              classification: fallback.classification,
+              confidence: fallback.confidence,
+              reasoning: fallback.reasoning,
+              proposedMerge: { ...fallback.proposedMerge, mergeRationale: fallback.mergeRationale },
             };
             classifierFallbackApplied = true;
           }
@@ -1076,6 +1083,27 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               }
             }
 
+            // Issue A remediation: if either source had an invocation block but
+            // the merged output doesn't start with one, prepend the source's
+            // canonical block. This handles the LLM case where the incoming
+            // skill's persona opener displaces the library's invocation trigger.
+            const sourceInvocation = baseInvocation ?? nonBaseInvocation;
+            if (sourceInvocation && storedMerge!.instructions) {
+              const mergedBlock = extractInvocationBlock(storedMerge!.instructions);
+              const isAtTop = mergedBlock !== null
+                && storedMerge!.instructions.trimStart().startsWith(mergedBlock.trimStart());
+              if (!isAtTop) {
+                storedMerge = {
+                  ...storedMerge!,
+                  instructions: `${sourceInvocation.trimEnd()}\n\n${storedMerge!.instructions.trimStart()}`,
+                };
+                logger.info('skill_analyzer_invocation_block_prepended', {
+                  candidateSlug: candidate.slug,
+                  source: baseInvocation ? 'base' : 'nonBase',
+                });
+              }
+            }
+
             mergeWarnings = validateMergeOutput(
               { definition: baseSkill.definition, instructions: baseSkill.instructions, invocationBlock: baseInvocation },
               { definition: nonBaseSkill.definition, instructions: nonBaseSkill.instructions, invocationBlock: nonBaseInvocation },
@@ -1085,6 +1113,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               librarySkills,
               excludedId,
               validationThresholds,
+              candidate.name,
             );
 
             // Prepend CLASSIFIER_FALLBACK when the rule-based path ran, so
@@ -1212,6 +1241,76 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         })
       )
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 5b: Cross-batch collision detection (v3 Fix 3)
+  // -------------------------------------------------------------------------
+  // After all per-skill merges are written, compare each in-batch merged skill
+  // against every other in-batch merged skill to catch intra-batch capability
+  // overlaps (e.g. cold-email and email-sequence both owning cold outreach).
+  // Library-level collisions were already detected per-skill in Stage 5;
+  // this pass only handles candidate-vs-candidate collisions.
+  {
+    const batchMergeResults = classifiedResults.filter(
+      (r) =>
+        r.proposedMerge &&
+        (r.classification === 'PARTIAL_OVERLAP' || r.classification === 'IMPROVEMENT'),
+    );
+
+    if (batchMergeResults.length >= 2) {
+      const batchCatalog = batchMergeResults.map((r) => {
+        const pm = r.proposedMerge as ProposedMerge;
+        return {
+          id: null as string | null,
+          slug: r.candidate.slug,
+          name: pm.name,
+          instructions: pm.instructions ?? null,
+        };
+      });
+
+      const batchWarningsBySlug = new Map<string, MergeWarning[]>();
+
+      for (const result of batchMergeResults) {
+        const catalogExcludingSelf = batchCatalog.filter(
+          (b) => b.slug !== result.candidate.slug,
+        );
+        if (catalogExcludingSelf.length === 0) continue;
+
+        const batchCollisions = detectSkillGraphCollision({
+          merged: result.proposedMerge as ProposedMerge,
+          libraryCatalog: catalogExcludingSelf,
+          excludedId: null,
+        });
+
+        if (batchCollisions.length === 0) continue;
+
+        const newWarnings: MergeWarning[] = batchCollisions.map((c) => ({
+          code: 'SKILL_GRAPH_COLLISION' as const,
+          severity: 'warning' as const,
+          message: `Merged skill overlaps ~${Math.round(c.overlapRatio * 100)}% with incoming batch skill "${c.collidingName}".`,
+          detail: JSON.stringify({
+            collidingSkillId: null,
+            collidingSlug: c.collidingSlug,
+            collidingName: c.collidingName,
+            overlapRatio: c.overlapRatio,
+            overlappingFragments: c.overlappingFragments,
+            batchCollision: true,
+          }),
+        }));
+
+        batchWarningsBySlug.set(result.candidate.slug, newWarnings);
+        logger.info('skill_analyzer_batch_collision', {
+          jobId,
+          candidateSlug: result.candidate.slug,
+          collidingSlugs: batchCollisions.map((c) => c.collidingSlug),
+        });
+      }
+
+      if (batchWarningsBySlug.size > 0) {
+        await appendBatchCollisionWarnings(jobId, batchWarningsBySlug);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

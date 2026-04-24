@@ -9,8 +9,8 @@ import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind } from './skillAnalyzerServicePure.js';
-import { evaluateApprovalState, checkConcurrencyStamp } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind, ProposedMerge } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
 import { createHash, randomUUID } from 'crypto';
@@ -2099,8 +2099,13 @@ export async function updateJobAgentRecommendation(
 
   if (updated.length === 0) {
     // Row was skipped — recommendation already written on a previous run.
+    // Do NOT return early: the retro-inject below must still run. On resumed
+    // or re-triggered jobs the agentRecommendation column is already set
+    // (idempotency guard blocks the write) but the per-result agentProposals
+    // may be empty if the inject was missed on a prior run (e.g. before Fix 5
+    // was deployed, or if the inject was aborted mid-loop). The per-row
+    // duplicate guard at line ~2123 prevents double-injection.
     logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
-    return;
   }
 
   // Retro-inject synthetic proposed-new-agent entries into affected
@@ -2150,12 +2155,17 @@ function slugifyName(name: string): string {
 // Classification retry helpers
 // ---------------------------------------------------------------------------
 
-/** Classification outcome returned by the LLM classify stage. */
+/** Classification outcome returned by the LLM classify stage.
+ *  `mergeRationale` is populated on the rule-based fallback path (same helper
+ *  as skillAnalyzerJob.ts Stage 5) so the retry path can persist it to the
+ *  `merge_rationale` column. */
 type ClassificationOutcome = {
   classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
   confidence: number;
   reasoning: string;
-  proposedMerge: object | null;
+  proposedMerge: ProposedMerge | null;
+  mergeRationale: string | null;
+  classifierFallbackApplied: boolean;
 };
 
 /** Run LLM classification for a single candidate/library pair.
@@ -2218,17 +2228,54 @@ async function classifySingleCandidate(
   }
 
   const classificationFailed = parsed === null;
+
+  // On failure: route through the same fallback helper the Stage-5 job uses so
+  // the reviewer sees a concrete rule-based proposal instead of "Proposal
+  // unavailable." Both code paths MUST go through buildClassifierFailureOutcome
+  // so the failure behaviour stays in lockstep.
+  if (classificationFailed) {
+    const fallback = buildClassifierFailureOutcome({
+      candidate: {
+        name: candidate.name,
+        description: candidate.description,
+        definition: (candidate.definition as object | null) ?? null,
+        instructions: candidate.instructions ?? null,
+      },
+      library: {
+        name: matchedLib.name,
+        description: matchedLib.description,
+        definition: (matchedLib.definition as object | null) ?? null,
+        instructions: matchedLib.instructions ?? null,
+      },
+    });
+    return {
+      result: {
+        classification: fallback.classification,
+        confidence: fallback.confidence,
+        reasoning: fallback.reasoning,
+        proposedMerge: fallback.proposedMerge,
+        mergeRationale: fallback.mergeRationale,
+        classifierFallbackApplied: true,
+      },
+      classificationFailed: true,
+      classificationFailureReason:
+        skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null),
+    };
+  }
+
+  // Success path: the LLM gave us a parseable result. It may or may not
+  // include a proposedMerge (DUPLICATE / DISTINCT legitimately return null).
   return {
-    result: parsed ?? {
-      classification: 'PARTIAL_OVERLAP',
-      confidence: 0.3,
-      reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
-      proposedMerge: null,
+    result: {
+      classification: parsed!.classification,
+      confidence: parsed!.confidence,
+      reasoning: parsed!.reasoning,
+      proposedMerge: (parsed!.proposedMerge as ProposedMerge | null) ?? null,
+      mergeRationale: (parsed!.proposedMerge as ProposedMerge | null)?.mergeRationale ?? null,
+      classifierFallbackApplied: false,
     },
-    classificationFailed,
-    classificationFailureReason: classificationFailed
-      ? skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null)
-      : null,
+    classificationFailed: false,
+    classificationFailureReason: null,
   };
 }
 
@@ -2288,6 +2335,20 @@ export async function retryClassification(
 
   const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
+  // Strip mergeRationale before persisting to proposed_merged_content — the
+  // rationale lives in its own DB column (same contract as the Stage-5 job).
+  const storedMerge: ProposedMerge | null = classification.proposedMerge
+    ? { ...classification.proposedMerge, mergeRationale: undefined }
+    : null;
+
+  // When the fallback path ran, surface CLASSIFIER_FALLBACK so the UI banner
+  // + approval gate activate (mirrors skillAnalyzerJob.ts:1092-1101). Full
+  // validateMergeOutput / remediateTables re-validation on retry is tracked
+  // separately — retry currently persists just the fallback marker.
+  const mergeWarnings: MergeWarning[] | null = classification.classifierFallbackApplied
+    ? [CLASSIFIER_FALLBACK_WARNING]
+    : null;
+
   await db
     .update(skillAnalyzerResults)
     .set({
@@ -2295,12 +2356,15 @@ export async function retryClassification(
       confidence: classification.confidence,
       classificationReasoning: classification.reasoning,
       diffSummary,
-      proposedMergedContent: classification.proposedMerge ?? null,
+      proposedMergedContent: storedMerge,
+      mergeRationale: classification.mergeRationale,
+      mergeWarnings,
+      classifierFallbackApplied: classification.classifierFallbackApplied,
       // Only seed the immutable original if it has never been set — retries
       // must not overwrite it, otherwise "Reset to AI suggestion" would
       // restore the retry's output rather than the original job output.
-      ...(result.originalProposedMerge === null && classification.proposedMerge !== null
-        ? { originalProposedMerge: classification.proposedMerge }
+      ...(result.originalProposedMerge === null && storedMerge !== null
+        ? { originalProposedMerge: storedMerge }
         : {}),
       classificationFailed,
       classificationFailureReason,
@@ -2364,6 +2428,38 @@ export async function bulkRetryFailedClassifications(
   return { retried: failedResults.length, stillFailed: remaining.length };
 }
 
+/** Append SKILL_GRAPH_COLLISION warnings produced by the cross-batch collision
+ *  pass (Stage 5b) to already-written result rows. Uses JSONB concatenation so
+ *  the existing library-level warnings (from Stage 5) are preserved. */
+export async function appendBatchCollisionWarnings(
+  jobId: string,
+  warningsBySlug: Map<string, MergeWarning[]>,
+): Promise<void> {
+  if (warningsBySlug.size === 0) return;
+
+  for (const [candidateSlug, newWarnings] of warningsBySlug.entries()) {
+    if (newWarnings.length === 0) continue;
+    const newWarningsJson = JSON.stringify(newWarnings);
+    await db
+      .update(skillAnalyzerResults)
+      .set({
+        mergeWarnings: sql`
+          CASE
+            WHEN ${skillAnalyzerResults.mergeWarnings} IS NULL
+            THEN ${newWarningsJson}::jsonb
+            ELSE ${skillAnalyzerResults.mergeWarnings} || ${newWarningsJson}::jsonb
+          END
+        `,
+      })
+      .where(
+        and(
+          eq(skillAnalyzerResults.jobId, jobId),
+          eq(skillAnalyzerResults.candidateSlug, candidateSlug),
+        ),
+      );
+  }
+}
+
 export const skillAnalyzerService = {
   createJob,
   resumeJob,
@@ -2390,4 +2486,5 @@ export const skillAnalyzerService = {
   unmarkSkillInFlight,
   updateResultAgentProposals,
   updateJobAgentRecommendation,
+  appendBatchCollisionWarnings,
 };
