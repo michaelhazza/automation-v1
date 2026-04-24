@@ -38,14 +38,37 @@ export type EventRowViewModel =
   | DefaultEventViewModel;
 
 /**
+ * Stable warn codes — log lines emit these so ops can grep for transitional
+ * fallback usage and notice when emitters haven't migrated to the structured
+ * fields. Tests can assert against these codes too.
+ */
+export const FALLBACK_WARN_CODES = {
+  legacySkillSlugDetection: 'event_row_legacy_skill_slug_detection_used',
+  legacyProviderRegex: 'event_row_legacy_provider_regex_used',
+} as const;
+
+/**
+ * Optional warn sink — defaults to console.warn but injectable for tests
+ * (so the suite can capture the call without polluting test output).
+ */
+export type WarnSink = (code: string, context: Record<string, unknown>) => void;
+
+const defaultWarnSink: WarnSink = (code, ctx) => {
+  // eslint-disable-next-line no-console
+  console.warn(`[eventRowPure] ${code}`, ctx);
+};
+
+/**
  * Returns true when the event represents a failed invoke_automation skill call.
  *
  * Detection priority:
  *   1. Structured `skillType === 'automation'` field (preferred).
- *   2. Slug-shape heuristics — transitional fallback only. Once all emitters
- *      attach `skillType`, the heuristics can be removed.
+ *   2. Slug-shape heuristics — transitional fallback only. When taken, emits a
+ *      warn with code `event_row_legacy_skill_slug_detection_used` so ops can
+ *      track unmigrated emitters. Once all emitters attach `skillType`, the
+ *      heuristics + warning can be removed.
  */
-export function isAutomationSkillFailure(payload: unknown): boolean {
+export function isAutomationSkillFailure(payload: unknown, warn: WarnSink = defaultWarnSink): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const p = payload as Record<string, unknown>;
   if (p.status !== 'error') return false;
@@ -53,11 +76,14 @@ export function isAutomationSkillFailure(payload: unknown): boolean {
   if (p.skillType === 'automation') return true;
   // Transitional fallback — slug-shape heuristics.
   const slug = typeof p.skillSlug === 'string' ? p.skillSlug : '';
-  return (
+  const matched =
     slug === 'invoke_automation' ||
     slug.startsWith('automation.') ||
-    slug.startsWith('invoke_automation.')
-  );
+    slug.startsWith('invoke_automation.');
+  if (matched) {
+    warn(FALLBACK_WARN_CODES.legacySkillSlugDetection, { skillSlug: slug });
+  }
+  return matched;
 }
 
 /**
@@ -65,11 +91,15 @@ export function isAutomationSkillFailure(payload: unknown): boolean {
  * shape) into a view model the row component can render declaratively.
  *
  * Falls back to the legacy `match(/The (\w+) connection/i)` regex on
- * resultSummary only when the structured `provider` field is absent. Once
- * all emitters provide structured fields, the regex branch can be removed.
+ * resultSummary only when the structured `provider` field is absent. When
+ * the regex branch fires, emits a warn with code
+ * `event_row_legacy_provider_regex_used` so ops can track unmigrated
+ * emitters. Once all emitters provide structured fields, the regex branch
+ * + warning can be removed.
  */
 export function mapInvokeAutomationFailedViewModel(
   event: AgentExecutionEvent,
+  warn: WarnSink = defaultWarnSink,
 ): InvokeAutomationFailedViewModel {
   const p = event.payload as {
     skillSlug?: string;
@@ -90,7 +120,13 @@ export function mapInvokeAutomationFailedViewModel(
   let provider = p.provider;
   if (!provider && p.resultSummary) {
     const match = p.resultSummary.match(/The (\w+) connection/i);
-    if (match) provider = match[1];
+    if (match) {
+      provider = match[1];
+      warn(FALLBACK_WARN_CODES.legacyProviderRegex, {
+        skillSlug: p.skillSlug,
+        sequenceNumber: event.sequenceNumber,
+      });
+    }
   }
 
   return {
@@ -106,10 +142,16 @@ export function mapInvokeAutomationFailedViewModel(
 
 /**
  * Top-level mapper. Returns a view-model the EventRow component renders.
+ *
+ * `warn` is injectable for tests; defaults to `console.warn`. Warning is emitted
+ * once per event when a transitional fallback path is taken.
  */
-export function mapEventToViewModel(event: AgentExecutionEvent): EventRowViewModel {
-  if (event.eventType === 'skill.completed' && isAutomationSkillFailure(event.payload)) {
-    return mapInvokeAutomationFailedViewModel(event);
+export function mapEventToViewModel(
+  event: AgentExecutionEvent,
+  warn: WarnSink = defaultWarnSink,
+): EventRowViewModel {
+  if (event.eventType === 'skill.completed' && isAutomationSkillFailure(event.payload, warn)) {
+    return mapInvokeAutomationFailedViewModel(event, warn);
   }
   return { kind: 'default' };
 }

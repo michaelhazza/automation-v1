@@ -121,3 +121,81 @@ This is the project convention across all 222 migrations. No actual duplicates e
 | F7 | technical | accept | Extract pure mapper |
 
 5 technical fixes auto-applied; 1 user-facing escalated; 1 technical rejected with rationale.
+
+---
+
+## Round 2 — Findings + triage
+
+**Reviewer verdict:** Approve. No blockers. Tightening recommendations only.
+**Captured:** 2026-04-24T10:40:49Z
+
+### R2-1. Transitional fallbacks need a kill switch — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> Without enforcement, fallbacks become permanent and new emitters may accidentally rely on them. Add a metric/log when fallback is used, optional feature flag to disable later.
+
+**Triage:** TECHNICAL · ACCEPT
+**Rationale:** Currently no emitter populates the structured fields, so the runtime path is *always* fallback — exactly the silent-regression risk the reviewer is flagging. A `console.warn` with a stable code (`event_row_legacy_provider_detection_used`, `event_row_legacy_skill_slug_detection_used`) lets ops grep for it and notice when emitters haven't migrated.
+**Fix:** Add warning logs in `eventRowPure.ts` when the fallback paths are taken. Stable code in the warn payload.
+
+---
+
+### R2-2. `server/lib/playbooks/.gitkeep` ghost directory — TECHNICAL · REJECT
+
+**Reviewer:**
+> server/lib/playbooks/.gitkeep is a lingering artifact. Delete it.
+
+**Triage:** TECHNICAL · REJECT
+**Rationale:** Verified — the file does **NOT** exist:
+- `ls server/lib/playbooks/` → "No such file or directory"
+- `find . -name '.gitkeep'` → zero results
+
+Reviewer is reading the GitHub PR diff view, which shows the *deleted* state of `server/playbooks/.gitkeep` (renamed in F6 round 1). GitHub's rename detection presents both the old name (deleted) and new name (added) which can read as "still present."
+
+---
+
+### R2-3. `playbookRuns.ts` and `processes.ts` still exist — TECHNICAL · REJECT
+
+**Reviewer:**
+> Still seeing playbookRuns.ts, processes.ts alongside automations, workflows. Define a deprecated rule or alias clearly.
+
+**Triage:** TECHNICAL · REJECT
+**Rationale:** Verified — neither file exists. `find server -name "playbook*" -o -name "processes.ts"` returns zero results. M2 renamed `processes.ts` → `automations.ts`; M3 renamed `playbookRuns.ts` → `workflowRuns.ts`. Same root cause as R2-2 — reviewer reading GitHub PR diff.
+
+---
+
+### R2-4. Tighten event payload typing — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> Move toward a discriminated `AutomationSkillCompletedPayload` type with required `skillType: 'automation'`. Then validate at emit time, reduce defensive logic in mappers.
+
+**Triage:** TECHNICAL · ACCEPT (additive — does not break the existing flexible type)
+**Rationale:** The current `skill.completed` union member uses `skillType?: 'automation' | ...` (optional). Add a stricter `AutomationSkillCompletedPayload` helper type for the dispatcher to use when emitting — keeps the union flexible for legacy emitters but gives new code a strict contract.
+**Fix:** Export a stricter `AutomationSkillCompletedPayload` type from `shared/types/agentExecutionLog.ts`. Add a builder helper `buildAutomationSkillCompletedPayload()` that takes the strict shape. New emitters use the helper; old ones can migrate over time.
+
+---
+
+### R2-5. ConfirmDialog not enforced at service layer — DEFER
+
+**Reviewer:**
+> UI enforces retry confirmation but nothing stops API call directly or programmatic trigger. Server-side guard for non-idempotent retries, or audit logging.
+
+**Triage:** ARCHITECTURAL · DEFER (correctly out of scope for this PR)
+**Rationale:** The dispatcher's existing `shouldBlock_nonIdempotentGuard` only fires on attempt 2+ within a single dispatch invocation. A separate "Retry step" endpoint (not yet built — the UI button just calls a callback prop) would look like attempt-1 of a fresh dispatch and bypass the guard. The right fix design is part of building that endpoint, not a surgical add now. Route to `tasks/todo.md` so the future endpoint design includes:
+- Server-side guard: `attempt > 1 OR retried_via_user_action` flag → respect non-idempotent block
+- Audit log entry for every retry, capturing actor + idempotent-flag-at-time-of-retry
+- Optional: explicit `force: true` query param the UI sets when the user has already confirmed
+
+---
+
+## Round 2 — Decisions matrix
+
+| # | Triage | Decision | Action |
+|---|---|---|---|
+| R2-1 | technical | accept | Add fallback warning logs |
+| R2-2 | technical | reject | File doesn't exist (verified) |
+| R2-3 | technical | reject | Files don't exist (verified) |
+| R2-4 | technical | accept | Add stricter `AutomationSkillCompletedPayload` helper type |
+| R2-5 | architectural | defer | Route to tasks/todo.md for retry-endpoint design |
+
+2 technical fixes auto-applied; 2 technical rejected (factually wrong); 1 architectural deferred.

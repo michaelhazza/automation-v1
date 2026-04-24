@@ -379,3 +379,50 @@ export interface AgentExecutionEventEnvelope {
 // ---------------------------------------------------------------------------
 
 export type PayloadPersistencePolicy = 'full' | 'args-redacted' | 'args-never-persisted';
+
+// ---------------------------------------------------------------------------
+// Strict skill.completed payload for invoke_automation emitters
+// ---------------------------------------------------------------------------
+// The base `skill.completed` union member uses optional structured fields so
+// existing emitters keep working. New automation-emitters should use this
+// stricter shape via `buildAutomationSkillCompletedPayload()` to make the
+// structured-fields contract a build-time check, not a runtime hope.
+//
+// `skillType: 'automation'` is required; that's what flips the UI into the
+// invoke_automation failure row. errorCode + idempotent are required because
+// without them the UI would fall back to the regex / unknown-idempotent paths.
+
+export interface AutomationSkillCompletedPayload {
+  eventType: 'skill.completed';
+  critical: false;
+  skillSlug: string;
+  durationMs: number;
+  status: 'ok' | 'error';
+  resultSummary: string;
+  actionId?: string;
+  // Strict: all four below are required for the structured-fields path.
+  skillType: 'automation';
+  errorCode: string;
+  idempotent: boolean;
+  // Optional — only present for connection failures. Required when
+  // errorCode === 'automation_missing_connection'.
+  provider?: string;
+  connectionKey?: string;
+}
+
+/**
+ * Builder helper — call this from any new automation-emitting code path so
+ * the compiler enforces the structured-fields contract. Returns a payload
+ * that satisfies the base `skill.completed` union member shape, so it drops
+ * straight into the existing event-write path.
+ */
+export function buildAutomationSkillCompletedPayload(
+  fields: Omit<AutomationSkillCompletedPayload, 'eventType' | 'critical' | 'skillType'>,
+): AutomationSkillCompletedPayload {
+  return {
+    eventType: 'skill.completed',
+    critical: false,
+    skillType: 'automation',
+    ...fields,
+  };
+}

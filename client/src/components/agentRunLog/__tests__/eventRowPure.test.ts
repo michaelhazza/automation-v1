@@ -12,11 +12,14 @@
  */
 
 import type { AgentExecutionEvent } from '../../../../../shared/types/agentExecutionLog';
+import { buildAutomationSkillCompletedPayload } from '../../../../../shared/types/agentExecutionLog';
 import {
   isAutomationSkillFailure,
   mapInvokeAutomationFailedViewModel,
   mapEventToViewModel,
   retryNeedsConfirmation,
+  FALLBACK_WARN_CODES,
+  type WarnSink,
 } from '../eventRowPure';
 
 let passed = 0;
@@ -190,6 +193,110 @@ test('idempotent=false → confirm needed', () => {
 
 test('idempotent=undefined (unknown) → confirm needed (safer default)', () => {
   assert(retryNeedsConfirmation(undefined), 'undefined → true');
+});
+
+// ── R2-1: Fallback warn-sink contract ──────────────────────────────────────
+
+console.log('\n── R2-1: Fallback warn-sink contract ──');
+
+function makeCapturingWarn(): { sink: WarnSink; calls: Array<{ code: string; ctx: Record<string, unknown> }> } {
+  const calls: Array<{ code: string; ctx: Record<string, unknown> }> = [];
+  const sink: WarnSink = (code, ctx) => calls.push({ code, ctx });
+  return { sink, calls };
+}
+
+test('isAutomationSkillFailure: structured path does NOT warn', () => {
+  const { sink, calls } = makeCapturingWarn();
+  isAutomationSkillFailure({ skillType: 'automation', status: 'error', skillSlug: 'whatever' }, sink);
+  assertEqual(calls.length, 0, 'no warn for structured path');
+});
+
+test('isAutomationSkillFailure: legacy slug fallback emits warn with stable code', () => {
+  const { sink, calls } = makeCapturingWarn();
+  isAutomationSkillFailure({ skillSlug: 'invoke_automation', status: 'error' }, sink);
+  assertEqual(calls.length, 1, 'one warn');
+  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacySkillSlugDetection, 'stable code');
+  assertEqual(calls[0].ctx.skillSlug, 'invoke_automation', 'context includes slug');
+});
+
+test('isAutomationSkillFailure: non-match does NOT warn (we only warn on actual fallback hits)', () => {
+  const { sink, calls } = makeCapturingWarn();
+  isAutomationSkillFailure({ skillSlug: 'crm.query', status: 'error' }, sink);
+  assertEqual(calls.length, 0, 'no warn for non-match');
+});
+
+test('mapInvokeAutomationFailedViewModel: structured provider does NOT warn', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({ provider: 'mailchimp', resultSummary: 'The Gmail connection is not configured.' });
+  mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(calls.length, 0, 'no warn for structured provider');
+});
+
+test('mapInvokeAutomationFailedViewModel: regex fallback emits warn with stable code', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({ resultSummary: 'The Mailchimp connection is missing.' });
+  mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(calls.length, 1, 'one warn');
+  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacyProviderRegex, 'stable code');
+});
+
+test('mapEventToViewModel: threads warn sink to both inner functions', () => {
+  const { sink, calls } = makeCapturingWarn();
+  // Triggers BOTH the slug fallback AND the regex fallback in one call.
+  const ev = makeSkillCompletedEvent({
+    skillSlug: 'invoke_automation',
+    resultSummary: 'The Mailchimp connection is missing.',
+  });
+  mapEventToViewModel(ev, sink);
+  assertEqual(calls.length, 2, 'two warns — slug + regex');
+  const codes = calls.map((c) => c.code).sort();
+  assertEqual(codes, [FALLBACK_WARN_CODES.legacyProviderRegex, FALLBACK_WARN_CODES.legacySkillSlugDetection].sort(), 'both codes');
+});
+
+// ── R2-4: Strict payload builder ───────────────────────────────────────────
+
+console.log('\n── R2-4: buildAutomationSkillCompletedPayload ──');
+
+test('builder produces a payload that satisfies the strict contract', () => {
+  const p = buildAutomationSkillCompletedPayload({
+    skillSlug: 'invoke_automation.send_email',
+    durationMs: 1234,
+    status: 'error',
+    resultSummary: 'Mailchimp connection is not set up.',
+    errorCode: 'automation_missing_connection',
+    idempotent: false,
+    provider: 'mailchimp',
+    connectionKey: 'mailchimp_account',
+  });
+  assertEqual(p.eventType, 'skill.completed', 'eventType set');
+  assertEqual(p.critical, false, 'critical false');
+  assertEqual(p.skillType, 'automation', 'skillType pinned');
+  assertEqual(p.errorCode, 'automation_missing_connection', 'errorCode passed');
+  assertEqual(p.idempotent, false, 'idempotent passed');
+});
+
+test('builder output flows through mapEventToViewModel without any warns', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const payload = buildAutomationSkillCompletedPayload({
+    skillSlug: 'invoke_automation.send_email',
+    durationMs: 1234,
+    status: 'error',
+    resultSummary: 'Mailchimp connection is not set up.',
+    errorCode: 'automation_missing_connection',
+    idempotent: false,
+    provider: 'mailchimp',
+    connectionKey: 'mailchimp_account',
+  });
+  const ev = { ...makeSkillCompletedEvent({}), payload } as unknown as AgentExecutionEvent;
+  const vm = mapEventToViewModel(ev, sink);
+  assertEqual(calls.length, 0, 'strict-builder output bypasses ALL fallback paths');
+  assertEqual(vm.kind, 'invoke_automation_failed', 'maps to failure row');
+  if (vm.kind === 'invoke_automation_failed') {
+    assertEqual(vm.provider, 'mailchimp', 'provider from structured field');
+    assertEqual(vm.connectionKey, 'mailchimp_account', 'connectionKey from structured field');
+    assertEqual(vm.idempotent, false, 'idempotent from structured field');
+    assertEqual(vm.errorCode, 'automation_missing_connection', 'errorCode from structured field');
+  }
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────
