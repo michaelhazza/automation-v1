@@ -146,6 +146,45 @@ test('resolveDispatch emits automation_scope_mismatch error code', () => {
   }
 });
 
+// ── §5.10a rule 4 — multi-webhook assertion ───────────────────────────────────
+
+console.log('\n── §5.10a Multi-webhook assertion ──');
+
+test('resolveDispatch rejects empty webhookPath', () => {
+  const auto = makeAutomation({ sideEffects: 'read_only', webhookPath: '' });
+  const result = resolveDispatch({
+    step: makeStep(), run: orgRun, automation: auto,
+    engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
+  });
+  assert(result.kind === 'error', 'should be error');
+  if (result.kind === 'error') {
+    assertEqual(result.error.code, 'automation_composition_invalid', 'error code');
+    assertEqual(result.error.type, 'validation', 'error type');
+    assertEqual(result.error.retryable, false, 'not retryable');
+  }
+});
+
+test('resolveDispatch rejects comma-separated webhookPath (multi-webhook)', () => {
+  const auto = makeAutomation({ sideEffects: 'read_only', webhookPath: '/webhook/a,/webhook/b' });
+  const result = resolveDispatch({
+    step: makeStep(), run: orgRun, automation: auto,
+    engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
+  });
+  assert(result.kind === 'error', 'should be error');
+  if (result.kind === 'error') {
+    assertEqual(result.error.code, 'automation_composition_invalid', 'error code');
+  }
+});
+
+test('resolveDispatch accepts valid single webhookPath', () => {
+  const auto = makeAutomation({ sideEffects: 'read_only', webhookPath: '/webhook/test' });
+  const result = resolveDispatch({
+    step: makeStep(), run: orgRun, automation: auto,
+    engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
+  });
+  assert(result.kind === 'dispatch', 'should dispatch with valid path');
+});
+
 // ── §5.4a Retry guard and clamp ───────────────────────────────────────────────
 
 console.log('\n── §5.4a Retry guard + clamp ──');

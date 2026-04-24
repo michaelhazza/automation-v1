@@ -141,6 +141,20 @@ export function resolveDispatch(input: DispatchInput): DispatchOutcome {
     };
   }
 
+  // §5.10a rule 4 — webhookPath must be a single non-empty path segment
+  const webhookPath = automation.webhookPath ?? '';
+  if (!webhookPath || webhookPath.includes(',')) {
+    return {
+      kind: 'error',
+      error: makeError(
+        'automation_composition_invalid',
+        'validation',
+        `Automation '${automation.id}' has an invalid webhookPath: multi-webhook or empty paths are not supported.`,
+        false,
+      ),
+    };
+  }
+
   // Resolve input mapping
   let resolvedInput: Record<string, unknown>;
   try {
