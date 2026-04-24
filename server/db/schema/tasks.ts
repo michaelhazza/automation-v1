@@ -50,7 +50,7 @@ export const tasks = pgTable(
     isSubTask: boolean('is_sub_task').notNull().default(false),
     parentTaskId: uuid('parent_task_id'),
 
-    // ── Delegation tracking (Paperclip Hierarchy — migration 0203) ────────
+    // ── Delegation tracking (Paperclip Hierarchy — migration 0215) ────────
     // Populated by reassign_task when hierarchy is active.
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
 

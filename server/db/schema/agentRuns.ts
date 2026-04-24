@@ -202,13 +202,30 @@ export const agentRuns = pgTable(
     nextEventSeq: integer('next_event_seq').notNull().default(0),
     eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
 
-    // Paperclip Hierarchy — delegation telemetry (migration 0204).
+    // Cached Context Infrastructure (migration 0209) — §5.8
+    // bundleSnapshotIds: array of bundle_resolution_snapshots.id for this run
+    bundleSnapshotIds: jsonb('bundle_snapshot_ids').$type<string[]>(),
+    // variableInputHash: SHA-256 of the dynamic (post-breakpoint) content
+    variableInputHash: text('variable_input_hash'),
+    // runOutcome: nullable while in-flight; set atomically at terminal write
+    runOutcome: text('run_outcome').$type<'completed' | 'degraded' | 'failed'>(),
+    softWarnTripped: boolean('soft_warn_tripped').notNull().default(false),
+    // degradedReason: diagnostic enum recorded alongside run_outcome='degraded' (§4.6)
+    degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
+
+    // Paperclip Hierarchy — delegation telemetry (migration 0216, renumbered from 0204 post-merge).
     // All four columns are nullable: only populated on runs that participate
     // in a delegation chain. Ships empty; no behaviour change in this chunk.
+    // `handoffSourceRunId` self-references `agent_runs.id`; the FK + ON DELETE
+    // SET NULL live in the migration (see 0216_agent_runs_delegation_telemetry.sql),
+    // NOT here. Declaring `.references(() => agentRuns.id, ...)` in Drizzle
+    // creates a circular type inference that bloats agentRuns to `any` once
+    // the table has enough columns — same reason `parentRunId` and
+    // `parentSpawnRunId` are plain `uuid(...)` declarations above.
     delegationScope: text('delegation_scope').$type<DelegationScope>(),
     hierarchyDepth: smallint('hierarchy_depth'),
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
-    handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    handoffSourceRunId: uuid('handoff_source_run_id'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

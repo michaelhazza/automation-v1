@@ -26,7 +26,7 @@ Full wording authored by architect in `plan.md § System Invariants`. Names only
 
 ## Pre-Phase-2 blocker
 
-Partial unique index (migration 0202) will fail until seeded manifest is re-parented. Current: `companies/automation-os/automation-os-manifest.json` has `orchestrator` (line 18, `reportsTo: null`) AND `portfolio-health-agent` (line 168, `reportsTo: null`, `executionScope: 'org'`). Resolution is manifest edit + re-seed per spec §13. Architect plan sequences as Phase-2 Chunk 0 before migration 0202 runs: audit → edit → re-seed → re-audit → migration.
+Partial unique index (migration 0214) will fail until seeded manifest is re-parented. Current: `companies/automation-os/automation-os-manifest.json` has `orchestrator` (line 18, `reportsTo: null`) AND `portfolio-health-agent` (line 168, `reportsTo: null`, `executionScope: 'org'`). Resolution is manifest edit + re-seed per spec §13. Architect plan sequences as Phase-2 Chunk 0 before migration 0214 runs: audit → edit → re-seed → re-audit → migration.
 
 ## Chunks
 

@@ -88,7 +88,7 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 
 8. **Subaccount template picker UX (Phase 2).** The subaccount creation form gains a "Starting team" dropdown that lists available hierarchy templates and calls `POST /api/hierarchy-templates/:id/apply` on submit. Backend verb already exists.
 
-9. **Run trace delegation graph (Phase 4).** `RunTraceViewerPage` gains a DAG view over `agent_runs.parentRunId` / `isSubAgent` / `handoffDepth` (existing) + `agent_runs.handoff_source_run_id` + `delegation_scope` + `delegation_direction` + `hierarchy_depth` (new in Phase 1 migration 0204, populated from Phase 4).
+9. **Run trace delegation graph (Phase 4).** `RunTraceViewerPage` gains a DAG view over `agent_runs.parentRunId` / `isSubAgent` / `handoffDepth` (existing) + `agent_runs.handoff_source_run_id` + `delegation_scope` + `delegation_direction` + `hierarchy_depth` (new in Phase 1 migration 0216, populated from Phase 4).
 
 **What this spec does NOT cover.** Reorganising the seeded 16-agent Automation OS company into a multi-tier org chart (separate track). Mesh / dynamic-team / task-based-grouping delegation patterns (out of scope per §3.2). Cost rollups per subtree or performance-attribution per manager (future capability surface — the hierarchy primitives this spec ships are designed to support those later without redesign). Changes to the Universal Brief UX itself — GlobalAskBar, conversations table, triage classifier, artefact contracts stay as they are; we augment how they route, not redesign the surface.
 
@@ -109,7 +109,7 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 
 **Seeded company with flat hierarchy (current manifest).** `companies/automation-os/automation-os-manifest.json` now defines 16 agents with TWO `reportsTo: null` agents: the Orchestrator (historical root) and the `portfolio-health-agent` (added recently). The other 14 agents have `reportsTo: orchestrator`. There is no middle-management tier in the seeded data; the flat-with-two-roots shape is a transitional artefact of adding the portfolio-health agent before this spec's root-agent-contract ships — once Phase 2 lands, the seed reorg track (§3.2 out-of-scope) needs to decide which agent is the canonical root and whether `portfolio-health-agent` reparents under the Orchestrator or shifts to a separate subaccount. `scripts/seed.ts` resolves `reportsTo` strings into FK IDs at seed time — the seed script already handles arbitrary-depth trees; the flatness is a data choice, not a limitation.
 
-**Implication for the partial unique index (§5.1).** The seeded company runs on the org sentinel subaccount; the two `reportsTo: null` agents both land on that single subaccount during seed. This trips the at-most-one-active-root partial unique index in Phase 2 migration 0202. The audit script (§5.1 pre-migration audit, `scripts/audit-subaccount-roots.ts`) must call this out, and the seed-reorg track must resolve one of the two to non-root before migration 0202 applies. §13 pull-forward: "seeded company cleanup before Phase 2 migration" is now a concrete gate.
+**Implication for the partial unique index (§5.1).** The seeded company runs on the org sentinel subaccount; the two `reportsTo: null` agents both land on that single subaccount during seed. This trips the at-most-one-active-root partial unique index in Phase 2 migration 0214. The audit script (§5.1 pre-migration audit, `scripts/audit-subaccount-roots.ts`) must call this out, and the seed-reorg track must resolve one of the two to non-root before migration 0214 applies. §13 pull-forward: "seeded company cleanup before Phase 2 migration" is now a concrete gate.
 
 **Delegation primitives (flat).**
 - `spawn_sub_agents` (`server/services/skillExecutor.ts:3410`+) — creates 2–3 sub-tasks and dispatches them in parallel. Validates `requireSubaccountContext()` and agent existence; does NOT filter targets by `parentSubaccountAgentId`. Hard-blocks nesting ("sub-agents cannot spawn sub-agents") at line ~3415.
@@ -130,7 +130,7 @@ This spec adds runtime enforcement to the agent hierarchy that already exists in
 
 **Workspace Health Audit subsystem.** `server/services/workspaceHealth/` with `detectors/index.ts` as a plug-and-play registry. Each detector exports `{ name, severity, detect(orgId, db) }`. Existing detectors: `agentNoRecentRuns`, `processBrokenConnectionMapping`, `processNoEngine`, `subaccountAgentNoSchedule`, `subaccountAgentNoSkills`, `systemAgentLinkNeverSynced`. Three new detectors in this spec (§6.9) slot into this registry.
 
-**Run trace.** `agent_runs` already carries `parentRunId`, `isSubAgent`, `parentSpawnRunId`, `handoffDepth` (integer, default 0). The handoff source run id currently lives on `tasks.handoff_source_run_id`, NOT on `agent_runs`. This spec adds `agent_runs.handoff_source_run_id` in migration 0204 (§5.3) so the delegation graph can be built from `agent_runs` alone. `client/src/pages/RunTraceViewerPage.tsx` renders single-run detail. No cross-run tree view yet.
+**Run trace.** `agent_runs` already carries `parentRunId`, `isSubAgent`, `parentSpawnRunId`, `handoffDepth` (integer, default 0). The handoff source run id currently lives on `tasks.handoff_source_run_id`, NOT on `agent_runs`. This spec adds `agent_runs.handoff_source_run_id` in migration 0216 (§5.3) so the delegation graph can be built from `agent_runs` alone. `client/src/pages/RunTraceViewerPage.tsx` renders single-run detail. No cross-run tree view yet.
 
 ### 2.2 What does NOT exist
 
@@ -159,10 +159,10 @@ Without these, this spec would have had to build its own scope / template / obse
 ### 3.1 In scope (this spec)
 
 **Schema (§5):**
-- `subaccount_agents` — partial unique index for root-agent contract (migration 0202).
-- `tasks` — new `delegation_direction` text column (migration 0203).
-- `agent_runs` — new `delegation_scope` text column, `hierarchy_depth` smallint column, `delegation_direction` text column, and `handoff_source_run_id` uuid column (migration 0204).
-- `delegation_outcomes` — new table with RLS policy + `rlsProtectedTables` manifest entry (migration 0205).
+- `subaccount_agents` — partial unique index for root-agent contract (migration 0214).
+- `tasks` — new `delegation_direction` text column (migration 0215).
+- `agent_runs` — new `delegation_scope` text column, `hierarchy_depth` smallint column, `delegation_direction` text column, and `handoff_source_run_id` uuid column (migration 0216).
+- `delegation_outcomes` — new table with RLS policy + `rlsProtectedTables` manifest entry (migration 0217).
 
 **Services (§6):**
 - `hierarchyContextBuilderService` — new pure + impure service for building `context.hierarchy` snapshots.
@@ -195,7 +195,7 @@ Without these, this spec would have had to build its own scope / template / obse
 
 No code dependencies outside `main`. All prerequisite primitives (hierarchy schema, Universal Brief, triage classifier, hierarchy templates, run-trace fields, Workspace Health framework, `rlsProtectedTables` manifest) are on main as of 2026-04-22.
 
-**One non-code prerequisite, BLOCKING for Phase 2:** the seeded Automation OS company currently has two `reportsTo: null` agents (§2.1 current state). Migration 0202's partial unique index will fail until the dual-root is resolved (re-seed with `portfolio-health-agent` reparented, moved to a separate subaccount, or marked inactive). This is a manifest edit + re-seed, not a code change — flagged in §13 as a Phase 2 gate.
+**One non-code prerequisite, BLOCKING for Phase 2:** the seeded Automation OS company currently has two `reportsTo: null` agents (§2.1 current state). Migration 0214's partial unique index will fail until the dual-root is resolved (re-seed with `portfolio-health-agent` reparented, moved to a separate subaccount, or marked inactive). This is a manifest edit + re-seed, not a code change — flagged in §13 as a Phase 2 gate.
 
 ### 3.4 Primitive reuse decisions
 
@@ -467,7 +467,7 @@ Four migrations total. Numbering assumes 0201 is the latest on main at spec merg
 
 ### 5.1 `subaccount_agents` — partial unique index for root enforcement
 
-**Migration:** `0202_subaccount_agents_root_unique.sql` (Phase 2).
+**Migration:** `0214_subaccount_agents_root_unique.sql` (Phase 2).
 
 **Invariant enforced:** **at most one** active root per subaccount. Zero active roots is a valid state (unconfigured subaccount; resolver falls back to the org-level Orchestrator per §6.6). The partial unique index enforces the at-most-one bound; presence is not required.
 
@@ -492,7 +492,7 @@ CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount
 
 ### 5.2 `tasks` — `delegation_direction` column
 
-**Migration:** `0203_tasks_delegation_direction.sql` (Phase 4).
+**Migration:** `0215_tasks_delegation_direction.sql` (Phase 4).
 
 **Change:**
 
@@ -515,7 +515,7 @@ ALTER TABLE tasks
 
 ### 5.3 `agent_runs` — `delegation_scope` + `hierarchy_depth` + `delegation_direction` + `handoff_source_run_id` columns
 
-**Migration:** `0204_agent_runs_delegation_telemetry.sql` (Phase 1 — all columns ship nullable; populators land in later phases).
+**Migration:** `0216_agent_runs_delegation_telemetry.sql` (Phase 1 — all columns ship nullable; populators land in later phases).
 
 **Context (repo-state fact).** `agent_runs` today has `parentRunId`, `parentSpawnRunId`, `isSubAgent`, `handoffDepth` — but NOT `handoffSourceRunId`. The handoff source run ID lives on `tasks.handoff_source_run_id` (via `handoffJson`) in the current schema. Because the delegation graph (§7.2) is a per-run view keyed on `agent_runs`, the spec adds `handoff_source_run_id` to `agent_runs` directly — single-table lookup, no join to `tasks` for graph construction.
 
@@ -558,7 +558,7 @@ CREATE INDEX agent_runs_handoff_source_run_id_idx ON agent_runs (handoff_source_
 
 ### 5.4 `delegation_outcomes` — new table
 
-**Migration:** `0205_delegation_outcomes.sql` (Phase 1).
+**Migration:** `0217_delegation_outcomes.sql` (Phase 1).
 
 **Change (table creation + RLS policy in the same migration — pattern enforced by `verify-rls-coverage.sh`):**
 
@@ -631,10 +631,10 @@ For the self-consistency audit and Phase 1 planning, every schema change referen
 
 | Migration | Phase | Files |
 |---|---|---|
-| 0202 | Phase 2 | `migrations/0202_subaccount_agents_root_unique.sql`, `server/db/schema/subaccountAgents.ts` (add `uniqueIndex`), `scripts/audit-subaccount-roots.ts` (new) |
-| 0203 | Phase 4 | `migrations/0203_tasks_delegation_direction.sql`, `server/db/schema/tasks.ts` (add column) |
-| 0204 | Phase 1 | `migrations/0204_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable); `server/db/schema/agentRuns.ts` (add four columns) |
-| 0205 | Phase 1 | `migrations/0205_delegation_outcomes.sql`, `server/db/schema/delegationOutcomes.ts` (new), `server/db/schema/index.ts` (export), `server/config/rlsProtectedTables.ts` (manifest entry) |
+| 0214 | Phase 2 | `migrations/0214_subaccount_agents_root_unique.sql`, `server/db/schema/subaccountAgents.ts` (add `uniqueIndex`), `scripts/audit-subaccount-roots.ts` (new) |
+| 0215 | Phase 4 | `migrations/0215_tasks_delegation_direction.sql`, `server/db/schema/tasks.ts` (add column) |
+| 0216 | Phase 1 | `migrations/0216_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable); `server/db/schema/agentRuns.ts` (add four columns) |
+| 0217 | Phase 1 | `migrations/0217_delegation_outcomes.sql`, `server/db/schema/delegationOutcomes.ts` (new), `server/db/schema/index.ts` (export), `server/config/rlsProtectedTables.ts` (manifest entry) |
 
 All four migration files, all six schema file references, roll forward into §14 File inventory.
 
@@ -1209,7 +1209,7 @@ One new tenant-scoped table (§5.4):
 
 | Table | `organisation_id` | `subaccount_id` | RLS policy in migration? | `rlsProtectedTables.ts` entry? | Route guard? | Principal context? |
 |---|---|---|---|---|---|---|
-| `delegation_outcomes` | yes | yes (NOT NULL — §4.4) | yes — `delegation_outcomes_org_isolation` (USING + WITH CHECK) in 0205 | yes — added in same commit | yes — `requireOrgPermission` on `/api/org/delegation-outcomes` (§7.1) | yes — reads always via `orgScopedDb` / `withPrincipalContext` |
+| `delegation_outcomes` | yes | yes (NOT NULL — §4.4) | yes — `delegation_outcomes_org_isolation` (USING + WITH CHECK) in 0217 | yes — added in same commit | yes — `requireOrgPermission` on `/api/org/delegation-outcomes` (§7.1) | yes — reads always via `orgScopedDb` / `withPrincipalContext` |
 
 All four RLS requirements from the Spec Authoring Checklist §4 are met for the one new tenant-scoped table.
 
@@ -1348,8 +1348,8 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Ships:** Telemetry STORAGE (tables + columns), health detectors, and the schema to hold future telemetry. No write paths ship in Phase 1 — the `delegation_outcomes` table is empty until Phase 4 activates the write path in `spawn_sub_agents` / `reassign_task`. The `agent_runs` new columns are null on new rows until Phase 3 (hierarchy_depth) and Phase 4 (delegation_scope, delegation_direction, handoff_source_run_id) populate them. No behaviour change to delegation or routing in this phase.
 
 **Schema (§5):**
-- Migration 0204 — `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable; populated in later phases per §5.3)
-- Migration 0205 — `delegation_outcomes` table + RLS + manifest entry
+- Migration 0216 — `agent_runs.delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` (all nullable; populated in later phases per §5.3)
+- Migration 0217 — `delegation_outcomes` table + RLS + manifest entry
 
 **Services introduced (§6):**
 - `delegationOutcomeService` (new; thin wrapper over the new table, used for inserts and the admin list — writes start in Phase 4)
@@ -1368,7 +1368,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Columns referenced by code in this phase:** `agent_runs.delegation_scope`, `agent_runs.hierarchy_depth`, `agent_runs.delegation_direction`, `agent_runs.handoff_source_run_id`, `delegation_outcomes.*`. All introduced in this phase (schema only; values are null until later phases populate).
 
 **Exit criteria:**
-- Migrations 0204 + 0205 applied cleanly.
+- Migrations 0216 + 0217 applied cleanly.
 - `rlsProtectedTables` manifest covers `delegation_outcomes`; `verify-rls-coverage.sh` green.
 - `subaccountMultipleRoots` and `subaccountNoRoot` detectors registered and visible in `AdminHealthFindingsPage`. `explicitDelegationSkillsWithoutChildren` is NOT registered in this phase — it depends on Phase 4's derived-skill resolution and ships with Phase 4.
 - `delegation_outcomes` ships empty; `agent_runs.delegation_scope` / `hierarchy_depth` / `delegation_direction` / `handoff_source_run_id` columns exist but are null on new rows until later phases populate them.
@@ -1379,7 +1379,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Ships:** Per-subaccount CEOs. Briefs filed against a subaccount route to that subaccount's root agent instead of the hardcoded global Orchestrator. Creating a subaccount offers a starting team template.
 
 **Schema (§5):**
-- Migration 0202 — partial unique index on `subaccount_agents` for root enforcement
+- Migration 0214 — partial unique index on `subaccount_agents` for root enforcement
 - Prerequisite: run `scripts/audit-subaccount-roots.ts` and resolve any pre-existing violations before applying the migration
 
 **Services introduced (§6):**
@@ -1398,7 +1398,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Columns referenced by code in this phase:** `subaccount_agents.parent_subaccount_agent_id` (existing), `subaccount_agents.is_active` (existing). No new columns.
 
 **Exit criteria:**
-- Migration 0202 applied cleanly; audit script shows zero violations.
+- Migration 0214 applied cleanly; audit script shows zero violations.
 - A Brief filed against a subaccount with a configured root routes to that subaccount's root, observable in the Brief detail page's handling-agent display.
 - Template picker in subaccount creation successfully installs the chosen template.
 - Phase-1 detectors register zero `subaccountMultipleRoots` findings; `subaccountNoRoot` findings remain at their natural count (informational, not a failure — operators assign roots when they want per-subaccount routing, and the org-level fallback continues to work in the meantime).
@@ -1435,7 +1435,7 @@ Four phases. Each is independently shippable, commit-and-revert. Each completes 
 **Ships:** Hierarchy becomes binding. Agents can only delegate within scope. Managers emerge from graph position. The trace graph makes multi-agent fan-out legible for debugging the adjustment period.
 
 **Schema (§5):**
-- Migration 0203 — `tasks.delegation_direction` column
+- Migration 0215 — `tasks.delegation_direction` column
 
 **Services introduced (§6):**
 - `delegationGraphService` — composes subtree response for the new route
@@ -1504,7 +1504,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary` + `runtime_t
 
 - `npm run typecheck` — TypeScript compiles. New interfaces in `shared/types/delegation.ts` and extended `SkillExecutionContext` must type-check across all call sites.
 - `npm run lint` — ESLint passes. No new disables.
-- `verify-rls-coverage.sh` — `delegation_outcomes` added to manifest in the same commit as migration 0205. Gate fails if not.
+- `verify-rls-coverage.sh` — `delegation_outcomes` added to manifest in the same commit as migration 0217. Gate fails if not.
 - `verify-rls-contract-compliance.sh` — no direct DB access outside `orgScopedDb` / `withAdminConnection` for the new table.
 - `scripts/verify-integration-reference.mjs` — unaffected (no integration changes).
 
@@ -1540,14 +1540,14 @@ Documented per checklist §9 — flag deviations from framing ground truth, but 
 - **No E2E tests** for the subaccount-creation template picker. `e2e_tests_of_own_app: none_for_now`.
 - **No frontend component tests** for `DelegationGraphView` or the picker. `frontend_tests: none_for_now`.
 - **No performance baselines** for the hierarchy context builder or the resolver. `performance_baselines: defer_until_production`. Expected sub-5ms per run is stated as prose; we'll measure if it matters.
-- **No migration safety tests** for 0202 (root enforcement). `migration_safety_tests: defer_until_live_data_exists`. Pre-production; audit script output is the safety gate.
+- **No migration safety tests** for 0214 (root enforcement). `migration_safety_tests: defer_until_live_data_exists`. Pre-production; audit script output is the safety gate.
 - **No composition tests** cross-phase (e.g. "Phase 2 routing + Phase 4 enforcement together"). `composition_tests: defer_until_stabilisation`. Each phase's exit criteria are the tests; full composition validates in production use.
 
 ### 12.4 Manual verification per phase
 
 Static gates + pure tests validate correctness. The brief's success criteria (§17) are behavioural and require manual / observational verification during rollout:
 
-- **Phase 1:** Confirm migrations 0204 + 0205 apply cleanly and `rlsProtectedTables` manifest is green. `delegation_outcomes` ships empty — no writes until Phase 4 (§6.3 / §6.4 are the only producers). `agent_runs.delegation_scope` and `hierarchy_depth` ship null on new rows until Phase 3 populates `hierarchy_depth` from `context.hierarchy.depth` and Phase 4 populates `delegation_scope` from the dispatching skill. Health detectors register; `subaccountNoRoot` is expected to fire for most subaccounts pre-Phase-2 (intentional signal, not a bug).
+- **Phase 1:** Confirm migrations 0216 + 0217 apply cleanly and `rlsProtectedTables` manifest is green. `delegation_outcomes` ships empty — no writes until Phase 4 (§6.3 / §6.4 are the only producers). `agent_runs.delegation_scope` and `hierarchy_depth` ship null on new rows until Phase 3 populates `hierarchy_depth` from `context.hierarchy.depth` and Phase 4 populates `delegation_scope` from the dispatching skill. Health detectors register; `subaccountNoRoot` is expected to fire for most subaccounts pre-Phase-2 (intentional signal, not a bug).
 - **Phase 2:** File a Brief scoped to a subaccount with a configured root; confirm it dispatches to the subaccount's root, not the global Orchestrator. Confirm the template picker installs a starting team.
 - **Phase 3:** Trigger a Brief that involves a manager calling `config_list_agents`; confirm the returned list is scoped to children by default.
 - **Phase 4:** Observe rejection-rate metrics over the first week post-rollout. Trend should be down; prompts should be updated as violations surface. Trace graph renders fan-out correctly for a multi-agent Brief.
@@ -1576,7 +1576,7 @@ Items mentioned in prose but intentionally not shipped in this spec. Each has a 
 
 - **Multi-tier seeded Automation OS company.** §3.2 carries this explicitly. Restructuring `companies/automation-os/` into a 3-tier org chart (Orchestrator → department heads → specialists) is designed on a separate track. **Pull-forward condition:** this spec ships and the team wants a dogfood target for recursive delegation.
 
-- **Seed-company dual-root cleanup before Phase 2 migration.** Per §2.1 current state, the Automation OS manifest has two `reportsTo: null` agents (Orchestrator + portfolio-health-agent). Migration 0202's partial unique index will fail if both are active on the same subaccount. **Pull-forward status:** BLOCKING for Phase 2. The Phase 2 kickoff audit (§5.1 `scripts/audit-subaccount-roots.ts`) surfaces this; the fix is either reparenting `portfolio-health-agent` under Orchestrator, or moving it to a different subaccount, or marking it inactive pre-migration. Resolution is a one-manifest-edit + re-seed; not a code change.
+- **Seed-company dual-root cleanup before Phase 2 migration.** Per §2.1 current state, the Automation OS manifest has two `reportsTo: null` agents (Orchestrator + portfolio-health-agent). Migration 0214's partial unique index will fail if both are active on the same subaccount. **Pull-forward status:** BLOCKING for Phase 2. The Phase 2 kickoff audit (§5.1 `scripts/audit-subaccount-roots.ts`) surfaces this; the fix is either reparenting `portfolio-health-agent` under Orchestrator, or moving it to a different subaccount, or marking it inactive pre-migration. Resolution is a one-manifest-edit + re-seed; not a code change.
 
 - **Cost rollups per subtree and performance attribution per manager.** Framing in §1 flagged these as future capabilities the primitives enable. Neither is built here. **Pull-forward condition:** the Cost / Observability working group picks up either as a first-class feature.
 
@@ -1594,8 +1594,8 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 ### 14.1 Phase 1 — Observability foundations
 
 **New:**
-- `migrations/0204_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` columns (all nullable; §5.3)
-- `migrations/0205_delegation_outcomes.sql` — creates table + RLS policy + indexes (§5.4)
+- `migrations/0216_agent_runs_delegation_telemetry.sql` — adds `delegation_scope`, `hierarchy_depth`, `delegation_direction`, `handoff_source_run_id` columns (all nullable; §5.3)
+- `migrations/0217_delegation_outcomes.sql` — creates table + RLS policy + indexes (§5.4)
 - `server/db/schema/delegationOutcomes.ts` — Drizzle reflection (§5.4)
 - `server/services/delegationOutcomeService.ts` + `delegationOutcomeServicePure.ts` — insert + list helpers (§6, §7.1)
 - `server/services/__tests__/delegationOutcomeServicePure.test.ts` (§12.2)
@@ -1620,7 +1620,7 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 ### 14.2 Phase 2 — Root contract + scope-aware routing + template picker
 
 **New:**
-- `migrations/0202_subaccount_agents_root_unique.sql` — partial unique index (§5.1)
+- `migrations/0214_subaccount_agents_root_unique.sql` — partial unique index (§5.1)
 - `scripts/audit-subaccount-roots.ts` — pre-migration audit (§5.1, §6)
 - `server/services/hierarchyRouteResolverService.ts` + `hierarchyRouteResolverServicePure.ts` (§6.6)
 - `server/services/__tests__/hierarchyRouteResolverServicePure.test.ts` (§12.2)
@@ -1649,7 +1649,7 @@ Single source of truth for what the spec touches. Grouped by phase; every prose 
 ### 14.4 Phase 4 — Execution enforcement + derived skill resolution + trace graph
 
 **New:**
-- `migrations/0203_tasks_delegation_direction.sql` (§5.2)
+- `migrations/0215_tasks_delegation_direction.sql` (§5.2)
 - `server/services/delegationGraphService.ts` + `delegationGraphServicePure.ts` (§7.2)
 - `server/services/__tests__/delegationGraphServicePure.test.ts` (§12.2)
 - `server/services/__tests__/skillExecutor.spawnSubAgents.test.ts` (§12.2)
@@ -1681,10 +1681,10 @@ Every prose reference in §2 through §11 is accounted for in this inventory:
 
 | Prose mention (sample) | Inventory line |
 |---|---|
-| "new `delegation_outcomes` table" (§1, §5.4) | §14.1 — `migrations/0205`, `server/db/schema/delegationOutcomes.ts` |
+| "new `delegation_outcomes` table" (§1, §5.4) | §14.1 — `migrations/0217`, `server/db/schema/delegationOutcomes.ts` |
 | "partial slug removal (subaccount-scope only)" (§1, §6.7) | §14.2 — `server/jobs/orchestratorFromTaskJob.ts` modified; `ORCHESTRATOR_AGENT_SLUG` retained for org-scope fallback per §6.6 case 2 |
 | "new `hierarchyContextBuilderService`" (§6.1) | §14.3 — two new files + test |
-| "`tasks.delegation_direction` column" (§5.2) | §14.4 — migration 0203 + schema change |
+| "`tasks.delegation_direction` column" (§5.2) | §14.4 — migration 0215 + schema change |
 | "three new detectors" (§6.9) | §14.1 — two new files (`subaccountMultipleRoots`, `subaccountNoRoot`) under `workspaceHealth/detectors/`. Third detector (`explicitDelegationSkillsWithoutChildren`) ships in Phase 4 — §14.4. |
 | "`GET /api/org/delegation-outcomes`" (§7.1) | §14.1 — `server/routes/delegationOutcomes.ts` |
 | "Starting team picker" (§8.1) | §14.2 — `StartingTeamPicker.tsx` new + `AdminSubaccountsPage.tsx` modified |

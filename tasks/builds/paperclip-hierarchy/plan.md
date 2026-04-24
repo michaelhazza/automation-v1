@@ -145,14 +145,14 @@ No new retry/backoff primitive, no new RLS layer, no new queue, no new skill sys
 
 ## 3. Phase overview
 
-Four phases per spec §11, plus a Phase 2 pre-flight (Chunk 2.0) that is non-code — it resolves the seed-manifest dual-root before migration 0202 can apply.
+Four phases per spec §11, plus a Phase 2 pre-flight (Chunk 2.0) that is non-code — it resolves the seed-manifest dual-root before migration 0214 can apply.
 
 | Phase | Chunks | Ships | User-visible? |
 |---|---|---|---|
-| 1 — Observability foundations | 1a, 1b, 1c | Migrations 0204 + 0205; `delegationOutcomeService`; list route; two detectors; optional admin page | No (no behaviour change) |
-| 2 — Root contract + routing + picker | 2.0, 2a, 2b, 2c | Manifest re-seed → migration 0202; resolver service; job + brief + template rotation; picker UI | Yes (per-subaccount CEO routing) |
+| 1 — Observability foundations | 1a, 1b, 1c | Migrations 0216 + 0217; `delegationOutcomeService`; list route; two detectors; optional admin page | No (no behaviour change) |
+| 2 — Root contract + routing + picker | 2.0, 2a, 2b, 2c | Manifest re-seed → migration 0214; resolver service; job + brief + template rotation; picker UI | Yes (per-subaccount CEO routing) |
 | 3 — Hierarchy context + visibility | 3a, 3b | Builder service; `SkillExecutionContext.hierarchy`; scope param on three list skills | Partial (adaptive defaults on list skills) |
-| 4 — Execution enforcement + derived skills + trace graph | 4a, 4b, 4c, 4d | Migration 0203; `spawn_sub_agents` / `reassign_task` validation; derived delegation skills; third detector; graph route + trace tab | Yes (enforcement + trace UI) |
+| 4 — Execution enforcement + derived skills + trace graph | 4a, 4b, 4c, 4d | Migration 0215; `spawn_sub_agents` / `reassign_task` validation; derived delegation skills; third detector; graph route + trace tab | Yes (enforcement + trace UI) |
 
 Forward-only dependency: Phase N never references primitives first introduced in Phase N+k. Three intentional early-introductions are called out in §9 Phase dependency check.
 
@@ -164,16 +164,16 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Entry state.** Main branch at spec-merge; migrations up to `0201_universal_brief_permissions.sql`. No `shared/types/delegation.ts` yet. No `delegation_outcomes` table. No `hierarchy` field on `SkillExecutionContext`.
 
-**Exit state.** Two migrations applied (0204, 0205). One new shared types file. One new thin service (`delegationOutcomeService` + pure). One new admin-only route (`GET /api/org/delegation-outcomes`) behind a new permission (`org.observability.view`). Two detectors registered. Optional admin page. `verify-rls-coverage.sh` and typecheck + lint green.
+**Exit state.** Two migrations applied (0216, 0217). One new shared types file. One new thin service (`delegationOutcomeService` + pure). One new admin-only route (`GET /api/org/delegation-outcomes`) behind a new permission (`org.observability.view`). Two detectors registered. Optional admin page. `verify-rls-coverage.sh` and typecheck + lint green.
 
 ### Chunk 1a — Shared types + schema migrations + `delegationOutcomeService`
 
-**What this chunk ships.** Migrations 0204 and 0205. Drizzle reflections. The single new shared-types file. The thin pure+impure service that future Phase 4 writers and the Phase 1 route both consume.
+**What this chunk ships.** Migrations 0216 and 0217. Drizzle reflections. The single new shared-types file. The thin pure+impure service that future Phase 4 writers and the Phase 1 route both consume.
 
 **Files — New:**
 - `shared/types/delegation.ts` — defines `DelegationScope`, `DELEGATION_SCOPE_VALUES`, `DelegationScopeSchema` (Zod), `HierarchyContext`, `DelegationOutcome` interface, error-code string constants (`DELEGATION_OUT_OF_SCOPE`, `CROSS_SUBTREE_NOT_PERMITTED`, `HIERARCHY_CONTEXT_MISSING`), and `DelegationDirectionSchema`. Per spec §4 — TypeScript-first; Drizzle schemas import from here.
-- `migrations/0204_agent_runs_delegation_telemetry.sql` — exact DDL per spec §5.3 (add four nullable columns to `agent_runs`; two CHECK constraints; two partial indexes on `hierarchy_depth` and `handoff_source_run_id`).
-- `migrations/0205_delegation_outcomes.sql` — exact DDL per spec §5.4 (CREATE TABLE with six FKs and four CHECK constraints; three indexes; ENABLE RLS; CREATE POLICY `delegation_outcomes_org_isolation` with USING + WITH CHECK).
+- `migrations/0216_agent_runs_delegation_telemetry.sql` — exact DDL per spec §5.3 (add four nullable columns to `agent_runs`; two CHECK constraints; two partial indexes on `hierarchy_depth` and `handoff_source_run_id`).
+- `migrations/0217_delegation_outcomes.sql` — exact DDL per spec §5.4 (CREATE TABLE with six FKs and four CHECK constraints; three indexes; ENABLE RLS; CREATE POLICY `delegation_outcomes_org_isolation` with USING + WITH CHECK).
 - `server/db/schema/delegationOutcomes.ts` — Drizzle table matching the migration; export type inference.
 - `server/services/delegationOutcomeService.ts` — impure wrapper exporting `insertOutcomeSafe(input)` (detached try/catch; swallows on failure; logs WARN tag `delegation_outcome_write_failed` per spec §10.3 and INV-3), `recordOutcomeStrict(input)` (test/backfill-only; throws on failure — JSDoc warns skill handlers never call it), and `list(orgId, filters)` (read path used by §7.1 route — honours `callerAgentId`, `targetAgentId`, `outcome`, `delegationDirection`, `since` (default now - 7d), `limit` (default 100, cap 500); ORDER BY `created_at DESC`). Uses `orgScopedDb`; never raw `db`.
 - `server/services/delegationOutcomeServicePure.ts` — `assertDelegationOutcomeShape(input)` pure validator replicating the four DB CHECK constraints (scope enum, outcome enum, reason-iff-rejected, direction enum) so callers surface a Zod/assertion error instead of a Postgres error; `buildListQueryFilters(rawQuery)` that coerces + clamps `limit` and `since`.
@@ -182,13 +182,13 @@ Forward-only dependency: Phase N never references primitives first introduced in
 **Files — Modified:**
 - `server/db/schema/agentRuns.ts` — add `delegationScope: text('delegation_scope')`, `hierarchyDepth: smallint('hierarchy_depth')`, `delegationDirection: text('delegation_direction')`, `handoffSourceRunId: uuid('handoff_source_run_id').references(() => agentRuns.id)`.
 - `server/db/schema/index.ts` — export `delegationOutcomes`.
-- `server/config/rlsProtectedTables.ts` — add `delegation_outcomes` to the manifest. Same commit as migration 0205 so `verify-rls-coverage.sh` stays green.
+- `server/config/rlsProtectedTables.ts` — add `delegation_outcomes` to the manifest. Same commit as migration 0217 so `verify-rls-coverage.sh` stays green.
 
 **Implementation notes.**
 - `insertOutcomeSafe` runs the service-layer integrity check from spec §4.4 — read both actor `subaccount_agents` rows via the same `orgScopedDb` call, assert `subaccount_id` on each equals the outcome's `subaccountId`, refuse + WARN on mismatch. Mismatch is a construction-bug safety net, not a data-corruption probe; cheap to leave in.
 - Error tag `delegation_outcome_write_failed` is a STRING LITERAL, co-located with the WARN call. Dashboards filter on the literal; do not parameterise it. Spec §15.6 / INV-3 depend on the exact tag.
 - The `list()` service method is used by the Phase 1 route (§1b) and future dashboards. It returns `DelegationOutcome[]` typed per `shared/types/delegation.ts`.
-- Migration 0204 is intentionally separate from 0205 — one alters an existing table (`agent_runs`), the other creates a new table + RLS policy. Keeping them separate makes `rlsProtectedTables` manifest drift obvious and keeps blast radius small.
+- Migration 0216 is intentionally separate from 0217 — one alters an existing table (`agent_runs`), the other creates a new table + RLS policy. Keeping them separate makes `rlsProtectedTables` manifest drift obvious and keeps blast radius small.
 
 **Invariants touched.**
 - **INV-2.** The error-code string constants are defined here so every downstream write site (Phase 4) imports the same literal. Renames require a spec update.
@@ -197,7 +197,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 **Static gates (run before marking chunk done).**
 - `npm run typecheck` — new types flow through `agentRuns.ts` and `delegationOutcomes.ts` without errors.
 - `npm run lint`.
-- `npm run db:generate` — verify generated migration SQL matches the hand-written 0204 / 0205 files (Drizzle reflects; if drift, adjust the schema file, not the SQL).
+- `npm run db:generate` — verify generated migration SQL matches the hand-written 0216 / 0217 files (Drizzle reflects; if drift, adjust the schema file, not the SQL).
 - `verify-rls-coverage.sh` — green (manifest + migration in same commit).
 - `npm test -- delegationOutcomeServicePure` — pure unit test passes.
 
@@ -275,7 +275,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 - Detectors are idempotent: re-running an audit over the same state produces the same finding set (dedup key stable).
 
 **Phase 1 exit criteria (cross-chunk roll-up).**
-- Migrations 0204 + 0205 applied; `rlsProtectedTables` manifest covers `delegation_outcomes`; `verify-rls-coverage.sh` green.
+- Migrations 0216 + 0217 applied; `rlsProtectedTables` manifest covers `delegation_outcomes`; `verify-rls-coverage.sh` green.
 - `shared/types/delegation.ts` exports the full contract surface (scope enum, outcome interface, error-code constants, `HierarchyContext`).
 - `delegationOutcomeService` is importable and callable (writes still no-op from skill handlers — the call sites wire in Phase 4).
 - `GET /api/org/delegation-outcomes` is mountable and returns `[]`.
@@ -288,13 +288,13 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Goal (from spec §11 Phase 2).** Per-subaccount CEOs. Briefs filed against a subaccount dispatch to that subaccount's configured root agent; the hardcoded `'orchestrator'` slug is no longer the subaccount-scope entry point. Starting-team picker ships in the subaccount creation form.
 
-**Entry state.** Phase 1 complete. Seed manifest at `companies/automation-os/automation-os-manifest.json` still has two `reportsTo: null` agents (Orchestrator + portfolio-health-agent) — migration 0202 would fail.
+**Entry state.** Phase 1 complete. Seed manifest at `companies/automation-os/automation-os-manifest.json` still has two `reportsTo: null` agents (Orchestrator + portfolio-health-agent) — migration 0214 would fail.
 
-**Exit state.** Seed manifest re-parented (one root only on the Automation OS sentinel subaccount); migration 0202 applied; `hierarchyRouteResolverService` live; `orchestratorFromTaskJob` reads scope from job payload; `briefCreationService` passes scope through; template apply does same-transaction root rotation; subaccount creation form has a "Starting team" dropdown. Partial slug removal is subaccount-scope-only — `ORCHESTRATOR_AGENT_SLUG` constant retained for org-scope fallback per §6.6 case 2.
+**Exit state.** Seed manifest re-parented (one root only on the Automation OS sentinel subaccount); migration 0214 applied; `hierarchyRouteResolverService` live; `orchestratorFromTaskJob` reads scope from job payload; `briefCreationService` passes scope through; template apply does same-transaction root rotation; subaccount creation form has a "Starting team" dropdown. Partial slug removal is subaccount-scope-only — `ORCHESTRATOR_AGENT_SLUG` constant retained for org-scope fallback per §6.6 case 2.
 
 ### Chunk 2.0 — Seed manifest dual-root cleanup (NON-CODE pre-flight)
 
-**What this chunk ships.** A re-parented seed manifest that lands in-tree + a re-seed on the dev DB. No TypeScript, no SQL. Gated BEFORE migration 0202 applies — if this chunk doesn't land first, migration 0202 fails with `23505` on the sentinel subaccount.
+**What this chunk ships.** A re-parented seed manifest that lands in-tree + a re-seed on the dev DB. No TypeScript, no SQL. Gated BEFORE migration 0214 applies — if this chunk doesn't land first, migration 0214 fails with `23505` on the sentinel subaccount.
 
 **Files — Modified:**
 - `companies/automation-os/automation-os-manifest.json` — change `portfolio-health-agent` (currently line ~168 with `reportsTo: null` and `executionScope: 'org'`) to one of:
@@ -309,7 +309,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 2. Edit the manifest per Option A.
 3. Run `npm run seed` (or the equivalent `scripts/seed.ts` entry point). The seed script already resolves `reportsTo` strings into FK IDs; it handles arbitrary-depth trees. Re-seeding replaces the dual-root with one.
 4. Re-run the audit. Expected: zero subaccounts with `COUNT(*) > 1`.
-5. Commit the manifest change WITHOUT migration 0202 — that's Chunk 2a. Keeping the commits separate means a revert on migration 0202 doesn't revert the manifest cleanup.
+5. Commit the manifest change WITHOUT migration 0214 — that's Chunk 2a. Keeping the commits separate means a revert on migration 0214 doesn't revert the manifest cleanup.
 
 **Acceptance criteria.**
 - `audit-subaccount-roots.ts` (or its SQL equivalent) reports zero dual-root violations on the dev DB.
@@ -321,12 +321,12 @@ Forward-only dependency: Phase N never references primitives first introduced in
 - If a teammate seeds a different DB instance mid-chunk, the cleanup must repeat on that instance before 2a runs against it. Call out in the PR description.
 - No rollback concern — seed is idempotent over the manifest.
 
-### Chunk 2a — Migration 0202 + audit script + same-tx root rotation
+### Chunk 2a — Migration 0214 + audit script + same-tx root rotation
 
 **What this chunk ships.** The partial unique index + its pre-migration audit tool + `hierarchyTemplateService` root rotation that preserves the invariant across re-applies.
 
 **Files — New:**
-- `migrations/0202_subaccount_agents_root_unique.sql` — per spec §5.1. `CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount ON subaccount_agents (subaccount_id) WHERE parent_subaccount_agent_id IS NULL AND is_active = true;`.
+- `migrations/0214_subaccount_agents_root_unique.sql` — per spec §5.1. `CREATE UNIQUE INDEX subaccount_agents_one_root_per_subaccount ON subaccount_agents (subaccount_id) WHERE parent_subaccount_agent_id IS NULL AND is_active = true;`.
 - `scripts/audit-subaccount-roots.ts` — standalone Node script. Reads `subaccount_agents` via admin connection (not RLS-scoped — it's an operator tool across orgs); groups by `subaccount_id` over active rows with `parent_subaccount_agent_id IS NULL`; prints a report: `subaccount_id | org_id | count | agent_slugs`. Exits with code 0 if all counts ≤ 1, non-zero otherwise. Pure core in `scripts/auditSubaccountRootsPure.ts` takes the raw rows and produces the report structure.
 - `scripts/__tests__/auditSubaccountRootsPure.test.ts` — per spec §12.2. Covers: clean roster (no violations), single-violation roster, multi-org mixed.
 
@@ -346,7 +346,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Execution order (critical).**
 1. Run `scripts/audit-subaccount-roots.ts`. Exit code 0 means safe to proceed. If non-zero, halt and resolve (Chunk 2.0 should have handled this, but an independent audit guards against drift between chunks).
-2. Apply migration 0202.
+2. Apply migration 0214.
 3. Re-run the audit. Must still exit 0.
 4. Re-run the existing `hierarchyTemplateService` tests. No new tests for the service itself (impure DB call) per framing; existing regression tests catch mistakes.
 
@@ -361,12 +361,12 @@ Forward-only dependency: Phase N never references primitives first introduced in
 **Static gates.**
 - `npm run typecheck`.
 - `npm run lint`.
-- `npm run db:generate` — verify the Drizzle `uniqueIndex` reflection matches the hand-written 0202 migration.
+- `npm run db:generate` — verify the Drizzle `uniqueIndex` reflection matches the hand-written 0214 migration.
 - `npm test -- auditSubaccountRoots` — pure test passes.
-- Manual: run `scripts/audit-subaccount-roots.ts` before and after 0202 — both exit 0.
+- Manual: run `scripts/audit-subaccount-roots.ts` before and after 0214 — both exit 0.
 
 **Acceptance criteria.**
-- Migration 0202 applies cleanly on the post-2.0 dev DB; `psql` confirms the partial unique index exists.
+- Migration 0214 applies cleanly on the post-2.0 dev DB; `psql` confirms the partial unique index exists.
 - Attempting to insert a second active root on any subaccount returns `23505`.
 - `hierarchyTemplateService.apply()` successfully re-applies a template to a subaccount with an existing root without a uniqueness error.
 - The Phase 1 detector `subaccountMultipleRoots` reports zero findings post-migration on the dev DB.
@@ -443,7 +443,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Phase 2 exit criteria (cross-chunk roll-up).**
 - Manifest has exactly one `reportsTo: null` agent on the sentinel subaccount (2.0).
-- Migration 0202 applied; partial unique index enforces at-most-one active root per subaccount (2a).
+- Migration 0214 applied; partial unique index enforces at-most-one active root per subaccount (2a).
 - `hierarchyRouteResolverService.resolveRootForScope` is the canonical root-finder for `scope === 'subaccount'` (2b). `ORCHESTRATOR_AGENT_SLUG` retained for org-scope fallback only.
 - Briefs dispatch to the subaccount root when configured; fall back to the org Orchestrator otherwise; `fallback !== 'none'` rate is logged (Phase 2 success criterion: <1% after week 1).
 - Subaccount creation form offers a starting-team picker that installs a template on success (2c).
@@ -562,14 +562,14 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Entry state.** Phase 3 complete. `context.hierarchy` is populated per run. List skills are adaptive. `spawn_sub_agents` and `reassign_task` still flat — no scope param, no validation. `ORCHESTRATOR_AGENT_SLUG` retained for org-scope fallback only.
 
-**Exit state.** Migration 0203 applied. Two write-side skills validate scope and write telemetry. Third detector live (`explicitDelegationSkillsWithoutChildren`). New route `GET /api/agent-runs/:id/delegation-graph` + service + UI tab. `architecture.md` updated with a new "Hierarchical Agent Delegation" section.
+**Exit state.** Migration 0215 applied. Two write-side skills validate scope and write telemetry. Third detector live (`explicitDelegationSkillsWithoutChildren`). New route `GET /api/agent-runs/:id/delegation-graph` + service + UI tab. `architecture.md` updated with a new "Hierarchical Agent Delegation" section.
 
-### Chunk 4a — Migration 0203 + `spawn_sub_agents` + `reassign_task` validation + telemetry dual-writes
+### Chunk 4a — Migration 0215 + `spawn_sub_agents` + `reassign_task` validation + telemetry dual-writes
 
 **What this chunk ships.** The two write-side skill handlers become scope-aware with full telemetry. The `tasks.delegation_direction` column lands. `agent_execution_events` gets a new best-effort entry point. The nesting-block at line ~3415 in `skillExecutor.ts` is removed. `MAX_HANDOFF_DEPTH` enforced uniformly across handoff + spawn chains.
 
 **Files — New:**
-- `migrations/0203_tasks_delegation_direction.sql` — per spec §5.2. `ALTER TABLE tasks ADD COLUMN delegation_direction text;` + CHECK constraint `tasks_delegation_direction_chk`.
+- `migrations/0215_tasks_delegation_direction.sql` — per spec §5.2. `ALTER TABLE tasks ADD COLUMN delegation_direction text;` + CHECK constraint `tasks_delegation_direction_chk`.
 - `server/services/__tests__/skillExecutor.spawnSubAgents.test.ts` — per spec §12.2 / INV-2. Covers: all-children-accepted → all rows written with `direction='down'`; one-out-of-scope → whole call rejected, rejection rows for out-of-scope targets only; `effectiveScope === 'subaccount'` → `cross_subtree_not_permitted` regardless of caller role (roots included); `context.handoffDepth >= MAX_HANDOFF_DEPTH` → `max_handoff_depth_exceeded`; `context.hierarchy` undefined → `hierarchy_context_missing`; adaptive default (no children → `subaccount` → reject).
 - `server/services/__tests__/skillExecutor.reassignTask.test.ts` — per spec §12.2. Covers direction computation (`down` / `up` / `lateral`); upward-escalation special case (§6.4 step 2) — target === `parentId`, skips scope validation, direction `'up'`; `effectiveScope === 'subaccount'` and caller is configured subaccount root → accepted; same scope and caller is NOT root → `cross_subtree_not_permitted`; `context.hierarchy` undefined → `hierarchy_context_missing`; special-case ordering — a non-root caller reassigning to its parent with explicit `scope: 'children'` still succeeds (the special case runs BEFORE generic validation).
 
@@ -610,7 +610,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 **Static gates.**
 - `npm run typecheck`.
 - `npm run lint`.
-- `npm run db:generate` — verify 0203 matches the hand-written SQL.
+- `npm run db:generate` — verify 0215 matches the hand-written SQL.
 - `verify-rls-coverage.sh` — no new tables; `rlsProtectedTables` unchanged.
 - `npm test -- skillExecutor.spawnSubAgents skillExecutor.reassignTask`.
 - Manual: craft a multi-agent fan-out scenario (Orchestrator spawns 3 children, one of which reassigns to its parent → upward escalation), inspect `agent_runs`, `delegation_outcomes`, `agent_execution_events`, `tasks.delegation_direction`. All four tables show consistent correlated ids (INV-1).
@@ -740,7 +740,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 - `architecture.md` has a new section linked from the TOC (if the file has one) that captures the contract; no stale "hardcoded Orchestrator slug" language remains for subaccount-scope dispatch.
 
 **Phase 4 exit criteria (cross-chunk roll-up).**
-- Migration 0203 applied. `tasks.delegation_direction` populated on reassigned rows.
+- Migration 0215 applied. `tasks.delegation_direction` populated on reassigned rows.
 - `spawn_sub_agents` and `reassign_task` validate scope + emit structured errors + write telemetry dual-writes. Nesting block removed.
 - Skill resolver derives the three delegation skills from graph position; managers emerge from having children.
 - `GET /api/agent-runs/:id/delegation-graph` returns the DAG; `RunTraceViewerPage` renders it.
@@ -757,8 +757,8 @@ Every file in spec §14 maps to exactly one chunk. This table is the authoritati
 
 | Spec §14 entry | File | Chunk |
 |---|---|---|
-| §14.1 New | `migrations/0204_agent_runs_delegation_telemetry.sql` | 1a |
-| §14.1 New | `migrations/0205_delegation_outcomes.sql` | 1a |
+| §14.1 New | `migrations/0216_agent_runs_delegation_telemetry.sql` | 1a |
+| §14.1 New | `migrations/0217_delegation_outcomes.sql` | 1a |
 | §14.1 New | `server/db/schema/delegationOutcomes.ts` | 1a |
 | §14.1 New | `server/services/delegationOutcomeService.ts` | 1a |
 | §14.1 New | `server/services/delegationOutcomeServicePure.ts` | 1a |
@@ -778,7 +778,7 @@ Every file in spec §14 maps to exactly one chunk. This table is the authoritati
 | §14.1 Modified | `server/index.ts` (mount `delegationOutcomesRouter`) | 1b |
 | §14.1 Modified | `server/lib/permissions.ts` (add `ORG_OBSERVABILITY_VIEW`) | 1b |
 | §14.1 Modified (optional) | `client/src/App.tsx` + `client/src/components/Layout.tsx` (route + sidebar) | 1b (optional) |
-| §14.2 New | `migrations/0202_subaccount_agents_root_unique.sql` | 2a |
+| §14.2 New | `migrations/0214_subaccount_agents_root_unique.sql` | 2a |
 | §14.2 New | `scripts/audit-subaccount-roots.ts` (+ pure sibling + test) | 2a |
 | §14.2 New | `server/services/hierarchyRouteResolverService.ts` | 2b |
 | §14.2 New | `server/services/hierarchyRouteResolverServicePure.ts` | 2b |
@@ -800,7 +800,7 @@ Every file in spec §14 maps to exactly one chunk. This table is the authoritati
 | §14.3 Modified | `server/skills/config_list_agents.md` | 3b |
 | §14.3 Modified | `server/skills/config_list_subaccounts.md` | 3b |
 | §14.3 Modified | `server/skills/config_list_links.md` | 3b |
-| §14.4 New | `migrations/0203_tasks_delegation_direction.sql` | 4a |
+| §14.4 New | `migrations/0215_tasks_delegation_direction.sql` | 4a |
 | §14.4 New | `server/services/delegationGraphService.ts` | 4c |
 | §14.4 New | `server/services/delegationGraphServicePure.ts` | 4c |
 | §14.4 New | `server/services/__tests__/delegationGraphServicePure.test.ts` | 4c |
@@ -844,7 +844,7 @@ Confirmed by reading every chunk and walking the dependency edges. Phase N never
 | `agent_runs.delegation_scope` / `hierarchy_depth` / `delegation_direction` / `handoff_source_run_id` | 1a | 3a (hierarchy_depth) / 4a (others) |
 | `org.observability.view` permission | 1b | 1b (route), 4c (no — run-trace uses no per-user permission) |
 | `subaccountMultipleRoots` / `subaccountNoRoot` detectors | 1c | 1c (registry) |
-| Seed manifest re-parented | 2.0 | 2a (migration 0202) |
+| Seed manifest re-parented | 2.0 | 2a (migration 0214) |
 | Partial unique index + same-tx root rotation | 2a | 2a (service), 2b (resolver reads the invariant-protected roster) |
 | `hierarchyRouteResolverService` | 2b | 2b (`orchestratorFromTaskJob`) |
 | Scope-from-payload in `briefCreationService` / `orchestratorFromTaskJob` | 2b | 2b |
@@ -863,9 +863,9 @@ No edge points backward. Plan is forward-only consistent.
 
 **Phase boundary verdicts (per spec §11 phase dependency check).**
 - Phase 1 is "no behaviour change" — ✓ migrations only, no code path reads the new columns until Phase 3/4.
-- Phase 2 is "routing change" — ✓ one migration (0202) + resolver wiring. No skill-execution change.
+- Phase 2 is "routing change" — ✓ one migration (0214) + resolver wiring. No skill-execution change.
 - Phase 3 is "no migrations, code-only" — ✓ pure builder + extended context + list-skill scope. No DDL.
-- Phase 4 is "one migration + execution change + graph UI" — ✓ migration 0203 plus write-side enforcement + derived skills + trace graph.
+- Phase 4 is "one migration + execution change + graph UI" — ✓ migration 0215 plus write-side enforcement + derived skills + trace graph.
 
 ---
 
@@ -873,8 +873,8 @@ No edge points backward. Plan is forward-only consistent.
 
 Implementation-time risks and their mitigations. Spec §15 covers the architectural / rollout risks; this section covers the risks that bite a builder inside a chunk.
 
-**R1. Chunk 2.0 is out-of-sync with a teammate's DB.** A teammate seeds a fresh DB between 2.0 landing and 2a running, reintroducing the dual-root. Migration 0202 fails with `23505`.
-- **Mitigation.** 2a always runs `scripts/audit-subaccount-roots.ts` BEFORE applying migration 0202. If the audit fails, halt and re-run the manifest edit + re-seed. Document in the Chunk 2a PR description that anyone merging 2a must confirm their local DB is clean.
+**R1. Chunk 2.0 is out-of-sync with a teammate's DB.** A teammate seeds a fresh DB between 2.0 landing and 2a running, reintroducing the dual-root. Migration 0214 fails with `23505`.
+- **Mitigation.** 2a always runs `scripts/audit-subaccount-roots.ts` BEFORE applying migration 0214. If the audit fails, halt and re-run the manifest edit + re-seed. Document in the Chunk 2a PR description that anyone merging 2a must confirm their local DB is clean.
 
 **R2. `insertOutcomeSafe` inadvertently promoted to strict behaviour.** A well-meaning refactor converts `insertOutcomeSafe`'s catch block into `throw` and the skill handler no longer swallows failures — telemetry DB hiccup becomes a user-facing delegation failure.
 - **Mitigation.** JSDoc on `insertOutcomeSafe` names the swallow contract explicitly; the strict variant is named `recordOutcomeStrict` and is JSDoc-tagged "tests/backfills only, never call from skill handlers." Phase 4 pure test `skillExecutor.spawnSubAgents.test.ts` injects a failing inner call and asserts the delegation still succeeds (INV-3 regression guard).
@@ -941,10 +941,10 @@ Stale prose to REMOVE or UPDATE in the same edit:
 
 Walked the spec section by section; every spec requirement appears in a chunk:
 - §4 contracts → Chunk 1a (shared types).
-- §5.1 migration 0202 + §6.8 same-tx rotation → Chunk 2a.
-- §5.2 migration 0203 → Chunk 4a.
-- §5.3 migration 0204 → Chunk 1a.
-- §5.4 migration 0205 + table + RLS → Chunk 1a.
+- §5.1 migration 0214 + §6.8 same-tx rotation → Chunk 2a.
+- §5.2 migration 0215 → Chunk 4a.
+- §5.3 migration 0216 → Chunk 1a.
+- §5.4 migration 0217 + table + RLS → Chunk 1a.
 - §6.1 `hierarchyContextBuilderService` → Chunk 3a.
 - §6.2 scope on three list skills → Chunk 3b.
 - §6.3 `spawn_sub_agents` validation → Chunk 4a.

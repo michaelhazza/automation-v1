@@ -823,6 +823,21 @@ export const queueService = {
         }
       });
 
+      // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
+      // Worker registered here; schedule NOT enabled until Phase 6 (pilot validation).
+      // To trigger manually: boss.send('maintenance:bundle-utilization', {})
+      await (boss as any).work('maintenance:bundle-utilization', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runBundleUtilization } = await import('../jobs/bundleUtilizationJob.js');
+          await withTimeout(runBundleUtilization(), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:bundle-utilization', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Memory & Briefings Phase 4 — portfolio briefing + digest rollups (S23)
       await (boss as any).work('maintenance:portfolio-briefing', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {

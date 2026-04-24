@@ -213,5 +213,18 @@ export * from './fastPathDecisions.js';
 // Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
 export * from './userSettings.js';
 
-// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0205)
+// Cached Context Infrastructure Phase 1 — reference documents + bundles + snapshots + budget policies
+// (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
+export * from './referenceDocuments.js';
+export * from './referenceDocumentVersions.js';
+export * from './documentBundles.js';
+export * from './documentBundleMembers.js';
+export * from './documentBundleAttachments.js';
+export * from './bundleResolutionSnapshots.js';
+export * from './modelTierBudgetPolicies.js';
+
+// Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
+export * from './bundleSuggestionDismissals.js';
+
+// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0217, renumbered from 0205 post-merge)
 export * from './delegationOutcomes.js';

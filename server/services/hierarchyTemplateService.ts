@@ -397,7 +397,7 @@ export const hierarchyTemplateService = {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockHash})`);
 
     // Replace mode: deactivate all agents AND clear hierarchy atomically.
-    // Under migration 0202's partial unique index, setting parentId=null for
+    // Under migration 0214's partial unique index, setting parentId=null for
     // children while an active root exists causes a mid-statement uniqueness
     // violation. Deactivating all agents first avoids that intermediate state.
     let agentsRemovedFromHierarchy = 0;
@@ -414,7 +414,7 @@ export const hierarchyTemplateService = {
       ).length;
 
       if (existing.length > 0) {
-        // Deactivate AND clear hierarchy atomically so the 0202 partial unique
+        // Deactivate AND clear hierarchy atomically so the 0214 partial unique
         // index (one active root per subaccount) is never transiently violated.
         await tx.update(subaccountAgents)
           .set({ isActive: false, parentSubaccountAgentId: null, updatedAt: new Date() })
@@ -426,7 +426,7 @@ export const hierarchyTemplateService = {
     }
 
     // Deactivate the current active root before template roots are applied.
-    // Prevents uniqueness violation (0202 index) when a new root slot is created.
+    // Prevents uniqueness violation (0214 index) when a new root slot is created.
     // Runs unconditionally — setting isActive=false on an already-false row is
     // a no-op, so this is safe after the replace block above.
     await tx.update(subaccountAgents)

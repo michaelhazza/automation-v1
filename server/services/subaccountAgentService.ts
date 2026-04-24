@@ -9,7 +9,7 @@ import { logger } from '../lib/logger.js';
 // ─── Last-root invariant ────────────────────────────────────────────────────
 // Invariant: every subaccount that has ever had a root agent must always have
 // at least one active root (parent_subaccount_agent_id IS NULL AND is_active =
-// true). The partial unique index (migration 0202) enforces "at most one";
+// true). The partial unique index (migration 0214) enforces "at most one";
 // this helper enforces "at least one" at the service-layer mutation boundary.
 //
 // Transient 0-root states are allowed only during low-level transactional

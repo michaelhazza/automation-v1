@@ -1,7 +1,7 @@
 ---
 name: spec-conformance
 description: Verifies implemented code matches its source spec. Auto-detects the spec and the set of files changed on the branch. Auto-fixes mechanical gaps (missing files/exports/fields the spec explicitly names), routes directional gaps to tasks/todo.md, and persists a review log. Runs after development completes, before pr-reviewer.
-tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
+tools: Read, Glob, Grep, Bash, Edit, Write
 model: opus
 ---
 
@@ -13,14 +13,21 @@ You run after the development session claims completion and **before** `pr-revie
 
 ---
 
+## Execution model — in-session playbook, NOT a sub-agent
+
+This file is a **playbook executed by the main session**, not a sub-agent specification. When the user invokes `spec-conformance: verify ...`, the **main session reads this file and runs the protocol inline using its own tools** — `TodoWrite`, `Read`, `Edit`, `Bash`, etc. Do NOT spawn a sub-agent via the `Agent` tool with `subagent_type: spec-conformance`.
+
+Why: the Step 0 `TodoWrite` list must appear in the **user-visible** parent-session todo UI so the user can watch each subcomponent move from `pending` → `in_progress` → `completed` in real time. Sub-agent `TodoWrite` lists are confined to the sub-agent's transcript and never surface back to the parent. A sub-agent launch therefore defeats the whole point of Step 0.
+
+The frontmatter `name:` + `description:` + `tools:` fields exist for tooling compatibility but are not load-bearing here. Ignore the typical sub-agent-launch pattern when executing this playbook.
+
+---
+
 ## Contents
 
 1. Context Loading
 2. Setup — auto-detect inputs (spec path, changed files, scope)
-3. Verification pass
-   - Step 1: extract the conformance checklist from the spec
-   - Step 1.5: build the progress task list and batch plan (TodoWrite + batching)
-   - Step 2: verify requirements in concurrent waves of 4–5 read-only subagents
+3. Verification pass (Step 0: emit per-subcomponent TodoWrite list; Steps 1–2: extract checklist, verify each requirement)
 4. Classification criteria (Step 3: MECHANICAL_GAP vs DIRECTIONAL_GAP vs AMBIGUOUS)
 5. Apply fixes (Step 4: mechanical, directional routing, log) and re-verify (Step 5)
 6. Final output envelope
@@ -115,6 +122,16 @@ Record the scope decision in the log. Future sessions need to know *what was ver
 
 ## Verification pass
 
+### Step 0 — Emit a per-subcomponent TodoWrite list (MANDATORY)
+
+Before Step 1's checklist extraction, call the `TodoWrite` tool once to create an explicit task list with **one `pending` item per spec subcomponent**. Derive subcomponents from the spec's own section numbering — every numbered subsection that names an implementable artifact (each §5 schema element: table, column, index, constraint; each §6 service method; each §7 route; each error-code constant; each action-registry entry; each migration file) becomes one todo. Do not batch subsections; do not collapse a whole phase into a single item.
+
+Why: the user must be able to watch the audit walk through each subcomponent, one at a time, seeing progress per item. A single "audit everything" checkbox hides which item the agent is currently verifying and loses per-subcomponent traceability.
+
+As the verification pass runs (Steps 1–5), flip each item to `in_progress` when its audit starts and to `completed` only when that subcomponent is either confirmed PASS, has had its MECHANICAL_GAP fix applied, or has had its DIRECTIONAL_GAP routed to `tasks/todo.md`. Never batch completions — update one item at a time so the visible progress matches the real work.
+
+If the scoped phase is narrower than the whole spec (Setup Step C), emit todos only for that phase's subcomponents. OUT_OF_SCOPE subcomponents are not added to the list.
+
 ### Step 1 — Extract the conformance checklist from the spec
 
 Read the spec in full and enumerate every **concrete, named requirement** the spec puts on the implementation. You are looking for items the spec explicitly promises, not items a reader might infer.
@@ -144,117 +161,32 @@ REQ #N
   Spec quote (short): "<verbatim phrase that names the requirement>"
 ```
 
-### Step 1.5 — Build the progress task list and batch plan
+### Step 2 — Verify each requirement against the changed-code set
 
-After the scratch checklist is written, do two things before any verification happens:
+For each requirement:
 
-**1. Partition REQs into batches.** Batch-size constant:
+1. Identify which files in the changed-code set should satisfy it. If the spec names a path, use that. If it names an identifier, grep for it.
+2. Read the relevant sections of those files.
+3. Compare against the spec's requirement.
 
-```
-BATCH_SIZE = 5   # REQs per verification subagent
-```
+**Referenced existing files.** If a requirement references an existing file or contract (e.g. *"follows the shape in `shared/schemas/agentRunResponse.ts`"*), verify only that the implementation *conforms* to that contract. Do not flag the referenced file itself as a gap unless the spec explicitly says to modify it. The spec's intent in these cases is "the new code conforms to this existing boundary", not "the existing boundary needs changes."
 
-For `N` requirements, produce `ceil(N / BATCH_SIZE)` batches. The last batch may be smaller (e.g., 67 REQs → 13 batches of 5 + 1 batch of 2). Batch REQs in extracted order — do not reorder by category or predicted outcome. The scratch file's REQ ordering is the source of truth for batch composition.
-
-**2. Create a TodoWrite progress list — one entry per batch.** Each todo's `content` follows:
+Output a verification verdict for each REQ:
 
 ```
-Verify batch M/K — REQ #X–#Y (<one-line batch theme>)
-```
-
-Where:
-- `M` = batch number (1-indexed)
-- `K` = total batch count
-- `#X–#Y` = REQ number range covered by this batch (use `#X` alone if the batch has a single REQ)
-- `<one-line batch theme>` = short descriptor derived from the batch's REQ categories, e.g. `"schema + migrations"`, `"routes + contracts"`, `"behavior invariants"`, `"docs + config"`. Mixed-category batches → name the dominant category first.
-
-All todos start `pending`. You will update them in Step 2 as each wave dispatches and returns.
-
-**Why this exists.** Step 2 is the longest-running phase (can be dozens of REQs against thousands of lines of code). Without a visible progress surface, the caller sees no output until the final log lands — which looks like a hang and may also genuinely hit a timeout on large specs. The TodoWrite list gives the caller live visibility and lets them grep the log even if a wave fails mid-flight.
-
----
-
-### Step 2 — Verify requirements in concurrent waves of 4–5 read-only subagents
-
-Replace any instinct to verify REQs sequentially in the main agent's own context. Instead: dispatch verification to parallel `general-purpose` subagents, one batch per subagent, multiple batches concurrent per wave.
-
-Concurrency constant:
-
-```
-WAVE_SIZE = 5   # maximum batch-subagents dispatched in parallel
-```
-
-**Per-wave protocol:**
-
-1. Pick the next up-to-`WAVE_SIZE` pending batches. Mark their TodoWrite entries `in_progress` in a single `TodoWrite` call before dispatch.
-2. Dispatch one `Agent` call per batch **in a single message** (multiple `Agent` tool-use blocks in one response — this is what makes them run concurrently, not sequentially). Use `subagent_type: "general-purpose"`. Every subagent prompt must be fully self-contained — subagents do not share your conversation context (see Subagent prompt template below).
-3. When the wave returns, parse each subagent's structured verdict output. Append the verdicts to the scratch file under a per-batch heading.
-4. Mark the wave's TodoWrite entries `completed` in a single `TodoWrite` call.
-5. Repeat until every batch has returned.
-
-**Subagent prompt template** — use this verbatim, filling the `<...>` slots. The contract is: subagents verify only, they do not modify files.
-
-```
-You are a verification worker dispatched by the spec-conformance agent. Your job:
-for each requirement below, determine whether the implementation satisfies it and
-return a structured verdict. You do NOT modify any files — verification only.
-
-## Inputs
-- Spec path: <SPEC_PATH>
-- Changed-code set (files to verify against): <CHANGED_FILES_LIST>
-- Scope decision: <SCOPE_FROM_SETUP_STEP_C>
-
-## Classification (fail-closed)
-Start each REQ by asking: "Am I 100% sure this is mechanical?" If anything short
-of 100% — classify DIRECTIONAL_GAP, not MECHANICAL_GAP.
-
-- PASS — changed code satisfies the requirement.
-- MECHANICAL_GAP — spec explicitly names the missing item AND the fix is a
-  surgical addition (new file, new export, new column, new error code, new field)
-  with no design choice. Only if 100% sure.
-- DIRECTIONAL_GAP — spec describes behavior but implementation diverges, OR the
-  fix requires design judgment, OR the fix would span files beyond the
-  changed-code set, OR the requirement is stated but satisfying it needs a choice
-  the spec did not spell out.
-- AMBIGUOUS — you cannot confidently determine from the evidence. Treat as
-  DIRECTIONAL.
-- OUT_OF_SCOPE — the requirement is outside the scope decision above.
-
-## Referenced existing files
-If a REQ references an existing file or contract (e.g. "follows the shape in
-shared/schemas/X.ts"), verify only that the implementation CONFORMS to that
-contract. Do not flag the referenced file itself as a gap unless the spec
-explicitly says to modify it.
-
-## Output format (strict)
-For each REQ, emit exactly:
-
-REQ #N → <verdict>
-  Evidence: <path:line or path, one line>
+REQ #N → PASS | MECHANICAL_GAP | DIRECTIONAL_GAP | AMBIGUOUS | OUT_OF_SCOPE
+  Evidence: <file:line or file path, one line>
   Gap description (if not PASS): <one sentence>
-  Proposed fix (if MECHANICAL_GAP): <one sentence — what is missing, not how to write it>
-
-Return every REQ in the order given. No commentary outside the structured blocks.
-
-## Read-only contract
-You have Read, Glob, Grep, and read-only Bash available. You MUST NOT use Edit,
-Write, or any Bash command that modifies files (no git commits, no npm installs,
-no file creation). If you find yourself wanting to fix a gap — stop and classify
-it as MECHANICAL_GAP or DIRECTIONAL_GAP and let the parent agent decide.
-
-## REQs to verify
-
-<inline the full REQ blocks (REQ #N, Category, Spec section, Requirement, Spec
-quote) for every REQ in this batch, copied verbatim from the scratch file>
+  Proposed fix (if MECHANICAL_GAP): <one sentence — what will be added>
 ```
 
-**Malformed-output fallback.** If a subagent returns output that cannot be parsed (missing verdicts, wrong format, empty body, or an error), re-dispatch **just that single batch** once with an appended note: *"Your previous output did not match the required format. Return only the structured REQ → verdict blocks."* If the second attempt also fails, mark every REQ in that batch as AMBIGUOUS with evidence `"verification subagent failed twice"`. Continue the remaining waves — do not abort the whole run on one bad batch.
+Verdict definitions:
 
-**Detected subagent mutation.** If a subagent's output or behavior indicates it modified a file despite the read-only contract (e.g., explicit "I edited X"), mark every REQ in that batch as AMBIGUOUS, add a `**Warning:** subagent violated read-only contract — review diff carefully` line to the scratch file, and surface the warning in the final log's "Mechanical fixes applied" section under a separate "Unexpected subagent edits (human review required)" subheading.
-
-**Concurrency with `tasks/todo.md`.** This agent writes to `tasks/todo.md` only in Step 4b, from the main agent context, after all waves have completed. Subagents never touch `tasks/todo.md`. This preserves the CLAUDE.md rule against concurrent review agents racing on that file — batch-subagents here are internal verification workers, not review agents.
-
-**Do not cross the main-agent boundary.** Mechanical fixes (Step 4a) stay in the main agent, never in subagents. Subagents return *proposed* fix descriptions; the main agent decides whether to apply.
+- **PASS** — the requirement is satisfied by the changed code.
+- **MECHANICAL_GAP** — the spec explicitly names the missing item, and the fix is surgical and obvious. You will apply the fix in Step 4.
+- **DIRECTIONAL_GAP** — the requirement is partially addressed or the implementation diverges in a way that needs human judgment (different contract shape, ambiguous logic branch, alternative approach). You will route this to `tasks/todo.md` in Step 4.
+- **AMBIGUOUS** — you are not confident whether the requirement is satisfied. Treat as DIRECTIONAL_GAP for safety.
+- **OUT_OF_SCOPE** — the requirement belongs to a phase/chunk the caller said was not yet implemented. Skip.
 
 ## Classification criteria
 
@@ -470,9 +402,6 @@ Record the resulting commit hash in the final log under a new line `**Commit at 
 - **You do not write tests unless the spec names specific test cases with specific assertions.** Generic "add test coverage" is NOT a mechanical fix.
 - **You do not extend a phase/chunk that the caller said was out of scope.** If phase 3 of 10 is done, don't verify phases 4–10.
 - **You never auto-apply a fix you're unsure about.** Conservative classification — AMBIGUOUS always becomes DIRECTIONAL.
-- **Verification subagents are read-only workers.** They return verdicts; they do not modify files, do not append to `tasks/todo.md`, and do not commit. The main agent is the sole writer in this flow.
-- **Mechanical fixes stay in the main agent.** Step 4a is never delegated to subagents. This keeps fix application deterministic and ordered, and preserves a single commit at finish.
-- **Concurrent waves are not iteration.** Step 2 dispatches up to `WAVE_SIZE` subagents in parallel per wave and walks the batch list in order until every batch has returned exactly one verdict set (at most twice per batch when the malformed-output fallback fires). That is one verification pass, not a loop. The "run once per invocation" rule still applies — you go through Steps 1 → 5 once.
 - **You run once per invocation.** No iteration loop. If mechanical fixes pass verification in Step 5, you are done.
 - **If the spec is not detected, you stop and report — you do not guess.** Better to return "no spec detected" than to verify against the wrong document.
 - **If mechanical fixes modified any files, the caller should re-run `pr-reviewer` on the expanded changed-code set** before creating the PR. Flag this explicitly in the Next step section of the final log.

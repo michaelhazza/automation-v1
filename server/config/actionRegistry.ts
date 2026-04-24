@@ -2842,6 +2842,47 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     onFailure: 'skip',
   },
+
+  // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────
+  cached_context_budget_breach: {
+    actionType: 'cached_context_budget_breach',
+    description:
+      'Operator review gate: the assembled context prefix for a cached-context run ' +
+      'exceeds the resolved execution budget. Payload contains the breach details, ' +
+      'top document contributors, and suggested remediation actions. ' +
+      'Approval re-runs assembly exactly once; rejection or timeout terminates the run.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'block',
+    createsBoardTask: false,
+    readPath: 'none',
+    payloadFields: ['thresholdBreached', 'budgetUsed', 'budgetAllowed', 'topContributors', 'suggestedActions'],
+    parameterSchema: z.object({
+      thresholdBreached: z.enum(['max_input_tokens', 'per_document_cap']),
+      budgetUsed: z.object({
+        inputTokens: z.number(),
+        worstPerDocumentTokens: z.number(),
+      }),
+      budgetAllowed: z.object({
+        maxInputTokens: z.number(),
+        perDocumentCap: z.number(),
+      }),
+      topContributors: z.array(z.object({
+        documentId: z.string(),
+        documentName: z.string(),
+        tokens: z.number(),
+        percentOfBudget: z.number(),
+      })),
+      suggestedActions: z.array(z.enum(['trim_bundle', 'upgrade_model', 'split_task', 'abort'])),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
 };
 
 /**
