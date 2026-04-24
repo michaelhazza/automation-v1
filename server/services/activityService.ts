@@ -11,8 +11,10 @@ import {
   playbookRuns,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
-import { mapAgentRunTriggerType, sortActivityItems } from './activityServicePure.js';
+import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
 import type { TriggerType } from './activityServicePure.js';
+
+const VALID_TRIGGER_TYPES = new Set<string>(['manual', 'scheduled', 'webhook', 'agent', 'system']);
 
 // ---------------------------------------------------------------------------
 // Activity Service — unified activity feed across all data sources
@@ -233,8 +235,10 @@ async function fetchAgentRuns(
       : `/admin/agents/${run.agentId}/runs/${run.id}`,
     // ── Additive fields ────────────────────────────────────────────────────
     triggeredByUserId: triggeredByUserId ?? null,
-    triggeredByUserName: (triggeredByUserName != null && triggeredByUserLastName != null)
-      ? `${triggeredByUserName} ${triggeredByUserLastName}`
+    triggeredByUserName: triggeredByUserName != null
+      ? (triggeredByUserLastName != null
+          ? `${triggeredByUserName} ${triggeredByUserLastName}`
+          : triggeredByUserName)
       : null,
     triggerType: mapAgentRunTriggerType(run.runType, run.runSource ?? null),
     durationMs: run.durationMs ?? null,
@@ -286,11 +290,7 @@ async function fetchReviewItems(
     detailUrl: item.subaccountId
       ? `/subaccounts/${item.subaccountId}/review`
       : `/admin/review`,
-    triggeredByUserId: null,
-    triggeredByUserName: null,
-    triggerType: null,
-    durationMs: null,
-    runId: null,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -328,11 +328,7 @@ async function fetchHealthFindings(
     createdAt: (f.detectedAt ?? new Date()).toISOString(),
     updatedAt: (f.detectedAt ?? new Date()).toISOString(),
     detailUrl: '/admin/health',
-    triggeredByUserId: null,
-    triggeredByUserName: null,
-    triggerType: null,
-    durationMs: null,
-    runId: null,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -380,11 +376,7 @@ async function fetchInboxItems(
     detailUrl: action.subaccountId
       ? `/subaccounts/${action.subaccountId}/agent-inbox`
       : `/admin/agent-inbox`,
-    triggeredByUserId: null,
-    triggeredByUserName: null,
-    triggerType: null,
-    durationMs: null,
-    runId: null,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -426,11 +418,7 @@ async function fetchPlaybookRuns(
     createdAt: (run.createdAt ?? new Date()).toISOString(),
     updatedAt: (run.updatedAt ?? run.createdAt ?? new Date()).toISOString(),
     detailUrl: `/subaccounts/${run.subaccountId}/playbook-runs/${run.id}`,
-    triggeredByUserId: null,
-    triggeredByUserName: null,
-    triggerType: null,
-    durationMs: null,
-    runId: null,
+    ...addNullAdditiveFields(),
   }));
 }
 
@@ -480,10 +468,14 @@ async function fetchWorkflowExecutions(
     detailUrl: `/executions/${exec.id}`,
     // ── Additive fields ────────────────────────────────────────────────────
     triggeredByUserId: triggeredByUserId ?? null,
-    triggeredByUserName: (triggeredByUserName != null && triggeredByUserLastName != null)
-      ? `${triggeredByUserName} ${triggeredByUserLastName}`
+    triggeredByUserName: triggeredByUserName != null
+      ? (triggeredByUserLastName != null
+          ? `${triggeredByUserName} ${triggeredByUserLastName}`
+          : triggeredByUserName)
       : null,
-    triggerType: exec.triggerType as TriggerType,
+    triggerType: (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
+      ? (exec.triggerType as TriggerType)
+      : null,
     durationMs: exec.durationMs ?? null,
     runId: exec.id,
   }));

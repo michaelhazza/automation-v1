@@ -46,6 +46,28 @@ export function mapAgentRunTriggerType(
 }
 
 // ---------------------------------------------------------------------------
+// addNullAdditiveFields — returns the null-valued additive fields for activity
+// types that do not carry run/user context (review_item, health_finding,
+// inbox_item, playbook_run).  Exported for unit testing.
+// ---------------------------------------------------------------------------
+
+export function addNullAdditiveFields(): {
+  triggeredByUserId: null;
+  triggeredByUserName: null;
+  triggerType: null;
+  durationMs: null;
+  runId: null;
+} {
+  return {
+    triggeredByUserId: null,
+    triggeredByUserName: null,
+    triggerType: null,
+    durationMs: null,
+    runId: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // sortActivityItems — deterministic sort with id DESC tiebreaker.
 //
 // Accepts a minimal shape (only the fields needed for sorting) so the pure

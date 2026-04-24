@@ -11,6 +11,7 @@
 import {
   mapAgentRunTriggerType,
   sortActivityItems,
+  addNullAdditiveFields,
   type TriggerType,
   type SortableItem,
 } from '../activityServicePure.js';
@@ -190,24 +191,13 @@ test('sort is stable for 3 items with different timestamps', () => {
 console.log('');
 console.log('--- Additive fields default null on non-run types ---');
 
-// These checks verify the SHAPE contract. Since the pure helpers only cover
-// mapAgentRunTriggerType and sortActivityItems, we verify the null-field rule
-// by constructing ActivityItem literals and checking TypeScript accepts them
-// with null values for all 5 additive fields. The runtime assertion is that
-// `null` is the correct value for non-run types.
-
-function makeNullAdditiveFields() {
-  return {
-    triggeredByUserId: null as string | null,
-    triggeredByUserName: null as string | null,
-    triggerType: null as TriggerType | null,
-    durationMs: null as number | null,
-    runId: null as string | null,
-  };
-}
+// These checks call the real addNullAdditiveFields() function exported from
+// activityServicePure.ts to verify the null-field contract.  Any change to
+// the set of additive fields or their types will break this test at runtime
+// (not just at compile time), giving us a real behavioural signal.
 
 test('non-run types produce null for all 5 additive fields', () => {
-  const fields = makeNullAdditiveFields();
+  const fields = addNullAdditiveFields();
   assertNull(fields.triggeredByUserId, 'triggeredByUserId');
   assertNull(fields.triggeredByUserName, 'triggeredByUserName');
   assertNull(fields.triggerType, 'triggerType');
@@ -215,18 +205,25 @@ test('non-run types produce null for all 5 additive fields', () => {
   assertNull(fields.runId, 'runId');
 });
 
+test('addNullAdditiveFields returns exactly 5 keys', () => {
+  const fields = addNullAdditiveFields();
+  const keys = Object.keys(fields);
+  assertEqual(keys.length, 5, 'number of additive fields');
+});
+
 test('deleted user → triggeredByUserName = null, does not throw', () => {
   // Simulates what happens when the LEFT JOIN finds no user row.
-  // The pure equivalent: receiving null from the join does not explode.
-  const userName: string | null = null; // what the LEFT JOIN returns
-  assertNull(userName, 'triggeredByUserName when user deleted');
+  // addNullAdditiveFields() is the canonical source of the null defaults;
+  // receiving null from the join should propagate to null on the output.
+  const fields = addNullAdditiveFields();
+  assertNull(fields.triggeredByUserName, 'triggeredByUserName when user deleted');
 });
 
 test('workflow execution passes through triggerType directly', () => {
   // The pass-through rule: executions.triggerType is already the correct type;
   // no mapping needed.  We verify the type values are in the TriggerType union.
-  const executionTriggerTypes: TriggerType[] = ['manual', 'agent', 'scheduled', 'webhook'];
-  assertEqual(executionTriggerTypes.length, 4, 'count');
+  const executionTriggerTypes: TriggerType[] = ['manual', 'agent', 'scheduled', 'webhook', 'system'];
+  assertEqual(executionTriggerTypes.length, 5, 'count');
   // Each value must be a valid TriggerType (compile-time check above is the
   // real guard; this runtime check confirms the array is non-empty).
   assertNotNull(executionTriggerTypes[0], 'first value');
