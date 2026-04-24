@@ -1,6 +1,6 @@
 # System Monitoring Agent — Phase 0 + 0.5 Spec
 
-**Status:** v3 — final-spec pass, reviewer feedback incorporated
+**Status:** v4 — second reviewer pass incorporated; implementation-ready
 **Owner:** Platform
 **Scope:** Server + client + migrations
 **Not included in this spec:** Phase 0.75 (email/Slack notifications — requires new outbound infrastructure), Phase 1 (synthetic checks), Phase 2 (monitoring agent), Phase 3 (auto-remediation), Phase 4 (dev-agent handoff). Future phases have stub sections at the end for context only.
@@ -65,7 +65,7 @@ v2 went to an external reviewer. All blocking and high-impact findings are now i
 
 - **#3 Fingerprint fragility under deploy-time volatility.** `topFrameOf()` in v2 included line numbers and column positions, which shift on every deploy → "same issue, new fingerprint, incident explosion." v3 introduces `topFrameSignature()` that strips `:line:col` suffixes, preserving function + file path only. Also added `IncidentInput.fingerprintOverride` so integrations with domain-stable identifiers (agent slug + error code, connector provider type + error code, etc.) bypass stack-derived fingerprinting entirely. See §5.2 for the override table.
 - **#4 Severity never-de-escalates inflation risk.** Added explicit per-lifecycle-scope clarification to §5.6. Existing "new row after resolve" design already handles the long-term case correctly; v3 just documents it so operators don't think "once critical, always critical."
-- **#5 Ingest-in-request-path latency risk.** v3 pre-wires a sync/async mode toggle via `SYSTEM_INCIDENT_INGEST_MODE=sync|async` env var, with `NODE_ENV=test` forcing sync. Async mode enqueues to a `systemMonitor.ingest` pg-boss queue and runs identical ingestion logic in a worker. Shipping the toggle from day one avoids the emergency-refactor failure mode.
+- **#5 Ingest-in-request-path latency risk.** v3 pre-wires a sync/async mode toggle via `SYSTEM_INCIDENT_INGEST_MODE=sync|async` env var, with `NODE_ENV=test` forcing sync. Async mode enqueues to a `system-monitor-ingest` pg-boss queue and runs identical ingestion logic in a worker. Shipping the toggle from day one avoids the emergency-refactor failure mode.
 - **#6 Suppression silent failure mode.** v2 suppressions discarded signal entirely — no DB row, only a `logger.warn`. v3 adds `suppressed_count` and `last_suppressed_at` columns to `system_incident_suppressions`. Each blocked occurrence increments the counter. The admin suppressions UI surfaces the counts so operators can triage "is this suppression still useful or should it be lifted?"
 - **#7 Unbounded manual escalation.** v2 allowed a user to escalate the same incident any number of times, each creating a new Orchestrator task. v3 adds `escalation_count` + `previous_task_ids[]` columns on `system_incidents`, a soft guardrail (409 + confirmation modal) when an incident is already escalated with a still-open prior task, a hard cap at 3 escalations per incident, and a 60-second per-incident rate limit. Blocked attempts write `escalation_blocked` events for observability. Full design in new §10.2.5.
 
@@ -98,6 +98,35 @@ All four columns are additive; the core schema from v2 is unchanged.
 | `SYSTEM_INCIDENT_NOTIFY_MILESTONES` | `10,100,1000` | Notification recurrence thresholds (already in v2, retained) |
 
 No v3 change rolls back any v2 decision. All v3 additions are additive refinements on the existing design shape.
+
+### 0.6 v4 changes — second reviewer pass
+
+v3 went back to the reviewer. Verdict: "implementation-ready, no architectural blockers." All concrete actionable findings are now incorporated; items the reviewer flagged as "future-proofing / no change required now" are captured as deferred-enhancement notes in-section rather than built.
+
+**Applied in v4:**
+
+- **#1 Async ingest ordering semantics (§5.8.2 new).** Made explicit: upsert + event append + notify-enqueue happen inside one transaction; WebSocket push fires only from the notify job handler (post-commit); client UI must tolerate eventual consistency and must treat WS events as hints, not source of truth. WebSocket payload now carries `incidentId + fingerprint + severity + status + occurrenceCount` for targeted client-side refresh (avoids full-page refetch during incident storms).
+- **#2 Fingerprint override governance contract (§5.2).** Overrides promoted from guidance to binding contract: must match regex `^[a-z_]+:[a-z0-9_.-]+(:[a-z0-9_.-]+)+$` (domain + error identifier minimum), rejected overrides log and fall back to stack-derived fingerprinting, per-integration unit tests required. Prevents fragmentation / collision drift.
+- **#5 Resolution feedback loop (§4.2, §7.2).** New `resolution_linked_to_task` event type. Emitted when `resolveIncident` runs against an incident that had been escalated — captures the escalation→resolution outcome as a training signal for Phase 2. Nullable `wasSuccessful` field reserved for a future UI prompt; not populated in Phase 0.5.
+- **#6 Pulse blast-radius awareness (§10.1).** Dedupe query extended with a `distinct_org_count` aggregate. Subtitle surfaces it when > 1 org is affected: "agent · 120× · 8 orgs · 2m ago". Makes cross-org systemic issues impossible to hide behind single-card dedupe.
+- **#7 Test-incident triggerNotifications flag (§8.9).** Test trigger gains an optional full-pipeline mode (default OFF) that lets the operator exercise the WebSocket + Pulse + nav-badge flow end-to-end. Rate-limited to 2/hour, confirmed via modal, summary tagged `[TEST]`, never auto-escalates.
+- **#9 Queue naming consistency (§5.7, §5.8.1, §9.2, elsewhere).** All pg-boss queues renamed from `systemMonitor.*` (camelCase, inconsistent with existing codebase) to `system-monitor-*` (kebab-case, matching existing convention — verified against `connector-polling-sync`, `iee-run-completed`, `skill-analyzer`). Four queues affected: `system-monitor-ingest`, `system-monitor-notify`, `system-monitor-self-check`, `system-monitor-triage` (Phase 2).
+
+**Deferred in v4 (reviewer explicitly said no change required now):**
+
+- **#3 Peak vs current severity** — noted in §5.6 as a future enhancement; revisit after 4 weeks in production when oscillation data exists.
+- **#4 Suppression blast-radius (`distinctResourceCount`)** — noted in §4.3 as a future enhancement; revisit if suppression volume ever trips the Q7 monthly audit.
+- **#8 Cascading-failure heartbeat detection** — noted in §5.7 as a future enhancement; revisit 2 weeks after production cutover when ingest rate baselines become stable.
+
+**Schema additions in v4 (beyond v3):**
+
+None. All v4 changes are behavioural / naming / contract-level — no new columns, no new tables. Schema footprint matches v3.
+
+**Event-type additions in v4:**
+
+- `resolution_linked_to_task` (§4.2, per #5)
+
+**No rollbacks of v2 or v3 decisions.** v4 is purely additive / refining.
 
 ---
 
@@ -201,7 +230,7 @@ There is no central error/incident table. Errors live in five different surfaces
 
 ### 3.2 Non-goals
 
-- NG1 **No automated agent triage.** The `incident.triage` pg-boss job pattern from the audit is deferred to Phase 2.
+- NG1 **No automated agent triage.** The `system-monitor-triage` pg-boss job pattern from the audit is deferred to Phase 2.
 - NG2 **No auto-remediation.** No skills that retry jobs, disable flags, restart connectors, etc. Those are Phase 3.
 - NG3 **No synthetic/heartbeat checks.** Phase 1.
 - NG4 **No dev-agent handoff.** Phase 4.
@@ -347,17 +376,20 @@ export const systemIncidentEvents = pgTable(
     incidentId: uuid('incident_id').notNull().references(() => systemIncidents.id, { onDelete: 'cascade' }),
 
     eventType: text('event_type').notNull()
-      .$type<'occurrence'           // the fingerprint fired again
-          | 'status_change'         // lifecycle transition
-          | 'ack'                   // human acknowledged
-          | 'resolve'               // human resolved
-          | 'suppress'              // human suppressed
-          | 'unsuppress'            // suppression lifted (auto or manual)
-          | 'escalation'            // manual escalate-to-agent, or Phase 2 auto-escalation
-          | 'remediation_attempt'   // Phase 3: something tried to fix
-          | 'remediation_outcome'   // Phase 3: result of the attempt
-          | 'diagnosis'             // Phase 2: agent annotated diagnosis
-          | 'note'                  // free-form human note
+      .$type<'occurrence'                  // the fingerprint fired again
+          | 'status_change'                // lifecycle transition
+          | 'ack'                          // human acknowledged
+          | 'resolve'                      // human resolved
+          | 'suppress'                     // human suppressed
+          | 'unsuppress'                   // suppression lifted (auto or manual)
+          | 'escalation'                   // manual escalate-to-agent, or Phase 2 auto-escalation
+          | 'escalation_blocked'           // v3: guardrail refused an escalation attempt
+          | 'resolution_linked_to_task'    // v4: resolve happened on an escalated incident — links resolver to the task
+          | 'notification_surfaced'        // Phase 0.5 in-app notification fired
+          | 'remediation_attempt'          // Phase 3: something tried to fix
+          | 'remediation_outcome'          // Phase 3: result of the attempt
+          | 'diagnosis'                    // Phase 2: agent annotated diagnosis
+          | 'note'                         // free-form human note
       >(),
 
     actorKind: text('actor_kind').notNull()
@@ -448,6 +480,8 @@ The monthly audit job referenced in §14.2 (Q7) flags permanent suppressions whe
 - Suppressions that were added for a genuine one-time spike get flagged as unused (`suppressedCount` stays at 0).
 - You can make informed decisions about which suppressions to lift without needing to search log files.
 
+**Future enhancement note (v4 — NOT built in Phase 0.5): blast-radius awareness on suppressions.** `suppressedCount` tells you volume but not spread. 10,000 suppressed events across 1 agent is fine (localised and known); 10,000 suppressed events across 500 agents is a major issue being silently masked. A `distinctResourceCount` field would close this gap. Deferred because Phase 0.5 suppressions are simple-string keyed (fingerprint + org) and computing spread requires joining against the non-row occurrences — we only have the counter, not the source rows. Viable extensions when implementing: (a) add a lightweight `suppressed_occurrence_log` table with rolling 30-day retention, or (b) during §5.1 step 3 suppression-check, also increment a `distinct_resource_id_set` aggregate (requires hashed-set storage). Revisit if suppression volume ever trips the monthly audit described in §14.2 Q7.
+
 ### 4.4 Migration
 
 Single migration file: `migrations/NNNN_system_incidents.sql` where NNNN is the next free sequence (currently 0223+).
@@ -478,7 +512,7 @@ That function does, in order:
 3. **Suppression check.** If a matching `system_incident_suppressions` row is active, log `incident_suppressed` and return.
 4. **Upsert.** Insert a new `system_incidents` row, or increment `occurrence_count` + update `lastSeenAt` on an existing active row with the same fingerprint.
 5. **Append event.** Write an `occurrence` row to `system_incident_events`.
-6. **Emit notification signal.** Enqueue a `incident.notify` pg-boss job if the incident crossed a notification threshold (first open of a high/critical severity, or configured recurrence multiple). Phase 0.5 consumes this.
+6. **Emit notification signal.** Enqueue a `system-monitor-notify` pg-boss job if the incident crossed a notification threshold (first open of a high/critical severity, or configured recurrence multiple). Phase 0.5 consumes this.
 
 All of the above wrapped in a try/catch that logs but never throws. Ingestion failure must never break the caller.
 
@@ -549,11 +583,11 @@ function topFrameSignature(stack: string | undefined): string {
 - `affectedResourceKind` keeps resource-type separation without using the specific resource ID (which would defeat dedupe — we WANT "40 failing agent runs" to collapse to one incident).
 - 16 hex chars = 64 bits, collision probability is negligible at the scale we'll see.
 
-**Per-integration fingerprint override (added v3):**
+**Per-integration fingerprint override (added v3, governed v4):**
 
 The `IncidentInput` interface accepts an optional `fingerprintOverride: string` that bypasses stack-derived fingerprinting entirely. Callers that have a strongest-signal identifier specific to their domain pass it here instead of relying on stack normalisation:
 
-| Integration | Recommended `fingerprintOverride` |
+| Integration | Required `fingerprintOverride` format |
 |---|---|
 | Agent run failures | `agent:${agent.slug}:${errorCode ?? 'generic'}` — stable across refactors of the agent service |
 | Connector polling | `connector:${providerType}:${errorCode ?? errorName}` — ties dedupe to the provider + typed error, not the polling code |
@@ -565,6 +599,22 @@ The `IncidentInput` interface accepts an optional `fingerprintOverride: string` 
 The override pattern is documented once here and each integration section (§6) references this table rather than restating the logic.
 
 **Stack-based fallback is still the default** for sources where no strongest-signal identifier is appropriate (route handlers, self-source). Override is an opt-in, not a requirement.
+
+**Override governance contract (v4 — binding):**
+
+Unstructured overrides fragment the fingerprint space. To prevent drift:
+
+1. **Every override MUST include at least two components joined by `:`** — a **domain identifier** (agent slug, provider type, queue name, skill slug, model name) AND an **error identifier** (error code, error name, or the literal token `generic` if nothing more specific is available).
+2. **Overly broad overrides are rejected at ingest time.** A runtime validator in `incidentIngestor` enforces the regex `^[a-z_]+:[a-z0-9_.-]+(:[a-z0-9_.-]+)+$`. Examples:
+    - ✅ `agent:orchestrator:CLASSIFICATION_PARSE_FAILURE`
+    - ✅ `connector:gohighlevel:rate_limit`
+    - ✅ `job:agent-execution-queue:exhausted`
+    - ❌ `agent:error` — rejected; no error identifier component
+    - ❌ `my-thing` — rejected; no domain+error structure
+    - ❌ `agent:orchestrator` — rejected; missing error identifier (use `agent:orchestrator:generic` if nothing specific applies)
+3. **On validation failure, the ingestor logs `logger.warn('incident_fingerprint_override_rejected', { override, caller })` and falls back to stack-derived fingerprinting.** The incident is still captured — the override is dropped, not the incident.
+4. **Unit test coverage required.** Every integration site that uses `fingerprintOverride` gets a test that asserts the override passes validation against real sample inputs. Failure of any such test blocks merge.
+5. **This is a contract, not guidance.** Future changes to override shapes require an explicit spec amendment and a migration plan for existing fingerprints (e.g. dual-fingerprint write during transition).
 
 ### 5.3 Classification
 
@@ -668,7 +718,7 @@ DO UPDATE SET
 RETURNING id, occurrence_count, (xmax = 0) AS was_inserted;
 ```
 
-Drizzle doesn't natively support partial-index conflicts, so we write this as a raw SQL call wrapped in a Drizzle service method. The `(xmax = 0)` trick returns `true` on INSERT and `false` on UPDATE — we use this to decide whether to emit `status_change` events and `incident.notify` jobs.
+Drizzle doesn't natively support partial-index conflicts, so we write this as a raw SQL call wrapped in a Drizzle service method. The `(xmax = 0)` trick returns `true` on INSERT and `false` on UPDATE — we use this to decide whether to emit `status_change` events and `system-monitor-notify` jobs.
 
 **Severity never de-escalates *within a single incident lifecycle*.** If an incident starts as `low` and later occurrences come in as `critical`, the row flips to `critical`. The reverse cannot happen automatically — only human resolution flips it.
 
@@ -680,11 +730,13 @@ Drizzle doesn't natively support partial-index conflicts, so we write this as a 
 
 This design choice trades minor UX inconvenience (fresh row on recurrence) for durable signal quality (severity reflects current reality, not historical baggage).
 
+**Future enhancement note (v4 — NOT built in Phase 0.5):** add derived fields `peakSeverity` (highest severity ever observed during this lifecycle — the current `severity` column) and `latestSeverity` (severity of the most recent occurrence, potentially lower). Together they reveal oscillation patterns: "started critical, settled into medium noise" vs "was always critical." Useful signal for Phase 2 agent diagnosis and for noise detection in the admin UI. Deferred because the minor operational value doesn't justify the extra column until we have real oscillation data to validate the design. Revisit after 4 weeks in production.
+
 ### 5.7 Self-source protection
 
 The ingestor itself can fail (DB down, constraint violation, bug). If the ingestor errors while being called from a path that already handles errors, we must NOT recurse.
 
-Rule: the ingestor **never calls itself**. Internal errors are logged with `logger.error('incident_ingest_failed', ...)` and return. A dedicated pg-boss job on a 5-minute cron (`systemMonitor.selfCheck`, Phase 0) scans the last 5 minutes of logs for `incident_ingest_failed` events and, **if the failure rate crosses a threshold**, writes a single `source='self'` incident directly via a raw SQL path that bypasses the normal ingestor. This is the "who monitors the monitor" loop.
+Rule: the ingestor **never calls itself**. Internal errors are logged with `logger.error('incident_ingest_failed', ...)` and return. A dedicated pg-boss job on a 5-minute cron (`system-monitor-self-check`, Phase 0) scans the last 5 minutes of logs for `incident_ingest_failed` events and, **if the failure rate crosses a threshold**, writes a single `source='self'` incident directly via a raw SQL path that bypasses the normal ingestor. This is the "who monitors the monitor" loop.
 
 **Thresholding (v3 addition):** a transient DB hiccup that drops one ingest write is noise, not an incident. The self-check job fires ONLY when:
 
@@ -710,6 +762,8 @@ Self-sourced incidents:
 - Always severity `high`.
 - Always require HITL — never eligible for agent escalation in Phase 2+. Hard-coded guard.
 - Bypass the fatigue guard for the first occurrence (the operator must know the monitor is broken). The cooldown window above is a separate mechanism from the fatigue guard — it governs self-check firing specifically, not general notification throttling.
+
+**Future enhancement note (v4 — NOT built in Phase 0.5): cascading-failure detection via ingest heartbeat.** The current self-check is log-scan based — if the ingestor fails so catastrophically that no `incident_ingest_failed` logs are emitted (e.g. logger itself broken, process crashed before log flush), the self-check never fires. A heartbeat metric comparing *expected ingest rate vs actual* would catch silent total-system failures. Concretely: record a 1-minute rolling aggregate of `recordIncident` call count; if that count drops >80% from the rolling 24h mean without a known deploy/scale-down event, fire a synthetic self-incident. Deferred because (a) we lack prior-art baselines to know what the "natural" ingest rate is, and (b) in Phase 0.5 pre-production traffic, the ingest rate is too noisy to baseline. Revisit 2 weeks after production cutover.
 
 ### 5.8 Performance characteristics and mode toggle
 
@@ -747,7 +801,7 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
   if (getIngestMode() === 'async') {
     // Enqueue to pg-boss; return immediately. The worker runs the same
     // ingestion logic — identical classify / fingerprint / upsert code path.
-    await enqueue('systemMonitor.ingest', safeSerialize(input));
+    await enqueue('system-monitor-ingest', safeSerialize(input));
     return;
   }
 
@@ -759,7 +813,7 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
 **Runtime behaviour:**
 
 - **Default: `sync`.** Lower operational complexity; errors captured immediately; integration tests can assert state without flake.
-- **`SYSTEM_INCIDENT_INGEST_MODE=async`.** Ingestor enqueues the input to a pg-boss queue (`systemMonitor.ingest`) and returns. A worker consumes the queue and calls `ingestInline`. Adds ~50–200ms end-to-end delay but removes all DB work from the request path.
+- **`SYSTEM_INCIDENT_INGEST_MODE=async`.** Ingestor enqueues the input to a pg-boss queue (`system-monitor-ingest`) and returns. A worker consumes the queue and calls `ingestInline`. Adds ~50–200ms end-to-end delay but removes all DB work from the request path.
 - **`SYSTEM_INCIDENT_INGEST_ENABLED=false`.** Full ingestor no-op. Top-level kill switch from §13.6.
 
 **Why pre-wire this now, even though we don't expect to need it:**
@@ -778,6 +832,45 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
 
 - Caller cannot observe ingestion failure. Any errors in the worker path are logged by `logger.error('incident_ingest_failed', ...)` and picked up by the self-check job (§5.7) if they recur.
 - The `recordIncident` call no longer blocks; return values / promises resolve immediately after enqueue.
+
+### 5.8.2 Ordering invariants for async mode (v4)
+
+When `SYSTEM_INCIDENT_INGEST_MODE=async` is active, the caller's request returns before the incident is visible in the DB or the UI. This introduces ordering guarantees the implementation must preserve and the UI must tolerate.
+
+**Server-side invariants (binding contract):**
+
+1. **Upsert before event append.** The `system_incidents` row MUST be written (or its counters incremented) before any `system_incident_events` row referencing it is written. Foreign key enforces this at the DB layer.
+2. **Upsert + event before notify enqueue.** The `system-monitor-notify` job MUST NOT be enqueued until the upsert and the `occurrence` event are both durably committed. All three operations (upsert, event append, notify-enqueue) happen inside a single transaction. If the transaction rolls back, nothing escapes — the caller receives no notification, no WebSocket push, no Pulse card.
+3. **WebSocket push fires only from the notify job handler**, never from the ingestor itself. The notify job reads the incident from the DB before emitting the WebSocket event. This means the DB row is guaranteed visible to other connections by the time the WebSocket event lands.
+
+**Client-side tolerance (binding for Phase 0.5 UI code):**
+
+- The admin page MUST treat the WebSocket event as a hint to refetch, not as the source of truth. The page always re-queries the API for the authoritative state.
+- The admin page MUST NOT assume `incident.lastSeenAt` strictly increases across polling ticks — under async mode with high concurrency, a poll can land between two ingests and see intermediate state.
+- Pulse items MUST cope with a card briefly "appearing empty" if the Pulse refresh lands before the notify job completes its WebSocket push. The polling fallback will fill it in.
+
+**WebSocket payload shape (v4 improvement):**
+
+Rather than emitting a bare `system_incident:updated` signal that forces a full refetch, include the incident ID in the payload so the client can do a targeted refresh:
+
+```ts
+// server side, in the notify job
+socket.to('sysadmin').emit('system_incident:updated', {
+  incidentId: incident.id,
+  fingerprint: incident.fingerprint,
+  severity: incident.severity,
+  status: incident.status,
+  occurrenceCount: incident.occurrenceCount,
+});
+```
+
+The client-side handler:
+
+1. If the incident is currently rendered in the list → update it in place (no refetch).
+2. If the incident is new to the list → prepend it and refetch the count badges (cheap).
+3. If Pulse is currently visible → invalidate the Pulse query so it re-fetches.
+
+Targeted refresh reduces DB load during incident storms: fan-out of 100 incidents triggers 100 targeted WS events, not 100 full-page refetches.
 
 ## 6. Phase 0 — Integration points
 
@@ -991,6 +1084,33 @@ All methods that mutate state also write a `system_incident_events` row inside t
 
 No direct DB access in the route file — route calls service, service calls DB. This matches architecture.md §Route Conventions.
 
+**Resolution feedback loop (v4):**
+
+When `resolveIncident` is called on an incident that has `escalatedTaskId IS NOT NULL` (i.e. the incident had previously been escalated to an agent), the service writes **two** events inside the same transaction:
+
+1. `resolve` event — the standard resolution record.
+2. `resolution_linked_to_task` event with payload:
+    ```ts
+    {
+      taskId: incident.escalatedTaskId,
+      taskStatus: <looked up at resolve time>,
+      escalationCount: incident.escalationCount,
+      previousTaskIds: incident.previousTaskIds,
+      resolvedByUserId: userId,
+      resolutionNote: note ?? null,
+      linkedPrUrl: linkedPrUrl ?? null,
+      // Optional, future: wasSuccessful — whether resolution was driven by agent's diagnosis.
+      // In Phase 0.5 this is null; a later API will let the operator flag it.
+      wasSuccessful: null,
+    }
+    ```
+
+**Why this matters now, even though Phase 2 doesn't exist yet:**
+
+Every resolution that follows an escalation is a training signal for the future monitoring agent (Phase 2). Capturing it in the event log from day one means Phase 2's design has real data to work against ("of 500 escalations, 120 resulted in human resolution within 24h — those are the patterns the agent should learn"). Without capture, Phase 2 starts blind.
+
+The `wasSuccessful` field is deliberately nullable and unpopulated in Phase 0.5 — a future UI will ask the resolver "did the agent's diagnosis help?" as an optional prompt. Not building that UI now, but reserving the field prevents schema churn later.
+
 ### 7.3 Permissions
 
 **Change to** `server/lib/permissions.ts`:
@@ -1123,24 +1243,38 @@ Per CLAUDE.md architecture rule ("Tables: column-header sort + filter by default
 
 Active filter indicator on column headers (indigo dot). Active sort indicator (up/down arrow). "Clear all filters" button appears when any non-default sort/filter is applied.
 
-### 8.9 Test-incident trigger (per Q8 §0.2)
+### 8.9 Test-incident trigger (per Q8 §0.2, flag-extended v4)
 
 A **"Trigger test incident"** button sits in the page header next to the refresh controls. Clicking it:
 
-1. Opens a small form: severity radio (default `low`), source dropdown (default `synthetic`), optional free-form `summary` (default "Manual test incident from admin UI").
+1. Opens a small form: severity radio (default `low`), source dropdown (default `synthetic`), optional free-form `summary` (default "Manual test incident from admin UI"), **and a "Trigger full notification pipeline" checkbox (default OFF)**.
 2. Submits to `POST /api/system/incidents/test` (new endpoint, `requireSystemAdmin`).
-3. The endpoint calls `recordIncident` with `isTestIncident: true` column set (see below), fingerprint `test:manual:{userId}:{timestamp}` so each click produces a distinct incident.
+3. The endpoint calls `recordIncident` with `isTestIncident: true` column set, fingerprint `test:manual:{userId}:{timestamp}` so each click produces a distinct incident, and `triggerNotifications: <checkbox value>`.
 4. Returns the new incident to the client; the page redirects to the detail drawer.
 
 **Schema addition:** `system_incidents.is_test_incident boolean NOT NULL DEFAULT false`. Added in the Phase 0 migration from the start (avoids a Phase 0.5 schema change).
 
 **Default list filter:** the admin page filters `isTestIncident = false` by default. A "Show test incidents" toggle in the filter bar flips it.
 
-**Notification behaviour:** test incidents bypass the notify job (`isTestIncident=true` short-circuits §9.2) — no WebSocket push, no Pulse surfacing. They exist purely for pipeline verification. (Phase 0.75 will also exclude them from push notifications.)
+**Notification behaviour (v4 — refined):**
 
-**Rate limit:** max 10 test incidents per system-admin per hour — prevents misuse and accidental spam during rapid testing.
+Test incidents have TWO modes:
 
-**Why this is useful:** after deploying Phase 0 and 0.5, the operator can verify the sink is working without needing to reproduce a real error. Also essential for validating Phase 0.75 notification wiring once email/Slack are live.
+| Mode | `triggerNotifications` | Effect |
+|---|---|---|
+| **Sink-only verification** (default) | `false` | Bypasses the notify job entirely. No WebSocket push, no Pulse card, no Layout nav badge update. Row appears in the DB and in the admin page's "test incidents" filter. Useful for: verifying ingestion, suppression, dedupe. |
+| **Full pipeline verification** | `true` | Notify job runs normally. WebSocket push fires. Pulse card appears. Layout nav badge updates. Phase 0.75 email/Slack would also fire. Useful for: verifying end-to-end user-visible flow before production notifications go live. |
+
+**Guardrails on full-pipeline mode:**
+
+1. Rate limit: max 2 full-pipeline test incidents per sysadmin per hour (separate from the sink-only limit of 10/hour). Prevents accidental alert storms during testing.
+2. UI confirmation: checking the box shows a warning "This will trigger real notifications to all sysadmins with notifications enabled. Continue?" — require explicit confirmation.
+3. Subject/summary tagged: when `triggerNotifications=true`, the incident's `summary` is prefixed with `[TEST]` automatically so recipients see at a glance it's not real.
+4. Never auto-escalated. Even in full-pipeline mode, test incidents are ineligible for agent escalation (the escalate button is hidden in the drawer for test incidents).
+
+**Rate limit (sink-only):** max 10 test incidents per system-admin per hour — prevents misuse and accidental spam during rapid testing.
+
+**Why split modes:** v3 made test incidents invisible to the notification pipeline entirely, which meant the WebSocket + Pulse + nav-badge flow could not be tested without reproducing a real error. v4 restores that capability behind an explicit, confirmed, heavily-rate-limited flag. The default is still safe (no notifications); the opt-in exists for pre-production verification.
 
 ## 9. Phase 0.5 — In-app notifications
 
@@ -1159,7 +1293,7 @@ Sysadmins are the only recipients. Non-sysadmin users see no system-incident sur
 
 ### 9.2 Notification trigger job (Phase 0.5 role)
 
-**New pg-boss job:** `systemMonitor.notify`
+**New pg-boss job:** `system-monitor-notify`
 
 Enqueued by the ingestion service (§5.1 step 6) when an incident crosses a notification threshold:
 
@@ -1266,21 +1400,51 @@ Returns open (non-acked) system incidents that a user should attend to:
 
 **Lane assignment:** system incidents go to the `internal` lane. They are never `client` or `major` lane items.
 
-**Fingerprint dedupe (v3):** Pulse is a supervision surface, not an incident log. If the same fingerprint produces five concurrent open incidents — for example, across multiple orgs during a cross-cutting outage — Pulse shows **one card, not five**. Implementation:
+**Fingerprint dedupe with blast-radius awareness (v3 / v4):** Pulse is a supervision surface, not an incident log. If the same fingerprint produces five concurrent open incidents — for example, across multiple orgs during a cross-cutting outage — Pulse shows **one card, not five**, but the subtitle surfaces the **distinct organisation count** so cross-org systemic issues don't hide behind single-card dedupe.
+
+Implementation (conceptual shape — actual query uses Drizzle):
 
 ```sql
--- Conceptual shape — actual query in pulseService uses Drizzle
-SELECT DISTINCT ON (fingerprint)
-  id, fingerprint, severity, summary, last_seen_at, occurrence_count, organisation_id
-FROM system_incidents
-WHERE status IN ('open', 'investigating', 'escalated')
-  AND severity IN ('high', 'critical')
-  AND acknowledged_at IS NULL
-  AND is_test_incident = false
-ORDER BY fingerprint, severity DESC, last_seen_at DESC
+WITH active AS (
+  SELECT id, fingerprint, severity, summary, last_seen_at,
+         occurrence_count, organisation_id
+  FROM system_incidents
+  WHERE status IN ('open', 'investigating', 'escalated')
+    AND severity IN ('high', 'critical')
+    AND acknowledged_at IS NULL
+    AND is_test_incident = false
+),
+-- Winning row per fingerprint (highest severity, most recent)
+winners AS (
+  SELECT DISTINCT ON (fingerprint) *
+  FROM active
+  ORDER BY fingerprint, severity DESC, last_seen_at DESC
+),
+-- Aggregates per fingerprint
+aggregates AS (
+  SELECT fingerprint,
+         COUNT(*) AS group_count,
+         COUNT(DISTINCT organisation_id) AS distinct_org_count,
+         SUM(occurrence_count) AS total_occurrences
+  FROM active
+  GROUP BY fingerprint
+)
+SELECT w.*, a.group_count, a.distinct_org_count, a.total_occurrences
+FROM winners w JOIN aggregates a USING (fingerprint)
+ORDER BY w.severity DESC, w.last_seen_at DESC;
 ```
 
-The "winning" row per fingerprint is the highest-severity, most-recent one. The card links to that specific incident, but the subtitle includes `${groupCount}× incidents` when `groupCount > 1` so the sysadmin sees the fan-out.
+The card links to the winning incident. Subtitle composition (v4):
+
+| Condition | Subtitle shape |
+|---|---|
+| `groupCount = 1` | `${source} · ${occurrenceCount}× · ${timeAgo}` |
+| `groupCount > 1`, `distinctOrgCount = 1` | `${source} · ${totalOccurrences}× · ${groupCount} incidents · ${timeAgo}` |
+| `groupCount > 1`, `distinctOrgCount > 1` | `${source} · ${totalOccurrences}× · ${groupCount} incidents · ${distinctOrgCount} orgs · ${timeAgo}` |
+
+**Why the org count matters:** 10,000 occurrences concentrated in one org suggests a tenant-specific configuration issue (contact the tenant). 10,000 occurrences spread across 500 orgs suggests a platform-wide regression (halt deploys, find the root cause). The subtitle surfaces that distinction at a glance — no drill-down required.
+
+**Edge case: system-level incidents (organisationId IS NULL):** counted under `distinctOrgCount` as a single bucket (treated as "system" org for aggregation). This means `distinctOrgCount = 1` for a purely system-level fingerprint; `distinctOrgCount = 4` for three tenants plus system-level.
 
 **Surfacing thresholds (v3):** to avoid Pulse churn from noisy incidents, only surface a Pulse card when:
 
@@ -1803,7 +1967,7 @@ Estimated size: ~3-5 days of focused work once provider choice is made. Small co
 
 ### 16.2 Phase 1 — Synthetic checks (proactive monitoring)
 
-- `systemMonitor.syntheticChecks` pg-boss job on 1-minute tick.
+- `system-monitor-synthetic-checks` pg-boss job on 1-minute tick.
 - Checks for absence-of-events: job queue stalls, no agent runs in N minutes, stale connectors, heartbeat probes.
 - Writes incidents with `source='synthetic'`.
 - Enables detection of silent failures that error-driven monitoring misses.
@@ -1812,7 +1976,7 @@ Estimated size: ~3-5 days of focused work once provider choice is made. Small co
 ### 16.3 Phase 2 — The monitoring agent (read-only)
 
 - New system-managed agent `system_monitor`. Scope `system` (requires Option B principal context from §7.4).
-- Auto-triggered by `incident.triage` pg-boss job (enqueued by ingestor when incident opens with `severity >= medium`).
+- Auto-triggered by `system-monitor-triage` pg-boss job (enqueued by ingestor when incident opens with `severity >= medium`).
 - Diagnosis-only skills: read recent logs, read job queue health, read failed agent runs, read DLQ jobs, read connector status.
 - Annotation + escalation skills: annotate diagnosis on incident, escalate to human, propose (not execute) remediation.
 - Modelled on Portfolio Health Agent's prompt shape.
@@ -1835,14 +1999,17 @@ Estimated size: ~3-5 days of focused work once provider choice is made. Small co
 
 ---
 
-**End of Phase 0 + 0.5 specification (v3 — final).**
+**End of Phase 0 + 0.5 specification (v4 — final, implementation-ready).**
 
 - v1 open questions: resolved (§0.2).
 - v1 prerequisites: verified against the live codebase (§0.1).
 - v2 scope conflict (push notifications): carved out into Phase 0.75 (§0.3, §9, §16.1).
 - v3 reviewer feedback: all 2 critical + 5 high-impact + 4 medium-impact findings incorporated (§0.5).
+- v4 second reviewer pass: 6 concrete findings applied; 3 future-proofing items captured as in-section deferred notes (§0.6).
 
-Implementation-ready. Next gate is `architect` (for structural validation + file-by-file implementation plan) unless the user runs `spec-reviewer` first from a local Codex CLI session (not available in Claude Code on the web per CLAUDE.md).
+Reviewer's final verdict on v3: "implementation-ready, no architectural blockers, green light." v4 closes the remaining tightening items before coding begins.
+
+Next gate: `architect` (file-by-file implementation plan + structural validation) → then implementation.
 
 
 
