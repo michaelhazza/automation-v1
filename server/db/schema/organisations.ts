@@ -57,6 +57,11 @@ export const organisations = pgTable(
     // Per-org toggles for clarifying + sparring skills (Phase 4).
     clarifyingEnabled: boolean('clarifying_enabled').notNull().default(true),
     sparringEnabled: boolean('sparring_enabled').notNull().default(true),
+    // ── System org marker (migration 0223) ─────────────────────────────
+    // True only for the seeded System Operations org. A partial unique index
+    // in the migration enforces at-most-one. Non-sysadmin org-listing endpoints
+    // filter rows where isSystemOrg = true so the org is invisible to tenants.
+    isSystemOrg: boolean('is_system_org').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
