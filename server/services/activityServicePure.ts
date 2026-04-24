@@ -101,6 +101,28 @@ function idDesc(a: SortableItem, b: SortableItem): number {
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// addNullAdditiveFields — returns the null-valued additive fields for activity
+// types that do not carry run/user context (review_item, health_finding,
+// inbox_item, playbook_run).  Exported for unit testing.
+// ---------------------------------------------------------------------------
+
+export function addNullAdditiveFields(): {
+  triggeredByUserId: null;
+  triggeredByUserName: null;
+  triggerType: null;
+  durationMs: null;
+  runId: null;
+} {
+  return {
+    triggeredByUserId: null,
+    triggeredByUserName: null,
+    triggerType: null,
+    durationMs: null,
+    runId: null,
+  };
+}
+
 export function sortActivityItems<T extends SortableItem>(
   items: T[],
   sort: string,
