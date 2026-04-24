@@ -271,7 +271,12 @@ export async function invokeAutomationStep(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // §5.8: signed material must be recoverable by the receiver so HMAC is
+          // verifiable; also serves as a stable idempotency key across retries
+          // (hmacSignature is computed over stepRunId and stepRunId is stable
+          // for the life of the step, so retries hit the same dedup key).
           'X-Webhook-Signature': hmacSignature,
+          'X-Automation-Step-Run-Id': stepRunId,
           ...authHeaders,
         },
         body: JSON.stringify(outcome.body),

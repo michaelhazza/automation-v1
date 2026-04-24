@@ -143,7 +143,9 @@ export function resolveDispatch(input: DispatchInput): DispatchOutcome {
     };
   }
 
-  // §5.10a rule 4 — webhookPath must be a single non-empty path segment
+  // §5.10a rule 4 — defence-in-depth: reject any webhookPath that would produce more than
+  // one outbound webhook for the step (e.g. a comma-separated list of targets) or is empty.
+  // Multi-segment paths like "/webhook/abc" are the normal shape and remain valid.
   const webhookPath = automation.webhookPath ?? '';
   if (!webhookPath || webhookPath.includes(',')) {
     return {

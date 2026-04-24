@@ -408,6 +408,19 @@ export function validateDefinition(
         if (typeof v === 'string') refSources.push(v);
       }
     }
+    // invoke_automation: inputMapping values are template expressions (§5.4) that resolve
+    // against the enclosing workflow context (same namespaces as agentInputs/actionInputs).
+    // Validate them here so bad {{ steps.* }} refs are caught at authoring time rather
+    // than surfacing as runtime failures during dispatch.
+    // Note: outputMapping values evaluate with a local `response` namespace added at
+    // runtime (§5.5, projectOutputMapping) — that namespace is not in parsePath's
+    // allowed-prefix list, so running them through extractReferences here would produce
+    // false positives. outputMapping validation is handled separately at runtime.
+    if ('inputMapping' in step && step.inputMapping) {
+      for (const v of Object.values(step.inputMapping as Record<string, unknown>)) {
+        if (typeof v === 'string') refSources.push(v);
+      }
+    }
     for (const source of refSources) {
       let refs;
       try {
