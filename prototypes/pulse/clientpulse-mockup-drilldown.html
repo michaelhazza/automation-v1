@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Smith Dental · ClientPulse drill-down (simplified + visual)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .container { max-width: 1060px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .breadcrumb { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
+  .breadcrumb a { color: #4338ca; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { margin: 0 6px; color: #9ca3af; }
+
+  /* Pending proposal card — visible when an intervention is awaiting approval */
+  .pending-hero {
+    background: #eef2ff; border: 1.5px solid #c7d2fe; border-radius: 10px;
+    padding: 18px 22px; margin-bottom: 16px;
+    display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center;
+    box-shadow: 0 1px 3px rgba(67, 56, 202, 0.1);
+  }
+  .pending-hero .ph-label {
+    font-size: 11px; color: #4338ca; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .pending-hero .ph-action {
+    font-size: 15px; font-weight: 600; color: #1a1d23; margin-bottom: 4px;
+  }
+  .pending-hero .ph-why {
+    font-size: 13px; color: #4b5563; line-height: 1.55;
+  }
+  .pending-hero .ph-actions {
+    display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+  }
+  .pending-hero .btn-primary {
+    padding: 8px 20px; font-size: 13px; font-weight: 600;
+    background: #4f46e5; color: #fff; border: 1px solid #4338ca;
+    border-radius: 5px; cursor: pointer;
+  }
+  .pending-hero .btn-primary:hover { background: #4338ca; }
+  .pending-hero .btn-ghost-red {
+    padding: 6px 16px; font-size: 12px; font-weight: 500;
+    background: #fff; color: #991b1b; border: 1px solid #fecaca;
+    border-radius: 5px; cursor: pointer;
+  }
+  .pending-hero .btn-ghost-red:hover { background: #fef2f2; }
+  .pending-hero .btn-ghost-defer {
+    padding: 2px 8px; font-size: 11px; color: #6b7280;
+    background: none; border: none; cursor: pointer; text-align: center;
+  }
+  .pending-hero .btn-ghost-defer:hover { color: #4338ca; text-decoration: underline; }
+
+  /* Hero card with title + big health score + trend chart */
+  .hero-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 26px 28px; margin-bottom: 20px;
+    display: grid; grid-template-columns: 1fr 460px; gap: 32px; align-items: center;
+  }
+  .hero-left h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.4px; }
+  .hero-left .meta { font-size: 13px; color: #6b7280; margin-top: 6px; }
+
+  .health-block {
+    margin-top: 18px; display: flex; align-items: center; gap: 18px;
+  }
+  .health-num {
+    font-size: 48px; font-weight: 700; color: #991b1b; line-height: 1; letter-spacing: -1px;
+  }
+  .health-side .band-pill {
+    display: inline-block; padding: 4px 10px; border-radius: 4px;
+    font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+    background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;
+  }
+  .health-side .delta { font-size: 13px; color: #b91c1c; margin-top: 6px; font-weight: 500; }
+
+  .hero-actions { margin-top: 22px; display: flex; gap: 8px; align-items: center; }
+  .btn-primary {
+    padding: 10px 18px; font-size: 13px; font-weight: 600;
+    background: #4f46e5; color: #fff; border: 1px solid #4338ca;
+    border-radius: 6px; cursor: pointer;
+  }
+  .btn-primary:hover { background: #4338ca; }
+  .config-link { margin-left: 6px; font-size: 12px; color: #6b7280; }
+  .config-link a { color: #6b7280; text-decoration: none; }
+  .config-link a:hover { color: #4338ca; text-decoration: underline; }
+
+  /* Trend chart on the right side of hero */
+  .trend-card {
+    background: #fafbfc; border: 1px solid #eef0f3; border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .trend-card .tlabel {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;
+    font-weight: 600; margin-bottom: 12px;
+  }
+  .trend-card .trange {
+    font-size: 11px; color: #9ca3af; text-transform: none; letter-spacing: 0;
+  }
+  .trend-svg { width: 100%; height: 140px; display: block; }
+
+  .trend-legend {
+    display: flex; gap: 10px; margin-top: 8px; font-size: 10px; color: #9ca3af;
+    justify-content: flex-end;
+  }
+  .trend-legend .ld { display: inline-block; width: 12px; height: 2px; margin-right: 3px; vertical-align: middle; }
+
+  /* Panel */
+  .panel {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  .panel-head {
+    padding: 14px 20px; border-bottom: 1px solid #eef0f3;
+    font-size: 14px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-head .meta-small { font-size: 11px; color: #9ca3af; font-weight: 500; }
+  .panel-body { padding: 14px 20px; }
+
+  /* Signal list with sparklines */
+  .signal-list { display: flex; flex-direction: column; gap: 4px; }
+  .signal-row {
+    display: grid; grid-template-columns: 28px 1fr 90px auto;
+    gap: 12px; align-items: center;
+    padding: 10px 0; border-bottom: 1px dashed #f1f2f4;
+  }
+  .signal-row:last-child { border-bottom: none; }
+  .signal-row .sdir {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .signal-row .sdir.down { background: #fef2f2; color: #b91c1c; }
+  .signal-row .sdir.up { background: #ecfdf5; color: #15803d; }
+  .signal-row .sname { font-weight: 600; font-size: 13px; }
+  .signal-row .ssub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .signal-row .s-spark { display: block; }
+  .signal-row .s-value {
+    font-size: 12px; color: #6b7280; text-align: right; font-weight: 500;
+  }
+
+  /* Intervention history with outcome bar */
+  .hist-row {
+    padding: 14px 0; border-bottom: 1px solid #f1f2f4;
+    display: grid; grid-template-columns: 86px 1fr auto; gap: 16px; align-items: center;
+  }
+  .hist-row:last-child { border-bottom: none; }
+  .hist-row .when { font-size: 12px; color: #9ca3af; }
+  .hist-row .what .action { font-weight: 600; font-size: 13px; }
+  .hist-row .what .trigger { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .outcome-badge {
+    padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .outcome-badge.improved { background: #ecfdf5; color: #065f46; }
+  .outcome-badge.unchanged { background: #f3f4f6; color: #4b5563; }
+  .outcome-badge.worsened { background: #fef2f2; color: #991b1b; }
+  .outcome-badge .delta-num { font-size: 10px; opacity: 0.75; }
+
+  /* Advanced disclosure */
+  details.advanced {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  details.advanced summary {
+    padding: 14px 20px; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: #4b5563;
+    display: flex; align-items: center; gap: 8px;
+    list-style: none;
+  }
+  details.advanced summary::before {
+    content: '▸'; font-size: 11px; color: #9ca3af;
+    transition: transform 0.1s;
+  }
+  details.advanced[open] summary::before { transform: rotate(90deg); }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced[open] summary { border-bottom: 1px solid #eef0f3; }
+  details.advanced .disc-body { padding: 14px 20px; }
+
+  .transition-row {
+    padding: 8px 0; font-size: 13px;
+    display: grid; grid-template-columns: 90px 1fr; gap: 14px;
+    border-bottom: 1px solid #f5f6f8;
+  }
+  .transition-row:last-child { border-bottom: none; }
+  .transition-row .date { color: #6b7280; font-size: 12px; }
+
+  .ministep {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .ministep.healthy { background: #ecfdf5; color: #065f46; }
+  .ministep.watch { background: #fef3c7; color: #92400e; }
+  .ministep.at-risk { background: #fef2f2; color: #b91c1c; }
+  .ministep.critical { background: #fef2f2; color: #991b1b; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Drill-down (Option 2 · visual) · pending-proposal card at top when an intervention is awaiting approval (Smith Dental).
+  Hero health-score trend chart · sparklines on signals · outcome badges with delta values.
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="clientpulse-mockup-dashboard.html">Clients</a> <span class="sep">›</span> Smith Dental
+  </div>
+
+  <!-- Pending proposal card (visible when ClientPulse has proposed an intervention awaiting approval for this client) -->
+  <div class="pending-hero">
+    <div class="ph-left">
+      <div class="ph-label">⚑ ClientPulse has proposed an intervention — awaiting your approval</div>
+      <div class="ph-action">Retention call task · assigned to Ben · within 24h</div>
+      <div class="ph-why">
+        Dropped to Critical 4d ago. Outbound silent 8d. Retention-call template previously improved band 2 of 3 times for dentistry.
+      </div>
+    </div>
+    <div class="ph-actions">
+      <button class="btn-primary">Approve</button>
+      <button class="btn-ghost-red">Reject</button>
+      <button class="btn-ghost-defer">Defer 24h</button>
+    </div>
+  </div>
+
+  <!-- Hero card with title + big health score + 90-day trend chart -->
+  <div class="hero-card">
+    <div class="hero-left">
+      <h1>Smith Dental</h1>
+      <div class="meta">Dentistry · AU · onboarded 4 months ago · GHL sub-account</div>
+
+      <div class="health-block">
+        <span class="health-num">28</span>
+        <div class="health-side">
+          <span class="band-pill">Critical</span>
+          <div class="delta">↓ 12 points · last 7 days</div>
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <a class="btn-primary" href="clientpulse-mockup-propose-intervention.html" style="text-decoration:none; display:inline-block;">Propose intervention</a>
+        <span class="config-link">· <a href="clientpulse-mockup-config-assistant-chat.html">Configuration Assistant</a></span>
+      </div>
+    </div>
+
+    <div class="trend-card">
+      <div class="tlabel">
+        <span>Health score · 90 days</span>
+        <span class="trange">Jan 23 – Apr 23</span>
+      </div>
+      <svg class="trend-svg" viewBox="0 0 420 140" preserveAspectRatio="none">
+        <!-- Band threshold backgrounds -->
+        <rect x="0" y="0"    width="420" height="28"  fill="#fef2f2" opacity="0.4"/>  <!-- Critical 0-19 → top band inverted -->
+        <rect x="0" y="28"   width="420" height="28"  fill="#fef3c7" opacity="0.35"/> <!-- At Risk 20-39 -->
+        <rect x="0" y="56"   width="420" height="28"  fill="#fffbeb" opacity="0.5"/>  <!-- Watch 40-59 -->
+        <rect x="0" y="84"   width="420" height="56"  fill="#ecfdf5" opacity="0.35"/> <!-- Healthy 60-100 -->
+
+        <!-- Band labels on right -->
+        <text x="415" y="14"  font-size="8" fill="#9ca3af" text-anchor="end">Healthy</text>
+        <text x="415" y="42"  font-size="8" fill="#9ca3af" text-anchor="end">Watch</text>
+        <text x="415" y="70"  font-size="8" fill="#9ca3af" text-anchor="end">At Risk</text>
+        <text x="415" y="98"  font-size="8" fill="#9ca3af" text-anchor="end">Critical</text>
+
+        <!-- Health line: y is inverted because healthy (high score) sits at top -->
+        <!-- Mapping: score 100 → y=0, score 0 → y=140. Points: week-by-week over 13 weeks -->
+        <polyline
+          fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+          points="10,22 42,24 74,22 106,28 138,34 170,32 202,38 234,50 266,62 298,72 330,80 362,94 400,112"/>
+
+        <!-- Band crossings markers -->
+        <circle cx="234" cy="50" r="3" fill="#d97706"/>  <!-- Watch crossing -->
+        <circle cx="298" cy="72" r="3" fill="#dc2626"/>  <!-- At Risk crossing -->
+        <circle cx="400" cy="112" r="4" fill="#991b1b" stroke="#fff" stroke-width="1.5"/>  <!-- Critical / current -->
+      </svg>
+      <div class="trend-legend">
+        <span><span class="ld" style="background:#6366f1;"></span>Health score</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top signals with sparklines -->
+  <div class="panel">
+    <div class="panel-head">
+      <span>Top signals driving the drop</span>
+      <span class="meta-small">5 of 12 shown · sorted by impact</span>
+    </div>
+    <div class="panel-body">
+      <div class="signal-list">
+
+        <div class="signal-row">
+          <span class="sdir down">↓</span>
+          <div>
+            <div class="sname">Inbound calls</div>
+            <div class="ssub">8d since last · baseline 2d</div>
+          </div>
+          <svg class="s-spark" width="90" height="22" viewBox="0 0 90 22">
+            <polyline points="2,6 14,7 26,9 38,11 50,13 62,15 74,17 88,20" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="88" cy="20" r="2" fill="#b91c1c"/>
+          </svg>
+          <span class="s-value" style="color:#b91c1c;">−6 calls / 4w</span>
+        </div>
+
+        <div class="signal-row">
+          <span class="sdir down">↓</span>
+          <div>
+            <div class="sname">Outbound SMS</div>
+            <div class="ssub">last sent 8d ago · team avg 2d</div>
+          </div>
+          <svg class="s-spark" width="90" height="22" viewBox="0 0 90 22">
+            <polyline points="2,4 14,6 26,8 38,12 50,14 62,15 74,18 88,20" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="88" cy="20" r="2" fill="#b91c1c"/>
+          </svg>
+          <span class="s-value" style="color:#b91c1c;">−4 SMS / 4w</span>
+        </div>
+
+        <div class="signal-row">
+          <span class="sdir down">↓</span>
+          <div>
+            <div class="sname">Logged in</div>
+            <div class="ssub">6d since last login</div>
+          </div>
+          <svg class="s-spark" width="90" height="22" viewBox="0 0 90 22">
+            <polyline points="2,8 14,9 26,10 38,12 50,14 62,15 74,17 88,19" fill="none" stroke="#b45309" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="88" cy="19" r="2" fill="#b45309"/>
+          </svg>
+          <span class="s-value" style="color:#b45309;">6d ago</span>
+        </div>
+
+        <div class="signal-row">
+          <span class="sdir down">↓</span>
+          <div>
+            <div class="sname">Pipeline value</div>
+            <div class="ssub">$647 → $347 this week</div>
+          </div>
+          <svg class="s-spark" width="90" height="22" viewBox="0 0 90 22">
+            <polyline points="2,3 14,4 26,5 38,7 50,9 62,12 74,16 88,20" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="88" cy="20" r="2" fill="#b91c1c"/>
+          </svg>
+          <span class="s-value" style="color:#b91c1c;">−$300 / 4w</span>
+        </div>
+
+        <div class="signal-row">
+          <span class="sdir up">↑</span>
+          <div>
+            <div class="sname">Unread conversations</div>
+            <div class="ssub">3 inbound messages · last 5 days</div>
+          </div>
+          <svg class="s-spark" width="90" height="22" viewBox="0 0 90 22">
+            <polyline points="2,18 14,16 26,15 38,13 50,10 62,8 74,6 88,4" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="88" cy="4" r="2" fill="#d97706"/>
+          </svg>
+          <span class="s-value" style="color:#b45309;">+3 unread</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Intervention history -->
+  <div class="panel">
+    <div class="panel-head">
+      <span>Intervention history</span>
+      <span class="meta-small">3 interventions in last 90 days</span>
+    </div>
+    <div class="panel-body" style="padding-top:4px;">
+      <div class="hist-row">
+        <span class="when">12d ago</span>
+        <div class="what">
+          <div class="action">Retention call task (assigned to Ben)</div>
+          <div class="trigger">Triggered: Watch → At Risk band change</div>
+        </div>
+        <span class="outcome-badge unchanged">Unchanged <span class="delta-num">±0</span></span>
+      </div>
+      <div class="hist-row">
+        <span class="when">26d ago</span>
+        <div class="what">
+          <div class="action">Funnel-nurture email sequence</div>
+          <div class="trigger">Triggered: Watch band entry</div>
+        </div>
+        <span class="outcome-badge improved">Improved <span class="delta-num">+8 pts</span></span>
+      </div>
+      <div class="hist-row">
+        <span class="when">58d ago</span>
+        <div class="what">
+          <div class="action">Operator alert — unread-conversation spike</div>
+          <div class="trigger">Triggered: Blind-spot pattern</div>
+        </div>
+        <span class="outcome-badge worsened">Worsened <span class="delta-num">−3 pts</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Band transitions (collapsed disclosure) -->
+  <details class="advanced">
+    <summary>Advanced · Band-transition history (3)</summary>
+    <div class="disc-body">
+      <div class="transition-row">
+        <span class="date">4d ago</span>
+        <span><span class="ministep at-risk">At Risk</span> → <span class="ministep critical">Critical</span> · trigger: health score dropped below 30</span>
+      </div>
+      <div class="transition-row">
+        <span class="date">19d ago</span>
+        <span><span class="ministep watch">Watch</span> → <span class="ministep at-risk">At Risk</span> · trigger: multi-signal composite</span>
+      </div>
+      <div class="transition-row">
+        <span class="date">34d ago</span>
+        <span><span class="ministep healthy">Healthy</span> → <span class="ministep watch">Watch</span> · trigger: outbound SMS silent 7+ days</span>
+      </div>
+    </div>
+  </details>
+</div>
+
+</body>
+</html>

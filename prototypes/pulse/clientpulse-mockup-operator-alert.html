@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Operator alert · intervention editor (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; z-index: 1; }
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15,23,42,0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 520px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .m-body { padding: 16px 20px; }
+  .form-field { margin-bottom: 12px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 90px; resize: vertical; line-height: 1.55; }
+
+  .severity-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .severity-option {
+    padding: 8px 10px; border: 1.5px solid #e5e7eb; border-radius: 5px; cursor: pointer;
+    font-size: 12px; text-align: center; font-weight: 500; color: #4b5563;
+  }
+  .severity-option.info.selected { border-color: #1d4ed8; background: #eff6ff; color: #1e40af; }
+  .severity-option.warn.selected { border-color: #b45309; background: #fef3c7; color: #92400e; }
+  .severity-option.urgent.selected { border-color: #b91c1c; background: #fef2f2; color: #991b1b; }
+
+  .channel-list { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .channel-row {
+    padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px; font-size: 12px;
+    display: flex; align-items: center; gap: 6px; cursor: pointer; color: #4b5563;
+  }
+  .channel-row.selected { border-color: #4338ca; background: #eef2ff; color: #4338ca; font-weight: 600; }
+
+  .m-footer {
+    padding: 12px 20px; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: flex-end; gap: 8px; background: #fafbfc;
+  }
+  .btn { padding: 8px 16px; font-size: 13px; font-weight: 600; border-radius: 5px; cursor: pointer; border: 1px solid; }
+  .btn.secondary { background: #fff; color: #4b5563; border-color: #d1d5db; }
+  .btn.primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn.primary:hover { background: #4338ca; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Operator alert editor (simplified) · form-only. Alert-preview card + "how this works" callout + channel-availability note all deferred.
+</div>
+<div class="bg-context"></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+    <div class="m-head">
+      <div>
+        <h2>Send operator alert</h2>
+        <div class="sub">For Smith Dental · notify internal staff</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+      <div class="form-field">
+        <label>Title</label>
+        <input type="text" value="Smith Dental dropped to Critical">
+      </div>
+
+      <div class="form-field">
+        <label>Message</label>
+        <textarea>Smith Dental moved At Risk → Critical 4 days ago. Last outbound call 8 days ago. Suggest a retention call within 24h.</textarea>
+      </div>
+
+      <div class="form-field">
+        <label>Severity</label>
+        <div class="severity-toggle">
+          <div class="severity-option info">Info</div>
+          <div class="severity-option warn">Warn</div>
+          <div class="severity-option urgent selected">Urgent</div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Recipients</label>
+        <select>
+          <option>Account team (Ben + Sarah)</option>
+          <option>All operators</option>
+          <option>Just me</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>Channels</label>
+        <div class="channel-list">
+          <div class="channel-row selected">In-app</div>
+          <div class="channel-row selected">Email</div>
+          <div class="channel-row">Slack</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-footer">
+      <button class="btn secondary">Cancel</button>
+      <button class="btn primary">Send alert</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

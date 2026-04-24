@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Synthetos · Run detail / execution log</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner a { color: #78350f; font-weight: 700; text-decoration: underline; }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 28px 32px 60px; }
+
+  .backlink { font-size: 12px; color: #6b7280; margin-bottom: 16px; display: flex; gap: 4px; }
+  .backlink a { color: #4338ca; font-weight: 500; }
+  .backlink a:hover { text-decoration: underline; }
+
+  /* Run header */
+  .run-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 20px; gap: 24px;
+  }
+  .run-header .rh-left h1 {
+    font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;
+    margin-bottom: 4px;
+  }
+  .run-header .rh-left .run-id {
+    font-family: 'Fira Mono', 'Courier New', monospace;
+    font-size: 11px; color: #94a3b8; letter-spacing: 0.3px;
+  }
+  .run-header .rh-right { display: flex; gap: 12px; align-items: center; }
+  .run-trace-link {
+    font-size: 13px; color: #4f46e5; font-weight: 600; padding: 7px 14px;
+    border: 1px solid #c7d2fe; border-radius: 6px; background: #fff;
+  }
+  .run-trace-link:hover { background: #eef2ff; }
+
+  /* Run meta bar */
+  .run-meta {
+    display: flex; gap: 24px; flex-wrap: wrap;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 14px 20px; margin-bottom: 24px;
+    align-items: center;
+  }
+  .run-meta .meta-item { font-size: 13px; color: #475569; display: flex; align-items: center; gap: 8px; }
+  .run-meta .meta-item .mi-label { font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.3px; color: #94a3b8; margin-right: 2px; }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+  .status-badge.completed { background: #ecfdf5; color: #065f46; }
+  .status-badge.running { background: #eff6ff; color: #1d4ed8; }
+  .status-badge.failed { background: #fef2f2; color: #991b1b; }
+  .status-badge .sb-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .status-badge.completed .sb-dot { background: #10b981; }
+  .status-badge.running .sb-dot { background: #3b82f6; animation: blink 1.2s infinite; }
+  .status-badge.failed .sb-dot { background: #ef4444; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Two-column layout: timeline left, drawer right */
+  .page-body {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* Timeline */
+  .timeline-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    overflow: hidden;
+  }
+  .timeline-card .tc-head {
+    padding: 14px 18px; border-bottom: 1px solid #f1f2f4;
+    font-size: 13px; font-weight: 700; color: #0f172a;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .tc-count { font-size: 11px; color: #94a3b8; font-weight: 500; }
+  .timeline-list { padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+
+  .event-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 10px; border-radius: 6px; border: 1px solid transparent;
+    cursor: pointer; transition: all 0.08s; width: 100%; text-align: left;
+    background: none;
+  }
+  .event-row:hover { background: #f8fafc; border-color: #e2e8f0; }
+  .event-row.selected { background: #eef2ff; border-color: #c7d2fe; }
+
+  .er-ts {
+    font-family: 'Fira Mono', 'Courier New', monospace;
+    font-size: 11px; color: #94a3b8; flex-shrink: 0; width: 52px; padding-top: 1px;
+  }
+  .er-body { flex: 1; min-width: 0; }
+  .er-top { display: flex; align-items: center; gap: 6px; }
+  .er-label { font-size: 13px; font-weight: 500; color: #334155; }
+  .event-row.selected .er-label { color: #1a1d23; font-weight: 600; }
+  .er-label.critical { color: #0f172a; font-weight: 600; }
+  .er-badge-crit {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
+    background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 3px;
+  }
+  .er-seq {
+    font-family: 'Fira Mono', monospace; font-size: 10px; color: #cbd5e1;
+    margin-left: auto;
+  }
+  .er-sub { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+  .er-sub a { color: #4338ca; }
+  .er-sub a:hover { text-decoration: underline; }
+
+  /* Event detail drawer (shown inline in mockup) */
+  .drawer {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    position: sticky; top: 24px;
+    max-height: calc(100vh - 120px); overflow-y: auto;
+  }
+  .drawer-head {
+    padding: 12px 16px; border-bottom: 1px solid #f1f2f4;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .drawer-head h2 { font-size: 13px; font-weight: 700; color: #0f172a; flex: 1; }
+  .drawer-head .d-seq { font-family: monospace; font-size: 11px; color: #94a3b8; }
+  .drawer-head .d-close {
+    font-size: 18px; color: #94a3b8; cursor: pointer; line-height: 1;
+    background: none; border: none; padding: 2px 4px;
+  }
+  .drawer-head .d-close:hover { color: #475569; }
+
+  .drawer-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .drawer-ts { font-size: 11.5px; color: #94a3b8; }
+
+  .d-section h3 { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  .d-entity {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+    padding: 10px 12px; font-size: 13px; color: #334155;
+  }
+  .d-entity .de-label { font-weight: 600; margin-bottom: 4px; }
+  .d-entity .de-links { display: flex; gap: 10px; margin-top: 6px; font-size: 12px; color: #4338ca; }
+  .d-entity .de-links a:hover { text-decoration: underline; }
+
+  .d-payload {
+    background: #0f172a; border-radius: 6px; padding: 12px 14px;
+    font-family: 'Fira Mono', 'Courier New', monospace;
+    font-size: 11px; color: #94a3b8; white-space: pre-wrap; overflow-x: auto;
+    line-height: 1.7;
+  }
+  .d-payload .k { color: #7dd3fc; } /* key */
+  .d-payload .s { color: #86efac; } /* string value */
+  .d-payload .n { color: #fbbf24; } /* number/bool */
+
+  .d-fetch-btn {
+    padding: 7px 14px; font-size: 12px; font-weight: 600;
+    border: 1px solid #e2e8f0; border-radius: 6px;
+    background: #fff; color: #334155; cursor: pointer; width: 100%; text-align: left;
+  }
+  .d-fetch-btn:hover { background: #f8fafc; border-color: #c7d2fe; color: #4338ca; }
+
+  details summary {
+    font-size: 12px; font-weight: 600; color: #475569; cursor: pointer; padding: 4px 0;
+  }
+  details summary:hover { color: #0f172a; }
+  details[open] summary { color: #0f172a; }
+  details pre {
+    background: #f8fafc; border-radius: 6px; padding: 10px 12px;
+    font-size: 11px; font-family: 'Fira Mono', monospace;
+    white-space: pre-wrap; overflow-x: auto; margin-top: 6px;
+    color: #334155; line-height: 1.6;
+  }
+  .d-meta-pill {
+    display: inline-flex; font-size: 11px; padding: 2px 8px; border-radius: 3px;
+    font-weight: 600; margin-right: 4px;
+  }
+  .d-meta-pill.amber { background: #fffbeb; color: #92400e; }
+  .d-meta-pill.emerald { background: #ecfdf5; color: #065f46; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  PROPOSED · Run detail page (route <code>/agent-runs/:runId</code>) · based on shipped
+  <code>AgentRunLivePage.tsx</code> + Timeline + EventDetailDrawer.
+  <a href="home-dashboard.html">← Home dashboard</a>
+</div>
+
+<div class="container">
+
+  <div class="backlink">
+    <a href="home-dashboard.html">Home</a>
+    <span>/</span>
+    <span>Run detail</span>
+  </div>
+
+  <div class="run-header">
+    <div class="rh-left">
+      <h1>Live execution log</h1>
+      <div class="run-id">Run a3f8c1d2-0044-4e7b-8a1c-d2091b34e5f7</div>
+    </div>
+    <div class="rh-right">
+      <a class="run-trace-link" href="#">View run trace →</a>
+    </div>
+  </div>
+
+  <!-- Run meta bar -->
+  <div class="run-meta">
+    <div class="meta-item">
+      <span class="mi-label">Agent</span>
+      <strong>ClientPulse Weekly Scorer</strong>
+    </div>
+    <div class="meta-item">
+      <span class="mi-label">Status</span>
+      <span class="status-badge completed"><span class="sb-dot"></span>Completed</span>
+    </div>
+    <div class="meta-item">
+      <span class="mi-label">Duration</span>
+      <strong>1m 42s</strong>
+    </div>
+    <div class="meta-item">
+      <span class="mi-label">Events</span>
+      <strong>34</strong>
+    </div>
+    <div class="meta-item">
+      <span class="mi-label">Started</span>
+      <span>20 Apr 2026 · 09:14</span>
+    </div>
+  </div>
+
+  <!-- Two-column: timeline + drawer -->
+  <div class="page-body">
+
+    <!-- Timeline -->
+    <div class="timeline-card">
+      <div class="tc-head">
+        <span>Event timeline</span>
+        <span class="tc-count">34 events</span>
+      </div>
+      <div class="timeline-list">
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+0ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label critical">Run started</span>
+              <span class="er-badge-crit">critical</span>
+              <span class="er-seq">#1</span>
+            </div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+38ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Orchestrator routed run</span>
+              <span class="er-seq">#2</span>
+            </div>
+            <div class="er-sub">→ clientpulse-health-scorer</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+91ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Context source loaded</span>
+              <span class="er-seq">#3</span>
+            </div>
+            <div class="er-sub">CRM contacts · 87 records</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+210ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Memory retrieved</span>
+              <span class="er-seq">#4</span>
+            </div>
+            <div class="er-sub">Scoring config · operator overrides</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+290ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Policy rule evaluated</span>
+              <span class="er-seq">#5</span>
+            </div>
+            <div class="er-sub">churn-threshold · passed</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+340ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Prompt assembled</span>
+              <span class="er-seq">#6</span>
+            </div>
+            <div class="er-sub">Assembly #1 · 4,820 tokens</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+350ms</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">LLM call started</span>
+              <span class="er-seq">#7</span>
+            </div>
+          </div>
+        </button>
+
+        <button class="event-row selected" type="button">
+          <div class="er-ts">+18.3s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label critical">LLM call completed</span>
+              <span class="er-badge-crit">critical</span>
+              <span class="er-seq">#8</span>
+            </div>
+            <div class="er-sub">18.0s · 1,240 output tokens</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+18.4s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Skill invoked</span>
+              <span class="er-seq">#9</span>
+            </div>
+            <div class="er-sub">write-health-scores · 87 records</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+22.1s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Skill completed</span>
+              <span class="er-seq">#10</span>
+            </div>
+            <div class="er-sub">write-health-scores · 87 written in 3.7s</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+22.2s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Prompt assembled</span>
+              <span class="er-seq">#11</span>
+            </div>
+            <div class="er-sub">Assembly #2 · 2,100 tokens</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+22.3s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">LLM call started</span>
+              <span class="er-seq">#12</span>
+            </div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+31.8s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label critical">LLM call completed</span>
+              <span class="er-badge-crit">critical</span>
+              <span class="er-seq">#13</span>
+            </div>
+            <div class="er-sub">9.5s · 820 output tokens · intervention proposal: Smith Dental</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+31.9s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label critical">Clarification requested</span>
+              <span class="er-badge-crit">critical</span>
+              <span class="er-seq">#14</span>
+            </div>
+            <div class="er-sub">Awaiting operator approval · handoff paused</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+1m 40s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label">Handoff decided</span>
+              <span class="er-seq">#33</span>
+            </div>
+            <div class="er-sub">Operator approved · resuming</div>
+          </div>
+        </button>
+
+        <button class="event-row" type="button">
+          <div class="er-ts">+1m 42s</div>
+          <div class="er-body">
+            <div class="er-top">
+              <span class="er-label critical">Run completed</span>
+              <span class="er-badge-crit">critical</span>
+              <span class="er-seq">#34</span>
+            </div>
+            <div class="er-sub">87 clients scored · 1 intervention proposed · 0 errors</div>
+          </div>
+        </button>
+
+      </div>
+    </div><!-- /.timeline-card -->
+
+    <!-- Event detail drawer (shown for #8 LLM call completed) -->
+    <div class="drawer">
+      <div class="drawer-head">
+        <h2>llm.completed <span class="d-seq">#8</span></h2>
+        <button class="d-close" type="button">×</button>
+      </div>
+      <div class="drawer-body">
+
+        <div class="drawer-ts">20 Apr 2026, 09:14:18 · clientpulse-health-scorer</div>
+
+        <div class="d-section">
+          <h3>Linked entity</h3>
+          <div class="d-entity">
+            <div class="de-label">ClientPulse Health Scoring Run · Week 16</div>
+            <div class="de-links">
+              <a href="clientpulse-mockup-dashboard.html">View dashboard</a>
+              <a href="#">Edit config</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-section">
+          <h3>Payload</h3>
+          <div class="d-payload"><span class="k">"llmRequestId"</span>: <span class="s">"lr-0091fc"</span>,
+<span class="k">"model"</span>:       <span class="s">"claude-opus-4-7"</span>,
+<span class="k">"durationMs"</span>:  <span class="n">17982</span>,
+<span class="k">"inputTokens"</span>: <span class="n">4820</span>,
+<span class="k">"outputTokens"</span>:<span class="n">1240</span>,
+<span class="k">"critical"</span>:    <span class="n">true</span></div>
+        </div>
+
+        <div class="d-section">
+          <h3>Full payload</h3>
+          <div style="margin-bottom: 8px;">
+            <span class="d-meta-pill emerald">1,240 output tokens</span>
+            <span class="d-meta-pill amber">0 modifications</span>
+          </div>
+          <details open>
+            <summary>System prompt</summary>
+            <pre>You are the ClientPulse health scoring agent.
+Your job is to score each of the 87 client accounts
+on a 0–100 health scale based on the signals provided.
+
+Rules:
+- Critical: 0–29
+- At Risk: 30–44
+- Watch: 45–59
+- Healthy: 60–100
+
+Return a JSON array with { clientId, score, band, signals[] }.</pre>
+          </details>
+          <details style="margin-top: 8px;">
+            <summary>Messages (2)</summary>
+            <pre>[{ "role": "user", "content": "Score the following 87 clients…" }]</pre>
+          </details>
+          <details style="margin-top: 8px;">
+            <summary>Response</summary>
+            <pre>[
+  { "clientId": "clt_smith_dental",
+    "score": 28, "band": "Critical",
+    "signals": ["inbound_silent_8d", "pipeline_dropping"] },
+  { "clientId": "clt_northside_physio",
+    "score": 18, "band": "Critical",
+    "signals": ["cooldown_active", "silent_6d"] },
+  … 85 more
+]</pre>
+          </details>
+        </div>
+
+      </div><!-- /.drawer-body -->
+    </div><!-- /.drawer -->
+
+  </div><!-- /.page-body -->
+
+</div>
+
+</body>
+</html>

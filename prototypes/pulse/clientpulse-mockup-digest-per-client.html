@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Per-client weekly digest (richer — D2 decision)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fde68a 0%, #fcd34d 100%);
+    color: #78350f; padding: 10px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .decide-note {
+    max-width: 720px; margin: 16px auto 0; padding: 14px 16px;
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;
+    color: #1e40af; font-size: 13px; line-height: 1.6;
+  }
+  .decide-note strong { color: #1e3a8a; }
+
+  .email-wrap {
+    max-width: 640px; margin: 24px auto 40px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+  }
+  .email-head {
+    padding: 14px 24px; border-bottom: 1px solid #eef0f3; background: #fafbfc;
+    font-size: 12px; color: #6b7280;
+  }
+  .email-head .from { color: #1a1d23; font-weight: 500; }
+
+  .email-body { padding: 28px 28px 32px; }
+  .email-body h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.3px; }
+  .email-body .subline { font-size: 13px; color: #6b7280; margin-bottom: 20px; }
+
+  /* Week-summary band strip */
+  .week-strip {
+    display: grid; grid-template-columns: 1fr 160px; gap: 18px;
+    padding: 18px 20px; border-radius: 8px;
+    background: #fef2f2; border: 1px solid #fecaca; margin-bottom: 20px;
+    align-items: center;
+  }
+  .week-strip .ws-left h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .week-strip .band-change {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 14px;
+  }
+  .band-tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 3px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .band-tag.at-risk { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .band-tag.critical { background: #991b1b; color: #fff; }
+  .week-strip .wk-sub { font-size: 12px; color: #991b1b; margin-top: 6px; }
+
+  .week-strip .mini-trend svg { display: block; width: 100%; height: 50px; }
+  .week-strip .mini-trend .m-label { font-size: 10px; color: #991b1b; text-align: right; margin-top: 4px; }
+
+  /* Section labels */
+  .sect-label {
+    font-size: 11px; font-weight: 700; color: #6b7280; margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .section { margin-bottom: 22px; }
+
+  /* Intervention outcome cards */
+  .outcome-row {
+    padding: 12px 14px; border-radius: 6px; margin-bottom: 8px;
+    display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+    font-size: 13px; border: 1px solid #eef0f3; background: #fafbfc;
+  }
+  .outcome-row strong { font-weight: 600; }
+  .outcome-row .o-meta { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .outcome-badge {
+    padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .outcome-badge.improved { background: #ecfdf5; color: #065f46; }
+  .outcome-badge.unchanged { background: #f3f4f6; color: #4b5563; }
+  .outcome-badge.worsened { background: #fef2f2; color: #991b1b; }
+  .outcome-badge .delta-num { font-size: 10px; opacity: 0.75; margin-left: 4px; }
+
+  /* Activity summary */
+  .activity-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .activity-cell {
+    padding: 12px 14px; background: #fafbfc; border: 1px solid #eef0f3; border-radius: 6px;
+  }
+  .activity-cell .ac-label { font-size: 11px; color: #6b7280; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; }
+  .activity-cell .ac-value { font-size: 16px; font-weight: 600; }
+  .activity-cell .ac-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .activity-cell.warn .ac-value { color: #b45309; }
+  .activity-cell.good .ac-value { color: #15803d; }
+
+  /* Next-week watch */
+  .watch-item {
+    padding: 10px 12px; background: #fafbfc; border: 1px solid #eef0f3;
+    border-left: 3px solid #6366f1; border-radius: 5px; margin-bottom: 8px;
+    font-size: 13px; color: #4b5563;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .watch-item strong { color: #1a1d23; font-weight: 600; }
+  .watch-item .when { font-size: 11px; color: #6b7280; }
+
+  .email-cta {
+    display: inline-block; margin-top: 4px;
+    padding: 10px 22px; background: #4f46e5; color: #fff;
+    border-radius: 6px; font-weight: 600; font-size: 14px;
+    text-decoration: none;
+  }
+  .email-foot {
+    padding: 14px 24px; border-top: 1px solid #eef0f3;
+    font-size: 11px; color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  D2 DECISION · RICHER per-client Friday digest (backward-looking).
+  Approve to ship this, or tell me to delete the feature entirely.
+</div>
+
+<div class="decide-note">
+  <strong>Revised richer variant of the per-client backward-looking weekly digest.</strong>
+  Now includes: mini trend chart of this week's move, intervention outcomes this week with delta values, activity summary (outbound / login), and a "watch for next week" bridge.
+  Primary task reinforced — <em>close the week knowing what happened and what rolls into next week</em>.
+  <br><br>
+  Worth shipping given the drilldown's Intervention-history panel already covers most of this? That's what you're deciding.
+</div>
+
+<div class="email-wrap">
+  <div class="email-head">
+    <div><span class="from">Synthetos</span> &lt;ping@synthetos.io&gt;</div>
+    <div style="margin-top:4px;">to Ben Quinlan · Friday 17:00</div>
+    <div style="margin-top:4px;"><strong style="color:#1a1d23;">Subject:</strong> Smith Dental · week ending 25 April</div>
+  </div>
+
+  <div class="email-body">
+    <h1>Smith Dental · this week</h1>
+    <div class="subline">Week ending Friday 25 April · 7 days reviewed</div>
+
+    <!-- Week-change hero strip with trend -->
+    <div class="week-strip">
+      <div class="ws-left">
+        <h2>What changed this week</h2>
+        <div class="band-change">
+          <span class="band-tag at-risk">At Risk</span>
+          <span style="color:#9ca3af;">→</span>
+          <span class="band-tag critical">Critical</span>
+        </div>
+        <div class="wk-sub">Dropped 4 days ago · health 40 → 28</div>
+      </div>
+      <div class="mini-trend">
+        <svg viewBox="0 0 140 50" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#991b1b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            points="4,14 24,18 44,20 64,26 84,32 104,38 124,44 136,46"/>
+          <circle cx="136" cy="46" r="2.5" fill="#991b1b"/>
+        </svg>
+        <div class="m-label">this week</div>
+      </div>
+    </div>
+
+    <!-- Intervention outcomes this week -->
+    <div class="section">
+      <div class="sect-label">Interventions this week</div>
+      <div class="outcome-row">
+        <div>
+          <strong>Retention call task</strong> · assigned to Ben · 2 days ago
+          <div class="o-meta">Still open — task not yet completed</div>
+        </div>
+        <span class="outcome-badge unchanged">Pending</span>
+      </div>
+      <div class="outcome-row">
+        <div>
+          <strong>Funnel-nurture email</strong> · sent 6 days ago
+          <div class="o-meta">James opened + clicked the calendar link</div>
+        </div>
+        <span class="outcome-badge improved">Improved <span class="delta-num">+8 pts briefly</span></span>
+      </div>
+    </div>
+
+    <!-- Activity summary -->
+    <div class="section">
+      <div class="sect-label">Team activity this week</div>
+      <div class="activity-grid">
+        <div class="activity-cell warn">
+          <div class="ac-label">Outbound to client</div>
+          <div class="ac-value">2</div>
+          <div class="ac-meta">1 call, 1 email · team avg 5</div>
+        </div>
+        <div class="activity-cell warn">
+          <div class="ac-label">Client logins</div>
+          <div class="ac-value">1</div>
+          <div class="ac-meta">last login 6d ago</div>
+        </div>
+        <div class="activity-cell good">
+          <div class="ac-label">Inbound from client</div>
+          <div class="ac-value">3</div>
+          <div class="ac-meta">3 unread messages</div>
+        </div>
+        <div class="activity-cell">
+          <div class="ac-label">Pipeline movement</div>
+          <div class="ac-value" style="color:#b91c1c;">−$300</div>
+          <div class="ac-meta">$647 → $347</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Watch for next week -->
+    <div class="section">
+      <div class="sect-label">Watch for next week</div>
+      <div class="watch-item">
+        <span><strong>Retention call still open</strong> · complete the task to unblock recovery</span>
+        <span class="when">pending</span>
+      </div>
+      <div class="watch-item">
+        <span><strong>Renewal window opens in 3 days</strong> · contract expires 38 days out</span>
+        <span class="when">Mon</span>
+      </div>
+    </div>
+
+    <a href="#" class="email-cta">Open Smith Dental →</a>
+  </div>
+
+  <div class="email-foot">
+    Weekly digest · <a href="#" style="color:#4338ca;">Pause these digests</a> · <a href="#" style="color:#4338ca;">Change schedule</a>
+  </div>
+</div>
+
+</body>
+</html>

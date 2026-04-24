@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Create task · intervention editor (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; z-index: 1; }
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15,23,42,0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 520px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .m-body { padding: 16px 20px; }
+
+  .form-field { margin-bottom: 12px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .m-footer {
+    padding: 12px 20px; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: flex-end; gap: 8px; background: #fafbfc;
+  }
+  .btn {
+    padding: 8px 16px; font-size: 13px; font-weight: 600;
+    border-radius: 5px; cursor: pointer; border: 1px solid;
+  }
+  .btn.secondary { background: #fff; color: #4b5563; border-color: #d1d5db; }
+  .btn.primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn.primary:hover { background: #4338ca; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Create task editor (simplified) · form-only. Preview card + "How this works" callout deferred — the task lands in the CRM immediately on approval.
+</div>
+<div class="bg-context"></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+    <div class="m-head">
+      <div>
+        <h2>Create task</h2>
+        <div class="sub">For Smith Dental · intervention for At Risk → Critical drop</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+      <div class="form-field">
+        <label>Assign to</label>
+        <select>
+          <option>Ben Quinlan — Owner</option>
+          <option>Sarah Chen — VA</option>
+          <option>Marcus Reid — Account manager</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>Related contact (optional)</label>
+        <input type="text" placeholder="Search contact…" value="James Smith (primary)">
+      </div>
+
+      <div class="form-field">
+        <label>Title</label>
+        <input type="text" value="Retention call — Smith Dental">
+      </div>
+
+      <div class="form-field">
+        <label>Notes</label>
+        <textarea>Client dropped to Critical. Last outbound call 8 days ago. Suggest a 15-min check-in + funnel review.</textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>Due</label>
+          <input type="text" value="Tomorrow 9:00 AM">
+        </div>
+        <div class="form-field">
+          <label>Priority</label>
+          <select>
+            <option>High</option>
+            <option>Medium</option>
+            <option>Low</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-footer">
+      <button class="btn secondary">Cancel</button>
+      <button class="btn primary">Create task</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
