@@ -639,40 +639,43 @@ function WarningResolutionBlock({
       {/* v6 Fix 2: split warnings into a primary data-integrity group and a
           secondary "formatting & notes" group (name mismatch, cross-reference
           hints). Keeps the critical list short and de-noises the primary area. */}
-      {warnings
-        .filter(w => w.code !== 'NAME_MISMATCH' && w.code !== 'CROSS_REFERENCES_DISTINCT')
-        .map((w, i) => (
-          <WarningItem
-            key={`${w.code}-${i}`}
-            warning={w}
-            isLocked={isLocked}
-            isResolved={isResolved}
-            onResolve={resolveWarning}
-            criticalPhrase={criticalPhrase}
-          />
-        ))}
-      {warnings.some(w => w.code === 'NAME_MISMATCH' || w.code === 'CROSS_REFERENCES_DISTINCT') && (
+      {warnings.filter(w => !FORMATTING_WARNING_CODES.has(w.code)).map((w, i) => (
+        <WarningItem
+          key={`${w.code}-${i}`}
+          warning={w}
+          isLocked={isLocked}
+          isResolved={isResolved}
+          onResolve={resolveWarning}
+          criticalPhrase={criticalPhrase}
+        />
+      ))}
+      {warnings.some(w => FORMATTING_WARNING_CODES.has(w.code)) && (
         <div className="mt-3 pt-2 border-t border-slate-300/60">
           <p className="font-medium text-slate-600 mb-2 text-[11px] uppercase tracking-wide">
             Formatting & notes
           </p>
-          {warnings
-            .filter(w => w.code === 'NAME_MISMATCH' || w.code === 'CROSS_REFERENCES_DISTINCT')
-            .map((w, i) => (
-              <WarningItem
-                key={`fmt-${w.code}-${i}`}
-                warning={w}
-                isLocked={isLocked}
-                isResolved={isResolved}
-                onResolve={resolveWarning}
-                criticalPhrase={criticalPhrase}
-              />
-            ))}
+          {warnings.filter(w => FORMATTING_WARNING_CODES.has(w.code)).map((w, i) => (
+            <WarningItem
+              key={`fmt-${w.code}-${i}`}
+              warning={w}
+              isLocked={isLocked}
+              isResolved={isResolved}
+              onResolve={resolveWarning}
+              criticalPhrase={criticalPhrase}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
+/** Warning codes rendered in the secondary "Formatting & notes" section
+ *  (v6 Fix 2). Kept adjacent to the partition logic so the two can't drift. */
+const FORMATTING_WARNING_CODES = new Set<MergeWarningCode>([
+  'NAME_MISMATCH',
+  'CROSS_REFERENCES_DISTINCT',
+]);
 
 function WarningItem({
   warning,

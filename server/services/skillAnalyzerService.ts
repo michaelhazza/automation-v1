@@ -2491,6 +2491,33 @@ export async function appendBatchCollisionWarnings(
   }
 }
 
+/** v6 Fix 4 follow-up — apply an incremental confidence deduction to rows
+ *  whose warnings were augmented post-Stage-5 (SOURCE_FORK, CONTENT_OVERLAP).
+ *  The per-candidate `adjustClassifierConfidence` runs before Stage 5c, so
+ *  batch-level warnings never influence the originally-persisted confidence.
+ *  This helper closes that gap by deducting a fixed amount per batch warning,
+ *  floored at 0.20. */
+export async function applyBatchConfidenceDeductions(
+  jobId: string,
+  deductionBySlug: Map<string, number>,
+): Promise<void> {
+  if (deductionBySlug.size === 0) return;
+  for (const [candidateSlug, deduction] of deductionBySlug.entries()) {
+    if (deduction <= 0) continue;
+    await db
+      .update(skillAnalyzerResults)
+      .set({
+        confidence: sql`GREATEST(0.20, COALESCE(${skillAnalyzerResults.confidence}, 0.5) - ${deduction})`,
+      })
+      .where(
+        and(
+          eq(skillAnalyzerResults.jobId, jobId),
+          eq(skillAnalyzerResults.candidateSlug, candidateSlug),
+        ),
+      );
+  }
+}
+
 export const skillAnalyzerService = {
   createJob,
   resumeJob,
@@ -2518,4 +2545,5 @@ export const skillAnalyzerService = {
   updateResultAgentProposals,
   updateJobAgentRecommendation,
   appendBatchCollisionWarnings,
+  applyBatchConfidenceDeductions,
 };

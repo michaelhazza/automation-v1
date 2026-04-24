@@ -524,9 +524,25 @@ export function parseDemotedFieldStatuses(
   }
 }
 
+/** Tokenise a snake_case field name into a set of informative tokens. */
+function fieldNameTokens(name: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of name.toLowerCase().split(/[_\s-]+/)) {
+    if (raw.length < 2) continue;
+    out.add(stemToken(raw));
+  }
+  return out;
+}
+
 /** Classify each demoted required field based on whether it still exists in
  *  the merged properties, was replaced by a similarly-named field, or was
- *  removed entirely. Used to build the REQUIRED_FIELD_DEMOTED warning detail. */
+ *  removed entirely. Used to build the REQUIRED_FIELD_DEMOTED warning detail.
+ *
+ *  The replacement heuristic tokenises the field name on `_` / `-` / spaces,
+ *  stems each token, and scores each candidate property by the size of the
+ *  shared informative-token set. Requires ≥ 2 shared tokens OR a single
+ *  shared token paired with a pluralisation/suffix signal to guard against
+ *  spurious matches (e.g. "user_name" matching "user_agent"). */
 export function classifyDemotedFields(
   demotedFields: string[],
   mergedDefinition: object | null,
@@ -543,28 +559,35 @@ export function classifyDemotedFields(
       out[field] = { status: 'made_optional' };
       continue;
     }
-    // Look for a "similar" property: matches after stripping trailing 's',
-    // '_url', '_urls', or after a common fuzz — covers competitor_name → competitor_urls / competitor_names.
-    const candidates: string[] = [];
-    const bases = new Set<string>();
-    bases.add(field);
-    bases.add(field.replace(/s$/, ''));
-    bases.add(field.replace(/_urls?$/, ''));
-    bases.add(field.replace(/_names?$/, ''));
-    for (const p of propertyNames) {
-      for (const base of bases) {
-        if (base.length < 3) continue;
-        if (p === field) continue;
-        if (p.includes(base) || base.includes(p)) {
-          candidates.push(p);
-          break;
-        }
-      }
+
+    const fieldTokens = fieldNameTokens(field);
+    if (fieldTokens.size === 0) {
+      out[field] = { status: 'removed_entirely' };
+      continue;
     }
-    if (candidates.length > 0) {
-      // Prefer the shortest candidate (most likely to be a plain rename / pluralisation).
-      candidates.sort((a, b) => a.length - b.length);
-      out[field] = { status: 'replaced_by', replacement: candidates[0] };
+    // Pluralisation / suffix family signals. Two fields from the same family
+    // (e.g. competitor_name → competitor_urls) are treated as likely-related
+    // even if the shared-token set is small.
+    const fieldFamily = field.replace(/(_urls?|_names?|s)$/i, '');
+
+    let best: { name: string; shared: number; sameFamily: boolean } | null = null;
+    for (const p of propertyNames) {
+      if (p === field) continue;
+      const propTokens = fieldNameTokens(p);
+      let shared = 0;
+      for (const t of fieldTokens) if (propTokens.has(t)) shared++;
+      const pFamily = p.replace(/(_urls?|_names?|s)$/i, '');
+      const sameFamily = fieldFamily.length >= 3 && fieldFamily === pFamily;
+      const qualifies = shared >= 2 || (shared >= 1 && sameFamily);
+      if (!qualifies) continue;
+      // Prefer higher shared count, then same-family, then shorter name.
+      const score = shared * 10 + (sameFamily ? 5 : 0) - p.length * 0.01;
+      const bestScore = best ? best.shared * 10 + (best.sameFamily ? 5 : 0) - best.name.length * 0.01 : -Infinity;
+      if (score > bestScore) best = { name: p, shared, sameFamily };
+    }
+
+    if (best) {
+      out[field] = { status: 'replaced_by', replacement: best.name };
     } else {
       out[field] = { status: 'removed_entirely' };
     }
@@ -595,22 +618,41 @@ export function adjustClassifierConfidence(
   },
 ): number {
   if (!Number.isFinite(llmConfidence)) return 0.5;
+  // No-op for rows that have nothing to adjust. Prevents the 0.20 floor from
+  // clamping low-confidence DISTINCT/DUPLICATE rows that carry no warnings
+  // and no merge. Deliberate behaviour change vs. applying the floor blindly.
+  if (warnings.length === 0 && !opts.mergedInstructions) return llmConfidence;
+
   let score = llmConfidence;
 
-  // Required field demotions: -0.05 per field, capped at -0.15. Uses the
-  // structured detail written by Fix 3 so a warning with 3 demoted fields
-  // deducts proportionally, not once per warning.
+  // Required field demotions — weighted by per-field status from Fix 3 so
+  // "made optional" counts softer than "removed entirely". Reads fieldStatus
+  // out of the warning's detail JSON; falls back to -0.05/field for legacy
+  // details that only carry a demotedFields list.
   const reqWarning = warnings.find(w => w.code === 'REQUIRED_FIELD_DEMOTED');
   if (reqWarning) {
-    const demotedCount = parseDemotedFields(reqWarning.detail).length;
-    score -= Math.min(0.15, demotedCount * 0.05);
+    const fields = parseDemotedFields(reqWarning.detail);
+    const statuses = parseDemotedFieldStatuses(reqWarning.detail);
+    let deduction = 0;
+    for (const field of fields) {
+      const s = statuses[field];
+      if (!s) { deduction += 0.05; continue; } // legacy detail
+      if (s.status === 'removed_entirely') deduction += 0.05;
+      else if (s.status === 'replaced_by')  deduction += 0.03;
+      else if (s.status === 'made_optional') deduction += 0.01;
+    }
+    score -= Math.min(0.15, deduction);
   }
 
   // Name change: -0.03 when the incoming renamed the skill.
   if (warnings.some(w => w.code === 'NAME_MISMATCH')) score -= 0.03;
 
-  // Source fork: -0.05. Being one of several incoming merges of the same
-  // library skill is a structural weakness.
+  // Source fork: -0.05. NOTE: SOURCE_FORK warnings are emitted in Stage 5c
+  // (batch-level, after per-candidate Stage 5 finishes). This per-candidate
+  // call of adjustClassifierConfidence runs before Stage 5c, so this branch
+  // only fires when a SOURCE_FORK warning has been attached via the
+  // post-batch confidence re-adjustment pass (see skillAnalyzerJob.ts
+  // finaliseForkConfidences).
   if (warnings.some(w => w.code === 'SOURCE_FORK')) score -= 0.05;
 
   // Critical scope expansion: -0.05 on top of NAME_MISMATCH / table checks.
@@ -632,16 +674,22 @@ export function adjustClassifierConfidence(
   score -= Math.min(0.08, tableDropCount * 0.02);
 
   // Self-reference: merged instructions reference the incoming skill's own
-  // slug or name inside a Related Skills section — signal that the incoming
-  // was designed to live alongside the library skill, not replace it.
+  // slug inside a Related Skills section — signal that the incoming was
+  // designed to live alongside the library skill, not replace it. Uses a
+  // word-boundary regex to avoid false positives on short slugs (e.g. "ads"
+  // matching inside "Google Ads"), gated by a ≥5-char minimum to keep the
+  // match distinctive.
   if (opts.mergedInstructions) {
     const relIdx = opts.mergedInstructions.search(/^##\s+related\s+skills\b/im);
     if (relIdx !== -1) {
-      const relatedSection = opts.mergedInstructions.slice(relIdx).toLowerCase();
+      const relatedSection = opts.mergedInstructions.slice(relIdx);
       const slug = opts.candidateSlug.toLowerCase();
-      const hyphenated = slug.replace(/_/g, '-');
-      if (slug.length >= 3 && (relatedSection.includes(slug) || relatedSection.includes(hyphenated))) {
-        score -= 0.10;
+      if (slug.length >= 5) {
+        const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hyphenated = slug.replace(/_/g, '-');
+        const escapedHyphen = hyphenated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b(${escaped}|${escapedHyphen})\\b`, 'i');
+        if (re.test(relatedSection)) score -= 0.10;
       }
     }
   }
@@ -2801,44 +2849,77 @@ function cleanCellForMatch(cell: string): string {
   return cleaned;
 }
 
-/** Returns the first N non-empty, match-worthy cell values from a pipe-row.
- *  "First N columns" semantics per the v6 brief — typically first two columns
- *  carry the identifying values (e.g. "Headline | 30 chars"). For rows whose
- *  leading cells are blank (table continuations), this reaches further right
- *  to collect up to N distinctive cells. */
-function extractRowKeyValues(rowLine: string, limit = 2): string[] {
-  const trimmed = rowLine.trim().replace(/^\||\|$/g, '');
-  const cells = trimmed.split('|').map(cleanCellForMatch);
-  const out: string[] = [];
-  for (const c of cells) {
-    if (c.length > 0) out.push(c);
-    if (out.length >= limit) break;
+/** Stopwords that carry no identifying signal when comparing table cells.
+ *  Kept short — we want to preserve domain terms like "chars" that the
+ *  stemming logic handles separately. */
+const CELL_TOKEN_STOPWORDS = new Set([
+  'and', 'but', 'for', 'the', 'with', 'each', 'upto', 'up', 'to', 'max',
+  'min', 'per', 'via', 'not', 'any', 'all', 'or', 'of', 'in', 'on', 'at',
+  'by', 'as', 'is', 'are', 'if',
+]);
+
+/** Strip a common pluralisation / word-form suffix so "headlines" matches
+ *  "headline" and "chars" matches "characters". Intentionally conservative —
+ *  we want false negatives over false positives. */
+function stemToken(token: string): string {
+  let t = token;
+  if (t.length > 4 && t.endsWith('s')) t = t.slice(0, -1); // plural
+  // Normalise common word-form pairs seen in skill specs: characters↔chars,
+  // seconds↔secs, minutes↔mins. The full words and short forms both collapse
+  // to the shared prefix.
+  if (t.startsWith('character')) t = 'char';
+  else if (t.startsWith('second')) t = 'sec';
+  else if (t.startsWith('minute')) t = 'min';
+  return t;
+}
+
+/** Extract distinctive tokens from a string — length-≥3, non-stopword, stemmed.
+ *  Used for row-level coverage matching where exact substring fails on LLM
+ *  restructurings ("30 chars each, up to 15" vs "30 characters | Up to 15"). */
+function extractInformativeTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const raw of text.toLowerCase().split(/[\s,/|\-()[\]:;"]+/)) {
+    if (raw.length < 3) continue;
+    if (CELL_TOKEN_STOPWORDS.has(raw)) continue;
+    tokens.push(stemToken(raw));
   }
-  return out;
+  return tokens;
+}
+
+/** Extract informative tokens from the first `limit` non-empty cells of a row. */
+function extractRowKeyTokens(rowLine: string, limit = 2): string[] {
+  const trimmed = rowLine.trim().replace(/^\||\|$/g, '');
+  const nonEmptyCells: string[] = [];
+  for (const cell of trimmed.split('|')) {
+    const cleaned = cleanCellForMatch(cell);
+    if (cleaned.length > 0) nonEmptyCells.push(cleaned);
+    if (nonEmptyCells.length >= limit) break;
+  }
+  return nonEmptyCells.flatMap(extractInformativeTokens);
 }
 
 /** Returns true if the merged instructions already contain table data that
- *  covers at least `coverageThreshold` of the source table's rows (by their
- *  first 1-2 identifying cell values). v6 Fix 1: uses row-level substring
- *  matching against the entire merged text — handles LLM restructurings
- *  (splits, merges, column reorderings) that a header-structure comparison
- *  would miss. Each row is "covered" if ALL of its key values (cleaned) appear
- *  as substrings in the merged text. */
+ *  covers at least `coverageThreshold` of the source table's rows. v6 Fix 1:
+ *  for each row, extract informative tokens from its first ~2 cells (stemmed,
+ *  stopwords removed), then count the row "covered" when ≥50% of those tokens
+ *  appear as whole tokens anywhere in the merged instructions. The outer
+ *  80%-row-coverage guard controls false positives. */
 function mergedOutputCoversTableData(
   sourceTable: ExtractedTableRows,
   mergedInstructions: string,
   coverageThreshold = 0.80,
+  rowTokenThreshold = 0.50,
 ): { covered: boolean; matchedRows: number; totalRows: number } {
-  const haystack = mergedInstructions.toLowerCase();
+  const haystackTokens = new Set(extractInformativeTokens(mergedInstructions));
   let matched = 0;
   let scoreable = 0;
 
   for (const row of sourceTable.rows) {
-    const keys = extractRowKeyValues(row, 2);
-    if (keys.length === 0) continue;
+    const rowTokens = extractRowKeyTokens(row, 2);
+    if (rowTokens.length === 0) continue;
     scoreable++;
-    const allPresent = keys.every(k => haystack.includes(k));
-    if (allPresent) matched++;
+    const present = rowTokens.filter(t => haystackTokens.has(t)).length;
+    if (present / rowTokens.length >= rowTokenThreshold) matched++;
   }
 
   if (scoreable === 0) return { covered: false, matchedRows: 0, totalRows: 0 };

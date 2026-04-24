@@ -39,6 +39,7 @@ import {
   updateResultAgentProposals,
   updateJobAgentRecommendation,
   appendBatchCollisionWarnings,
+  applyBatchConfidenceDeductions,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -1494,6 +1495,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     }
     if (forkWarningsBySlug.size > 0) {
       await appendBatchCollisionWarnings(jobId, forkWarningsBySlug);
+      // v6 Fix 4 follow-up: post-Stage-5c confidence deduction. The per-
+      // candidate adjustClassifierConfidence ran before Stage 5c finished,
+      // so SOURCE_FORK membership never fed the confidence. Apply -0.05 per
+      // forked slug here (mirrors the coefficient inside adjustClassifierConfidence).
+      const forkDeductions = new Map<string, number>();
+      for (const slug of forkWarningsBySlug.keys()) forkDeductions.set(slug, 0.05);
+      await applyBatchConfidenceDeductions(jobId, forkDeductions);
       logger.info('skill_analyzer_source_forks_detected', {
         jobId, forkCount: forkWarningsBySlug.size,
       });
