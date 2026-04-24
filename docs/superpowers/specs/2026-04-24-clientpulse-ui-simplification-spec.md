@@ -28,6 +28,7 @@
 - [§11. Deferred items](#11-deferred-items)
 - [§12. Telemetry events](#12-telemetry-events)
 - [§13. Performance guardrails](#13-performance-guardrails)
+- [§14. Scaling note — `GET /api/pulse/attention`](#14-scaling-note--get-apipulseattention)
 
 ---
 
@@ -170,6 +171,14 @@ If any `kind` value graduates to mode-1 during implementation (e.g. `task` has a
 2. If intent is present: auto-open the approval/rejection UI (e.g. open the modal, scroll to the approval section, focus the primary action button) and pre-select the intent action.
 3. The operator sees only the final confirmation step — not the full decision flow from scratch.
 4. After the action completes **successfully**, remove the `?intent` param from the URL (use `replace: true`) to avoid a stale intent on back-navigation.
+
+**Stale intent guard.** Before auto-opening the approval UI in step 2, the destination page MUST verify that the item is still actionable. If the item's status is no longer `pending` or `edited_pending` (e.g. already approved, already rejected, or deleted since the card was rendered):
+- Do NOT auto-open the approval UI.
+- Show an inline informational message: **"This item is no longer pending."**
+- Strip `?intent` from the URL (`replace: true`).
+- The page renders normally — the operator can still view context, they simply cannot re-action an item that has already been processed.
+
+This covers the case where a user bookmarks a `?intent` URL, or where another user actioned the item between the home dashboard render and the navigation.
 
 **`?intent` failure-handling rule.** The success path above is not enough on its own. If an intent-driven action fails (network error, validation rejection, modal fails to open):
 
@@ -408,6 +417,12 @@ Replaces two separate tables (human "Recent Activity" narrative list + agent "Re
 
 **Endpoint:** `GET /api/activity?limit=20&sort=newest` (existing; backed by `listActivityItems()` exported from `server/services/activityService.ts`). Allowed sort values are `attention_first | newest | oldest | severity`. No new endpoint is introduced.
 
+**Ordering tiebreaker.** Under high throughput, multiple activity items can share identical `createdAt` timestamps (e.g. a batch agent run spawning several events in the same millisecond). The sort order MUST be deterministic:
+- Primary: `created_at DESC`
+- Secondary: `id DESC` (UUID/ULID insertion order as stable tiebreaker)
+
+Without the tiebreaker, rows with identical timestamps appear in non-deterministic order between refreshes, causing visible reordering in the feed. The secondary `id DESC` ensures a consistent stable order the operator can rely on.
+
 **Current response shape (from `server/services/activityService.ts`):**
 
 ```typescript
@@ -599,6 +614,12 @@ The banner renders only when `pendingIntervention` is non-null; parents pass `nu
 3. **Show an inline message** adjacent to the card/banner: **"This item was already updated."** — not a toast, not a modal, inline.
 
 HTTP 409 Conflict is the expected server response for this case. If the server returns a non-409 error (network failure, 500), apply the failure-handling rule from §2.2 instead (revert + show retry-able inline error, do not strip `?intent`).
+
+**Idempotency contract.** Approve and Reject actions MUST be idempotent on the backend. If an operator double-clicks Approve, or a network retry fires the same request twice, the `review_item` state transition must happen exactly once. Subsequent identical calls for the same `reviewItemId` must:
+- Return the current final state (e.g. `{ status: 'approved', ... }`) without side effects.
+- NOT emit a duplicate approval event, duplicate notification, or duplicate intervention record.
+
+Implementation approach: the approval/rejection handler checks the current `review_item.status` before writing. If status is already `approved` (or `rejected`), it returns the current row as-is with HTTP 200 (idempotent success), not 409. HTTP 409 is reserved for *conflict* (a different action was taken than expected), not for replay. The `usePendingIntervention` hook must also disable its action buttons for the duration of a pending request (no double-click race on the client side), but the backend idempotency is the authoritative guard.
 
 The shared hook is a new file: `client/src/hooks/usePendingIntervention.ts`. Add it to the §10 file inventory.
 
@@ -845,3 +866,25 @@ All dashboard endpoints introduced or modified by this spec must return within *
 **Enforcement mechanism:** Add a slow-query log assertion to each endpoint's integration test fixture (or use `server/lib/instrumentedQuery` if it exists). Log a WARN if a query exceeds 100ms in development. No hard fail in CI for now — the 300ms target is a measurable posture, not a gated check.
 
 If the `sparklineWeekly` data cannot be computed within the 300ms budget for large orgs, pre-compute it as a materialised column or background job and serve from cache — do NOT do 4× rolling-window aggregation queries inline per request.
+
+**Partial failure resilience.** All endpoints must degrade gracefully under partial data failure — a failed enrichment join must NOT fail the entire response:
+
+- If the `triggeredByUserName` join fails (e.g. user deleted, join timeout), the activity row still returns with `triggeredByUserName: null`. The "Executed by" cell renders the fallback ("System · `actor`") — it does not crash or omit the row.
+- If `sparklineWeekly` cannot be computed for a specific client row (e.g. missing historical data), the row returns with `sparklineWeekly: []`. The sparkline component renders an empty baseline — it does not omit the row.
+- If `resolvedUrl` computation fails for one attention item (e.g. entity deleted mid-request), that item returns with `resolvedUrl: null` and the card renders with disabled action buttons per §2.2. The endpoint does not fail the entire attention list.
+
+Implementation: wrap each enrichment step (user join, sparkline aggregation, URL resolution) in a `try/catch` or nullable fallback. Partial failure at one step must not propagate to the surrounding row or sibling rows. Log the failure at WARN level with the `itemId` and `enrichmentStep` for observability.
+
+---
+
+## §14. Scaling note — `GET /api/pulse/attention`
+
+This endpoint will be the first performance bottleneck as usage grows. It aggregates across multiple item types, now includes `resolvedUrl` resolution per item, and drives the highest-visibility surface (home dashboard). As the attention queue grows in breadth (more `kind` values, more lanes) and depth (many concurrent pending items), latency and branching logic will accumulate.
+
+**Not required for v1**, but worth knowing where this evolves:
+
+- Move toward a **precomputed attention queue**: an `attention_items` materialised table (or a lightweight denormalised view) written at the time a `review_item`, `task`, or `health_finding` enters actionable state, rather than aggregated on read.
+- Use **event-driven updates**: when a `review_item` status changes, a background job updates the attention queue rather than recomputing it on the next request.
+- **`resolvedUrl` should be written at queue insert time**, not resolved on every read — the resolution rules are known when the item enters the queue.
+
+This evolution does not change the API surface from the frontend's perspective — it is a pure backend optimisation. The spec as written is the correct interface contract; this note describes how the implementation layer should evolve when the read-time aggregation becomes a bottleneck. Track this in §11 Deferred Items if it becomes a near-term priority.
