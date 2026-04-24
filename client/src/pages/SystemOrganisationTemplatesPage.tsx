@@ -268,9 +268,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Name</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agents</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Published</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Created</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
@@ -284,13 +282,11 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                       <div className="text-xs text-slate-500 mt-0.5 max-w-[280px] truncate">{t.description}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">{t.agentCount}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${t.isPublished ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
                       {t.isPublished ? 'Published' : 'Draft'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">v{t.version}</td>
                   <td className="px-4 py-3 text-[13px] text-slate-500">
                     {new Date(t.createdAt).toLocaleDateString()}
                   </td>

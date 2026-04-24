@@ -647,3 +647,22 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
 - [ ] **Defer 24h button for pending-approval cards.** Spec initially specified Approve / Reject / Defer 24h on both the home-dashboard pending cards and the drilldown PendingHero. AUTO-DECIDED during review to DROP Defer 24h from v1 because the backend has no defer state (no column, no endpoint, no resume semantics) and adding one is a scope expansion beyond "UI simplification". Deferred to §11 of the spec. Re-open if an operator explicitly asks for a "snooze this decision for a day" flow.
 - [ ] **CRM Queries workspace card on the home dashboard.** Spec initially placed it as 1 of 4 cards in a 2×2 grid pointing at `/crm`. AUTO-DECIDED during review to DROP for v1 because `/crm` is not a real route in the codebase. Re-open §2.3 to add the card (and graduate the grid back to 2×2) when the `/crm` route lands with a real landing page.
 - [ ] **Agents workspace card on the home dashboard.** Spec initially placed it as 1 of 4 cards pointing at `/agents`. AUTO-DECIDED during review to DROP for v1 because `/agents` currently redirects to `/`. Re-open §2.3 when `/agents` has a real landing page.
+
+---
+
+## Deferred — Blueprint/template "Browse library" modal integration
+
+**Captured**: 2026-04-24  
+**Branch**: `feat/clientpulse-ui-simplification`
+
+### Task 5.6 — Table column trims + "Browse shared library" demotion
+
+The header-level "Browse Shared Library" buttons have been removed from both pages as part of the ClientPulse UI simplification (Task 5.6):
+- `SubaccountBlueprintsPage.tsx`: removed button from header; empty-state version preserved
+- `SystemOrganisationTemplatesPage.tsx`: removed button from header; empty-state version preserved
+
+Full "Browse library" modal UX integration deferred to a follow-up task:
+- [ ] **SubaccountBlueprintsPage**: merge "Browse Shared Library" into "+ New Template" modal as first step (tabbed choice: "Create from scratch" vs "Browse library")
+- [ ] **SystemOrganisationTemplatesPage**: same pattern — integrate "Browse library" into the import flow
+
+**Why deferred**: Maintains simplification goal (remove header clutter) while preserving discovery (empty-state button remains). Modal integration requires UX/interaction design for the tabbed flow, which is out of scope for the column-trim task.
