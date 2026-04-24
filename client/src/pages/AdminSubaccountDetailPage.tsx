@@ -409,7 +409,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         </Suspense>
       )}
 
-      {/* Onboarding — spec §9.3: lists owed onboarding playbooks per module set */}
+      {/* Onboarding — spec §9.3: lists owed onboarding workflows per module set */}
       {activeTab === 'onboarding' && subaccountId && (
         <OnboardingTab subaccountId={subaccountId} />
       )}
@@ -1259,7 +1259,7 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
       );
       setRows(res.data.owed);
     } catch (e: any) {
-      setErr(e?.response?.data?.error ?? e?.message ?? 'Failed to load onboarding playbooks');
+      setErr(e?.response?.data?.error ?? e?.message ?? 'Failed to load onboarding workflows');
     } finally {
       setLoading(false);
     }
@@ -1288,7 +1288,7 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
   };
 
   if (loading) {
-    return <div className="py-8 text-sm text-slate-500">Loading onboarding playbooks...</div>;
+    return <div className="py-8 text-sm text-slate-500">Loading onboarding workflows...</div>;
   }
   if (err) {
     return <div className="py-4 text-sm text-red-600">{err}</div>;
@@ -1301,13 +1301,13 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
       <div className="flex items-baseline justify-between">
         <h2 className="text-[18px] font-semibold text-slate-800 m-0">Onboarding</h2>
         <div className="text-[13px] text-slate-500">
-          Status: <span className="font-medium text-slate-700">{completedCount} of {rows.length} playbooks complete</span>
+          Status: <span className="font-medium text-slate-700">{completedCount} of {rows.length} workflows complete</span>
         </div>
       </div>
 
       {rows.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl py-10 text-center text-sm text-slate-500">
-          No onboarding playbooks configured for this sub-account's module set.
+          No onboarding workflows configured for this sub-account's module set.
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -1361,8 +1361,8 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
       )}
 
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-[13px] text-slate-600 leading-relaxed">
-        <div className="font-semibold text-slate-700 mb-1">About onboarding playbooks</div>
-        Onboarding playbooks are the templates the agency runs the first time a sub-account is set up.
+        <div className="font-semibold text-slate-700 mb-1">About onboarding workflows</div>
+        onboarding workflows are the templates the agency runs the first time a sub-account is set up.
         They capture baseline facts, configure recurring schedules, and leave behind Memory Blocks the
         rest of the system reads. Edit the set per module on the Modules admin page.
       </div>

@@ -123,6 +123,12 @@ test('wrong org → scope mismatch', () => {
   assert(!checkScope(wrongOrgRun, makeAutomation()), 'wrong org should fail scope check');
 });
 
+test('system-scoped automation (organisationId=null) accessible from any run', () => {
+  const sysAuto = makeAutomation({ organisationId: null as unknown as string, subaccountId: null });
+  assert(checkScope(orgRun, sysAuto), 'system auto should be accessible from org run');
+  assert(checkScope(subRun, sysAuto), 'system auto should be accessible from subaccount run');
+});
+
 test('resolveDispatch emits automation_scope_mismatch error code', () => {
   const wrongOrgRun: RunScope = { organisationId: 'org-WRONG', subaccountId: null };
   const result = resolveDispatch({

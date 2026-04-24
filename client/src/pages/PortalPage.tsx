@@ -190,7 +190,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-3">
             <h2 className="text-[16px] font-semibold text-slate-800 m-0">Workflows</h2>
-            <HelpHint text="These playbooks were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
+            <HelpHint text="These workflows were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
           </div>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {otherRuns.map((run) => {

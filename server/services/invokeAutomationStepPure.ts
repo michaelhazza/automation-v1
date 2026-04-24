@@ -54,8 +54,11 @@ export function resolveGateLevel(
 // ── Scope matching (§5.8) ─────────────────────────────────────────────────────
 
 export function checkScope(run: RunScope, automation: Automation): boolean {
+  // System-scoped automations (organisationId = null) are accessible from any run
+  if (automation.organisationId === null) return true;
+  // Org-scoped and subaccount-scoped automations must match the run's org
   if (automation.organisationId !== run.organisationId) return false;
-  // Org-scope automation: accessible from any run in the org
+  // Org-scope automation (subaccountId = null): accessible from any run in the org
   if (automation.subaccountId === null) return true;
   // Subaccount-native automation: must match run's subaccount
   return automation.subaccountId === run.subaccountId;

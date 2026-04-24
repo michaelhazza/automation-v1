@@ -1,18 +1,19 @@
 /**
  * Stateful wrapper around the pure invoke_automation dispatcher. §5.3 / §5.9.
- * Owns: webhook fetch, retry loop, tracing emission, engine/connection resolution.
+ * Owns: webhook fetch, retry loop, HMAC signing, tracing emission, engine/connection resolution.
  * All decision logic lives in invokeAutomationStepPure.ts.
  */
 
 import { db } from '../db/index.js';
 import { automations } from '../db/schema/automations.js';
 import { automationEngines } from '../db/schema/automationEngines.js';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, or } from 'drizzle-orm';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { logger } from '../lib/logger.js';
 import { createEvent } from '../lib/tracing.js';
+import { webhookService } from './webhookService.js';
 import type { InvokeAutomationStep, AutomationStepError } from '../lib/workflow/types.js';
-import { renderString } from '../lib/workflow/templating.js';
+import { resolveInputs } from '../lib/workflow/templating.js';
 import {
   resolveDispatch,
   resolveGateLevel,
@@ -26,12 +27,7 @@ import {
   type TemplateCtx,
 } from './invokeAutomationStepPure.js';
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-
-/**
- * §5.9 completed-event `status` values — a 10-entry enum driven by the §5.7
- * error-code vocabulary. Every pre-dispatch failure surfaces through this map.
- */
+/** §5.9 completed-event `status` values — 10-entry enum per §5.7 vocabulary. */
 type CompletedStatus =
   | 'ok'
   | 'http_error'
@@ -53,9 +49,10 @@ function preDispatchStatusForCode(code: string): CompletedStatus {
     case 'automation_scope_mismatch': return 'automation_scope_mismatch';
     case 'automation_composition_invalid': return 'automation_composition_invalid';
     default:
-      // Should not occur for pre-dispatch codes; fall back to the nearest
-      // spec-valid status. Tests cover every expected code path explicitly.
-      return 'automation_not_found';
+      // Unknown pre-dispatch code — classify as composition-invalid so operators
+      // investigate the step definition rather than the automation itself.
+      logger.warn('invoke_automation_unknown_predispatch_code', { code });
+      return 'automation_composition_invalid';
   }
 }
 
@@ -80,14 +77,26 @@ export async function invokeAutomationStep(
 ): Promise<InvokeAutomationResult> {
   const { step, runId, stepRunId, run, templateCtx } = params;
 
-  // Load automation row
+  const baseEventPayload = {
+    runId,
+    stepId: step.id,   // §5.9: DSL-level step identifier, not the step-run row id
+    automationId: step.automationId,
+    orgId: run.organisationId,
+    subaccountId: run.subaccountId,
+  };
+
+  // Load automation row — include soft-delete guard (§5.10 edge 1)
   const [automation] = await db
     .select()
     .from(automations)
-    .where(eq(automations.id, step.automationId));
+    .where(
+      and(
+        eq(automations.id, step.automationId),
+        isNull(automations.deletedAt),
+      ),
+    );
 
   if (!automation) {
-    // §5.7: execution-class error (pre-dispatch resolution failure).
     const error: AutomationStepError = {
       code: 'automation_not_found',
       type: 'execution',
@@ -95,8 +104,7 @@ export async function invokeAutomationStep(
       retryable: false,
     };
     createEvent('workflow.step.automation.completed', {
-      runId, stepRunId, automationId: step.automationId,
-      status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
+      ...baseEventPayload, status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
     });
     return { status: 'error', error, gateLevel: 'review', retryAttempt: 1 };
   }
@@ -110,17 +118,40 @@ export async function invokeAutomationStep(
       retryable: false,
     };
     createEvent('workflow.step.automation.completed', {
-      runId, stepRunId, automationId: step.automationId,
-      status: 'automation_scope_mismatch', retryAttempt: 1, latencyMs: 0, error,
+      ...baseEventPayload, status: 'automation_scope_mismatch', retryAttempt: 1, latencyMs: 0, error,
     });
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
-  // Load engine for base URL
+  // Load engine — scoped to automation's org (or system), soft-delete guarded
+  const workflowEngineId = automation.workflowEngineId;
+  if (!workflowEngineId) {
+    const error: AutomationStepError = {
+      code: 'automation_execution_error',
+      type: 'execution',
+      message: `Automation '${step.automationId}' has no engine assigned.`,
+      retryable: false,
+    };
+    createEvent('workflow.step.automation.completed', {
+      ...baseEventPayload, status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
+    });
+    return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
+  }
+
   const [engine] = await db
     .select()
     .from(automationEngines)
-    .where(eq(automationEngines.id, automation.workflowEngineId!));
+    .where(
+      and(
+        eq(automationEngines.id, workflowEngineId),
+        isNull(automationEngines.deletedAt),
+        // Enforce org scope — engine must belong to the automation's org or be system-scoped
+        or(
+          eq(automationEngines.organisationId, automation.organisationId ?? ''),
+          isNull(automationEngines.organisationId),
+        ),
+      ),
+    );
 
   if (!engine) {
     const error: AutomationStepError = {
@@ -129,6 +160,9 @@ export async function invokeAutomationStep(
       message: `Automation engine for '${step.automationId}' could not be resolved.`,
       retryable: false,
     };
+    createEvent('workflow.step.automation.completed', {
+      ...baseEventPayload, status: 'automation_not_found', retryAttempt: 1, latencyMs: 0, error,
+    });
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
@@ -139,41 +173,41 @@ export async function invokeAutomationStep(
     return { status: 'review_required', gateLevel, retryAttempt: 1 };
   }
 
+  // §5.4: use resolveInputs (not renderString) so native types (number, array,
+  // object) are preserved in the webhook body. renderString always returns a
+  // string, which breaks JSON-shaped webhooks.
   const renderTemplate = (expr: string, ctx: TemplateCtx) =>
-    renderString(expr, ctx as unknown as Parameters<typeof renderString>[1]);
+    resolveInputs({ _v: expr }, ctx as unknown as Parameters<typeof resolveInputs>[1])._v as unknown;
 
   const maxAttempts = clampMaxAttempts(step.automationRetryPolicy?.maxAttempts);
   const authHeaders = buildEngineAuthHeaders(engine.engineType, engine.apiKey ?? undefined);
+  const timeoutMs = (step.timeoutSeconds ?? 300) * 1000; // §5.3: default 300s
 
   let lastError: AutomationStepError | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    // Non-idempotent retry guard (§5.4a rule 3). The guard fires only on
-    // attempt ≥ 2 — the previous iteration already emitted a §5.9 completed
-    // event with the true terminal outcome (http_error / timeout / network).
-    // We do NOT emit a separate "guard blocked" event; operators read
-    // retryAttempt + error.retryable to see the guard took effect. The
-    // previous iteration's `lastError` is what the caller receives.
+    // Non-idempotent retry guard (§5.4a rule 3).
     if (shouldBlock_nonIdempotentGuard(automation, step, attempt)) {
       const error: AutomationStepError = lastError ?? {
         code: 'automation_network_error',
         type: 'external',
-        message: `Automation '${step.automationId}' is non-idempotent; automatic retry is blocked. Set overrideNonIdempotentGuard: true on the step to bypass.`,
+        message: `Automation '${step.automationId}' is non-idempotent; retry blocked. Set overrideNonIdempotentGuard: true to bypass.`,
         retryable: false,
       };
       return { status: 'error', error, gateLevel, retryAttempt: attempt - 1 };
     }
 
     const outcome = resolveDispatch({
-      step, run, automation, engineBaseUrl: engine.baseUrl, renderTemplate, templateCtx,
+      step, run, automation,
+      engineBaseUrl: engine.baseUrl.replace(/\/$/, ''),
+      renderTemplate,
+      templateCtx,
     });
 
     if (outcome.kind === 'error') {
-      // §5.9 status enum maps 1:1 from the §5.7 error code.
       const status = preDispatchStatusForCode(outcome.error.code);
       createEvent('workflow.step.automation.completed', {
-        runId, stepRunId, automationId: step.automationId,
-        status, retryAttempt: attempt, latencyMs: 0, error: outcome.error,
+        ...baseEventPayload, status, retryAttempt: attempt, latencyMs: 0, error: outcome.error,
       });
       return { status: 'error', error: outcome.error, gateLevel, retryAttempt: attempt };
     }
@@ -182,37 +216,47 @@ export async function invokeAutomationStep(
       return { status: 'ok', output: {}, gateLevel, retryAttempt: attempt };
     }
 
-    // Dispatch
+    // Dispatch — HMAC sign the outbound request (§5.8 re-uses existing per-engine signing)
     const start = Date.now();
+    const hmacSignature = webhookService.signOutboundRequest(stepRunId, engine.hmacSecret);
+
     createEvent('workflow.step.automation.dispatched', {
-      runId, stepRunId, automationId: step.automationId, retryAttempt: attempt,
+      ...baseEventPayload,
+      automationEngineId: engine.id,
+      engineType: engine.engineType,
+      retryAttempt: attempt,
     });
 
     try {
       const response = await fetch(outcome.webhookUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': hmacSignature,
+          ...authHeaders,
+        },
         body: JSON.stringify(outcome.body),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const latencyMs = Date.now() - start;
 
-      // §5.10a rule 4: one step → one webhook. Dispatched, not multi-webhook.
-      // If response indicates multi-webhook resolution, error.
       let responseBody: unknown;
       try { responseBody = await response.json(); } catch { responseBody = {}; }
+      const responseSizeBytes = JSON.stringify(responseBody).length;
 
       if (!response.ok) {
-        // §5.7: external-class HTTP error. Retry only on 5xx AND idempotent.
         lastError = {
           code: 'automation_http_error',
           type: 'external',
           message: `Automation webhook returned HTTP ${response.status}.`,
-          retryable: response.status >= 500 && (automation.idempotent || step.automationRetryPolicy?.overrideNonIdempotentGuard === true),
+          retryable:
+            response.status >= 500 &&
+            (automation.idempotent || step.automationRetryPolicy?.overrideNonIdempotentGuard === true),
         };
         createEvent('workflow.step.automation.completed', {
-          runId, stepRunId, automationId: step.automationId,
-          status: 'http_error', retryAttempt: attempt, latencyMs, httpStatus: response.status, error: lastError,
+          ...baseEventPayload,
+          status: 'http_error', retryAttempt: attempt, latencyMs,
+          httpStatus: response.status, responseSizeBytes, error: lastError,
         });
         if (!lastError.retryable || attempt >= maxAttempts) {
           return { status: 'error', error: lastError, gateLevel, retryAttempt: attempt };
@@ -224,28 +268,22 @@ export async function invokeAutomationStep(
       const outputCheck = validateDispatchOutput(responseBody, automation);
       if (!outputCheck.ok) {
         createEvent('workflow.step.automation.completed', {
-          runId, stepRunId, automationId: step.automationId,
-          status: 'output_validation_failed', retryAttempt: attempt, latencyMs, error: outputCheck.error,
+          ...baseEventPayload,
+          status: 'output_validation_failed', retryAttempt: attempt, latencyMs,
+          responseSizeBytes, error: outputCheck.error,
         });
         return { status: 'error', error: outputCheck.error, gateLevel, retryAttempt: attempt };
       }
 
-      const output = projectOutputMapping(
-        responseBody, step.outputMapping, renderTemplate, templateCtx,
-      );
+      const output = projectOutputMapping(responseBody, step.outputMapping, renderTemplate, templateCtx);
 
       createEvent('workflow.step.automation.completed', {
-        runId, stepRunId, automationId: step.automationId,
-        status: 'ok', retryAttempt: attempt, latencyMs,
+        ...baseEventPayload, status: 'ok', retryAttempt: attempt, latencyMs, responseSizeBytes,
       });
       return { status: 'ok', output, gateLevel, retryAttempt: attempt };
 
     } catch (err) {
       const latencyMs = Date.now() - start;
-      // §5.7: bucket by specific error class — timeout (timeout), network errors
-      // (external), everything else that escaped fetch maps to network_error
-      // as the safest external classification since the webhook never produced
-      // a usable response.
       const isTimeout = err instanceof Error && err.name === 'TimeoutError';
       const retryableTransient =
         automation.idempotent || step.automationRetryPolicy?.overrideNonIdempotentGuard === true;
@@ -255,9 +293,9 @@ export async function invokeAutomationStep(
         message: err instanceof Error ? err.message : 'Unknown error during automation dispatch.',
         retryable: retryableTransient,
       };
-      logger.warn('invoke_automation_step_error', { runId, stepRunId, attempt, error: lastError });
+      logger.warn('invoke_automation_step_error', { runId, stepRunId: stepRunId, attempt, error: lastError });
       createEvent('workflow.step.automation.completed', {
-        runId, stepRunId, automationId: step.automationId,
+        ...baseEventPayload,
         status: isTimeout ? 'timeout' : 'network_error',
         retryAttempt: attempt, latencyMs, error: lastError,
       });
@@ -267,14 +305,14 @@ export async function invokeAutomationStep(
     }
   }
 
-  // §1.5 principle 4 / §5.7 unknown bucket: if we fell out of the retry loop
-  // without a terminal outcome, surface as unknown-class + non-retryable.
+  // Belt-and-braces fallthrough guard — should not be reached under normal control flow
+  logger.warn('invoke_automation_unexpected_loop_exit', { runId, stepId: step.id });
   return {
     status: 'error',
     error: lastError ?? {
       code: 'automation_network_error',
       type: 'unknown',
-      message: 'Exhausted retry attempts.',
+      message: 'Exhausted retry attempts without a terminal outcome.',
       retryable: false,
     },
     gateLevel,

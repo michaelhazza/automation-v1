@@ -107,7 +107,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
       await api.patch(`/api/system/modules/${editingModuleId}`, {
         onboardingWorkflowSlugs: Array.from(editSelection),
       });
-      toast.success('Onboarding playbooks updated');
+      toast.success('onboarding workflows updated');
       cancelEdit();
       await loadModules();
     } catch (e: any) {
@@ -140,8 +140,8 @@ export default function SystemModulesPage({ user: _user }: Props) {
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Agent access</th>
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   <span className="inline-flex items-center gap-1.5">
-                    Onboarding playbooks
-                    <HelpHint text="Sub-accounts that enable this module will be prompted to run these playbooks during setup." />
+                    onboarding workflows
+                    <HelpHint text="Sub-accounts that enable this module will be prompted to run these workflows during setup." />
                   </span>
                 </th>
                 <th className="px-5 py-3 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Created</th>
