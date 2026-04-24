@@ -23,6 +23,7 @@ export interface PulseItem {
   agentName: string | null;
   createdAt: string;
   detailUrl: string;
+  resolvedUrl: string | null;
   actionType: string | null;
   runId: string | null;
 }

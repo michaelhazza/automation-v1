@@ -6,7 +6,7 @@ import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
-import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
+import NeedsAttentionRow from '../components/clientpulse/NeedsAttentionRow';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 
 interface Props { user: User; }
@@ -19,10 +19,15 @@ interface HealthSummary {
 }
 
 interface HighRiskClient {
-  id: string;
-  name: string;
-  score: number;
-  issues: string[];
+  subaccountId: string;
+  subaccountName: string;
+  healthScore: number;
+  healthBand: 'critical' | 'at_risk' | 'watch' | 'healthy';
+  healthScoreDelta7d: number;
+  sparklineWeekly: number[];
+  lastActionText: string | null;
+  hasPendingIntervention: boolean;
+  drilldownUrl: string;
 }
 
 interface LatestReport {
@@ -47,7 +52,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [subscription, setSubscription] = useState<OrgSubscription | null>(null);
   const [ghlConnected, setGhlConnected] = useState<boolean | null>(null);
-  const [proposingFor, setProposingFor] = useState<{ id: string; name: string } | null>(null);
   const { openConfigAssistant } = useConfigAssistantPopup();
 
   useEffect(() => {
@@ -81,17 +85,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <GuidedTour />
-      {proposingFor && (
-        <ProposeInterventionModal
-          subaccountId={proposingFor.id}
-          subaccountName={proposingFor.name}
-          onClose={() => setProposingFor(null)}
-          onSubmitted={() => {
-            // Soft-refresh high-risk on successful submit.
-            api.get('/api/clientpulse/high-risk').then((r) => setHighRisk(r.data?.clients ?? [])).catch(() => undefined);
-          }}
-        />
-      )}
 
       {/* Trial expired banner */}
       {trialBanner && (
@@ -180,41 +173,22 @@ export default function ClientPulseDashboardPage({ user }: Props) {
       )}
 
       <div className="grid gap-6 [grid-template-columns:1fr_1fr]">
-        {/* High-risk clients */}
+        {/* Needs Attention */}
         <div id="tour-high-risk-widget" className="bg-white rounded-xl border border-slate-200 p-5">
-          <h2 className="text-[14px] font-bold text-slate-900 mb-4">High-Risk Clients</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[14px] font-bold text-slate-900">Needs Attention</h2>
+            <Link to="/clientpulse/clients" className="text-[12px] text-indigo-600 font-semibold hover:text-indigo-700 no-underline">
+              View all →
+            </Link>
+          </div>
           {highRisk.length === 0 ? (
             <p className="text-[13px] text-slate-400 text-center py-6">
-              {ghlConnected ? 'No high-risk clients this week.' : 'Connect GHL to see risk data.'}
+              {ghlConnected ? 'No clients need attention this week.' : 'Connect GHL to see client health.'}
             </p>
           ) : (
-            <div className="space-y-3">
-              {highRisk.slice(0, 5).map((client) => (
-                <div key={client.id} className="flex items-start gap-3 text-left hover:bg-slate-50 rounded-md px-1 py-1 transition">
-                  <div className={`shrink-0 mt-0.5 w-2 h-2 rounded-full mt-1.5 ${
-                    client.score >= 80 ? 'bg-red-500' : client.score >= 60 ? 'bg-amber-500' : 'bg-yellow-400'
-                  }`} />
-                  <Link
-                    to={`/clientpulse/clients/${client.id}`}
-                    className="flex-1 min-w-0"
-                    aria-label={`Open drilldown for ${client.name}`}
-                  >
-                    <p className="text-[13.5px] font-medium text-slate-800 truncate underline-offset-2 hover:underline">{client.name}</p>
-                    {client.issues.length > 0 && (
-                      <p className="text-[12px] text-slate-400 truncate">{client.issues.slice(0, 2).join(' · ')}</p>
-                    )}
-                  </Link>
-                  <span className={`text-[12px] font-bold shrink-0 ${
-                    client.score >= 80 ? 'text-red-500' : client.score >= 60 ? 'text-amber-500' : 'text-yellow-500'
-                  }`}>{client.score}</span>
-                  <button
-                    onClick={() => setProposingFor({ id: client.id, name: client.name })}
-                    className="shrink-0 text-[11px] text-indigo-600 hover:underline"
-                    aria-label={`Propose intervention for ${client.name}`}
-                  >
-                    Propose
-                  </button>
-                </div>
+            <div className="flex flex-col divide-y divide-slate-50">
+              {highRisk.slice(0, 7).map((client) => (
+                <NeedsAttentionRow key={client.subaccountId} client={client} />
               ))}
             </div>
           )}

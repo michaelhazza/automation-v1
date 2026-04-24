@@ -1,6 +1,5 @@
 interface Signal {
   slug: string;
-  contribution: number;
   label: string | null;
   lastSeenAt: string | null;
 }
@@ -19,7 +18,7 @@ export default function SignalPanel({ signals, lastUpdatedAt }: { signals: Signa
       ) : (
         <ul className="space-y-1.5">
           {signals.map((s) => (
-            <li key={s.slug} className="flex items-center justify-between text-[13px]">
+            <li key={s.slug} className="text-[13px]">
               <div>
                 <div className="font-semibold text-slate-800">{s.label ?? s.slug}</div>
                 {s.lastSeenAt && (
@@ -28,9 +27,6 @@ export default function SignalPanel({ signals, lastUpdatedAt }: { signals: Signa
                   </div>
                 )}
               </div>
-              <span className="text-[12px] font-mono text-slate-600">
-                {(s.contribution * 100).toFixed(0)}%
-              </span>
             </li>
           ))}
         </ul>

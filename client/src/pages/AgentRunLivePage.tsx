@@ -8,10 +8,19 @@ import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import Timeline from '../components/agentRunLog/Timeline';
 import EventDetailDrawer from '../components/agentRunLog/EventDetailDrawer';
+import { formatDuration } from '../lib/formatDuration';
 import type {
   AgentExecutionEvent,
   AgentExecutionEventPage,
 } from '../../../shared/types/agentExecutionLog';
+
+type RunMeta = {
+  agentName: string;
+  status: string;
+  durationMs: number | null;
+  eventCount: number | null;
+  startedAt: string | null;
+};
 
 const INITIAL_FETCH_LIMIT = 1000;
 const BACKFILL_LIMIT = 1000;
@@ -38,12 +47,20 @@ export function getAgentRunLiveClientMetrics(): {
   return { ...clientMetrics };
 }
 
+const STATUS_BADGE: Record<string, string> = {
+  completed: 'bg-emerald-100 text-emerald-700',
+  failed: 'bg-red-100 text-red-700',
+  running: 'bg-blue-100 text-blue-700',
+  cancelled: 'bg-slate-100 text-slate-600',
+};
+
 export default function AgentRunLivePage({ user: _user }: { user: User }) {
   const { runId } = useParams<{ runId: string }>();
   const [events, setEvents] = useState<AgentExecutionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<AgentExecutionEvent | null>(null);
+  const [runMeta, setRunMeta] = useState<RunMeta | null>(null);
   const lastSeenSeqRef = useRef(0);
   const initialBufferRef = useRef<AgentExecutionEvent[]>([]);
   const initialGateRef = useRef(false);
@@ -78,11 +95,23 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
     // into the new run's timeline.
     setEvents([]);
     setSelected(null);
+    setRunMeta(null);
     lastSeenSeqRef.current = 0;
     initialBufferRef.current = [];
     initialGateRef.current = false;
     setLoading(true);
     setError(null);
+
+    api.get(`/api/agent-runs/${runId}`).then(({ data }) => {
+      setRunMeta({
+        agentName: data.agentName ?? '',
+        status: data.status ?? '',
+        durationMs: data.durationMs ?? null,
+        eventCount: data.eventCount ?? null,
+        startedAt: data.startedAt ?? null,
+      });
+    }).catch(() => {/* meta bar is best-effort */});
+
     fetchSnapshot(1)
       .then(() => setLoading(false))
       .catch((err) => {
@@ -179,7 +208,21 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
           View run trace →
         </Link>
       </div>
-      <div className="text-xs text-slate-500 mb-3 font-mono">Run {runId}</div>
+      {runMeta ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-[12px] text-slate-600">
+          <span className="font-semibold text-slate-800">{runMeta.agentName}</span>
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${STATUS_BADGE[runMeta.status] ?? 'bg-slate-100 text-slate-600'}`}>
+            {runMeta.status}
+          </span>
+          <span>{formatDuration(runMeta.durationMs)}</span>
+          {runMeta.eventCount != null && <span>{runMeta.eventCount.toLocaleString()} events</span>}
+          {runMeta.startedAt && (
+            <span>Started {new Date(runMeta.startedAt).toLocaleString()}</span>
+          )}
+        </div>
+      ) : (
+        <div className="text-xs text-slate-500 mb-3 font-mono">Run {runId}</div>
+      )}
 
       {capDetails && (
         <div

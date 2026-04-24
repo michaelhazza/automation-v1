@@ -40,12 +40,6 @@ interface CompanyTemplateDetail {
   tree: unknown[];
 }
 
-const SOURCE_BADGE: Record<string, { cls: string; label: string }> = {
-  manual: { cls: 'bg-slate-100 text-slate-600', label: 'Manual' },
-  paperclip_import: { cls: 'bg-blue-100 text-blue-700', label: 'Imported' },
-  from_system: { cls: 'bg-violet-100 text-violet-700', label: 'System' },
-};
-
 const ROLE_CLS: Record<string, string> = {
   orchestrator: 'bg-purple-100 text-purple-800',
   specialist: 'bg-blue-100 text-blue-800',
@@ -215,20 +209,12 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
           </div>
         )}
-        <div className="flex gap-2">
-          <button
-            onClick={openLibrary}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
-          >
-            Browse Shared Library
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
-          >
-            + New Template
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+        >
+          + New Template
+        </button>
       </div>
 
       {error && (
@@ -274,17 +260,13 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Name</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Source</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agents</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Created</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {templates.map((t) => {
-                const badge = SOURCE_BADGE[t.sourceType] ?? SOURCE_BADGE.manual;
-                return (
+              {templates.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -297,13 +279,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
                         <div className="text-xs text-slate-500 mt-0.5 max-w-[280px] truncate">{t.description}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                    </td>
                     <td className="px-4 py-3 text-[13px] text-slate-600">{t.slotCount}</td>
-                    <td className="px-4 py-3 text-[13px] text-slate-600">v{t.version}</td>
                     <td className="px-4 py-3 text-[13px] text-slate-500">
                       {new Date(t.createdAt).toLocaleDateString()}
                     </td>
@@ -326,8 +302,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
                       </div>
                     </td>
                   </tr>
-                );
-              })}
+                ))}
             </tbody>
           </table>
         )}

@@ -8,7 +8,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**In-flight spec:** `docs/riley-observations-dev-spec.md` — Wave 1 (naming + invoke_automation) PR #186 (branch `claude/start-riley-architect-pipeline-7ElHp`) approved for merge after the full review pipeline (spec-conformance → pr-reviewer → dual-reviewer + 3 rounds of ChatGPT PR review). 191 files vs origin/main; **111/111 Riley-relevant tests passing** (23 dispatcher + 18 workspace-health + 39 workflow-lib + 31 eventRowPure); zero new typecheck errors. Final HEAD: `bf46addc` (post-main merge). Awaiting merge into `main`. Next spec not yet chosen — pick from the queue below or kick off Riley W2 (Explore/Execute), W3 (context-assembly telemetry), or W4 (heartbeat gate).
+**In-flight spec:** `docs/superpowers/specs/2026-04-24-clientpulse-ui-simplification-spec.md` — PR #187 (branch `feat/clientpulse-ui-simplification`) merge-ready after the full review pipeline (spec-conformance CONFORMANT → pr-reviewer with B1–B3 + S1 fixed in-branch + S2–S7 / N1–N8 deferred → dual-reviewer hit Codex usage limit → 3 rounds ChatGPT PR review, 15 rejected as diff-vs-HEAD hallucinations, 5 polish items deferred). 63 files vs origin/main (+7.7k / -721). Session log: `tasks/review-logs/chatgpt-pr-review-clientpulse-ui-simplification-2026-04-24T12-01-27Z.md`. Final HEAD at session close: `ccb5d343`. Awaiting merge into `main`.
+
+**Previous:** Riley Observations W1 (PR #186 merged into `main` at commit `4cd626c8`, pulled into this branch via `38ace578` with rename sync for `playbook_run` → `workflow_run`).
 
 **Pick-next queue:** See `tasks/todo.md` for the durable backlog. Highest-value unblocked items at the time of writing:
   1. **LAEL-P1-1** — `llmRouter` `llm.requested` / `llm.completed` emission + `agent_run_llm_payloads` writer integration. Without it the Live Agent Execution Log shows no "doing" phase.
@@ -19,6 +21,8 @@ For per-session progress (what was done this session, what's next), write to `ta
   6. **Cached-context follow-up** — subaccount-isolation posture spec-doc task (from `tasks/todo.md § Deferred from chatgpt-pr-review — PR #183`).
 
 **Recently shipped to `main`:**
+
+- **Riley Observations W1 — naming + invoke_automation** (PR #186 — 2026-04-24, merged at `4cd626c8`). Renames: `processes` → `automations`, `playbooks` → `workflows` (table + code), `workflow_runs` → `flow_runs`; `ActivityType.playbook_run` → `workflow_run`; `invoke_automation` step type. Includes `scripts/codemod-riley-rename.ts` + `scripts/rebase-post-riley-rename.sh` for branches forking off pre-merge `main`. Merged after full review pipeline (spec-conformance + pr-reviewer + dual-reviewer + 3 ChatGPT rounds).
 
 - **Paperclip Hierarchy** (PR #182 — 2026-04-23, merged). Hierarchical delegation infrastructure for cached-context inheritance, spawn vs handoff continuity, and delegation-graph rendering. Review arc: spec-conformance whole-branch pass (1 architectural item routed to `tasks/todo.md`); pr-reviewer clean; ChatGPT PR review 3 rounds (10 implement / 1 reject / 3 defer). Session log: `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`.
 

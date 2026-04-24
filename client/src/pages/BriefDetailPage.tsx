@@ -154,7 +154,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <div className="mb-4">
-        <Link to="/admin/pulse" className="text-sm text-gray-400 hover:text-gray-600">← Back</Link>
+        <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Back</Link>
       </div>
 
       <div className="mb-6">
