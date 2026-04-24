@@ -70,7 +70,10 @@ export function NeedsAttentionRow({ client }: NeedsAttentionRowProps): React.Rea
           {client.subaccountName}
         </span>
         {client.hasPendingIntervention && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-700 leading-none">
+          <span
+            aria-label="Pending intervention"
+            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-700 leading-none"
+          >
             ⚑ PENDING
           </span>
         )}
