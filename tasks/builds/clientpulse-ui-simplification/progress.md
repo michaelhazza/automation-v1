@@ -6,9 +6,16 @@
 
 ---
 
-## Status: PAUSED — model switch requested by user
+## Status: COMPLETE — PR #187 merge-ready
 
-All code tasks complete (through Task 7.5). Paused before spec-conformance review at user request to change models. Resume with spec-conformance → pr-reviewer → dual-reviewer.
+All code tasks complete (through Task 7.5). All review gates passed. PR: https://github.com/michaelhazza/automation-v1/pull/187
+
+**Review gates passed:**
+- spec-conformance: CONFORMANT (`tasks/review-logs/spec-conformance-log-clientpulse-ui-simplification-2026-04-24T07-09-46Z.md`)
+- pr-reviewer: blocking B1–B3 + strong S1 fixed in `b1b16b72`; S2–S7 / N1–N8 deferred to `tasks/todo.md` (`tasks/review-logs/pr-review-log-clientpulse-ui-simplification-2026-04-24T07-55-00Z.md`)
+- dual-reviewer: Codex CLI hit ChatGPT usage limit (0 iterations); non-blocking per project convention (`tasks/review-logs/dual-review-log-clientpulse-ui-simplification-2026-04-24T11-44-38Z.md`)
+- chatgpt-pr-review (3 rounds): 15 findings rejected as diff-vs-HEAD hallucinations or verified safe; 5 polish items deferred (`tasks/review-logs/chatgpt-pr-review-clientpulse-ui-simplification-2026-04-24T12-01-27Z.md`)
+- main merged (`38ace578`): textual conflicts resolved in App.tsx / activityService.ts / reviewService.ts; Riley Observations W1 rename sync (`playbook_run` → `workflow_run`)
 
 ---
 
@@ -77,12 +84,13 @@ All code tasks complete (through Task 7.5). Paused before spec-conformance revie
 
 ---
 
-## Next step: spec-conformance → pr-reviewer → dual-reviewer
+## Next step: merge PR #187
 
-All code tasks are done. Resume with:
-1. `spec-conformance: verify the current branch against its spec`
-2. `pr-reviewer` on full branch changes
-3. `dual-reviewer` and fix all issues
+All review gates closed. Deferred polish items tracked in `tasks/todo.md` under:
+- `## Deferred from pr-reviewer review — clientpulse-ui-simplification (2026-04-24)`
+- `## Deferred from chatgpt-pr-review — PR #187`
+
+Post-merge manual QA items (G6 / G1–G10 ship gates) still open — see spec §Ship gates.
 
 ---
 
