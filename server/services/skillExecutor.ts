@@ -60,6 +60,7 @@ const execFileAsync = promisify(execFile);
 // Register worker adapter for execution layer (handles review-gated worker actions)
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
+import { recordIncident } from './incidentIngestor.js';
 
 registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
@@ -343,6 +344,19 @@ async function runWithProcessors(
       return { success: false, error: err.reason, retryable: err.options.retry };
     }
     // Non-TripWire failure — apply the action's onFailure directive if declared.
+    // When fail_run fires, record a system incident before propagating.
+    const actionDef = getActionDefinition(toolSlug);
+    if ((actionDef?.onFailure ?? 'retry') === 'fail_run') {
+      recordIncident({
+        source: 'skill',
+        summary: `Skill terminal failure: ${toolSlug} — ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+        errorCode: 'skill_fail_run',
+        stack: err instanceof Error ? err.stack : undefined,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        fingerprintOverride: `skill:${toolSlug}:fail_run`,
+      });
+    }
     return applyOnFailure(toolSlug, err);
   }
 
