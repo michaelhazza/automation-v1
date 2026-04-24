@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Workflow Executor Service — Flows-before-Crew pattern.
+// Flow Executor Service — Flows-before-Crew pattern.
 //
-// Executes a WorkflowDefinition step-by-step, writing a LangGraph-style
+// Executes a FlowDefinition step-by-step, writing a LangGraph-style
 // checkpoint after each step so runs can resume deterministically after a
 // process restart or a HITL pause.
 //
@@ -9,12 +9,12 @@
 //   - Steps execute in declaration order.
 //   - currentStepIndex is the _next_ step to execute (not the last done).
 //   - Outputs from completed steps are accumulated in stepOutputs on the run row.
-//   - After each step a WorkflowStepOutput row is appended (audit trail).
+//   - After each step a FlowStepOutput row is appended (audit trail).
 //
 // HITL handling (two-path model):
-//   - Review-gated steps: propose action → store workflowRunId in metadata
+//   - Review-gated steps: propose action → store flowRunId in metadata
 //     → write checkpoint → mark run as 'paused' → RETURN immediately.
-//     The DB-backed resume worker (queueService) calls resumeWorkflow() after
+//     The DB-backed resume worker (queueService) calls resumeFlow() after
 //     the human approves the action in the review queue.
 //   - Auto-gated / non-gated steps: execute inline via skillExecutor as usual.
 //
@@ -26,22 +26,22 @@
 import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { workflowRuns, workflowStepOutputs } from '../db/schema/workflowRuns.js';
+import { flowRuns, flowStepOutputs } from '../db/schema/flowRuns.js';
 import { skillExecutor } from './skillExecutor.js';
 import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
 import { ACTION_REGISTRY } from '../config/actionRegistry.js';
 import { logger } from '../lib/logger.js';
-import type { WorkflowDefinition, WorkflowCheckpoint, WorkflowRunStatus, WorkflowStep } from '../types/workflow.js';
+import type { FlowDefinition, FlowCheckpoint, FlowRunStatus, FlowStep } from '../types/flow.js';
 
 // HITL approval window — approvals arriving after this are rejected as stale
 const HITL_TIMEOUT_HOURS = 24;
 
 // ---------------------------------------------------------------------------
-// Context passed to every workflow step execution
+// Context passed to every flow step execution
 // ---------------------------------------------------------------------------
 
-export interface WorkflowExecutionContext {
+export interface FlowExecutionContext {
   organisationId: string;
   subaccountId: string;
   agentId: string;
@@ -53,15 +53,15 @@ export interface WorkflowExecutionContext {
 // ---------------------------------------------------------------------------
 
 /**
- * Start a new workflow run and execute it until completion, pause, or failure.
- * Returns the workflow run ID.
+ * Start a new flow run and execute it until completion, pause, or failure.
+ * Returns the flow run ID.
  */
-export async function startWorkflow(
-  definition: WorkflowDefinition,
-  context: WorkflowExecutionContext,
+export async function startFlow(
+  definition: FlowDefinition,
+  context: FlowExecutionContext,
 ): Promise<string> {
   const [run] = await db
-    .insert(workflowRuns)
+    .insert(flowRuns)
     .values({
       organisationId: context.organisationId,
       subaccountId: context.subaccountId,
@@ -72,48 +72,48 @@ export async function startWorkflow(
       currentStepIndex: 0,
       stepOutputs: {},
     })
-    .returning({ id: workflowRuns.id });
+    .returning({ id: flowRuns.id });
 
   await executeFromCheckpoint(run.id, context, 0, {});
   return run.id;
 }
 
 /**
- * Resume a paused workflow run from its last checkpoint.
+ * Resume a paused flow run from its last checkpoint.
  *
  * If `approvedActionId` is provided the approved action's resultJson is
  * used as the output of the currently-paused step before advancing.
  */
-export async function resumeWorkflow(
-  workflowRunId: string,
-  context: WorkflowExecutionContext,
+export async function resumeFlow(
+  flowRunId: string,
+  context: FlowExecutionContext,
   approvedActionId?: string,
 ): Promise<void> {
-  const run = await db.query.workflowRuns.findFirst({
+  const run = await db.query.flowRuns.findFirst({
     where: and(
-      eq(workflowRuns.id, workflowRunId),
-      eq(workflowRuns.organisationId, context.organisationId),
+      eq(flowRuns.id, flowRunId),
+      eq(flowRuns.organisationId, context.organisationId),
     ),
   });
 
   if (!run) {
-    logger.warn('workflow.resume_run_not_found', { workflowRunId, organisationId: context.organisationId });
+    logger.warn('flow.resume_run_not_found', { flowRunId, organisationId: context.organisationId });
     return;
   }
 
   // Only paused runs can be resumed (guard against duplicate resume jobs)
   if (run.status !== 'paused') {
-    logger.warn('workflow.resume_wrong_status', { workflowRunId, status: run.status });
+    logger.warn('flow.resume_wrong_status', { flowRunId, status: run.status });
     return;
   }
 
   // ── Resume validation ────────────────────────────────────────────────────
-  const checkpoint = run.checkpoint as WorkflowCheckpoint | null;
+  const checkpoint = run.checkpoint as FlowCheckpoint | null;
 
   if (checkpoint?.timeoutAt && new Date() > new Date(checkpoint.timeoutAt)) {
     const msg = `Resume rejected: approval window expired at ${checkpoint.timeoutAt}`;
-    logger.warn('workflow.resume_expired', { workflowRunId, timeoutAt: checkpoint.timeoutAt });
-    await markRunFailed(workflowRunId, msg);
+    logger.warn('flow.resume_expired', { flowRunId, timeoutAt: checkpoint.timeoutAt });
+    await markRunFailed(flowRunId, msg);
     return;
   }
 
@@ -126,14 +126,14 @@ export async function resumeWorkflow(
     const currentHash = hashPayload(approvedAction.payloadJson as Record<string, unknown>);
     if (currentHash !== checkpoint.inputHash) {
       const msg = 'Resume rejected: action payload was modified after checkpoint was written';
-      logger.warn('workflow.resume_payload_tampered', { workflowRunId });
-      await markRunFailed(workflowRunId, msg);
+      logger.warn('flow.resume_payload_tampered', { flowRunId });
+      await markRunFailed(flowRunId, msg);
       return;
     }
   }
   // ────────────────────────────────────────────────────────────────────────
 
-  const definition = run.workflowDefinition as WorkflowDefinition;
+  const definition = run.workflowDefinition as FlowDefinition;
   const accumulatedOutputs: Record<string, unknown> = (run.stepOutputs as Record<string, unknown>) ?? {};
   let stepIndex = run.currentStepIndex;
 
@@ -145,18 +145,18 @@ export async function resumeWorkflow(
 
     if (pausedStep) {
       accumulatedOutputs[pausedStep.stepId] = stepOutput;
-      await appendStepOutput(workflowRunId, pausedStep, stepIndex, stepOutput, 'completed');
+      await appendStepOutput(flowRunId, pausedStep, stepIndex, stepOutput, 'completed');
     }
 
     stepIndex += 1;
   }
 
   await db
-    .update(workflowRuns)
+    .update(flowRuns)
     .set({ status: 'running', updatedAt: new Date() })
-    .where(eq(workflowRuns.id, workflowRunId));
+    .where(eq(flowRuns.id, flowRunId));
 
-  await executeFromCheckpoint(workflowRunId, context, stepIndex, accumulatedOutputs);
+  await executeFromCheckpoint(flowRunId, context, stepIndex, accumulatedOutputs);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,18 +164,18 @@ export async function resumeWorkflow(
 // ---------------------------------------------------------------------------
 
 async function executeFromCheckpoint(
-  workflowRunId: string,
-  context: WorkflowExecutionContext,
+  flowRunId: string,
+  context: FlowExecutionContext,
   startIndex: number,
   initialOutputs: Record<string, unknown>,
 ): Promise<void> {
-  const run = await db.query.workflowRuns.findFirst({
-    where: eq(workflowRuns.id, workflowRunId),
+  const run = await db.query.flowRuns.findFirst({
+    where: eq(flowRuns.id, flowRunId),
   });
 
   if (!run) return;
 
-  const definition = run.workflowDefinition as WorkflowDefinition;
+  const definition = run.workflowDefinition as FlowDefinition;
   const steps = definition.steps;
   let stepIndex = startIndex;
   let accumulatedOutputs: Record<string, unknown> = { ...initialOutputs };
@@ -183,12 +183,12 @@ async function executeFromCheckpoint(
   while (stepIndex < steps.length) {
     const step = steps[stepIndex];
 
-    // ── Idempotency guard: skip steps already recorded in step_outputs ─────
+    // ── Idempotency guard: skip steps already recorded in flow_step_outputs ─
     // This makes resume provably safe under duplicate-job or partial-failure scenarios.
-    const existingOutput = await db.query.workflowStepOutputs.findFirst({
+    const existingOutput = await db.query.flowStepOutputs.findFirst({
       where: and(
-        eq(workflowStepOutputs.workflowRunId, workflowRunId),
-        eq(workflowStepOutputs.stepIndex, stepIndex),
+        eq(flowStepOutputs.flowRunId, flowRunId),
+        eq(flowStepOutputs.stepIndex, stepIndex),
       ),
     });
     if (existingOutput && existingOutput.status !== 'failed') {
@@ -201,7 +201,7 @@ async function executeFromCheckpoint(
 
     // ── Review-gated step: propose, checkpoint, pause. Do NOT block. ──────
     if (gateLevel === 'review') {
-      await proposeWorkflowHitlStep(workflowRunId, step, stepIndex, accumulatedOutputs, context);
+      await proposeFlowHitlStep(flowRunId, step, stepIndex, accumulatedOutputs, context);
       return; // caller (resume worker) continues after human approves
     }
 
@@ -217,7 +217,7 @@ async function executeFromCheckpoint(
         skillName: step.actionType,
         input: mergedPayload,
         context: {
-          runId: context.agentRunId ?? workflowRunId,
+          runId: context.agentRunId ?? flowRunId,
           organisationId: context.organisationId,
           subaccountId: context.subaccountId,
           agentId: context.agentId,
@@ -231,20 +231,20 @@ async function executeFromCheckpoint(
       errorMessage = err instanceof Error ? err.message : String(err);
       output = { error: errorMessage };
 
-      await appendStepOutput(workflowRunId, step, stepIndex, output, 'failed', errorMessage);
-      await writeCheckpoint(workflowRunId, stepIndex, accumulatedOutputs, 'failed', errorMessage);
+      await appendStepOutput(flowRunId, step, stepIndex, output, 'failed', errorMessage);
+      await writeCheckpoint(flowRunId, stepIndex, accumulatedOutputs, 'failed', errorMessage);
       return;
     }
 
-    await appendStepOutput(workflowRunId, step, stepIndex, output, stepStatus);
+    await appendStepOutput(flowRunId, step, stepIndex, output, stepStatus);
 
     stepIndex += 1;
-    await writeCheckpoint(workflowRunId, stepIndex, accumulatedOutputs, 'running');
+    await writeCheckpoint(flowRunId, stepIndex, accumulatedOutputs, 'running');
   }
 
   // All steps completed
   await db
-    .update(workflowRuns)
+    .update(flowRuns)
     .set({
       status: 'completed',
       currentStepIndex: steps.length,
@@ -252,24 +252,24 @@ async function executeFromCheckpoint(
       completedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(workflowRuns.id, workflowRunId));
+    .where(eq(flowRuns.id, flowRunId));
 }
 
 // ---------------------------------------------------------------------------
 // HITL step — propose + create review item + checkpoint + pause
 // ---------------------------------------------------------------------------
 
-async function proposeWorkflowHitlStep(
-  workflowRunId: string,
-  step: WorkflowStep,
+async function proposeFlowHitlStep(
+  flowRunId: string,
+  step: FlowStep,
   stepIndex: number,
   accumulatedOutputs: Record<string, unknown>,
-  context: WorkflowExecutionContext,
+  context: FlowExecutionContext,
 ): Promise<void> {
   const mergedPayload = { ...step.payload, ...accumulatedOutputs };
 
   // Idempotency key includes run + step so retried resume proposals don't duplicate
-  const idempotencyKey = `workflow:${workflowRunId}:${step.stepId}`;
+  const idempotencyKey = `flow:${flowRunId}:${step.stepId}`;
 
   const proposed = await actionService.proposeAction({
     organisationId: context.organisationId,
@@ -279,11 +279,11 @@ async function proposeWorkflowHitlStep(
     actionType: step.actionType,
     idempotencyKey,
     payload: mergedPayload,
-    // Store workflow context in metadata so the approval handler can enqueue resume
+    // Store flow context in metadata so the approval handler can enqueue resume
     metadata: {
-      workflowRunId,
-      workflowStepId: step.stepId,
-      workflowStepIndex: stepIndex,
+      flowRunId,
+      flowStepId: step.stepId,
+      flowStepIndex: stepIndex,
     },
   });
 
@@ -291,7 +291,7 @@ async function proposeWorkflowHitlStep(
     const action = await actionService.getAction(proposed.actionId, context.organisationId);
     await reviewService.createReviewItem(action, {
       actionType: step.actionType,
-      reasoning: `Workflow step ${stepIndex + 1}: ${step.stepId}`,
+      reasoning: `Flow step ${stepIndex + 1}: ${step.stepId}`,
       proposedPayload: mergedPayload,
     });
   }
@@ -302,7 +302,7 @@ async function proposeWorkflowHitlStep(
   const def = ACTION_REGISTRY[step.actionType as keyof typeof ACTION_REGISTRY];
   const toolVersion = String((def as { version?: unknown } | undefined)?.version ?? '1');
 
-  await writeCheckpoint(workflowRunId, stepIndex, accumulatedOutputs, 'paused', undefined, {
+  await writeCheckpoint(flowRunId, stepIndex, accumulatedOutputs, 'paused', undefined, {
     timeoutAt,
     inputHash,
     toolVersion,
@@ -313,28 +313,28 @@ async function proposeWorkflowHitlStep(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Resolve the effective gate level for a workflow step. */
-function getStepGateLevel(step: WorkflowStep): 'auto' | 'review' | 'block' {
+/** Resolve the effective gate level for a flow step. */
+function getStepGateLevel(step: FlowStep): 'auto' | 'review' | 'block' {
   const def = ACTION_REGISTRY[step.actionType as keyof typeof ACTION_REGISTRY];
   return (def?.defaultGateLevel ?? 'auto') as 'auto' | 'review' | 'block';
 }
 
 async function writeCheckpoint(
-  workflowRunId: string,
+  flowRunId: string,
   nextStepIndex: number,
   stepOutputs: Record<string, unknown>,
-  status: WorkflowRunStatus,
+  status: FlowRunStatus,
   errorMessage?: string,
-  extraCheckpointFields?: Pick<WorkflowCheckpoint, 'timeoutAt' | 'inputHash' | 'toolVersion'>,
+  extraCheckpointFields?: Pick<FlowCheckpoint, 'timeoutAt' | 'inputHash' | 'toolVersion'>,
 ): Promise<void> {
-  const checkpoint: WorkflowCheckpoint = {
+  const checkpoint: FlowCheckpoint = {
     lastCompletedStepIndex: nextStepIndex - 1,
     checkpointedAt: new Date().toISOString(),
     ...extraCheckpointFields,
   };
 
   await db
-    .update(workflowRuns)
+    .update(flowRuns)
     .set({
       status,
       currentStepIndex: nextStepIndex,
@@ -343,7 +343,7 @@ async function writeCheckpoint(
       errorMessage: errorMessage ?? null,
       updatedAt: new Date(),
     })
-    .where(eq(workflowRuns.id, workflowRunId));
+    .where(eq(flowRuns.id, flowRunId));
 }
 
 /** SHA-256 of a deterministically-serialised payload object. */
@@ -352,24 +352,24 @@ function hashPayload(payload: Record<string, unknown>): string {
   return createHash('sha256').update(sorted).digest('hex');
 }
 
-/** Mark a workflow run as failed with a message. */
-async function markRunFailed(workflowRunId: string, message: string): Promise<void> {
+/** Mark a flow run as failed with a message. */
+async function markRunFailed(flowRunId: string, message: string): Promise<void> {
   await db
-    .update(workflowRuns)
+    .update(flowRuns)
     .set({ status: 'failed', errorMessage: message, updatedAt: new Date() })
-    .where(eq(workflowRuns.id, workflowRunId));
+    .where(eq(flowRuns.id, flowRunId));
 }
 
 async function appendStepOutput(
-  workflowRunId: string,
-  step: WorkflowStep,
+  flowRunId: string,
+  step: FlowStep,
   stepIndex: number,
   output: unknown,
   stepStatus: 'completed' | 'failed' | 'skipped',
   errorMessage?: string,
 ): Promise<void> {
-  await db.insert(workflowStepOutputs).values({
-    workflowRunId,
+  await db.insert(flowStepOutputs).values({
+    flowRunId,
     stepId: step.stepId,
     stepIndex,
     output,

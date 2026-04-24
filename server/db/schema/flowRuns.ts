@@ -3,26 +3,27 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agentRuns } from './agentRuns';
 import { users } from './users';
-import type { WorkflowDefinition, WorkflowRunStatus, WorkflowCheckpoint } from '../../types/workflow';
+import type { FlowDefinition, FlowRunStatus, FlowCheckpoint } from '../../types/flow';
 
 // ---------------------------------------------------------------------------
-// Workflow Runs — one row per workflow execution (Flows pattern).
+// Flow Runs — one row per workflow execution (Flows pattern).
 // Schema matches migration 0037_phase1c_memory_and_workflows.sql
+// Renamed from workflow_runs via migration 0219.
 // ---------------------------------------------------------------------------
 
-export const workflowRuns = pgTable(
-  'workflow_runs',
+export const flowRuns = pgTable(
+  'flow_runs',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
     subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id),
 
-    /** Frozen snapshot of the WorkflowDefinition at run-start time. */
-    workflowDefinition: jsonb('workflow_definition').notNull().$type<WorkflowDefinition>(),
+    /** Frozen snapshot of the FlowDefinition at run-start time. */
+    workflowDefinition: jsonb('workflow_definition').notNull().$type<FlowDefinition>(),
     workflowName: text('workflow_name').notNull().default(''),
     workflowVersion: text('workflow_version').notNull().default('1.0.0'),
 
-    status: text('status').notNull().$type<WorkflowRunStatus>().default('running'),
+    status: text('status').notNull().$type<FlowRunStatus>().default('running'),
 
     /** Index into workflowDefinition.steps pointing at the active step. */
     currentStepIndex: integer('current_step_index').notNull().default(0),
@@ -37,7 +38,7 @@ export const workflowRuns = pgTable(
      * LangGraph-style checkpoint — written after each step completes.
      * Allows deterministic resume after process restart or HITL pause.
      */
-    checkpoint: jsonb('checkpoint').$type<WorkflowCheckpoint>(),
+    checkpoint: jsonb('checkpoint').$type<FlowCheckpoint>(),
 
     /** Optional: the user who triggered this workflow. */
     triggeredBy: uuid('triggered_by').references(() => users.id),
@@ -51,24 +52,24 @@ export const workflowRuns = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    orgIdx: index('idx_workflow_runs_org').on(table.organisationId, table.status),
-    subaccountIdx: index('idx_workflow_runs_subaccount').on(table.subaccountId, table.status),
+    orgIdx: index('idx_flow_runs_org').on(table.organisationId, table.status),
+    subaccountIdx: index('idx_flow_runs_subaccount').on(table.subaccountId, table.status),
   }),
 );
 
-export type WorkflowRun = typeof workflowRuns.$inferSelect;
-export type NewWorkflowRun = typeof workflowRuns.$inferInsert;
+export type FlowRun = typeof flowRuns.$inferSelect;
+export type NewFlowRun = typeof flowRuns.$inferInsert;
 
 // ---------------------------------------------------------------------------
-// Workflow Step Outputs — append-only log of step results.
-// Schema matches migration 0037_phase1c_memory_and_workflows.sql
+// Flow Step Outputs — append-only log of step results.
+// Renamed from workflow_step_outputs via migration 0219.
 // ---------------------------------------------------------------------------
 
-export const workflowStepOutputs = pgTable(
-  'workflow_step_outputs',
+export const flowStepOutputs = pgTable(
+  'flow_step_outputs',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    workflowRunId: uuid('workflow_run_id').notNull().references(() => workflowRuns.id),
+    flowRunId: uuid('flow_run_id').notNull().references(() => flowRuns.id),
 
     stepId: text('step_id').notNull(),
     stepIndex: integer('step_index').notNull(),
@@ -85,9 +86,9 @@ export const workflowStepOutputs = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => ({
-    runIdx: index('idx_workflow_step_outputs_run').on(table.workflowRunId, table.stepIndex),
+    runIdx: index('idx_flow_step_outputs_run').on(table.flowRunId, table.stepIndex),
   }),
 );
 
-export type WorkflowStepOutput = typeof workflowStepOutputs.$inferSelect;
-export type NewWorkflowStepOutput = typeof workflowStepOutputs.$inferInsert;
+export type FlowStepOutput = typeof flowStepOutputs.$inferSelect;
+export type NewFlowStepOutput = typeof flowStepOutputs.$inferInsert;

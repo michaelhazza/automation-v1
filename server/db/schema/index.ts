@@ -66,7 +66,7 @@ export * from './hierarchyTemplates';
 export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
 export * from './systemHierarchyTemplateSlots';
-export * from './workflowRuns';
+export * from './flowRuns';
 export * from './auditEvents';
 export * from './pageProjects';
 export * from './pages';

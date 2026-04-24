@@ -479,8 +479,8 @@ export const queueService = {
     }
 
     // Synchronous fallback — resume inline (no restart resilience, but functional)
-    const { resumeWorkflow } = await import('./workflowExecutorService.js');
-    resumeWorkflow(params.workflowRunId, {
+    const { resumeFlow } = await import('./flowExecutorService.js');
+    resumeFlow(params.workflowRunId, {
       organisationId: params.organisationId,
       subaccountId: params.subaccountId,
       agentId: params.agentId,
@@ -985,9 +985,9 @@ export const queueService = {
               agentRunId?: string;
             };
 
-          const { resumeWorkflow } = await import('./workflowExecutorService.js');
+          const { resumeFlow } = await import('./flowExecutorService.js');
           await withTimeout(
-            resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
+            resumeFlow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
             270_000, // 300 - 30
           );
         } catch (err) {

@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
-// Workflow types — Flows-before-Crew pattern (LangGraph checkpoint model).
+// Flow types — Flows-before-Crew pattern (LangGraph checkpoint model).
 //
-// A WorkflowDefinition is a frozen JSONB snapshot stored on workflow_runs.
+// A FlowDefinition is a frozen JSONB snapshot stored on flow_runs.
 // Steps execute sequentially; the executor writes a checkpoint after each
 // step so runs can resume deterministically after a process restart.
+// Renamed from workflow.ts via M1 (migration 0219).
 // ---------------------------------------------------------------------------
 
-export interface WorkflowStep {
+export interface FlowStep {
   /** Unique within the workflow. Used as a stable resume cursor. */
   stepId: string;
   /** Action type slug (must exist in ACTION_REGISTRY). */
@@ -17,15 +18,15 @@ export interface WorkflowStep {
   skippable?: boolean;
 }
 
-export interface WorkflowDefinition {
+export interface FlowDefinition {
   workflowType: string;
   version: number;
-  steps: WorkflowStep[];
+  steps: FlowStep[];
   /** Human-readable label shown in the inbox/review queue. */
   label?: string;
 }
 
-export type WorkflowRunStatus =
+export type FlowRunStatus =
   | 'pending'
   | 'running'
   | 'paused'        // waiting for human approval on a review-gated step
@@ -45,7 +46,7 @@ export type WorkflowRunStatus =
  *                 mutations after the checkpoint was written.
  *   - toolVersion: ACTION_REGISTRY version string at checkpoint time (for future compat).
  */
-export interface WorkflowCheckpoint {
+export interface FlowCheckpoint {
   /** Index of the last successfully completed step. -1 = none yet. */
   lastCompletedStepIndex: number;
   /** ISO timestamp of the most recent checkpoint write. */
