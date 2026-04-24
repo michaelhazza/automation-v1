@@ -228,3 +228,9 @@ export * from './bundleSuggestionDismissals.js';
 
 // Paperclip Hierarchy — delegation outcomes telemetry table (migration 0217, renumbered from 0205 post-merge)
 export * from './delegationOutcomes.js';
+
+// System Monitoring Foundation — incident sink + audit log + suppressions (migration 0224)
+// BYPASSES RLS — all readers must be sysadmin-gated; see rlsProtectedTables.ts commentary.
+export * from './systemIncidents.js';
+export * from './systemIncidentEvents.js';
+export * from './systemIncidentSuppressions.js';

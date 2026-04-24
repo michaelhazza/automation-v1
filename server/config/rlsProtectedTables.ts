@@ -519,6 +519,21 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   },
 ];
 
+// ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
+//
+// The following tables introduced in migration 0224 INTENTIONALLY bypass the
+// standard RLS framework (spec §7.4 Option A). They are system-admin-only
+// surfaces; access is gated at the route and service layers by
+// requireSystemAdmin — there is no per-row RLS policy.
+//
+// If you are tempted to query these tables from non-sysadmin code paths,
+// STOP — every caller must be sysadmin-gated or apply explicit service-layer
+// filtering. There is no RLS safety net.
+//
+//   system_incidents            — central incident sink
+//   system_incident_events      — append-only audit log per incident
+//   system_incident_suppressions — named mute rules
+
 /** Convenience set for fast membership checks in the CI gate. */
 export const RLS_PROTECTED_TABLE_NAMES: ReadonlySet<string> = new Set(
   RLS_PROTECTED_TABLES.map((t) => t.tableName),
