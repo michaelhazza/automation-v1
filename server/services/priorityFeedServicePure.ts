@@ -8,7 +8,7 @@ export type FeedEntrySource =
   | 'review_item'
   | 'agent_inbox'
   | 'task'
-  | 'playbook_run'
+  | 'workflow_run'
   | 'agent_run_failure';
 
 export type FeedEntry = {

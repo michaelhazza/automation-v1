@@ -7,7 +7,7 @@ type ActivityType =
   | 'review_item'
   | 'health_finding'
   | 'inbox_item'
-  | 'playbook_run'
+  | 'workflow_run'
   | 'workflow_execution';
 
 type NormalisedStatus = 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
@@ -30,7 +30,7 @@ type ActivityItem = {
 
 const ACTIVITY_TYPES: ActivityType[] = [
   'agent_run', 'review_item', 'health_finding', 'inbox_item',
-  'playbook_run', 'workflow_execution',
+  'workflow_run', 'workflow_execution',
 ];
 
 const STATUS_OPTIONS: NormalisedStatus[] = ['active', 'attention_needed', 'completed', 'failed', 'cancelled'];

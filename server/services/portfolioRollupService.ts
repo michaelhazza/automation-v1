@@ -24,7 +24,7 @@ import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   subaccounts,
-  playbookRuns,
+  workflowRuns,
   memoryReviewQueue,
 } from '../db/schema/index.js';
 import { deliveryService, type DeliveryChannelConfig } from './deliveryService.js';
@@ -104,20 +104,20 @@ export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRoll
   for (const sub of clientSubs) {
     const [run] = await db
       .select({
-        id: playbookRuns.id,
-        completedAt: playbookRuns.completedAt,
-        status: playbookRuns.status,
+        id: workflowRuns.id,
+        completedAt: workflowRuns.completedAt,
+        status: workflowRuns.status,
       })
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.subaccountId, sub.id),
-          eq(playbookRuns.organisationId, input.organisationId),
-          eq(playbookRuns.playbookSlug, slug),
-          gte(playbookRuns.createdAt, windowStart),
+          eq(workflowRuns.subaccountId, sub.id),
+          eq(workflowRuns.organisationId, input.organisationId),
+          eq(workflowRuns.workflowSlug, slug),
+          gte(workflowRuns.createdAt, windowStart),
         ),
       )
-      .orderBy(desc(playbookRuns.createdAt))
+      .orderBy(desc(workflowRuns.createdAt))
       .limit(1);
 
     rollupRows.push({

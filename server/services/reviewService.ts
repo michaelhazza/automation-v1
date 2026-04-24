@@ -1,4 +1,4 @@
-import { eq, and, or, desc, sql, isNull } from 'drizzle-orm';
+﻿import { eq, and, or, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
@@ -145,19 +145,19 @@ export const reviewService = {
 
     // Dispatch execution outside the approval transaction
     let execResult;
-    // ─── Playbook action_call HITL resumption branch (spec §4.7) ──────────
-    // When the action was proposed by a playbook's action_call step, route
-    // execution through the playbook resumption path instead of the default
+    // ─── Workflow action_call HITL resumption branch (spec §4.7) ──────────
+    // When the action was proposed by a Workflow's action_call step, route
+    // execution through the Workflow resumption path instead of the default
     // adapter-based executionLayerService. The resumption path invokes the
     // raw config_* skill handler (bypassing a duplicate audit row), marks
     // the action completed / failed on the same row, and resumes the
-    // playbook step run via the engine.
+    // Workflow step run via the engine.
     const actionForBranch = await actionService.getAction(item.actionId, organisationId);
     const branchMeta = (actionForBranch.metadataJson ?? null) as Record<string, unknown> | null;
-    const isPlaybookActionCall = branchMeta?.source === 'playbook_action_call';
+    const isWorkflowActionCall = branchMeta?.source === 'workflow_action_call';
     try {
-      if (isPlaybookActionCall) {
-        const { resumeActionCallAfterApproval } = await import('./playbookActionCallExecutor.js');
+      if (isWorkflowActionCall) {
+        const { resumeActionCallAfterApproval } = await import('./workflowActionCallExecutor.js');
         const resumed = await resumeActionCallAfterApproval({
           action: actionForBranch,
           approverUserId: userId,

@@ -6,7 +6,7 @@ import {
   agentRuns,
   agents,
   tasks,
-  playbookRuns,
+  workflowRuns,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
 import { rankFeed, type FeedEntry, type FeedEntrySource } from './priorityFeedServicePure.js';
@@ -35,7 +35,7 @@ export async function listFeed(
     fetchPendingReviews(scope.orgId, scope.subaccountId),
     fetchOpenTasks(scope.orgId, scope.subaccountId),
     fetchFailedRuns(scope.orgId, scope.subaccountId),
-    fetchActivePlaybookRuns(scope.orgId, scope.subaccountId),
+    fetchActiveWorkflowRuns(scope.orgId, scope.subaccountId),
   ]);
 
   const allEntries: FeedEntry[] = [
@@ -222,23 +222,23 @@ async function fetchFailedRuns(orgId: string, subaccountId?: string): Promise<Fe
   }));
 }
 
-async function fetchActivePlaybookRuns(orgId: string, subaccountId?: string): Promise<FeedEntry[]> {
+async function fetchActiveWorkflowRuns(orgId: string, subaccountId?: string): Promise<FeedEntry[]> {
   const conditions = [
-    eq(playbookRuns.organisationId, orgId),
-    eq(playbookRuns.status, 'awaiting_input'),
+    eq(workflowRuns.organisationId, orgId),
+    eq(workflowRuns.status, 'awaiting_input'),
     // Priority feed is subaccount-scoped by contract (FeedEntry.subaccountId is
     // non-nullable). Org-scope runs (migration 0171) surface through an
     // org-level feed once Phase 5 ships — skip them here.
-    eq(playbookRuns.scope, 'subaccount'),
+    eq(workflowRuns.scope, 'subaccount'),
   ];
-  if (subaccountId) conditions.push(eq(playbookRuns.subaccountId, subaccountId));
+  if (subaccountId) conditions.push(eq(workflowRuns.subaccountId, subaccountId));
 
-  const rows = await db.select().from(playbookRuns).where(and(...conditions)).limit(30);
+  const rows = await db.select().from(workflowRuns).where(and(...conditions)).limit(30);
 
   return rows
     .filter((r): r is typeof r & { subaccountId: string } => r.subaccountId !== null)
     .map((r) => ({
-      source: 'playbook_run' as const,
+      source: 'workflow_run' as const,
       id: r.id,
       subaccountId: r.subaccountId,
       severity: 'warning' as const,

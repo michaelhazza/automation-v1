@@ -23,7 +23,7 @@ export const memoryBlockVersions = pgTable(
     /** Null for seed events. */
     createdByUserId: uuid('created_by_user_id'),
     changeSource: text('change_source').notNull().$type<
-      'manual_edit' | 'seed' | 'reset_to_canonical' | 'auto_synthesis' | 'playbook_upsert'
+      'manual_edit' | 'seed' | 'reset_to_canonical' | 'auto_synthesis' | 'workflow_upsert'
     >(),
     notes: text('notes'),
   },

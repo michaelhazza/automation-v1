@@ -15,8 +15,8 @@ import {
   agentRuns,
   subaccountAgents,
   subaccounts,
-  processes,
-  processConnectionMappings,
+  automations,
+  automationConnectionMappings,
   workspaceHealthFindings,
 } from '../../db/schema/index.js';
 import { runDetectors, diffFindings, type ExistingFindingRow } from './workspaceHealthServicePure.js';
@@ -281,18 +281,18 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
   // ── Processes ─────────────────────────────────────────────────────────
   const processRows = await db
     .select({
-      id: processes.id,
-      name: processes.name,
-      status: processes.status,
-      scope: processes.scope,
-      workflowEngineId: processes.workflowEngineId,
-      requiredConnections: processes.requiredConnections,
+      id: automations.id,
+      name: automations.name,
+      status: automations.status,
+      scope: automations.scope,
+      automationEngineId: automations.automationEngineId,
+      requiredConnections: automations.requiredConnections,
     })
-    .from(processes)
+    .from(automations)
     .where(
       and(
-        eq(processes.organisationId, organisationId),
-        isNull(processes.deletedAt),
+        eq(automations.organisationId, organisationId),
+        isNull(automations.deletedAt),
       ),
     );
 
@@ -301,21 +301,21 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
     name: p.name,
     status: p.status,
     scope: p.scope,
-    workflowEngineId: p.workflowEngineId,
+    automationEngineId: p.automationEngineId,
     requiredConnections: p.requiredConnections,
   }));
 
   // ── Process connection mappings ───────────────────────────────────────
   const mappingRows = await db
     .select({
-      processId: processConnectionMappings.processId,
-      subaccountId: processConnectionMappings.subaccountId,
+      processId: automationConnectionMappings.processId,
+      subaccountId: automationConnectionMappings.subaccountId,
       subaccountName: subaccounts.name,
-      connectionKey: processConnectionMappings.connectionKey,
+      connectionKey: automationConnectionMappings.connectionKey,
     })
-    .from(processConnectionMappings)
-    .innerJoin(subaccounts, eq(subaccounts.id, processConnectionMappings.subaccountId))
-    .where(eq(processConnectionMappings.organisationId, organisationId));
+    .from(automationConnectionMappings)
+    .innerJoin(subaccounts, eq(subaccounts.id, automationConnectionMappings.subaccountId))
+    .where(eq(automationConnectionMappings.organisationId, organisationId));
 
   const mappingsCtx = mappingRows.map((m) => ({
     processId: m.processId,
@@ -330,8 +330,8 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
     systemAgentStaleThresholdDays: DEFAULT_SYSTEM_AGENT_STALE_DAYS,
     agents: agentsCtx,
     subaccountAgents: subaccountAgentsCtx,
-    processes: processesCtx,
-    processConnectionMappings: mappingsCtx,
+    automations: processesCtx,
+    automationConnectionMappings: mappingsCtx,
     systemAgentLinks,
   };
 }

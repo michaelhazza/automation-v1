@@ -82,7 +82,7 @@ export default function TestPanel({
   // agent:run:completed / agent:run:failed; each triggers a REST refresh so
   // the TestPanel re-renders with full payload consistency (tool calls,
   // tokens, deliverables). Polling only fires every 10s as a reconnect-gap
-  // safety net, matching the pattern in PlaybookRunDetailPage.
+  // safety net, matching the pattern in WorkflowRunDetailPage.
   const refreshRun = useCallback(async () => {
     if (!runId) return;
     try {

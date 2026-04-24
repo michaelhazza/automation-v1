@@ -1,4 +1,4 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.
@@ -2518,8 +2518,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
 
   // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
-  config_deliver_playbook_output: {
-    actionType: 'config_deliver_playbook_output',
+  config_deliver_workflow_output: {
+    actionType: 'config_deliver_workflow_output',
     description: 'Deliver a playbook artefact via deliveryService: always writes to inbox + dispatches portal/slack per deliveryChannels config.',
     actionCategory: 'api',
     topics: ['playbook', 'delivery'],
@@ -2548,8 +2548,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
-  config_publish_playbook_output_to_portal: {
-    actionType: 'config_publish_playbook_output_to_portal',
+  config_publish_workflow_output_to_portal: {
+    actionType: 'config_publish_workflow_output_to_portal',
     description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_briefs row for this run and marks the run portal-visible.',
     actionCategory: 'api',
     topics: ['portal', 'playbook'],
@@ -2574,8 +2574,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
-  config_send_playbook_email_digest: {
-    actionType: 'config_send_playbook_email_digest',
+  config_send_workflow_email_digest: {
+    actionType: 'config_send_workflow_email_digest',
     description: 'Send a markdown email digest to a list of recipients. Deduplicated per (runId, sorted recipients) so retries never double-send.',
     actionCategory: 'api',
     topics: ['email', 'playbook'],

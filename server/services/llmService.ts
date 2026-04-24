@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { processes, executions, executionPayloads } from '../db/schema/index.js';
+import { automations, executions, executionPayloads } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -123,13 +123,13 @@ export async function getOrgProcessesForTools(
 ): Promise<Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>> {
   const rows = await db
     .select({
-      id: processes.id,
-      name: processes.name,
-      description: processes.description,
-      inputSchema: processes.inputSchema,
+      id: automations.id,
+      name: automations.name,
+      description: automations.description,
+      inputSchema: automations.inputSchema,
     })
-    .from(processes)
-    .where(and(eq(processes.organisationId, organisationId), eq(processes.status, 'active'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.organisationId, organisationId), eq(automations.status, 'active'), isNull(automations.deletedAt)));
 
   return rows;
 }
@@ -153,8 +153,8 @@ export async function executeTriggerredProcess(
   // Support system processes (no orgId) and org processes
   const [process] = await db
     .select()
-    .from(processes)
-    .where(and(eq(processes.id, processId), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, processId), isNull(automations.deletedAt)));
 
   if (!process) throw new Error(`Process ${processId} not found`);
   if (process.organisationId && process.organisationId !== organisationId) {

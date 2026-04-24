@@ -45,7 +45,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   canonicalConversationProviders,
-  canonicalWorkflowDefinitions,
+  canonicalFlowDefinitions,
   canonicalTagDefinitions,
   canonicalCustomFieldDefinitions,
   canonicalContactSources,
@@ -276,14 +276,14 @@ async function loadObservations(organisationId: string, subaccountId: string): P
 
   const workflows = await db
     .select({
-      actionTypes: canonicalWorkflowDefinitions.actionTypes,
-      webhookTargets: canonicalWorkflowDefinitions.outboundWebhookTargets,
+      actionTypes: canonicalFlowDefinitions.actionTypes,
+      webhookTargets: canonicalFlowDefinitions.outboundWebhookTargets,
     })
-    .from(canonicalWorkflowDefinitions)
+    .from(canonicalFlowDefinitions)
     .where(
       and(
-        eq(canonicalWorkflowDefinitions.organisationId, organisationId),
-        eq(canonicalWorkflowDefinitions.subaccountId, subaccountId),
+        eq(canonicalFlowDefinitions.organisationId, organisationId),
+        eq(canonicalFlowDefinitions.subaccountId, subaccountId),
       ),
     );
   for (const w of workflows) {

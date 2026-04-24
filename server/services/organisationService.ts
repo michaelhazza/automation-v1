@@ -213,19 +213,19 @@ export class OrganisationService {
       and(eq(users.organisationId, id), isNull(users.deletedAt))
     );
 
-    const { workflowEngines } = await import('../db/schema/index.js');
-    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(workflowEngines.organisationId, id), isNull(workflowEngines.deletedAt))
+    const { automationEngines } = await import('../db/schema/index.js');
+    await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automationEngines.organisationId, id), isNull(automationEngines.deletedAt))
     );
 
-    const { processCategories } = await import('../db/schema/index.js');
-    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(processCategories.organisationId, id), isNull(processCategories.deletedAt))
+    const { automationCategories } = await import('../db/schema/index.js');
+    await db.update(automationCategories).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automationCategories.organisationId, id), isNull(automationCategories.deletedAt))
     );
 
-    const { processes } = await import('../db/schema/index.js');
-    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(processes.organisationId, id), isNull(processes.deletedAt))
+    const { automations } = await import('../db/schema/index.js');
+    await db.update(automations).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automations.organisationId, id), isNull(automations.deletedAt))
     );
 
     return { message: 'Organisation deleted successfully' };
