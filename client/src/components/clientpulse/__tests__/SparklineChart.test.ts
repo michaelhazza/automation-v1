@@ -1,7 +1,7 @@
 /**
  * SparklineChart — pure-logic tests for point computation.
  *
- * Tests the `computePoints` and `renderEmptyFallback` helpers extracted
+ * Tests the `computePoints` and `clampValue` helpers extracted
  * from SparklineChartPure.ts. No DOM / React rendering required.
  *
  * Run via: npx tsx client/src/components/clientpulse/__tests__/SparklineChart.test.ts
@@ -13,6 +13,9 @@
  *   4. computePoints returns last point for terminal dot positioning
  */
 
+import { renderToStaticMarkup } from 'react-dom/server';
+import React from 'react';
+import SparklineChart from '../SparklineChart.js';
 import { computePoints, clampValue } from '../SparklineChartPure.js';
 
 let passed = 0;
@@ -140,6 +143,23 @@ test('values=[150] → terminal dot position is (45, 0)', () => {
   assertClose(last.y, 0, 'dot y');
 });
 
+test('values=[50] w=90 h=28 → single point at x=45 y=14', () => {
+  const { points } = computePoints([50], 90, 28);
+  assertEqual(points.length, 1, 'length');
+  assertClose(points[0].x, 45, 'x — centered (width/2)');
+  assertClose(points[0].y, 14, 'y — 28 - (50/100)*28 = 14');
+});
+
+test('values=[0] w=90 h=28 → y=28 (bottom of SVG)', () => {
+  const { points } = computePoints([0], 90, 28);
+  assertClose(points[0].y, 28, 'y at score 0');
+});
+
+test('values=[100] w=90 h=28 → y=0 (top of SVG)', () => {
+  const { points } = computePoints([100], 90, 28);
+  assertClose(points[0].y, 0, 'y at score 100');
+});
+
 // ---------------------------------------------------------------------------
 // Test 4: terminalDot=false — no circle rendered (component-level concern;
 //         the pure module exposes `last` point so the component can decide)
@@ -158,6 +178,30 @@ test('computePoints exposes last point for all non-empty inputs', () => {
 test('computePoints returns last=undefined for empty input', () => {
   const { last } = computePoints([], 90, 28);
   if (last !== undefined) throw new Error('expected last to be undefined for empty input');
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: terminalDot=false → no <circle> in rendered output
+// ---------------------------------------------------------------------------
+
+console.log('\n--- Test 5: terminalDot prop ---');
+
+test('terminalDot=false → no <circle> rendered', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(SparklineChart, { values: [20, 40, 60, 80], colour: 'text-rose-500', terminalDot: false })
+  );
+  if (html.includes('<circle')) {
+    throw new Error(`expected no <circle> when terminalDot=false, but found one in: ${html}`);
+  }
+});
+
+test('terminalDot=true (default) → <circle> rendered at last point', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(SparklineChart, { values: [20, 40, 60, 80], colour: 'text-rose-500' })
+  );
+  if (!html.includes('<circle')) {
+    throw new Error(`expected a <circle> when terminalDot=true, but none found in: ${html}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
