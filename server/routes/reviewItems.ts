@@ -11,6 +11,7 @@ import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getMajorThresholds } from '../services/pulseConfigService.js';
 import { buildDraftFromAction, getRunTotalCostMinor, getRunTotalCostMinorBatch } from '../services/pulseService.js';
 import { classify, buildAckText } from '../services/pulseLaneClassifier.js';
+import type { PulseLane, MajorReason } from '../services/pulseLaneClassifier.js';
 
 const router = Router();
 
@@ -83,76 +84,96 @@ router.post(
 
     const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);
 
-    if (reviewItem.reviewStatus !== 'pending' && reviewItem.reviewStatus !== 'edited_pending') {
-      throw { statusCode: 409, message: 'Item already resolved', errorCode: 'ALREADY_RESOLVED' };
-    }
+    const isPending =
+      reviewItem.reviewStatus === 'pending' || reviewItem.reviewStatus === 'edited_pending';
 
     const action = await actionService.getAction(reviewItem.actionId, req.orgId!);
 
-    const thresholds = await getMajorThresholds(req.orgId!);
-    const runTotal = action.agentRunId
-      ? await getRunTotalCostMinor(action.agentRunId, req.orgId!)
-      : null;
-    const draft = buildDraftFromAction(action, runTotal);
-    const { lane, majorReason } = classify(draft, thresholds);
-
+    // Idempotency and conflict handling is fully owned by reviewService.
+    // The service returns the existing row for idempotent replays (200) and
+    // throws 409 ITEM_CONFLICT for cross-terminal conflicts.
+    //
+    // MAJOR_ACK_REQUIRED (412) only applies to pending items — idempotent
+    // replays bypass this check because the service short-circuits before any
+    // audit or side-effect code runs.
+    let lane: PulseLane | undefined;
+    let majorReason: MajorReason | undefined;
     let ackText: string | null = null;
     let ackAmountMinor: number | null = null;
+    let majorCurrencyCode: string | undefined;
 
-    if (lane === 'major') {
-      const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
-      if (majorAcknowledgment !== true) {
-        res.status(412).json({
-          error: { code: 'MAJOR_ACK_REQUIRED', message: 'Major-lane approval requires acknowledgment' },
-          lane,
-          majorReason,
-          ackText: ack.text,
-          ackAmountMinor: ack.amountMinor,
-          ackCurrencyCode: thresholds.currencyCode,
-        });
-        return;
+    if (isPending) {
+      const thresholds = await getMajorThresholds(req.orgId!);
+      const runTotal = action.agentRunId
+        ? await getRunTotalCostMinor(action.agentRunId, req.orgId!)
+        : null;
+      const draft = buildDraftFromAction(action, runTotal);
+      const classified = classify(draft, thresholds);
+      lane = classified.lane;
+      majorReason = classified.majorReason;
+
+      if (lane === 'major') {
+        const ack = buildAckText(draft, majorReason!, thresholds.currencyCode, thresholds);
+        if (majorAcknowledgment !== true) {
+          res.status(412).json({
+            error: { code: 'MAJOR_ACK_REQUIRED', message: 'Major-lane approval requires acknowledgment' },
+            lane,
+            majorReason,
+            ackText: ack.text,
+            ackAmountMinor: ack.amountMinor,
+            ackCurrencyCode: thresholds.currencyCode,
+          });
+          return;
+        }
+        ackText = ack.text;
+        ackAmountMinor = ack.amountMinor;
+        majorCurrencyCode = thresholds.currencyCode;
       }
-      ackText = ack.text;
-      ackAmountMinor = ack.amountMinor;
     }
 
     const result = await reviewService.approveItem(req.params.id, req.orgId!, req.user!.id, edits);
 
-    reviewAuditService.record({
-      actionId: action.id,
-      organisationId: req.orgId!,
-      subaccountId: action.subaccountId!,
-      agentRunId: action.agentRunId,
-      toolSlug: action.actionType,
-      agentOutput: action.payloadJson as Record<string, unknown>,
-      decidedBy: req.user!.id,
-      decision: edits ? 'edited' : 'approved',
-      rawFeedback: comment,
-      editedArgs: edits,
-      proposedAt: action.createdAt,
-      majorAcknowledged: lane === 'major',
-      majorReason: majorReason ?? undefined,
-      ackText: ackText ?? undefined,
-      ackAmountMinor: ackAmountMinor ?? undefined,
-      ackCurrencyCode: lane === 'major' ? thresholds.currencyCode : undefined,
-    }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
-
-    // If this action was created by a workflow step, enqueue a resume job
-    const meta = action.metadataJson as Record<string, unknown> | null;
-    const workflowRunId = meta?.workflowRunId as string | undefined;
-    if (workflowRunId) {
-      queueService.enqueueWorkflowResume({
-        workflowRunId,
-        approvedActionId: action.id,
+    // Only record audit and enqueue workflow resume on a real (non-idempotent)
+    // transition. Guard using isPending to avoid double-audit on idempotent
+    // replays (where the service already returned without side effects).
+    if (isPending) {
+      reviewAuditService.record({
+        actionId: action.id,
         organisationId: req.orgId!,
         subaccountId: action.subaccountId!,
-        agentId: action.agentId,
-        agentRunId: action.agentRunId ?? undefined,
-      }).catch((err) => console.error('[ReviewItems] Workflow resume enqueue failed:', err));
+        agentRunId: action.agentRunId,
+        toolSlug: action.actionType,
+        agentOutput: action.payloadJson as Record<string, unknown>,
+        decidedBy: req.user!.id,
+        decision: edits ? 'edited' : 'approved',
+        rawFeedback: comment,
+        editedArgs: edits,
+        proposedAt: action.createdAt,
+        majorAcknowledged: lane === 'major',
+        majorReason: majorReason ?? undefined,
+        ackText: ackText ?? undefined,
+        ackAmountMinor: ackAmountMinor ?? undefined,
+        ackCurrencyCode: lane === 'major' ? majorCurrencyCode : undefined,
+      }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
+
+      // If this action was created by a workflow step, enqueue a resume job
+      const meta = action.metadataJson as Record<string, unknown> | null;
+      const workflowRunId = meta?.workflowRunId as string | undefined;
+      if (workflowRunId) {
+        queueService.enqueueWorkflowResume({
+          workflowRunId,
+          approvedActionId: action.id,
+          organisationId: req.orgId!,
+          subaccountId: action.subaccountId!,
+          agentId: action.agentId,
+          agentRunId: action.agentRunId ?? undefined,
+        }).catch((err) => console.error('[ReviewItems] Workflow resume enqueue failed:', err));
+      }
+
+      const subaccountId = action.subaccountId;
+      if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
     }
 
-    const subaccountId = action.subaccountId;
-    if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
     res.json({ ...result, lane });
   })
 );
@@ -176,25 +197,32 @@ router.post(
     }
 
     const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);
+    const isPending =
+      reviewItem.reviewStatus === 'pending' || reviewItem.reviewStatus === 'edited_pending';
+
     const action = await actionService.getAction(reviewItem.actionId, req.orgId!);
 
     const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.user!.id, comment);
 
-    reviewAuditService.record({
-      actionId: action.id,
-      organisationId: req.orgId!,
-      subaccountId: action.subaccountId!,
-      agentRunId: action.agentRunId,
-      toolSlug: action.actionType,
-      agentOutput: action.payloadJson as Record<string, unknown>,
-      decidedBy: req.user!.id,
-      decision: 'rejected',
-      rawFeedback: comment,
-      proposedAt: action.createdAt,
-    }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
+    // Only record audit on a real (non-idempotent) transition.
+    if (isPending) {
+      reviewAuditService.record({
+        actionId: action.id,
+        organisationId: req.orgId!,
+        subaccountId: action.subaccountId!,
+        agentRunId: action.agentRunId,
+        toolSlug: action.actionType,
+        agentOutput: action.payloadJson as Record<string, unknown>,
+        decidedBy: req.user!.id,
+        decision: 'rejected',
+        rawFeedback: comment,
+        proposedAt: action.createdAt,
+      }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
 
-    const subaccountId = action.subaccountId;
-    if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'rejected' });
+      const subaccountId = action.subaccountId;
+      if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'rejected' });
+    }
+
     res.json(result);
   })
 );
