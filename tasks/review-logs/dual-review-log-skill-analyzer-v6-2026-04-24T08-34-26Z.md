@@ -11,6 +11,7 @@
 **Iterations run:** 3 / 3
 **Timestamp:** 2026-04-24T08:34:26Z
 **Base for review:** branch `bugfixes-april26` vs `5c7cd01b` (parent of v6 commits `1a8c31fc` + `cb7e72de`)
+**Commit at finish:** `7fcb3a83`
 
 ---
 
