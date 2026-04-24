@@ -65,15 +65,15 @@ export const ORG_PERMISSIONS = {
   MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'org.billing.iee.view',
-  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
-  PLAYBOOK_TEMPLATES_READ: 'org.playbook_templates.read',
-  PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
-  PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
-  PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
-  // Org-scope playbook runs (migration 0171 / ClientPulse §13.3). Distinct from
-  // SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START because org-scope runs operate
+  // ── Workflows (multi-step automation; spec §8.1) ────────────────────────
+  WORKFLOW_TEMPLATES_READ: 'org.workflow_templates.read',
+  WORKFLOW_TEMPLATES_WRITE: 'org.workflow_templates.write',
+  WORKFLOW_TEMPLATES_PUBLISH: 'org.workflow_templates.publish',
+  WORKFLOW_STUDIO_ACCESS: 'org.workflow_studio.access',
+  // Org-scope workflow runs (migration 0171 / ClientPulse §13.3). Distinct from
+  // SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START because org-scope runs operate
   // across the whole organisation rather than a single subaccount.
-  PLAYBOOK_RUNS_START: 'org.playbook_runs.start',
+  WORKFLOW_RUNS_START: 'org.workflow_runs.start',
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
@@ -133,12 +133,12 @@ export const SUBACCOUNT_PERMISSIONS = {
   REVIEW_APPROVE: 'subaccount.review.approve',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'subaccount.billing.iee.view',
-  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
-  PLAYBOOK_RUNS_READ: 'subaccount.playbook_runs.read',
-  PLAYBOOK_RUNS_START: 'subaccount.playbook_runs.start',
-  PLAYBOOK_RUNS_CANCEL: 'subaccount.playbook_runs.cancel',
-  PLAYBOOK_RUNS_EDIT_OUTPUT: 'subaccount.playbook_runs.edit_output',
-  PLAYBOOK_RUNS_APPROVE: 'subaccount.playbook_runs.approve',
+  // ── Workflows (multi-step automation; spec §8.1) ────────────────────────
+  WORKFLOW_RUNS_READ: 'subaccount.workflow_runs.read',
+  WORKFLOW_RUNS_START: 'subaccount.workflow_runs.start',
+  WORKFLOW_RUNS_CANCEL: 'subaccount.workflow_runs.cancel',
+  WORKFLOW_RUNS_EDIT_OUTPUT: 'subaccount.workflow_runs.edit_output',
+  WORKFLOW_RUNS_APPROVE: 'subaccount.workflow_runs.approve',
   // Skills (subaccount-scoped skill management; migration 0117)
   SKILLS_VIEW: 'subaccount.skills.view',
   SKILLS_MANAGE: 'subaccount.skills.manage',
@@ -201,12 +201,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE,
     description: 'Manage data sources (reference files, URLs) attached to scheduled tasks',
     groupName: 'org.agents' },
-  // org.playbooks (multi-step automation; spec §8.1)
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_READ,    description: 'View Playbook templates',                       groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
-  { key: ORG_PERMISSIONS.PLAYBOOK_RUNS_START,        description: 'Start org-scope Playbook runs',                 groupName: 'org.playbooks' },
+  // org.workflows (multi-step automation; spec §8.1)
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_READ,    description: 'View Workflow templates',                       groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_WRITE,   description: 'Create / fork / delete Workflow templates',     groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_PUBLISH, description: 'Publish a new version of a Workflow template', groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_STUDIO_ACCESS,     description: 'Access the Workflow Studio chat authoring UI', groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_START,        description: 'Start org-scope Workflow runs',                 groupName: 'org.workflows' },
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
@@ -267,12 +267,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.mcp_servers
   { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
   { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
-  // subaccount.playbooks (multi-step automation; spec §8.1)
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ,        description: 'View Playbook runs for this subaccount',     groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START,       description: 'Start Playbook runs and submit user input',  groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_CANCEL,      description: 'Cancel running Playbooks',                   groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.playbooks' },
-  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_APPROVE,     description: 'Decide on Playbook approval gates',          groupName: 'subaccount.playbooks' },
+  // subaccount.workflows (multi-step automation; spec §8.1)
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ,        description: 'View Workflow runs for this subaccount',     groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START,       description: 'Start Workflow runs and submit user input',  groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_CANCEL,      description: 'Cancel running Workflows',                   groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.workflows' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_APPROVE,     description: 'Decide on Workflow approval gates',          groupName: 'subaccount.workflows' },
   // subaccount.skills (subaccount-scoped skill management; migration 0117)
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,   description: 'View subaccount-scoped skills',                          groupName: 'subaccount.skills' },
   { key: SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE, description: 'Create, edit, and delete subaccount-scoped skills',      groupName: 'subaccount.skills' },

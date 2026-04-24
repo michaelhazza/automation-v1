@@ -346,8 +346,8 @@ export async function executeConfigCreateScheduledTask(
       timezone: input.timezone ? String(input.timezone) : undefined,
       scheduleTime: input.scheduleTime ? String(input.scheduleTime) : '09:00',
       taskSlug,
-      createdByPlaybookSlug: input.createdByPlaybookSlug
-        ? String(input.createdByPlaybookSlug)
+      createdByWorkflowSlug: input.createdByWorkflowSlug
+        ? String(input.createdByWorkflowSlug)
         : undefined,
       firstRunAt: input.firstRunAt ? new Date(String(input.firstRunAt)) : undefined,
       firstRunAtTz: input.firstRunAtTz ? String(input.firstRunAtTz) : undefined,

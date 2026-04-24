@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
 import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
@@ -156,10 +156,10 @@ export const agentRuns = pgTable(
     isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
-    // Playbooks reverse link (migration 0076) — set when this agent run was
-    // dispatched by a Playbooks step. Engine reads this in onAgentRunCompleted
+    // Workflows reverse link (migration 0076) — set when this agent run was
+    // dispatched by a Workflows step. Engine reads this in onAgentRunCompleted
     // to find the originating step run.
-    playbookStepRunId: uuid('playbook_step_run_id'),
+    workflowStepRunId: uuid('workflow_step_run_id'),
 
     // IEE Phase 0 denormalised reference (migration 0176). When the run
     // is delegated to an IEE worker, agentExecutionService writes the
@@ -246,10 +246,10 @@ export const agentRuns = pgTable(
     idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
     // Stale run cleanup query
     staleRunIdx: index('agent_runs_stale_run_idx').on(table.status, table.lastActivityAt),
-    // Playbooks reverse lookup (migration 0076)
-    playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
-      .on(table.playbookStepRunId)
-      .where(sql`${table.playbookStepRunId} IS NOT NULL`),
+    // Workflows reverse lookup (migration 0076)
+    workflowStepRunIdx: index('agent_runs_workflow_step_run_id_idx')
+      .on(table.workflowStepRunId)
+      .where(sql`${table.workflowStepRunId} IS NOT NULL`),
     // Brain Tree OS adoption P1 (migration 0095) — supports the
     // "latest handoff for this agent" lookup used by getLatestHandoffForAgent
     // and the seedFromPreviousRun read path. Partial so the index stays

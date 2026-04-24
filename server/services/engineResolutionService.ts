@@ -16,7 +16,7 @@ export const engineResolutionService = {
    * Resolve the engine for a given process and subaccount context.
    *
    * Priority:
-   * 1. Process-specific engine (process.workflowEngineId)
+   * 1. Process-specific engine (automation.workflowEngineId)
    * 2. Subaccount-scoped engine
    * 3. Organisation-scoped engine
    * 4. System-scoped engine
@@ -27,21 +27,21 @@ export const engineResolutionService = {
     orgId: string
   ): Promise<AutomationEngine> {
     // 1. Process has a specific engine assigned
-    if (process.workflowEngineId) {
+    if (automation.workflowEngineId) {
       const [engine] = await db.select()
         .from(automationEngines)
         .where(and(
-          eq(automationEngines.id, process.workflowEngineId),
+          eq(automationEngines.id, automation.workflowEngineId),
           eq(automationEngines.status, 'active'),
           isNull(automationEngines.deletedAt)
         ));
       if (engine) {
         // Validate engine belongs to the correct scope — prevent cross-tenant usage
         if (engine.scope === 'organisation' && engine.organisationId !== orgId) {
-          throw { statusCode: 403, message: 'Process references an engine from a different organisation' };
+          throw { statusCode: 403, message: 'Automation references an engine from a different organisation' };
         }
         if (engine.scope === 'subaccount' && engine.subaccountId !== subaccountId) {
-          throw { statusCode: 403, message: 'Process references an engine from a different subaccount' };
+          throw { statusCode: 403, message: 'Automation references an engine from a different subaccount' };
         }
         return engine;
       }

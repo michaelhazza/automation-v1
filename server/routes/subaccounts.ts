@@ -120,7 +120,7 @@ router.post(
     // flow so a failing enqueue never blocks subaccount creation (§5.8 pattern).
     if (req.user?.id) {
       subaccountOnboardingService
-        .autoStartOwedOnboardingPlaybooks({
+        .autoStartOwedOnboardingWorkflows({
           organisationId,
           subaccountId: sa.id,
           startedByUserId: req.user.id,

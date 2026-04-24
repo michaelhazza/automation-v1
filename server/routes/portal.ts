@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Portal routes — accessed by subaccount members.
  *
  * These endpoints are scoped to a specific subaccount and require the caller
@@ -20,13 +20,13 @@ import {
   executions,
   executionPayloads,
   automationEngines,
-  playbookRuns,
-  playbookTemplateVersions,
-  systemPlaybookTemplateVersions,
+  workflowRuns,
+  workflowTemplateVersions,
+  systemWorkflowTemplateVersions,
   scheduledTasks,
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
-import { playbookRunService } from '../services/playbookRunService.js';
+import { WorkflowRunService } from '../services/workflowRunService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 
@@ -469,10 +469,10 @@ router.get(
   })
 );
 
-// ─── Portal: portal-visible playbook runs (spec §9.4) ────────────────────────
+// ─── Portal: portal-visible Workflow runs (spec §9.4) ────────────────────────
 
 /**
- * GET /api/portal/:subaccountId/playbook-runs
+ * GET /api/portal/:subaccountId/Workflow-runs
  *
  * Returns runs where `isPortalVisible = true` for this subaccount, ordered by
  * most-recently started.  Each entry includes the portalPresentation metadata
@@ -480,9 +480,9 @@ router.get(
  * title and headline extraction path without a second round-trip.
  */
 router.get(
-  '/api/portal/:subaccountId/playbook-runs',
+  '/api/portal/:subaccountId/Workflow-runs',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const sa = await resolveSubaccount(subaccountId);
@@ -490,15 +490,15 @@ router.get(
     // Load visible runs newest-first.
     const runs = await db
       .select()
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.subaccountId, subaccountId),
-          eq(playbookRuns.organisationId, sa.organisationId),
-          eq(playbookRuns.isPortalVisible, true),
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, sa.organisationId),
+          eq(workflowRuns.isPortalVisible, true),
         ),
       )
-      .orderBy(desc(playbookRuns.createdAt));
+      .orderBy(desc(workflowRuns.createdAt));
 
     if (runs.length === 0) {
       res.json({ runs: [] });
@@ -510,9 +510,9 @@ router.get(
     const versionIds = runs.map((r) => r.templateVersionId);
 
     const orgVersions = await db
-      .select({ id: playbookTemplateVersions.id, definitionJson: playbookTemplateVersions.definitionJson })
-      .from(playbookTemplateVersions)
-      .where(inArray(playbookTemplateVersions.id, versionIds));
+      .select({ id: workflowTemplateVersions.id, definitionJson: workflowTemplateVersions.definitionJson })
+      .from(workflowTemplateVersions)
+      .where(inArray(workflowTemplateVersions.id, versionIds));
     const orgVersionMap = new Map(orgVersions.map((v) => [v.id, v.definitionJson]));
 
     // For IDs not found in org versions, fall back to system template versions.
@@ -520,9 +520,9 @@ router.get(
     const sysVersionMap = new Map<string, unknown>();
     if (missingIds.length > 0) {
       const sysVersions = await db
-        .select({ id: systemPlaybookTemplateVersions.id, definitionJson: systemPlaybookTemplateVersions.definitionJson })
-        .from(systemPlaybookTemplateVersions)
-        .where(inArray(systemPlaybookTemplateVersions.id, missingIds));
+        .select({ id: systemWorkflowTemplateVersions.id, definitionJson: systemWorkflowTemplateVersions.definitionJson })
+        .from(systemWorkflowTemplateVersions)
+        .where(inArray(systemWorkflowTemplateVersions.id, missingIds));
       for (const v of sysVersions) sysVersionMap.set(v.id, v.definitionJson);
     }
 
@@ -560,7 +560,7 @@ router.get(
 router.get(
   '/api/portal/:subaccountId/intelligence-briefing-card',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const sa = await resolveSubaccount(subaccountId);
@@ -569,19 +569,19 @@ router.get(
 
     const [latestRun] = await db
       .select({
-        id: playbookRuns.id,
-        completedAt: playbookRuns.completedAt,
+        id: workflowRuns.id,
+        completedAt: workflowRuns.completedAt,
       })
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.subaccountId, subaccountId),
-          eq(playbookRuns.organisationId, sa.organisationId),
-          eq(playbookRuns.playbookSlug, DAILY_BRIEF_SLUG),
-          eq(playbookRuns.status, 'completed'),
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, sa.organisationId),
+          eq(workflowRuns.workflowSlug, DAILY_BRIEF_SLUG),
+          eq(workflowRuns.status, 'completed'),
         ),
       )
-      .orderBy(desc(playbookRuns.completedAt))
+      .orderBy(desc(workflowRuns.completedAt))
       .limit(1);
 
     const [activeSchedule] = await db
@@ -593,7 +593,7 @@ router.get(
       .where(
         and(
           eq(scheduledTasks.subaccountId, subaccountId),
-          eq(scheduledTasks.createdByPlaybookSlug, DAILY_BRIEF_SLUG),
+          eq(scheduledTasks.createdByWorkflowSlug, DAILY_BRIEF_SLUG),
           eq(scheduledTasks.isActive, true),
         ),
       )
@@ -620,16 +620,16 @@ router.get('/api/portal/:subaccountId/daily-brief-card', (req, res) => {
 });
 
 /**
- * POST /api/portal/:subaccountId/playbook-runs/:runId/run-now
+ * POST /api/portal/:subaccountId/Workflow-runs/:runId/run-now
  *
- * Starts a fresh run of the same playbook template as `runId` (spec §9.4
+ * Starts a fresh run of the same Workflow template as `runId` (spec §9.4
  * "Run now" button). Idempotent via the §10.5.1 DB-level unique guard.
  * Returns the new runId (or the existing active runId if one is in flight).
  */
 router.post(
-  '/api/portal/:subaccountId/playbook-runs/:runId/run-now',
+  '/api/portal/:subaccountId/Workflow-runs/:runId/run-now',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId, runId } = req.params;
     const sa = await resolveSubaccount(subaccountId);
@@ -637,13 +637,13 @@ router.post(
     // Load the source run to extract orgId + templateVersionId.
     const [sourceRun] = await db
       .select()
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.id, runId),
-          eq(playbookRuns.subaccountId, subaccountId),
-          eq(playbookRuns.organisationId, sa.organisationId),
-          eq(playbookRuns.isPortalVisible, true),
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, sa.organisationId),
+          eq(workflowRuns.isPortalVisible, true),
         ),
       );
     if (!sourceRun) {
@@ -654,13 +654,13 @@ router.post(
     // Determine whether this was a system or org template so we can pass the
     // right identifier to startRun.
     const [orgVer] = await db
-      .select({ templateId: playbookTemplateVersions.templateId })
-      .from(playbookTemplateVersions)
-      .where(eq(playbookTemplateVersions.id, sourceRun.templateVersionId));
+      .select({ templateId: workflowTemplateVersions.templateId })
+      .from(workflowTemplateVersions)
+      .where(eq(workflowTemplateVersions.id, sourceRun.templateVersionId));
 
     let startResult: { runId: string; status: string };
     if (orgVer) {
-      startResult = await playbookRunService.startRun({
+      startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
         templateId: orgVer.templateId,
@@ -670,14 +670,14 @@ router.post(
         isPortalVisible: true,
       });
     } else {
-      if (!sourceRun.playbookSlug) {
-        res.status(422).json({ error: 'Cannot replay: playbookSlug not set on source run' });
+      if (!sourceRun.workflowSlug) {
+        res.status(422).json({ error: 'Cannot replay: workflowSlug not set on source run' });
         return;
       }
-      startResult = await playbookRunService.startRun({
+      startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
-        systemTemplateSlug: sourceRun.playbookSlug,
+        systemTemplateSlug: sourceRun.workflowSlug,
         initialInput: {},
         startedByUserId: req.user!.id,
         runMode: 'auto',

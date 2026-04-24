@@ -1,4 +1,4 @@
-export * from './organisations';
+﻿export * from './organisations';
 export * from './users';
 export * from './automationEngines';
 export * from './automationCategories';
@@ -105,9 +105,9 @@ export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
 
-// Playbooks — multi-step automation engine (migration 0076)
-export * from './playbookTemplates';
-export * from './playbookRuns';
+// Workflows — multi-step automation engine (migration 0076)
+export * from './workflowTemplates';
+export * from './workflowRuns';
 
 // Sprint 2 — P1.1 Layer 3 (migration 0082)
 export * from './toolCallSecurityEvents';
@@ -158,7 +158,7 @@ export * from './configHistory.js';
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
 
-// Portal Briefs — published playbook output for the portal card (migration 0123)
+// Portal Briefs — published workflow output for the portal card (migration 0123)
 export * from './portalBriefs.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)

@@ -1,9 +1,9 @@
-/**
+﻿/**
  * intelligence-briefing — Configuration Schema (§9.2)
  *
  * Declares the question set the onboarding conversation (Step 6) and the
  * async Configuration Document both ask. Maps 1-1 to the runtime input shape
- * of the playbook's `initialInputSchema`.
+ * of the workflow's `initialInputSchema`.
  *
  * Spec: docs/memory-and-briefings-spec.md §9.2 (S21)
  */

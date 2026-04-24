@@ -65,10 +65,10 @@ const SystemAutomationsPage = lazy(() => import('./pages/SystemAutomationsPage')
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
-const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
-const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
-const PlaybookRunPage = lazy(() => import('./pages/subaccount/PlaybookRunPage'));
-const PlaybookStudioPage = lazy(() => import('./pages/PlaybookStudioPage'));
+const WorkflowsLibraryPage = lazy(() => import('./pages/WorkflowsLibraryPage'));
+const WorkflowRunDetailPage = lazy(() => import('./pages/WorkflowRunDetailPage'));
+const WorkflowRunPage = lazy(() => import('./pages/subaccount/WorkflowRunPage'));
+const WorkflowStudioPage = lazy(() => import('./pages/WorkflowStudioPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -274,12 +274,12 @@ export default function App() {
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<Navigate to="/admin/pulse" replace />} />
-          <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
-          <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
+          <Route path="/workflows" element={<WorkflowsLibraryPage user={user!} />} />
+          <Route path="/workflow-runs/:runId" element={<WorkflowRunDetailPage user={user!} />} />
           {/* §9.2 — subaccount-scoped run page (envelope endpoint + WS live). */}
-          <Route path="/sub/:subaccountId/runs/:runId" element={<PlaybookRunPage user={user!} />} />
+          <Route path="/sub/:subaccountId/runs/:runId" element={<WorkflowRunPage user={user!} />} />
           {/* §9.4 — portal-scoped variant; same component, viewer-role aware. */}
-          <Route path="/portal/:subaccountId/runs/:runId" element={<PlaybookRunPage user={user!} />} />
+          <Route path="/portal/:subaccountId/runs/:runId" element={<WorkflowRunPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -376,7 +376,7 @@ export default function App() {
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
             <Route path="/system/llm-pnl" element={<SystemPnlPage />} />
             <Route path="/system/skill-analyser" element={<SkillAnalyzerPage user={user!} />} />
-            <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
+            <Route path="/system/workflow-studio" element={<WorkflowStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/automations" element={<SystemAutomationsPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />

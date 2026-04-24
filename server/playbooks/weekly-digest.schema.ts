@@ -1,4 +1,4 @@
-/**
+﻿/**
  * weekly-digest — Configuration Schema (§9.2)
  *
  * Mirrors intelligence-briefing.schema.ts but for the backward-looking

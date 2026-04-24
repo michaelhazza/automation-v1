@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+﻿import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -191,15 +191,15 @@ export interface AgentRunRequest {
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
   /**
-   * Playbooks: when this agent run was dispatched by a Playbook step, the
-   * step run id is stamped onto agent_runs.playbook_step_run_id so the
+   * Workflows: when this agent run was dispatched by a Workflow step, the
+   * step run id is stamped onto agent_runs.workflow_step_run_id so the
    * completion hook can route the result back to the engine.
-   * Spec tasks/playbooks-spec.md §5.2 / step 6 wiring.
+   * Spec tasks/Workflows-spec.md §5.2 / step 6 wiring.
    */
-  playbookStepRunId?: string;
+  WorkflowStepRunId?: string;
   /**
    * The principal that initiated this run, when known. Plumbed into the
-   * SkillExecutionContext so user-scoped tools (e.g. Playbook Studio
+   * SkillExecutionContext so user-scoped tools (e.g. Workflow Studio
    * propose_save) can enforce ownership without making downstream
    * database lookups. Optional because system / scheduled runs have no
    * initiating user. Review finding #3.
@@ -215,13 +215,13 @@ export interface AgentRunRequest {
    */
   seedFromPreviousRun?: boolean;
   /**
-   * Playbook agent_decision steps: rendered decision envelope injected at the
+   * Workflow agent_decision steps: rendered decision envelope injected at the
    * end of the system prompt so the agent sees branch options and output schema.
-   * Spec: docs/playbook-agent-decision-step-spec.md §17.
+   * Spec: docs/Workflow-agent-decision-step-spec.md §17.
    */
   systemPromptAddendum?: string;
   /**
-   * Playbook agent_decision steps: when set to an empty array, the agent runs
+   * Workflow agent_decision steps: when set to an empty array, the agent runs
    * with no tools (pure reasoning only). If omitted, the agent's configured
    * skill set is used.
    */
@@ -401,7 +401,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
-        playbookStepRunId: request.playbookStepRunId ?? null,
+        WorkflowStepRunId: request.WorkflowStepRunId ?? null,
         isTestRun: request.isTestRun ?? false,
         delegationScope: request.delegationScope ?? null,
         delegationDirection: request.delegationDirection ?? null,
@@ -1119,7 +1119,7 @@ export const agentExecutionService = {
         //
         // IMPORTANT: we deliberately skip the post-completion hooks at
         // the bottom of this function (handoff build, memory scoring,
-        // playbook engine notification, etc.). Those fire from the event
+        // Workflow engine notification, etc.). Those fire from the event
         // handler's finalisation path when the delegation terminates.
         if (!request.ieeTask) {
           throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
@@ -1606,18 +1606,18 @@ export const agentExecutionService = {
         tasksCreated: loopResult.tasksCreated, durationMs,
       });
 
-      // Playbooks: if this agent run was dispatched by a Playbook step, route
+      // Workflows: if this agent run was dispatched by a Workflow step, route
       // its result back to the engine so the step run can be marked completed
       // and the next tick fired. Hook is non-blocking — failures are logged
       // and do not affect the agent run completion.
       try {
-        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
-        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+        const { notifyWorkflowEngineOnAgentRunComplete } = await import('./workflowAgentRunHook.js');
+        await notifyWorkflowEngineOnAgentRunComplete(run.id, {
           ok: true,
           output: { summary: loopResult.summary ?? '' },
         });
       } catch (err) {
-        console.error('[AgentExecution] playbook hook failed (non-fatal)', err);
+        console.error('[AgentExecution] Workflow hook failed (non-fatal)', err);
       }
       emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
         runId: run.id, agentId: request.agentId, status: finalStatus,
@@ -1773,16 +1773,16 @@ export const agentExecutionService = {
         status: 'failed', errorMessage, durationMs,
       });
 
-      // Playbooks: route the failure to the engine so the step run is marked
+      // Workflows: route the failure to the engine so the step run is marked
       // failed and downstream failure-policy logic runs.
       try {
-        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
-        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+        const { notifyWorkflowEngineOnAgentRunComplete } = await import('./workflowAgentRunHook.js');
+        await notifyWorkflowEngineOnAgentRunComplete(run.id, {
           ok: false,
           error: errorMessage,
         });
       } catch (hookErr) {
-        console.error('[AgentExecution] playbook hook failed (non-fatal)', hookErr);
+        console.error('[AgentExecution] Workflow hook failed (non-fatal)', hookErr);
       }
       emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
         runId: run.id, agentId: request.agentId, status: 'failed',

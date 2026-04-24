@@ -115,13 +115,13 @@ const envSchema = z.object({
   GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
 
-  // Playbook Studio — PR creation against the platform's own repo
-  // (spec tasks/playbooks-spec.md §10.8.6). Optional: when unset, the
+  // Workflow Studio — PR creation against the platform's own repo
+  // (spec tasks/workflows-spec.md §10.8.6). Optional: when unset, the
   // Save & Open PR endpoint returns a structured error explaining how
-  // to configure it. The token must have repo scope on PLAYBOOK_STUDIO_REPO.
-  PLAYBOOK_STUDIO_GITHUB_TOKEN: z.string().optional(),
-  PLAYBOOK_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
-  PLAYBOOK_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
+  // to configure it. The token must have repo scope on WORKFLOW_STUDIO_REPO.
+  WORKFLOW_STUDIO_GITHUB_TOKEN: z.string().optional(),
+  WORKFLOW_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
+  WORKFLOW_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
 
   // ── Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md) ──
   // Retention tiers. P1 ships with rotation disabled; P3 adds the archive job.

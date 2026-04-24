@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Intelligence Briefing — Phase G system template (spec §11).
  *
  * Exercises every primitive shipped in this spec:
@@ -8,7 +8,7 @@
  *   - Unified Knowledge (§7)    — research step reads Memory Blocks as context
  *   - knowledgeBindings (§8)    — baseline facts written back on first run
  *   - Run modal + portal card   — publish_portal marks the run portal-visible
- *   - modules.onboardingPlaybookSlugs (§10) — autoStartOnOnboarding: true
+ *   - modules.onboardingWorkflowSlugs (§10) — autoStartOnOnboarding: true
  *
  * Step DAG:
  *   setup_schedule (action_call, idempotent)
@@ -21,11 +21,11 @@
  *   npm run seed
  *
  * To validate without touching the DB:
- *   npm run playbooks:validate
+ *   npm run workflows:validate
  */
 
 import { z } from 'zod';
-import { definePlaybook } from '../lib/playbook/definePlaybook.js';
+import { defineWorkflow } from '../lib/workflow/defineWorkflow.js';
 /** Schedule input shape consumed by config_create_scheduled_task (spec §5.2). */
 const schedulePickerValueSchema = z.object({
   rrule: z.string().describe('iCal RRULE string defining the recurrence pattern'),
@@ -33,7 +33,7 @@ const schedulePickerValueSchema = z.object({
   scheduleTime: z.string().describe('Time of day in HH:MM format'),
 });
 
-export default definePlaybook({
+export default defineWorkflow({
   slug: 'intelligence-briefing',
   name: 'Intelligence Briefing',
   description:
@@ -98,13 +98,13 @@ export default definePlaybook({
       actionInputs: {
         title: 'Intelligence Briefing',
         description:
-          'Recurring brief for this sub-account. Created by the Intelligence Briefing playbook.',
+          'Recurring brief for this sub-account. Created by the Intelligence Briefing workflow.',
         subaccountId: '{{ run.subaccount.id }}',
         rrule: '{{ run.input.schedule.rrule }}',
         timezone: '{{ run.input.schedule.timezone }}',
         scheduleTime: '{{ run.input.schedule.scheduleTime }}',
         taskSlug: 'intelligence-briefing-{{ run.subaccount.id }}',
-        createdByPlaybookSlug: 'intelligence-briefing',
+        createdByWorkflowSlug: 'intelligence-briefing',
         // runNow: true kicks off the first occurrence immediately so the brief
         // exists in the portal before the next scheduled run fires.
         runNow: 'true',
@@ -183,9 +183,9 @@ export default definePlaybook({
       dependsOn: ['draft'],
       sideEffectType: 'reversible',
       humanReviewRequired: true,
-      actionSlug: 'config_publish_playbook_output_to_portal',
+      actionSlug: 'config_publish_workflow_output_to_portal',
       actionInputs: {
-        playbookSlug: 'intelligence-briefing',
+        workflowSlug: 'intelligence-briefing',
         title: '{{ steps.draft.output.title }}',
         bullets: '{{ steps.draft.output.bullets }}',
         detailMarkdown: '{{ steps.draft.output.detailMarkdown }}',
@@ -205,7 +205,7 @@ export default definePlaybook({
       dependsOn: ['draft'],
       sideEffectType: 'irreversible',
       retryPolicy: { maxAttempts: 1 },
-      actionSlug: 'config_send_playbook_email_digest',
+      actionSlug: 'config_send_workflow_email_digest',
       actionInputs: {
         to: '{{ run.input.deliveryEmails }}',
         subject: '{{ steps.draft.output.title }}',

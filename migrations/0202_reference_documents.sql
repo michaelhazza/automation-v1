@@ -57,7 +57,7 @@ CREATE INDEX reference_documents_active_idx
 ALTER TABLE reference_documents ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY reference_documents_org_isolation ON reference_documents
-  USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
+  USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
 
 CREATE POLICY reference_documents_subaccount_isolation ON reference_documents
   USING (

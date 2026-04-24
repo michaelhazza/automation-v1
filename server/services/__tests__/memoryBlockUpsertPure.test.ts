@@ -55,7 +55,7 @@ function makeExisting(overrides: Partial<ExistingBlockView> = {}): ExistingBlock
     id: 'block-1',
     content: 'existing',
     lastEditedByAgentId: 'agent-1',
-    lastWrittenByPlaybookSlug: 'onboarding',
+    lastWrittenByWorkflowSlug: 'onboarding',
     sourceRunId: 'run-prior',
     ...overrides,
   };
@@ -69,7 +69,7 @@ test('skips empty incoming content', () => {
     label: 'Facts',
     incomingContent: '   ',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 0,
   });
   assertEqual(d.kind, 'skip_empty', 'empty kind');
@@ -81,7 +81,7 @@ test('skips when per-run rate limit reached', () => {
     label: 'Facts',
     incomingContent: 'new value',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: MEMORY_BLOCKS_PER_RUN_MAX,
   });
   assertEqual(d.kind, 'skip_rate_limited', 'rate limit kind');
@@ -93,7 +93,7 @@ test('creates when no existing block', () => {
     label: 'Facts',
     incomingContent: 'hello',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 3,
   });
   assert(d.kind === 'create', 'create kind');
@@ -111,7 +111,7 @@ test('create truncates oversize incoming content from end', () => {
     label: 'Facts',
     incomingContent: incoming,
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 0,
   });
   assert(d.kind === 'create', 'create kind');
@@ -128,12 +128,12 @@ test('HITL skip when last edit was human and prior playbook differs', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: 'different-playbook',
+      lastWrittenByWorkflowSlug: 'different-workflow',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
   assert(d.kind === 'skip_hitl_overwrite', 'hitl kind');
@@ -143,12 +143,12 @@ test('HITL skip when last edit was human and prior playbook is null', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: null,
+      lastWrittenByWorkflowSlug: null,
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
   assert(d.kind === 'skip_hitl_overwrite', 'hitl kind');
@@ -161,12 +161,12 @@ test('HITL carve-out: same playbook may rewrite its own human-edited block', () 
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: 'onboarding',
+      lastWrittenByWorkflowSlug: 'onboarding',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
   // Per the spec (§7.5): "A playbook can freely rewrite blocks IT
@@ -178,12 +178,12 @@ test('no HITL skip when last edit was by an agent', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: 'agent-1',
-      lastWrittenByPlaybookSlug: 'different',
+      lastWrittenByWorkflowSlug: 'different',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
   assert(d.kind === 'update', 'update kind');

@@ -69,9 +69,9 @@ import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
-import playbookTemplatesRouter from './routes/playbookTemplates.js';
-import playbookRunsRouter from './routes/playbookRuns.js';
-import playbookStudioRouter from './routes/playbookStudio.js';
+import workflowTemplatesRouter from './routes/workflowTemplates.js';
+import workflowRunsRouter from './routes/workflowRuns.js';
+import workflowStudioRouter from './routes/workflowStudio.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
 import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
@@ -290,9 +290,9 @@ app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
-app.use(playbookTemplatesRouter);
-app.use(playbookRunsRouter);
-app.use(playbookStudioRouter);
+app.use(workflowTemplatesRouter);
+app.use(workflowRunsRouter);
+app.use(workflowStudioRouter);
 app.use(subaccountOnboardingRouter);
 app.use(automationConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
@@ -434,13 +434,13 @@ async function start() {
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
-  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  // Workflow engine workers (tick + watchdog cron) — spec §5.2 + §5.7
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
-      const { playbookEngineService } = await import('./services/playbookEngineService.js');
-      await playbookEngineService.registerWorkers();
+      const { WorkflowEngineService } = await import('./services/workflowEngineService.js');
+      await WorkflowEngineService.registerWorkers();
     } catch (err) {
-      console.error('[boot] failed to register playbook engine workers', err);
+      console.error('[boot] failed to register workflow engine workers', err);
     }
   }
   // Skill Analyzer worker (migration 0092)

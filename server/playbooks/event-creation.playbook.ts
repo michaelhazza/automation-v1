@@ -1,5 +1,5 @@
-/**
- * Event Creation Playbook — first system template (spec §3.6).
+﻿/**
+ * Event Creation Workflow — first system template (spec §3.6).
  *
  * 6 steps that exercise the full Phase 1 feature set:
  *   1. user_input              — gather venue/capacity from the operator
@@ -16,16 +16,16 @@
  *
  * To seed locally:
  *   npm run migrate
- *   npm run playbooks:seed
+ *   npm run workflows:seed
  *
  * To validate without touching the DB:
- *   npm run playbooks:validate
+ *   npm run workflows:validate
  */
 
 import { z } from 'zod';
-import { definePlaybook } from '../lib/playbook/definePlaybook.js';
+import { defineWorkflow } from '../lib/workflow/defineWorkflow.js';
 
-export default definePlaybook({
+export default defineWorkflow({
   slug: 'event-creation',
   name: 'Create a New Event',
   description:

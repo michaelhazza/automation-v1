@@ -24,7 +24,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type OccurrenceSource = 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
+export type OccurrenceSource = 'heartbeat' | 'cron' | 'workflow' | 'scheduled_task';
 
 export type ScopeTag = 'system' | 'org' | 'subaccount';
 
@@ -67,7 +67,7 @@ export interface OccurrenceBase {
 export const SOURCE_PRIORITY = {
   heartbeat: 1,
   cron: 2,
-  playbook: 3,
+  workflow: 3,
   scheduled_task: 4,
 } as const satisfies Record<OccurrenceSource, number>;
 
@@ -300,7 +300,7 @@ export interface RRuleInput extends OccurrenceBase {
   rrule: string;
   timezone: string;
   scheduleTime: string; // HH:MM 24hr
-  source: 'playbook' | 'scheduled_task';
+  source: 'workflow' | 'scheduled_task';
   sourceId: string;
   sourceName: string;
 }

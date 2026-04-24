@@ -1,14 +1,14 @@
-/**
+﻿/**
  * Sub-account onboarding service — Phase F (spec §10).
  *
- * Computes the "owed onboarding playbooks" for a sub-account as the union of
- * `modules.onboardingPlaybookSlugs` across every module active on the
+ * Computes the "owed onboarding Workflows" for a sub-account as the union of
+ * `modules.onboardingWorkflowSlugs` across every module active on the
  * sub-account's org, then joins that union to the latest matching
- * `playbookRuns` row (filtered by `isOnboardingRun = true`).
+ * `workflowRuns` row (filtered by `isOnboardingRun = true`).
  *
  * Consumers:
  *   - §9.3 admin Onboarding tab (AdminSubaccountDetailPage) — lists owed
- *     playbooks, renders progress per slug, and offers "Start now" for any
+ *     Workflows, renders progress per slug, and offers "Start now" for any
  *     slug that has no active run.
  *   - §10.5 auto-start hook — iterates owed slugs and enqueues the ones
  *     whose template declares `autoStartOnOnboarding = true`.
@@ -19,24 +19,24 @@ import { db } from '../db/index.js';
 import {
   modules,
   orgSubscriptions,
-  playbookRuns,
-  playbookTemplates,
+  workflowRuns,
+  workflowTemplates,
   subaccounts,
   subscriptions,
-  systemPlaybookTemplates,
+  systemWorkflowTemplates,
 } from '../db/schema/index.js';
-import type { PlaybookRunStatus } from '../db/schema/playbookRuns.js';
-import { playbookRunService } from './playbookRunService.js';
-import { upsertSubaccountOnboardingState } from '../lib/playbook/onboardingStateHelpers.js';
+import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
+import { WorkflowRunService } from './workflowRunService.js';
+import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 
-export interface OwedOnboardingPlaybook {
+export interface OwedOnboardingWorkflow {
   slug: string;
   /** Which enabled modules contributed this slug to the owed list. */
   moduleIds: string[];
   /** Latest onboarding run for this subaccount+slug, or null if never run. */
   latestRun: {
     id: string;
-    status: PlaybookRunStatus;
+    status: WorkflowRunStatus;
     startedAt: string | null;
     completedAt: string | null;
   } | null;
@@ -44,7 +44,7 @@ export interface OwedOnboardingPlaybook {
 
 class SubaccountOnboardingService {
   /**
-   * Resolve the union of `onboardingPlaybookSlugs` for the sub-account's org,
+   * Resolve the union of `onboardingWorkflowSlugs` for the sub-account's org,
    * tagged with the modules that contributed each slug. Returns an empty map
    * when the org has no active subscription.
    */
@@ -73,7 +73,7 @@ class SubaccountOnboardingService {
     const activeModules = await db
       .select({
         id: modules.id,
-        onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs,
+        onboardingWorkflowSlugs: modules.onboardingWorkflowSlugs,
       })
       .from(modules)
       .where(and(inArray(modules.id, sub.moduleIds), isNull(modules.deletedAt)));
@@ -81,7 +81,7 @@ class SubaccountOnboardingService {
     // slug -> ordered list of module ids that advertised it
     const slugToModules = new Map<string, string[]>();
     for (const m of activeModules) {
-      for (const slug of m.onboardingPlaybookSlugs ?? []) {
+      for (const slug of m.onboardingWorkflowSlugs ?? []) {
         const existing = slugToModules.get(slug);
         if (existing) {
           if (!existing.includes(m.id)) existing.push(m.id);
@@ -94,14 +94,14 @@ class SubaccountOnboardingService {
   }
 
   /**
-   * §10.3 — list the onboarding playbooks owed for a sub-account, each joined
-   * to its latest matching `playbookRuns` row (filtered by
+   * §10.3 — list the onboarding Workflows owed for a sub-account, each joined
+   * to its latest matching `workflowRuns` row (filtered by
    * `isOnboardingRun = true`).
    */
-  async listOwedOnboardingPlaybooks(
+  async listOwedOnboardingWorkflows(
     organisationId: string,
     subaccountId: string,
-  ): Promise<OwedOnboardingPlaybook[]> {
+  ): Promise<OwedOnboardingWorkflow[]> {
     // 1. Verify the subaccount belongs to the org.
     const [sub] = await db
       .select({
@@ -121,33 +121,33 @@ class SubaccountOnboardingService {
     const slugs = Array.from(slugToModules.keys());
 
     // 3. Load the latest onboarding run per slug for this subaccount.
-    //    DISTINCT ON (playbook_slug) ordered by createdAt DESC.
+    //    DISTINCT ON (workflow_slug) ordered by createdAt DESC.
     const latestRuns = await db
       .select({
-        id: playbookRuns.id,
-        playbookSlug: playbookRuns.playbookSlug,
-        status: playbookRuns.status,
-        startedAt: playbookRuns.startedAt,
-        completedAt: playbookRuns.completedAt,
-        createdAt: playbookRuns.createdAt,
+        id: workflowRuns.id,
+        workflowSlug: workflowRuns.workflowSlug,
+        status: workflowRuns.status,
+        startedAt: workflowRuns.startedAt,
+        completedAt: workflowRuns.completedAt,
+        createdAt: workflowRuns.createdAt,
       })
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.organisationId, organisationId),
-          eq(playbookRuns.subaccountId, subaccountId),
-          eq(playbookRuns.isOnboardingRun, true),
-          inArray(playbookRuns.playbookSlug, slugs),
+          eq(workflowRuns.organisationId, organisationId),
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.isOnboardingRun, true),
+          inArray(workflowRuns.workflowSlug, slugs),
         ),
       )
-      .orderBy(desc(playbookRuns.createdAt));
+      .orderBy(desc(workflowRuns.createdAt));
 
     // Collapse to the newest row per slug (the query already orders desc).
     const latestBySlug = new Map<string, (typeof latestRuns)[number]>();
     for (const row of latestRuns) {
-      if (!row.playbookSlug) continue;
-      if (!latestBySlug.has(row.playbookSlug)) {
-        latestBySlug.set(row.playbookSlug, row);
+      if (!row.workflowSlug) continue;
+      if (!latestBySlug.has(row.workflowSlug)) {
+        latestBySlug.set(row.workflowSlug, row);
       }
     }
 
@@ -171,14 +171,14 @@ class SubaccountOnboardingService {
   }
 
   /**
-   * §10.3 — start an owed onboarding playbook. Resolves the slug to an org or
-   * system template, then delegates to `playbookRunService.startRun()` with
+   * §10.3 — start an owed onboarding Workflow. Resolves the slug to an org or
+   * system template, then delegates to `WorkflowRunService.startRun()` with
    * `isOnboardingRun: true`. The DB-level partial unique index
-   * (`playbook_runs_active_per_subaccount_slug`) guarantees at-most-one active
+   * (`workflow_runs_active_per_subaccount_slug`) guarantees at-most-one active
    * run per (subaccount, slug) — the duplicate-run guard is enforced at the
-   * service layer by `playbookRunService.startRun()` (§10.5.1).
+   * service layer by `WorkflowRunService.startRun()` (§10.5.1).
    */
-  async startOwedOnboardingPlaybook(params: {
+  async startOwedOnboardingWorkflow(params: {
     organisationId: string;
     subaccountId: string;
     slug: string;
@@ -191,24 +191,24 @@ class SubaccountOnboardingService {
     if (!slugToModules.has(params.slug)) {
       throw {
         statusCode: 400,
-        message: `Slug '${params.slug}' is not an onboarding playbook for this sub-account`,
+        message: `Slug '${params.slug}' is not an onboarding Workflow for this sub-account`,
         errorCode: 'onboarding_slug_not_owed',
       };
     }
 
     // Prefer an org-owned template with this slug, then fall back to system.
     const [orgTemplate] = await db
-      .select({ id: playbookTemplates.id })
-      .from(playbookTemplates)
+      .select({ id: workflowTemplates.id })
+      .from(workflowTemplates)
       .where(
         and(
-          eq(playbookTemplates.organisationId, params.organisationId),
-          eq(playbookTemplates.slug, params.slug),
-          isNull(playbookTemplates.deletedAt),
+          eq(workflowTemplates.organisationId, params.organisationId),
+          eq(workflowTemplates.slug, params.slug),
+          isNull(workflowTemplates.deletedAt),
         ),
       );
 
-    let startInput: Parameters<typeof playbookRunService.startRun>[0];
+    let startInput: Parameters<typeof WorkflowRunService.startRun>[0];
     if (orgTemplate) {
       startInput = {
         organisationId: params.organisationId,
@@ -221,9 +221,9 @@ class SubaccountOnboardingService {
       };
     } else {
       const [sysTemplate] = await db
-        .select({ id: systemPlaybookTemplates.id })
-        .from(systemPlaybookTemplates)
-        .where(eq(systemPlaybookTemplates.slug, params.slug));
+        .select({ id: systemWorkflowTemplates.id })
+        .from(systemWorkflowTemplates)
+        .where(eq(systemWorkflowTemplates.slug, params.slug));
       if (!sysTemplate) {
         throw {
           statusCode: 404,
@@ -243,7 +243,7 @@ class SubaccountOnboardingService {
     }
 
     try {
-      const result = await playbookRunService.startRun(startInput);
+      const result = await WorkflowRunService.startRun(startInput);
       return { runId: result.runId };
     } catch (err) {
       // §10.5.1 duplicate-run guard: the partial unique index may raise
@@ -252,14 +252,14 @@ class SubaccountOnboardingService {
       const pgCode = (err as { code?: string } | null)?.code;
       if (pgCode === '23505') {
         const [existing] = await db
-          .select({ id: playbookRuns.id })
-          .from(playbookRuns)
+          .select({ id: workflowRuns.id })
+          .from(workflowRuns)
           .where(
             and(
-              eq(playbookRuns.organisationId, params.organisationId),
-              eq(playbookRuns.subaccountId, params.subaccountId),
-              eq(playbookRuns.playbookSlug, params.slug),
-              inArray(playbookRuns.status, [
+              eq(workflowRuns.organisationId, params.organisationId),
+              eq(workflowRuns.subaccountId, params.subaccountId),
+              eq(workflowRuns.workflowSlug, params.slug),
+              inArray(workflowRuns.status, [
                 'pending',
                 'running',
                 'awaiting_input',
@@ -267,7 +267,7 @@ class SubaccountOnboardingService {
               ]),
             ),
           )
-          .orderBy(desc(playbookRuns.createdAt))
+          .orderBy(desc(workflowRuns.createdAt))
           .limit(1);
         if (existing) return { runId: existing.id };
       }
@@ -283,12 +283,12 @@ class SubaccountOnboardingService {
    * Failures are isolated per slug — a single failed enqueue does not block
    * the others, matching the §5.8 failure-isolation pattern.
    */
-  async autoStartOwedOnboardingPlaybooks(params: {
+  async autoStartOwedOnboardingWorkflows(params: {
     organisationId: string;
     subaccountId: string;
     startedByUserId: string;
   }): Promise<{ startedRunIds: string[]; skippedSlugs: string[]; errors: Array<{ slug: string; error: string }> }> {
-    const owed = await this.listOwedOnboardingPlaybooks(
+    const owed = await this.listOwedOnboardingWorkflows(
       params.organisationId,
       params.subaccountId,
     );
@@ -315,7 +315,7 @@ class SubaccountOnboardingService {
       }
 
       try {
-        const { runId } = await this.startOwedOnboardingPlaybook({
+        const { runId } = await this.startOwedOnboardingWorkflow({
           organisationId: params.organisationId,
           subaccountId: params.subaccountId,
           slug: row.slug,
@@ -345,8 +345,8 @@ class SubaccountOnboardingService {
     // Org-owned template.
     const orgRows = (await db.execute(sql`
       SELECT ptv.definition_json AS definition
-      FROM playbook_templates pt
-      JOIN playbook_template_versions ptv
+      FROM workflow_templates pt
+      JOIN workflow_template_versions ptv
         ON ptv.template_id = pt.id AND ptv.version = pt.latest_version
       WHERE pt.organisation_id = ${organisationId}
         AND pt.slug = ${slug}
@@ -362,8 +362,8 @@ class SubaccountOnboardingService {
     // System template fallback.
     const sysRows = (await db.execute(sql`
       SELECT sptv.definition_json AS definition
-      FROM system_playbook_templates spt
-      JOIN system_playbook_template_versions sptv
+      FROM system_workflow_templates spt
+      JOIN system_workflow_template_versions sptv
         ON sptv.system_template_id = spt.id AND sptv.version = spt.latest_version
       WHERE spt.slug = ${slug}
         AND spt.latest_version > 0
@@ -382,9 +382,9 @@ class SubaccountOnboardingService {
     runId: string;
     organisationId: string;
     subaccountId: string;
-    playbookSlug: string | null;
+    workflowSlug: string | null;
     isOnboardingRun: boolean;
-    runStatus: PlaybookRunStatus;
+    runStatus: WorkflowRunStatus;
     startedAt: Date | null;
     completedAt: Date | null;
   }): Promise<void> {

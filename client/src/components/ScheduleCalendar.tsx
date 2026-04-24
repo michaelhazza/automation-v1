@@ -14,7 +14,7 @@
 import { useMemo, useState } from 'react';
 import { formatMoney } from '../lib/formatMoney';
 
-export type OccurrenceSource = 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
+export type OccurrenceSource = 'heartbeat' | 'cron' | 'workflow' | 'scheduled_task';
 export type ScopeTag = 'system' | 'org' | 'subaccount';
 
 export interface ScheduleOccurrence {
@@ -56,7 +56,7 @@ export interface ScheduleCalendarProps {
 const SOURCE_LABELS: Record<OccurrenceSource, string> = {
   heartbeat: 'Heartbeat',
   cron: 'Cron',
-  playbook: 'Playbook',
+  playbook: 'Workflow',
   scheduled_task: 'Scheduled task',
 };
 

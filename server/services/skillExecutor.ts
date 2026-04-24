@@ -1,4 +1,4 @@
-import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
 import { insertOutcomeSafe } from './delegationOutcomeService.js';
@@ -145,7 +145,7 @@ export interface SkillExecutionContext {
   /**
    * The principal that initiated this run, when known. Populated by
    * agentExecutionService when the AgentRunRequest carries a userId.
-   * Used by user-scoped tools (e.g. Playbook Studio propose_save) to
+   * Used by user-scoped tools (e.g. Workflow Studio propose_save) to
    * enforce ownership without trusting tool inputs. Undefined for
    * scheduled / system runs that have no initiating user — tools that
    * require a user MUST refuse to run when this is undefined.
@@ -569,21 +569,21 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWithActionAudit('monitor_webpage', input, context, () => executeMonitorWebpage(input, context));
   },
 
-  // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
-  playbook_read_existing: async (input) => {
-    return executePlaybookReadExisting(input);
+  // ── Workflow Studio tools (system-admin only; agent: Workflow-author) ──
+  workflow_read_existing: async (input) => {
+    return executeWorkflowReadExisting(input);
   },
-  playbook_validate: async (input) => {
-    return executePlaybookValidate(input);
+  workflow_validate: async (input) => {
+    return executeWorkflowValidate(input);
   },
-  playbook_simulate: async (input) => {
-    return executePlaybookSimulate(input);
+  workflow_simulate: async (input) => {
+    return executeWorkflowSimulate(input);
   },
-  playbook_estimate_cost: async (input) => {
-    return executePlaybookEstimateCost(input);
+  workflow_estimate_cost: async (input) => {
+    return executeWorkflowEstimateCost(input);
   },
-  playbook_propose_save: async (input, context) => {
-    return executePlaybookProposeSave(input, context);
+  workflow_propose_save: async (input, context) => {
+    return executeWorkflowProposeSave(input, context);
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
@@ -1587,14 +1587,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWeeklyDigestGather(input);
   },
 
-  // Action-call alias used by the playbook runner (see weekly-digest.playbook.ts)
+  // Action-call alias used by the Workflow runner (see weekly-digest.Workflow.ts)
   config_weekly_digest_gather: async (input) => {
     const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
     return executeWeeklyDigestGather(input);
   },
 
-  // ── Phase 3 S22: Deliver playbook output via deliveryService ─────
-  config_deliver_playbook_output: async (input, context) => {
+  // ── Phase 3 S22: Deliver Workflow output via deliveryService ─────
+  config_deliver_workflow_output: async (input, context) => {
     const { deliveryService } = await import('./deliveryService.js');
     const {
       subaccountId,
@@ -1783,13 +1783,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
 
   // Phase G — portal / email skills (spec §11.6) — action_call only.
-  config_publish_playbook_output_to_portal: async (input, context) => {
-    const { executeConfigPublishPlaybookOutputToPortal } = await import('../tools/config/playbookSkillHandlers.js');
-    return executeWithActionAudit('config_publish_playbook_output_to_portal', input, context, () => executeConfigPublishPlaybookOutputToPortal(input, context));
+  config_publish_workflow_output_to_portal: async (input, context) => {
+    const { executeConfigPublishWorkflowOutputToPortal } = await import('../tools/config/workflowSkillHandlers.js');
+    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, () => executeConfigPublishWorkflowOutputToPortal(input, context));
   },
-  config_send_playbook_email_digest: async (input, context) => {
-    const { executeConfigSendPlaybookEmailDigest } = await import('../tools/config/playbookSkillHandlers.js');
-    return executeWithActionAudit('config_send_playbook_email_digest', input, context, () => executeConfigSendPlaybookEmailDigest(input, context));
+  config_send_workflow_email_digest: async (input, context) => {
+    const { executeConfigSendWorkflowEmailDigest } = await import('../tools/config/workflowSkillHandlers.js');
+    return executeWithActionAudit('config_send_workflow_email_digest', input, context, () => executeConfigSendWorkflowEmailDigest(input, context));
   },
 
   // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
@@ -5260,21 +5260,21 @@ function executeMethodologySkill(
   };
 }
 
-// ─── Playbook Studio tool executors ──────────────────────────────────────────
-// Spec: tasks/playbooks-spec.md §10.8.4 — the five tools the Playbook
-// Author agent calls. All five delegate to playbookStudioService.
+// ─── Workflow Studio tool executors ──────────────────────────────────────────
+// Spec: tasks/Workflows-spec.md §10.8.4 — the five tools the Workflow
+// Author agent calls. All five delegate to workflowStudioService.
 //
-// Dynamic-imported on first call to avoid pulling the playbook services
+// Dynamic-imported on first call to avoid pulling the Workflow services
 // into the eager skillExecutor graph (which is loaded by every agent run).
 
-async function executePlaybookReadExisting(
+async function executeWorkflowReadExisting(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const slug = String(input.slug ?? '');
   if (!slug) return { success: false, error: 'slug is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
   try {
-    return playbookStudioService.readExistingPlaybook(slug);
+    return workflowStudioService.readExistingWorkflow(slug);
   } catch (err) {
     return {
       success: false,
@@ -5283,41 +5283,41 @@ async function executePlaybookReadExisting(
   }
 }
 
-async function executePlaybookValidate(
+async function executeWorkflowValidate(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.validateCandidate(definition);
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.validateCandidate(definition);
 }
 
-async function executePlaybookSimulate(
+async function executeWorkflowSimulate(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.simulateRun(definition);
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.simulateRun(definition);
 }
 
-async function executePlaybookEstimateCost(
+async function executeWorkflowEstimateCost(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
   const mode = (input.mode as 'optimistic' | 'pessimistic' | undefined) ?? 'pessimistic';
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.estimateCost(definition, { mode });
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.estimateCost(definition, { mode });
 }
 
-async function executePlaybookProposeSave(
+async function executeWorkflowProposeSave(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
   // Definition-only API. The agent supplies the validated definition
   // object (NOT raw file contents) and the server renders the
-  // .playbook.ts file deterministically. There is no input the agent
+  // .Workflow.ts file deterministically. There is no input the agent
   // can use to inject arbitrary file content — that's the whole point
   // of spec invariant 14 in the post-round-3 design.
   const sessionId = String(input.sessionId ?? '');
@@ -5329,7 +5329,7 @@ async function executePlaybookProposeSave(
     return {
       success: false,
       error:
-        'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
+        'definition object is required. propose_save no longer accepts fileContents — the server renders the Workflow file deterministically from the validated definition.',
     };
   }
   // Feature 3 §5.6 — high-severity gate for n8n imports.
@@ -5343,7 +5343,7 @@ async function executePlaybookProposeSave(
   ) {
     return {
       success: false,
-      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call playbook_propose_save again with unresolved_high_severity_count: 0.`,
+      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call workflow_propose_save again with unresolved_high_severity_count: 0.`,
     };
   }
   // Strict user-scope enforcement (review finding #3 from the previous
@@ -5355,14 +5355,14 @@ async function executePlaybookProposeSave(
     return {
       success: false,
       error:
-        'playbook_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
+        'workflow_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
     };
   }
-  const { playbookStudioService } = await import('./playbookStudioService.js');
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
   // Validate + render in one call. This re-uses the exact same code
   // path the /render endpoint uses, so the server's view of the
   // canonical file body is consistent everywhere.
-  const rendered = playbookStudioService.validateAndRender(definition);
+  const rendered = workflowStudioService.validateAndRender(definition);
   if (!rendered.ok) {
     return {
       success: false,
@@ -5373,7 +5373,7 @@ async function executePlaybookProposeSave(
   // Persist the rendered file as the session's candidate, scoped by
   // (sessionId, userId). Returns false when the session doesn't exist
   // OR isn't owned by the calling user.
-  const updated = await playbookStudioService.updateCandidate(
+  const updated = await workflowStudioService.updateCandidate(
     sessionId,
     context.userId,
     rendered.fileContents,

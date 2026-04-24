@@ -701,8 +701,8 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.processes.view') && (
                 <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
               )}
-              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.playbook_templates.read')) && (
-                <NavItem to="/playbooks" icon={<Icons.automations />} label="Playbooks" />
+              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.workflow_templates.read')) && (
+                <NavItem to="/workflows" icon={<Icons.automations />} label="Workflows" />
               )}
               {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
@@ -822,7 +822,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
               <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
-              <NavItem to="/system/playbook-studio" icon={<Icons.automations />} label="Playbook Studio" />
+              <NavItem to="/system/workflow-studio" icon={<Icons.automations />} label="Workflow Studio" />
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />

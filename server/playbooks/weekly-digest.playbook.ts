@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Weekly Digest — Memory & Briefings Phase 3 S19
  *
  * Backward-looking summary of the subaccount's past 7 days. Complements the
@@ -14,14 +14,14 @@
  *
  * The Memory Health section (Section 5 of the digest output) renders live
  * data from memoryHealthDataService once S14 lands in Phase 4. Until then it
- * renders a "coverage gaps will be computed from Phase 4" stub so the playbook
+ * renders a "coverage gaps will be computed from Phase 4" stub so the workflow
  * can ship and run end-to-end without cross-phase blockers.
  *
  * Spec: docs/memory-and-briefings-spec.md §7.2 (S19)
  */
 
 import { z } from 'zod';
-import { definePlaybook } from '../lib/playbook/definePlaybook.js';
+import { defineWorkflow } from '../lib/workflow/defineWorkflow.js';
 
 const schedulePickerValueSchema = z.object({
   rrule: z.string().describe('iCal RRULE string defining the recurrence pattern'),
@@ -35,7 +35,7 @@ const deliveryChannelsSchema = z.object({
   slack: z.boolean().default(false),
 });
 
-export default definePlaybook({
+export default defineWorkflow({
   slug: 'weekly-digest',
   name: 'Weekly Digest',
   description:
@@ -79,13 +79,13 @@ export default definePlaybook({
       actionInputs: {
         title: 'Weekly Digest',
         description:
-          'Weekly retrospective digest. Created by the Weekly Digest playbook.',
+          'Weekly retrospective digest. Created by the Weekly Digest workflow.',
         subaccountId: '{{ run.subaccount.id }}',
         rrule: '{{ run.input.schedule.rrule }}',
         timezone: '{{ run.input.schedule.timezone }}',
         scheduleTime: '{{ run.input.schedule.scheduleTime }}',
         taskSlug: 'weekly-digest-{{ run.subaccount.id }}',
-        createdByPlaybookSlug: 'weekly-digest',
+        createdByWorkflowSlug: 'weekly-digest',
         runNow: 'true',
       },
       outputSchema: z.object({
@@ -180,7 +180,7 @@ export default definePlaybook({
       type: 'action_call',
       dependsOn: ['draft'],
       sideEffectType: 'irreversible',
-      actionSlug: 'config_deliver_playbook_output',
+      actionSlug: 'config_deliver_workflow_output',
       actionInputs: {
         subaccountId: '{{ run.subaccount.id }}',
         organisationId: '{{ run.subaccount.organisationId }}',

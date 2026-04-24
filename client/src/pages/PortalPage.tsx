@@ -31,7 +31,7 @@ interface PortalPresentation {
 }
 interface PortalRun {
   id: string;
-  playbookSlug: string | null;
+  workflowSlug: string | null;
   status: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -183,19 +183,19 @@ export default function PortalPage({ user: _user }: { user: User }) {
           this list to avoid showing it twice. */}
       {(() => {
         const otherRuns = dailyBriefCard?.active
-          ? portalRuns.filter((r) => r.playbookSlug !== 'intelligence-briefing')
+          ? portalRuns.filter((r) => r.workflowSlug !== 'intelligence-briefing')
           : portalRuns;
         if (otherRuns.length === 0) return null;
         return (
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-[16px] font-semibold text-slate-800 m-0">Playbooks</h2>
+            <h2 className="text-[16px] font-semibold text-slate-800 m-0">Workflows</h2>
             <HelpHint text="These playbooks were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
           </div>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {otherRuns.map((run) => {
               const pp = run.portalPresentation;
-              const title = pp?.cardTitle ?? run.playbookSlug ?? 'Playbook run';
+              const title = pp?.cardTitle ?? run.workflowSlug ?? 'Workflow run';
               const isActive = ACTIVE_STATUSES.has(run.status);
               const isRunningNow = runningNow.has(run.id);
               const lastRunDate = run.completedAt ?? run.startedAt ?? run.createdAt;
