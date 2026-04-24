@@ -170,23 +170,12 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
   const classifyQueue = currentJob.classifyState?.queue ?? [];
   const inFlight = currentJob.classifyState?.inFlight ?? {};
 
-  // Unified slug list for the per-skill rows. The queue alone isn't enough:
-  // after a resume, every skill is already classified, so classifyQueue is
-  // empty — but liveResults still holds all 19 persisted rows. Showing the
-  // queue OR the persisted results keeps the list populated through every
-  // stage (mid-classify, post-resume, Stage 6/7/7b agent enrichment).
-  //
-  // Ordering: queue items first (preserves "classifying now at top" during a
-  // live run), then any persisted result not in the queue, sorted by
-  // candidateIndex for a stable listing.
-  const displaySlugs = (() => {
-    const queued = new Set(classifyQueue);
-    const doneOnly = liveResults
-      .filter((r) => !queued.has(r.candidateSlug))
-      .sort((a, b) => a.candidateIndex - b.candidateIndex)
-      .map((r) => r.candidateSlug);
-    return [...classifyQueue, ...doneOnly];
-  })();
+  // The queue is the full LLM-candidate list in original import order,
+  // set once at Stage 5 start and never shrunk. Already-classified skills
+  // render as ✓ done via deriveRowStatus; in-flight and queued ones show
+  // their live state. Hash-matched (DUPLICATE) skills are never in the queue
+  // and intentionally don't appear here — this view is the AI-classify view.
+  const displaySlugs = classifyQueue;
   const showSkillList =
     !isFailed
     && currentJob.status !== 'completed'

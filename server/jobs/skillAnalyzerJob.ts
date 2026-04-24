@@ -524,10 +524,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
     classifyState: {
-      // Only the remaining (un-classified) slugs belong in the live queue; the
-      // inFlight map is always reset — any entries from a prior crashed
-      // process refer to calls that are definitively dead.
-      queue: resumedLlmQueue.map((m) => candidates[m.candidateIndex].slug),
+      // Full LLM-candidate list (not just remaining) so the UI can show all
+      // skills in stable original order. Already-classified ones render as
+      // 'done' via deriveRowStatus; the inFlight map is reset — any entries
+      // from a prior crashed process refer to calls that are definitively dead.
+      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
       inFlight: {},
     },
   });
@@ -774,12 +775,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
     });
   } else {
-    // Concurrency 2: even 3 concurrent PARTIAL_OVERLAP/IMPROVEMENT calls
-    // can exhaust the rolling TPM budget on the current Anthropic tier,
-    // causing all in-flight calls to stall together on 429 backoff. 2 keeps
-    // meaningful parallelism while halving peak token draw; drop to 1 if
-    // stalls still occur on marketing-heavy imports.
-    const limit = await getPLimit(2);
+    // Concurrency 3: all classify calls run in parallel. Drop to 2 if
+    // 429 rate-limit stalls occur on large marketing-heavy imports.
+    const limit = await getPLimit(3);
     // Resume-aware progress: start the counter at the number of candidates
     // that were already classified by a prior run so the UI percentage doesn't
     // regress after a worker restart.

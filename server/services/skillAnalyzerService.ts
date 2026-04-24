@@ -182,6 +182,10 @@ export async function resumeJob(params: {
   // Guard against double-enqueue: if pg-boss already has a live row for
   // this jobId, resuming would run the handler twice in parallel and both
   // copies would fight over the Stage-8 insert set.
+  // Exception: if our DB row is 'failed', a lingering 'active' pg-boss entry
+  // means the worker process died without pg-boss detecting it (the lock
+  // expires after expireInSeconds, which is 4 hours). Force-expire it so the
+  // resume can proceed rather than blocking for hours.
   // drizzle-orm/postgres-js returns db.execute() as the row array directly
   // (NOT { rows }) — see server/services/jobQueueHealthService.ts for the
   // established cast pattern.
@@ -194,7 +198,20 @@ export async function resumeJob(params: {
   `);
   const aliveCount = (aliveRows as unknown as Array<{ n: number }>)[0]?.n ?? 0;
   if (aliveCount > 0) {
-    throw { statusCode: 409, message: 'Analysis is already queued or running.' };
+    if (job.status === 'failed') {
+      // Dead worker left a ghost active entry — expire it so we can re-enqueue.
+      await db.execute(sql`
+        UPDATE pgboss.job
+        SET state = 'failed',
+            completedon = NOW(),
+            output = '{"error":"Expired by resume — worker process died"}'::jsonb
+        WHERE name = 'skill-analyzer'
+          AND data->>'jobId' = ${jobId}
+          AND state = 'active'
+      `);
+    } else {
+      throw { statusCode: 409, message: 'Analysis is already queued or running.' };
+    }
   }
 
   // Reset the intermediate row state so the progress UI reflects the
