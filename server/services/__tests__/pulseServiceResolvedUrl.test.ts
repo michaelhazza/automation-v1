@@ -1,38 +1,15 @@
 /**
  * pulseServiceResolvedUrl.test.ts — Unit tests for resolvedUrl on PulseItem.
  *
- * Tests the resolution rules for resolvedUrl via a local reference implementation
- * that mirrors the rules table in the task spec. The real helper in pulseService.ts
- * is not exported (by design), so these tests act as both a specification and a
- * regression guard — if the implementation diverges from the rules table the
- * TypeScript interface and the items.push() blocks will produce wrong values.
+ * Tests the resolution rules for resolvedUrl by importing the production helper
+ * directly from pulseService.ts, so changes to the implementation are
+ * immediately caught here.
  *
  * Runnable via:
  *   npx tsx server/services/__tests__/pulseServiceResolvedUrl.test.ts
  */
 
-// ---------------------------------------------------------------------------
-// Reference implementation of resolveUrlForItem (mirrors rules table)
-// ---------------------------------------------------------------------------
-
-function resolveUrlForItem(
-  kind: string,
-  id: string,
-  subaccountId: string | null | undefined,
-): string | null {
-  switch (kind) {
-    case 'review':
-      return subaccountId ? `/clientpulse/clients/${subaccountId}` : null;
-    case 'task':
-      return subaccountId ? `/admin/subaccounts/${subaccountId}/workspace` : null;
-    case 'failed_run':
-      return `/runs/${id}/live`;
-    case 'health_finding':
-      return '/admin/health';
-    default:
-      return null;
-  }
-}
+import { _resolveUrlForItem } from '../pulseService';
 
 // ---------------------------------------------------------------------------
 // Lightweight test runner (matches project tsx convention)
@@ -73,22 +50,22 @@ console.log('\n── review ─────────────────
 
 test('review with subaccountId returns /clientpulse/clients/:subaccountId', () => {
   assertEqual(
-    resolveUrlForItem('review', 'item-1', 'sub-abc'),
+    _resolveUrlForItem('review', 'item-1', 'sub-abc'),
     '/clientpulse/clients/sub-abc',
     'review with subaccountId',
   );
 });
 
 test('review without subaccountId (undefined) returns null', () => {
-  assertNull(resolveUrlForItem('review', 'item-1', undefined), 'review undefined subaccountId');
+  assertNull(_resolveUrlForItem('review', 'item-1', undefined), 'review undefined subaccountId');
 });
 
 test('review without subaccountId (null) returns null', () => {
-  assertNull(resolveUrlForItem('review', 'item-1', null), 'review null subaccountId');
+  assertNull(_resolveUrlForItem('review', 'item-1', null), 'review null subaccountId');
 });
 
 test('review without subaccountId (empty string) returns null', () => {
-  assertNull(resolveUrlForItem('review', 'item-1', ''), 'review empty string subaccountId');
+  assertNull(_resolveUrlForItem('review', 'item-1', ''), 'review empty string subaccountId');
 });
 
 // ---------------------------------------------------------------------------
@@ -99,22 +76,22 @@ console.log('\n── task ─────────────────�
 
 test('task with subaccountId returns /admin/subaccounts/:subaccountId/workspace', () => {
   assertEqual(
-    resolveUrlForItem('task', 'task-99', 'sub-xyz'),
+    _resolveUrlForItem('task', 'task-99', 'sub-xyz'),
     '/admin/subaccounts/sub-xyz/workspace',
     'task with subaccountId',
   );
 });
 
 test('task without subaccountId (undefined) returns null', () => {
-  assertNull(resolveUrlForItem('task', 'task-99', undefined), 'task undefined subaccountId');
+  assertNull(_resolveUrlForItem('task', 'task-99', undefined), 'task undefined subaccountId');
 });
 
 test('task without subaccountId (null) returns null', () => {
-  assertNull(resolveUrlForItem('task', 'task-99', null), 'task null subaccountId');
+  assertNull(_resolveUrlForItem('task', 'task-99', null), 'task null subaccountId');
 });
 
 test('task without subaccountId (empty string) returns null', () => {
-  assertNull(resolveUrlForItem('task', 'task-99', ''), 'task empty string subaccountId');
+  assertNull(_resolveUrlForItem('task', 'task-99', ''), 'task empty string subaccountId');
 });
 
 // ---------------------------------------------------------------------------
@@ -125,7 +102,7 @@ console.log('\n── failed_run ───────────────�
 
 test('failed_run with subaccountId returns /runs/:id/live', () => {
   assertEqual(
-    resolveUrlForItem('failed_run', 'run-42', 'sub-abc'),
+    _resolveUrlForItem('failed_run', 'run-42', 'sub-abc'),
     '/runs/run-42/live',
     'failed_run with subaccountId',
   );
@@ -133,14 +110,14 @@ test('failed_run with subaccountId returns /runs/:id/live', () => {
 
 test('failed_run without subaccountId returns /runs/:id/live', () => {
   assertEqual(
-    resolveUrlForItem('failed_run', 'run-42', null),
+    _resolveUrlForItem('failed_run', 'run-42', null),
     '/runs/run-42/live',
     'failed_run without subaccountId',
   );
 });
 
 test('failed_run URL uses run id, not subaccountId', () => {
-  const url = resolveUrlForItem('failed_run', 'run-99', 'sub-different');
+  const url = _resolveUrlForItem('failed_run', 'run-99', 'sub-different');
   if (!url || !url.includes('run-99')) {
     throw new Error(`expected URL to contain run-99, got ${url}`);
   }
@@ -157,7 +134,7 @@ console.log('\n── health_finding ──────────────�
 
 test('health_finding returns /admin/health', () => {
   assertEqual(
-    resolveUrlForItem('health_finding', 'finding-1', null),
+    _resolveUrlForItem('health_finding', 'finding-1', null),
     '/admin/health',
     'health_finding null subaccountId',
   );
@@ -165,7 +142,7 @@ test('health_finding returns /admin/health', () => {
 
 test('health_finding ignores subaccountId', () => {
   assertEqual(
-    resolveUrlForItem('health_finding', 'finding-1', 'sub-abc'),
+    _resolveUrlForItem('health_finding', 'finding-1', 'sub-abc'),
     '/admin/health',
     'health_finding with subaccountId',
   );
@@ -190,7 +167,7 @@ function makePulseItem(
   id: string,
   subaccountId: string | null,
 ): PulseItemLike {
-  return { id, kind, resolvedUrl: resolveUrlForItem(kind, id, subaccountId) };
+  return { id, kind, resolvedUrl: _resolveUrlForItem(kind, id, subaccountId) };
 }
 
 test('review with subaccountId — resolvedUrl on PulseItem', () => {
