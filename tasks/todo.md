@@ -699,3 +699,44 @@ Full "Browse library" modal UX integration deferred to a follow-up task:
   - Spec section: §7.1 Router transition guarantees table
   - Gap: spec requires five runtime checks (static grep ✓; browser back from approval; deep-link redirect; subaccount-scoped redirect; no React error boundary on redirect paths). Only the static grep has been confirmed. The remaining four require a manual browser pass.
   - Suggested approach: run the four runtime checks in a browser against the build output; record results in `tasks/builds/clientpulse-ui-simplification/progress.md` under a new "G6 manual QA" heading. Does not block PR creation if runtime smoke checks pass, but should complete before merge.
+
+## Deferred from pr-reviewer review — clientpulse-ui-simplification (2026-04-24)
+
+**Captured:** 2026-04-24T07:55:00Z
+**Source log:** `tasks/review-logs/pr-review-log-clientpulse-ui-simplification-2026-04-24T07-55-00Z.md`
+**Branch:** `feat/clientpulse-ui-simplification`
+
+Strong Recommendations and Non-Blocking observations from PR review. Blocking findings (B1-B3) and S1 already addressed in commit `b1b16b72`.
+
+- [ ] S2 — `PULSE_CURSOR_SECRET` fallback warning fires on every `/api/clientpulse/high-risk` request when unset
+  - File: `server/services/clientPulseHighRiskService.ts` lines 162-169
+  - Fix: one-shot process-level warning (module-init check + cached flag) or startup assertion in production
+
+- [ ] S3 — DashboardPage + ClientPulseDashboardPage error states are silent
+  - Files: `client/src/pages/DashboardPage.tsx` lines 34-46; `client/src/pages/ClientPulseDashboardPage.tsx` lines 57-71
+  - Every fetch swallows errors with console.error and returns null; user sees zero-state identical to real empty. Track hasError per source; surface inline retry banner
+
+- [ ] S4 — DashboardPage telemetry fires before navigation, even if user backs out
+  - File: `client/src/pages/DashboardPage.tsx` lines 62-65
+  - Rename events to `pending_card_approve_clicked` / `_reject_clicked` OR move fire site into actual approve/reject success handler
+
+- [ ] S5 — UnifiedActivityFeed receives unused `orgId` prop
+  - File: `client/src/components/UnifiedActivityFeed.tsx` line 229
+  - Remove prop from `UnifiedActivityFeedProps` (line 52) and caller in `DashboardPage.tsx` line 229
+
+- [ ] S6 — No test coverage for idempotent approve/reject backend race path
+  - File: `server/services/reviewService.ts` lines 83-183 / 274-395
+  - Add integration tests for `idempotent_race` branch; spec §6.2.1 GWTs are not exercised
+
+- [ ] S7 — ClientPulseDashboardPage socket merge validation missing
+  - File: `client/src/pages/ClientPulseDashboardPage.tsx` lines 74-79
+  - Validate keys against HealthSummary's known set before merging; only toast when at least one relevant field changed
+
+- [ ] N1 — DashboardPage greeting hour computed once at render (stale past midnight/noon/17:00)
+- [ ] N2 — `formatLastAction` produces "create_task · 0d ago" for today — awkward copy
+- [ ] N3 — NeedsAttentionRow shows `↑0 / 7d` when delta is 0 — noisy
+- [ ] N4 — PendingApprovalCard renders three disabled buttons when `isDisabled` — could split into empty-state variant
+- [ ] N5 — WorkspaceFeatureCard CTA arrow always rendered even for minimal summary
+- [ ] N6 — `resolvePulseDetailUrl.ts` WARN on every call (intentional; noise only if server regresses)
+- [ ] N7 — `clientPulseHighRiskService.getPrioritisedClients` has 6 sequential DB round-trips; could parallelise with Promise.all after subIds known
+- [ ] N8 — `resolvePulseDetailUrl` (client) and `pulseService._resolveUrlForItem` (server) have slightly different prefix shapes (`run` vs `failed_run`, `health` vs `health_finding`) — could share a single constant
