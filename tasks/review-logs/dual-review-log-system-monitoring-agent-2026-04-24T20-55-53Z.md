@@ -15,6 +15,7 @@ all six ingestion call-sites.
 
 **Iterations run:** 3/3
 **Timestamp:** 2026-04-24T20:55:53Z
+**Commit at finish:** 5737216c5074f58d10ac6bdd5d7c3c68e92ead5b
 
 ---
 
