@@ -271,6 +271,7 @@ export default function Layout({ user, children }: LayoutProps) {
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
+  const [incidentCount, setIncidentCount] = useState(0);
 
   // Inline create modals
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -400,6 +401,12 @@ export default function Layout({ user, children }: LayoutProps) {
     if (!activeClientId) { setReviewCount(0); return; }
     api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to fetch review queue count:', err));
   }, [activeClientId]);
+
+  // Incident badge — system admin only, initial load
+  useEffect(() => {
+    if (!isSystemAdmin) return;
+    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(() => {});
+  }, [isSystemAdmin]);
 
   // Live agent badge — initial load + WebSocket updates
   useEffect(() => {
@@ -825,6 +832,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/workflow-studio" icon={<Icons.automations />} label="Workflow Studio" />
               <NavItem to="/system/automations" icon={<Icons.automations />} label="Automations" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
+              <NavItem to="/system/incidents" icon={<Icons.diagnostic />} label="Incidents" badge={incidentCount} />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/llm-pnl" icon={<Icons.usage />} label="LLM P&L" />
