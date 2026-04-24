@@ -1743,6 +1743,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // dead worker. Without this, Stage 7b updates progress once at start
     // and stays silent until Stage 8 — a 10+ min legitimate window that
     // the 15-min sweep threshold would otherwise have to absorb.
+    //
+    // Concurrency safety: enrichedCount is incremented inside per-task
+    // `finally` blocks running under p-limit(3). JS is single-threaded;
+    // `enrichedCount++` then `enrichedCount % HEARTBEAT_EVERY === 0` runs
+    // atomically per microtask, so no heartbeat can be skipped due to
+    // interleaving. The `|| enrichedCount === totalToEnrich` clause covers
+    // the degenerate `totalToEnrich < HEARTBEAT_EVERY` case.
     const HEARTBEAT_EVERY = 5;
     const totalToEnrich = distinctIndicesToEnrich.size;
     let enrichedCount = 0;

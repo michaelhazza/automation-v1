@@ -37,8 +37,11 @@ test('STALE_ANALYZER_JOB_THRESHOLD_MS is 15 minutes (matches sweep schedule head
 test('mid-flight status set covers the full skill_analyzer_jobs lifecycle pre-completion', () => {
   // The set must include every status the job pipeline writes via
   // updateJobProgress before terminal `completed` / `failed`. Pending isn't
-  // included on purpose — a queued job has no worker to die.
-  const expected = ['parsing', 'hashing', 'embedding', 'matching', 'classifying'];
+  // included on purpose — a queued job has no worker to die. `comparing`
+  // (Stage 4 — similarity computation) was missing in the initial draft;
+  // its absence meant Stage 4 worker deaths would never be reaped. Locking
+  // the canonical names here so the bug can't silently regress.
+  const expected = ['parsing', 'hashing', 'embedding', 'comparing', 'classifying'];
   assert(
     STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES.length === expected.length,
     `expected ${expected.length} statuses, got ${STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES.length}`,
@@ -59,6 +62,16 @@ test('mid-flight status set deliberately excludes terminal + pending states', ()
       `should not include: ${status}`,
     );
   }
+});
+
+test('mid-flight status set rejects historical typo "matching" — reviewer caught this in B1', () => {
+  // Belt-and-braces against the original B1 bug. `matching` is a name the
+  // pipeline never writes. Including it would shift an entire stage's
+  // worker-deaths into the "never reaped" bucket.
+  assert(
+    !(STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES as readonly string[]).includes('matching'),
+    'matching is not a real status — must not appear in the sweep set',
+  );
 });
 
 test('computeStaleAnalyzerJobCutoff: default threshold subtracts 15 min from now', () => {

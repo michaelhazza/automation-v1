@@ -8,8 +8,11 @@ import {
   parseDemotedFieldStatuses,
   adjustClassifierConfidence,
   validateMergeOutput,
+  buildClassifyPromptWithMerge,
+  buildClassificationPrompt,
 } from '../skillAnalyzerServicePure.js';
 import type { MergeWarning } from '../skillAnalyzerServicePure.js';
+import type { ParsedSkill } from '../skillParserServicePure.js';
 
 let passed = 0;
 let failed = 0;
@@ -397,6 +400,91 @@ This skill handles customer support tickets and routes them to agents based on u
   const tableDrop = warnings.find(w => w.code === 'TABLE_ROWS_DROPPED');
   assert(tableDrop !== undefined, 'should emit a TABLE_ROWS_DROPPED warning');
   assert(!/restructured/i.test(tableDrop!.message), 'message should NOT mention restructured');
+});
+
+// ---------------------------------------------------------------------------
+// v7-A prompt edits — Rule 6/7 + cross-reference user-message hint
+// ---------------------------------------------------------------------------
+
+const SAMPLE_LIBRARY = {
+  id: 'lib-1',
+  slug: 'create-lead-magnet',
+  name: 'Create Lead Magnet',
+  description: 'Produces downloadable lead-magnet assets.',
+  definition: null,
+  instructions: null,
+  isSystem: true as const,
+};
+
+function makeCandidate(description: string): ParsedSkill {
+  return {
+    name: 'free-tool-strategy',
+    slug: 'free-tool-strategy',
+    description,
+    definition: null,
+    instructions: null,
+    rawSource: '',
+  };
+}
+
+test('system prompt includes Rule 6 (artifact-type divergence)', () => {
+  const { system } = buildClassifyPromptWithMerge(
+    makeCandidate('A sample skill description.'),
+    SAMPLE_LIBRARY,
+    'ambiguous',
+  );
+  assert(/Artifact-type divergence/i.test(system), 'Rule 6 missing from system prompt');
+  assert(/prefer DISTINCT/i.test(system), 'Rule 6 should direct toward DISTINCT');
+});
+
+test('system prompt includes Rule 7 (author cross-reference)', () => {
+  const { system } = buildClassifyPromptWithMerge(
+    makeCandidate('A sample skill description.'),
+    SAMPLE_LIBRARY,
+    'ambiguous',
+  );
+  assert(/Author cross-reference is intent/i.test(system), 'Rule 7 missing from system prompt');
+});
+
+test('system prompt includes Example 5 (DISTINCT despite vocabulary overlap)', () => {
+  const { system } = buildClassifyPromptWithMerge(
+    makeCandidate('A sample skill description.'),
+    SAMPLE_LIBRARY,
+    'ambiguous',
+  );
+  assert(/Example 5: DISTINCT despite high vocabulary overlap/i.test(system), 'Example 5 missing');
+});
+
+test('buildClassifyPromptWithMerge: appends cross-ref hint when description references library by name', () => {
+  const candidate = makeCandidate(
+    'Strategy for free interactive tools. For downloadable content lead magnets, see Create Lead Magnet.',
+  );
+  const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
+  assert(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing');
+  assert(/Create Lead Magnet/.test(userMessage), 'library name should appear in hint');
+  assert(/strongly prefer DISTINCT/i.test(userMessage), 'hint should push toward DISTINCT');
+});
+
+test('buildClassifyPromptWithMerge: appends cross-ref hint when description references library by slug (hyphenated)', () => {
+  // Library slug is "create-lead-magnet" (hyphenated form via underscore-to-hyphen
+  // conversion in crossReferencesLibrarySkill).
+  const candidate = makeCandidate(
+    'Free-tool playbook. For ebook/checklist work, use create-lead-magnet.',
+  );
+  const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
+  assert(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing for slug match');
+});
+
+test('buildClassifyPromptWithMerge: NO cross-ref hint when description does not reference the library', () => {
+  const candidate = makeCandidate('Strategy for free interactive tools as growth levers.');
+  const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
+  assert(!/Author-intent signal/i.test(userMessage), 'should not surface hint without cross-ref');
+});
+
+test('buildClassificationPrompt (legacy path) also surfaces cross-ref hint', () => {
+  const candidate = makeCandidate('For downloadable content lead magnets, see Create Lead Magnet.');
+  const { userMessage } = buildClassificationPrompt(candidate, SAMPLE_LIBRARY, 'ambiguous');
+  assert(/Author-intent signal/i.test(userMessage), 'legacy path should mirror the hint');
 });
 
 // ---------------------------------------------------------------------------

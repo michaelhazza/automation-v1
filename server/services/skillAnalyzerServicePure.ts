@@ -133,6 +133,8 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 3. A skill with a better-structured definition but identical purpose is IMPROVEMENT.
 4. If uncertain between DUPLICATE and IMPROVEMENT, prefer IMPROVEMENT (conservative).
 5. If uncertain between PARTIAL_OVERLAP and DISTINCT, prefer PARTIAL_OVERLAP (conservative).
+6. **Artifact-type divergence overrides vocabulary overlap.** When two skills produce fundamentally different artifact types — a strategy/planning document vs. a generated tool output, an audit/diagnostic report vs. a drafted creative asset, a one-shot analysis vs. an iterative production pipeline, a short structured output vs. a long-form authored document — prefer DISTINCT (or PARTIAL_OVERLAP at most) even when the skills share heavy domain vocabulary. Shared vocabulary like "lead", "ad", "copy", "campaign", "seo", "content", "email" is a routing signal between related skills, not evidence that they should be merged. Two skills that both touch "ad copy" but where one produces 30-character RSA headlines and the other produces a website's full landing-page strategy do NOT belong as one merged tool.
+7. **Author cross-reference is intent.** When the incoming skill's description or instructions explicitly references another named skill — phrases like "see other-skill", "for topic, use other-skill", "other-skill handles topic", "distinct from other-skill" — the author is telling you they intend two skills, not one. Treat this as strong evidence for DISTINCT, even at high similarity. The merged-skill output also fails the author's stated intent.
 
 ## Few-Shot Examples
 
@@ -159,6 +161,18 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 **Incoming:** "monitor_api_health — Checks API endpoints for availability and latency."
 **Classification:** DISTINCT (different purposes entirely)
 **Confidence:** 0.97
+
+### Example 5: DISTINCT despite high vocabulary overlap (Rule 6 — artifact-type divergence)
+**Existing:** "draft_ad_copy — Generates ad copy variants (30-char headlines, 90-char descriptions, CTAs) for paid platforms (Google, Meta, LinkedIn). Returns short copy strings ready for upload."
+**Incoming:** "copywriting — Strategic framework for landing page copy, sales pages, and brand voice development. Provides messaging hierarchy, voice guides, and conversion-focused page structures."
+**Classification:** DISTINCT (both involve "copy" but produce fundamentally different artifacts — ad variants ≤90 chars vs. multi-section landing-page strategy. Each has independent value; merging would produce a confused hybrid. The shared vocabulary is a routing hint, not a merge signal.)
+**Confidence:** 0.85
+
+### Example 6: DISTINCT triggered by author cross-reference (Rule 7)
+**Existing:** "create_lead_magnet — Produces downloadable lead-magnet assets (ebooks, checklists, templates) for email capture."
+**Incoming:** "free-tool-strategy — Strategy for designing free interactive tools (calculators, generators, audits) as growth levers. *For downloadable content lead magnets (ebooks, checklists, templates), see lead-magnets.*"
+**Classification:** DISTINCT (the incoming description literally directs the reader to "see lead-magnets" for the existing skill's scope — explicit author intent that these are two skills, not one.)
+**Confidence:** 0.90
 
 ## Output Format
 
@@ -200,7 +214,18 @@ export function buildClassificationPrompt(
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
-  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship.`;
+  // Mirror of the cross-ref hint in buildClassifyPromptWithMerge — see that
+  // function for the full rationale (Rule 7 in the system prompt).
+  const crossRefDetected = crossReferencesLibrarySkill(
+    candidate.description,
+    librarySkill.name,
+    librarySkill.slug,
+  );
+  const crossRefHint = crossRefDetected
+    ? `\n\n**Author-intent signal (Rule 7):** the incoming description references "${librarySkill.name}" / "${librarySkill.slug}" in a "see X" / "for X, use Y" pattern. The author intends two separate skills — strongly prefer DISTINCT.`
+    : '';
+
+  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}${crossRefHint}\n\nClassify their relationship.`;
 
   return { system: CLASSIFICATION_SYSTEM_PROMPT, userMessage };
 }
@@ -1013,7 +1038,22 @@ export function buildClassifyPromptWithMerge(
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
-  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
+  // Author cross-reference hint (system prompt Rule 7 enforcement). Detect
+  // whether the incoming description contains "see X" / "for X, use Y"
+  // language that names this library skill — the author's explicit signal
+  // that they intend two separate skills. Surfacing this to the LLM lets
+  // Rule 7 fire on the actual signal instead of relying on the LLM to
+  // notice and apply the rule on its own.
+  const crossRefDetected = crossReferencesLibrarySkill(
+    candidate.description,
+    librarySkill.name,
+    librarySkill.slug,
+  );
+  const crossRefHint = crossRefDetected
+    ? `\n\n**Author-intent signal (Rule 7):** the incoming skill's description explicitly references "${librarySkill.name}" (or its slug "${librarySkill.slug}") in a "see X" / "for X, use Y" pattern. The author has stated these are two separate skills. Strongly prefer DISTINCT — only choose PARTIAL_OVERLAP / IMPROVEMENT if the cross-reference language is clearly stale or out-of-date, and document why in \`reasoning\`.`
+    : '';
+
+  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}${crossRefHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
 
   return { system: CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT, userMessage };
 }

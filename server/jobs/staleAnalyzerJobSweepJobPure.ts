@@ -16,22 +16,28 @@
 // the user for a punitive amount of time.
 //
 // Statuses considered "mid-flight" for sweep purposes match the set the job
-// pipeline writes: parsing, hashing, embedding, matching, classifying.
+// pipeline writes: parsing, hashing, embedding, comparing, classifying.
 // `pending` is excluded — a row that hasn't been picked up yet doesn't
-// have a worker to die.
+// have a worker to die. The `comparing` status covers Stage 4 (similarity
+// computation, 40%→60%) — a substantial compute window where worker death
+// must still be reaped. Earlier drafts of this file mistakenly listed
+// `matching` (a name the pipeline never writes); see PR review log
+// pr-review-log-skill-analyzer-resilience-2026-04-24T08-50-00Z.md (B1).
 // ---------------------------------------------------------------------------
 
 /** Threshold (ms) of `updated_at` silence after which a mid-flight job is
  *  considered stuck. See file header for derivation. */
 export const STALE_ANALYZER_JOB_THRESHOLD_MS = 15 * 60_000;
 
-/** Mid-flight statuses that the sweep can act on. Sourced from the
- *  skillAnalyzerJobs.status enum values that the pipeline writes. */
+/** Mid-flight statuses that the sweep can act on. MUST stay in sync with
+ *  the `status` column enum in `server/db/schema/skillAnalyzerJobs.ts` and
+ *  the `SkillAnalyzerJobStatus` type in `server/services/skillAnalyzerService.ts`.
+ *  Drift here = silent failure to reap stuck jobs in the missing stage. */
 export const STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES = [
   'parsing',
   'hashing',
   'embedding',
-  'matching',
+  'comparing',
   'classifying',
 ] as const;
 
