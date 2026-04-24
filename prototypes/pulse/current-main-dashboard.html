@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CURRENT — Main dashboard (shipped today in main)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #e0e7ff 0%, #c7d2fe 100%);
+    color: #3730a3; padding: 10px 16px; font-size: 12px; text-align: center; font-weight: 600;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 32px 60px; }
+
+  .greeting h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+  .greeting .sub { font-size: 13px; color: #64748b; margin-top: 6px; }
+
+  /* Metric cards */
+  .metric-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin: 24px 0;
+  }
+  .metric-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px;
+    cursor: pointer;
+  }
+  .metric-card:hover { border-color: #c7d2fe; }
+  .metric-card .mc-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .metric-card .mc-label {
+    font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .metric-card .mc-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .mc-icon.indigo { background: #eef2ff; color: #6366f1; }
+  .mc-icon.emerald { background: #ecfdf5; color: #10b981; }
+  .mc-icon.green { background: #ecfdf5; color: #16a34a; }
+  .mc-icon.blue { background: #eff6ff; color: #3b82f6; }
+  .metric-card .mc-value { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+  .metric-card .mc-sub { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+
+  /* Workspace health widget */
+  .widget-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px;
+    margin-bottom: 24px;
+  }
+  .widget-card h3 {
+    font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .widget-card h3 .pill {
+    font-size: 10px; padding: 2px 7px; background: #ecfdf5; color: #065f46;
+    border-radius: 10px; font-weight: 600;
+  }
+  .widget-card .health-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px;
+  }
+  .widget-card .hs-cell {
+    text-align: center; padding: 10px 8px;
+    background: #f8fafc; border-radius: 8px; font-size: 11px; color: #64748b;
+  }
+  .widget-card .hs-cell strong { display: block; font-size: 16px; color: #0f172a; margin-bottom: 2px; }
+
+  /* Run activity chart */
+  .chart-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;
+    margin-bottom: 32px;
+  }
+  .chart-card .chart-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+  }
+  .chart-card h2 { font-size: 15px; font-weight: 800; color: #0f172a; }
+  .chart-card .range { font-size: 12px; color: #94a3b8; }
+  .chart-card svg { width: 100%; height: 120px; display: block; }
+
+  /* Quick chat */
+  .section-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+  }
+  .section-head h2 { font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px; }
+  .section-head a { font-size: 13px; color: #4f46e5; font-weight: 600; text-decoration: none; }
+  .section-head a:hover { text-decoration: underline; }
+
+  .agent-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+    margin-bottom: 32px;
+  }
+  .agent-card {
+    background: #fff; border: 2px solid #f1f5f9; border-radius: 12px; padding: 14px;
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .agent-card:hover {
+    border-color: #c7d2fe; box-shadow: 0 4px 12px rgba(0,0,0,0.04); transform: translateY(-1px);
+  }
+  .agent-icon {
+    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+    background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+  }
+  .agent-card .a-name { font-size: 13px; font-weight: 700; color: #0f172a; }
+  .agent-card .a-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+  /* Recent activity */
+  .activity-section { margin-top: 8px; }
+  .activity-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+  }
+  table.activity {
+    width: 100%; border-collapse: collapse;
+  }
+  table.activity th {
+    text-align: left; padding: 12px 18px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.5px; color: #64748b;
+    border-bottom: 1px solid #f1f5f9; font-weight: 600;
+  }
+  table.activity td {
+    padding: 12px 18px; border-bottom: 1px solid #f8fafc; font-size: 13px; color: #475569;
+  }
+  table.activity td.run-id {
+    color: #4f46e5; font-family: "SF Mono", Menlo, monospace; font-size: 12px; font-weight: 600;
+  }
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    border: 1px solid;
+  }
+  .status-badge::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.7;
+  }
+  .status-badge.completed { background: #ecfdf5; color: #15803d; border-color: #bbf7d0; }
+  .status-badge.running { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+  .status-badge.failed { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  CURRENT STATE (as shipped on main) · route <code>/</code> · <code>client/src/pages/DashboardPage.tsx</code>
+</div>
+
+<div class="container">
+
+  <div class="greeting">
+    <h1>Good morning, Ben</h1>
+    <div class="sub">4 AI agents ready to work.</div>
+  </div>
+
+  <!-- 4 metric cards -->
+  <div class="metric-grid">
+    <div class="metric-card">
+      <div class="mc-head">
+        <span class="mc-label">Active Agents</span>
+        <span class="mc-icon indigo">👤</span>
+      </div>
+      <div class="mc-value">4</div>
+      <div class="mc-sub">all ready</div>
+    </div>
+    <div class="metric-card">
+      <div class="mc-head">
+        <span class="mc-label">Runs (7 days)</span>
+        <span class="mc-icon emerald">▶</span>
+      </div>
+      <div class="mc-value">127</div>
+      <div class="mc-sub">↑ 12 vs yesterday</div>
+    </div>
+    <div class="metric-card">
+      <div class="mc-head">
+        <span class="mc-label">Success Rate</span>
+        <span class="mc-icon green">✓</span>
+      </div>
+      <div class="mc-value">96%</div>
+      <div class="mc-sub">122 of 127 runs</div>
+    </div>
+    <div class="metric-card">
+      <div class="mc-head">
+        <span class="mc-label">Items Created</span>
+        <span class="mc-icon blue">📄</span>
+      </div>
+      <div class="mc-value">84</div>
+      <div class="mc-sub">38 updated</div>
+    </div>
+  </div>
+
+  <!-- Workspace health widget -->
+  <div class="widget-card">
+    <h3>Workspace health <span class="pill">All good</span></h3>
+    <div style="font-size:12px; color:#64748b; margin-top:4px;">Brain Tree OS audit · 4 of 4 checks passing</div>
+    <div class="health-strip">
+      <div class="hs-cell"><strong>4</strong>Agents configured</div>
+      <div class="hs-cell"><strong>87</strong>Clients monitored</div>
+      <div class="hs-cell"><strong>2</strong>Integrations</div>
+      <div class="hs-cell"><strong>3</strong>Team members</div>
+    </div>
+  </div>
+
+  <!-- Run activity chart -->
+  <div class="chart-card">
+    <div class="chart-head">
+      <h2>Run Activity</h2>
+      <span class="range">Last 14 days</span>
+    </div>
+    <svg viewBox="0 0 700 120" preserveAspectRatio="none">
+      <g>
+        <rect x="10"  y="70" width="40" height="50" fill="#34d399" rx="3"/>
+        <rect x="60"  y="55" width="40" height="65" fill="#34d399" rx="3"/>
+        <rect x="110" y="40" width="40" height="80" fill="#34d399" rx="3"/>
+        <rect x="160" y="60" width="40" height="60" fill="#34d399" rx="3"/>
+        <rect x="210" y="30" width="40" height="90" fill="#34d399" rx="3"/>
+        <rect x="260" y="35" width="40" height="85" fill="#34d399" rx="3"/>
+        <rect x="310" y="50" width="40" height="70" fill="#34d399" rx="3"/>
+        <rect x="360" y="20" width="40" height="100" fill="#34d399" rx="3"/>
+        <rect x="410" y="25" width="40" height="95" fill="#34d399" rx="3"/>
+        <rect x="460" y="45" width="40" height="75" fill="#34d399" rx="3"/>
+        <rect x="510" y="15" width="40" height="105" fill="#34d399" rx="3"/>
+        <rect x="560" y="32" width="40" height="88" fill="#34d399" rx="3"/>
+        <rect x="610" y="48" width="40" height="72" fill="#34d399" rx="3"/>
+        <rect x="660" y="38" width="30" height="82" fill="#10b981" rx="3"/>
+      </g>
+    </svg>
+  </div>
+
+  <!-- Quick chat agents -->
+  <div class="section-head">
+    <h2>Quick Chat</h2>
+    <a href="#">View all →</a>
+  </div>
+  <div class="agent-grid">
+    <div class="agent-card">
+      <div class="agent-icon">🔍</div>
+      <div>
+        <div class="a-name">CRM Query Planner</div>
+        <div class="a-desc">Ask anything about your CRM</div>
+      </div>
+    </div>
+    <div class="agent-card">
+      <div class="agent-icon">💬</div>
+      <div>
+        <div class="a-name">Universal Brief</div>
+        <div class="a-desc">Chat-first task creation</div>
+      </div>
+    </div>
+    <div class="agent-card">
+      <div class="agent-icon">📊</div>
+      <div>
+        <div class="a-name">ClientPulse</div>
+        <div class="a-desc">Client health monitoring</div>
+      </div>
+    </div>
+    <div class="agent-card">
+      <div class="agent-icon">📣</div>
+      <div>
+        <div class="a-name">Weekly Digest</div>
+        <div class="a-desc">Friday retrospective</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent activity -->
+  <div class="activity-section">
+    <div class="section-head">
+      <h2>Recent Activity</h2>
+      <a href="#">View all →</a>
+    </div>
+    <div class="activity-card">
+      <table class="activity">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="run-id">a1f2b8c3</td>
+            <td><span class="status-badge completed">completed</span></td>
+            <td>4.2s</td>
+            <td>12 min ago</td>
+          </tr>
+          <tr>
+            <td class="run-id">c9e3d4a7</td>
+            <td><span class="status-badge completed">completed</span></td>
+            <td>1.8s</td>
+            <td>28 min ago</td>
+          </tr>
+          <tr>
+            <td class="run-id">b2f6a1e9</td>
+            <td><span class="status-badge running">running</span></td>
+            <td>—</td>
+            <td>1h ago</td>
+          </tr>
+          <tr>
+            <td class="run-id">d4c8b2a5</td>
+            <td><span class="status-badge failed">failed</span></td>
+            <td>12.1s</td>
+            <td>2h ago</td>
+          </tr>
+          <tr>
+            <td class="run-id">e7a9c1b4</td>
+            <td><span class="status-badge completed">completed</span></td>
+            <td>3.4s</td>
+            <td>3h ago</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

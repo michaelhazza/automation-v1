@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClientPulse · Dashboard (proposed)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner a { color: #78350f; text-decoration: underline; font-weight: 600; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .backlink {
+    font-size: 12px; color: #64748b; margin-bottom: 12px; display: inline-block;
+  }
+  .backlink a { color: #4f46e5; font-weight: 500; }
+  .backlink a:hover { text-decoration: underline; }
+
+  .greeting-row {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    margin-bottom: 24px;
+  }
+  .greeting h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+  .greeting .sub { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .config-btn {
+    padding: 7px 14px; font-size: 12.5px; font-weight: 600;
+    background: #fff; color: #334155; border: 1px solid #e2e8f0; border-radius: 6px;
+    cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-block;
+  }
+  .config-btn:hover { border-color: #cbd5e1; background: #f8fafc; }
+
+  /* 4 colourful health cards — preserve current visual language */
+  .health-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;
+    margin-bottom: 24px;
+  }
+  .health-card {
+    border: 1px solid; border-radius: 12px; padding: 16px 20px;
+    text-decoration: none; color: inherit; cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.12s;
+    display: block;
+  }
+  .health-card:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,0.04); }
+
+  .health-card .hc-value {
+    font-size: 32px; font-weight: 800; line-height: 1; margin-bottom: 6px; letter-spacing: -0.5px;
+  }
+  .health-card .hc-label { font-size: 12px; color: #64748b; font-weight: 500; }
+  .health-card .hc-pct { font-size: 11px; font-weight: 700; margin-top: 6px; }
+
+  .health-card.total { background: #f8fafc; border-color: #e2e8f0; }
+  .health-card.total .hc-value { color: #0f172a; }
+
+  .health-card.green { background: #ecfdf5; border-color: #bbf7d0; }
+  .health-card.green .hc-value { color: #047857; }
+  .health-card.green .hc-pct { color: #10b981; }
+
+  .health-card.amber { background: #fffbeb; border-color: #fde68a; }
+  .health-card.amber .hc-value { color: #b45309; }
+  .health-card.amber .hc-pct { color: #f59e0b; }
+
+  .health-card.red { background: #fef2f2; border-color: #fecaca; }
+  .health-card.red .hc-value { color: #b91c1c; }
+  .health-card.red .hc-pct { color: #ef4444; }
+
+  /* Two-column layout */
+  .two-col { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; margin-bottom: 18px; }
+
+  .widget {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px 22px;
+  }
+  .widget-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+  }
+  .widget-head h2 { font-size: 15px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px; }
+  .widget-head a { font-size: 12.5px; color: #4f46e5; font-weight: 600; }
+  .widget-head a:hover { text-decoration: underline; }
+
+  /* Needs attention list — enriched with sparklines + pending chips */
+  .attention-list { display: flex; flex-direction: column; gap: 4px; }
+  .att-row {
+    display: grid;
+    grid-template-columns: 10px 1fr auto auto auto;
+    gap: 14px; align-items: center;
+    padding: 10px 6px; border-radius: 6px;
+    text-decoration: none; color: inherit;
+  }
+  .att-row:hover { background: #f8fafc; }
+  .att-row + .att-row { border-top: 1px solid #f1f5f9; }
+
+  .att-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; }
+  .att-dot.critical { background: #b91c1c; }
+  .att-dot.at-risk { background: #dc2626; }
+  .att-dot.watch { background: #d97706; }
+
+  .att-main .att-name-row { display: flex; align-items: center; gap: 6px; }
+  .att-main .att-name { font-size: 13.5px; font-weight: 600; color: #0f172a; }
+  .att-main .att-meta { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+  .pending-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+    padding: 2px 7px; border-radius: 3px;
+    background: #eef2ff; color: #4338ca; text-transform: uppercase;
+  }
+
+  .att-spark { display: block; }
+  .att-spark-meta { font-size: 10px; color: #b91c1c; margin-top: 2px; text-align: right; display: block; font-weight: 500; }
+
+  .att-score {
+    font-size: 15px; font-weight: 800; letter-spacing: -0.3px;
+  }
+  .att-score.critical { color: #991b1b; }
+  .att-score.at-risk { color: #b91c1c; }
+  .att-score.watch { color: #b45309; }
+
+  .att-arrow {
+    font-size: 13px; color: #cbd5e1; transition: color 0.1s, transform 0.1s;
+  }
+  .att-row:hover .att-arrow { color: #4f46e5; transform: translateX(2px); }
+
+  .view-all-row {
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9;
+    text-align: center; font-size: 13px; color: #4f46e5; font-weight: 600;
+    display: block; text-decoration: none;
+  }
+  .view-all-row:hover { text-decoration: underline; }
+
+  /* Latest Report widget — preserve current visual */
+  .lr-title { font-size: 13.5px; font-weight: 700; color: #334155; margin-bottom: 4px; }
+  .lr-date { font-size: 12px; color: #94a3b8; margin-bottom: 18px; }
+  .lr-mini {
+    display: flex; gap: 8px; margin-bottom: 16px;
+  }
+  .lr-mini .lr-cell {
+    flex: 1; text-align: center; padding: 12px 6px; border-radius: 8px;
+  }
+  .lr-mini .lr-cell.green { background: #ecfdf5; }
+  .lr-mini .lr-cell.green .v { color: #10b981; }
+  .lr-mini .lr-cell.amber { background: #fffbeb; }
+  .lr-mini .lr-cell.amber .v { color: #f59e0b; }
+  .lr-mini .lr-cell.red { background: #fef2f2; }
+  .lr-mini .lr-cell.red .v { color: #ef4444; }
+  .lr-mini .v { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
+  .lr-mini .l { font-size: 10.5px; font-weight: 700; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.4px; color: #475569; }
+
+  .lr-view {
+    display: block; text-align: center; padding: 9px;
+    border: 1px solid #c7d2fe; border-radius: 8px;
+    font-size: 13px; color: #4f46e5; font-weight: 700;
+    text-decoration: none;
+  }
+  .lr-view:hover { background: #eef2ff; }
+
+  /* Portfolio trend mini chart */
+  .portfolio-trend {
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid #f1f5f9;
+  }
+  .portfolio-trend .pt-label {
+    font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+  }
+  .portfolio-trend .pt-range { font-size: 10px; color: #94a3b8; text-transform: none; letter-spacing: 0; }
+  .portfolio-trend svg { width: 100%; height: 60px; display: block; }
+
+  /* Bottom links */
+  .bottom-links {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 16px; font-size: 13px;
+  }
+  .bottom-links a { color: #4f46e5; font-weight: 600; text-decoration: none; }
+  .bottom-links a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  PROPOSED · ClientPulse dashboard (route <code>/clientpulse</code>) · kept current's visual language (4 colourful health cards + 2-col).
+  New: sparklines per row, Pending chips for awaiting-approval clients, rows click through to drilldown.
+  Approvals live centrally on <a href="home-dashboard.html">Home dashboard</a>.
+</div>
+
+<div class="container">
+
+  <div class="backlink"><a href="home-dashboard.html">← Home</a></div>
+
+  <div class="greeting-row">
+    <div class="greeting">
+      <h1>Portfolio Health</h1>
+      <div class="sub">87 clients monitored. Last updated just now.</div>
+    </div>
+    <a class="config-btn" href="clientpulse-mockup-config-assistant-chat.html">Configuration Assistant</a>
+  </div>
+
+  <!-- 4 colourful health cards -->
+  <div class="health-grid">
+    <a class="health-card total" href="clientpulse-mockup-clients-list.html">
+      <div class="hc-value">87</div>
+      <div class="hc-label">Total Clients</div>
+    </a>
+    <a class="health-card green" href="clientpulse-mockup-clients-list.html">
+      <div class="hc-value">67</div>
+      <div class="hc-label">Healthy</div>
+      <div class="hc-pct">77%</div>
+    </a>
+    <a class="health-card amber" href="clientpulse-mockup-clients-list.html">
+      <div class="hc-value">13</div>
+      <div class="hc-label">Watch</div>
+      <div class="hc-pct">15%</div>
+    </a>
+    <a class="health-card red" href="clientpulse-mockup-clients-list.html">
+      <div class="hc-value">7</div>
+      <div class="hc-label">At Risk</div>
+      <div class="hc-pct">8%</div>
+    </a>
+  </div>
+
+  <!-- Two-column: Needs Attention + Latest Report -->
+  <div class="two-col">
+
+    <div class="widget">
+      <div class="widget-head">
+        <h2>Needs attention</h2>
+        <a href="clientpulse-mockup-clients-list.html">View all →</a>
+      </div>
+
+      <div class="attention-list">
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot critical"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Smith Dental</span>
+              <span class="pending-chip">⚑ Pending</span>
+            </div>
+            <div class="att-meta">Critical · dropped from At Risk 4d ago · inbound silent 8d</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,5 12,7 22,6 32,9 42,11 52,14 62,16 78,19" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="19" r="2" fill="#b91c1c"/>
+            </svg>
+            <span class="att-spark-meta">↓ 12 / 4w</span>
+          </div>
+          <span class="att-score critical">28</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot critical"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Northside Physio</span>
+            </div>
+            <div class="att-meta">Critical · cooldown active · 6d silent</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,4 12,6 22,9 32,11 42,13 52,15 62,17 78,19" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="19" r="2" fill="#b91c1c"/>
+            </svg>
+            <span class="att-spark-meta">↓ 9 / 4w</span>
+          </div>
+          <span class="att-score critical">18</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot at-risk"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Cairns Solar</span>
+              <span class="pending-chip">⚑ Pending</span>
+            </div>
+            <div class="att-meta">At Risk · in At Risk 8 days · outbound silent 5d</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,6 12,8 22,10 32,10 42,12 52,13 62,15 78,16" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="16" r="2" fill="#dc2626"/>
+            </svg>
+            <span class="att-spark-meta" style="color:#dc2626;">↓ 5 / 4w</span>
+          </div>
+          <span class="att-score at-risk">36</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot at-risk"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Highland Fitness</span>
+            </div>
+            <div class="att-meta">At Risk · entered 2d ago</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,5 12,6 22,7 32,9 42,11 52,13 62,15 78,17" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="17" r="2" fill="#dc2626"/>
+            </svg>
+            <span class="att-spark-meta" style="color:#dc2626;">↓ 8 / 4w</span>
+          </div>
+          <span class="att-score at-risk">34</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot at-risk"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Coastal Realty</span>
+            </div>
+            <div class="att-meta">At Risk · in At Risk 12 days</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,5 12,6 22,8 32,10 42,12 52,14 62,15 78,17" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="17" r="2" fill="#dc2626"/>
+            </svg>
+            <span class="att-spark-meta" style="color:#dc2626;">↓ 6 / 4w</span>
+          </div>
+          <span class="att-score at-risk">32</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot watch"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Parkside Vet</span>
+            </div>
+            <div class="att-meta">Watch · moved from Healthy 2d ago</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,4 12,5 22,7 32,8 42,10 52,11 62,12 78,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="13" r="2" fill="#d97706"/>
+            </svg>
+            <span class="att-spark-meta" style="color:#d97706;">↓ 4 / 4w</span>
+          </div>
+          <span class="att-score watch">48</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+        <a class="att-row" href="clientpulse-mockup-drilldown.html">
+          <span class="att-dot watch"></span>
+          <div class="att-main">
+            <div class="att-name-row">
+              <span class="att-name">Harbour Accounting</span>
+            </div>
+            <div class="att-meta">Watch · in Watch 6 days</div>
+          </div>
+          <div>
+            <svg class="att-spark" width="80" height="22" viewBox="0 0 80 22">
+              <polyline points="2,5 12,6 22,7 32,8 42,10 52,11 62,12 78,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="78" cy="13" r="2" fill="#d97706"/>
+            </svg>
+            <span class="att-spark-meta" style="color:#d97706;">↓ 3 / 4w</span>
+          </div>
+          <span class="att-score watch">52</span>
+          <span class="att-arrow">→</span>
+        </a>
+
+      </div>
+      <a class="view-all-row" href="clientpulse-mockup-clients-list.html">View all 87 clients →</a>
+    </div>
+
+    <!-- Latest Report (preserves current pastel tile design + trend chart added) -->
+    <div class="widget">
+      <div class="widget-head">
+        <h2>Latest Report</h2>
+        <a href="#">All reports →</a>
+      </div>
+      <div class="lr-title">Weekly Portfolio Report · Week 16</div>
+      <div class="lr-date">Sunday, 19 April</div>
+      <div class="lr-mini">
+        <div class="lr-cell green"><div class="v">67</div><div class="l">Healthy</div></div>
+        <div class="lr-cell amber"><div class="v">13</div><div class="l">Watch</div></div>
+        <div class="lr-cell red"><div class="v">7</div><div class="l">At Risk</div></div>
+      </div>
+      <a href="#" class="lr-view">View full report →</a>
+
+      <!-- Portfolio trend over 12 weeks — one load-bearing visual -->
+      <div class="portfolio-trend">
+        <div class="pt-label">
+          <span>Portfolio trend · 12 weeks</span>
+          <span class="pt-range">MRR at risk</span>
+        </div>
+        <svg viewBox="0 0 300 60" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ef4444" stop-opacity="0.2"/>
+              <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M 4,42 L 28,38 L 52,40 L 76,36 L 100,34 L 124,32 L 148,28 L 172,24 L 196,20 L 220,18 L 244,14 L 268,10 L 296,6 L 296,60 L 4,60 Z" fill="url(#mrrGrad)"/>
+          <polyline fill="none" stroke="#ef4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            points="4,42 28,38 52,40 76,36 100,34 124,32 148,28 172,24 196,20 220,18 244,14 268,10 296,6"/>
+          <circle cx="296" cy="6" r="2.5" fill="#ef4444"/>
+        </svg>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="bottom-links">
+    <a href="clientpulse-mockup-settings.html">⚙ ClientPulse settings</a>
+    <a href="clientpulse-mockup-clients-list.html">Browse all clients →</a>
+  </div>
+
+</div>
+
+</body>
+</html>

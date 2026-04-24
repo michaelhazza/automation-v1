@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CURRENT — ClientPulse dashboard (shipped today in main)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #e0e7ff 0%, #c7d2fe 100%);
+    color: #3730a3; padding: 10px 16px; font-size: 12px; text-align: center; font-weight: 600;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 32px 60px; }
+
+  .greeting-row {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    margin-bottom: 26px;
+  }
+  .greeting h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+  .greeting .sub { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .config-btn {
+    padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+    background: #fff; color: #334155; border: 1px solid #e2e8f0; border-radius: 6px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .config-btn:hover { border-color: #cbd5e1; background: #f8fafc; }
+
+  /* 4 health cards */
+  .health-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px;
+    margin-bottom: 24px;
+  }
+  .health-card {
+    background: #fff; border: 1px solid; border-radius: 12px; padding: 16px 18px;
+  }
+  .health-card .hc-value {
+    font-size: 28px; font-weight: 800; line-height: 1; margin-bottom: 4px; letter-spacing: -0.5px;
+  }
+  .health-card .hc-label { font-size: 12px; color: #64748b; font-weight: 500; }
+  .health-card .hc-pct { font-size: 11px; font-weight: 600; margin-top: 4px; }
+
+  .health-card.total { background: #f8fafc; border-color: #e2e8f0; }
+  .health-card.total .hc-value { color: #0f172a; }
+
+  .health-card.green { background: #ecfdf5; border-color: #bbf7d0; }
+  .health-card.green .hc-value { color: #047857; }
+  .health-card.green .hc-pct { color: #10b981; }
+
+  .health-card.amber { background: #fffbeb; border-color: #fde68a; }
+  .health-card.amber .hc-value { color: #b45309; }
+  .health-card.amber .hc-pct { color: #f59e0b; }
+
+  .health-card.red { background: #fef2f2; border-color: #fecaca; }
+  .health-card.red .hc-value { color: #b91c1c; }
+  .health-card.red .hc-pct { color: #ef4444; }
+
+  /* Two-column */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .widget {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;
+  }
+  .widget h2 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
+
+  /* High-risk list */
+  .risk-row {
+    display: grid; grid-template-columns: 12px 1fr auto auto; gap: 12px; align-items: center;
+    padding: 6px 4px; border-radius: 6px;
+    font-size: 13.5px;
+  }
+  .risk-row:hover { background: #f8fafc; }
+  .risk-row + .risk-row { margin-top: 4px; }
+  .risk-row .rr-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+  .risk-row .rr-dot.red { background: #ef4444; }
+  .risk-row .rr-dot.amber { background: #f59e0b; }
+  .risk-row .rr-dot.yellow { background: #eab308; }
+
+  .risk-row .rr-main .rr-name {
+    font-size: 13.5px; font-weight: 500; color: #1e293b;
+    text-decoration: underline; text-decoration-color: transparent;
+  }
+  .risk-row:hover .rr-main .rr-name { text-decoration-color: #1e293b; }
+  .risk-row .rr-main .rr-issues { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+  .risk-row .rr-score { font-size: 12px; font-weight: 700; }
+  .risk-row .rr-score.red { color: #ef4444; }
+  .risk-row .rr-score.amber { color: #f59e0b; }
+  .risk-row .rr-score.yellow { color: #eab308; }
+  .risk-row .rr-propose {
+    font-size: 11px; color: #4f46e5; cursor: pointer; background: none; border: none; padding: 2px 4px;
+  }
+  .risk-row .rr-propose:hover { text-decoration: underline; }
+
+  /* Latest report */
+  .lr-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+  .lr-date { font-size: 12px; color: #94a3b8; margin-bottom: 18px; }
+  .lr-mini {
+    display: flex; gap: 10px; margin-bottom: 20px;
+  }
+  .lr-mini .lr-cell {
+    flex: 1; text-align: center; padding: 10px 4px; border-radius: 8px;
+  }
+  .lr-mini .lr-cell.green { background: #ecfdf5; }
+  .lr-mini .lr-cell.green .v { color: #10b981; }
+  .lr-mini .lr-cell.amber { background: #fffbeb; }
+  .lr-mini .lr-cell.amber .v { color: #f59e0b; }
+  .lr-mini .lr-cell.red { background: #fef2f2; }
+  .lr-mini .lr-cell.red .v { color: #ef4444; }
+  .lr-mini .v { font-size: 20px; font-weight: 800; }
+  .lr-mini .l { font-size: 10px; font-weight: 600; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  .lr-view {
+    display: block; text-align: center; padding: 8px;
+    border: 1px solid #c7d2fe; border-radius: 8px;
+    font-size: 13px; color: #4f46e5; font-weight: 600;
+    text-decoration: none;
+  }
+  .lr-view:hover { background: #eef2ff; }
+
+  .view-reports {
+    margin-top: 16px; text-align: right; font-size: 13px;
+  }
+  .view-reports a { color: #4f46e5; font-weight: 600; text-decoration: none; }
+  .view-reports a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  CURRENT STATE (as shipped on main) · route <code>/clientpulse</code> · <code>client/src/pages/ClientPulseDashboardPage.tsx</code>
+</div>
+
+<div class="container">
+
+  <div class="greeting-row">
+    <div class="greeting">
+      <h1>Portfolio Health</h1>
+      <div class="sub">87 clients monitored. Last updated just now.</div>
+    </div>
+    <button class="config-btn">Configuration Assistant</button>
+  </div>
+
+  <!-- 4 health cards -->
+  <div class="health-grid">
+    <div class="health-card total">
+      <div class="hc-value">87</div>
+      <div class="hc-label">Total Clients</div>
+    </div>
+    <div class="health-card green">
+      <div class="hc-value">67</div>
+      <div class="hc-label">Healthy</div>
+      <div class="hc-pct">77%</div>
+    </div>
+    <div class="health-card amber">
+      <div class="hc-value">13</div>
+      <div class="hc-label">Needs Attention</div>
+      <div class="hc-pct">15%</div>
+    </div>
+    <div class="health-card red">
+      <div class="hc-value">7</div>
+      <div class="hc-label">At Risk</div>
+      <div class="hc-pct">8%</div>
+    </div>
+  </div>
+
+  <!-- Two-column: High-Risk Clients + Latest Report -->
+  <div class="two-col">
+
+    <div class="widget">
+      <h2>High-Risk Clients</h2>
+      <div class="risk-row">
+        <span class="rr-dot red"></span>
+        <div class="rr-main">
+          <div class="rr-name">Smith Dental</div>
+          <div class="rr-issues">inbound silent 8d · pipeline dropping</div>
+        </div>
+        <span class="rr-score red">28</span>
+        <button class="rr-propose">Propose</button>
+      </div>
+      <div class="risk-row">
+        <span class="rr-dot red"></span>
+        <div class="rr-main">
+          <div class="rr-name">Northside Physio</div>
+          <div class="rr-issues">cooldown active · 6d silent</div>
+        </div>
+        <span class="rr-score red">18</span>
+        <button class="rr-propose">Propose</button>
+      </div>
+      <div class="risk-row">
+        <span class="rr-dot amber"></span>
+        <div class="rr-main">
+          <div class="rr-name">Highland Fitness</div>
+          <div class="rr-issues">entered At Risk 2d ago</div>
+        </div>
+        <span class="rr-score amber">34</span>
+        <button class="rr-propose">Propose</button>
+      </div>
+      <div class="risk-row">
+        <span class="rr-dot amber"></span>
+        <div class="rr-main">
+          <div class="rr-name">Cairns Solar</div>
+          <div class="rr-issues">in At Risk · 8 days</div>
+        </div>
+        <span class="rr-score amber">36</span>
+        <button class="rr-propose">Propose</button>
+      </div>
+      <div class="risk-row">
+        <span class="rr-dot yellow"></span>
+        <div class="rr-main">
+          <div class="rr-name">Coastal Realty</div>
+          <div class="rr-issues">in At Risk · 12 days</div>
+        </div>
+        <span class="rr-score yellow">32</span>
+        <button class="rr-propose">Propose</button>
+      </div>
+    </div>
+
+    <div class="widget">
+      <h2>Latest Report</h2>
+      <div class="lr-title">Weekly Portfolio Report · Week 16</div>
+      <div class="lr-date">Sunday, 19 April</div>
+      <div class="lr-mini">
+        <div class="lr-cell green"><div class="v">67</div><div class="l">Healthy</div></div>
+        <div class="lr-cell amber"><div class="v">13</div><div class="l">Attention</div></div>
+        <div class="lr-cell red"><div class="v">7</div><div class="l">At Risk</div></div>
+      </div>
+      <a href="#" class="lr-view">View full report →</a>
+    </div>
+
+  </div>
+
+  <div class="view-reports">
+    <a href="#">View all reports →</a>
+  </div>
+
+</div>
+
+</body>
+</html>

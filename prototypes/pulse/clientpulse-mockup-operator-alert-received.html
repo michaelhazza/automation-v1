@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pulse · attention queue (simplified lane view)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 28px 60px; }
+
+  .page-head { margin-bottom: 20px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  .page-head .sub { font-size: 13px; color: #6b7280; margin-top: 4px; }
+
+  .lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  .lane {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    display: flex; flex-direction: column;
+  }
+  .lane-head {
+    padding: 12px 16px; border-bottom: 1px solid #eef0f3; background: #fafbfc;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .lane-head .lname { font-size: 13px; font-weight: 600; }
+  .lane-head .lcount {
+    font-size: 11px; padding: 2px 8px; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 10px; color: #6b7280; font-weight: 500;
+  }
+  .lane-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  .card {
+    background: #fafbfc; border: 1px solid #eef0f3; border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .card.urgent {
+    border-left: 3px solid #b91c1c; background: #fff;
+  }
+  .card .title { font-size: 13px; font-weight: 600; line-height: 1.4; margin-bottom: 4px; }
+  .card .meta { font-size: 11px; color: #6b7280; margin-bottom: 8px; }
+  .card .reasoning { font-size: 12px; color: #4b5563; line-height: 1.55; margin-bottom: 10px; }
+  .card .evidence-link {
+    font-size: 11px; color: #4338ca; cursor: pointer;
+    text-decoration: none;
+  }
+  .card .evidence-link:hover { text-decoration: underline; }
+
+  .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; border: 1px solid; }
+  .btn-sm.approve { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn-sm.reject { background: #fff; color: #991b1b; border-color: #fecaca; }
+  .btn-sm.defer { background: #fff; color: #6b7280; border-color: #d1d5db; }
+  .btn-sm:hover { opacity: 0.9; }
+
+  .card-compact .compact-meta {
+    font-size: 11px; color: #9ca3af; margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Existing page in main — NOT a new page. Route: <code>/pulse</code> (PulsePage.tsx) · visible to every operator in the org.
+  This is where proposed interventions + major-change approvals + internal clarifications land for human sign-off.
+  Ben (owner), Sarah (VA), any operator with access sees this. Shown simplified — signal strip removed; decision context reachable via "Open drilldown".
+</div>
+
+<div class="container">
+  <div class="page-head">
+    <h1>Pulse</h1>
+    <div class="sub">Items needing your attention · approve, reject, or defer</div>
+  </div>
+
+  <div class="lanes">
+
+    <!-- Client lane -->
+    <div class="lane">
+      <div class="lane-head">
+        <span class="lname">Client</span>
+        <span class="lcount">3</span>
+      </div>
+      <div class="lane-body">
+        <div class="card urgent">
+          <div class="title">Retention call for Smith Dental</div>
+          <div class="meta">Proposed by ClientPulse · 12 min ago · Smith Dental</div>
+          <div class="reasoning">Client dropped to Critical 4 days ago. Last outbound call 8d ago. Suggest retention call within 24h.</div>
+          <a href="#" class="evidence-link">Open drilldown →</a>
+          <div class="actions">
+            <button class="btn-sm approve">Approve</button>
+            <button class="btn-sm reject">Reject</button>
+            <button class="btn-sm defer">Defer 24h</button>
+          </div>
+        </div>
+
+        <div class="card card-compact">
+          <div class="title">SMS check-in for Cairns Solar</div>
+          <div class="meta">Proposed by ClientPulse · 2h ago · Cairns Solar</div>
+          <a href="#" class="evidence-link">Open drilldown →</a>
+          <div class="actions">
+            <button class="btn-sm approve">Approve</button>
+            <button class="btn-sm reject">Reject</button>
+            <button class="btn-sm defer">Defer</button>
+          </div>
+        </div>
+
+        <div class="card card-compact">
+          <div class="title">Funnel-nurture email for Highland Fitness</div>
+          <div class="meta">Proposed by ClientPulse · 4h ago · Highland Fitness</div>
+          <a href="#" class="evidence-link">Open drilldown →</a>
+          <div class="actions">
+            <button class="btn-sm approve">Approve</button>
+            <button class="btn-sm reject">Reject</button>
+            <button class="btn-sm defer">Defer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Major lane -->
+    <div class="lane">
+      <div class="lane-head">
+        <span class="lname">Major</span>
+        <span class="lcount">1</span>
+      </div>
+      <div class="lane-body">
+        <div class="card">
+          <div class="title">Change churn-band thresholds</div>
+          <div class="meta">Requested via Config Assistant · 1h ago</div>
+          <div class="reasoning">Lower At Risk upper bound from 39 → 44 across the org.</div>
+          <a href="#" class="evidence-link">View proposed diff →</a>
+          <div class="actions">
+            <button class="btn-sm approve">Approve</button>
+            <button class="btn-sm reject">Reject</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Internal lane -->
+    <div class="lane">
+      <div class="lane-head">
+        <span class="lname">Internal</span>
+        <span class="lcount">2</span>
+      </div>
+      <div class="lane-body">
+        <div class="card card-compact">
+          <div class="title">Unclassified fingerprint: "stripe_subscription_deleted"</div>
+          <div class="meta">From Agent run · 30 min ago</div>
+          <a href="#" class="evidence-link">Classify →</a>
+        </div>
+        <div class="card card-compact">
+          <div class="title">Clarification needed: "Ben Q" assignee ambiguous</div>
+          <div class="meta">From Brief · 6h ago</div>
+          <a href="#" class="evidence-link">Answer →</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

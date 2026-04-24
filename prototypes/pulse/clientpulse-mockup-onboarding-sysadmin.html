@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>System-admin create-org (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; z-index: 1; }
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15,23,42,0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 560px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head .admin-crumb {
+    display: inline-block; font-size: 10px; padding: 2px 7px;
+    background: #fef3c7; color: #92400e; border-radius: 3px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; margin-top: 4px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; align-self: flex-start; }
+
+  .m-body { padding: 16px 20px; }
+  .form-field { margin-bottom: 14px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select {
+    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+
+  .template-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .template-card {
+    padding: 12px 14px; border: 1.5px solid #e5e7eb; border-radius: 6px; cursor: pointer;
+  }
+  .template-card:hover { border-color: #9ca3af; }
+  .template-card.selected { border-color: #4338ca; background: #eef2ff; }
+  .template-card .tname { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .template-card .tmeta { font-size: 11px; color: #6b7280; }
+
+  .tier-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tier-card {
+    padding: 12px 14px; border: 1.5px solid #e5e7eb; border-radius: 6px; cursor: pointer;
+  }
+  .tier-card.selected { border-color: #4338ca; background: #eef2ff; }
+  .tier-card .tier-name { font-size: 13px; font-weight: 600; }
+  .tier-card .tier-price { font-size: 11px; color: #6b7280; margin-top: 2px; }
+
+  .m-footer {
+    padding: 12px 20px; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: flex-end; gap: 8px; background: #fafbfc;
+  }
+  .btn { padding: 8px 16px; font-size: 13px; font-weight: 600; border-radius: 5px; cursor: pointer; border: 1px solid; }
+  .btn.secondary { background: #fff; color: #4b5563; border-color: #d1d5db; }
+  .btn.primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn.primary:hover { background: #4338ca; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  System-admin create-org (simplified) · single-pane form. Right-side preview pane + SQL-table-name footer removed.
+  Admin previews the template's config from the template detail page, not here.
+</div>
+<div class="bg-context"></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+    <div class="m-head">
+      <div>
+        <span class="admin-crumb">Synthetos admin</span>
+        <h2>Create organisation</h2>
+        <div class="sub">New agency org on the Synthetos platform</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+      <div class="form-field">
+        <label>Organisation name</label>
+        <input type="text" placeholder="e.g. Breakout Solutions">
+      </div>
+
+      <div class="form-field">
+        <label>Admin email</label>
+        <input type="email" placeholder="admin@agency.com">
+      </div>
+
+      <div class="form-field">
+        <label>Template</label>
+        <div class="template-picker">
+          <div class="template-card selected">
+            <div class="tname">GHL Agency Intelligence</div>
+            <div class="tmeta">v3 · 12 adoptions</div>
+          </div>
+          <div class="template-card">
+            <div class="tname">SaaS Founder Workspace</div>
+            <div class="tmeta">v1 · 4 adoptions</div>
+          </div>
+          <div class="template-card">
+            <div class="tname">Internal Ops</div>
+            <div class="tmeta">v2 · 2 adoptions</div>
+          </div>
+          <div class="template-card">
+            <div class="tname">Multi-Location Retail</div>
+            <div class="tmeta">v1 · 1 adoption</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Tier</label>
+        <div class="tier-toggle">
+          <div class="tier-card selected">
+            <div class="tier-name">Monitor</div>
+            <div class="tier-price">$1,200 / month</div>
+          </div>
+          <div class="tier-card">
+            <div class="tier-name">Operate</div>
+            <div class="tier-price">$2,400 / month</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-footer">
+      <button class="btn secondary">Cancel</button>
+      <button class="btn primary">Create organisation</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

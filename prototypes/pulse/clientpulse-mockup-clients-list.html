@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClientPulse · All clients (filtered list)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .container { max-width: 1060px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  .backlink { font-size: 12px; color: #6b7280; margin-bottom: 12px; display: inline-block; }
+  .backlink a { color: #4338ca; }
+  .backlink a:hover { text-decoration: underline; }
+
+  .page-head {
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 24px;
+    margin-bottom: 20px;
+  }
+  .page-head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.3px; }
+  .page-head .sub { font-size: 13px; color: #6b7280; margin-top: 6px; }
+
+  /* Filter chips */
+  .filters {
+    display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; align-items: center;
+  }
+  .filter-chip {
+    padding: 6px 12px; font-size: 12px; font-weight: 500;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 20px;
+    color: #4b5563; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .filter-chip:hover { border-color: #c7d2fe; }
+  .filter-chip .fc-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .filter-chip.active {
+    background: #eef2ff; border-color: #4338ca; color: #4338ca; font-weight: 600;
+  }
+  .filter-chip .fc-count { font-size: 11px; opacity: 0.75; margin-left: 2px; }
+
+  .search-input {
+    flex: 1; max-width: 280px; padding: 7px 12px;
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+
+  /* Client list (reused style from dashboard) */
+  .client-list {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  .client-row {
+    display: grid;
+    grid-template-columns: 14px minmax(180px, 1.3fr) 100px 80px 1fr auto;
+    gap: 16px; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid #f1f2f4;
+    transition: background 0.08s;
+  }
+  .client-row:last-child { border-bottom: none; }
+  .client-row:hover { background: #fafbfc; }
+
+  .row-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .row-dot.critical { background: #b91c1c; }
+  .row-dot.at-risk { background: #dc2626; }
+  .row-dot.watch { background: #d97706; }
+  .row-dot.healthy { background: #16a34a; }
+
+  .client-main .name { font-size: 14px; font-weight: 600; color: #1a1d23; }
+  .client-main .name-row { display: flex; align-items: center; gap: 6px; }
+  .client-main .sub-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
+  .pending-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+    padding: 2px 7px; border-radius: 3px;
+    background: #eef2ff; color: #4338ca; text-transform: uppercase;
+  }
+
+  .spark-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .spark-meta { font-size: 11px; font-weight: 500; }
+  .spark-meta.down { color: #b91c1c; }
+  .spark-meta.up { color: #15803d; }
+  .spark-meta.flat { color: #6b7280; }
+
+  .health-cell { display: flex; flex-direction: column; align-items: flex-start; }
+  .health-score { font-size: 18px; font-weight: 700; line-height: 1; letter-spacing: -0.3px; }
+  .health-score.critical { color: #991b1b; }
+  .health-score.at-risk { color: #b91c1c; }
+  .health-score.watch { color: #b45309; }
+  .health-score.healthy { color: #15803d; }
+  .health-delta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .health-delta.down { color: #b91c1c; }
+
+  .last-action-cell { font-size: 12px; color: #6b7280; }
+  .last-action-cell .la-main { color: #4b5563; }
+
+  .row-arrow {
+    font-size: 13px; color: #9ca3af; opacity: 0.6; transition: all 0.08s;
+  }
+  .client-row:hover .row-arrow { opacity: 1; color: #4338ca; }
+
+  /* Pagination / footer */
+  .list-footer {
+    padding: 12px 20px; background: #fafbfc;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: #6b7280;
+  }
+  .list-footer a { color: #4338ca; font-weight: 500; }
+  .list-footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  All clients list — destination of "View all N [band]" links from the ClientPulse dashboard.
+  Filter pills switch band; rows link to drilldown.
+</div>
+
+<div class="container">
+
+  <div class="backlink"><a href="clientpulse-mockup-dashboard.html">← Dashboard</a></div>
+
+  <div class="page-head">
+    <div>
+      <h1>All clients</h1>
+      <div class="sub">87 clients · showing Watch (13)</div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <span class="filter-chip">
+      <span class="fc-dot" style="background:#9ca3af;"></span>
+      All <span class="fc-count">· 87</span>
+    </span>
+    <span class="filter-chip">
+      <span class="fc-dot" style="background:#b91c1c;"></span>
+      Critical <span class="fc-count">· 2</span>
+    </span>
+    <span class="filter-chip">
+      <span class="fc-dot" style="background:#dc2626;"></span>
+      At Risk <span class="fc-count">· 5</span>
+    </span>
+    <span class="filter-chip active">
+      <span class="fc-dot" style="background:#d97706;"></span>
+      Watch <span class="fc-count">· 13</span>
+    </span>
+    <span class="filter-chip">
+      <span class="fc-dot" style="background:#16a34a;"></span>
+      Healthy <span class="fc-count">· 67</span>
+    </span>
+    <input class="search-input" type="text" placeholder="Search clients…" />
+  </div>
+
+  <div class="client-list">
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Parkside Vet</span></div>
+        <div class="sub-meta">Vet · moved from Healthy 2d ago</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,4 14,5 26,7 38,9 50,10 62,12 74,13 88,14" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="14" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 4 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">48</span><span class="health-delta">↓ 2 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">Nurture · 14d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Harbour Accounting</span></div>
+        <div class="sub-meta">Accounting · in Watch · 6 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,5 14,6 26,7 38,8 50,10 62,11 74,12 88,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="13" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 3 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">52</span><span class="health-delta">↓ 1 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">Check-in · 21d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Blackwood Law</span></div>
+        <div class="sub-meta">Legal · in Watch · 9 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,5 14,6 26,6 38,8 50,10 62,11 74,13 88,14" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="14" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 3 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">46</span><span class="health-delta">↓ 2 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">Email · 10d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Summit Fitness</span></div>
+        <div class="sub-meta">Fitness · in Watch · 11 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,4 14,5 26,6 38,7 50,9 62,11 74,12 88,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="13" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 2 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">54</span><span class="health-delta">↓ 1 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">SMS · 18d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Marina Hospitality</span></div>
+        <div class="sub-meta">Hospitality · in Watch · 3 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,5 14,5 26,6 38,7 50,8 62,10 74,11 88,12" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="12" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 2 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">55</span><span class="health-delta">↓ 1 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">Call · 9d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Redcliffe Dental</span></div>
+        <div class="sub-meta">Dentistry · in Watch · 7 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,5 14,6 26,7 38,8 50,9 62,10 74,11 88,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="13" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 3 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">49</span><span class="health-delta">↓ 2 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">Email · 16d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <a class="client-row" href="clientpulse-mockup-drilldown.html">
+      <span class="row-dot watch"></span>
+      <div class="client-main">
+        <div class="name-row"><span class="name">Outback Trades</span></div>
+        <div class="sub-meta">Trades · in Watch · 4 days</div>
+      </div>
+      <div class="spark-wrap">
+        <svg width="90" height="28" viewBox="0 0 90 28">
+          <polyline points="2,6 14,7 26,8 38,9 50,10 62,11 74,12 88,13" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="88" cy="13" r="2.5" fill="#d97706"/>
+        </svg>
+        <span class="spark-meta down">↓ 2 pts · 4w</span>
+      </div>
+      <div class="health-cell"><span class="health-score watch">53</span><span class="health-delta">↓ 1 / 7d</span></div>
+      <div class="last-action-cell"><div class="la-main">SMS · 12d ago</div></div>
+      <span class="row-arrow">→</span>
+    </a>
+
+    <div class="list-footer">
+      <span>Showing 7 of 13</span>
+      <a href="#">Load more →</a>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
