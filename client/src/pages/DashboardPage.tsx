@@ -185,9 +185,28 @@ export default function DashboardPage({ user }: { user: User }) {
             testId="workspace-card-clientpulse"
             summary={
               healthSummary ? (
-                <span className="text-[13px] text-slate-500">
-                  {healthSummary.healthy} healthy · {healthSummary.attention + healthSummary.atRisk} need attention
-                </span>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex h-1.5 rounded-full overflow-hidden gap-0.5">
+                    {healthSummary.totalClients > 0 ? (
+                      <>
+                        {healthSummary.healthy > 0 && (
+                          <div className="bg-emerald-400 rounded-full" style={{ width: `${(healthSummary.healthy / healthSummary.totalClients) * 100}%` }} />
+                        )}
+                        {healthSummary.attention > 0 && (
+                          <div className="bg-amber-400 rounded-full" style={{ width: `${(healthSummary.attention / healthSummary.totalClients) * 100}%` }} />
+                        )}
+                        {healthSummary.atRisk > 0 && (
+                          <div className="bg-rose-500 rounded-full" style={{ width: `${(healthSummary.atRisk / healthSummary.totalClients) * 100}%` }} />
+                        )}
+                      </>
+                    ) : (
+                      <div className="bg-slate-200 rounded-full w-full" />
+                    )}
+                  </div>
+                  <span className="text-[13px] text-slate-500">
+                    {healthSummary.healthy} healthy · {healthSummary.attention} need attention · {healthSummary.atRisk} at risk
+                  </span>
+                </div>
               ) : (
                 <span className="text-[13px] text-slate-400">Health monitoring</span>
               )
@@ -195,7 +214,7 @@ export default function DashboardPage({ user }: { user: User }) {
           />
           <WorkspaceFeatureCard
             title="Settings"
-            href="/settings"
+            href="/clientpulse/settings"
             testId="workspace-card-settings"
             summary={<span className="text-[13px] text-slate-400">Team, integrations &amp; billing</span>}
           />
