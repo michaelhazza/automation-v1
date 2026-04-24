@@ -2,6 +2,8 @@
 // All mutating methods write a system_incident_events row inside the same tx.
 import { eq, and, or, inArray, isNull, sql, desc, asc, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { taskService } from './taskService.js';
+import { resolveSystemOpsContext } from './systemOperationsOrgResolver.js';
 import {
   systemIncidents,
   systemIncidentEvents,
@@ -243,9 +245,88 @@ export const systemIncidentService = {
     });
   },
 
-  // Stub — escalateIncidentToAgent is filled in commit 12
-  async escalateIncidentToAgent(_id: string, _userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
-    throw { statusCode: 501, message: 'Escalate to agent not yet implemented' };
+  async escalateIncidentToAgent(id: string, userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
+    const incident = await this.getIncident(id);
+    if (!incident) {
+      throw Object.assign(new Error('Incident not found'), { statusCode: 404, errorCode: 'incident_not_found' });
+    }
+
+    const now = new Date();
+    const verdict = computeEscalationVerdict({
+      escalationCount: incident.escalationCount ?? 0,
+      escalatedAt: incident.escalatedAt ?? null,
+      now,
+    });
+
+    if (!verdict.allowed) {
+      // Write escalation_blocked event then throw
+      await db.insert(systemIncidentEvents).values({
+        incidentId: incident.id,
+        eventType: 'escalation_blocked',
+        actorKind: 'user',
+        actorId: userId,
+        payload: JSON.parse(JSON.stringify(verdict)) as Record<string, unknown>,
+        occurredAt: now,
+      });
+      const msg = verdict.reason === 'hard_cap_reached'
+        ? `Escalation hard cap reached (${verdict.escalationCount}/3)`
+        : verdict.reason === 'rate_limited'
+        ? `Rate limited — wait ${verdict.secondsRemaining}s`
+        : (verdict as { message: string }).message ?? 'Escalation blocked';
+      throw Object.assign(new Error(msg), { statusCode: 429, errorCode: `escalation_${verdict.reason}` });
+    }
+
+    const sysOps = await resolveSystemOpsContext();
+
+    // Create task in System Operations org
+    const task = await taskService.createTask(
+      sysOps.organisationId,
+      sysOps.subaccountId,
+      {
+        title: `[Incident] ${incident.summary.slice(0, 120)}`,
+        description: [
+          `**Source:** ${incident.source}`,
+          `**Severity:** ${incident.severity}`,
+          `**Error code:** ${incident.errorCode ?? '—'}`,
+          `**Occurrences:** ${incident.occurrenceCount}`,
+          `**First seen:** ${incident.firstSeenAt.toISOString()}`,
+          `**Fingerprint:** \`${incident.fingerprint}\``,
+        ].join('\n'),
+        priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
+      },
+      userId,
+    );
+
+    const previousTaskIds = (incident.previousTaskIds ?? []) as string[];
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx.update(systemIncidents).set({
+        status: 'escalated',
+        escalationCount: (incident.escalationCount ?? 0) + 1,
+        escalatedAt: now,
+        escalatedTaskId: task.id,
+        previousTaskIds: [...previousTaskIds, ...(incident.escalatedTaskId ? [incident.escalatedTaskId] : [])],
+        updatedAt: now,
+      })
+        .where(eq(systemIncidents.id, id))
+        .returning();
+
+      await tx.insert(systemIncidentEvents).values({
+        incidentId: id,
+        eventType: 'escalated',
+        actorKind: 'user',
+        actorId: userId,
+        payload: {
+          taskId: task.id,
+          escalationCount: (incident.escalationCount ?? 0) + 1,
+        },
+        occurredAt: now,
+      });
+
+      return row;
+    });
+
+    return { incident: updated, taskId: task.id };
   },
 
   async listSuppressions(filter?: { activeOnly?: boolean }): Promise<SystemIncidentSuppression[]> {
