@@ -17,7 +17,7 @@ interface Category {
   colour: string | null;
 }
 
-export default function TasksPage({ user: _user }: { user: User }) {
+export default function AutomationsPage({ user: _user }: { user: User }) {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -28,7 +28,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
     const load = async () => {
       try {
         const [processRes, catRes] = await Promise.all([
-          api.get('/api/processes', { params: { status: 'active' } }),
+          api.get('/api/automations', { params: { status: 'active' } }),
           api.get('/api/categories'),
         ]);
         setProcesses(processRes.data);
@@ -168,7 +168,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
             return (
               <Link
                 key={process.id}
-                to={`/processes/${process.id}`}
+                to={`/automations/${process.id}`}
                 className="bg-white border-2 border-slate-100 rounded-xl p-5 flex flex-col no-underline hover:border-indigo-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 group"
               >
                 {cat && (

@@ -72,7 +72,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default function TaskExecutionPage({ user: _user }: { user: User }) {
+export default function AutomationExecutionPage({ user: _user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const [process, setProcess] = useState<Process | null>(null);
   const [inputData, setInputData] = useState('');
@@ -91,7 +91,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
 
   useEffect(() => {
     Promise.all([
-      api.get(`/api/processes/${id}`),
+      api.get(`/api/automations/${id}`),
       api.get('/api/settings/upload').catch((err) => { console.error('[TaskExecution] Failed to fetch upload settings:', err); return { data: { maxUploadSizeMb: 200 } }; }),
     ]).then(([processRes, settingsRes]) => {
       setProcess(processRes.data);
@@ -192,7 +192,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl py-14 px-8 flex flex-col items-center text-center max-w-[480px] mx-auto">
         <p className="font-bold text-[16px] text-red-600 mb-3">Automation not found</p>
-        <Link to="/processes" className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm no-underline transition-colors">
+        <Link to="/automations" className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm no-underline transition-colors">
           Back to Automations
         </Link>
       </div>
@@ -207,7 +207,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-[780px]">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 mb-5 text-[13px]">
-        <Link to="/processes" className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">Automations</Link>
+        <Link to="/automations" className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">Automations</Link>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="9 18 15 12 9 6" />
         </svg>

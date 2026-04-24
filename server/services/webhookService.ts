@@ -17,7 +17,7 @@
 import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executionFiles, executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
+import { executionFiles, executions, executionPayloads, users, automationEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -214,9 +214,9 @@ export const webhookService = {
     let engineHmacSecret: string | undefined;
     if (execution.engineId) {
       const [engine] = await db.select()
-        .from(workflowEngines)
+        .from(automationEngines)
         // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch engine HMAC secret; engineId obtained from execution row"
-        .where(eq(workflowEngines.id, execution.engineId));
+        .where(eq(automationEngines.id, execution.engineId));
       engineHmacSecret = engine?.hmacSecret;
     }
 

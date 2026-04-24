@@ -12,14 +12,14 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
 import {
   subaccounts,
-  subaccountProcessLinks,
+  subaccountAutomationLinks,
   subaccountCategories,
   subaccountUserAssignments,
   permissionSetItems,
-  processes,
+  automations,
   executions,
   executionPayloads,
-  workflowEngines,
+  automationEngines,
   playbookRuns,
   playbookTemplateVersions,
   systemPlaybookTemplateVersions,
@@ -87,16 +87,16 @@ async function hasSubaccountPerm(userId: string, subaccountId: string, key: stri
   return !!row;
 }
 
-// ─── Portal: list processes ───────────────────────────────────────────────────
+// ─── Portal: list automations ───────────────────────────────────────────────────
 
 /**
- * GET /api/portal/:subaccountId/processes
- * Returns processes visible to this subaccount member, grouped by category.
+ * GET /api/portal/:subaccountId/automations
+ * Returns automations visible to this subaccount member, grouped by category.
  */
 router.get(
-  '/api/portal/:subaccountId/processes',
+  '/api/portal/:subaccountId/automations',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId);
 
@@ -105,36 +105,36 @@ router.get(
       return;
     }
 
-    // Org processes linked (active link + active process)
+    // Org automations linked (active link + active process)
     const linkedRows = await db
       .select({
-        processId: subaccountProcessLinks.processId,
-        subaccountCategoryId: subaccountProcessLinks.subaccountCategoryId,
-        processName: processes.name,
-        processDescription: processes.description,
-        processInputSchema: processes.inputSchema,
-        processOutputSchema: processes.outputSchema,
+        processId: subaccountAutomationLinks.processId,
+        subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
+        processName: automations.name,
+        processDescription: automations.description,
+        processInputSchema: automations.inputSchema,
+        processOutputSchema: automations.outputSchema,
       })
-      .from(subaccountProcessLinks)
-      .innerJoin(processes, eq(processes.id, subaccountProcessLinks.processId))
+      .from(subaccountAutomationLinks)
+      .innerJoin(automations, eq(automations.id, subaccountAutomationLinks.processId))
       .where(
         and(
-          eq(subaccountProcessLinks.subaccountId, req.params.subaccountId),
-          eq(subaccountProcessLinks.isActive, true),
-          eq(processes.status, 'active'),
-          isNull(processes.deletedAt)
+          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId),
+          eq(subaccountAutomationLinks.isActive, true),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt)
         )
       );
 
-    // Subaccount-native processes
+    // Subaccount-native automations
     const nativeRows = await db
       .select()
-      .from(processes)
+      .from(automations)
       .where(
         and(
-          eq(processes.subaccountId, req.params.subaccountId),
-          eq(processes.status, 'active'),
-          isNull(processes.deletedAt)
+          eq(automations.subaccountId, req.params.subaccountId),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt)
         )
       );
 
@@ -176,7 +176,7 @@ router.get(
 
     res.json({
       subaccount: { id: sa.id, name: sa.name },
-      processes: allProcesses,
+      automations: allProcesses,
       categories,
     });
   })
@@ -192,7 +192,7 @@ router.get(
 router.post(
   '/api/portal/:subaccountId/executions',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId);
 
@@ -214,25 +214,25 @@ router.post(
 
     // Verify the process is accessible to this subaccount (linked or native)
     const linkedResult = await db
-      .select({ processId: subaccountProcessLinks.processId })
-      .from(subaccountProcessLinks)
+      .select({ processId: subaccountAutomationLinks.processId })
+      .from(subaccountAutomationLinks)
       .where(
         and(
-          eq(subaccountProcessLinks.subaccountId, req.params.subaccountId),
-          eq(subaccountProcessLinks.processId, processId),
-          eq(subaccountProcessLinks.isActive, true)
+          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId),
+          eq(subaccountAutomationLinks.processId, processId),
+          eq(subaccountAutomationLinks.isActive, true)
         )
       );
 
     const nativeResult = await db
-      .select({ id: processes.id })
-      .from(processes)
+      .select({ id: automations.id })
+      .from(automations)
       .where(
         and(
-          eq(processes.id, processId),
-          eq(processes.subaccountId, req.params.subaccountId),
-          eq(processes.status, 'active'),
-          isNull(processes.deletedAt)
+          eq(automations.id, processId),
+          eq(automations.subaccountId, req.params.subaccountId),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt)
         )
       );
 
@@ -244,8 +244,8 @@ router.post(
     // Fetch process and engine
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, processId), eq(processes.status, 'active'), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, processId), eq(automations.status, 'active'), isNull(automations.deletedAt)));
 
     if (!process || !process.workflowEngineId) {
       res.status(400).json({ error: 'Process not available' });
@@ -254,8 +254,8 @@ router.post(
 
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(eq(workflowEngines.id, process.workflowEngineId));
+      .from(automationEngines)
+      .where(eq(automationEngines.id, process.workflowEngineId));
 
     if (!engine) {
       res.status(400).json({ error: 'Workflow engine not found' });

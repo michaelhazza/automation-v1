@@ -17,7 +17,7 @@ interface Process {
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-export default function AdminTaskEditPage({ user: _user }: { user: User }) {
+export default function AdminAutomationEditPage({ user: _user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const [process, setProcess] = useState<Process | null>(null);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
@@ -32,7 +32,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
   useEffect(() => {
     const load = async () => {
       const [processRes, catRes] = await Promise.all([
-        api.get(`/api/processes/${id}`),
+        api.get(`/api/automations/${id}`),
         api.get('/api/categories'),
       ]);
       setProcess(processRes.data);
@@ -45,7 +45,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
   const handleSave = async () => {
     setError(''); setSuccess(''); setSaving(true);
     try {
-      await api.patch(`/api/processes/${id}`, process);
+      await api.patch(`/api/automations/${id}`, process);
       setSuccess('Automation saved successfully');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -62,7 +62,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
       }
       const form = new FormData();
       if (parsedInput !== undefined) form.append('inputData', JSON.stringify(parsedInput));
-      const { data } = await api.post(`/api/processes/${id}/test`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const { data } = await api.post(`/api/automations/${id}/test`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
       setTestResult(data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: unknown } };
@@ -75,7 +75,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-4">
-        <Link to="/admin/processes" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
+        <Link to="/admin/automations" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
           ← Back to automations
         </Link>
       </div>

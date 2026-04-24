@@ -3,7 +3,7 @@ import type { DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
-import { processes } from './processes';
+import { automations } from './automations';
 import { projects } from './projects';
 import { goals } from './goals';
 
@@ -28,7 +28,7 @@ export const tasks = pgTable(
     createdByAgentId: uuid('created_by_agent_id')
       .references(() => agents.id),
     processId: uuid('process_id')
-      .references(() => processes.id),
+      .references(() => automations.id),
     projectId: uuid('project_id')
       .references(() => projects.id),
     goalId: uuid('goal_id')

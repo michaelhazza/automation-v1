@@ -10,14 +10,14 @@ import type { Detector, WorkspaceHealthFinding } from '../detectorTypes';
 
 export const processNoEngine: Detector = (ctx) => {
   const findings: WorkspaceHealthFinding[] = [];
-  for (const p of ctx.processes) {
+  for (const p of ctx.automations) {
     if (p.scope === 'system') continue;
     if (p.workflowEngineId) continue;
 
     findings.push({
       detector: 'process.no_engine',
       severity: 'critical',
-      resourceKind: 'process',
+      resourceKind: 'automation',
       resourceId: p.id,
       resourceLabel: p.name,
       message: 'Process has no workflow engine assigned and cannot execute.',

@@ -65,7 +65,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       const [saRes, catRes, processRes, boardRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
-        api.get(`/api/subaccounts/${subaccountId}/processes`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
+        api.get(`/api/subaccounts/${subaccountId}/automations`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
         api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err: { response?: { status?: number } }) => { if (err?.response?.status !== 404) console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
       ]);
       setSa(saRes.data);
@@ -83,7 +83,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const loadOrgData = async () => {
     const [processesRes] = await Promise.all([
-      api.get('/api/processes').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: [] }; }),
+      api.get('/api/automations').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: [] }; }),
     ]);
     setOrgProcesses((processesRes.data as OrgProcess[]).filter(t => t.status === 'active'));
   };
@@ -106,7 +106,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const handleCreateLink = async () => {
     setError('');
     try {
-      await api.post(`/api/subaccounts/${subaccountId}/processes`, {
+      await api.post(`/api/subaccounts/${subaccountId}/automations`, {
         processId: linkForm.processId,
         subaccountCategoryId: linkForm.subaccountCategoryId || undefined,
       });
@@ -119,12 +119,12 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const handleDeleteLink = async () => {
     if (!deleteLinkId) return;
-    await api.delete(`/api/subaccounts/${subaccountId}/processes/${deleteLinkId}`);
+    await api.delete(`/api/subaccounts/${subaccountId}/automations/${deleteLinkId}`);
     setDeleteLinkId(null); load();
   };
 
   const handleToggleLinkActive = async (link: ProcessLink) => {
-    await api.patch(`/api/subaccounts/${subaccountId}/processes/${link.linkId}`, { isActive: !link.isActive });
+    await api.patch(`/api/subaccounts/${subaccountId}/automations/${link.linkId}`, { isActive: !link.isActive });
     load();
   };
 

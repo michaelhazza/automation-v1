@@ -1,16 +1,16 @@
 import { pgTable, uuid, text, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
-import { processes } from './processes';
+import { automations } from './automations';
 import { integrationConnections } from './integrationConnections';
 
 // ---------------------------------------------------------------------------
-// Process Connection Mappings — wires a process's required connection slots
-// to actual integration connections for a specific subaccount.
+// Automation Connection Mappings — wires an automation's required connection
+// slots to actual integration connections for a specific subaccount.
 // ---------------------------------------------------------------------------
 
-export const processConnectionMappings = pgTable(
-  'process_connection_mappings',
+export const automationConnectionMappings = pgTable(
+  'automation_connection_mappings',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id')
@@ -21,8 +21,8 @@ export const processConnectionMappings = pgTable(
       .references(() => subaccounts.id),
     processId: uuid('process_id')
       .notNull()
-      .references(() => processes.id),
-    // Matches a key from processes.required_connections (e.g. "gmail_account")
+      .references(() => automations.id),
+    // Matches a key from automations.required_connections (e.g. "gmail_account")
     connectionKey: text('connection_key').notNull(),
     connectionId: uuid('connection_id')
       .notNull()
@@ -31,14 +31,14 @@ export const processConnectionMappings = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    subaccountProcessKeyUnique: unique('pcm_subaccount_process_key_unique').on(
+    subaccountAutomationKeyUnique: unique('acm_subaccount_automation_key_unique').on(
       table.subaccountId, table.processId, table.connectionKey
     ),
-    subaccountProcessIdx: index('pcm_subaccount_process_idx').on(table.subaccountId, table.processId),
-    connectionIdx: index('pcm_connection_idx').on(table.connectionId),
-    orgIdx: index('pcm_org_idx').on(table.organisationId),
+    subaccountAutomationIdx: index('acm_subaccount_automation_idx').on(table.subaccountId, table.processId),
+    connectionIdx: index('acm_connection_idx').on(table.connectionId),
+    orgIdx: index('acm_org_idx').on(table.organisationId),
   })
 );
 
-export type ProcessConnectionMapping = typeof processConnectionMappings.$inferSelect;
-export type NewProcessConnectionMapping = typeof processConnectionMappings.$inferInsert;
+export type AutomationConnectionMapping = typeof automationConnectionMappings.$inferSelect;
+export type NewAutomationConnectionMapping = typeof automationConnectionMappings.$inferInsert;

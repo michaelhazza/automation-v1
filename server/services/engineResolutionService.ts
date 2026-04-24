@@ -7,9 +7,9 @@
 
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowEngines } from '../db/schema/index.js';
-import type { Process } from '../db/schema/processes.js';
-import type { WorkflowEngine } from '../db/schema/workflowEngines.js';
+import { automationEngines } from '../db/schema/index.js';
+import type { Automation } from '../db/schema/automations.js';
+import type { AutomationEngine } from '../db/schema/automationEngines.js';
 
 export const engineResolutionService = {
   /**
@@ -22,18 +22,18 @@ export const engineResolutionService = {
    * 4. System-scoped engine
    */
   async resolveEngine(
-    process: Process,
+    automation: Automation,
     subaccountId: string,
     orgId: string
-  ): Promise<WorkflowEngine> {
+  ): Promise<AutomationEngine> {
     // 1. Process has a specific engine assigned
     if (process.workflowEngineId) {
       const [engine] = await db.select()
-        .from(workflowEngines)
+        .from(automationEngines)
         .where(and(
-          eq(workflowEngines.id, process.workflowEngineId),
-          eq(workflowEngines.status, 'active'),
-          isNull(workflowEngines.deletedAt)
+          eq(automationEngines.id, process.workflowEngineId),
+          eq(automationEngines.status, 'active'),
+          isNull(automationEngines.deletedAt)
         ));
       if (engine) {
         // Validate engine belongs to the correct scope — prevent cross-tenant usage
@@ -50,33 +50,33 @@ export const engineResolutionService = {
 
     // 2. Subaccount-scoped engine
     const [subEngine] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.subaccountId, subaccountId),
-        eq(workflowEngines.scope, 'subaccount'),
-        eq(workflowEngines.status, 'active'),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.subaccountId, subaccountId),
+        eq(automationEngines.scope, 'subaccount'),
+        eq(automationEngines.status, 'active'),
+        isNull(automationEngines.deletedAt)
       ));
     if (subEngine) return subEngine;
 
     // 3. Organisation-scoped engine
     const [orgEngine] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.organisationId, orgId),
-        eq(workflowEngines.scope, 'organisation'),
-        eq(workflowEngines.status, 'active'),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.organisationId, orgId),
+        eq(automationEngines.scope, 'organisation'),
+        eq(automationEngines.status, 'active'),
+        isNull(automationEngines.deletedAt)
       ));
     if (orgEngine) return orgEngine;
 
     // 4. System-scoped engine
     const [sysEngine] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.scope, 'system'),
-        eq(workflowEngines.status, 'active'),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.scope, 'system'),
+        eq(automationEngines.status, 'active'),
+        isNull(automationEngines.deletedAt)
       ));
     if (sysEngine) return sysEngine;
 

@@ -34,7 +34,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-export default function AdminTasksPage({ user: _user }: { user: User }) {
+export default function AdminAutomationsPage({ user: _user }: { user: User }) {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [engines, setEngines] = useState<Engine[]>([]);
@@ -52,7 +52,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
 
   const load = async () => {
     const [processRes, catRes, engRes] = await Promise.all([
-      api.get('/api/processes'),
+      api.get('/api/automations'),
       api.get('/api/categories'),
       api.get('/api/engines'),
     ]);
@@ -67,7 +67,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
   const handleCreate = async () => {
     setError('');
     try {
-      await api.post('/api/processes', { ...form, orgCategoryId: form.orgCategoryId || undefined });
+      await api.post('/api/automations', { ...form, orgCategoryId: form.orgCategoryId || undefined });
       setShowForm(false);
       load();
     } catch (err: unknown) {
@@ -76,12 +76,12 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     }
   };
 
-  const handleActivate = async (id: string) => { await api.post(`/api/processes/${id}/activate`); load(); };
-  const handleDeactivate = async (id: string) => { await api.post(`/api/processes/${id}/deactivate`); load(); };
+  const handleActivate = async (id: string) => { await api.post(`/api/automations/${id}/activate`); load(); };
+  const handleDeactivate = async (id: string) => { await api.post(`/api/automations/${id}/deactivate`); load(); };
 
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
-    await api.delete(`/api/processes/${deleteId}`);
+    await api.delete(`/api/automations/${deleteId}`);
     setDeleteId(null);
     load();
   };
@@ -91,7 +91,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     setSelectedSystemId('');
     setError('');
     try {
-      const { data } = await api.get('/api/processes/system');
+      const { data } = await api.get('/api/automations/system');
       // Filter out already-linked system processes
       const linkedIds = new Set(processes.filter(p => p.systemProcessId).map(p => p.systemProcessId));
       setSystemProcesses((data as SystemProcess[]).filter(sp => !linkedIds.has(sp.id)));
@@ -105,7 +105,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     setLinkLoading(true);
     setError('');
     try {
-      await api.post(`/api/processes/link-system/${selectedSystemId}`);
+      await api.post(`/api/automations/link-system/${selectedSystemId}`);
       setShowLinkSystem(false);
       load();
     } catch (err: unknown) {
@@ -273,7 +273,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
                     <div className="flex gap-2">
                       {!process.isSystemManaged && (
                         <Link
-                          to={`/admin/processes/${process.id}`}
+                          to={`/admin/automations/${process.id}`}
                           className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
                         >
                           Edit

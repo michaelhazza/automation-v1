@@ -1,12 +1,12 @@
 import { eq, and, isNull, ilike } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { processes, workflowEngines, executions, executionPayloads } from '../db/schema/index.js';
+import { automations, automationEngines, executions, executionPayloads } from '../db/schema/index.js';
 import { webhookService } from './webhookService.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
 const DEFAULT_TIMEOUT_SECONDS = 300;
 
-export class ProcessService {
+export class AutomationService {
   /**
    * List org-level processes. For non-admin users only active processes are returned.
    */
@@ -17,23 +17,23 @@ export class ProcessService {
     params: { categoryId?: string; status?: string; search?: string; limit?: number; offset?: number }
   ) {
     const isAdmin = role === 'system_admin' || role === 'org_admin';
-    const conditions = [eq(processes.organisationId, organisationId), isNull(processes.deletedAt)];
+    const conditions = [eq(automations.organisationId, organisationId), isNull(automations.deletedAt)];
 
     if (!isAdmin) {
-      conditions.push(eq(processes.status, 'active'));
+      conditions.push(eq(automations.status, 'active'));
     } else if (params.status) {
-      conditions.push(eq(processes.status, params.status as 'draft' | 'active' | 'inactive'));
+      conditions.push(eq(automations.status, params.status as 'draft' | 'active' | 'inactive'));
     }
 
-    if (params.categoryId) conditions.push(eq(processes.orgCategoryId, params.categoryId));
-    if (params.search) conditions.push(ilike(processes.name, `%${params.search}%`));
+    if (params.categoryId) conditions.push(eq(automations.orgCategoryId, params.categoryId));
+    if (params.search) conditions.push(ilike(automations.name, `%${params.search}%`));
 
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
 
     const rows = await db
       .select()
-      .from(processes)
+      .from(automations)
       .where(and(...conditions))
       .limit(limit)
       .offset(offset);
@@ -56,15 +56,15 @@ export class ProcessService {
   ) {
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, data.workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, data.workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 404, message: 'Workflow engine not found or inactive' };
     }
 
     const [process] = await db
-      .insert(processes)
+      .insert(automations)
       .values({
         organisationId,
         workflowEngineId: data.workflowEngineId,
@@ -89,8 +89,8 @@ export class ProcessService {
 
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found or not accessible' };
     if (!isAdmin && process.status !== 'active') throw { statusCode: 404, message: 'Process not found or not accessible' };
@@ -113,8 +113,8 @@ export class ProcessService {
   ) {
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
@@ -128,9 +128,9 @@ export class ProcessService {
     if (data.subaccountId !== undefined) update.subaccountId = data.subaccountId;
 
     const [updated] = await db
-      .update(processes)
+      .update(automations)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, name: updated.name, status: updated.status };
@@ -139,21 +139,21 @@ export class ProcessService {
   async deleteProcess(id: string, organisationId: string) {
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
     const now = new Date();
-    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)));
+    await db.update(automations).set({ deletedAt: now, updatedAt: now }).where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)));
     return { message: 'Process deleted successfully' };
   }
 
   async activateProcess(id: string, organisationId: string) {
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
@@ -162,17 +162,17 @@ export class ProcessService {
 
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 400, message: 'Process cannot be activated: engine is inactive' };
     }
 
     const [updated] = await db
-      .update(processes)
+      .update(automations)
       .set({ status: 'active', updatedAt: new Date() })
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, status: updated.status };
@@ -181,16 +181,16 @@ export class ProcessService {
   async deactivateProcess(id: string, organisationId: string) {
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
     if (!process.workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const [updated] = await db
-      .update(processes)
+      .update(automations)
       .set({ status: 'inactive', updatedAt: new Date() })
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, status: updated.status };
@@ -199,8 +199,8 @@ export class ProcessService {
   async testProcess(id: string, organisationId: string, userId: string, inputData?: unknown) {
     const [process] = await db
       .select()
-      .from(processes)
-      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
@@ -209,8 +209,8 @@ export class ProcessService {
 
     const [engine] = await db
       .select()
-      .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, workflowEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
 
     if (!engine) throw { statusCode: 503, message: 'Engine not found' };
 
@@ -297,7 +297,7 @@ export class ProcessService {
     }
   }
 
-  private _mapProcess(t: typeof processes.$inferSelect, includeAdmin: boolean) {
+  private _mapProcess(t: typeof automations.$inferSelect, includeAdmin: boolean) {
     return {
       id: t.id,
       name: t.name,
@@ -314,4 +314,4 @@ export class ProcessService {
   }
 }
 
-export const processService = new ProcessService();
+export const automationService = new AutomationService();

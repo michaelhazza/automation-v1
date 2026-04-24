@@ -24,7 +24,7 @@ const STATUS_CLS: Record<string, string> = {
 
 const inputCls = 'w-full mt-1 px-3 py-2 border border-slate-200 rounded-md text-[14px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-export default function SystemProcessesPage({ user }: { user: User }) {
+export default function SystemAutomationsPage({ user }: { user: User }) {
   const [processes, setProcesses] = useState<SystemProcess[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,7 +33,7 @@ export default function SystemProcessesPage({ user }: { user: User }) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = () => {
-    api.get('/api/system/processes')
+    api.get('/api/system/automations')
       .then(({ data }) => setProcesses(data))
       .catch((err) => { console.error('[SystemProcesses] Failed to load processes:', err); setError('Failed to load system processes'); })
       .finally(() => setLoading(false));
@@ -43,7 +43,7 @@ export default function SystemProcessesPage({ user }: { user: User }) {
 
   const handleCreate = async () => {
     try {
-      await api.post('/api/system/processes', form);
+      await api.post('/api/system/automations', form);
       setShowCreate(false);
       setForm({ name: '', description: '', webhookPath: '', inputSchema: '', configSchema: '' });
       load();
@@ -54,18 +54,18 @@ export default function SystemProcessesPage({ user }: { user: User }) {
   };
 
   const handleActivate = async (id: string) => {
-    await api.post(`/api/system/processes/${id}/activate`);
+    await api.post(`/api/system/automations/${id}/activate`);
     load();
   };
 
   const handleDeactivate = async (id: string) => {
-    await api.post(`/api/system/processes/${id}/deactivate`);
+    await api.post(`/api/system/automations/${id}/deactivate`);
     load();
   };
 
   const handleDelete = async (id: string) => {
     try {
-      await api.delete(`/api/system/processes/${id}`);
+      await api.delete(`/api/system/automations/${id}`);
       toast.success('System process deleted');
       load();
     } catch {

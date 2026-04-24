@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { processConnectionMappings, integrationConnections, processes } from '../db/schema/index.js';
+import { automationConnectionMappings, integrationConnections, automations } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -16,17 +16,17 @@ const router = Router();
 
 // Get connection mappings for a process in a subaccount
 router.get(
-  '/api/subaccounts/:subaccountId/processes/:processId/connections',
+  '/api/subaccounts/:subaccountId/automations/:automationId/connections',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CONFIGURE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const mappings = await db.select()
-      .from(processConnectionMappings)
+      .from(automationConnectionMappings)
       .where(and(
-        eq(processConnectionMappings.subaccountId, subaccount.id),
-        eq(processConnectionMappings.processId, req.params.processId)
+        eq(automationConnectionMappings.subaccountId, subaccount.id),
+        eq(automationConnectionMappings.processId, req.params.automationId)
       ));
 
     res.json(mappings);
@@ -36,9 +36,9 @@ router.get(
 // Set/update all connection mappings for a process in a subaccount
 // Body: { mappings: [{ connectionKey: string, connectionId: string }] }
 router.put(
-  '/api/subaccounts/:subaccountId/processes/:processId/connections',
+  '/api/subaccounts/:subaccountId/automations/:automationId/connections',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CONFIGURE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     // guard-ignore-next-line: input-validation reason="manual validation enforced: Array.isArray check, per-item connection ownership and status validation"
@@ -69,18 +69,18 @@ router.put(
     }
 
     // Delete existing mappings and insert new ones (atomic replace)
-    await db.delete(processConnectionMappings)
+    await db.delete(automationConnectionMappings)
       .where(and(
-        eq(processConnectionMappings.subaccountId, subaccount.id),
-        eq(processConnectionMappings.processId, req.params.processId)
+        eq(automationConnectionMappings.subaccountId, subaccount.id),
+        eq(automationConnectionMappings.processId, req.params.automationId)
       ));
 
     if (mappings.length > 0) {
-      await db.insert(processConnectionMappings).values(
+      await db.insert(automationConnectionMappings).values(
         mappings.map(m => ({
           organisationId: req.orgId!,
           subaccountId: subaccount.id,
-          processId: req.params.processId,
+          processId: req.params.automationId,
           connectionKey: m.connectionKey,
           connectionId: m.connectionId,
         }))
@@ -89,10 +89,10 @@ router.put(
 
     // Return the new mappings
     const result = await db.select()
-      .from(processConnectionMappings)
+      .from(automationConnectionMappings)
       .where(and(
-        eq(processConnectionMappings.subaccountId, subaccount.id),
-        eq(processConnectionMappings.processId, req.params.processId)
+        eq(automationConnectionMappings.subaccountId, subaccount.id),
+        eq(automationConnectionMappings.processId, req.params.automationId)
       ));
 
     res.json(result);
@@ -101,26 +101,26 @@ router.put(
 
 // Clone a process into this subaccount (from system or org scope)
 router.post(
-  '/api/subaccounts/:subaccountId/processes/:processId/clone',
+  '/api/subaccounts/:subaccountId/automations/:processId/clone',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_CLONE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_CLONE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const [source] = await db.select()
-      .from(processes)
-      .where(and(eq(processes.id, req.params.processId), isNull(processes.deletedAt)));
+      .from(automations)
+      .where(and(eq(automations.id, req.params.automationId), isNull(automations.deletedAt)));
 
     if (!source) throw { statusCode: 404, message: 'Source process not found' };
 
-    // Can only clone system processes or processes from the same org
+    // Can only clone system automations or automations from the same org
     if (source.scope !== 'system' && source.organisationId !== req.orgId!) {
-      throw { statusCode: 403, message: 'Cannot clone processes from another organisation' };
+      throw { statusCode: 403, message: 'Cannot clone automations from another organisation' };
     }
 
     const { name } = req.body;
 
-    const [cloned] = await db.insert(processes).values({
+    const [cloned] = await db.insert(automations).values({
       organisationId: req.orgId!,
       workflowEngineId: null,
       name: name || `${source.name} (Clone)`,

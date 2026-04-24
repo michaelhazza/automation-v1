@@ -2,8 +2,8 @@ import { pgTable, uuid, text, timestamp, index, uniqueIndex } from 'drizzle-orm/
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
-export const processCategories = pgTable(
-  'process_categories',
+export const automationCategories = pgTable(
+  'automation_categories',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id')
@@ -17,14 +17,14 @@ export const processCategories = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    orgIdIdx: index('process_categories_org_id_idx').on(table.organisationId),
-    deletedAtIdx: index('process_categories_deleted_at_idx').on(table.deletedAt),
+    orgIdIdx: index('automation_categories_org_id_idx').on(table.organisationId),
+    deletedAtIdx: index('automation_categories_deleted_at_idx').on(table.deletedAt),
     // M-7: unique name per org, soft-delete-aware
-    orgNameUniq: uniqueIndex('process_categories_org_name_unique_idx')
+    orgNameUniq: uniqueIndex('automation_categories_org_name_unique_idx')
       .on(table.organisationId, table.name)
       .where(sql`${table.deletedAt} IS NULL`),
   })
 );
 
-export type ProcessCategory = typeof processCategories.$inferSelect;
-export type NewProcessCategory = typeof processCategories.$inferInsert;
+export type AutomationCategory = typeof automationCategories.$inferSelect;
+export type NewAutomationCategory = typeof automationCategories.$inferInsert;

@@ -1,10 +1,10 @@
 import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { subaccounts } from './subaccounts';
-import { processes } from './processes';
+import { automations } from './automations';
 import { subaccountCategories } from './subaccountCategories';
 
-export const subaccountProcessLinks = pgTable(
-  'subaccount_process_links',
+export const subaccountAutomationLinks = pgTable(
+  'subaccount_automation_links',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     subaccountId: uuid('subaccount_id')
@@ -12,11 +12,11 @@ export const subaccountProcessLinks = pgTable(
       .references(() => subaccounts.id),
     processId: uuid('process_id')
       .notNull()
-      .references(() => processes.id),
+      .references(() => automations.id),
     subaccountCategoryId: uuid('subaccount_category_id')
       .references(() => subaccountCategories.id),
     isActive: boolean('is_active').notNull().default(true),
-    // Per-subaccount config overrides (merged with process.default_config at execution time)
+    // Per-subaccount config overrides (merged with automation.default_config at execution time)
     configOverrides: jsonb('config_overrides'),
     // Override input schema for this subaccount (rare, for advanced customisation)
     customInputSchema: text('custom_input_schema'),
@@ -24,15 +24,15 @@ export const subaccountProcessLinks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    subaccountProcessUniqueIdx: uniqueIndex('subaccount_process_links_subaccount_process_unique_idx').on(
+    subaccountAutomationUniqueIdx: uniqueIndex('subaccount_automation_links_subaccount_automation_unique_idx').on(
       table.subaccountId,
       table.processId
     ),
-    subaccountIdx: index('subaccount_process_links_subaccount_idx').on(table.subaccountId),
-    processIdx: index('subaccount_process_links_process_idx').on(table.processId),
-    categoryIdx: index('subaccount_process_links_category_idx').on(table.subaccountCategoryId),
+    subaccountIdx: index('subaccount_automation_links_subaccount_idx').on(table.subaccountId),
+    automationIdx: index('subaccount_automation_links_automation_idx').on(table.processId),
+    categoryIdx: index('subaccount_automation_links_category_idx').on(table.subaccountCategoryId),
   })
 );
 
-export type SubaccountProcessLink = typeof subaccountProcessLinks.$inferSelect;
-export type NewSubaccountProcessLink = typeof subaccountProcessLinks.$inferInsert;
+export type SubaccountAutomationLink = typeof subaccountAutomationLinks.$inferSelect;
+export type NewSubaccountAutomationLink = typeof subaccountAutomationLinks.$inferInsert;

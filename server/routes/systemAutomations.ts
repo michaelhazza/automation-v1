@@ -7,30 +7,30 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { processes } from '../db/schema/index.js';
+import { automations } from '../db/schema/index.js';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
-// List all system processes
-router.get('/api/system/processes', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+// List all system automations
+router.get('/api/system/automations', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const rows = await db.select()
-    .from(processes)
-    .where(and(eq(processes.scope, 'system'), isNull(processes.deletedAt)))
-    .orderBy(desc(processes.createdAt));
+    .from(automations)
+    .where(and(eq(automations.scope, 'system'), isNull(automations.deletedAt)))
+    .orderBy(desc(automations.createdAt));
   res.json(rows);
 }));
 
 // Create system process
-router.post('/api/system/processes', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/system/automations', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { name, description, webhookPath, inputSchema, outputSchema, configSchema, defaultConfig, requiredConnections, workflowEngineId } = req.body;
 
   if (!name || !webhookPath) {
     throw { statusCode: 400, message: 'name and webhookPath are required' };
   }
 
-  const [process] = await db.insert(processes).values({
+  const [process] = await db.insert(automations).values({
     organisationId: null,
     workflowEngineId: workflowEngineId ?? null,
     name,
@@ -50,20 +50,20 @@ router.post('/api/system/processes', authenticate, requireSystemAdmin, asyncHand
 }));
 
 // Get system process
-router.get('/api/system/processes/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.get('/api/system/automations/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [process] = await db.select()
-    .from(processes)
-    .where(and(eq(processes.id, req.params.id), eq(processes.scope, 'system'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, req.params.id), eq(automations.scope, 'system'), isNull(automations.deletedAt)));
 
   if (!process) throw { statusCode: 404, message: 'System process not found' };
   res.json(process);
 }));
 
 // Update system process
-router.patch('/api/system/processes/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.patch('/api/system/automations/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(processes)
-    .where(and(eq(processes.id, req.params.id), eq(processes.scope, 'system'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, req.params.id), eq(automations.scope, 'system'), isNull(automations.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System process not found' };
 
@@ -73,56 +73,56 @@ router.patch('/api/system/processes/:id', authenticate, requireSystemAdmin, asyn
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
 
-  const [updated] = await db.update(processes)
+  const [updated] = await db.update(automations)
     .set(updates)
-    .where(eq(processes.id, req.params.id))
+    .where(eq(automations.id, req.params.id))
     .returning();
 
   res.json(updated);
 }));
 
 // Delete system process (soft)
-router.delete('/api/system/processes/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.delete('/api/system/automations/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(processes)
-    .where(and(eq(processes.id, req.params.id), eq(processes.scope, 'system'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, req.params.id), eq(automations.scope, 'system'), isNull(automations.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System process not found' };
 
-  await db.update(processes)
+  await db.update(automations)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(processes.id, req.params.id));
+    .where(eq(automations.id, req.params.id));
 
   res.json({ success: true });
 }));
 
 // Activate system process
-router.post('/api/system/processes/:id/activate', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/system/automations/:id/activate', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(processes)
-    .where(and(eq(processes.id, req.params.id), eq(processes.scope, 'system'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, req.params.id), eq(automations.scope, 'system'), isNull(automations.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System process not found' };
 
-  const [updated] = await db.update(processes)
+  const [updated] = await db.update(automations)
     .set({ status: 'active', updatedAt: new Date() })
-    .where(eq(processes.id, req.params.id))
+    .where(eq(automations.id, req.params.id))
     .returning();
 
   res.json(updated);
 }));
 
 // Deactivate system process
-router.post('/api/system/processes/:id/deactivate', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/system/automations/:id/deactivate', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const [existing] = await db.select()
-    .from(processes)
-    .where(and(eq(processes.id, req.params.id), eq(processes.scope, 'system'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, req.params.id), eq(automations.scope, 'system'), isNull(automations.deletedAt)));
 
   if (!existing) throw { statusCode: 404, message: 'System process not found' };
 
-  const [updated] = await db.update(processes)
+  const [updated] = await db.update(automations)
     .set({ status: 'inactive', updatedAt: new Date() })
-    .where(eq(processes.id, req.params.id))
+    .where(eq(automations.id, req.params.id))
     .returning();
 
   res.json(updated);

@@ -2,8 +2,8 @@ import { pgTable, uuid, text, timestamp, jsonb, index } from 'drizzle-orm/pg-cor
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
-export const workflowEngines = pgTable(
-  'workflow_engines',
+export const automationEngines = pgTable(
+  'automation_engines',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id')
@@ -27,13 +27,13 @@ export const workflowEngines = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    orgStatusIdx: index('workflow_engines_org_status_idx').on(table.organisationId, table.status),
-    orgIdIdx: index('workflow_engines_org_id_idx').on(table.organisationId),
-    statusIdx: index('workflow_engines_status_idx').on(table.status),
-    scopeStatusIdx: index('workflow_engines_scope_status_idx').on(table.scope, table.status),
-    subaccountIdx: index('workflow_engines_subaccount_idx').on(table.subaccountId),
+    orgStatusIdx: index('automation_engines_org_status_idx').on(table.organisationId, table.status),
+    orgIdIdx: index('automation_engines_org_id_idx').on(table.organisationId),
+    statusIdx: index('automation_engines_status_idx').on(table.status),
+    scopeStatusIdx: index('automation_engines_scope_status_idx').on(table.scope, table.status),
+    subaccountIdx: index('automation_engines_subaccount_idx').on(table.subaccountId),
   })
 );
 
-export type WorkflowEngine = typeof workflowEngines.$inferSelect;
-export type NewWorkflowEngine = typeof workflowEngines.$inferInsert;
+export type AutomationEngine = typeof automationEngines.$inferSelect;
+export type NewAutomationEngine = typeof automationEngines.$inferInsert;
