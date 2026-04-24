@@ -17,9 +17,14 @@ interface NotifyPayload {
 }
 
 export async function registerSystemIncidentNotifyWorker(boss: PgBoss): Promise<void> {
+  // teamSize 4 gives cross-instance parallelism; teamConcurrency 1 serialises
+  // each worker instance so a single jobs-burst for one incident can't fan out
+  // duplicate WebSocket broadcasts from the same worker. The client handler
+  // is idempotent on duplicates across workers, but intra-worker serialisation
+  // reduces broadcast chatter under load.
   await (boss as any).work(
     'system-monitor-notify',
-    { teamSize: 4, teamConcurrency: 2 },
+    { teamSize: 4, teamConcurrency: 1 },
     async (job: { data: NotifyPayload }) => {
       const { incidentId } = job.data;
 

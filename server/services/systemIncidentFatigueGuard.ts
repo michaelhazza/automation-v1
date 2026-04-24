@@ -4,7 +4,7 @@
 // NOT invoked in Phase 0.5 — reserved for push channels (email, Slack).
 import { gte, and, eq, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { systemIncidentEvents } from '../db/schema/index.js';
+import { systemIncidentEvents, systemIncidents } from '../db/schema/index.js';
 import type { AlertLimits } from './orgConfigService.js';
 import { AlertFatigueGuardBase } from './alertFatigueGuardBase.js';
 
@@ -13,18 +13,17 @@ export class SystemIncidentFatigueGuard extends AlertFatigueGuardBase {
     super(limits);
   }
 
-  protected async queryTodayCount(_fingerprint: string): Promise<number> {
+  protected async queryTodayCount(fingerprint: string): Promise<number> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    // NOTE: Counts ALL notification_surfaced events today (not scoped to _fingerprint).
-    // Filtering by fingerprint requires a JOIN to system_incidents — deferred to Phase 0.75.
-    // Phase 0.5 never invokes this guard, so global over-counting is harmless for now.
     const [result] = await db
       .select({ count: count() })
       .from(systemIncidentEvents)
+      .innerJoin(systemIncidents, eq(systemIncidentEvents.incidentId, systemIncidents.id))
       .where(and(
         eq(systemIncidentEvents.eventType, 'notification_surfaced'),
+        eq(systemIncidents.fingerprint, fingerprint),
         gte(systemIncidentEvents.occurredAt, todayStart),
       ));
 

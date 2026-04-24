@@ -10,7 +10,7 @@ interface SystemIncident {
   source: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   classification: string;
-  status: 'open' | 'investigating' | 'remediating' | 'escalated' | 'resolved';
+  status: 'open' | 'investigating' | 'remediating' | 'escalated' | 'resolved' | 'suppressed';
   summary: string;
   errorCode: string | null;
   occurrenceCount: number;
@@ -34,7 +34,7 @@ type SortCol = 'severity' | 'status' | 'source' | 'summary' | 'occurrenceCount' 
 type SortDir = 'asc' | 'desc';
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-const STATUS_ORDER: Record<string, number> = { escalated: 5, open: 4, remediating: 3, investigating: 2, resolved: 1 };
+const STATUS_ORDER: Record<string, number> = { escalated: 6, open: 5, remediating: 4, investigating: 3, resolved: 2, suppressed: 1 };
 
 // ─── ColHeader ────────────────────────────────────────────────────────────────
 
@@ -105,6 +105,7 @@ function StatusBadge({ status }: { status: string }) {
   const cls = status === 'escalated' ? 'bg-red-100 text-red-700'
     : status === 'open' ? 'bg-orange-100 text-orange-700'
     : status === 'investigating' || status === 'remediating' ? 'bg-blue-100 text-blue-700'
+    : status === 'suppressed' ? 'bg-slate-200 text-slate-600'
     : 'bg-green-100 text-green-700';
   return <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${cls}`}>{status}</span>;
 }
