@@ -1738,14 +1738,29 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // Haiku calls are cheaper but share the same API key quota.
     const agentEnrichLimit = await getPLimit(3);
 
+    // Heartbeat — bump `updated_at` every HEARTBEAT_EVERY enriched skills so
+    // the stale-analyzer-job sweep can distinguish a slow Stage 7b from a
+    // dead worker. Without this, Stage 7b updates progress once at start
+    // and stays silent until Stage 8 — a 10+ min legitimate window that
+    // the 15-min sweep threshold would otherwise have to absorb.
+    const HEARTBEAT_EVERY = 5;
+    const totalToEnrich = distinctIndicesToEnrich.size;
+    let enrichedCount = 0;
+
     await Promise.all(
       [...distinctIndicesToEnrich].map((candidateIndex) =>
         agentEnrichLimit(async () => {
           const candidate = candidates[candidateIndex];
-          if (!candidate) return;
+          if (!candidate) {
+            enrichedCount++;
+            return;
+          }
 
           const existingProposals = agentProposalsByCandidateIndex.get(candidateIndex) ?? [];
-          if (existingProposals.length === 0) return;
+          if (existingProposals.length === 0) {
+            enrichedCount++;
+            return;
+          }
 
           try {
             const { system, userMessage } = skillAnalyzerServicePure.buildAgentSuggestionPrompt(
@@ -1852,6 +1867,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               slug: candidate.slug,
               error: err instanceof Error ? err.message : String(err),
             });
+          } finally {
+            enrichedCount++;
+            // Heartbeat: bump `updated_at` every HEARTBEAT_EVERY tasks (and
+            // always on the last one) so the stale-job sweep can tell a
+            // working Stage 7b from a dead one. Best-effort — a heartbeat
+            // failure must not abort enrichment.
+            if (enrichedCount % HEARTBEAT_EVERY === 0 || enrichedCount === totalToEnrich) {
+              try {
+                await updateJobProgress(jobId, {
+                  progressPct: 92,
+                  progressMessage: `Refining agent assignments with AI… ${enrichedCount}/${totalToEnrich}`,
+                });
+              } catch (heartbeatErr) {
+                logger.warn('skill_analyzer_stage7b_heartbeat_failed', {
+                  jobId,
+                  enrichedCount,
+                  error: heartbeatErr instanceof Error ? heartbeatErr.message : String(heartbeatErr),
+                });
+              }
+            }
           }
         })
       )

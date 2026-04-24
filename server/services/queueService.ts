@@ -664,6 +664,26 @@ export const queueService = {
         }
       });
 
+      // Skill-analyzer resilience — reap mid-flight skill_analyzer_jobs
+      // rows that have stalled (no `updated_at` progress for 15 min). On a
+      // worker crash mid-run the DB row stays in `classifying` and the
+      // pg-boss job stays `active` for `expireInSeconds` (4 hours). This
+      // sweep marks the DB row failed + expires the pg-boss ghost so the
+      // built-in retryLimit/retryDelay can pick the job up under the v5
+      // resume-seeding contract. See KNOWLEDGE.md (2026-04-24) for the
+      // failure mode this codifies.
+      await (boss as any).work('maintenance:stale-analyzer-job-sweep', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { sweepStaleAnalyzerJobs } = await import('../jobs/staleAnalyzerJobSweepJob.js');
+          await withTimeout(sweepStaleAnalyzerJobs().then(() => undefined), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:stale-analyzer-job-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Deferred-items brief §6 — purge llm_inflight_history rows older
       // than env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS (default 7).
       await (boss as any).work('maintenance:llm-inflight-history-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
@@ -1040,6 +1060,10 @@ export const queueService = {
       // Deferred-items brief §1 — reap aged-out provisional 'started' rows
       // every 2 minutes. Cadence matches the in-flight clarification sweep.
       await boss.schedule('maintenance:llm-started-row-sweep', '*/2 * * * *', {});
+      // Skill-analyzer resilience — sweep stalled mid-flight rows every
+      // 10 min. Threshold: 15-min `updated_at` silence (see
+      // staleAnalyzerJobSweepJobPure.ts header).
+      await boss.schedule('maintenance:stale-analyzer-job-sweep', '*/10 * * * *', {});
       // Deferred-items brief §6 — daily 04:15 UTC cleanup of
       // llm_inflight_history rows older than the retention window.
       await boss.schedule('maintenance:llm-inflight-history-cleanup', '15 4 * * *', {});
