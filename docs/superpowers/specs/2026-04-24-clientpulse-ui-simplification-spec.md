@@ -1,6 +1,6 @@
 # ClientPulse UI Simplification — Implementation Spec
 
-**Status:** Draft — awaiting user approval before implementation begins
+**Status:** Approved — ready for implementation (4 rounds of external review completed; no remaining design gaps)
 **Date:** 2026-04-24
 **Branch target:** off `main` (current: `claude/cached-context-infrastructure-fcVmS`)
 **Research foundation:** `tasks/builds/clientpulse-ui-simplification/audit.md` (superseded as implementation guide)
@@ -121,6 +121,8 @@ Renders only when the returned list is non-empty. If empty, the section is hidde
 
 **Priority sort:** the server already returns items grouped into `lanes: { client: [...], major: [...], internal: [...] }`. The section flattens them in that order. Within each lane, newest-first by `createdAt` (server-side; client does no re-sort).
 
+**Lane priority overrides recency (explicit rule).** A `major`-lane item that is 30 days old renders after all `client`-lane items regardless of their age. Lane priority is the primary sort key; `createdAt` is secondary within a lane only. This is intentional — an older client-health intervention is more operationally urgent than a newer internal clarification. Future developers must not "fix" this ordering toward pure recency.
+
 Each card shows:
 - Colour-coded left dot (client lane = dark red, major lane = amber, internal lane = slate)
 - Feature badge pill (ClientPulse / Config change / Agent clarification — mapped from `kind` + lane)
@@ -148,6 +150,18 @@ resolvedUrl: string | null;   // fully qualified SPA path e.g. "/clientpulse/cli
 | `health:<id>` | `/clientpulse/clients/<subaccountId>` (subaccount drilldown) |
 
 The client-side resolver remains as a **fallback only** — it maps the legacy opaque `detailUrl` token to the correct path in case `resolvedUrl` is absent (e.g. older cached data or a backend not yet upgraded). The resolver is a small pure function co-located with `DashboardPage.tsx`.
+
+**Implementation warning — do not let the fallback become primary.** The fallback resolver must not become the de-facto routing mechanism during development. Instrumentation rule: log a `WARN fallback_resolver_used` event every time the client resolver fires (i.e. `resolvedUrl` was null and the fallback was needed). Target: fallback usage below 5% of pending card navigations before release. If fallback usage is high during QA, the backend `resolvedUrl` resolution is not implemented correctly — do not paper over it by extending the frontend fallback.
+
+**Navigation traceability.** When navigating to a resolved URL with intent, pass a lightweight state hint so the destination page can verify item identity and improve telemetry:
+
+```typescript
+navigate(`${resolvedUrl}?intent=approve`, {
+  state: { sourceItemId: item.id }
+})
+```
+
+The destination page MAY read `location.state?.sourceItemId` to confirm the correct item is loaded before auto-opening the approval UI. This is not required for correctness (the stale-intent guard in §2.2 already handles mismatched state), but it improves traceability when debugging edge cases and enriches the `pending_card_approved` telemetry event with the originating item.
 
 **Null destination handling.** If both `resolvedUrl` and the fallback resolver return `null`:
 - The "Open in context" button is **disabled** with tooltip: **"This item cannot be actioned from here."**
@@ -471,8 +485,20 @@ All five fields are nullable; existing activity types that don't source them (e.
 | **Activity** | ~38% | `subject` (bold) + subtext context line. For `agent_run` and `workflow_execution` rows where `runId` is set: inline "View log →" link → `/runs/:runId/live`. |
 | **Executed by** | ~22% | Agent pill (indigo `agentName` + secondary `triggerType` label) **or** human avatar (coloured initial circle + `triggeredByUserName`) **or** italic "System · `actor`" |
 | **Status** | ~12% | Colour-coded badge: Completed (green) / Failed (red) / Running (blue) / Approved (green) / Rejected (slate) / Waiting (amber) / Detected / Info |
-| **Duration** | ~8% | `durationMs` formatted (`1m 42s`, `28s`, `—` for null/instant) |
+| **Duration** | ~8% | `durationMs` formatted per formatting rules below |
 | **When** | ~10% | Relative time (`12 min ago`, `Yesterday`, `7 days ago`) |
+
+**Duration formatting rules.** All duration values across the spec (activity feed, run meta bar) use a single formatting function. Rules:
+
+| Input | Output |
+|---|---|
+| `null` | `—` (em dash) |
+| `0` to `999ms` | `0s` |
+| `1000ms` to `59999ms` | `Ns` (e.g. `28s`) — always round **down** to nearest second |
+| `60000ms` to `3599999ms` | `Nm Ns` (e.g. `1m 42s`) — seconds component always rounds **down** |
+| `≥ 3600000ms` | `Nh Nm` (e.g. `1h 3m`) — minutes component always rounds **down** |
+
+Always round down (floor), never round up or round to nearest. This prevents jitter: a `1m 59s` run never flickers to `2m 0s` between refreshes if the final event arrives slightly late. The formatting function is a pure utility — colocate it with the feed component as `formatDuration(ms: number | null): string`.
 
 ### §4.4 Actor rendering rules
 
