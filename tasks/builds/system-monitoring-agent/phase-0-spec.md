@@ -1,14 +1,62 @@
 # System Monitoring Agent — Phase 0 + 0.5 Spec
 
-**Status:** Draft — pre-architect-review
+**Status:** v2 — decisions resolved, ready for review
 **Owner:** Platform
 **Scope:** Server + client + migrations
-**Not included in this spec:** Phase 1 (synthetic checks), Phase 2 (monitoring agent), Phase 3 (auto-remediation), Phase 4 (dev-agent handoff). Those phases have stub sections at the end for context only.
+**Not included in this spec:** Phase 0.75 (email/Slack notifications — requires new outbound infrastructure), Phase 1 (synthetic checks), Phase 2 (monitoring agent), Phase 3 (auto-remediation), Phase 4 (dev-agent handoff). Future phases have stub sections at the end for context only.
+
+---
+
+## 0. Decisions log (v2)
+
+The v1 draft left 8 questions open and 5 prerequisites unverified. v2 resolves them — either by investigation (read the code and report reality) or by recommendation (argue one choice and pick it). Any decision the user wants to override is a simple edit to this section; downstream sections cross-reference back to here.
+
+### 0.1 Prerequisites — verified against the current codebase
+
+| ID | Question | Finding | Effect on spec |
+|---|---|---|---|
+| P1 | Is correlation ID propagation end-to-end? | **Partial.** Route middleware at `server/middleware/correlation.ts` attaches `req.correlationId`. But `agent_runs` has NO `correlationId` column, and pg-boss job payloads do not carry one by convention. | `correlationId` on `system_incidents` stays nullable. Route-source incidents always have it; agent/job/connector-source may have null initially. Phase 0 includes a prerequisite mini-migration adding `correlation_id` to `agent_runs` and a convention (documented in architecture.md) that new pg-boss job payloads include a `correlationId` field. Existing jobs are left alone — no bulk refactor. |
+| P2 | Is email delivery available? | **Not available.** No nodemailer/sendgrid/postmark/mailgun/resend dependency or service. | **Email moves out of Phase 0.5.** See §0.2 Q-Notifications. |
+| P3 | Is Slack outbound available? | **Not available.** No Slack SDK or outbound pattern. (Inbound webhook handling exists, not outbound.) | **Slack moves out of Phase 0.5.** See §0.2 Q-Notifications. |
+| P4 | Do `tasks.linkedEntityKind` / `linkedEntityId` columns exist? | **No.** | Phase 0.5 migration adds both columns (nullable text + nullable uuid). |
+| P5 | Does `user_settings` have notification preferences? | **No.** | Since email/Slack defer to Phase 0.75, the notification-preferences column also defers — it is added in Phase 0.75, not Phase 0.5. Phase 0.5 has no per-user preferences surface. |
+
+### 0.2 Open questions — resolved
+
+| ID | Question | Decision | Reasoning |
+|---|---|---|---|
+| Q1 | Table/domain naming | `system_incidents` (keep current naming) | Matches existing conventions: `system_admin`, `system_agents`, `requireSystemAdmin`, `SystemTaskQueuePage`, `SystemSkillsPage`. Consistency wins. |
+| Q2 | Escalation target subaccount (§10.3) | **Option 3 hybrid, locked in.** Org-scoped incidents escalate inside their own org's sentinel subaccount (the existing pattern used by Orchestrator). System-level incidents escalate to a new seeded `System Operations` org + sysadmin subaccount, flagged `isSystemOrg: true` on `organisations`. Seeded via migration. | Keeps org-local context for org-specific faults (specialists have the data). Isolates system-wide faults into a dedicated surface that doesn't pollute tenant org task boards. |
+| Q3 | Severity defaults per source (§5.5) | Keep table defaults as specified, with one addition: when `source='agent'` AND the run's agent is `isSystemManaged=true`, bump default severity to `high`. | Failures of system-managed agents (Orchestrator, Portfolio Health Agent, and the future monitor itself) are infrastructure failures, not tenant work failures. They deserve higher default attention. |
+| Q4 | Notification `minSeverity` default | Deferred to Phase 0.75 (when notifications exist). For Phase 0.5 the question doesn't apply — no push notifications ship. | See Q-Notifications. |
+| Q5 | Admin page polling interval (§8.5) | **10 seconds when tab visible; pause when backgrounded (Page Visibility API); manual refresh button in header; auto-refresh toggle.** | Active triage needs low latency; idle tabs should not burn DB. Giving the admin a toggle covers the edge case where someone wants to stop polling entirely. |
+| Q6 | Daily digest in Phase 0.5 or later | **Not in Phase 0.5. Not in Phase 0.75. Phase 1 or later.** Low-priority incidents get NO push notification in this scope — they are visible on the admin page and in Pulse only. | Batching that doesn't deliver is a bug. Skip batching entirely at the Phase 0 scope; revisit once the page has run in production and we know whether a digest is actually wanted. |
+| Q7 | Hard cap on permanent suppressions | **No hard cap. Warning banner above 25 active permanent suppressions. Monthly audit event emitted for permanent suppressions with no `linkedPrUrl` or `resolutionNote`.** | Hard caps in SRE tooling get worked around; social pressure via visibility is more effective. |
+| Q8 | Test-incident trigger button | **Yes — include. "Trigger test incident" button at the top of the admin page.** Fires an incident with fingerprint prefix `test:manual:{timestamp}`, severity `low`, `isTestIncident: true` column. Default list filter hides test incidents; toggle to show. | Useful for post-deploy smoke testing and for verifying notification/escalation wiring in staging. Cost: tiny. |
+
+### 0.3 Q-Notifications — scope-change decision
+
+**Problem:** Phase 0.5 as v1-drafted assumed email + Slack were available infrastructure. P2 and P3 show they are not.
+
+**Options considered:**
+
+1. Build email + Slack outbound infrastructure as part of Phase 0.5 (SMTP config, Slack app registration, per-channel adapters, user preferences UI). **Rejected** — expands Phase 0.5 scope by ~40%, adds dependencies that aren't needed for the core observability value.
+2. Stub email + Slack and ship Phase 0.5 with no-op notification channels. **Rejected** — ships dead code paths that pretend to work, creates confusion about what's real.
+3. Carve email + Slack out into a new **Phase 0.75** that ships after Phase 0.5, before Phase 1. **Chosen.** Phase 0.5 is in-app only (admin page + Pulse + in-app bell badge in the header). Phase 0.75 adds email, Slack, user preferences UI, and the fatigue-guard refactor.
+
+**Effect on Phase 0.5 scope:** removes §9.4 (email), §9.5 (Slack), §9.6 (user preferences), §9.9 (SMS stub), the email/Slack adapter files, and the notification-preferences schema change. Keeps §9.2 (notify job — still useful for in-app Pulse surfacing and future fan-out), §9.3 (fatigue guard — extract the base class now so Phase 0.75 can reuse it), §9.8 (observability of notifications in the event log).
+
+**Effect on Phase 0.5 user experience:** sysadmins see incidents on the admin page, in Pulse, and via a red-dot badge on the Layout nav entry. They do NOT receive pushed email or Slack alerts. For in-development / in-staging monitoring that is sufficient.
+
+### 0.4 Decisions that did NOT change from v1
+
+Everything else in v1 stands: the three-table schema, ingestor design, fingerprint algorithm, 7 integration points, principal-context Option A, incident lifecycle, escalate-to-agent via Orchestrator, Pulse integration, and the broader rollout + risk framing.
 
 ---
 
 ## Table of contents
 
+0. [Decisions log (v2)](#0-decisions-log-v2)
 1. [Summary](#1-summary)
 2. [Context](#2-context)
 3. [Goals, non-goals, success criteria](#3-goals-non-goals-success-criteria)
@@ -17,12 +65,12 @@
 6. [Phase 0 — Integration points](#6-phase-0--integration-points)
 7. [Phase 0.5 — Routes, permissions, principal context](#7-phase-05--routes-permissions-principal-context)
 8. [Phase 0.5 — Admin UI](#8-phase-05--admin-ui)
-9. [Phase 0.5 — Notifications](#9-phase-05--notifications)
+9. [Phase 0.5 — In-app notifications](#9-phase-05--in-app-notifications)
 10. [Phase 0.5 — Pulse integration + manual-escalate-to-agent](#10-phase-05--pulse-integration--manual-escalate-to-agent)
 11. [File inventory](#11-file-inventory)
 12. [Testing strategy](#12-testing-strategy)
 13. [Rollout plan](#13-rollout-plan)
-14. [Dependencies and open questions](#14-dependencies-and-open-questions)
+14. [Dependencies and assumptions](#14-dependencies-and-assumptions)
 15. [Risk register](#15-risk-register)
 16. [Future phases (summary only)](#16-future-phases-summary-only)
 
@@ -99,9 +147,10 @@ There is no central error/incident table. Errors live in five different surfaces
 
 - G0.5.1 Sysadmins have one page (`/system/incidents`) showing all open incidents, sortable and filterable by severity, source, status, classification, org.
 - G0.5.2 Sysadmins can ack / resolve / suppress / escalate-to-agent incidents from that page.
-- G0.5.3 Critical and high severity system-fault incidents trigger email and Slack notifications, deduplicated by the reusable fatigue guard.
-- G0.5.4 System incidents appear in Pulse for sysadmin users under a new `system_incident` kind.
-- G0.5.5 The "Escalate to agent" action creates a task scoped to a nominated system admin subaccount, which the existing Orchestrator routes to an appropriate agent for diagnosis. No new system agent is created in this phase.
+- G0.5.3 Critical and high severity system-fault incidents surface in-app via (a) Pulse under a new `system_incident` kind, (b) a red-dot badge on the Layout nav entry, and (c) the admin page's filtered default view. **Email and Slack push notifications defer to Phase 0.75** (see §0.3).
+- G0.5.4 System incidents appear in Pulse for sysadmin users under a new `system_incident` kind (same mechanism as G0.5.3 — called out separately because Pulse is a distinct surface).
+- G0.5.5 The "Escalate to agent" action creates a task scoped per §10.3 (org-scoped incidents → own org sentinel; system-level incidents → seeded `System Operations` subaccount), which the existing Orchestrator routes to an appropriate agent for diagnosis. No new system agent is created in this phase.
+- G0.5.6 System admins can trigger a deliberate test incident from the admin page (§8.9) for pipeline verification. Test incidents are hidden from the default list.
 
 ### 3.2 Non-goals
 
@@ -112,6 +161,8 @@ There is no central error/incident table. Errors live in five different surfaces
 - NG5 **No log persistence layer.** `logger.ts` keeps writing to stdout; we do not add a `system_logs` table in Phase 0. Incidents are the persistent record; full log bodies live in `errorDetail`/`payload` on the event row.
 - NG6 **No user-facing incident surface.** Phase 0.5 is system-admin only. Customer orgs do not see system incidents.
 - NG7 **No external observability integration** (Sentry, Datadog, Loki). Out of scope for this phase — can layer on later by hooking the same ingestion service.
+- NG7.5 **No email, Slack, or SMS push notifications in Phase 0.5** — defers to Phase 0.75 per §0.3. The in-app Pulse + badge + admin-page surfaces cover Phase 0.5's supervision needs.
+- NG7.6 **No per-user notification preferences in Phase 0.5** — deferred to Phase 0.75 with the push channels.
 - NG8 **No replacement of existing per-surface error columns.** `agent_runs.errorMessage`, `connector_configs.lastSyncError`, etc. remain as they are — the new sink is additive. Don't rip up working code.
 - NG9 **No migration of existing historical errors.** The table starts empty on deploy.
 - NG10 **No breaking changes to the `asyncHandler` or global error handler public shape.** Response payloads to the client are unchanged; ingestion is a side-effect.
@@ -132,10 +183,11 @@ There is no central error/incident table. Errors live in five different surfaces
 **Phase 0.5 is done when:**
 
 - SC0.5.1 A sysadmin navigating to `/system/incidents` sees the list with correct filters and lifecycle actions working.
-- SC0.5.2 Triggering a critical system-fault delivers an email (if SMTP configured) and a Slack message (if Slack integration active) to the sysadmin notification channel within 60s.
-- SC0.5.3 Firing the same critical incident 20 times in 5 minutes delivers at most `N` notifications where `N` is configured by the fatigue guard (default 3).
-- SC0.5.4 The "Escalate to agent" button creates a task in the designated system-admin subaccount, Orchestrator routes it, and an agent run is created against the incident's context. The incident's status flips to `escalated` and an event row is written.
+- SC0.5.2 Triggering a critical system-fault surfaces in the Pulse feed within one polling tick (10s), and the Layout nav entry shows a red-dot badge. (Email / Slack validation moves to Phase 0.75 SC set.)
+- SC0.5.3 Firing the same critical incident 20 times in 5 minutes produces one incident row with `occurrence_count = 20` and 20 `occurrence` event rows. (Notification fatigue-guard validation is deferred to Phase 0.75 where push channels exist.)
+- SC0.5.4 The "Escalate to agent" button creates a task in the correct subaccount per §10.3, Orchestrator routes it, and an agent run is created against the incident's context. The incident's status flips to `escalated` and an event row is written.
 - SC0.5.5 Pulse for a sysadmin user shows a `system_incident` card for each open non-acked critical/high incident in their visible orgs.
+- SC0.5.6 The "Trigger test incident" button (§8.9) creates an incident with `isTestIncident=true`, hidden from the default list; toggling "Show test incidents" reveals it.
 
 ### 3.4 Explicit non-requirements that often get scope-crept in
 
@@ -204,6 +256,9 @@ export const systemIncidents = pgTable(
     // Escalation metadata
     escalatedAt: timestamp('escalated_at', { withTimezone: true }),
     escalatedTaskId: uuid('escalated_task_id').references(() => tasks.id),  // set by manual-escalate-to-agent button
+
+    // Test-incident flag (per Q8 §0.2) — set by the admin UI test-trigger; excluded from default list + push notifications
+    isTestIncident: boolean('is_test_incident').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -461,7 +516,8 @@ Callers should set severity when they know it. When they don't:
 | `source='route'` and `statusCode >= 500` | `medium` |
 | `source='route'` and `statusCode in [408, 409, 429]` | `low` |
 | `source='job'` (landed in DLQ, retries exhausted) | `high` |
-| `source='agent'` (run terminal-failed) | `medium` |
+| `source='agent'` (run terminal-failed), agent is **not** system-managed | `medium` |
+| `source='agent'` (run terminal-failed), agent has `isSystemManaged=true` (per Q3 §0.2) | `high` |
 | `source='connector'` (poll failure) | `low` on first, `medium` on recurrence — handled in ingestor |
 | `source='skill'` with retryable error exhausted | `medium` |
 | `source='llm'` with `parse_failure` or `reconciliation_required` | `high` |
@@ -579,7 +635,7 @@ await recordIncident({
 ```ts
 await recordIncident({
   source: 'agent',
-  severity: run.status === 'timeout' ? 'medium' : 'medium',
+  severity: agent.isSystemManaged ? 'high' : 'medium',   // per Q3 §0.2
   summary: truncateSummary(`Agent run failed: ${agent.slug}`),
   errorCode: run.errorDetail?.code,
   errorDetail: run.errorDetail,
@@ -587,7 +643,7 @@ await recordIncident({
   affectedResourceId: run.id,
   organisationId: run.organisationId,
   subaccountId: run.subaccountId,
-  correlationId: run.correlationId,
+  correlationId: run.correlationId ?? null,              // agent_runs correlationId added by prereq migration (§14.1 P1)
 }).catch(/* swallow */);
 ```
 
@@ -808,9 +864,14 @@ Opens when a row is clicked. Right-side panel, not a route change (no URL update
 - Loading: skeleton rows.
 - Error fetching: inline error with retry button.
 
-### 8.5 Real-time behaviour
+### 8.5 Real-time behaviour (per Q5 §0.2)
 
-**Phase 0.5 is polling-based**, not WebSocket. Page refetches the list every 10 seconds while visible (use existing polling primitive — look for patterns in `JobQueueDashboardPage`). Drawer does NOT refetch detail on a tick — the user can press a refresh button if they want the latest event timeline. Real-time WebSocket integration is a later phase, optional.
+- **Polling interval: 10 seconds** when the tab is visible.
+- **Pauses when tab is backgrounded** via the Page Visibility API — no DB burn on idle tabs.
+- **Manual refresh button** in the page header for immediate refetch.
+- **Auto-refresh toggle** in the page header lets admins disable polling entirely (useful when viewing a frozen snapshot while triaging).
+- **WebSocket push for new/updated incidents** via the `system_incident:updated` event emitted from the notify job (§9.4). Sub-second latency when something significant happens; polling is the fallback for less-critical changes (occurrence count increments on existing incidents).
+- Drawer does NOT refetch detail on a tick. A manual "refresh" icon at the top of the event timeline refetches on demand.
 
 ### 8.6 Navigation registration
 
@@ -841,38 +902,63 @@ Per CLAUDE.md architecture rule ("Tables: column-header sort + filter by default
 
 Active filter indicator on column headers (indigo dot). Active sort indicator (up/down arrow). "Clear all filters" button appears when any non-default sort/filter is applied.
 
-## 9. Phase 0.5 — Notifications
+### 8.9 Test-incident trigger (per Q8 §0.2)
 
-### 9.1 Scope
+A **"Trigger test incident"** button sits in the page header next to the refresh controls. Clicking it:
 
-Notifications are **system-admin-only** in Phase 0.5. Customer orgs don't see system incidents; they don't get notified. Only users with `system_admin = true` who have opted into notifications receive them.
+1. Opens a small form: severity radio (default `low`), source dropdown (default `synthetic`), optional free-form `summary` (default "Manual test incident from admin UI").
+2. Submits to `POST /api/system/incidents/test` (new endpoint, `requireSystemAdmin`).
+3. The endpoint calls `recordIncident` with `isTestIncident: true` column set (see below), fingerprint `test:manual:{userId}:{timestamp}` so each click produces a distinct incident.
+4. Returns the new incident to the client; the page redirects to the detail drawer.
 
-Channels: **email** and **Slack**. SMS is **stubbed** (interface defined, no implementation) — add the provider later.
+**Schema addition:** `system_incidents.is_test_incident boolean NOT NULL DEFAULT false`. Added in the Phase 0 migration from the start (avoids a Phase 0.5 schema change).
 
-### 9.2 Notification trigger job
+**Default list filter:** the admin page filters `isTestIncident = false` by default. A "Show test incidents" toggle in the filter bar flips it.
+
+**Notification behaviour:** test incidents bypass the notify job (`isTestIncident=true` short-circuits §9.2) — no WebSocket push, no Pulse surfacing. They exist purely for pipeline verification. (Phase 0.75 will also exclude them from push notifications.)
+
+**Rate limit:** max 10 test incidents per system-admin per hour — prevents misuse and accidental spam during rapid testing.
+
+**Why this is useful:** after deploying Phase 0 and 0.5, the operator can verify the sink is working without needing to reproduce a real error. Also essential for validating Phase 0.75 notification wiring once email/Slack are live.
+
+## 9. Phase 0.5 — In-app notifications
+
+### 9.1 Scope (revised per §0.3)
+
+Phase 0.5 ships **in-app only** notification surfaces. Email, Slack, and SMS push channels — along with per-user preferences — defer to **Phase 0.75** (see §16.1).
+
+In-app surfaces in Phase 0.5:
+
+1. **Admin incidents page** (`/system/incidents`) — default view shows open + investigating + escalated incidents. Primary triage surface.
+2. **Pulse** — `system_incident` kind in the `internal` lane for sysadmin users.
+3. **Layout nav badge** — red dot on the "Incidents" nav entry when there are open critical or high incidents. Numeric badge for count when > 0.
+4. **Event log** — every notification-surfacing event (opened, severity-escalated, etc.) appends to the incident's `system_incident_events` timeline, so Phase 0.75's push channels can consume the same signal without adding new observability hooks.
+
+Sysadmins are the only recipients. Non-sysadmin users see no system-incident surfaces.
+
+### 9.2 Notification trigger job (Phase 0.5 role)
 
 **New pg-boss job:** `systemMonitor.notify`
 
-Enqueued by the ingestion service (§5.1 step 6) when an incident crosses a notification threshold. Consumed by a new handler:
-
-**New file:** `server/jobs/systemIncidentNotifyJob.ts`
-
-Thresholds that enqueue:
+Enqueued by the ingestion service (§5.1 step 6) when an incident crosses a notification threshold:
 
 1. An incident is newly opened AND severity is `high` or `critical`.
 2. An incident occurrence count crosses `10`, `100`, or `1000` (configurable via `SYSTEM_INCIDENT_NOTIFY_MILESTONES`).
 3. An incident's severity escalates via the "never-de-escalate" rule (e.g. existing `medium` incident receives a `high` occurrence).
 
-The job handler:
+Consumed by a new handler: **`server/jobs/systemIncidentNotifyJob.ts`**
+
+In Phase 0.5 the job does:
 
 1. Fetches the incident.
 2. Checks suppression — if `system_incident_suppressions` matches, skip.
-3. Checks fatigue guard (§9.3).
-4. Fans out to configured channels (§9.4, §9.5).
-5. Appends a `notification_sent` event to the incident's event log for each channel dispatched.
-6. If all channels suppressed by fatigue guard, appends a `notification_throttled` event with the guard's reason.
+3. Writes a `notification_surfaced` event to the incident's event log.
+4. Emits a WebSocket `system_incident:updated` event to all connected sysadmin sessions so the admin page + nav badge refresh without waiting for the 10-second poll tick.
+5. *(Phase 0.75 extends this handler to fan out to email/Slack after the fatigue-guard check.)*
 
-Job idempotency key: `incident-notify:${incidentId}:${severity}:${occurrenceCount}`. Guards against duplicate notifications from retries.
+Job idempotency key: `incident-notify:${incidentId}:${severity}:${occurrenceCount}`. Guards against duplicate events from retries.
+
+**Why build the job now even though Phase 0.5 doesn't push anywhere:** (a) the ingestion service already emits the signal, (b) the WebSocket fan-out is a legitimate Phase 0.5 feature, (c) it leaves Phase 0.75 as a small diff that only adds channel adapters. The job is not dead code.
 
 ### 9.3 Fatigue guard — reuse AlertFatigueGuard
 
@@ -893,87 +979,44 @@ export abstract class AlertFatigueGuardBase {
 
 Then:
 
-- Existing `AlertFatigueGuard` extends the base (wired to `anomaly_events` + `accountId`).
-- **New `SystemIncidentFatigueGuard`** extends the base (wired to `system_incident_events` with `event_type='notification_sent'` + `fingerprint` as the dedupe key).
+- Existing `AlertFatigueGuard` extends the base (wired to `anomaly_events` + `accountId`). **Behaviour preserved byte-for-byte.** This is a safe refactor — Portfolio Health Agent's limits, count queries, and delivery decisions remain identical.
+- A **`SystemIncidentFatigueGuard` subclass is created but not invoked in Phase 0.5** (no push channels to gate). It is wired up in Phase 0.75.
 
-Default limits for system incidents:
+**Why extract now even though we don't use it:** Phase 0.75 will add email + Slack channels and immediately need the guard. Extracting the base class in Phase 0.5 keeps the Portfolio Health refactor isolated in a smaller commit and avoids bundling an unrelated refactor into Phase 0.75's notification PR. It also gives Phase 0.5 a place to document the behavioural contract.
+
+Default limits for system incidents (referenced by Phase 0.75):
 
 ```ts
 const SYSTEM_INCIDENT_ALERT_LIMITS: AlertLimits = {
-  maxAlertsPerRun: 5,                  // per invocation of the notify job
-  maxAlertsPerKeyPerDay: 6,            // per fingerprint per calendar day (critical bypass: +2)
-  batchLowPriority: true,              // low-severity incidents batched into daily digest
+  maxAlertsPerRun: 5,
+  maxAlertsPerKeyPerDay: 6,            // per fingerprint per calendar day
+  batchLowPriority: false,             // revisit in Phase 1 with daily digest
   criticalBypass: true,                // critical incidents can exceed maxAlertsPerKeyPerDay by 2
 };
 ```
 
-`self`-source incidents (§5.7) bypass the fatigue guard on first occurrence per UTC day.
+`self`-source incidents (§5.7) bypass the fatigue guard on first occurrence per UTC day (applies in Phase 0.75 when guard is active).
 
-### 9.4 Email channel
+### 9.4 WebSocket fan-out
 
-**Service:** `server/services/notificationService.ts` (new) — generic notification abstraction with per-channel adapters.
+Extend the existing WebSocket infrastructure (`client/src/hooks/useSocket.ts` + server-side emitter) to emit a `system_incident:updated` room-scoped event to users with `system_admin = true`.
 
-**Email adapter:** reuse existing email infrastructure (find by searching for `sendEmail`, SMTP config, or SendGrid/Postmark integration). If no email infra exists, add a stub that logs `notification_email_stub` and document as a known gap — do NOT add SMTP config in this PR.
+The admin page + Layout nav subscribe to this event and refetch. This cuts user-visible latency from the 10s polling interval down to sub-second on new incidents — without pushing anything outside the browser.
 
-Email shape:
+### 9.5 Observability of notifications
 
-- **Subject:** `[SEV-CRITICAL] <summary>` (or HIGH, MEDIUM, LOW — matching severity)
-- **Body:** plaintext — summary, fingerprint, first-seen, occurrences, direct link to `/system/incidents/:id` in the admin UI, raw error-detail preview (truncated)
-- **Recipient:** system-admin users with `notificationPreferences.systemIncidents.email = true` (see §9.6)
+Every notification-surfacing event writes a `notification_surfaced` row to the incident's `system_incident_events` log. Phase 0.75 will additionally write `email_sent`, `slack_sent`, `email_throttled`, etc. events using the same timeline — a sysadmin reading the incident detail drawer always sees "what was done about this, when, by whom" in one place.
 
-### 9.5 Slack channel
+### 9.6 What's NOT in Phase 0.5 (explicit)
 
-**Slack adapter:** reuse existing Slack integration (look for `server/services/slack*` or `server/routes/slack*`). Project already has Slack inbound jobs, so outbound infrastructure likely exists.
+- No email.
+- No Slack.
+- No SMS.
+- No per-user notification preferences.
+- No daily digest.
+- No fatigue-guard invocation (the class exists; nothing calls it).
 
-Slack shape:
-
-- Post to a configured system-admin channel (ID stored in `systemConfig` table or env var `SYSTEM_INCIDENT_SLACK_CHANNEL_ID`).
-- Message uses Slack Block Kit: severity-coloured header, summary as title, fingerprint + source + occurrences as fields, link button to admin UI, and quick-action buttons (`Ack`, `Resolve`, `Suppress 24h`) that POST to a webhook endpoint in `server/routes/slackIncidentActions.ts` (new — out of scope for detailed design in this spec; stub the interaction handler and note it as a Phase 0.5 follow-up).
-
-**Minimum viable Slack:** block-kit message + link button to admin UI. Quick-action buttons are nice-to-have; ship if time permits, defer if not.
-
-### 9.6 User notification preferences
-
-**Schema change:** extend `users` table OR add a `user_notification_preferences` table (existing `user_settings` table can accommodate — check `server/db/schema/userSettings.ts`).
-
-Shape:
-
-```ts
-interface UserNotificationPreferences {
-  systemIncidents: {
-    email: boolean;
-    slack: boolean;
-    minSeverity: 'low' | 'medium' | 'high' | 'critical';  // filter — never notify below this
-  };
-}
-```
-
-**Default for system-admin users:** email + Slack enabled, `minSeverity: 'high'`. This prevents day-1 pager fatigue.
-
-**Default for non-system-admin users:** all disabled. Non-admins don't receive system-incident notifications.
-
-UI for preferences: a section on an existing user settings page — do NOT build a new settings page. If no appropriate user-settings page exists, note as a follow-up and add preferences via API-only in Phase 0.5 (read the defaults, no UI toggle).
-
-### 9.7 Daily digest (deferred)
-
-Batched low-priority notifications (per the fatigue guard's `batchLowPriority` flag) accumulate into a daily digest email. Phase 0.5 scope: **write to a "pending digest" queue, do NOT send**. Digest delivery is a Phase 1 follow-up. This prevents low-severity incidents from silently disappearing while keeping scope contained.
-
-### 9.8 Observability of notifications
-
-Every notification attempt (delivered or suppressed) writes an event to the incident's `system_incident_events` log. This closes the loop: when debugging "did we get paged for incident X?" the answer is in one place — the incident's event timeline.
-
-### 9.9 SMS (stub)
-
-Interface defined in `notificationService.ts`:
-
-```ts
-interface NotificationChannel {
-  send(payload: NotificationPayload): Promise<void>;
-  name: 'email' | 'slack' | 'sms';
-}
-```
-
-No SMS adapter implementation. Register a `SmsChannelStub` that throws `NotImplementedError`. When SMS provider is chosen, implement the adapter and register it — no further refactor needed.
+All of the above are in Phase 0.75 (§16.1).
 
 ## 10. Phase 0.5 — Pulse integration + manual-escalate-to-agent
 
@@ -1047,19 +1090,40 @@ The existing `orchestratorFromTaskJob.ts` job is automatically enqueued by `task
 
 **Crucially: no new agent is built for Phase 0.5.** The escalation leverages existing routing infrastructure. If Orchestrator doesn't know what to do with "diagnose this incident" — which it likely won't on day one — the sysadmin will see a "no capable agent" response and learn the system's current limits. This is useful diagnostic information for designing Phase 2.
 
-### 10.3 Designated system-admin subaccount
+### 10.3 Designated escalation target (per Q2 §0.2 — decided)
 
-For the escalation to produce a task that the Orchestrator can route, the task needs a concrete org + subaccount context. Three options:
+**Decision: Option 3 (hybrid) with a new seeded "System Operations" org for the system-level fallback.**
 
-**Option 1: Use the system-admin user's primary org + subaccount.** Simple; the task shows up in the admin's own Tasks page. Risk: the admin's org becomes cluttered with incident tasks unrelated to their own work.
+**Resolution logic at escalation time:**
 
-**Option 2: Dedicated "System Operations" org + subaccount.** Seeded via migration. All incident escalations route there. Cleanest separation; requires a new seeded org.
+```ts
+if (incident.organisationId) {
+  // Org-scoped incident — escalate inside the affected org's sentinel subaccount
+  // (same pattern Orchestrator uses for task routing today)
+  target = { orgId: incident.organisationId, subaccountId: sentinelSubaccountOf(incident.organisationId) };
+} else {
+  // System-level incident — escalate to the seeded System Operations org
+  target = { orgId: SYSTEM_OPS_ORG_ID, subaccountId: SYSTEM_OPS_SUBACCOUNT_ID };
+}
+```
 
-**Option 3: Per-incident resolution:** if `incident.organisationId` is set, use that org + subaccount; if null, fall back to Option 1 or 2.
+**System Operations org seeding:**
 
-**Recommendation: Option 3 with Option 2 as fallback.** Org-scoped incidents escalate inside the affected org (makes sense — the specialists there have the context). System-level incidents escalate to a dedicated System Ops subaccount. This requires a new migration to seed `System Operations` as an org + subaccount.
+- New column: `organisations.is_system_org boolean NOT NULL DEFAULT false`. Added in the Phase 0.5 migration.
+- Seed migration creates one row with `is_system_org = true`, name `"System Operations"`, slug `system-ops`. Only one such row allowed system-wide (enforced by a partial unique index: `UNIQUE(is_system_org) WHERE is_system_org = true`).
+- Seeds one sentinel subaccount inside it (`"System Ops"`), modelled on the existing org-sentinel subaccount pattern used by Orchestrator.
+- The System Operations org is **hidden from non-sysadmin users** — any org-listing endpoint must filter `is_system_org = false` unless the caller has `system_admin = true`. Add this filter to existing org-listing services as a prerequisite to this migration.
+- `SYSTEM_OPS_ORG_ID` and `SYSTEM_OPS_SUBACCOUNT_ID` are resolved at app boot into a runtime config cache; they are not env vars (avoid per-env drift).
 
-**Open question (see §14):** does this warrant a new seeded org, or do we store escalations against a designated "system" flag on an existing infrastructure org? Needs user input before migration design.
+**Why a seeded org and not a flag on an existing org:**
+
+1. No existing org is shaped to be "infrastructure" — picking one would couple incident escalations to a tenant.
+2. The System Operations org can later host: the monitor agent (Phase 2) which runs with no natural tenant, the dev agent (Phase 4), and any other platform-level agents. We'd end up needing this anyway.
+3. Isolation is stronger: incident tasks never pollute a tenant's task board, and visibility gating is a single column check, not ad-hoc.
+
+**Why not use Orchestrator's existing sentinel pattern system-wide:**
+
+Orchestrator's sentinel lives inside each tenant org. There's no canonical "system" org to place a system-wide sentinel in. The seeded `System Operations` org *is* the system-wide sentinel — it is the structural answer to "where do platform-level agents live?"
 
 ### 10.4 Task description template
 
@@ -1152,12 +1216,15 @@ These are all intentional Phase 2 boundaries.
 - `server/services/incidentIngestor.ts` — the core ingestion function (§5)
 - `server/services/incidentIngestorPure.ts` — pure logic companion (fingerprint, classify, normalise) — test target
 - `server/services/systemIncidentService.ts` — CRUD-ish service (§7.2)
-- `server/services/notificationService.ts` — generic multi-channel notification abstraction (§9.4)
-- `server/services/notifications/emailChannel.ts`
-- `server/services/notifications/slackChannel.ts`
-- `server/services/notifications/smsChannelStub.ts`
 - `server/services/alertFatigueGuardBase.ts` — extracted base class (§9.3)
-- `server/services/systemIncidentFatigueGuard.ts` — subclass for system incidents
+- `server/services/systemIncidentFatigueGuard.ts` — subclass declared in Phase 0.5; **invoked in Phase 0.75**
+
+**Deferred to Phase 0.75 (NOT in Phase 0.5):**
+
+- ~~`server/services/notificationService.ts`~~ — Phase 0.75
+- ~~`server/services/notifications/emailChannel.ts`~~ — Phase 0.75
+- ~~`server/services/notifications/slackChannel.ts`~~ — Phase 0.75
+- ~~`server/services/notifications/smsChannelStub.ts`~~ — Phase 0.75
 
 **Server — routes:**
 
@@ -1203,26 +1270,36 @@ These are all intentional Phase 2 boundaries.
 | `server/services/skillExecutor.ts` | Add `recordIncident` on retry exhaustion with system-fault |
 | `server/services/llmRouter.ts` | Add `recordIncident` for parse-failure + reconciliation-required |
 | `server/services/pulseService.ts` | Add `system_incident` kind + `getSystemIncidents` getter |
-| `server/services/alertFatigueGuard.ts` | Refactor to extend new base class |
+| `server/services/alertFatigueGuard.ts` | Refactor to extend new base class (behaviour preserved byte-for-byte) |
 | `server/lib/permissions.ts` | Add `SYSTEM_PERMISSIONS.INCIDENT_*` keys |
 | `server/config/rlsProtectedTables.ts` | Explicitly omit the 3 new tables (Option A per §7.4) |
 | `server/db/schema/index.ts` | Re-export 3 new schema files |
-| `server/jobs/index.ts` | Register 2 new jobs |
-| `server/db/schema/tasks.ts` | Add `linkedEntityKind` + `linkedEntityId` if missing (§10.5) |
-| `server/db/schema/userSettings.ts` OR `users.ts` | Add `notificationPreferences` JSON column (§9.6) |
+| `server/db/schema/agentRuns.ts` | Add `correlation_id` column (prereq P1 per §0.1) |
+| `server/db/schema/tasks.ts` | Add `linkedEntityKind` + `linkedEntityId` columns (prereq P4 per §0.1) |
+| `server/db/schema/organisations.ts` | Add `isSystemOrg` boolean column + partial unique index (§10.3) |
+| `server/jobs/index.ts` | Register 2 new jobs (`systemIncidentNotifyJob`, `systemMonitorSelfCheckJob`) |
 | `server/services/taskService.ts` | Accept `linkedEntityKind` + `linkedEntityId` in createTask |
+| `server/services/organisationService.ts` (or equivalent org-listing service) | Filter `is_system_org = false` for non-sysadmin callers (§10.3) |
 | `client/src/App.tsx` | Add `/system/incidents` route + lazy import |
-| `client/src/components/Layout.tsx` | Add nav entry under System Admin section |
+| `client/src/components/Layout.tsx` | Add nav entry under System Admin section with red-dot badge (§9.1) |
+| `client/src/hooks/useSocket.ts` (or equivalent) | Subscribe to `system_incident:updated` room event (§9.4) |
 | `architecture.md` | New section: System Incidents + Monitoring Foundation |
 | `docs/capabilities.md` | Add "System Incident Monitoring" entry under Support-facing section (editorial rules §1) |
 
+**Deferred to Phase 0.75 (NOT in Phase 0.5):**
+
+- ~~`server/db/schema/userSettings.ts`~~ — no `notificationPreferences` column in Phase 0.5 (push channels don't exist)
+
 ### 11.3 Not changed (explicit non-changes)
 
-- `agent_runs`, `connector_configs`, `workspace_health_findings` schemas — unchanged. The sink is additive.
+- `connector_configs`, `workspace_health_findings` schemas — unchanged. The sink is additive.
+- `agent_runs` — only a nullable `correlation_id` column is added (prereq P1); no behavioural changes.
+- `tasks` — only `linkedEntityKind` + `linkedEntityId` columns are added (prereq P4); no behavioural changes.
 - Global error handler's client response shape — unchanged.
 - Existing `asyncHandler` behaviour — unchanged (ingestion is side-effect).
 - `anomaly_events` table — unchanged; it stays for its own purpose (business-metric anomalies for ClientPulse).
-- Portfolio Health Agent — unchanged; its fatigue guard refactors to the base class but the existing behaviour is preserved byte-for-byte.
+- Portfolio Health Agent — unchanged. Its `AlertFatigueGuard` refactors to extend the new base class, but behaviour is preserved byte-for-byte and verified by a regression test.
+- All existing org-listing endpoints — behaviour unchanged for sysadmin users. For non-sysadmins, a new `is_system_org = false` filter is added; since only the newly-seeded System Operations row has `is_system_org = true`, existing orgs are unaffected.
 
 ## 12. Testing strategy
 
@@ -1303,16 +1380,19 @@ If p95 > 100ms, enable async mode (§5.8) before shipping.
 
 Commits in order:
 
-1. Schema + migration + RLS manifest
-2. Ingestor service + pure tests
-3. Ingestor integration points (one commit per integration: route, asyncHandler, DLQ, agent, connector, skill, LLM)
-4. Routes + service
-5. Notifications service + fatigue guard refactor
-6. Notify job + self-check job
-7. Admin UI page + components + client tests
-8. Pulse integration
-9. Manual escalate-to-agent service + task shape
-10. Architecture.md + capabilities.md updates (per CLAUDE.md §11 "docs stay in sync")
+1. Prereq mini-migrations (P1 agent_runs.correlation_id, P4 tasks.linkedEntityKind/Id, §10.3 organisations.isSystemOrg + System Operations seed row)
+2. Core schema + migration + RLS manifest (three new incident tables + isTestIncident column)
+3. Ingestor service + pure tests
+4. Ingestor integration points (one commit per integration: route, asyncHandler, DLQ, agent, connector, skill, LLM)
+5. Routes + service + permissions
+6. AlertFatigueGuardBase extraction (Portfolio Health refactor, behaviour-preserving)
+7. Notify job (in-app + WebSocket fan-out, no push channels)
+8. Self-check job
+9. Admin UI page + components + test-incident trigger + client tests
+10. Pulse integration + Layout nav badge
+11. Manual escalate-to-agent service + task shape + System Operations org wiring
+12. Org-listing service filter for non-sysadmin visibility (§10.3)
+13. Architecture.md + capabilities.md updates (per CLAUDE.md §11 "docs stay in sync")
 
 ### 13.3 Deployment
 
@@ -1324,7 +1404,11 @@ Commits in order:
 
 No feature flag for ingestion — if we deploy it, we want it running. CLAUDE.md §Core Principles: "Don't use feature flags or backwards-compatibility shims when you can just change the code."
 
-The **only** flag: `SYSTEM_INCIDENT_NOTIFICATIONS_ENABLED` (env var, default `false`) — gates outbound email/Slack dispatch. Lets staging ingest without paging. Flip to `true` in production after a day of observation.
+In Phase 0.5 there are no outbound push channels (per §9), so there is no notification kill switch at this phase — WebSocket fan-out + in-app surfacing are always on.
+
+The single kill switch in Phase 0.5 is `SYSTEM_INCIDENT_INGEST_ENABLED` (env var, default `true`) — a safety valve on the ingestor itself per §13.6. All other behaviour is gated by status, suppression, and the `isTestIncident` flag.
+
+Phase 0.75 will re-introduce `SYSTEM_INCIDENT_NOTIFICATIONS_ENABLED` as the push-channel kill switch.
 
 ### 13.5 Post-deploy monitoring
 
@@ -1350,36 +1434,39 @@ If a critical regression is found:
 - Daily digest delivery (deferred from §9.7).
 - External observability integration (Sentry/Datadog/Loki hook — a 50-line adapter).
 
-## 14. Dependencies and open questions
+## 14. Dependencies and assumptions
 
-### 14.1 Prerequisites (must be resolved before Phase 0 ships)
+All v1 open questions are resolved in §0.2. All v1 prerequisites are investigated in §0.1. This section retains the remaining runtime-only assumptions and the prerequisite work required inside the Phase 0 PR.
 
-- **P1 — Correlation ID propagation audit (§6.9).** Confirm `req.correlationId` on every route, propagation into pg-boss payloads, presence on `agent_runs` rows. If missing, add as a prerequisite PR.
-- **P2 — Email delivery capability.** Confirm the project has working email infrastructure. If not, stub only (§9.4).
-- **P3 — Slack outbound capability.** Confirm working Slack outbound. If not, stub only (§9.5).
-- **P4 — `tasks.linkedEntityKind/Id` columns.** Confirm exist; add if not (§10.5).
-- **P5 — User notification preferences storage.** Confirm `user_settings` or `users` can accommodate; add column if not (§9.6).
+### 14.1 Prerequisite work bundled into the Phase 0 PR
 
-### 14.2 Open questions for user input
+None of these are separate PRs; they are included as preparatory commits within the Phase 0 PR.
 
-| Q | Question | Owner decision needed |
+- **P1 — `agent_runs.correlation_id` column.** Added via mini-migration + schema update. Populated on new rows only — no backfill.
+- **P1 — pg-boss payload convention.** Document in `architecture.md` that new pg-boss job payloads SHOULD include a `correlationId` field. Do not bulk-refactor existing jobs. New jobs added from this PR onward follow the convention.
+- **P4 — `tasks.linkedEntityKind/Id` columns.** Added via Phase 0.5 migration.
+- **§10.3 — `organisations.isSystemOrg` column.** Added via Phase 0.5 migration. One-time seed row for "System Operations" org + sentinel subaccount.
+
+Prerequisites that dropped OUT of this spec (per §0.3):
+
+- ~~P2 (email)~~ — moved to Phase 0.75
+- ~~P3 (Slack)~~ — moved to Phase 0.75
+- ~~P5 (user notification preferences)~~ — moved to Phase 0.75
+
+### 14.2 Resolved decisions
+
+See §0.2 for the full 8-question decision table. All Q1–Q8 are answered; no outstanding user-input items gate Phase 0 or Phase 0.5 implementation.
+
+### 14.3 Assumptions (runtime-only, cannot be verified until deployed)
+
+| ID | Assumption | Risk if wrong |
 |---|---|---|
-| Q1 | Naming: call it `system_incidents` or `platform_incidents` or `operational_incidents`? | User |
-| Q2 | Designated system-admin subaccount for escalation (§10.3): new seeded org, or use an existing infrastructure org with a flag? | User |
-| Q3 | Severity defaults per source (§5.5) — is the table's judgement about right? (Primarily: should agent-run failure default to `medium` or `high`?) | User |
-| Q4 | Notification `minSeverity` default (§9.6) — is `high` the right floor, or should low-traffic projects get `medium`? | User |
-| Q5 | Phase 0.5 polling interval (§8.5) — 10s, 30s, 60s? Tradeoff: responsiveness vs DB load. | User |
-| Q6 | Should Phase 0.5 include a daily digest delivery (§9.7), or is deferring to Phase 1 OK? | User |
-| Q7 | Should suppressions have a hard upper limit (e.g. max 50 permanent suppressions system-wide) to prevent "suppress our way out of bugs"? | User |
-| Q8 | Do we want a `tests/` helper skill for system-admins to deliberately trigger a test incident from the UI (for end-to-end verification)? | User |
-
-### 14.3 Assumptions (documented so they can be challenged)
-
-- **A1** — The existing `AlertFatigueGuard` is the right pattern to reuse. If the Portfolio Health team plans to rewrite it, this spec needs adjustment.
-- **A2** — The Orchestrator's existing routing logic can handle "diagnose an incident" tasks well enough to be useful, or at minimum fail clearly. Not validated — depends on §10.2 behaviour in practice.
-- **A3** — Ingest p95 latency < 100ms is achievable with current DB shape. If tests show otherwise, switch to async mode per §5.8.
-- **A4** — 16-char fingerprint is sufficient dedupe resolution at our scale. Revisit if collision rate > 0.1%.
-- **A5** — Correlation IDs propagate reliably through pg-boss and agent runs. Validated by P1 audit.
+| A1 | Existing `AlertFatigueGuard` behaviour is preserved byte-for-byte through the base-class extraction. | Portfolio Health Agent alerting regresses. Mitigated by integration test that runs the refactored guard against the same inputs the original test uses and expects identical outputs. |
+| A2 | The Orchestrator's existing routing logic can handle "diagnose an incident" tasks well enough to be useful — or at minimum fail clearly with a readable "no capable agent" response. | Escalate-to-agent button produces unhelpful output. Acceptable failure mode — it's manual-trigger only, and the failure teaches us what Phase 2 needs to build. |
+| A3 | Ingest p95 latency < 100ms is achievable with current DB shape. | Request latency regresses for the caller. Mitigated by the async fallback mode (§5.8) if measurements show otherwise. |
+| A4 | 16-char fingerprint hash provides sufficient dedupe resolution at our scale. | Collisions group unrelated errors. Mitigated by post-deploy monitoring (§13.5) and the normalisation-rule tuning plan. |
+| A5 | New correlation ID propagation is sufficient for grouping; the absence of correlation IDs on pre-existing pg-boss jobs does not significantly degrade incident analysis. | Phase 2 agent diagnosis has thinner context than ideal for job-source incidents. Acceptable — correlation IDs will organically spread as new jobs are added and existing ones are edited. |
+| A6 | The existing org-listing services can be cleanly filtered by `is_system_org = false` for non-sysadmins. | Potential visibility leak of System Operations org. Mitigated by an explicit audit of every org-listing service at implementation time, and by a test that verifies a non-sysadmin user does not see the System Operations org in any listing endpoint. |
 
 ## 15. Risk register
 
@@ -1403,7 +1490,27 @@ If a critical regression is found:
 
 Included for context; NOT in scope for this spec.
 
-### Phase 1 — Synthetic checks (proactive monitoring)
+### 16.1 Phase 0.75 — Email + Slack push notifications
+
+**Prerequisite for:** production deployment. Phase 0.75 is the phase that turns the in-app-only observability from Phase 0.5 into a real pager, suitable for production use where sysadmins aren't staring at the admin page.
+
+Scope:
+
+- Add email outbound infrastructure. Choose a provider (likely **Resend** or **Postmark** for simplicity; **SendGrid** if there's already a billing relationship). Add the SDK dependency, SMTP/API credentials to env config, and a minimal email-sending abstraction. Do NOT build a full email templating system — plain-text emails are sufficient for Phase 0.75.
+- Add Slack outbound. Choose between (a) incoming-webhook-per-channel — simplest, no app install needed, limited to one channel — and (b) a Slack app with a bot token and `chat.postMessage`. Recommendation: (a) for Phase 0.75, (b) for Phase 2 when interactive buttons matter.
+- Build `server/services/notificationService.ts` with the channel-adapter shape specified in v1 of this spec.
+- Wire `SystemIncidentFatigueGuard` into the `systemIncidentNotifyJob` so it actually decides delivery.
+- Add `user_settings.notificationPreferences` column and a minimal UI surface on an existing user-settings page (channels on/off + min severity).
+- Default preferences for sysadmin users: email+Slack enabled, `minSeverity: 'high'`.
+- Default for non-sysadmins: all disabled.
+- Event log additions: `email_sent`, `email_throttled`, `slack_sent`, `slack_throttled`, `email_failed`, `slack_failed`.
+
+Dependencies: Phase 0 + 0.5 shipped.
+Not in scope for 0.75: SMS (still a stub), daily digest, Slack interactive buttons. Those are Phase 1+.
+
+Estimated size: ~3-5 days of focused work once provider choice is made. Small compared to Phase 0.5 because all the observability wiring already exists — this phase only adds channel adapters.
+
+### 16.2 Phase 1 — Synthetic checks (proactive monitoring)
 
 - `systemMonitor.syntheticChecks` pg-boss job on 1-minute tick.
 - Checks for absence-of-events: job queue stalls, no agent runs in N minutes, stale connectors, heartbeat probes.
@@ -1411,7 +1518,7 @@ Included for context; NOT in scope for this spec.
 - Enables detection of silent failures that error-driven monitoring misses.
 - Depends on Phase 0 sink.
 
-### Phase 2 — The monitoring agent (read-only)
+### 16.3 Phase 2 — The monitoring agent (read-only)
 
 - New system-managed agent `system_monitor`. Scope `system` (requires Option B principal context from §7.4).
 - Auto-triggered by `incident.triage` pg-boss job (enqueued by ingestor when incident opens with `severity >= medium`).
@@ -1421,14 +1528,14 @@ Included for context; NOT in scope for this spec.
 - Rate-limited: max 2 invocations per incident fingerprint; persistent recurrence auto-escalates to human.
 - Kill switch: `SYSTEM_MONITOR_ENABLED` env var.
 
-### Phase 3 — Auto-remediation (whitelist-only)
+### 16.4 Phase 3 — Auto-remediation (whitelist-only)
 
 - New remediation skills, each with strict safety envelope: retry failed job, requeue agent run, disable feature flag, throttle connector, circuit-break skill.
 - All `destructiveHint: true`; all logged as `remediation_attempt` + `remediation_outcome` event pairs.
 - Rate limit: max 2 remediation attempts per fingerprint; recurrence after attempts auto-classifies `persistent_defect`.
 - No remediation without explicit playbook match — agent cannot invent fixes.
 
-### Phase 4 — Dev-agent handoff (deferred)
+### 16.5 Phase 4 — Dev-agent handoff (deferred)
 
 - When incident classifies `persistent_defect`, emit structured bug report (repro, stack, affected files, proposed fix).
 - Hand to a (not-yet-designed) development agent for code change authorship.
@@ -1437,9 +1544,11 @@ Included for context; NOT in scope for this spec.
 
 ---
 
-**End of Phase 0 + 0.5 specification.**
+**End of Phase 0 + 0.5 specification (v2).**
 
-Ready for `spec-reviewer` iteration before architect/implementation begins (note: `spec-reviewer` requires the local Codex CLI per CLAUDE.md, and must be invoked by the user explicitly — not auto-invoked).
+All v1 open questions resolved (§0.2). All v1 prerequisites verified against the codebase (§0.1). Scope adjusted: push notifications (email/Slack/SMS) carved out into Phase 0.75 because the underlying infrastructure does not yet exist; Phase 0.5 ships in-app-only.
+
+Ready for user review. Once reviewed, next gate is `architect` for structural validation before implementation (or `spec-reviewer` if the user wants an adversarial Codex pass first — note: `spec-reviewer` requires the local Codex CLI per CLAUDE.md, and must be invoked by the user explicitly, not auto-invoked).
 
 
 
