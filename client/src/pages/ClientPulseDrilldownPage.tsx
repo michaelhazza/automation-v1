@@ -73,7 +73,7 @@ export default function ClientPulseDrilldownPage(_: Props) {
         api.get(`/api/clientpulse/subaccounts/${subaccountId}/band-transitions?windowDays=${WINDOW_DAYS}`),
         api.get(`/api/clientpulse/subaccounts/${subaccountId}/interventions?limit=50`),
       ]);
-      setSummary({ ...(sRes.data as Summary), pendingIntervention: (sRes.data as { pendingIntervention?: PendingIntervention | null }).pendingIntervention ?? null });
+      setSummary(sRes.data as Summary);
       setSignals(sigRes.data as SignalsResponse);
       setTransitions(trRes.data as TransitionsResponse);
       setInterventions((intRes.data as { interventions: InterventionRow[] }).interventions);
@@ -110,7 +110,7 @@ export default function ClientPulseDrilldownPage(_: Props) {
       <PendingHero
         pendingIntervention={summary.pendingIntervention}
         onApprove={approve}
-        onReject={(id) => reject(id, '')}
+        onReject={reject}
         conflict={interventionConflict}
         error={interventionError}
       />

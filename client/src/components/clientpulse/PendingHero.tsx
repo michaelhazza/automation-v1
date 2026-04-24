@@ -8,7 +8,7 @@ interface PendingHeroProps {
     rationale: string;
   } | null;
   onApprove: (reviewItemId: string) => Promise<void>;
-  onReject: (reviewItemId: string) => Promise<void>;
+  onReject: (reviewItemId: string, comment: string) => Promise<void>;
   conflict?: boolean;
   error?: string | null;
 }
@@ -37,6 +37,8 @@ export function PendingHero({
   error = null,
 }: PendingHeroProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectComment, setRejectComment] = useState('');
 
   if (!pendingIntervention) return null;
 
@@ -54,12 +56,14 @@ export function PendingHero({
     }
   };
 
-  const handleReject = async () => {
+  const handleSubmitReject = async () => {
     const id = pendingIntervention?.reviewItemId;
-    if (!id || isDisabled) return;
+    if (!id || isDisabled || rejectComment.trim() === '') return;
     setIsSubmitting(true);
     try {
-      await onReject(id);
+      await onReject(id, rejectComment);
+      setShowRejectInput(false);
+      setRejectComment('');
     } finally {
       setIsSubmitting(false);
     }
@@ -84,14 +88,40 @@ export function PendingHero({
         >
           Approve
         </button>
-        <button
-          onClick={handleReject}
-          disabled={isDisabled}
-          className="rounded px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
-        >
-          Reject
-        </button>
+        {!showRejectInput && (
+          <button
+            onClick={() => setShowRejectInput(true)}
+            disabled={isDisabled}
+            className="rounded px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+          >
+            Reject
+          </button>
+        )}
       </div>
+      {showRejectInput && (
+        <div>
+          <textarea
+            rows={2}
+            className="mt-2 w-full rounded border border-slate-200 p-2 text-[13px] text-slate-700 resize-none"
+            placeholder="Reason for rejection"
+            value={rejectComment}
+            onChange={(e) => setRejectComment(e.target.value)}
+          />
+          <button
+            onClick={handleSubmitReject}
+            disabled={rejectComment.trim() === '' || isSubmitting}
+            className="mt-1 rounded px-3 py-1.5 bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700 disabled:opacity-50"
+          >
+            Submit rejection
+          </button>
+          <button
+            onClick={() => { setShowRejectInput(false); setRejectComment(''); }}
+            className="mt-1 ml-2 text-[12px] text-slate-500 hover:underline"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
