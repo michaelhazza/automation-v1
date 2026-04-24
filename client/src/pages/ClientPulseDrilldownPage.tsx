@@ -6,11 +6,20 @@ import SignalPanel from '../components/clientpulse/drilldown/SignalPanel';
 import BandTransitionsTable from '../components/clientpulse/drilldown/BandTransitionsTable';
 import InterventionHistoryTable, { type InterventionRow } from '../components/clientpulse/drilldown/InterventionHistoryTable';
 import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
+import PendingHero from '../components/clientpulse/PendingHero';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
+import { usePendingIntervention } from '../hooks/usePendingIntervention';
 
 interface Props {
   user: User;
 }
+
+type PendingIntervention = {
+  reviewItemId: string;
+  actionTitle: string;
+  proposedAt: string;
+  rationale: string;
+};
 
 type Summary = {
   subaccount: { id: string; name: string };
@@ -18,6 +27,7 @@ type Summary = {
   healthScore: number | null;
   healthScoreDelta7d: number | null;
   lastAssessmentAt: string | null;
+  pendingIntervention: PendingIntervention | null;
 };
 
 type SignalsResponse = {
@@ -49,6 +59,8 @@ export default function ClientPulseDrilldownPage(_: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPropose, setShowPropose] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [showAllSignals, setShowAllSignals] = useState(false);
 
   const load = useCallback(async () => {
     if (!subaccountId) return;
@@ -61,7 +73,7 @@ export default function ClientPulseDrilldownPage(_: Props) {
         api.get(`/api/clientpulse/subaccounts/${subaccountId}/band-transitions?windowDays=${WINDOW_DAYS}`),
         api.get(`/api/clientpulse/subaccounts/${subaccountId}/interventions?limit=50`),
       ]);
-      setSummary(sRes.data as Summary);
+      setSummary({ ...(sRes.data as Summary), pendingIntervention: (sRes.data as { pendingIntervention?: PendingIntervention | null }).pendingIntervention ?? null });
       setSignals(sigRes.data as SignalsResponse);
       setTransitions(trRes.data as TransitionsResponse);
       setInterventions((intRes.data as { interventions: InterventionRow[] }).interventions);
@@ -72,6 +84,12 @@ export default function ClientPulseDrilldownPage(_: Props) {
       setLoading(false);
     }
   }, [subaccountId]);
+
+  const { approve, reject, conflict: interventionConflict, error: interventionError } = usePendingIntervention({
+    onApproved: load,
+    onRejected: load,
+    onConflict: load,
+  });
 
   useEffect(() => {
     load();
@@ -89,6 +107,14 @@ export default function ClientPulseDrilldownPage(_: Props) {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
+      <PendingHero
+        pendingIntervention={summary.pendingIntervention}
+        onApprove={approve}
+        onReject={(id) => reject(id, '')}
+        conflict={interventionConflict}
+        error={interventionError}
+      />
+
       <header className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -114,19 +140,48 @@ export default function ClientPulseDrilldownPage(_: Props) {
             >
               Propose intervention
             </button>
-            <button
-              onClick={handleOpenConfigAssistant}
-              className="px-4 py-2 rounded-md text-[13px] font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50"
-            >
-              Open Configuration Assistant
-            </button>
           </div>
         </div>
       </header>
 
-      <SignalPanel signals={signals.signals} lastUpdatedAt={signals.lastUpdatedAt} />
-      <BandTransitionsTable transitions={transitions.transitions} windowDays={WINDOW_DAYS} />
+      <div>
+        <SignalPanel
+          signals={showAllSignals ? signals.signals : signals.signals.slice(0, 5)}
+          lastUpdatedAt={signals.lastUpdatedAt}
+        />
+        {signals.signals.length > 5 && (
+          <button
+            onClick={() => setShowAllSignals(s => !s)}
+            className="mt-2 text-[12px] text-indigo-600 hover:underline"
+          >
+            {showAllSignals ? 'Show less' : `Show more (${signals.signals.length - 5} more)`}
+          </button>
+        )}
+      </div>
+
+      <div>
+        <BandTransitionsTable
+          transitions={historyExpanded ? transitions.transitions : transitions.transitions.slice(-3)}
+          windowDays={WINDOW_DAYS}
+        />
+        {transitions.transitions.length > 3 && (
+          <button
+            onClick={() => setHistoryExpanded(e => !e)}
+            className="mt-2 text-[12px] text-indigo-600 hover:underline"
+          >
+            {historyExpanded ? 'Hide history' : `Show history (${transitions.transitions.length - 3} more)`}
+          </button>
+        )}
+      </div>
+
       <InterventionHistoryTable rows={interventions} />
+
+      <p className="text-[12px] text-slate-500">
+        Need help interpreting this data?{' '}
+        <button onClick={handleOpenConfigAssistant} className="text-indigo-600 hover:underline">
+          Open Configuration Assistant
+        </button>
+      </p>
 
       {showPropose && (
         <ProposeInterventionModal
