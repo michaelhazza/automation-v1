@@ -26,6 +26,8 @@
 - [§9. Ship gates](#9-ship-gates)
 - [§10. File inventory](#10-file-inventory)
 - [§11. Deferred items](#11-deferred-items)
+- [§12. Telemetry events](#12-telemetry-events)
+- [§13. Performance guardrails](#13-performance-guardrails)
 
 ---
 
@@ -144,7 +146,14 @@ resolvedUrl: string | null;   // fully qualified SPA path e.g. "/clientpulse/cli
 | `run:<id>` | `/runs/<id>/live` |
 | `health:<id>` | `/clientpulse/clients/<subaccountId>` (subaccount drilldown) |
 
-The client-side resolver remains as a **fallback only** — it maps the legacy opaque `detailUrl` token to the correct path in case `resolvedUrl` is absent (e.g. older cached data or a backend not yet upgraded). The resolver is a small pure function co-located with `DashboardPage.tsx`. If both `resolvedUrl` and the fallback resolver return `null`, the "Open in context" button is disabled with a tooltip: **"This item has no destination yet."** (Tooltip wording is terse, factual, lowercase after the verb — apply this tone consistently to all disabled-state tooltips in this spec.)
+The client-side resolver remains as a **fallback only** — it maps the legacy opaque `detailUrl` token to the correct path in case `resolvedUrl` is absent (e.g. older cached data or a backend not yet upgraded). The resolver is a small pure function co-located with `DashboardPage.tsx`.
+
+**Null destination handling.** If both `resolvedUrl` and the fallback resolver return `null`:
+- The "Open in context" button is **disabled** with tooltip: **"This item cannot be actioned from here."**
+- The **Approve and Reject buttons are also disabled** — because both use mode-2 (navigate to destination + `?intent`), they require a resolvable URL. A null destination with active Approve/Reject buttons creates a dead-end: the operator clicks and nothing happens. Disabled state prevents that.
+- Tooltip on the disabled Approve/Reject buttons: same text — "This item cannot be actioned from here."
+
+(Tooltip wording is terse, factual, lowercase after the verb — apply this tone consistently to all disabled-state tooltips in this spec.)
 
 **Approve / Reject contract (narrowed in v1).** The pending card does NOT attempt to reproduce the full approve/reject flow for every item type. Two distinct UX modes are used, chosen by `kind`:
 
@@ -160,7 +169,16 @@ If any `kind` value graduates to mode-1 during implementation (e.g. `task` has a
 1. On mount, read `?intent=approve | reject` from the URL search params.
 2. If intent is present: auto-open the approval/rejection UI (e.g. open the modal, scroll to the approval section, focus the primary action button) and pre-select the intent action.
 3. The operator sees only the final confirmation step — not the full decision flow from scratch.
-4. After the action completes, remove the `?intent` param from the URL (use `replace: true`) to avoid a stale intent on back-navigation.
+4. After the action completes **successfully**, remove the `?intent` param from the URL (use `replace: true`) to avoid a stale intent on back-navigation.
+
+**`?intent` failure-handling rule.** The success path above is not enough on its own. If an intent-driven action fails (network error, validation rejection, modal fails to open):
+
+1. The approval UI MUST remain open — do not close the modal or scroll away.
+2. An inline error message MUST be shown within the approval UI (not a toast, not a full-page error — inline, adjacent to the action that failed).
+3. The `?intent` param MUST NOT be stripped from the URL — the operator must be able to reload and retry from the same intent state.
+4. The operator must be able to retry without re-navigating back to the home dashboard.
+
+This means the error boundary around the intent-triggered UI must be local, not page-level. If the intent detection logic itself throws (e.g. invalid `kind` value in the URL), the page still renders normally without the approval UI — it does not crash.
 
 This contract applies to ALL pages that appear in the `resolvedUrl` resolver table (review drilldown, task detail, run detail). If a destination page cannot satisfy this contract in v1 (e.g. the page needs a refactor to accept a modal-open signal), document the gap explicitly in §11 Deferred Items for that page — do NOT silently accept a broken flow.
 
@@ -315,6 +333,15 @@ interface HighRiskClientsResponse {
 
 **Sort order:** the server applies the §3.2 sort (PENDING first, then Critical, then At Risk, then Watch, then Healthy if `band=healthy`) so the client can trust the order regardless of which surface is consuming it. Within each band tier, rows are ordered by `health_score ASC` (worst first) then `subaccount_name ASC` as a tiebreaker — this makes the sort deterministic and stable across pagination pages.
 
+**Cursor pagination stability invariant.** The cursor pagination implementation must satisfy two hard guarantees regardless of concurrent inserts or updates:
+
+1. A row already returned in a previous page MUST NOT appear again in a subsequent page.
+2. A row MUST NOT be skipped because rows were inserted ahead of it between page requests.
+
+Both invariants require a **composite cursor** that encodes the full sort key: `(health_score, subaccount_name, subaccount_id)`. The server signs the encoded cursor (e.g. base64 of JSON + HMAC) and decodes it on the next request to apply a deterministic `WHERE (health_score, subaccount_name, id) > (:score, :name, :id)` (or `<` depending on direction) predicate. Opaque offset-based pagination (`OFFSET N`) is NOT acceptable — it produces skips and duplicates under concurrent inserts.
+
+The cursor must be treated as opaque by the client; the client passes it back verbatim, never constructs it.
+
 **Internal service decomposition.** The handler at `server/routes/clientpulseReports.ts` must decompose into three internal functions to keep the implementation testable:
 
 ```typescript
@@ -419,6 +446,8 @@ All five fields are nullable; existing activity types that don't source them (e.
 - `triggerType` is the highest-risk field: it requires a join or denormalization step. **`triggerType` MUST be precomputed or cached at write time** (not derived on read). Acceptable approaches: (a) write `trigger_type` into the activity log row when the event fires, or (b) compute it as a materialised column. Ad-hoc joins on the read path are not acceptable — they introduce latency and miss historical rows. Confirm coverage before shipping G3.
 - `durationMs` for `workflow_execution` rows: confirm the execution pipeline writes end-time consistently before rendering a Duration column for those rows.
 - `triggeredByUserName`: requires a users join. Confirm the join succeeds for all rows with non-null `triggeredByUserId` before shipping (no 30% join-miss rate).
+
+**Column visibility consistency rule.** The 80% coverage rule applies at the **endpoint level**, not per-row. Column visibility is determined once when the component mounts and the first page of data arrives — it does not change within a session even if subsequent data pages have different null patterns. A column that is present in the first response is present for the entire session; a column absent from the first response (because it failed the 80% threshold) is absent for the session. This prevents the table layout from shifting mid-scroll as rows with different data shapes load in. The `UnifiedActivityFeed` component must evaluate column visibility once from the first fetch response and fix it for that render cycle.
 
 ### §4.3 Table columns
 
@@ -563,6 +592,13 @@ The banner renders only when `pendingIntervention` is non-null; parents pass `nu
 1. Both surfaces use a **shared data hook** (`usePendingIntervention(subaccountId: string)`) that wraps the relevant API calls and owns the optimistic update logic. Neither `DashboardPage` nor `ClientPulseDrilldownPage` maintains its own independent approval state.
 2. After an Approve or Reject action from either surface, the hook applies an **optimistic update** immediately (item disappears from pending state) and confirms on API response. On error, the optimistic update is rolled back and an inline error message is shown.
 3. Query invalidation: after a successful approve/reject, the hook invalidates both the home-dashboard attention query (`/api/pulse/attention`) and the drilldown query (`/api/clientpulse/drilldown/:subaccountId`) so both surfaces reflect the new state on the next render.
+
+**Conflict rule.** If the API returns a conflict (e.g. the item was already approved by another user, or its state changed since the page loaded), the hook must:
+1. **Revert** the optimistic update immediately — the item reappears in the pending state locally.
+2. **Refetch** both source queries (`/api/pulse/attention` + the relevant drilldown query) to pull the true server state.
+3. **Show an inline message** adjacent to the card/banner: **"This item was already updated."** — not a toast, not a modal, inline.
+
+HTTP 409 Conflict is the expected server response for this case. If the server returns a non-409 error (network failure, 500), apply the failure-handling rule from §2.2 instead (revert + show retry-able inline error, do not strip `?intent`).
 
 The shared hook is a new file: `client/src/hooks/usePendingIntervention.ts`. Add it to the §10 file inventory.
 
@@ -774,3 +810,38 @@ Single source of truth for everything the spec mentions but does NOT ship in thi
   - `clientpulse-mockup-inline-edit.html` — pattern not needed.
   - `clientpulse-mockup-weekly-digest.html` — org-level email digest deferred (see intelligence briefing above).
   - `clientpulse-mockup-capability-showcase.html` — reference doc only, not a UI surface.
+
+---
+
+## §12. Telemetry events
+
+Five lightweight tracking events are introduced in this spec to give visibility into the new home dashboard and approval flow. These enable UX validation, drop-off detection, and feature prioritisation without building a monitoring product.
+
+All five events are fire-and-forget client-side calls (no UI-blocking behaviour). They do NOT block renders or actions. If the tracking call fails, the action continues normally. Events are tracked via whatever analytics infrastructure the project currently uses (check `client/src/lib/analytics.ts` or equivalent — do not introduce a new analytics client).
+
+| Event | When to fire | Properties |
+|---|---|---|
+| `pending_card_opened` | When the operator clicks "Open in context" on a pending approval card | `{ kind, lane, itemId, resolvedVia: 'backend' \| 'fallback' }` |
+| `pending_card_approved` | When the operator clicks Approve on a pending approval card | `{ kind, lane, itemId }` |
+| `pending_card_rejected` | When the operator clicks Reject on a pending approval card | `{ kind, lane, itemId }` |
+| `activity_log_viewed` | When the activity feed renders on the home dashboard (component mounts with data) | `{ rowCount, typesPresent: string[] }` |
+| `run_log_opened` | When the operator clicks a "View log →" link in the activity feed | `{ runId, activityType, triggerType }` |
+
+Implementation: fire from the relevant event handlers in `DashboardPage.tsx` and `UnifiedActivityFeed.tsx`. No test assertions required for telemetry calls — confirm the calls exist in the implementation, but do not write tests that assert on them.
+
+---
+
+## §13. Performance guardrails
+
+All dashboard endpoints introduced or modified by this spec must return within **300ms at p95** under normal load (single organisation, ≤ 500 clients, ≤ 50k activity rows). This is a "slow creep" prevention contract — not a launch blocker, but a standard that must be measurable from day one.
+
+| Endpoint | Guardrail | Notes |
+|---|---|---|
+| `GET /api/pulse/attention` | < 300ms p95 | Already exists; ensure `resolvedUrl` resolution does not add a serial chain of sub-queries |
+| `GET /api/clientpulse/high-risk` | < 300ms p95 | New endpoint; ensure sparkline and delta queries are batched, not N+1 per client row |
+| `GET /api/activity` | < 300ms p95 | Additive join for `triggeredByUserName` and `triggerType` must be a single JOIN, not per-row sub-selects |
+| `GET /api/agent-runs/:id` | < 300ms p95 | `eventCount` addition must be a `count(*)` aggregate in the existing query, not a separate round-trip |
+
+**Enforcement mechanism:** Add a slow-query log assertion to each endpoint's integration test fixture (or use `server/lib/instrumentedQuery` if it exists). Log a WARN if a query exceeds 100ms in development. No hard fail in CI for now — the 300ms target is a measurable posture, not a gated check.
+
+If the `sparklineWeekly` data cannot be computed within the 300ms budget for large orgs, pre-compute it as a materialised column or background job and serve from cache — do NOT do 4× rolling-window aggregation queries inline per request.
