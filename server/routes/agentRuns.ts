@@ -166,7 +166,8 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     const run = await agentActivityService.getRunDetail(req.params.id, req.orgId!);
-    res.json(run);
+    const { eventCount: _eventCount, ...runForClient } = run;
+    res.json(runForClient);
   })
 );
 
