@@ -130,7 +130,7 @@ export const WorkflowStudioService = {
 
   /**
    * Validates the definition and renders the deterministic Workflow
-   * file. Used by the /api/system/Workflow-studio/render endpoint and
+   * file. Used by the /api/system/workflow-studio/render endpoint and
    * by the Studio UI's preview pane. Returns either the rendered file
    * + canonical hash, or a structured validation error.
    */

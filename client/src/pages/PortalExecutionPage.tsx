@@ -65,10 +65,10 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   useEffect(() => {
     if (!subaccountId) return;
     Promise.all([
-      api.get(`/api/portal/${subaccountId}/processes`),
+      api.get(`/api/portal/${subaccountId}/automations`),
       api.get('/api/settings/upload').catch((err) => { console.error('[PortalExecution] Failed to fetch upload settings:', err); return { data: { maxUploadSizeMb: 200 } }; }),
     ]).then(([portalRes, settingsRes]) => {
-      const found = (portalRes.data.processes as Process[]).find((t: Process) => t.id === processId);
+      const found = (portalRes.data.automations as Process[]).find((t: Process) => t.id === processId);
       setProcess(found ?? null);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
     }).finally(() => setLoading(false));

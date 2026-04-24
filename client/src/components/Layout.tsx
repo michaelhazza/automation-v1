@@ -71,7 +71,7 @@ const Icons = {
 // ── Breadcrumb derivation from URL ─────────────────────────────────────────
 const SEG: Record<string, string | null> = {
   admin: null, system: null,
-  subaccounts: 'Companies', agents: 'AI Team', processes: 'Workflows',
+  subaccounts: 'Companies', agents: 'AI Team', automations: 'Automations', workflows: 'Workflows',
   executions: 'Activity', workspace: 'Tasks', memory: 'Memory',
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
@@ -698,8 +698,8 @@ export default function Layout({ user, children }: LayoutProps) {
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
               )}
-              {hasOrgPerm('org.processes.view') && (
-                <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
+              {hasOrgPerm('org.automations.view') && (
+                <NavItem to="/automations" icon={<Icons.automations />} label="Automations" />
               )}
               {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.workflow_templates.read')) && (
                 <NavItem to="/workflows" icon={<Icons.automations />} label="Workflows" />
@@ -807,7 +807,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/schedule-calendar" icon={<Icons.scheduled />} label="Calendar" />}
-              {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
+              {hasSidebarItem('workflows') && hasOrgPerm('org.automations.view') && <NavItem to="/admin/automations" icon={<Icons.automations />} label="Automations" />}
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
@@ -823,7 +823,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
               <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
               <NavItem to="/system/workflow-studio" icon={<Icons.automations />} label="Workflow Studio" />
-              <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
+              <NavItem to="/system/automations" icon={<Icons.automations />} label="Automations" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />

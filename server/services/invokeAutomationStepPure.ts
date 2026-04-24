@@ -131,7 +131,7 @@ export function resolveDispatch(input: DispatchInput): DispatchOutcome {
       kind: 'error',
       error: makeError(
         'automation_scope_mismatch',
-        'validation',
+        'execution',
         `Automation '${automation.id}' is not accessible from this run's scope.`,
         false,
       ),

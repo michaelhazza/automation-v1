@@ -20,7 +20,7 @@ const router = Router();
 // ─── System templates (read-only via API) ────────────────────────────────────
 
 router.get(
-  '/api/system/Workflow-templates',
+  '/api/system/workflow-templates',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (_req, res) => {
@@ -30,7 +30,7 @@ router.get(
 );
 
 router.get(
-  '/api/system/Workflow-templates/:slug',
+  '/api/system/workflow-templates/:slug',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -45,7 +45,7 @@ router.get(
 );
 
 router.get(
-  '/api/system/Workflow-templates/:slug/versions',
+  '/api/system/workflow-templates/:slug/versions',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -62,7 +62,7 @@ router.get(
 // ─── Org templates ───────────────────────────────────────────────────────────
 
 router.get(
-  '/api/Workflow-templates',
+  '/api/workflow-templates',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_READ),
   asyncHandler(async (req, res) => {
@@ -72,7 +72,7 @@ router.get(
 );
 
 router.get(
-  '/api/Workflow-templates/:id',
+  '/api/workflow-templates/:id',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_READ),
   asyncHandler(async (req, res) => {
@@ -87,7 +87,7 @@ router.get(
 );
 
 router.get(
-  '/api/Workflow-templates/:id/versions',
+  '/api/workflow-templates/:id/versions',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_READ),
   asyncHandler(async (req, res) => {
@@ -102,7 +102,7 @@ router.get(
 );
 
 router.post(
-  '/api/Workflow-templates/fork-system',
+  '/api/workflow-templates/fork-system',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_WRITE),
   asyncHandler(async (req, res) => {
@@ -121,7 +121,7 @@ router.post(
 );
 
 router.post(
-  '/api/Workflow-templates/:id/publish',
+  '/api/workflow-templates/:id/publish',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_PUBLISH),
   asyncHandler(async (req, res) => {
@@ -141,7 +141,7 @@ router.post(
 );
 
 router.delete(
-  '/api/Workflow-templates/:id',
+  '/api/workflow-templates/:id',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_TEMPLATES_WRITE),
   asyncHandler(async (req, res) => {

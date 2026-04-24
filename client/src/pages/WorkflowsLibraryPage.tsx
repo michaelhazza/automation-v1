@@ -54,8 +54,8 @@ export default function WorkflowsLibraryPage(_props: { user: User }) {
     (async () => {
       try {
         // System templates: requires system_admin. Try and fall through if 403.
-        const sys = await api.get('/api/system/Workflow-templates').catch(() => null);
-        const org = await api.get('/api/Workflow-templates').catch(() => null);
+        const sys = await api.get('/api/system/workflow-templates').catch(() => null);
+        const org = await api.get('/api/workflow-templates').catch(() => null);
         const subs = await api.get('/api/subaccounts').catch(() => null);
         if (cancelled) return;
         setSystemTemplates(sys?.data?.templates ?? []);
@@ -92,8 +92,8 @@ export default function WorkflowsLibraryPage(_props: { user: User }) {
         startTarget.kind === 'system'
           ? { systemTemplateSlug: startTarget.slug, input: parsedInput }
           : { templateId: startTarget.id, input: parsedInput };
-      const res = await api.post(`/api/subaccounts/${selectedSubaccountId}/Workflow-runs`, body);
-      navigate(`/Workflow-runs/${res.data.runId}`);
+      const res = await api.post(`/api/subaccounts/${selectedSubaccountId}/workflow-runs`, body);
+      navigate(`/workflow-runs/${res.data.runId}`);
     } catch (err) {
       const msg =
         (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data

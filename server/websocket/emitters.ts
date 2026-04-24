@@ -144,7 +144,7 @@ export function emitWorkflowRunUpdate(
   event: string,
   data: Record<string, unknown>
 ): void {
-  emitToRoom(`playbook-run:${runId}`, event, runId, data);
+  emitToRoom(`workflow-run:${runId}`, event, runId, data);
 }
 
 // ─── Org-wide events ──────────────────────────────────────────────────────────

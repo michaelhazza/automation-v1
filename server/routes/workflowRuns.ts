@@ -19,7 +19,7 @@ const router = Router();
 // ─── Subaccount-scoped: list runs + start run ────────────────────────────────
 
 router.get(
-  '/api/subaccounts/:subaccountId/Workflow-runs',
+  '/api/subaccounts/:subaccountId/workflow-runs',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
@@ -34,7 +34,7 @@ router.get(
 );
 
 router.post(
-  '/api/subaccounts/:subaccountId/Workflow-runs',
+  '/api/subaccounts/:subaccountId/workflow-runs',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
@@ -80,7 +80,7 @@ router.post(
 // ─── Run detail + actions ────────────────────────────────────────────────────
 
 router.get(
-  '/api/Workflow-runs/:runId',
+  '/api/workflow-runs/:runId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
@@ -93,7 +93,7 @@ router.get(
 // the run row, ordered step-run rows, the resolved template definition, the
 // resolved agent id map, and an empty events list (events arrive over WS).
 router.get(
-  '/api/subaccounts/:subaccountId/Workflow-runs/:runId/envelope',
+  '/api/subaccounts/:subaccountId/workflow-runs/:runId/envelope',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
@@ -110,7 +110,7 @@ router.get(
 
 // §9.4 — admin toggles whether a run is shown on the sub-account portal.
 router.patch(
-  '/api/subaccounts/:subaccountId/Workflow-runs/:runId/portal-visibility',
+  '/api/subaccounts/:subaccountId/workflow-runs/:runId/portal-visibility',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
@@ -132,7 +132,7 @@ router.patch(
 );
 
 router.post(
-  '/api/Workflow-runs/:runId/cancel',
+  '/api/workflow-runs/:runId/cancel',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -142,7 +142,7 @@ router.post(
 );
 
 router.post(
-  '/api/Workflow-runs/:runId/replay',
+  '/api/workflow-runs/:runId/replay',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
@@ -157,7 +157,7 @@ router.post(
 );
 
 router.post(
-  '/api/Workflow-runs/:runId/steps/:stepRunId/input',
+  '/api/workflow-runs/:runId/steps/:stepRunId/input',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -183,7 +183,7 @@ router.post(
 );
 
 router.post(
-  '/api/Workflow-runs/:runId/steps/:stepRunId/output',
+  '/api/workflow-runs/:runId/steps/:stepRunId/output',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -227,7 +227,7 @@ router.post(
 );
 
 router.post(
-  '/api/Workflow-runs/:runId/steps/:stepRunId/approve',
+  '/api/workflow-runs/:runId/steps/:stepRunId/approve',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {

@@ -10,7 +10,7 @@
  *   └────────────────────────────────────┴─────────────────────────────────────┘
  *
  * Data:
- *   - Baseline: GET /api/subaccounts/:id/Workflow-runs/:runId/envelope
+ *   - Baseline: GET /api/subaccounts/:id/workflow-runs/:runId/envelope
  *   - Live updates: WS room `Workflow-run:${runId}` with full refresh on event
  *   - Fallback: 12s polling while disconnected AND run.status === 'running'
  *     (stops at terminal status per spec §9.2)
@@ -178,7 +178,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
     if (!subaccountId || !runId) return;
     try {
       const res = await api.get(
-        `/api/subaccounts/${subaccountId}/Workflow-runs/${runId}/envelope`,
+        `/api/subaccounts/${subaccountId}/workflow-runs/${runId}/envelope`,
       );
       const env = res.data as Envelope;
       setData(env);
@@ -211,7 +211,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
   // ── Live updates over the `Workflow-run:${runId}` WebSocket room ──────────
 
   useSocketRoom(
-    'Workflow-run',
+    'workflow-run',
     runId ?? null,
     {
       'Workflow:run:status': () => refresh(),
@@ -304,7 +304,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
     try {
       const parsed = JSON.parse(inputFormData);
       await api.post(
-        `/api/Workflow-runs/${runId}/steps/${stepRunId}/input`,
+        `/api/workflow-runs/${runId}/steps/${stepRunId}/input`,
         { data: parsed, expectedVersion },
       );
       setInputFormOpen(false);
@@ -331,7 +331,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
     setActionError(null);
     try {
       await api.post(
-        `/api/Workflow-runs/${runId}/steps/${stepRunId}/approve`,
+        `/api/workflow-runs/${runId}/steps/${stepRunId}/approve`,
         { decision, editedOutput, expectedVersion },
       );
       setEditApproveOpen(false);
@@ -355,7 +355,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
 
   async function handleCancelRun() {
     try {
-      await api.post(`/api/Workflow-runs/${runId}/cancel`);
+      await api.post(`/api/workflow-runs/${runId}/cancel`);
       toast.success('Cancellation requested');
       await refresh();
     } catch (err) {
@@ -370,7 +370,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
 
   async function handleReplayRun() {
     try {
-      const res = await api.post(`/api/Workflow-runs/${runId}/replay`);
+      const res = await api.post(`/api/workflow-runs/${runId}/replay`);
       const newRunId = (res.data as { runId?: string })?.runId;
       toast.success('Replay run created');
       if (newRunId && subaccountId) {
@@ -522,7 +522,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
                       setKebabOpen(false);
                       try {
                         await api.patch(
-                          `/api/subaccounts/${subaccountId}/Workflow-runs/${runId}/portal-visibility`,
+                          `/api/subaccounts/${subaccountId}/workflow-runs/${runId}/portal-visibility`,
                           { isPortalVisible: !run.isPortalVisible },
                         );
                         toast.success(
@@ -552,7 +552,7 @@ export default function WorkflowRunPage(_props: { user: User }) {
                 {definition?.slug && (
                   <Link
                     role="menuitem"
-                    to={`/system/Workflow-studio?slug=${encodeURIComponent(definition.slug)}`}
+                    to={`/system/workflow-studio?slug=${encodeURIComponent(definition.slug)}`}
                     className="block w-full text-left px-3 py-2 hover:bg-slate-50 border-t border-slate-100"
                     onClick={() => setKebabOpen(false)}
                   >

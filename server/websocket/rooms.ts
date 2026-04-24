@@ -196,23 +196,23 @@ export function handleConnection(socket: Socket): void {
     socket.leave('system:llm-inflight');
   });
 
-  // ── Join a playbook run room (validated against org ownership) ──────
-  socket.on('join:playbook-run', async (runId: unknown) => {
+  // ── Join a workflow run room (validated against org ownership) ──────
+  socket.on('join:workflow-run', async (runId: unknown) => {
     if (!isValidUUID(runId)) return;
     try {
       const [run] = await db.select({ id: workflowRuns.id })
         .from(workflowRuns)
         .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, orgId)));
       if (!run) return;
-      socket.join(`playbook-run:${runId}`);
+      socket.join(`workflow-run:${runId}`);
     } catch {
       // DB error — silently reject
     }
   });
 
-  socket.on('leave:playbook-run', (runId: unknown) => {
+  socket.on('leave:workflow-run', (runId: unknown) => {
     if (!isValidUUID(runId)) return;
-    socket.leave(`playbook-run:${runId}`);
+    socket.leave(`workflow-run:${runId}`);
   });
 
   // Clean up on disconnect — Socket.IO auto-removes from all rooms

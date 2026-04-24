@@ -100,7 +100,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
   const refresh = useCallback(async () => {
     if (!runId) return;
     try {
-      const res = await api.get(`/api/Workflow-runs/${runId}`);
+      const res = await api.get(`/api/workflow-runs/${runId}`);
       setData(res.data as RunResponse);
       setError(null);
     } catch (err) {
@@ -118,7 +118,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
   // can switch to applying patches in place once we have telemetry on
   // event volume. Polling fallback (every 10s) covers reconnect gaps.
   useSocketRoom(
-    'Workflow-run',
+    'workflow-run',
     runId ?? null,
     {
       'Workflow:run:status': () => refresh(),
@@ -147,7 +147,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
     setActionError(null);
     try {
       const parsed = JSON.parse(formData);
-      await api.post(`/api/Workflow-runs/${runId}/steps/${stepRunId}/input`, {
+      await api.post(`/api/workflow-runs/${runId}/steps/${stepRunId}/input`, {
         data: parsed,
         expectedVersion: stepRunVersion,
       });
@@ -173,7 +173,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
     setActionSubmitting(true);
     setActionError(null);
     try {
-      await api.post(`/api/Workflow-runs/${runId}/steps/${stepRunId}/approve`, {
+      await api.post(`/api/workflow-runs/${runId}/steps/${stepRunId}/approve`, {
         decision,
         expectedVersion: stepRunVersion,
       });
@@ -192,7 +192,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
   async function cancelRun() {
     if (!runId) return;
     try {
-      await api.post(`/api/Workflow-runs/${runId}/cancel`);
+      await api.post(`/api/workflow-runs/${runId}/cancel`);
       toast.success('Workflow run cancelled');
       await refresh();
     } catch (err) {

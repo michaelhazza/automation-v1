@@ -472,7 +472,7 @@ router.get(
 // ─── Portal: portal-visible Workflow runs (spec §9.4) ────────────────────────
 
 /**
- * GET /api/portal/:subaccountId/Workflow-runs
+ * GET /api/portal/:subaccountId/workflow-runs
  *
  * Returns runs where `isPortalVisible = true` for this subaccount, ordered by
  * most-recently started.  Each entry includes the portalPresentation metadata
@@ -480,7 +480,7 @@ router.get(
  * title and headline extraction path without a second round-trip.
  */
 router.get(
-  '/api/portal/:subaccountId/Workflow-runs',
+  '/api/portal/:subaccountId/workflow-runs',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
@@ -620,14 +620,14 @@ router.get('/api/portal/:subaccountId/daily-brief-card', (req, res) => {
 });
 
 /**
- * POST /api/portal/:subaccountId/Workflow-runs/:runId/run-now
+ * POST /api/portal/:subaccountId/workflow-runs/:runId/run-now
  *
  * Starts a fresh run of the same Workflow template as `runId` (spec §9.4
  * "Run now" button). Idempotent via the §10.5.1 DB-level unique guard.
  * Returns the new runId (or the existing active runId if one is in flight).
  */
 router.post(
-  '/api/portal/:subaccountId/Workflow-runs/:runId/run-now',
+  '/api/portal/:subaccountId/workflow-runs/:runId/run-now',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {

@@ -69,8 +69,8 @@ export default function PortalPage({ user: _user }: { user: User }) {
   useEffect(() => {
     if (!subaccountId) return;
     Promise.all([
-      api.get(`/api/portal/${subaccountId}/processes`),
-      api.get(`/api/portal/${subaccountId}/playbook-runs`).catch(() => ({ data: { runs: [] } })),
+      api.get(`/api/portal/${subaccountId}/automations`),
+      api.get(`/api/portal/${subaccountId}/workflow-runs`).catch(() => ({ data: { runs: [] } })),
       // §G10.4 — gated on completed-run + active-schedule server-side, so
       // the client just reads `active` without running its own joins.
       api
@@ -82,7 +82,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
     ])
       .then(([processRes, runsRes, briefRes, permsRes]) => {
         setSubaccount(processRes.data.subaccount);
-        setProcesses(processRes.data.processes ?? []);
+        setProcesses(processRes.data.automations ?? []);
         setCategories(processRes.data.categories ?? []);
         setPortalRuns(runsRes.data.runs ?? []);
         setDailyBriefCard(briefRes.data ?? null);
@@ -104,7 +104,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
     setRunningNow((prev) => new Set([...prev, run.id]));
     try {
       const { data } = await api.post<{ runId: string }>(
-        `/api/portal/${subaccountId}/playbook-runs/${run.id}/run-now`,
+        `/api/portal/${subaccountId}/workflow-runs/${run.id}/run-now`,
       );
       toast.success('Run started');
       // Navigate to the new run
@@ -299,7 +299,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
           ) : (
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
               {filtered.map((process) => (
-                <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} className="no-underline">
+                <Link key={process.id} to={`/portal/${subaccountId}/automations/${process.id}`} className="no-underline">
                   <div className="bg-white rounded-xl px-6 py-5 shadow-sm border border-slate-200 h-full hover:border-indigo-300 hover:shadow-md transition-all">
                     {process.category && (
                       <div className="flex items-center gap-1.5 mb-2">

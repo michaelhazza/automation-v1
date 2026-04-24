@@ -109,7 +109,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
 
   async function loadSessions() {
     try {
-      const res = await api.get('/api/system/Workflow-studio/sessions');
+      const res = await api.get('/api/system/workflow-studio/sessions');
       setSessions(res.data.sessions ?? []);
     } catch (err) {
       const msg =
@@ -126,7 +126,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
 
   async function loadExistingSlugs() {
     try {
-      const res = await api.get('/api/system/Workflow-studio/Workflows');
+      const res = await api.get('/api/system/workflow-studio/workflows');
       setExistingSlugs(res.data.slugs ?? []);
     } catch {
       // Ignore — sidebar reference list is non-critical.
@@ -140,7 +140,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
 
   async function createSession() {
     try {
-      const res = await api.post('/api/system/Workflow-studio/sessions');
+      const res = await api.post('/api/system/workflow-studio/sessions');
       const created: Session = res.data.session;
       setSessions([created, ...sessions]);
       setActiveSessionId(created.id);
@@ -162,7 +162,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
 
   async function loadReference(slug: string) {
     try {
-      const res = await api.get(`/api/system/Workflow-studio/Workflows/${slug}`);
+      const res = await api.get(`/api/system/workflow-studio/workflows/${slug}`);
       // Reference Workflows are loaded into the preview pane for the
       // user to read, but the source of truth is still the definition
       // JSON below — they should copy structural patterns into their
@@ -200,7 +200,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
       }
 
       if (kind === 'validate') {
-        const res = await api.post('/api/system/Workflow-studio/validate', { definition: parsed });
+        const res = await api.post('/api/system/workflow-studio/validate', { definition: parsed });
         setToolResult({ kind: 'validate', ...res.data });
         // On a successful validate, refresh the preview pane so the
         // user sees the canonical file body the server would commit
@@ -210,10 +210,10 @@ export default function WorkflowStudioPage(_props: { user: User }) {
           await refreshPreview(parsed);
         }
       } else if (kind === 'simulate') {
-        const res = await api.post('/api/system/Workflow-studio/simulate', { definition: parsed });
+        const res = await api.post('/api/system/workflow-studio/simulate', { definition: parsed });
         setToolResult({ kind: 'simulate', ...res.data });
       } else {
-        const res = await api.post('/api/system/Workflow-studio/estimate', {
+        const res = await api.post('/api/system/workflow-studio/estimate', {
           definition: parsed,
           mode: 'pessimistic',
         });
@@ -253,7 +253,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
    */
   async function refreshPreview(definition: unknown): Promise<void> {
     try {
-      const res = await api.post('/api/system/Workflow-studio/render', { definition });
+      const res = await api.post('/api/system/workflow-studio/render', { definition });
       if (res.data?.ok && typeof res.data?.fileContents === 'string') {
         setRenderedPreview(res.data.fileContents);
       }
@@ -283,7 +283,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
     setError(null);
     try {
       const res = await api.post(
-        `/api/system/Workflow-studio/sessions/${activeSessionId}/save-and-open-pr`,
+        `/api/system/workflow-studio/sessions/${activeSessionId}/save-and-open-pr`,
         { definition: parsedDefinition }
       );
       // The server returns its rendered file alongside the PR URL —

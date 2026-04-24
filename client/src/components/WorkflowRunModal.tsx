@@ -107,7 +107,7 @@ export default function WorkflowRunModal({
           lockedSubaccountId
             ? Promise.resolve({ data: [] as SubaccountRow[] })
             : api.get('/api/subaccounts'),
-          api.get(`/api/system/Workflow-templates/${slug}`),
+          api.get(`/api/system/workflow-templates/${slug}`),
         ]);
         if (cancelled) return;
         if (!lockedSubaccountId) {
@@ -174,7 +174,7 @@ export default function WorkflowRunModal({
     }
     setStarting(true);
     try {
-      const res = await api.post(`/api/subaccounts/${subaccountId}/Workflow-runs`, {
+      const res = await api.post(`/api/subaccounts/${subaccountId}/workflow-runs`, {
         systemTemplateSlug: slug,
         input: parsedInput.value,
         runMode: supervised ? 'supervised' : 'auto',

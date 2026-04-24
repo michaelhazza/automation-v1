@@ -132,7 +132,10 @@ test('resolveDispatch emits automation_scope_mismatch error code', () => {
   assert(result.kind === 'error', 'should be error');
   if (result.kind === 'error') {
     assertEqual(result.error.code, 'automation_scope_mismatch', 'error code');
-    assertEqual(result.error.type, 'validation', 'error type');
+    // §5.7: automation_scope_mismatch is a pre-dispatch resolution failure
+    // → 'execution' bucket. The test previously asserted 'validation' —
+    // that matched the dispatcher bug, not the spec. Updated per spec.
+    assertEqual(result.error.type, 'execution', 'error type');
     assertEqual(result.error.retryable, false, 'not retryable');
   }
 });

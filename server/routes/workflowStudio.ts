@@ -19,7 +19,7 @@ const router = Router();
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 router.get(
-  '/api/system/Workflow-studio/sessions',
+  '/api/system/workflow-studio/sessions',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -29,7 +29,7 @@ router.get(
 );
 
 router.post(
-  '/api/system/Workflow-studio/sessions',
+  '/api/system/workflow-studio/sessions',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -39,7 +39,7 @@ router.post(
 );
 
 router.get(
-  '/api/system/Workflow-studio/sessions/:id',
+  '/api/system/workflow-studio/sessions/:id',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -55,7 +55,7 @@ router.get(
 // ─── Tools — read_existing_Workflow + list ───────────────────────────────────
 
 router.get(
-  '/api/system/Workflow-studio/Workflows',
+  '/api/system/workflow-studio/workflows',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (_req, res) => {
@@ -65,7 +65,7 @@ router.get(
 );
 
 router.get(
-  '/api/system/Workflow-studio/Workflows/:slug',
+  '/api/system/workflow-studio/workflows/:slug',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -81,7 +81,7 @@ router.get(
 // ─── Tools — validate_candidate ──────────────────────────────────────────────
 
 router.post(
-  '/api/system/Workflow-studio/validate',
+  '/api/system/workflow-studio/validate',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -103,7 +103,7 @@ router.post(
 // ─── Tools — simulate_run ────────────────────────────────────────────────────
 
 router.post(
-  '/api/system/Workflow-studio/simulate',
+  '/api/system/workflow-studio/simulate',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -116,7 +116,7 @@ router.post(
 // ─── Tools — estimate_cost ───────────────────────────────────────────────────
 
 router.post(
-  '/api/system/Workflow-studio/estimate',
+  '/api/system/workflow-studio/estimate',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -137,7 +137,7 @@ router.post(
 // see is exactly what gets committed.
 
 router.post(
-  '/api/system/Workflow-studio/render',
+  '/api/system/workflow-studio/render',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -164,7 +164,7 @@ router.post(
 // this endpoint the caller can use to inject arbitrary file content.
 
 router.post(
-  '/api/system/Workflow-studio/sessions/:id/save-and-open-pr',
+  '/api/system/workflow-studio/sessions/:id/save-and-open-pr',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
@@ -192,7 +192,7 @@ router.post(
 // ─── Update candidate (chat session edit) ────────────────────────────────────
 
 router.patch(
-  '/api/system/Workflow-studio/sessions/:id',
+  '/api/system/workflow-studio/sessions/:id',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
