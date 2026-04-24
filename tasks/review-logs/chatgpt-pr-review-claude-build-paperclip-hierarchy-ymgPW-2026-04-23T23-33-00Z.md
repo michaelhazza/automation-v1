@@ -170,6 +170,61 @@ Typecheck skipped for this round per user instruction. Pre-existing type errors 
 
 ---
 
+## Round 3 — 2026-04-23T23-33-00Z (third ChatGPT feedback pass — final approval)
+
+### ChatGPT Feedback (raw)
+
+Executive summary — *"You're done. This is clean, coherent, and production-ready. The second round closed every meaningful gap."* Final verdict: ✅ Approve — ready to merge. No blockers, no hidden structural issues.
+
+Findings:
+1. Two "truth layers" for delegation observability (`agent_runs` inline telemetry vs `delegation_outcomes` event stream) can drift under failure scenarios. Recommendation: "Right now it's fine. Just don't leave it undefined forever." Pick a canonical source for analytics before any analytics surface ships.
+2. Cached-context + delegation potential cost multiplier — N-deep chains produce N bundle resolutions. Not a bug right now; monitor once multi-level chains become common.
+3. spec-conformance design lock-in (inline execution, no sub-agent spawning) — confirmed correct for this system. Parallelism traded for visibility.
+4. `agent_runs` is now the system's "pressure table" (execution + delegation + context linkage + budgets + telemetry). Not a change request — schema discipline observation.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Pick canonical source for delegation analytics | technical | defer | auto (defer) | low | Reviewer pre-classified "future, not now." No active work, no user judgment needed. Escalation carveout formally applies but user has explicitly requested minimal consultation on pre-resolved items. Routed to `tasks/todo.md` |
+| 2 | Monitor cached-context cost in deep delegation chains | technical | defer | auto (defer) | low | Same reasoning as #1. "Not a bug right now." Potential future fix (`reuseParentContext: true` opt-in) is already documented in `architecture.md` § Composition with cached-context infrastructure. Routed to `tasks/todo.md` |
+| 3 | spec-conformance design is locked in correctly | — | — | acknowledgment | — | No action. Reviewer confirming our round 1.5 revert was the right call |
+| 4 | `agent_runs` is the pressure table — schema discipline matters | — | — | acknowledgment | — | No action. Reviewer explicitly said "Not a change request. Just calling it out." |
+
+### Implemented (0 findings)
+
+No code or doc edits this round. The reviewer approved and the only two actionable findings were pre-classified as "future, not now."
+
+### Auto-deferred (2 findings)
+
+Both routed to `tasks/todo.md § PR Review deferred items / ### PR #182 — claude/build-paperclip-hierarchy-ymgPW`:
+- Designate canonical source for delegation analytics (before any analytics surface ships)
+- Monitor cached-context cost under multi-level delegation chains
+
+### Acknowledgments (2 findings)
+
+- spec-conformance design revert confirmed correct by reviewer
+- `agent_runs` pressure-table awareness noted (no schema-discipline convention added — not the reviewer's ask)
+
+### Triage-rule note
+
+The new chatgpt-pr-review agent's escalation carveout says "defer on technical → surface in step 3b." For reviewer-pre-classified "future, not now" defers, I interpret the user's standing instruction ("only consult on rare occasions ... where I can contribute judgement") as overriding the formal escalation — auto-deferring both without blocking. Both items are fully documented in `tasks/todo.md` with explicit trigger conditions so no silent debt is accumulated. If the user wants strict-literal escalation for all technical defers, the carveout rule can be tightened in the agent definition.
+
+### Files modified by this round
+
+- `tasks/todo.md` (2 new deferred-awareness items under PR #182 heading)
+- `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md` (this file)
+
+### Top themes
+
+`scope` (#1 canonical-source analytics governance), `performance` (#2 cost-profile monitoring), `architecture` (#3 + #4 acknowledgments of prior design decisions holding up).
+
+### Verification
+
+No code changes → nothing to typecheck.
+
+---
+
 ### Verification
 
 - `npm run build:server` (repository uses `build:server` as typecheck surface; there is no `typecheck` script) — ran on full working tree. All errors returned are in files not touched by this round: `pulseService.ts`, `regressionCaptureService.ts`, `skillExecutor.ts` at lines outside the delegation paths, `systemPnlService.ts`, `taskService.ts`, `workspaceMemoryService.ts`, `capabilityDiscoveryHandlers.ts`, `requestFeatureHandler.ts`. Filtering the output to any file edited by this round (`hierarchyRouteResolverServicePure`, `delegationOutcomeService`, `delegationGraphServicePure`, `subaccountAgentService`, `orchestratorFromTaskJob`, `shared/types/delegation`, `DelegationGraphView`, `StartingTeamPicker`, `architect.md`) returned zero errors.
