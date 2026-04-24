@@ -30,6 +30,7 @@ interface DelegationGraphResponse {
   nodes: DelegationGraphNode[];
   edges: DelegationGraphEdge[];
   truncated: boolean;
+  depthLimit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,12 +85,20 @@ interface TreeNodeProps {
   childrenMap: Map<string, DelegationGraphEdge[]>;
   depth: number;
   onSelectRun: (runId: string) => void;
+  visited?: Set<string>;
 }
 
-function TreeNode({ nodeId, nodeMap, childrenMap, depth, onSelectRun }: TreeNodeProps) {
+function TreeNode({ nodeId, nodeMap, childrenMap, depth, onSelectRun, visited }: TreeNodeProps) {
   const [collapsed, setCollapsed] = useState(depth > 0);
   const node = nodeMap.get(nodeId);
   if (!node) return null;
+
+  // Cycle guard: backend should produce a DAG, but bad data or a bug must
+  // never crash the UI. `visited` carries the ancestor chain on this render path.
+  const visitedChain = visited ?? new Set<string>();
+  if (visitedChain.has(nodeId)) return null;
+  const nextVisited = new Set(visitedChain);
+  nextVisited.add(nodeId);
 
   const outboundEdges = childrenMap.get(nodeId) ?? [];
   const hasChildren = outboundEdges.length > 0;
@@ -151,6 +160,7 @@ function TreeNode({ nodeId, nodeMap, childrenMap, depth, onSelectRun }: TreeNode
                 childrenMap={childrenMap}
                 depth={depth + 1}
                 onSelectRun={onSelectRun}
+                visited={nextVisited}
               />
             </div>
           );
@@ -253,7 +263,7 @@ export default function DelegationGraphView({ runId }: DelegationGraphViewProps)
     <div>
       {graph.truncated && (
         <div className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3">
-          Graph truncated — some deep descendants not shown (limit: 6 levels)
+          Graph truncated — some deep descendants not shown (limit: {graph.depthLimit} levels)
         </div>
       )}
 

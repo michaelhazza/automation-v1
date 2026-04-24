@@ -91,6 +91,12 @@ export interface DelegationGraphResponse {
   rootRunId: string;
   nodes: DelegationGraphNode[];
   edges: DelegationGraphEdge[];
-  /** true if fan-out exceeded MAX_DEPTH_BOUND = 6 levels */
+  /** true if fan-out exceeded `depthLimit` levels */
   truncated: boolean;
+  /**
+   * The server-side depth bound applied when walking the graph (MAX_DEPTH_BOUND).
+   * Surfaced to the client so the UI can render the limit without duplicating
+   * the constant — if the backend bound changes, the UI tracks automatically.
+   */
+  depthLimit: number;
 }

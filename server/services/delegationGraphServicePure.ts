@@ -83,5 +83,6 @@ export function assembleGraphPure(input: {
     nodes: Array.from(nodeMap.values()),
     edges,
     truncated: input.truncated,
+    depthLimit: MAX_DEPTH_BOUND,
   };
 }

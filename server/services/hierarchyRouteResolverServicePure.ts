@@ -27,11 +27,20 @@ export interface ResolveRootResult {
   /** The subaccount the resolved agent link belongs to. */
   subaccountId: string;
   /**
-   * 'none'     — the result came directly from the requested scope.
-   * 'org_root' — fell back to the org-level Orchestrator link because no
-   *              subaccount root was found (or subaccountId was null).
+   * Routing semantics of the result:
+   *   'none'     — direct match for the requested scope (no fallback).
+   *   'expected' — fell back to the org-level link because the caller did
+   *                not scope a subaccount (`subaccountId: null`). This is
+   *                intentional caller-side behaviour, not misconfiguration.
+   *   'degraded' — fell back to the org-level link because the requested
+   *                subaccount exists but has zero active root agents. This
+   *                is a misconfiguration signal; the `subaccountNoRoot`
+   *                workspace-health detector should already be firing.
+   *
+   * Callers should treat `'expected'` as informational and `'degraded'` as
+   * actionable (log + metric), even though both route identically.
    */
-  fallback: 'none' | 'org_root';
+  fallback: 'none' | 'expected' | 'degraded';
 }
 
 /**
@@ -40,12 +49,12 @@ export interface ResolveRootResult {
  * | scope       | subaccountId | subaccountRoots | orgLevelLink | result                         |
  * |-------------|--------------|-----------------|--------------|-------------------------------|
  * | system      | any          | any             | any          | null                           |
- * | org         | any          | any             | present      | orgLevelLink, fallback:'none'  |
+ * | org         | any          | any             | present      | orgLevelLink, fallback:'none'   |
  * | org         | any          | any             | null         | null                           |
- * | subaccount  | null         | any             | present      | orgLevelLink, fallback:'org_root' |
+ * | subaccount  | null         | any             | present      | orgLevelLink, fallback:'expected' |
  * | subaccount  | null         | any             | null         | null                           |
- * | subaccount  | present      | 1 row           | any          | that row, fallback:'none'      |
- * | subaccount  | present      | 0 rows          | present      | orgLevelLink, fallback:'org_root' |
+ * | subaccount  | present      | 1 row           | any          | that row, fallback:'none'       |
+ * | subaccount  | present      | 0 rows          | present      | orgLevelLink, fallback:'degraded' |
  * | subaccount  | present      | 0 rows          | null         | null                           |
  * | subaccount  | present      | N rows (>1)     | any          | oldest by createdAt, fallback:'none' |
  */
@@ -69,16 +78,17 @@ export function resolveRootForScopePure(input: {
   }
 
   // ── Subaccount scope ────────────────────────────────────────────────────
-  // subaccountId null — we have no subaccount to look up; fall through to org root
+  // subaccountId null — caller didn't scope a subaccount; org-level is the expected fallback
   if (subaccountId === null) {
     if (!orgLevelLink) return null;
-    return { subaccountAgentId: orgLevelLink.subaccountAgentId, agentId: orgLevelLink.agentId, subaccountId: orgLevelLink.subaccountId, fallback: 'org_root' };
+    return { subaccountAgentId: orgLevelLink.subaccountAgentId, agentId: orgLevelLink.agentId, subaccountId: orgLevelLink.subaccountId, fallback: 'expected' };
   }
 
   // subaccountId present — evaluate the roster
   if (subaccountRoots.length === 0) {
+    // Subaccount exists but has no root — degraded, not expected.
     if (!orgLevelLink) return null;
-    return { subaccountAgentId: orgLevelLink.subaccountAgentId, agentId: orgLevelLink.agentId, subaccountId: orgLevelLink.subaccountId, fallback: 'org_root' };
+    return { subaccountAgentId: orgLevelLink.subaccountAgentId, agentId: orgLevelLink.agentId, subaccountId: orgLevelLink.subaccountId, fallback: 'degraded' };
   }
 
   if (subaccountRoots.length === 1) {

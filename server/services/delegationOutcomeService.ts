@@ -12,11 +12,40 @@ import type { DelegationOutcome } from '../../shared/types/delegation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import {
+  DEFAULT_SOFT_BREAKER_CONFIG,
+  createBreakerState,
+  isOpen as isBreakerOpen,
+  recordOutcome as recordBreakerOutcome,
+  shouldAttempt as shouldBreakerAttempt,
+} from '../lib/softBreakerPure.js';
+import {
   assertDelegationOutcomeShape,
   buildListQueryFilters,
   type DelegationOutcomeInput,
   type RawListFilters,
 } from './delegationOutcomeServicePure.js';
+
+// ---------------------------------------------------------------------------
+// Dual-write soft breaker
+// ---------------------------------------------------------------------------
+// Under DB pressure, every delegation attempt tries to write an outcome row.
+// Without a breaker, failures produce one warn log per call + CPU burn on
+// retries. Adopt the same pattern as `llmInflightRegistry.persistHistoryEvent`
+// (architecture.md § fire-and-forget persistence paths).
+//
+// Observability signal:
+//   - Structured WARN `delegation_outcome_write_failed` per failed DB op
+//     below threshold → log pipeline counts occurrences.
+//   - Exactly one `delegation_outcome_breaker_opened` per trip.
+//   - Construction bugs (shape validation, actor mismatch) do NOT feed the
+//     breaker — those are deterministic errors, not pressure signals.
+
+const outcomeBreakerState = createBreakerState();
+
+/** Test-only helper. Mirrors the llmInflightRegistry test hook. */
+export function _isOutcomeBreakerOpenForTests(nowMs: number): boolean {
+  return isBreakerOpen(outcomeBreakerState, nowMs);
+}
 
 // ---------------------------------------------------------------------------
 // insertOutcomeSafe — skill-handler entry point (INV-3)
@@ -27,23 +56,37 @@ import {
  * this function; failures must never surface to callers.
  *
  * Steps:
- *   1. Pure shape validation (`assertDelegationOutcomeShape`)
- *   2. DB integrity check: both actor `subaccount_agents` rows must exist and
+ *   1. Breaker gate (`shouldBreakerAttempt`) — drop silently if open
+ *   2. Pure shape validation (`assertDelegationOutcomeShape`)
+ *   3. DB integrity check: both actor `subaccount_agents` rows must exist and
  *      match `input.subaccountId`
- *   3. Insert into `delegation_outcomes`
+ *   4. Insert into `delegation_outcomes`
  *
- * Any failure logs a WARN with tag `delegation_outcome_write_failed` and returns.
+ * DB failures feed the breaker; construction bugs (shape, actor mismatch) do
+ * not. Any failure logs a WARN with tag `delegation_outcome_write_failed`.
  */
 export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<void> {
-  try {
-    // Step 1 — pure shape validation
-    assertDelegationOutcomeShape(input);
+  // Step 1 — breaker gate
+  if (!shouldBreakerAttempt(outcomeBreakerState, Date.now())) return;
 
+  // Step 2 — pure shape validation (construction bug — do not feed breaker)
+  try {
+    assertDelegationOutcomeShape(input);
+  } catch (err) {
+    logger.warn('delegation_outcome_write_failed', {
+      tag: 'delegation_outcome_write_failed',
+      reason: 'shape_invalid',
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  try {
     const db = getOrgScopedDb('delegationOutcomeService.insertOutcomeSafe');
 
-    // Step 2 — service-layer integrity check (single round trip — spec §4.4)
-    // never-throws contract: any failure logs WARN and returns; the surrounding
-    // try/catch is the structural guarantee that errors cannot escape this function.
+    // Step 3 — service-layer integrity check (single round trip — spec §4.4).
+    // Construction bugs (not DB pressure) — logged and returned without feeding
+    // the breaker.
     const actors = await db
       .select({ id: subaccountAgents.id, subaccountId: subaccountAgents.subaccountId })
       .from(subaccountAgents)
@@ -58,6 +101,7 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
         targetAgentId: input.targetAgentId,
         reason: 'one or both agent rows not found in org scope',
       });
+      recordBreakerOutcome(outcomeBreakerState, true, Date.now());
       return;
     }
 
@@ -68,10 +112,11 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
         mismatchedIds: mismatched.map((a) => a.id),
         reason: 'actor subaccount_id mismatch — construction bug',
       });
+      recordBreakerOutcome(outcomeBreakerState, true, Date.now());
       return;
     }
 
-    // Step 3 — insert
+    // Step 4 — insert
     await db.insert(delegationOutcomes).values({
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
@@ -83,11 +128,26 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
       reason: input.reason ?? null,
       delegationDirection: input.delegationDirection as 'down' | 'up' | 'lateral',
     });
+
+    recordBreakerOutcome(outcomeBreakerState, true, Date.now());
   } catch (err) {
-    logger.warn('delegation_outcome_write_failed', {
-      tag: 'delegation_outcome_write_failed',
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const { trippedNow } = recordBreakerOutcome(outcomeBreakerState, false, Date.now());
+    if (trippedNow) {
+      logger.warn('delegation_outcome_breaker_opened', {
+        tag: 'delegation_outcome_breaker_opened',
+        openDurationMs: DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs,
+        failThreshold: DEFAULT_SOFT_BREAKER_CONFIG.failThreshold,
+        lastError: err instanceof Error ? err.message : String(err),
+      });
+    } else if (isBreakerOpen(outcomeBreakerState, Date.now())) {
+      // Prior trip — stay silent so we don't flood during the open window.
+    } else {
+      logger.warn('delegation_outcome_write_failed', {
+        tag: 'delegation_outcome_write_failed',
+        reason: 'db_error',
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

@@ -125,10 +125,10 @@ test('scope:org without orgLevelLink returns null', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Branch 3: scope === 'subaccount' + subaccountId === null → fallback: 'org_root'
+// Branch 3: scope === 'subaccount' + subaccountId === null → fallback: 'expected'
 // ---------------------------------------------------------------------------
 
-test('scope:subaccount with null subaccountId falls back to org link with fallback:org_root', () => {
+test('scope:subaccount with null subaccountId falls back to org link with fallback:expected', () => {
   const result = resolveRootForScopePure({
     scope: 'subaccount',
     subaccountId: null,
@@ -139,7 +139,7 @@ test('scope:subaccount with null subaccountId falls back to org link with fallba
     subaccountAgentId: 'sa-org-001',
     agentId: 'agent-org-001',
     subaccountId: 'sub-sentinel',
-    fallback: 'org_root',
+    fallback: 'expected',
   }, 'null subaccountId fallback');
 });
 
@@ -188,10 +188,10 @@ test('scope:subaccount with one root ignores org link entirely', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Branch 5: scope === 'subaccount' + zero roots → fallback: 'org_root'
+// Branch 5: scope === 'subaccount' + zero roots → fallback: 'degraded'
 // ---------------------------------------------------------------------------
 
-test('scope:subaccount with zero roots falls back to org link with fallback:org_root', () => {
+test('scope:subaccount with zero roots falls back to org link with fallback:degraded', () => {
   const result = resolveRootForScopePure({
     scope: 'subaccount',
     subaccountId: 'sub-123',
@@ -202,8 +202,8 @@ test('scope:subaccount with zero roots falls back to org link with fallback:org_
     subaccountAgentId: 'sa-org-001',
     agentId: 'agent-org-001',
     subaccountId: 'sub-sentinel',
-    fallback: 'org_root',
-  }, 'zero roots fallback');
+    fallback: 'degraded',
+  }, 'zero roots fallback (misconfigured subaccount)');
 });
 
 test('scope:subaccount with zero roots and no org link returns null', () => {

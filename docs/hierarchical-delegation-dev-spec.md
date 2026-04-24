@@ -875,7 +875,7 @@ return resolveSlugsToTools(effectiveSlugs);
 export interface ResolveRootResult {
   subaccountAgentId: string;
   agentId: string;
-  fallback: 'none' | 'org_root';
+  fallback: 'none' | 'expected' | 'degraded';
 }
 
 export async function resolveRootForScope(params: {
@@ -885,15 +885,22 @@ export async function resolveRootForScope(params: {
 }): Promise<ResolveRootResult | null>;
 // Returns null when the scope is unsupported (scope === 'system' in v1 — §13 deferred).
 // Callers surface a Brief error artefact on null (see §6.7).
+//
+// `fallback` semantics:
+//   'none'     — direct match, no fallback.
+//   'expected' — caller did not scope a subaccount (subaccountId: null); org-level fallback is the
+//                intended behaviour. Informational, not actionable.
+//   'degraded' — the requested subaccount exists but has zero active root agents. Misconfiguration;
+//                the `subaccountNoRoot` workspace-health detector is the canonical surface.
 ```
 
 **Resolution logic:**
 
 1. **`scope === 'subaccount'`** (most common path, Brief scoped to a client subaccount):
-   - If `subaccountId` is null → fall through to the org-level Orchestrator link (§2.1 current behaviour). Return with `fallback: 'org_root'`. This happens for Brief enqueues that don't have a subaccount context (e.g. a task created at org level but routed with default scope); the fallback restores pre-spec behaviour.
+   - If `subaccountId` is null → fall through to the org-level Orchestrator link (§2.1 current behaviour). Return with `fallback: 'expected'`. This happens for Brief enqueues that don't have a subaccount context (e.g. a task created at org level but routed with default scope); the fallback restores pre-spec behaviour and is expected, not degraded.
    - Otherwise, query `subaccount_agents WHERE subaccount_id = $subaccountId AND parent_subaccount_agent_id IS NULL AND is_active = true`.
    - Expected: exactly one row (enforced by partial unique index §5.1). Return with `fallback: 'none'`.
-   - Zero rows: fall back to the org-level Orchestrator link. Log WARN with a structured event that the `subaccountNoRoot` detector picks up on the next audit sweep. Return with `fallback: 'org_root'`.
+   - Zero rows: fall back to the org-level Orchestrator link. Log WARN with a structured event that the `subaccountNoRoot` detector picks up on the next audit sweep. Return with `fallback: 'degraded'` — this is the misconfiguration case and callers should treat it as actionable (separate log tag from the expected-fallback case).
    - Multiple rows: impossible post-migration. Pre-migration window: pick oldest by `createdAt`, log CRITICAL with a structured event that the `subaccountMultipleRoots` detector picks up on the next audit sweep. Return with `fallback: 'none'` but flagged.
 
 2. **`scope === 'org'`:**

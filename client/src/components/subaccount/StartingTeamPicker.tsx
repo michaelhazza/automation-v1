@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api from '../../lib/api';
 
 interface HierarchyTemplate {
@@ -18,9 +18,11 @@ type LoadState = 'loading' | 'error' | 'ready';
 export default function StartingTeamPicker({ value, onChange, disabled }: StartingTeamPickerProps) {
   const [templates, setTemplates] = useState<HierarchyTemplate[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [loadTrigger, setLoadTrigger] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoadState('loading');
     api.get('/api/hierarchy-templates')
       .then(({ data }) => {
         if (!cancelled) {
@@ -32,6 +34,10 @@ export default function StartingTeamPicker({ value, onChange, disabled }: Starti
         if (!cancelled) setLoadState('error');
       });
     return () => { cancelled = true; };
+  }, [loadTrigger]);
+
+  const handleRetry = useCallback(() => {
+    setLoadTrigger((n) => n + 1);
   }, []);
 
   const selectClass =
@@ -47,9 +53,18 @@ export default function StartingTeamPicker({ value, onChange, disabled }: Starti
 
   if (loadState === 'error') {
     return (
-      <select disabled className={selectClass}>
-        <option>Could not load templates</option>
-      </select>
+      <div className="flex items-center gap-2">
+        <select disabled className={`${selectClass} flex-1`}>
+          <option>Could not load templates</option>
+        </select>
+        <button
+          type="button"
+          onClick={handleRetry}
+          className="text-[12px] text-indigo-500 hover:text-indigo-700 underline flex-shrink-0"
+        >
+          Retry
+        </button>
+      </div>
     );
   }
 

@@ -9,7 +9,9 @@ You are a senior application architect working on Automation OS — an AI agent 
 
 ## Context Loading
 
-Before producing any output, read:
+> **Ordering note:** the *very first* action of every invocation is the TodoWrite skeleton described in [Task Tracking](#task-tracking-mandatory) below — not file reading. Create the minimal TodoWrite list first, then come back here and load context as the list's first checked item. This section describes *what* to load; the Task Tracking section describes *when*.
+
+Read, in order:
 1. `CLAUDE.md` — project principles, task workflow, and conventions
 2. `architecture.md` — backend structure, route conventions, auth model, three-tier agent hierarchy, skill system, service patterns, and all key patterns
 3. `docs/spec-authoring-checklist.md` — pre-authoring checklist for Significant/Major plans. Every plan you produce must satisfy its appendix (primitives search, file inventory, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, testing posture) or document an explicit deviation.

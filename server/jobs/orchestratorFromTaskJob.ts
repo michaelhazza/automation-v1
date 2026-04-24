@@ -198,8 +198,21 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
-  if (resolvedRoot.fallback === 'org_root') {
-    logger.warn('orchestratorFromTask.fallback_to_org_root', {
+  // Log only the misconfigured case at WARN — the `'expected'` branch is the
+  // routine scope:subaccount-with-null-subaccountId flow and should not flood
+  // the log. `'degraded'` means the subaccount exists but has zero root agents
+  // (the `subaccountNoRoot` detector will surface it in workspace-health).
+  if (resolvedRoot.fallback === 'degraded') {
+    logger.warn('orchestratorFromTask.fallback_degraded', {
+      tag: 'orchestratorFromTask.fallback_degraded',
+      taskId,
+      organisationId,
+      subaccountId: task.subaccountId,
+      scope,
+      reason: 'subaccount has no active root agent — routed to org-level link',
+    });
+  } else if (resolvedRoot.fallback === 'expected') {
+    logger.info('orchestratorFromTask.fallback_expected', {
       taskId,
       organisationId,
       subaccountId: task.subaccountId,

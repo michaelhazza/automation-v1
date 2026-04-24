@@ -3036,7 +3036,13 @@ Full contract: `docs/hierarchical-delegation-dev-spec.md`.
 
 ### Root-agent contract
 
-Each subaccount has at most one active root agent (`parentSubaccountAgentId IS NULL AND isActive = true`). A partial unique index in `server/db/schema/subaccountAgents.ts` enforces uniqueness at the DB layer. The same-transaction rotation helper in `server/services/hierarchyTemplateService.ts` swaps roots atomically. If no subaccount-scoped root exists, brief routing falls back to the org-level orchestrator via `hierarchyRouteResolverService.ts`.
+Each subaccount has **exactly one** active root agent (`parentSubaccountAgentId IS NULL AND isActive = true`) at rest.
+
+- **Upper bound (≤ 1)** — a partial unique index in `server/db/schema/subaccountAgents.ts` enforces uniqueness at the DB layer.
+- **Lower bound (≥ 1)** — `subaccountAgentService.updateLink` and `subaccountAgentService.unlinkAgent` reject mutations that would deactivate, unlink, or re-parent the last active root (`errorCode: 'last_root_protected'`). Callers must activate another root first, or go through `hierarchyTemplateService.applyTemplate`'s atomic swap.
+- **Atomic swaps** — `hierarchyTemplateService.applyTemplate` bypasses the service-layer mutation check by doing its own transactional swap (deactivate all → apply new tree) inside a `pg_advisory_xact_lock`-protected transaction. This is the only supported path for transient 0-root states.
+- **Post-hoc detection** — the `subaccountNoRoot` and `subaccountMultipleRoots` workspace-health detectors surface DB-level anomalies that slipped past the service guards (e.g. direct SQL writes, legacy data).
+- **Brief routing fallback** — if at runtime no subaccount-scoped root exists, routing falls back to the org-level orchestrator via `hierarchyRouteResolverService.ts` with `fallback: 'degraded'` (misconfiguration signal, not routine behaviour).
 
 ### Hierarchy context (`HierarchyContext`)
 
@@ -3065,6 +3071,12 @@ Three delegation-specific error codes emitted as `agent_execution_events` rows (
 - `hierarchy_context_missing` — hierarchy snapshot absent when delegation skill is invoked.
 
 The dual-write contract (`delegationOutcomeService.ts`): for every spawn or handoff attempt, a `delegation_outcomes` row is written (fire-and-forget via `insertOutcomeSafe`). Failures are swallowed — they never surface to the caller. This preserves the synchronous delegation path even under transient DB pressure.
+
+Observability: `insertOutcomeSafe` wraps the DB write with `softBreakerPure.ts` (same primitive as `llmInflightRegistry.persistHistoryEvent`) so that sustained DB pressure does not produce a per-call log firehose. Signals:
+
+- Per-failure WARN with tag `delegation_outcome_write_failed` (log pipeline counts occurrences as the metric).
+- Exactly one WARN with tag `delegation_outcome_breaker_opened` per trip; once open, subsequent calls drop silently for `DEFAULT_SOFT_BREAKER_CONFIG.openDurationMs` and a half-open probe reopens or closes the breaker.
+- Construction-bug branches (shape validation, actor-id mismatch, subaccount mismatch) do NOT feed the breaker — those are deterministic errors, not pressure signals, and should not cause the breaker to trip against a healthy DB.
 
 ### Run-trace delegation graph
 

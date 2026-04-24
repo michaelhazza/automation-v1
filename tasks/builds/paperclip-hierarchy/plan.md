@@ -403,7 +403,7 @@ Forward-only dependency: Phase N never references primitives first introduced in
 
 **Acceptance criteria.**
 - A Brief filed against a subaccount with a configured root dispatches to that root (observable in `agent_runs.subaccountAgentId` on the first non-Brief-seed run).
-- A Brief filed against a subaccount with NO subaccount-level root falls back to the org-level Orchestrator (observable in logs as `fallback: 'org_root'`).
+- A Brief filed against a subaccount with NO subaccount-level root falls back to the org-level Orchestrator (observable in logs as `fallback: 'degraded'`, with a paired `subaccountNoRoot` workspace-health finding).
 - `scope === 'system'` Briefs surface a conversation-level error artefact ("system-scope Briefs are not yet routable"); no dispatch happens.
 - Non-Brief task-created triggers continue to work — they default to `'subaccount'` in the job handler.
 - `subaccountMultipleRoots` detector remains at zero findings.
