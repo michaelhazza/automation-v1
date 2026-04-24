@@ -260,6 +260,24 @@ export function validateEventPayload(
       if (p.actionId != null && !isStr(p.actionId)) {
         return { ok: false, reason: 'skill.completed_bad_action_id' };
       }
+      // Optional structured failure-context fields — UI uses these instead of
+      // parsing resultSummary. All optional, so absence is fine; presence must
+      // be the right shape.
+      if (p.skillType != null && (!isStr(p.skillType) || !['automation', 'agent_decision', 'action_call', 'other'].includes(p.skillType))) {
+        return { ok: false, reason: 'skill.completed_bad_skill_type' };
+      }
+      if (p.errorCode != null && !isStr(p.errorCode)) {
+        return { ok: false, reason: 'skill.completed_bad_error_code' };
+      }
+      if (p.provider != null && !isStr(p.provider)) {
+        return { ok: false, reason: 'skill.completed_bad_provider' };
+      }
+      if (p.connectionKey != null && !isStr(p.connectionKey)) {
+        return { ok: false, reason: 'skill.completed_bad_connection_key' };
+      }
+      if (p.idempotent != null && !isBool(p.idempotent)) {
+        return { ok: false, reason: 'skill.completed_bad_idempotent' };
+      }
       return { ok: true };
 
     case 'llm.requested':

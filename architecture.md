@@ -2331,7 +2331,7 @@ Three layers, all required:
 | `/api/system/playbook-studio/sessions` | `playbookStudio.ts` | System admin chat authoring: list/create/read sessions |
 | `/api/system/playbook-studio/sessions/:id` | `playbookStudio.ts` | Update chat-session candidate file contents |
 | `/api/system/playbook-studio/sessions/:id/save-and-open-pr` | `playbookStudio.ts` | Trust-boundary: validate + render + commit + open PR (server is the only producer of the file body) |
-| `/api/system/playbook-studio/playbooks` | `playbookStudio.ts` | List on-disk `server/playbooks/*.playbook.ts` slugs |
+| `/api/system/playbook-studio/playbooks` | `playbookStudio.ts` | List on-disk `server/workflows/*.workflow.ts` slugs |
 | `/api/system/playbook-studio/playbooks/:slug` | `playbookStudio.ts` | Read a specific on-disk playbook file |
 | `/api/system/playbook-studio/validate` | `playbookStudio.ts` | `validate_candidate` tool — returns canonical `definitionHash` on success |
 | `/api/system/playbook-studio/simulate` | `playbookStudio.ts` | `simulate_run` tool — dry-run side-effect classification |
@@ -2356,7 +2356,7 @@ All routes follow the standard conventions: `asyncHandler`, `authenticate`, `res
 | `playbookStudioGithub` | Real GitHub PR creation path used by `saveAndOpenPr` (deferred #5) |
 | `subaccountOnboardingService` | Resolves owed onboarding playbooks for a sub-account (`listOwedOnboardingPlaybooks`, `startOwedOnboardingPlaybook`, `autoStartOwedOnboardingPlaybooks`). Called fire-and-forget from sub-account creation. Idempotent via 23505 unique-violation catch on the partial unique index `(subaccount_id, playbook_slug) WHERE active_statuses`. |
 
-The templating/validator/renderer/hash primitives live under `server/lib/playbook/` (`templating.ts`, `validator.ts`, `renderer.ts`, `canonicalJson.ts`, `hash.ts`, `definePlaybook.ts`) so they can be imported by both the engine and the Studio tools without pulling in service layer state. They are pure and unit-tested (`server/lib/playbook/__tests__/playbook.test.ts`).
+The templating/validator/renderer/hash primitives live under `server/lib/workflow/` (`templating.ts`, `validator.ts`, `renderer.ts`, `canonicalJson.ts`, `hash.ts`, `defineWorkflow.ts`) so they can be imported by both the engine and the Studio tools without pulling in service layer state. They are pure and unit-tested (`server/lib/workflow/__tests__/workflow.test.ts`).
 
 ### Permissions
 
@@ -2377,11 +2377,11 @@ Integrate into the existing permission set UI.
 
 **Playbook Studio (shipped — system-admin chat authoring):**
 
-- `/system/playbook-studio` — `PlaybookStudioPage` — chat-driven authoring experience. Backed by the `playbook-author` system agent (`server/agents/playbook-author/master-prompt.md`) with the five `playbook_*` skills (`playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save`). Read-only file preview is rendered server-side via `/render` — the client never constructs the file body.
+- `/system/workflow-studio` — `WorkflowStudioPage` — chat-driven authoring experience. Backed by the `workflow-author` system agent (`server/agents/workflow-author/master-prompt.md`) with the five `workflow_*` Studio skills. Read-only file preview is rendered server-side via `/render` — the client never constructs the file body.
 
 **Author agent (deferred #6):** The Playbook Author is a system-managed agent — cannot be edited or deleted at org tier. Seeded via `scripts/seed-playbook-author.ts`. It is the only caller of the Studio tools; org agents do not get access to Studio endpoints (blocked by `requireSystemAdmin`).
 
-**Seeded templates:** Phase 1 ships with `server/playbooks/event-creation.playbook.ts` as the reference system template. `npm run playbooks:validate` runs DAG validation on every seeded file in CI; `npm run playbooks:seed` loads them into `systemPlaybookTemplates`.
+**Seeded templates:** Phase 1 ships with `server/workflows/event-creation.workflow.ts` as the reference system template. `npm run playbooks:validate` runs DAG validation on every seeded file in CI; `npm run playbooks:seed` loads them into `systemWorkflowTemplates`.
 
 ### Invariants (non-negotiable)
 

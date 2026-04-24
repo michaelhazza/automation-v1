@@ -160,6 +160,19 @@ export type AgentExecutionEventPayload =
       status: 'ok' | 'error';
       resultSummary: string;
       actionId?: string;
+      // ── Structured failure-context fields (preferred over parsing resultSummary).
+      // Discriminator for what kind of skill ran. UI uses this instead of slug-prefix matching.
+      skillType?: 'automation' | 'agent_decision' | 'action_call' | 'other';
+      // Stable error code from the §5.7 vocabulary when status='error' and skillType='automation'.
+      errorCode?: string;
+      // Provider name (e.g. 'mailchimp', 'gmail') when the failure is connection-related.
+      provider?: string;
+      // Connection slot key (matches automations.requiredConnections[].key) when
+      // errorCode is a connection failure (e.g. automation_missing_connection).
+      connectionKey?: string;
+      // Idempotency flag from automations.idempotent. When false, the UI must
+      // confirm before retry (since the side effect may have already occurred).
+      idempotent?: boolean;
     }
   | {
       eventType: 'llm.requested';

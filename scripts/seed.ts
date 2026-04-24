@@ -6,7 +6,7 @@
  *
  *   - scripts/seed-system.ts                  → Phases 1, 2
  *   - scripts/seed-local.ts                   → Phase 5 (partial — dev org + user)
- *   - scripts/seed-playbook-author.ts         → Phase 3
+ *   - scripts/seed-workflow-author.ts         → Phase 3
  *   - scripts/seed-playbooks.ts               → Phase 4 (discovery + upsert)
  *   - scripts/seed-portfolio-health-playbook.ts → Phase 4 (portfolio-health template)
  *   - scripts/seed-42macro-reporting-agent.ts → Phase 5 (reporting agent + integrations)
@@ -27,7 +27,7 @@
  *         - sets up the reportsTo hierarchy
  *
  *   [3/5] Playbook Author system agent (separate — Studio tool runner)
- *         - reads server/agents/playbook-author/master-prompt.md
+ *         - reads server/agents/workflow-author/master-prompt.md
  *         - upserts a 17th system_agents row (isSystemManaged: true)
  *         - wires the 5 playbook_* Studio tool skills
  *
@@ -443,8 +443,8 @@ async function phase2_systemAgents(): Promise<void> {
 async function phase3_playbookAuthor(): Promise<void> {
   logPhase(3, 6, 'Playbook Author system agent');
 
-  const SLUG = 'playbook-author';
-  const PROMPT_PATH = resolve(process.cwd(), 'server/agents/playbook-author/master-prompt.md');
+  const SLUG = 'workflow-author';
+  const PROMPT_PATH = resolve(process.cwd(), 'server/agents/workflow-author/master-prompt.md');
   const TOOL_SKILLS = [
     'playbook_read_existing',
     'playbook_validate',

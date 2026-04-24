@@ -1,12 +1,34 @@
+import { useState } from 'react';
 import type { AgentExecutionEvent } from '../../../../shared/types/agentExecutionLog';
+import ConfirmDialog from '../ConfirmDialog';
+import {
+  mapEventToViewModel,
+  retryNeedsConfirmation,
+  NON_IDEMPOTENT_RETRY_CONFIRM_MESSAGE,
+  type InvokeAutomationFailedViewModel,
+} from './eventRowPure';
+
+/**
+ * Structured request passed to onSetupConnection — replaces the previous
+ * (provider, event) signature so callers receive enough context to navigate
+ * to the right configuration screen (provider + connection slot key + the
+ * spec-named errorCode that classified the failure).
+ */
+export interface SetupConnectionRequest {
+  provider: string | undefined;
+  connectionKey: string | undefined;
+  errorCode: string | undefined;
+  event: AgentExecutionEvent;
+}
 
 interface Props {
   event: AgentExecutionEvent;
   onOpen: (event: AgentExecutionEvent) => void;
-  /** Called when the user clicks "Retry step" on a failed invoke_automation row. */
+  /** Called when the user clicks "Retry step" on a failed invoke_automation row.
+   *  For non-idempotent automations, the row first prompts the user via ConfirmDialog. */
   onRetryStep?: (event: AgentExecutionEvent) => void;
   /** Called when the user clicks "Set up [Provider]" on a failed invoke_automation row. */
-  onSetupConnection?: (provider: string, event: AgentExecutionEvent) => void;
+  onSetupConnection?: (request: SetupConnectionRequest) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -15,49 +37,71 @@ interface Props {
 // Shown when event.eventType === 'skill.completed' and the payload indicates
 // an invoke_automation skill that finished with status 'error'.  We surface
 // one human error line and two action buttons — no JSON, no trace internals.
+//
+// All payload-shape inference lives in `eventRowPure.ts` (mapEventToViewModel).
 
 interface InvokeAutomationFailedRowProps {
-  stepName: string;
-  errorMessage: string;
-  provider?: string;
+  vm: InvokeAutomationFailedViewModel;
   onRetryStep: () => void;
-  onSetupConnection: (provider: string) => void;
+  onSetupConnection: () => void;
 }
 
 function InvokeAutomationFailedRow({
-  stepName,
-  errorMessage,
-  provider,
+  vm,
   onRetryStep,
   onSetupConnection,
 }: InvokeAutomationFailedRowProps) {
-  const providerLabel = provider ?? 'the connection';
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const providerLabel = vm.provider ?? 'the connection';
+
+  const handleRetryClick = () => {
+    if (retryNeedsConfirmation(vm.idempotent)) {
+      setConfirmOpen(true);
+    } else {
+      onRetryStep();
+    }
+  };
+
   return (
-    <div className="w-full border border-red-200 rounded bg-red-50/60 px-4 py-3.5">
-      <div className="flex items-start gap-3">
-        <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 mt-[5px]" aria-hidden="true" />
-        <div className="flex-1 min-w-0">
-          <div className="text-[13.5px] font-semibold text-slate-900">{stepName}</div>
-          <div className="text-[12.5px] text-red-800 mt-1">{errorMessage}</div>
-          <div className="mt-3 flex gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => onSetupConnection(providerLabel)}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-md border-0 cursor-pointer font-[inherit]"
-            >
-              Set up {providerLabel}
-            </button>
-            <button
-              type="button"
-              onClick={onRetryStep}
-              className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12.5px] font-medium rounded-md border border-slate-300 cursor-pointer font-[inherit]"
-            >
-              Retry step
-            </button>
+    <>
+      <div className="w-full border border-red-200 rounded bg-red-50/60 px-4 py-3.5">
+        <div className="flex items-start gap-3">
+          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 mt-[5px]" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[13.5px] font-semibold text-slate-900">{vm.stepName}</div>
+            <div className="text-[12.5px] text-red-800 mt-1">{vm.errorMessage}</div>
+            <div className="mt-3 flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={onSetupConnection}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-md border-0 cursor-pointer font-[inherit]"
+              >
+                Set up {providerLabel}
+              </button>
+              <button
+                type="button"
+                onClick={handleRetryClick}
+                className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12.5px] font-medium rounded-md border border-slate-300 cursor-pointer font-[inherit]"
+              >
+                Retry step
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      {confirmOpen && (
+        <ConfirmDialog
+          title="Confirm retry"
+          message={NON_IDEMPOTENT_RETRY_CONFIRM_MESSAGE}
+          confirmLabel="Retry anyway"
+          onConfirm={() => {
+            setConfirmOpen(false);
+            onRetryStep();
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -94,40 +138,24 @@ export default function EventRow({ event, onOpen, onRetryStep, onSetupConnection
       : false;
 
   // ---------------------------------------------------------------------------
-  // invoke_automation failure branch — skill.completed with status 'error'
-  // where the skill slug indicates an automation invocation.
+  // invoke_automation failure branch — view-model is computed in eventRowPure.
   // ---------------------------------------------------------------------------
-  if (event.eventType === 'skill.completed') {
-    const p = event.payload as {
-      skillSlug: string;
-      status: 'ok' | 'error';
-      resultSummary: string;
-      skillName?: string;
-    };
-    const isAutomationSkill =
-      p.skillSlug === 'invoke_automation' ||
-      p.skillSlug.startsWith('automation.') ||
-      p.skillSlug.startsWith('invoke_automation.');
-
-    if (isAutomationSkill && p.status === 'error') {
-      // Extract provider from resultSummary heuristically.
-      // Automation failures typically embed the provider name, e.g.
-      // "The Mailchimp connection isn't set up for this subaccount, so nothing was sent."
-      const providerMatch = p.resultSummary.match(/The (\w+) connection/i);
-      const provider = providerMatch ? providerMatch[1] : undefined;
-
-      const stepName = event.linkedEntity?.label ?? p.skillName ?? p.skillSlug;
-
-      return (
-        <InvokeAutomationFailedRow
-          stepName={stepName}
-          errorMessage={p.resultSummary}
-          provider={provider}
-          onRetryStep={() => onRetryStep?.(event)}
-          onSetupConnection={(prov) => onSetupConnection?.(prov, event)}
-        />
-      );
-    }
+  const vm = mapEventToViewModel(event);
+  if (vm.kind === 'invoke_automation_failed') {
+    return (
+      <InvokeAutomationFailedRow
+        vm={vm}
+        onRetryStep={() => onRetryStep?.(event)}
+        onSetupConnection={() =>
+          onSetupConnection?.({
+            provider: vm.provider,
+            connectionKey: vm.connectionKey,
+            errorCode: vm.errorCode,
+            event,
+          })
+        }
+      />
+    );
   }
 
   // ---------------------------------------------------------------------------
