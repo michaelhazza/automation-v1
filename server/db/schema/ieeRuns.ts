@@ -4,6 +4,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { agentRuns } from './agentRuns';
+import type { FailureReason } from '../../../shared/iee/failureReason';
 
 // ---------------------------------------------------------------------------
 // iee_runs — Integrated Execution Environment runs
@@ -47,9 +48,9 @@ export const ieeRuns = pgTable(
     // ┌──────────────────────────────────────────────────────────────────────┐
     // │ TERMINAL STATUS FINALITY CONTRACT (reviewer round 4 #4)              │
     // │                                                                      │
-    // │ Once `status` is 'completed' or 'failed', NO further mutation is     │
-    // │ allowed on cost columns, resultSummary, stepCount, or status.        │
-    // │ Only the following columns may be updated post-terminal:             │
+    // │ Once `status` is 'completed', 'failed', or 'cancelled', NO further   │
+    // │ mutation is allowed on cost columns, resultSummary, stepCount, or    │
+    // │ status. Only the following columns may be updated post-terminal:     │
     // │   • event_emitted_at  — set when the iee-run-completed event is      │
     // │                         successfully published                       │
     // │   • deleted_at        — soft delete                                  │
@@ -61,14 +62,24 @@ export const ieeRuns = pgTable(
     // │      — atomic with reservation release                               │
     // │   3. worker/src/handlers/cleanupOrphans.ts::sweepReservationLeaks()  │
     // │      — atomic with reservation release                               │
+    // │   4. (Deferred — spec Step 8) user-initiated cancellation handler   │
+    // │      not yet implemented. When added, it will write status =        │
+    // │      'cancelled' gated by WHERE status IN ('pending', 'running',    │
+    // │      'delegated') so cannot touch an already-terminal row. Until    │
+    // │      Step 8 lands there are only three live callers.                │
     // │                                                                      │
-    // │ All three are gated by `WHERE status = ...` predicates that prevent  │
-    // │ a terminal row from being touched twice. Future contributors: do     │
-    // │ NOT add a fourth caller without preserving this invariant. If you    │
-    // │ need to update a terminal row, you almost certainly want a NEW row   │
-    // │ instead, or a denormalised column on a separate table.               │
+    // │ All callers are gated by `WHERE status = ...` predicates that        │
+    // │ prevent a terminal row from being touched twice. Future              │
+    // │ contributors: do NOT add another caller without preserving this     │
+    // │ invariant. If you need to update a terminal row, you almost          │
+    // │ certainly want a NEW row instead, or a denormalised column on a     │
+    // │ separate table.                                                      │
     // └──────────────────────────────────────────────────────────────────────┘
-    status:           text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed'>(),
+    // 'cancelled' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md
+    // Step 8) — terminal state written when a user cancels a delegated
+    // agent_run. The worker's per-step guard checks for this value and exits
+    // cleanly.
+    status:           text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'cancelled'>(),
 
     // Idempotency — DB-level uniqueness, partial on deletedAt to allow soft-delete + reinsert
     idempotencyKey:   text('idempotency_key').notNull(),
@@ -95,10 +106,14 @@ export const ieeRuns = pgTable(
     startedAt:        timestamp('started_at', { withTimezone: true }),
     completedAt:      timestamp('completed_at', { withTimezone: true }),
 
-    // Outcome — extended via spec v3.4 §8.4 / T13: connector_timeout,
-    // rate_limited, data_incomplete, internal_error added for the
-    // Reporting Agent paths. Existing values retained.
-    failureReason:    text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'connector_timeout' | 'rate_limited' | 'data_incomplete' | 'internal_error' | 'unknown'>(),
+    // Outcome. The TS union is the full shared FailureReason enum
+    // (shared/iee/failureReason.ts) so the schema and the worker's
+    // throwable failure taxonomy stay in lockstep. Previously an inline
+    // subset of the enum lived here and drifted — causing pre-existing
+    // type errors in worker/src/persistence/runs.ts and steps.ts where a
+    // wider FailureReason was being assigned to a narrower column type.
+    // Any future enum extension now automatically propagates.
+    failureReason:    text('failure_reason').$type<FailureReason>(),
     resultSummary:    jsonb('result_summary'),
     stepCount:        integer('step_count').notNull().default(0),
 

@@ -61,6 +61,12 @@ export const interventionService = {
     triggerEventId?: string;
     runId?: string;
     configVersion?: string;
+    /** Phase 4 — churn band at proposal time (read from action.metadataJson). */
+    bandBefore?: string;
+    /** Phase 4 — churn band at measurement time (read from latest assessment). */
+    bandAfter?: string;
+    /** Phase 4 — mark failed-execution outcomes so cooldown still respects them. */
+    executionFailed?: boolean;
   }): Promise<void> {
     const delta = data.healthScoreAfter != null && data.healthScoreBefore != null
       ? data.healthScoreAfter - data.healthScoreBefore
@@ -72,6 +78,11 @@ export const interventionService = {
       else if (delta < -5) outcome = 'worsened';
       else outcome = 'unchanged';
     }
+
+    // Band-change attribution for B2: if either side changed band, the
+    // outcome row carries both for easy downstream attribution queries.
+    const bandChanged =
+      data.bandBefore != null && data.bandAfter != null && data.bandBefore !== data.bandAfter;
 
     await db.insert(interventionOutcomes).values({
       organisationId: data.organisationId,
@@ -86,7 +97,11 @@ export const interventionService = {
       outcome,
       measuredAfterHours: data.measuredAfterHours ?? 24,
       deltaHealthScore: delta,
-    });
+      bandBefore: data.bandBefore,
+      bandAfter: data.bandAfter,
+      bandChanged,
+      executionFailed: data.executionFailed ?? false,
+    } as typeof interventionOutcomes.$inferInsert);
   },
 
   // ── Account overrides ───────────────────────────────────────────────────

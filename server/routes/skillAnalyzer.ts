@@ -324,6 +324,27 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/execute/unlock
+// v2 §11.11.3: recover a stuck execution_lock when a prior Execute crashed
+// hard enough to bypass the `finally` release (SIGKILL, OOM, host reboot).
+// Gated by systemAdmin (already required at the router level) + a min-age
+// check driven by config.executionLockStaleSeconds. Returns 409 if the lock
+// is either already released or younger than the stale threshold.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/execute/unlock',
+  asyncHandler(async (req, res) => {
+    const result = await skillAnalyzerService.unlockStaleExecution({
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      userId: req.user!.id,
+    });
+    return res.json(result);
+  })
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/system/skill-analyser/jobs/:jobId/results/:resultId/retry-classification
 // Retry LLM classification for a single result row with classificationFailed=true.
 // Idempotent — no-op if the row is not in a failed state.
@@ -386,6 +407,14 @@ router.post(
     );
     if (!backup) {
       throw { statusCode: 404, message: 'No backup found for this job' };
+    }
+
+    if (req.query.dryRun === 'true') {
+      const preview = await configBackupService.describeRestore({
+        backupId: backup.id,
+        organisationId: req.orgId!,
+      });
+      return res.json(preview);
     }
 
     const result = await configBackupService.restoreBackup({

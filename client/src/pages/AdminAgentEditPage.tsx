@@ -8,6 +8,8 @@ import { RunActivityChart } from '../components/ActivityCharts';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
 import TestPanel from '../components/runs/TestPanel';
+import { isTerminalRunStatus } from '../lib/runStatus';
+import { RunCostPanel } from '../components/run-cost/RunCostPanel';
 
 interface OrgAgentOption {
   id: string;
@@ -1631,6 +1633,7 @@ const RUN_STATUS_STYLES: Record<string, string> = {
   completed:       'bg-emerald-50 text-emerald-700 border-emerald-200',
   failed:          'bg-red-50 text-red-700 border-red-200',
   running:         'bg-blue-50 text-blue-700 border-blue-200',
+  delegated:       'bg-indigo-50 text-indigo-700 border-indigo-200',
   pending:         'bg-slate-100 text-slate-600 border-slate-200',
   timeout:         'bg-amber-50 text-amber-700 border-amber-200',
   cancelled:       'bg-slate-100 text-slate-400 border-slate-200',
@@ -1675,7 +1678,6 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [runCosts, setRunCosts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1692,13 +1694,7 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Fetch cost for expanded run
-  useEffect(() => {
-    if (!expandedId || runCosts[expandedId] !== undefined) return;
-    api.get(`/api/runs/${expandedId}/cost`)
-      .then(r => setRunCosts(prev => ({ ...prev, [expandedId]: r.data.totalCostCents ?? 0 })))
-      .catch(() => setRunCosts(prev => ({ ...prev, [expandedId]: 0 })));
-  }, [expandedId, runCosts]);
+  // Per-run cost now lives in <RunCostPanel/>; no inline state map needed.
 
   const filtered = statusFilter === 'all' ? runs : runs.filter(r => r.status === statusFilter);
   const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
@@ -1719,7 +1715,7 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
 
       {/* Status filter tabs */}
       <div className="flex gap-1 mb-4">
-        {['all', 'completed', 'failed', 'running', 'timeout'].map(s => (
+        {['all', 'completed', 'failed', 'running', 'delegated', 'timeout'].map(s => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
@@ -1743,7 +1739,6 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
         ) : (
           filtered.map(run => {
             const isExpanded = expandedId === run.id;
-            const costCents = runCosts[run.id];
             return (
               <div key={run.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 {/* Run summary row */}
@@ -1786,11 +1781,13 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
                           {fmtTime(run.startedAt)} → {fmtTime(run.completedAt)}
                         </div>
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Cost</div>
-                        <div className="text-[13px] text-slate-700 font-medium">
-                          {costCents !== undefined ? `$${(costCents / 100).toFixed(4)}` : '...'}
-                        </div>
+                        <RunCostPanel
+                          runId={run.id}
+                          runIsTerminal={isTerminalRunStatus(run.status)}
+                          compact
+                        />
                       </div>
                       <div>
                         <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Tool Calls</div>

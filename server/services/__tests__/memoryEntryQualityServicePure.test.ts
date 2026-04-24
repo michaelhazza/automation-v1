@@ -249,6 +249,137 @@ test('utilityRate computed correctly', () => {
   if (Math.abs(d.utilityRate - 0.35) > 1e-9) throw new Error(`utilityRate=${d.utilityRate}`);
 });
 
+// ---------------------------------------------------------------------------
+// Hermes Tier 1 Phase B §6.6 — per-entryType half-life branching.
+// ---------------------------------------------------------------------------
+//
+// `computeDecayFactor` now branches on `entryType`:
+//   - known entryType in HALF_LIFE_DAYS → exponential half-life decay,
+//     factor = 0.5 at T = halfLife
+//   - unknown / missing → today's linear DECAY_RATE formula (§6.6
+//     "Default keeps today's single rate")
+
+import { HALF_LIFE_DAYS } from '../../services/memoryEntryQualityServicePure.js';
+
+console.log('');
+console.log('Phase B §6.6 — per-entryType half-life decay:');
+
+const MS_PER_DAY_PHASE_B = 1000 * 60 * 60 * 24;
+const BASE_NOW = new Date('2026-01-01T00:00:00Z');
+
+function daysAgo(days: number): Date {
+  return new Date(BASE_NOW.getTime() - days * MS_PER_DAY_PHASE_B);
+}
+
+for (const [entryType, halfLife] of Object.entries(HALF_LIFE_DAYS) as [
+  'observation' | 'decision' | 'preference' | 'issue' | 'pattern',
+  number,
+][]) {
+  test(`${entryType} decays to factor 0.5 at T=${halfLife} days`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: daysAgo(halfLife),
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 0.5) > 1e-6) {
+      throw new Error(`expected factor ≈ 0.5, got ${factor}`);
+    }
+  });
+
+  test(`${entryType} decays to ~0.25 at T=2×halfLife (${halfLife * 2} days)`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: daysAgo(halfLife * 2),
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 0.25) > 1e-6) {
+      throw new Error(`expected factor ≈ 0.25, got ${factor}`);
+    }
+  });
+
+  test(`${entryType} factor at T=0 is 1.0 (no decay)`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: BASE_NOW,
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 1.0) > 1e-9) {
+      throw new Error(`expected factor 1.0, got ${factor}`);
+    }
+  });
+}
+
+test('factor never negative, even at extreme age', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(1_000_000),
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  if (factor < 0) throw new Error(`factor was negative: ${factor}`);
+  if (factor > 1) throw new Error(`factor exceeded 1: ${factor}`);
+});
+
+test('observation (7-day) decays faster than preference (30-day) at same T', () => {
+  const o = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(14),
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  const p = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(14),
+    now: BASE_NOW,
+    entryType: 'preference',
+  });
+  if (o >= p) {
+    throw new Error(`observation (${o}) should decay faster than preference (${p})`);
+  }
+});
+
+test('default branch (no entryType) falls back to linear DECAY_RATE — within window = 1.0', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(DECAY_WINDOW_DAYS / 2),
+    now: BASE_NOW,
+  });
+  if (Math.abs(factor - 1.0) > 1e-9) {
+    throw new Error(`default within-window factor should be 1.0, got ${factor}`);
+  }
+});
+
+test('default branch at DECAY_WINDOW+5 days uses linear formula', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(DECAY_WINDOW_DAYS + 5),
+    now: BASE_NOW,
+  });
+  const expected = Math.max(0.1, 1 - DECAY_RATE * 5);
+  if (Math.abs(factor - expected) > 1e-9) {
+    throw new Error(`expected linear ${expected}, got ${factor}`);
+  }
+});
+
+test('half-life branch on null lastAccessedAt uses DECAY_WINDOW_DAYS as baseline', () => {
+  // Null lastAccessed is treated as exactly DECAY_WINDOW_DAYS ago so the
+  // branch doesn't crash. Pinning so future refactors don't silently
+  // change the starting point.
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: null,
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  const expected = Math.pow(0.5, DECAY_WINDOW_DAYS / HALF_LIFE_DAYS.observation);
+  if (Math.abs(factor - expected) > 1e-9) {
+    throw new Error(`expected ${expected}, got ${factor}`);
+  }
+});
+
 console.log('');
 console.log(`${passed} passed, ${failed} failed`);
 console.log('');

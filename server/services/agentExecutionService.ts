@@ -39,6 +39,7 @@ import {
   parsePlan,
   isComplexRun,
   mutateActiveToolsPreservingUniversal,
+  computeRunResultStatus,
 } from './agentExecutionServicePure.js';
 import { reorderToolsByTopicRelevance } from './topicClassifierPure.js';
 import { HARD_REMOVAL_CONFIDENCE_THRESHOLD } from '../config/limits.js';
@@ -52,6 +53,8 @@ import { fingerprint } from './regressionCaptureServicePure.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
+import { tryEmitAgentEvent, emitAgentEvent } from './agentExecutionEventEmitter.js';
+import { persistAssembly as persistPromptAssembly } from './agentRunPromptService.js';
 import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
 import { agentBriefingService } from './agentBriefingService.js';
@@ -86,6 +89,8 @@ import {
   type FinalStatus, type ErrorType,
 } from '../lib/tracing.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
+// Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
+import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -147,6 +152,11 @@ export interface AgentRunRequest {
   /**
    * Optional IEE task. Required when executionMode is 'iee_browser' or
    * 'iee_dev'. Spec §9.1.
+   *
+   * Fields extended to pass through to the worker's browser executor:
+   *  - mode ('standard' | 'login_test' | 'capture_video')
+   *  - webLoginConnectionId (for paywall workflows; audit blocker #1 wiring)
+   *  - playSelector (capture_video mode)
    */
   ieeTask?: {
     type: 'browser' | 'dev';
@@ -156,6 +166,9 @@ export interface AgentRunRequest {
     repoUrl?: string;
     branch?: string;
     commands?: string[];
+    mode?: 'standard' | 'login_test' | 'capture_video';
+    webLoginConnectionId?: string;
+    playSelector?: string;
   };
   taskId?: string;
   triggerContext?: Record<string, unknown>;
@@ -217,11 +230,34 @@ export interface AgentRunRequest {
    * and shown with a "Test" badge in run history. Default false.
    */
   isTestRun?: boolean;
+  /**
+   * When set, executeRun emits a live-log `orchestrator.routing_decided`
+   * event on the dispatched run immediately after `run.started` — i.e.
+   * within the run's own timeline (sequence 2), not after it has finished.
+   *
+   * Set by `orchestratorFromTaskJob` on the downstream `executeRun` call
+   * so the timeline correctly captures the dispatch decision BEFORE the
+   * run completes. Previously the job emitted the event after awaiting
+   * `executeRun`, which put it after `run.completed` on the timeline.
+   * Spec: tasks/live-agent-execution-log-spec.md §5.3.
+   */
+  orchestratorDispatch?: {
+    taskId: string;
+    chosenAgentId: string;
+    idempotencyKey: string;
+    routingSource: 'rule' | 'llm' | 'fallback';
+  };
 }
 
 export interface AgentRunResult {
   runId: string;
-  status: 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'delegated' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md).
+  // When returned, the agent run has been handed off to a delegated backend
+  // (IEE worker). Terminal state is reached asynchronously via the
+  // iee-run-completed event handler. Callers that need a terminal result
+  // must subscribe to WebSocket `agent:run:completed` or poll the agent
+  // run status until it leaves 'delegated'.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -229,6 +265,12 @@ export interface AgentRunResult {
   tasksCreated: number;
   tasksUpdated: number;
   deliverablesCreated: number;
+  /** Present only when status === 'delegated'. Identifies the iee_runs row
+   *  that will eventually produce the terminal state. */
+  ieeRunId?: string;
+  /** Present only when status === 'delegated' and the enqueue hit an
+   *  existing idempotent row. */
+  delegationDeduplicated?: boolean;
 }
 
 /** Task with its joined agent relation resolved */
@@ -367,6 +409,53 @@ export const agentExecutionService = {
     emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
       runId: run.id, agentId: request.agentId,
     });
+
+    // Live Agent Execution Log — critical lifecycle bookend (spec §5.3).
+    // Awaited so that run.started claims sequence_number=1 before any later
+    // event (prompt.assembled, context.source_loaded, etc.) allocates a
+    // sequence number. Using tryEmitAgentEvent here would fire it in the
+    // background, creating a race where a subsequent event could win the
+    // lower sequence and sort before the bookend in the timeline.
+    await emitAgentEvent({
+      runId: run.id,
+      organisationId: request.organisationId,
+      subaccountId: request.subaccountId ?? null,
+      sourceService: 'agentExecutionService',
+      payload: {
+        eventType: 'run.started',
+        critical: true,
+        agentId: request.agentId,
+        runType: request.runType,
+        triggeredBy: request.runSource ?? 'unknown',
+      },
+      linkedEntity: { type: 'agent', id: request.agentId },
+    });
+
+    // Live Agent Execution Log — `orchestrator.routing_decided` (spec §5.3).
+    // Emitted here (not from the orchestrator job) so the event lands
+    // inside THIS run's timeline at sequence 2, immediately after
+    // `run.started`. The previous shape — job calls tryEmitAgentEvent
+    // AFTER awaiting executeRun — put the event after `run.completed`,
+    // breaking the "timeline represents actual execution order"
+    // invariant. Fire-and-forget is safe: this is a non-critical event
+    // and the run is now committed with sequence_number = 1 claimed.
+    if (request.orchestratorDispatch) {
+      tryEmitAgentEvent({
+        runId: run.id,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        sourceService: 'orchestratorFromTaskJob',
+        payload: {
+          eventType: 'orchestrator.routing_decided',
+          critical: false,
+          taskId: request.orchestratorDispatch.taskId,
+          chosenAgentId: request.orchestratorDispatch.chosenAgentId,
+          idempotencyKey: request.orchestratorDispatch.idempotencyKey,
+          routingSource: request.orchestratorDispatch.routingSource,
+        },
+        linkedEntity: { type: 'agent', id: request.orchestratorDispatch.chosenAgentId },
+      });
+    }
 
     // Observability: temporary metric for org subaccount runs (remove after 2 weeks stable)
     if (isOrgSubaccountRun) {
@@ -681,6 +770,15 @@ export const agentExecutionService = {
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
       }
+      // Phase 8 / W3c — log injected block IDs for provenance trail
+      const injectedBlockIds = memoryBlocksForPrompt.map((b: { id: string }) => b.id);
+      if (injectedBlockIds.length > 0) {
+        void db
+          .update(agentRuns)
+          .set({ appliedMemoryBlockIds: injectedBlockIds })
+          .where(eq(agentRuns.id, run.id))
+          .catch(() => {});
+      }
 
       // Layer 2b: Org skill instructions
       if (skillInstructions.length > 0) {
@@ -824,6 +922,60 @@ export const agentExecutionService = {
       const fullSystemPrompt = stablePrefix + dynamicSuffix;
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
+      // Live Agent Execution Log — persist the fully-assembled prompt + emit
+      // prompt.assembled event. Best-effort layer attributions (spec §5.6):
+      // we record offsets for the top-level layers we know about but do not
+      // drill into memory-block-level attribution in P1 — that's a follow-up
+      // when buildSystemPrompt learns to return per-layer offsets natively.
+      try {
+        const layerAttributions = {
+          master: { startOffset: 0, length: Buffer.byteLength(stablePrefix, 'utf8') },
+          orgAdditional: { startOffset: 0, length: 0 },
+          memoryBlocks: [] as Array<{ blockId: string; startOffset: number; length: number }>,
+          skillInstructions: [] as Array<{ skillSlug: string; startOffset: number; length: number }>,
+          taskContext: {
+            startOffset: Buffer.byteLength(stablePrefix, 'utf8'),
+            length: Buffer.byteLength(dynamicSuffix, 'utf8'),
+          },
+        };
+        const { promptRowId, assemblyNumber } = await persistPromptAssembly({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          systemPrompt: fullSystemPrompt,
+          userPrompt: targetItem?.description ?? targetItem?.title ?? '',
+          toolDefinitions: [],
+          layerAttributions,
+          totalTokens: systemPromptTokens,
+        });
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'prompt.assembled',
+            critical: false,
+            assemblyNumber,
+            promptRowId,
+            totalTokens: systemPromptTokens,
+            layerTokens: {
+              master: approxTokens(stablePrefix),
+              orgAdditional: 0,
+              memoryBlocks: 0,
+              skillInstructions: 0,
+              taskContext: approxTokens(dynamicSuffix),
+            },
+          },
+          linkedEntity: { type: 'prompt', id: promptRowId },
+        });
+      } catch (err) {
+        logger.warn('agentExecutionService.prompt_assembled_persist_failed', {
+          runId: run.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // Persist the context sources snapshot (spec §7.5). Captures every
       // entry considered at run-start time — winners, suppressed losers,
       // lazy manifest, eager-but-budget-excluded. Used by the run detail
@@ -868,6 +1020,35 @@ export const agentExecutionService = {
         contextSourcesSnapshot,
       }).where(eq(agentRuns.id, run.id));
 
+      // Live Agent Execution Log — emit one context.source_loaded per
+      // source. Payload is a slice of the existing contextSourcesSnapshot
+      // struct; reused directly. Fire-and-forget per §4.1.
+      for (const s of allForSnapshot) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'runContextLoader',
+          payload: {
+            eventType: 'context.source_loaded',
+            critical: false,
+            sourceId: s.id,
+            sourceName: s.name ?? 'unknown',
+            scope: s.scope ?? 'unknown',
+            contentType: s.contentType ?? 'text',
+            tokenCount: s.tokenCount ?? 0,
+            includedInPrompt: s.includedInPrompt ?? false,
+            exclusionReason: (() => {
+              if (s.suppressedByOverride) return 'override_suppressed';
+              if (s.loadingMode === 'lazy') return 'lazy_not_rendered';
+              if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded';
+              return undefined;
+            })(),
+          },
+          linkedEntity: { type: 'data_source', id: s.id },
+        });
+      }
+
       // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
       await db.insert(agentRunSnapshots)
         .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
@@ -880,11 +1061,17 @@ export const agentExecutionService = {
 
       if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
         // ── 8z. IEE — Integrated Execution Environment ──────────────────
-        // Spec §9.1. Enqueues a pg-boss job picked up by the worker. The
-        // worker writes terminal status to iee_runs and (in a future
-        // iteration) the agent run can be resumed when the row completes.
-        // For v1 the agent run completes immediately with a synthetic
-        // loopResult; the canonical execution state lives on the iee_run.
+        // Phase 0 (docs/iee-delegation-lifecycle-spec.md): transition the
+        // parent agent run to the non-terminal 'delegated' state and
+        // return early. The worker will reach a terminal state on
+        // iee_runs and emit an 'iee-run-completed' pg-boss event; the
+        // main-app handler (server/jobs/ieeRunCompletedHandler.ts) then
+        // finalises the parent via finaliseAgentRunFromIeeRun.
+        //
+        // IMPORTANT: we deliberately skip the post-completion hooks at
+        // the bottom of this function (handoff build, memory scoring,
+        // playbook engine notification, etc.). Those fire from the event
+        // handler's finalisation path when the delegation terminates.
         if (!request.ieeTask) {
           throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
         }
@@ -901,22 +1088,37 @@ export const agentExecutionService = {
           agentRunId: run.id,
           correlationId: run.id,
         });
-        loopResult = {
-          summary: `IEE ${expectedType} task enqueued (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
-          toolCallsLog: [{
-            type: 'iee_handoff',
-            ieeRunId: enqueueResult.ieeRunId,
-            deduplicated: enqueueResult.deduplicated,
-            mode: effectiveMode,
-          }],
+
+        // Park the parent run in 'delegated' state. Do NOT set completedAt.
+        // Persist ieeRunId as a first-class column (migration 0176) so
+        // callers never need to parse it out of the summary string and
+        // can fetch progress via the denormalised reference directly.
+        await db.update(agentRuns).set({
+          status: 'delegated',
+          ieeRunId: enqueueResult.ieeRunId,
+          summary: `Delegated to IEE ${expectedType} (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
+          lastActivityAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(agentRuns.id, run.id));
+
+        emitAgentRunUpdate(run.id, 'agent:run:delegated', {
+          ieeRunId: enqueueResult.ieeRunId,
+          mode: effectiveMode,
+          deduplicated: enqueueResult.deduplicated,
+        });
+
+        return {
+          runId: run.id,
+          status: 'delegated',
+          summary: null,
           totalToolCalls: 0,
-          inputTokens: 0,
-          outputTokens: 0,
           totalTokens: 0,
+          durationMs: Date.now() - startTime,
           tasksCreated: 0,
           tasksUpdated: 0,
           deliverablesCreated: 0,
-          finalStatus: 'completed',
+          ieeRunId: enqueueResult.ieeRunId,
+          delegationDeduplicated: enqueueResult.deduplicated,
         };
       } else if (effectiveMode === 'claude-code') {
         // ── 8a. Claude Code CLI execution ──────────────────────────────
@@ -1100,24 +1302,32 @@ export const agentExecutionService = {
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
-      let finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+      let finalStatus = (loopResult.finalStatus ?? 'completed') as
+        'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+
+      // Pre-fetch runMetadata once — consumed by both the Reporting Agent
+      // finalize hook and Phase B's runResultStatus derivation (which reads
+      // `hadUncertainty` from runMetadata, where the clarification-timeout
+      // job writes it).
+      const [preFinalizeRow] = await db
+        .select({ runMetadata: agentRuns.runMetadata })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, run.id))
+        .limit(1);
+      const preFinalizeMetadata =
+        (preFinalizeRow?.runMetadata ?? null) as Record<string, unknown> | null;
 
       // T25 / T16 — Reporting Agent end-of-run hook. Runs the invariant
       // and persists the content fingerprint. No-op for non-Reporting-Agent
       // runs. Spec v3.4 §6.7.2 / §8.4.2.
       if (finalStatus === 'completed') {
         try {
-          const [runRow] = await db
-            .select({ runMetadata: agentRuns.runMetadata })
-            .from(agentRuns)
-            .where(eq(agentRuns.id, run.id))
-            .limit(1);
           const { finalizeReportingAgentRun } = await import('../lib/reportingAgentRunHook.js');
           await finalizeReportingAgentRun({
             runId: run.id,
             subaccountAgentId: request.subaccountAgentId ?? null,
             organisationId: request.organisationId,
-            runMetadata: (runRow?.runMetadata ?? null) as Record<string, unknown> | null,
+            runMetadata: preFinalizeMetadata,
           });
         } catch (err) {
           // Invariant or persist failed — downgrade to failed so the run
@@ -1130,8 +1340,29 @@ export const agentExecutionService = {
         }
       }
 
-      await db.update(agentRuns).set({
+      // Hermes Tier 1 Phase B §6.3 — derive runResultStatus for the
+      // terminal write. `hadUncertainty` lives on runMetadata (the
+      // clarification-timeout job at `clarificationTimeoutJob.ts` writes
+      // it there); `hasError` is inferred from finalStatus; `hasSummary`
+      // is the trimmed-length > 0 check.
+      const hadUncertainty = preFinalizeMetadata?.hadUncertainty === true;
+      const hasSummary = !!(loopResult.summary && loopResult.summary.trim().length > 0);
+      const derivedRunResultStatus = computeRunResultStatus(
+        finalStatus,
+        /* hasError — only affects the 'completed' branch of computeRunResultStatus;
+           ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
+        hadUncertainty,
+        hasSummary,
+      );
+
+      // Write-once guard (§6.3.1): add `AND run_result_status IS NULL` so
+      // a second attempt at the same terminal write becomes a zero-row
+      // UPDATE rather than an overwrite. `.returning()` lets us detect
+      // that and log rather than silently drift from the first writer's
+      // value.
+      const terminalUpdate = await db.update(agentRuns).set({
         status: finalStatus,
+        runResultStatus: derivedRunResultStatus,
         totalToolCalls: loopResult.totalToolCalls,
         inputTokens: loopResult.inputTokens,
         outputTokens: loopResult.outputTokens,
@@ -1144,7 +1375,51 @@ export const agentExecutionService = {
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
-      }).where(eq(agentRuns.id, run.id));
+      })
+        .where(and(eq(agentRuns.id, run.id), isNull(agentRuns.runResultStatus)))
+        .returning({ id: agentRuns.id, nextEventSeq: agentRuns.nextEventSeq });
+      if (terminalUpdate.length === 0) {
+        logger.warn('runResultStatus.write_skipped', {
+          runId: run.id,
+          attemptedStatus: derivedRunResultStatus,
+          writeSite: 'finishLoop_normal',
+        });
+      }
+
+      // Live Agent Execution Log — critical terminal bookend (spec §5.3).
+      // totalCostCents is read from the ledger; eventCount from the
+      // just-returned nextEventSeq (number of events emitted so far this
+      // run, which bounds the event count at this terminal).
+      let totalCostCents = 0;
+      try {
+        const { getRunCostCentsFromLedger } = await import('../lib/runCostBreaker.js');
+        totalCostCents = await getRunCostCentsFromLedger(run.id);
+      } catch (err) {
+        logger.warn('agentExecutionService.run_completed_cost_lookup_failed', {
+          runId: run.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      // nextEventSeq is the highest sequence allocated before the terminal
+      // event. Add 1 to count the run.completed event itself, so the
+      // eventCount in the payload matches the number of rows the client
+      // will see when it fetches /events (including this terminal event).
+      const eventCount = (terminalUpdate[0]?.nextEventSeq ?? 0) + 1;
+      tryEmitAgentEvent({
+        runId: run.id,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        sourceService: 'agentExecutionService',
+        payload: {
+          eventType: 'run.completed',
+          critical: true,
+          finalStatus,
+          totalTokens: loopResult.totalTokens,
+          totalCostCents,
+          totalDurationMs: durationMs,
+          eventCount,
+        },
+      });
 
       // Brain Tree OS adoption P1 — build the structured handoff document
       // and persist it. Best-effort: a build failure logs and leaves the
@@ -1193,6 +1468,44 @@ export const agentExecutionService = {
           });
         }
       }
+
+      // Phase 8 / W3c — score applied memory_blocks against run output.
+      // Reads appliedMemoryBlockIds populated at injection time (line ~774).
+      // Best-effort: scoreRunBlocks swallows errors internally.
+      if (finalStatus === 'completed') {
+        try {
+          const [runRow] = await db
+            .select({ appliedMemoryBlockIds: agentRuns.appliedMemoryBlockIds })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, run.id))
+            .limit(1);
+          const appliedBlockIds = runRow?.appliedMemoryBlockIds ?? [];
+          if (appliedBlockIds.length > 0) {
+            const { scoreRunBlocks } = await import('./memoryCitationDetector.js');
+            const generatedText = typeof loopResult.summary === 'string'
+              ? loopResult.summary
+              : '';
+            await scoreRunBlocks({
+              runId: run.id,
+              organisationId: request.organisationId,
+              appliedBlockIds,
+              runOutputText: generatedText,
+            });
+          }
+        } catch (err) {
+          logger.warn('agent_runs.block_citation_score_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Universal Brief artefact emission hook (Phase 2+).
+      // Phase 1 prep only: the import above makes validateArtefactForPersistence
+      // available here. Capabilities that produce BriefChatArtefacts will call
+      // validateArtefactForPersistence() and persist to conversation_messages
+      // once Phase 2 tables are in place.
+      void validateArtefactForPersistence; // reference prevents dead-import lint removal
 
       // H-5: upsert toolCallsLog into the snapshot table
       await db.insert(agentRunSnapshots)
@@ -1263,12 +1576,31 @@ export const agentExecutionService = {
       // ── 10. Extract insights for workspace memory + entities ─────────────
       if (loopResult.summary) {
         try {
+          // Hermes Tier 1 Phase B §6.4 — thread the outcome through so
+          // extractRunInsights can branch entry-type promotion, quality
+          // scoring, and provenance confidence per §6.5 / §6.7. The
+          // primary agent-run completion path always passes a non-null
+          // `runResultStatus` here (when derivedRunResultStatus is null
+          // the run is not terminal and this branch is unreachable).
+          const extractionOutcome = {
+            runResultStatus: (derivedRunResultStatus ?? 'partial') as 'success' | 'partial' | 'failed',
+            // trajectoryPassed is always null in Phase B — no per-run
+            // verdict is persisted today. Reserved forward-compat slot.
+            trajectoryPassed: null as boolean | null,
+            // Best-effort errorMessage for the short-summary guard.
+            // The normal terminal path does not set errorMessage on the
+            // run row here (only the catch path does); pass null. A
+            // future refactor could surface loopResult.errorMessage if
+            // the loop ever captures one without throwing.
+            errorMessage: null as string | null,
+          };
           await workspaceMemoryService.extractRunInsights(
             run.id,
             request.agentId,
             request.organisationId,
             request.subaccountId!,
-            loopResult.summary
+            loopResult.summary,
+            extractionOutcome,
           );
         } catch (err) {
           console.error(`[AgentExecution] Memory extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
@@ -1356,14 +1688,35 @@ export const agentExecutionService = {
       const durationMs = Date.now() - startTime;
       const errorMessage = err instanceof Error ? err.message : String(err);
 
-      await db.update(agentRuns).set({
+      // Hermes Tier 1 Phase B §6.3 / §6.3.1 — outer catch-path write-once
+      // terminal update. `finalStatus='failed'` here always maps to
+      // `runResultStatus='failed'` via the pure helper; pinning via the
+      // helper so the two sites stay in lock-step if the derivation
+      // changes.
+      const catchRunResultStatus = computeRunResultStatus(
+        'failed',
+        /* hasError */ true,
+        /* hadUncertainty */ false,
+        /* hasSummary */ false,
+      );
+      const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',
+        runResultStatus: catchRunResultStatus,
         errorMessage,
         errorDetail: { error: errorMessage, stack: err instanceof Error ? err.stack : undefined },
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
-      }).where(eq(agentRuns.id, run.id));
+      })
+        .where(and(eq(agentRuns.id, run.id), isNull(agentRuns.runResultStatus)))
+        .returning({ id: agentRuns.id });
+      if (catchUpdate.length === 0) {
+        logger.warn('runResultStatus.write_skipped', {
+          runId: run.id,
+          attemptedStatus: catchRunResultStatus,
+          writeSite: 'finishLoop_catch',
+        });
+      }
 
       // Emit run failed event
       emitAgentRunUpdate(run.id, 'agent:run:failed', {

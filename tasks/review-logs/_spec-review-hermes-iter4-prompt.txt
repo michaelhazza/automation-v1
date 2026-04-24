@@ -1,0 +1,36 @@
+You are reviewing a markdown spec document for the Automation OS codebase. This is iteration 4 of a structured review loop. Iterations 1, 2, and 3 have already applied the following improvements (summarised — do not re-raise if these now read correctly):
+
+Iteration 1/2/3 summary:
+- Cross-cutting: `runResultStatus` write-site contract now names all three write paths (finishLoop normal, finishLoop outer-catch, finaliseAgentRunFromIeeRun). Write-once invariant pinned.
+- Phase A: `/api/runs/:runId/cost` read path moved to the `llm_requests_all` archive-safe view (migration 0189); `callSiteBreakdown` always-present contract with zero-defaults; failed-status exclusion list locked.
+- Phase A host-file inventory: `SessionLogCardList.tsx` + `RunTraceView.tsx` listed as delegated-component modification sites; the pages themselves are wrappers.
+- Phase A: `PlaybookRunDetailPage.tsx` was dropped from Phase A entirely because it operates on a `playbook_runs` ID, not an `agent_runs` ID; `/api/runs/:runId/cost` joins only on `agent_runs.id`. Deferred to §11.4 #10 as a follow-up spec.
+- Phase B: `extractRunInsights` signature adds a trailing `options?: { taskSlug?; overrides?: { isUnverified?; provenanceConfidence? } }` bag. `outcomeLearningService` passes `runResultStatus='partial'` + `options.overrides={ isUnverified: false, provenanceConfidence: 0.7 }` to preserve today's "run-sourced, verified" semantics for human-curated lessons (without this override, retrieval pipelines that filter on `isUnverified=false` would silently drop them).
+- Phase B decay: decay math lives in `memoryEntryQualityServicePure.ts::computeDecayFactor` (not `memoryEntryDecayJob.ts`, which only orchestrates); per-entryType half-life branching via lookup table.
+- Phase C: direct-`llm_requests` read path added on the breaker; rationale pinned in §7.4.1 (`cost_aggregates` is asynchronous via pg-boss, so a rollup read would be stale-bounded by aggregation lag). Concurrency overshoot bounded by inflight batch × per-call cost, not by one call's cost — §11.4 #9 is the deferred item for adding a per-run advisory lock. Fail-open on infra errors with `costBreaker.infra_failure` log; successful checks log `costBreaker.checked` at debug.
+- Phase C IEE run lookup: concrete helper `resolveRunIdFromIee(ctx)` defined inline in `llmRouter.ts` with pinned SELECT query.
+- §6.3 → §6.5 decay matrix: the `preference → observation` demote row is the lone documented exception to "failed run → only `issue` entries"; every cross-reference to the exception was normalised.
+
+Review the spec at `tasks/hermes-audit-tier-1-spec.md` (markdown below) against the project's framing in `docs/spec-context.md` (pre_production: yes, live_users: no, testing posture: static gates primary + pure-function unit tests + three carved-out integration tests; no feature flags; no staged rollouts).
+
+Focus this pass on:
+1. **New/residual contradictions** introduced by the iteration-3 edits. Specifically: the PlaybookRunDetailPage drop-from-Phase-A — are there any stale references to it still in prose? The `options.overrides` bag — are all call-site descriptions, type signatures, and test plans self-consistent?
+2. **Sequencing / dependency bugs** across Phases A/B/C and the gate order in §9.5.
+3. **Load-bearing claims without contracts** — statements that assert a guarantee but don't pin the mechanism.
+4. **File-inventory drift** — prose that references files not in the inventory tables.
+5. **Framing drift** — anything that violates pre-production / no-feature-flags / no-staged-rollouts / rapid-evolution testing posture.
+
+For each finding, provide: (a) spec section or line range, (b) one-sentence description, (c) concrete recommendation.
+
+Do NOT raise findings about:
+- Adding more tests beyond the existing pure + 3-integration envelope (the framing explicitly caps this).
+- Adding feature flags or staged rollouts (explicitly out of scope per framing).
+- Introducing new abstractions that duplicate existing primitives.
+- Things already covered by iterations 1/2/3 (summarised above).
+
+Severity tiers: P1 = must fix before implementation, P2 = should fix, P3 = nit.
+
+Spec contents follow.
+
+---
+

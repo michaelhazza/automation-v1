@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
 import { initWebSocket } from './websocket/index.js';
+import * as llmInflightRegistry from './services/llmInflightRegistry.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
 import { agentService } from './services/agentService.js';
 import { boardService } from './services/boardService.js';
@@ -78,6 +79,8 @@ import workspaceHealthRouter from './routes/workspaceHealth.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
 import llmUsageRouter from './routes/llmUsage.js';
+import systemPnlRouter from './routes/systemPnl.js';
+import agentExecutionLogRouter from './routes/agentExecutionLog.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
@@ -112,12 +115,21 @@ import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 // ClientPulse module routes
+// Side-effect import — registers ClientPulse's sensitive operational_config
+// dot-paths with the module-composable registry before any route registers.
+// Per spec §3.6 / §4.10(3): top of the route-wiring section.
+import './modules/clientpulse/registerSensitivePaths.js';
 import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
 import configHistoryRouter from './routes/configHistory.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
+import clientpulseMergeFieldsRouter from './routes/clientpulseMergeFields.js';
+import clientpulseInterventionsRouter from './routes/clientpulseInterventions.js';
+import clientpulseDrilldownRouter from './routes/clientpulseDrilldown.js';
+import organisationConfigRouter from './routes/organisationConfig.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
+import crmQueryPlannerRouter from './routes/crmQueryPlanner.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 // Memory & Briefings Phase 1 — delivery channels route (S22)
 import deliveryChannelsRouter from './routes/deliveryChannels.js';
@@ -137,6 +149,12 @@ import portfolioRollupRouter from './routes/portfolioRollup.js';
 // Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
 import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
 import pulseRouter from './routes/pulse.js';
+// Universal Brief routes (Phase 2 + Phase 5)
+import briefsRouter from './routes/briefs.js';
+import briefConversationsRouter from './routes/conversations.js';
+import rulesRouter from './routes/rules.js';
+import referenceDocumentsRouter from './routes/referenceDocuments.js';
+import documentBundlesRouter from './routes/documentBundles.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -280,6 +298,8 @@ app.use(workspaceHealthRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
 app.use(llmUsageRouter);
+app.use(systemPnlRouter);
+app.use(agentExecutionLogRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
@@ -316,8 +336,19 @@ app.use(modulesRouter);
 app.use(onboardingRouter);
 app.use(configHistoryRouter);
 app.use(clientpulseReportsRouter);
+app.use(clientpulseMergeFieldsRouter);
+app.use(clientpulseInterventionsRouter);
+app.use(clientpulseDrilldownRouter);
+app.use(organisationConfigRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);
+// Universal Brief routes (Phase 2 + Phase 5)
+app.use(briefsRouter);
+app.use(briefConversationsRouter);
+app.use('/api/rules', rulesRouter);
+app.use(crmQueryPlannerRouter);
+app.use(referenceDocumentsRouter);
+app.use(documentBundlesRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -423,6 +454,18 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
+  // Consumes pg-boss events emitted by the worker after terminal iee_runs
+  // writes, and finalises the parent agent_runs row accordingly.
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerIeeRunCompletedHandler } = await import('./jobs/ieeRunCompletedHandler.js');
+      await registerIeeRunCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register iee-run-completed handler', err);
+    }
+  }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.
   try {
@@ -471,10 +514,50 @@ async function start() {
   }
 
   initWebSocket(httpServer);
+
+  // Start the LLM in-flight registry's deadline-based sweep + (optional)
+  // Redis pub/sub subscription. Spec tasks/llm-inflight-realtime-tracker-spec.md.
+  llmInflightRegistry.init();
+
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
-  });
+
+  // Windows `node --watch` kills the old process before it can gracefully
+  // release the socket, so the new process typically boots while the port is
+  // still held in TIME_WAIT. Without a retry loop the new process crashes on
+  // EADDRINUSE, --watch restarts it, it crashes again, and the cycle can
+  // burn 2–3 minutes before the kernel releases the port. In production the
+  // process manager (PM2 / Docker) owns restart policy, so we only retry in
+  // dev.
+  const MAX_LISTEN_RETRIES = 30;           // 30 × 2s = 1 min ceiling
+  const LISTEN_RETRY_DELAY_MS = 2_000;
+  const canRetryListen = env.NODE_ENV !== 'production';
+
+  const listenWithRetry = (attempt: number) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && canRetryListen && attempt < MAX_LISTEN_RETRIES) {
+        console.warn(
+          `[SERVER] Port ${PORT} in use (likely TIME_WAIT from previous process) — retrying in ${LISTEN_RETRY_DELAY_MS / 1000}s [${attempt + 1}/${MAX_LISTEN_RETRIES}]`,
+        );
+        setTimeout(() => listenWithRetry(attempt + 1), LISTEN_RETRY_DELAY_MS);
+        return;
+      }
+      // Non-retryable error or retry ceiling reached — exit explicitly rather
+      // than throwing from an EventEmitter listener. The latter relies on
+      // Node's emit machinery routing the throw to uncaughtException, but a
+      // non-fatal path (unhandledRejection, which only logs) would silently
+      // leave the server running without a bound port.
+      console.error(
+        `[SERVER] Fatal: cannot bind port ${PORT} after ${attempt + 1} attempt(s) — ${err.code ?? 'unknown'}: ${err.message}`,
+      );
+      process.exit(1);
+    };
+    httpServer.once('error', onError);
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      httpServer.removeListener('error', onError);
+      console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
+    });
+  };
+  listenWithRetry(0);
 }
 
 start().catch((err) => {
@@ -515,6 +598,14 @@ async function gracefulShutdown(signal: string) {
         io.close(() => resolve());
       });
       console.log('[SHUTDOWN] Socket.IO server closed');
+    }
+
+    // 2a. Stop the LLM in-flight registry (sweep timer + Redis clients)
+    try {
+      await llmInflightRegistry.shutdown();
+      console.log('[SHUTDOWN] LLM in-flight registry stopped');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error stopping LLM in-flight registry', err);
     }
 
     // 3. Stop shared pg-boss instance (covers all queue workers)

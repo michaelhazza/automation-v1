@@ -25,6 +25,9 @@ export * from './agentConversations';
 export * from './agentMessages';
 export * from './agentRuns';
 export * from './agentRunSnapshots';
+export * from './agentExecutionEvents';
+export * from './agentRunPrompts';
+export * from './agentRunLlmPayloads';
 export * from './skills';
 export * from './boardTemplates';
 export * from './boardConfigs';
@@ -55,6 +58,8 @@ export * from './llmPricing';
 export * from './orgMarginConfigs';
 export * from './orgBudgets';
 export * from './llmRequests';
+export * from './llmRequestsArchive';
+export * from './llmInflightHistory';
 export * from './costAggregates';
 export * from './budgetReservations';
 export * from './hierarchyTemplates';
@@ -74,6 +79,7 @@ export * from './orgAgentConfigs';
 export * from './connectorConfigs';
 export * from './canonicalAccounts';
 export * from './canonicalEntities';
+export * from './clientPulseCanonicalTables';
 export * from './subaccountTags';
 export * from './orgMemories';
 export * from './mcpServerConfigs';
@@ -197,3 +203,25 @@ export * from './teams.js';
 export * from './teamMembers.js';
 export * from './delegationGrants.js';
 export * from './canonicalRowSubaccountScopes.js';
+
+// Universal Brief — polymorphic conversation tables (migration 0194)
+export * from './conversations.js';
+
+// Universal Brief — classifier shadow-eval logging (migration 0195)
+export * from './fastPathDecisions.js';
+
+// Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
+export * from './userSettings.js';
+
+// Cached Context Infrastructure Phase 1 — reference documents + bundles + snapshots + budget policies
+// (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
+export * from './referenceDocuments.js';
+export * from './referenceDocumentVersions.js';
+export * from './documentBundles.js';
+export * from './documentBundleMembers.js';
+export * from './documentBundleAttachments.js';
+export * from './bundleResolutionSnapshots.js';
+export * from './modelTierBudgetPolicies.js';
+
+// Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
+export * from './bundleSuggestionDismissals.js';

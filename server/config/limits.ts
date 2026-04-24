@@ -272,8 +272,28 @@ export const PROVIDER_BACKOFF_MS = [1000, 3000] as const;
 /** Ordered fallback chain of provider names */
 export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini', 'openrouter'] as const;
 
-/** Timeout (ms) for a single provider call before it's treated as a failure */
-export const PROVIDER_CALL_TIMEOUT_MS = 30000;
+/**
+ * Timeout (ms) for a single provider call before it's treated as a failure.
+ *
+ * Set to 600s (10 min) — safely above every documented provider generation
+ * ceiling, including OpenAI reasoning models (o1/o3) which can legitimately
+ * take 5-10 minutes per call. The earlier 30s cap routinely tripped on
+ * legitimate long generations inside the skill analyzer, triggering retries
+ * that double-billed at the provider layer (no LLM provider currently
+ * supports request-level dedup headers).
+ *
+ * Because callWithTimeout now actually aborts the underlying fetch via a
+ * merged AbortSignal, a timeout here is a genuine "something is wrong"
+ * event — not a silent provider billing leak. When this fires the error is
+ * classified non-retryable (see llmRouter.isNonRetryableError) so the
+ * provider can't be double-billed under the same idempotency key.
+ *
+ * Note: this is the cap on a single HTTP request, not on an agent task.
+ * Agent tasks loop many short requests; 600s is well above the longest
+ * single generation we expect. Adjust downward if a lower cap turns out
+ * to be safe for our provider mix.
+ */
+export const PROVIDER_CALL_TIMEOUT_MS = 600000;
 
 /** How long (ms) a provider stays in cooldown after exhausting retries */
 export const PROVIDER_COOLDOWN_MS = 60000;
@@ -361,10 +381,13 @@ export const MAX_SKILLS_PER_SUBACCOUNT = 200;
 
 // ── Skill Analyzer ──────────────────────────────────────────────────────────
 
-/** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries.
- *  Set to 120s: PARTIAL_OVERLAP/IMPROVEMENT calls must generate a full proposedMerge object
- *  (merged skill instructions up to 2500 chars each side), which can take 40-90s at peak API load. */
-export const SKILL_CLASSIFY_TIMEOUT_MS = 120_000;
+/** Maximum ms budget for a single skill LLM classification attempt, including all withBackoff retries.
+ *  Set to 600s to match PROVIDER_CALL_TIMEOUT_MS — the cap exists to catch genuinely-stuck
+ *  generations, not to bound normal-operation latency. Typical classifications complete in
+ *  30–120s; slow ones (peak API load + large proposedMerge) have been observed at 90–180s.
+ *  The job wraps this timeout in a one-shot retry loop so a stuck generation gets a second chance
+ *  before falling back to the rule-based merge. */
+export const SKILL_CLASSIFY_TIMEOUT_MS = 600_000;
 
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
@@ -648,3 +671,49 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  * keyed on userId. See spec §4.8 for Phase 2 Redis migration notes.
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
+
+// ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
+
+/**
+ * Default hard timeout (ms) on a single GHL dispatch from apiAdapter.execute().
+ * Consumed as a fallback when action.metadata_json.timeoutBudgetMs is missing.
+ * Spec §2.6 precondition 4 — timeout budget remaining. 30 s is comfortably
+ * above typical GHL p99 (sub-5 s) but below pg-boss's visibility timeout.
+ */
+export const DEFAULT_ADAPTER_TIMEOUT_MS = 30_000;
+
+// ── LLM in-flight registry (tasks/llm-inflight-realtime-tracker-spec.md) ──
+
+/**
+ * Hard cap on the per-process in-flight registry map. On add, if the map
+ * is at this cap, the oldest entry (by startedAt) is force-evicted and
+ * emits `terminalStatus: 'evicted_overflow'`. Sized at ~100× headroom
+ * over expected steady-state concurrency — any eviction is a real signal.
+ * Spec §4.4.
+ */
+export const MAX_INFLIGHT_ENTRIES = 5_000;
+
+/**
+ * Base period (ms) between stale-entry sweeps. Spec §4.5. Actual fire-time
+ * is `INFLIGHT_SWEEP_INTERVAL_MS ± INFLIGHT_SWEEP_JITTER_MS` to prevent
+ * multi-instance sweep-storm synchronisation.
+ */
+export const INFLIGHT_SWEEP_INTERVAL_MS = 60_000;
+
+/** Jitter applied to each sweep interval. Spec §4.5. */
+export const INFLIGHT_SWEEP_JITTER_MS = 5_000;
+
+/**
+ * Buffer past a call's `timeoutMs` before the sweep reaps its registry
+ * entry as `swept_stale` / `deadline_exceeded`. The router's own
+ * `callWithTimeout` would have aborted the provider call at `timeoutMs`;
+ * the extra buffer is precisely the window where only a crash can leave
+ * the entry alive. Spec §4.5.
+ */
+export const INFLIGHT_DEADLINE_BUFFER_MS = 30_000;
+
+/**
+ * Hard cap on the in-flight snapshot endpoint `GET /api/admin/llm-pnl/in-flight`.
+ * Values above this are silently clamped. Spec §5.
+ */
+export const INFLIGHT_SNAPSHOT_HARD_CAP = 500;

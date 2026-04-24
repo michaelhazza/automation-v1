@@ -18,7 +18,7 @@ import { actionService, buildActionIdempotencyKey } from './actionService.js';
 import { executionLayerService, registerAdapter } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
-import { getActionDefinition } from '../config/actionRegistry.js';
+import { getActionDefinition, resolveActionSlug } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
@@ -48,8 +48,14 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 
-registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) => {
+registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
+  // actionRegistry §1.3: every inbound action-slug surface MUST normalise via
+  // resolveActionSlug so legacy slugs (e.g. config_update_hierarchy_template,
+  // clientpulse.operator_alert) route to the current canonical handler. Without
+  // this call, any review-gated action queued before the Session 1 renames is
+  // silently dropped at the worker dispatch switch.
+  const actionType = resolveActionSlug(rawActionType);
   switch (actionType) {
     case 'create_page': return executeCreatePage(payload, context);
     case 'update_page': return executeUpdatePage(payload, context);
@@ -67,6 +73,41 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
     case 'propose_doc_update': return executeDocProposalApproved(payload, context);
     case 'write_docs': return executeWriteDocsApproved(payload, context);
+
+    // ── Phase 4.5 — config_update_organisation_config approval-execute ─────
+    // When the operator approves a sensitive-path config change, re-validate
+    // (drift check) and commit the merge + config_history row (B5 ship gate).
+    case 'config_update_organisation_config': {
+      const { executeApprovedOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
+      const actionId = (ctx as unknown as { actionId?: string }).actionId ?? '';
+      const result = await executeApprovedOrganisationConfigUpdate({
+        actionId,
+        organisationId: context.organisationId,
+      });
+      if (!result.success) {
+        throw new Error(`${result.errorCode}: ${result.message}`);
+      }
+      return result;
+    }
+
+    // ── Session 2 — notify_operator fan-out (spec §7.3) ──────────────────
+    case 'notify_operator': {
+      const fanoutModule = await import('./notifyOperatorFanoutService.js');
+      const alertPayload = payload as unknown as import('./notifyOperatorFanoutService.js').OperatorAlertPayload;
+      const actionId = (context as unknown as { actionId?: string }).actionId ?? '';
+      const fanoutResults = await fanoutModule.fanoutOperatorAlert({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        actionId,
+        payload: alertPayload,
+      });
+      return {
+        queued: true,
+        channels: alertPayload.channels,
+        fanoutResults,
+      };
+    }
+
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -1281,6 +1322,30 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWithActionAudit('compute_churn_risk', input, context, () =>
       executeComputeChurnRisk(input, context));
   },
+  compute_staff_activity_pulse: async (input, context) => {
+    const { executeComputeStaffActivityPulse } = await import('./computeStaffActivityPulseService.js');
+    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+      if (!subaccountId) throw new Error('subaccount_id is required');
+      return executeComputeStaffActivityPulse({
+        organisationId: context.organisationId,
+        subaccountId,
+        sourceRunId: input.source_run_id as string | undefined,
+      });
+    });
+  },
+  scan_integration_fingerprints: async (input, context) => {
+    const { executeScanIntegrationFingerprints } = await import('./scanIntegrationFingerprintsService.js');
+    return executeWithActionAudit('scan_integration_fingerprints', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+      if (!subaccountId) throw new Error('subaccount_id is required');
+      return executeScanIntegrationFingerprints({
+        organisationId: context.organisationId,
+        subaccountId,
+        sourceRunId: input.source_run_id as string | undefined,
+      });
+    });
+  },
   generate_portfolio_report: async (input, context) => {
     const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
     return executeWithActionAudit('generate_portfolio_report', input, context, () =>
@@ -1288,6 +1353,111 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   trigger_account_intervention: async (input, context) => {
     return proposeReviewGatedAction('trigger_account_intervention', input, context);
+  },
+
+  // ── ClientPulse Phase 4 intervention primitives (all review-gated) ────
+  // Scenario-detector proposes, operator approves in the /review queue.
+  'crm.fire_automation': async (input, context) => {
+    return proposeReviewGatedAction('crm.fire_automation', input, context);
+  },
+  'crm.send_email': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_email', input, context);
+  },
+  'crm.send_sms': async (input, context) => {
+    return proposeReviewGatedAction('crm.send_sms', input, context);
+  },
+  'crm.create_task': async (input, context) => {
+    return proposeReviewGatedAction('crm.create_task', input, context);
+  },
+
+  // ── CRM Query Planner (read-only, not review-gated) ─────────────────────
+  // Agent-facing tool per spec §18.2 — dispatches through the planner
+  // pipeline (Stage 1 registry / Stage 2 cache / Stage 3 LLM fallback /
+  // canonical + live + hybrid executors) and returns the BriefResultContract
+  // artefact set. The route at /api/crm-query-planner/query is the user
+  // surface; this handler is the agent surface.
+  'crm.query': async (input, context) => {
+    // Resolve target subaccount — prefer the explicit tool-input value,
+    // falling back to the agent's bound subaccount context.
+    const suppliedSubaccountId = typeof input.subaccountId === 'string' && input.subaccountId.length > 0
+      ? input.subaccountId
+      : null;
+    const targetSubaccountId = suppliedSubaccountId ?? context.subaccountId;
+
+    if (!targetSubaccountId) {
+      return {
+        success: false,
+        error:   'missing_permission',
+        message: 'crm.query requires a subaccount — supply input.subaccountId or bind the agent to a subaccount.',
+      };
+    }
+
+    // Horizontal-access guard (mirrors intelligenceSkillExecutor.executeQuerySubaccountCohort):
+    // a regular subaccount agent may only read its own subaccount. Only
+    // org-subaccount agents (allowedSubaccountIds === null) may cross
+    // boundaries, and even then only to subaccounts in their allowlist if
+    // the array form is present. Skip when the caller made no explicit
+    // cross-subaccount request (input.subaccountId matches context or was omitted).
+    if (suppliedSubaccountId && suppliedSubaccountId !== context.subaccountId) {
+      const allowed = context.allowedSubaccountIds;
+      const isOrgScope = allowed === null || allowed === undefined;
+      const inAllowlist = Array.isArray(allowed) && allowed.includes(suppliedSubaccountId);
+      if (!isOrgScope && !inAllowlist) {
+        return {
+          success: false,
+          error:   'missing_permission',
+          message: 'Agent is not authorised to read the specified subaccount.',
+        };
+      }
+    }
+
+    const { runQuery } = await import('./crmQueryPlanner/index.js');
+    const result = await runQuery(
+      {
+        rawIntent:    String(input.rawIntent ?? ''),
+        subaccountId: targetSubaccountId,
+        briefId:      typeof input.briefId === 'string' ? input.briefId : undefined,
+      },
+      {
+        orgId:                  context.organisationId,
+        organisationId:         context.organisationId,
+        subaccountId:           targetSubaccountId,
+        runId:                  context.runId,
+        briefId:                typeof input.briefId === 'string' ? input.briefId : undefined,
+        principalType:          'agent',
+        principalId:            context.agentId,
+        teamIds:                [],
+        // Agent-invoked — the agent's own capabilityMap gated the skill
+        // dispatch upstream (skillExecutor.execute). The planner's
+        // validator treats unknown `canonical.*` slugs as skipped per
+        // §12.1, so the route's subaccount-capability union is not
+        // required here — `crm.query` is the only hard-gated slug.
+        callerCapabilities:     new Set<string>(['crm.query']),
+        defaultSenderIdentifier: undefined,
+      },
+    );
+    return { success: true, ...result };
+  },
+
+  notify_operator: async (input, context) => {
+    return proposeReviewGatedAction('notify_operator', input, context);
+  },
+
+  // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
+  // The skill calls applyOrganisationConfigUpdate directly rather than
+  // routing through proposeReviewGatedAction — the service itself owns the
+  // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
+  config_update_organisation_config: async (input, context) => {
+    const { applyOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
+    return applyOrganisationConfigUpdate({
+      organisationId: context.organisationId,
+      path: input.path as string,
+      value: input.value,
+      reason: (input.reason as string) ?? 'config_agent write',
+      sourceSession: (input.sourceSession as string | null | undefined) ?? null,
+      changedByUserId: (context.userId as string | undefined) ?? null,
+      agentId: context.agentId,
+    });
   },
 
   // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
@@ -1349,6 +1519,23 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         agentId: context.agentId,
         correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
       },
+    );
+  },
+
+  // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ──────────
+  ask_clarifying_questions: async (input, context) => {
+    const { executeAskClarifyingQuestions } = await import('../tools/capabilities/askClarifyingQuestionsHandler.js');
+    return executeAskClarifyingQuestions(
+      context,
+      input as Parameters<typeof executeAskClarifyingQuestions>[1],
+    );
+  },
+
+  challenge_assumptions: async (input, context) => {
+    const { executeChallengeAssumptions } = await import('../tools/capabilities/challengeAssumptionsHandler.js');
+    return executeChallengeAssumptions(
+      context,
+      input as Parameters<typeof executeChallengeAssumptions>[1],
     );
   },
 
@@ -3747,7 +3934,6 @@ ${htmlForLlm}`;
       sourceType: 'system',
       agentName: 'scrape_structured',
       taskType: 'general',
-      executionPhase: 'execution',
       routingMode: 'ceiling',
     },
   });

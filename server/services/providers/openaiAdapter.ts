@@ -1,16 +1,21 @@
 import { env } from '../../lib/env.js';
 import type { LLMProviderAdapter, ProviderCallParams, ProviderResponse } from './types.js';
 import { toOpenAIMessages, toOpenAITools, fromOpenAIResponse, buildOpenAIRequestBody } from './openaiFormat.js';
+import { assertCalledFromRouter } from './callerAssert.js';
+import { mapAbortError, mapHttp499, isAbortError } from './adapterErrors.js';
 
 // ---------------------------------------------------------------------------
 // OpenAI provider adapter
 // Uses the shared OpenAI-format utilities for message/tool translation.
+// See anthropicAdapter.ts for the observability contract (signal + 499 + abort).
 // ---------------------------------------------------------------------------
 
 const openaiAdapter: LLMProviderAdapter = {
   provider: 'openai',
 
   async call(params: ProviderCallParams): Promise<ProviderResponse> {
+    assertCalledFromRouter();
+
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) {
       throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'openai', message: 'OpenAI adapter not configured. Set OPENAI_API_KEY.' };
@@ -26,14 +31,21 @@ const openaiAdapter: LLMProviderAdapter = {
       temperature: params.temperature,
     });
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: params.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) throw mapAbortError('openai', params.signal);
+      throw err;
+    }
 
     const providerRequestId = response.headers.get('x-request-id') ?? '';
 
@@ -44,6 +56,10 @@ const openaiAdapter: LLMProviderAdapter = {
         errorDetail = err?.error?.message ?? response.statusText;
       } catch {
         errorDetail = response.statusText;
+      }
+
+      if (response.status === 499) {
+        throw mapHttp499('openai', errorDetail);
       }
 
       if (response.status === 503 || response.status === 529) {

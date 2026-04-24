@@ -87,6 +87,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'LLM request/response records — includes full prompts and completions.',
   },
   {
+    tableName: 'llm_requests_archive',
+    schemaFile: 'llmRequestsArchive.ts',
+    policyMigration: '0188_llm_requests_archive.sql',
+    rationale: 'Retention archive for llm_requests — same tenant-isolation policy; rows move in from the nightly llm-ledger-archive job.',
+  },
+  {
     tableName: 'audit_events',
     schemaFile: 'auditEvents.ts',
     policyMigration: '0081_rls_llm_requests_audit.sql',
@@ -324,6 +330,185 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'integrationConnections.ts',
     policyMigration: '0168_p3b_canonical_rls.sql',
     rationale: 'External service credentials — principal-scoped visibility protects connection ownership and tokens.',
+  },
+  // 0172 — ClientPulse Phase 1 canonical + derived tables
+  {
+    tableName: 'canonical_subaccount_mutations',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Staff activity mutation log (§2.0b) — leaks reveal per-sub-account staff work patterns.',
+  },
+  {
+    tableName: 'canonical_conversation_providers',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Fingerprint source for third-party conversation providers (§2.0c) — reveals which integrations the sub-account uses.',
+  },
+  {
+    tableName: 'canonical_workflow_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Fingerprint source from workflow action types + webhook targets (§2.0c) — reveals automation posture.',
+  },
+  {
+    tableName: 'canonical_tag_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Tag vocabulary per sub-account (§2.0c) — reveals segmentation + third-party tag conventions.',
+  },
+  {
+    tableName: 'canonical_custom_field_definitions',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Custom field keys per sub-account (§2.0c) — reveals CRM customisation + third-party prefix patterns.',
+  },
+  {
+    tableName: 'canonical_contact_sources',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Contact attribution sources per sub-account (§2.0c) — reveals acquisition channels and third-party origin markers.',
+  },
+  {
+    tableName: 'client_pulse_signal_observations',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Timeseries of ClientPulse churn-predictive signals per sub-account — cross-tenant leak reveals client health state.',
+  },
+  {
+    tableName: 'subaccount_tier_history',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Subscription tier migration timeseries — reveals pricing posture and downgrade patterns per sub-account.',
+  },
+  // 0173 — ClientPulse Phase 2 derived timeseries
+  {
+    tableName: 'client_pulse_health_snapshots',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0173_clientpulse_health_snapshots.sql',
+    rationale: 'ClientPulse health-score timeseries per sub-account — leak reveals portfolio health posture.',
+  },
+  // 0174 — ClientPulse Phase 3 churn risk assessments
+  {
+    tableName: 'client_pulse_churn_assessments',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0174_clientpulse_churn_assessments.sql',
+    rationale: 'ClientPulse churn-risk band assessments per sub-account — leak reveals which clients are flagged as at-risk.',
+  },
+  // 0177 — ClientPulse Phase 1 follow-up: integration fingerprint scanner state
+  // (bumped from 0176 after merge-conflict with IEE 0176_iee_run_id_and_inflight_index.sql)
+  {
+    tableName: 'integration_fingerprints',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
+    rationale: 'Integration-fingerprint library (system + org scope). System rows are cross-tenant readable; org rows reveal the agency\'s vendor catalogue.',
+  },
+  {
+    tableName: 'integration_detections',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
+    rationale: 'Per-sub-account integration detections — leak reveals which third-party vendors each client uses.',
+  },
+  {
+    tableName: 'integration_unclassified_signals',
+    schemaFile: 'clientPulseCanonicalTables.ts',
+    policyMigration: '0177_clientpulse_integration_fingerprints.sql',
+    rationale: 'Novel fingerprint observations awaiting operator triage — leak reveals unclassified third-party activity per sub-account.',
+  },
+  // 0192 — Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md)
+  {
+    tableName: 'agent_execution_events',
+    schemaFile: 'agentExecutionEvents.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Durable per-run agent execution timeline — prompt assembly, memory retrieval, rule evaluation, LLM call start/complete, skill invocation. Payload contains reasoning excerpts, memory excerpts, and tool inputs that can hold PII + operational secrets.',
+  },
+  {
+    tableName: 'agent_run_prompts',
+    schemaFile: 'agentRunPrompts.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Fully-assembled system + user prompt per run assembly — contains the client knowledge base, memory-block composition, and task context that the LLM saw. Leak reveals an org\'s entire agent prompt surface.',
+  },
+  {
+    tableName: 'agent_run_llm_payloads',
+    schemaFile: 'agentRunLlmPayloads.ts',
+    policyMigration: '0192_agent_execution_log.sql',
+    rationale: 'Full request + response body per LLM ledger row — post-redaction, but still carries message history, tool inputs, and provider responses. Payload-read is gated tighter than view-log (AGENTS_EDIT), but RLS is still the last-resort tenant boundary.',
+  },
+  // 0195 — Universal Brief classifier shadow-eval logging.
+  // Migration 0200 repairs any dev DB that applied an earlier draft of
+  // 0195 that referenced the wrong session variable and omitted FORCE RLS.
+  {
+    tableName: 'fast_path_decisions',
+    schemaFile: 'fastPathDecisions.ts',
+    policyMigration: '0195_fast_path_decisions.sql',
+    rationale: 'Classifier triage decisions per Brief — contains routing intent, confidence scores, and downstream outcomes. Cross-tenant leak reveals org behavioural patterns and intent signals.',
+  },
+  // 0194 — Universal Brief polymorphic conversation tables.
+  // Migration 0200 repairs any dev DB that applied an earlier draft of
+  // 0194 that referenced the wrong session variable and omitted FORCE RLS.
+  {
+    tableName: 'conversations',
+    schemaFile: 'conversations.ts',
+    policyMigration: '0194_conversations_polymorphic.sql',
+    rationale: 'Polymorphic conversation container for Briefs, Tasks, and Agent-run logs — contains user chat turns which can include PII, business objectives, and operational intent.',
+  },
+  {
+    tableName: 'conversation_messages',
+    schemaFile: 'conversations.ts',
+    policyMigration: '0194_conversations_polymorphic.sql',
+    rationale: 'Individual messages within conversations — includes BriefChatArtefact JSONB blobs with query results, approval payloads, and error diagnostics. Same sensitivity as the parent conversation.',
+  },
+  // 0202–0208 + 0212 — Cached Context Infrastructure (spec: docs/cached-context-infrastructure-spec.md).
+  // Migration 0213 repairs the RLS policies on all eight tables below (wrong
+  // session variable + missing FORCE + missing WITH CHECK) to match the
+  // canonical 0079/0200 pattern.
+  {
+    tableName: 'reference_documents',
+    schemaFile: 'referenceDocuments.ts',
+    policyMigration: '0202_reference_documents.sql',
+    rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
+  },
+  {
+    tableName: 'reference_document_versions',
+    schemaFile: 'referenceDocumentVersions.ts',
+    policyMigration: '0203_reference_document_versions.sql',
+    rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states.',
+  },
+  {
+    tableName: 'document_bundles',
+    schemaFile: 'documentBundles.ts',
+    policyMigration: '0204_document_bundles.sql',
+    rationale: 'Document bundle groupings — names and descriptions can reveal organisational intent; bundle composition reveals which documents are used together. Cross-tenant leak exposes the org\'s knowledge structure.',
+  },
+  {
+    tableName: 'document_bundle_members',
+    schemaFile: 'documentBundleMembers.ts',
+    policyMigration: '0205_document_bundle_members.sql',
+    rationale: 'Join table linking documents to bundles — membership reveals bundle composition. Cross-tenant leak exposes the relationship between documents and bundles.',
+  },
+  {
+    tableName: 'document_bundle_attachments',
+    schemaFile: 'documentBundleAttachments.ts',
+    policyMigration: '0206_document_bundle_attachments.sql',
+    rationale: 'Links bundles to agents, tasks, or scheduled tasks — reveals which automated workflows reference which knowledge. Cross-tenant leak exposes operational context.',
+  },
+  {
+    tableName: 'bundle_resolution_snapshots',
+    schemaFile: 'bundleResolutionSnapshots.ts',
+    policyMigration: '0207_bundle_resolution_snapshots.sql',
+    rationale: 'Immutable per-run captures of resolved document versions and prefix hashes — contain the exact document content that was sent to the LLM for each run. Cross-tenant leak exposes both content and LLM call patterns.',
+  },
+  {
+    tableName: 'model_tier_budget_policies',
+    schemaFile: 'modelTierBudgetPolicies.ts',
+    policyMigration: '0208_model_tier_budget_policies.sql',
+    rationale: 'Per-org execution budget policies — per-org overrides reveal cost configuration and policy settings. Platform-default rows (organisation_id IS NULL) are intentionally readable across all orgs (custom SELECT policy).',
+  },
+  // 0212 — Bundle suggestion dismissals
+  {
+    tableName: 'bundle_suggestion_dismissals',
+    schemaFile: 'bundleSuggestionDismissals.ts',
+    policyMigration: '0212_bundle_suggestion_dismissals.sql',
+    rationale: 'Per-user dismissals of bundle-save suggestions — reveals which document sets a user has seen and ignored. Cross-tenant leak exposes user behaviour patterns.',
   },
 ];
 

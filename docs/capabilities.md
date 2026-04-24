@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-16 (Execution infrastructure hardening — exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity)
+> **Last updated:** 2026-04-21 (LLM Spend Observability follow-ups — partial-external-success double-bill protection via provisional audit records, single-terminal-transition invariant with ghost-arrival logging, pre-dispatch queue-wait visibility, logical-attempt sequencing across fallback providers, click-through live payload inspection, forensic in-flight archive with self-disabling soft circuit on write degradation, mobile-responsive operations view, token-level streaming progress infrastructure, and deterministic idempotency-key versioning)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -43,6 +43,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Platform Feature Request Pipeline](#platform-feature-request-pipeline)
   - [Configuration Assistant](#configuration-assistant)
   - [Skill System](#skill-system)
+  - [CRM Query Planner](#crm-query-planner)
   - [Playbook Engine](#playbook-engine)
   - [Human-in-the-Loop](#human-in-the-loop)
   - [Task Board & Workspace](#task-board--workspace)
@@ -194,6 +195,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Real-time chat** — Conversational interface with tool result cards, typing indicators, and session history
 - **Flexible scheduling:** Recurring intervals (minute-level precision), cron expressions with timezone, or event triggers (task created, task moved, agent completed)
 - **Execution control:** Per-run token budgets, cost ceilings, tool call limits, concurrency policies, and catch-up policies
+- **Per-run cost transparency:** Every run-detail surface (history card, trace viewer, agent admin page) shows the exact LLM spend for that run — total cost, call count, input/output token totals, and an app-vs-worker call-site breakdown. Operators see the bill, not just the ceiling
 - **Knowledge sources:** Per-agent data files from cloud storage, HTTP, Google Docs, Dropbox, or direct uploads — with token budgets and caching
 - Agent templates for rapid team deployment; full run history with execution traces; exactly-once deduplication on all run paths
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
@@ -224,6 +226,28 @@ Every user request for something the platform doesn't support today becomes stru
 - **Dogfood-ready** — the same task board the platform offers to end-users carries the request queue, so the platform team triages feature signal in the same UI they ship to customers
 - **Auditable lifecycle** — open → triaged → accepted/rejected/shipped/duplicate states with resolution notes, so every piece of user intent has a traceable outcome
 
+### Universal Brief
+
+A conversational intake surface that lets agency operators and clients describe what they want in natural language. The platform turns the conversation into structured work — clarifying before acting, challenging where needed, and presenting proposed actions for explicit approval.
+
+- **Chat-first entry point** — Operators open a Brief from the global sidebar; the AI starts the conversation, not a form
+- **Fast path for simple asks** — A deterministic classifier resolves chatter and cheap-answer intents without running the full Orchestrator, so low-stakes questions return in a single turn
+- **Smart clarification** — Before acting on ambiguous briefs, the AI asks up to five ranked clarifying questions; simple requests bypass this and proceed immediately
+- **Assumption challenge** — For high-stakes actions, an adversarial analysis pass surfaces the weakest assumptions as concern cards before the operator approves
+- **Structured approvals** — Actions that write data, send messages, or modify records surface as explicit approval cards with risk level (low / medium / high), affected record count, and a deterministic "Thinking…" indicator so the interface never goes silent after send
+- **Artefact trail** — Every Brief produces a typed output artefact (structured result, approval card, or error) that persists in the conversation for audit and replay, with client-side lifecycle resolution so superseded results, out-of-order arrivals, and orphan references all render correctly
+- **Scope-bound chat panes** — The same conversational surface embeds inside the task board (per-task chat) and inside agent-run detail pages (per-run Q&A), so context never leaks across surfaces
+- **Learned Rules loop** — When an operator approves an action, the platform drafts candidate rules that would make similar decisions automatic next time; auto-drafted rules start paused for human review before going live
+
+#### Hardening shipped with the initial release
+
+- Write-time integrity guard — the same parent result cannot be superseded twice, so concurrent edits from different agents can never corrupt a chain
+- Per-conversation emission cap — any single write is bounded at 25 artefacts; runaway output fails loud, not silent
+- Deterministic pending-assistant state — the UI shows "Thinking…" the moment a user message lands, with an auto-clearing fallback so a dropped websocket never leaves the interface mute
+- Double-send protection — rapid repeat submissions in the chat pane are deduped synchronously before the server sees them
+- Quality-gated rule capture — rules born from low-confidence signals or approval-suggestion loops start in a pending-review state instead of going live immediately, so the learning system cannot flood itself with noise
+- Operational counters — write-guard rejections, over-limit truncations, and validation failures each increment a scraped counter so dashboards can track drift without re-parsing logs
+
 ### Configuration Assistant
 
 AI-powered conversational configuration for agents, skills, schedules, and data sources. Helps org admins set up and manage their platform through natural language.
@@ -250,6 +274,21 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 - **Review gating** — 42+ skills require human approval before execution; 6 deterministic skills run instantly without AI involvement
 - Smart skill selection dynamically prioritises relevant skills per conversation; skill modules enable bulk management
 - See [Skills Reference](#skills-reference) for the full catalogue
+
+### CRM Query Planner
+
+Natural-language CRM reads that stay cheap and deterministic by default. Agents and operators ask in plain English — the planner answers from pre-approved queries first, falls back to live CRM reads only when needed, and bills nothing for the common path.
+
+- **Deterministic-first** — A curated library of canonical CRM queries (inactive contacts, stale opportunities, upcoming appointments, etc.) matches common phrasings directly, with zero AI cost and sub-second latency
+- **Structured plan cache** — Repeat intents within a short window reuse the prior plan across users in the same workspace, keyed per workspace so clients never see each other's queries
+- **AI fallback for the long tail** — When a question doesn't match the library, a focused AI step produces a validated query plan; an elevated tier only engages on low confidence or complex hybrid intents
+- **Hybrid execution** — The planner can combine a canonical base with a live-read filter for hard-to-canonicalise fields (city, country, custom tags) without forcing a full live scan
+- **Read-only by construction** — The planner cannot write to the CRM. Enforced structurally via import restrictions and a CI guard script; the failure mode for a misconfigured query is "no data", never "wrong data"
+- **Row-level tenant isolation** — Every query executes inside a per-caller security context; cross-workspace leakage is structurally impossible
+- **Cost-bounded** — Per-query cost ceiling with a router-level budget breaker; rate-limited calls are treated as transient and never mapped to a cost-exceeded surface
+- **Per-query trace** — Every response carries a full execution trace (which stage resolved the query, whether the cache was hit, which plan mutations fired, final executor used) so operators can debug "why did this return X?" without replaying the request
+- **Dual surface** — Exposed as an HTTP endpoint for users/Briefs and as an agent skill (`crm.query`) governed by the normal capability-gate and review system
+- **Observability built in** — Dashboard surfaces stage-hit rate, escalation rate, live-call rate, and cost-per-resolved-query so agencies can tune the deterministic library against real usage
 
 ### Playbook Engine
 
@@ -305,6 +344,18 @@ Single-screen operational command centre that replaces the legacy inbox, dashboa
 - **Threshold editor** — Organisation admins configure per-action and per-run cost thresholds that control Major-lane routing, with currency selection
 - **Per-subaccount retention** — Override the default run data retention period on a per-client basis
 - **409 concurrency guard** — Prevents double-approval of already-resolved items with graceful UI recovery
+
+### Live Execution Log — Per-Run Timeline
+
+Every material agent decision — prompt composition, memory retrieval, rule matching, skill invocation, call start/end, handoff — streamed live and retained as a durable, replayable record. Operators get mid-run visibility and months-later forensics on the same surface.
+
+- **Live timeline** — Watch a run unfold as it happens: which memories the agent pulled, which policies matched, which skills fired, and what the model saw at each step. Refreshes sub-second; buffers on reconnect so nothing is missed.
+- **Deep-link to the source** — Every event in the timeline links to the entity that caused it. Stale memory? Click through to edit it. Wrong rule firing? Open the rule editor in place. Edits affect future runs only — the live run keeps its original state.
+- **Prompt replay** — The fully-assembled prompt for every run (and every re-assembly after a handoff) is persisted in full. Click any prompt event to see exactly what the model was reading — no more guesswork about "what did the agent actually see".
+- **Full call payload** — Request and response bodies per model call, stored with automatic secret redaction. Gated by a stricter permission than the timeline itself so only agent editors see raw payloads.
+- **Long-term retention** — Timelines persist indefinitely with tiered storage: full fidelity for recent runs, summarised for older ones, archived for long-term audit. Compliance teams can answer "what did the agent do on April 3?" years after the fact.
+- **Per-tenant isolation** — Every event row is tenant-scoped at the database level; cross-client leakage is structurally impossible.
+- **Runaway-loop protection** — Hard cap on events per run with a one-shot "limit reached" signal, so an infinite-loop agent is still observable but never exhausts storage.
 
 ### Memory & Knowledge System
 
@@ -376,6 +427,20 @@ Pre-built connectors for the tools agencies already use — connect once, use ac
 - Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
 - See [Integrations Reference](#integrations-reference) for the full list
 
+### Document Bundles & Cached Context
+
+Reusable document libraries that let agents carry stable reference knowledge across runs — assembled once, served instantly at every execution.
+
+- **Document bundles** — Named collections of versioned reference documents. Attach a bundle to an agent, task, or scheduled task; every run in that scope receives the full bundle as context without re-uploading or re-prompting.
+- **Multi-file upload** — Upload multiple documents in a single operation; each file is stored as an immutable, versioned content record. Uploading new content creates a new version; prior versions are never deleted, preserving full reproducibility.
+- **Auto-bundles** — When documents are uploaded and immediately attached without naming a bundle, an unnamed bundle is created automatically and reused whenever the same document set recurs. Operators can promote any auto-bundle to a named bundle with a single action.
+- **Bundle suggestion** — After attaching a set of documents, the platform detects whether the set forms a useful named bundle and surfaces a one-click save prompt. Operators can permanently dismiss the suggestion per document set.
+- **Per-run snapshot isolation** — At run start, the platform captures an immutable snapshot of every attached bundle — the exact document versions, content hashes, and token counts in effect at that moment. Subsequent bundle edits or document updates never affect a run already in flight.
+- **Budget-aware assembly** — The platform resolves a per-run execution budget (model tier policy → org ceiling → task override) before assembling the prefix. Assembly validates token usage against the budget before calling the model; if the prefix exceeds the budget, the run is paused for operator review rather than silently truncating.
+- **Operator review gate** — Budget breaches surface as structured review items: which threshold was exceeded, the top document contributors, and suggested remediations (trim bundle, split task, upgrade model tier). Operators approve or reject; an approved retry re-resolves from current state exactly once.
+- **Utilisation labels** — Each bundle displays a utilisation indicator (low / medium / high / over-budget) showing how much of the typical model's context window the bundle occupies — so operators know before attaching whether a bundle will fit.
+- **Reproducible audit trail** — Every run records the snapshot IDs, variable-input hash, and run outcome (completed / degraded / failed). Degraded runs record the specific reason (soft warning threshold, token drift, or unexpected cache miss) for post-run observability.
+
 ### Execution Infrastructure
 
 Production-grade reliability — agents run consistently, recover from failures, and never double-execute.
@@ -394,6 +459,8 @@ Integrated Execution Environment for running agent work in isolated Docker conta
 
 - **Browser automation mode:** Agents execute multi-step browser tasks (logins, form submissions, structured scrapes, file downloads, paywalled content access) inside fully sandboxed containers with per-run cost tracking and budget controls. This is how agents do work on systems that don't have APIs.
 - **Development mode:** Agency-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a mandatory code review workflow with approved command lists and test execution. Not positioned as a standalone IDE.
+- **Live progress on long-running browser tasks:** delegated browser tasks surface real-time step count and worker heartbeat in the run-trace view while the agent is still working — operators see the work happening rather than a silent "in progress" spinner.
+- **Connection health validation:** stored credentials for paywalled and login-protected sites can be tested on demand — runs a real login attempt in a sandboxed browser and reports back, so credentials are verified before the agent depends on them.
 - **Full cost visibility** — both AI token costs and runtime costs are tracked per execution in the usage explorer, so agencies see their true cost of delivery — not just model spend.
 - All executions run in isolation with enforced gating; no agent touches host state.
 
@@ -529,7 +596,20 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Composite health scoring based on normalised CRM, engagement, and activity metrics
 - Anomaly detection compared against each account's own historical baseline
 - Intervention triggers (check-in, pause, escalation alert) proposed with human gating
-- ClientPulse dashboard for portfolio-wide health visibility at a glance
+- ClientPulse dashboard for portfolio-wide health visibility at a glance, powered by Staff Activity Pulse (weighted-sum activity scoring from CRM mutation events, with automation-user exclusion) and Integration Fingerprint Scanner (detects third-party tools installed in each sub-account from canonical artifact patterns)
+- **Intervention pipeline** (Phase 4): scenario-detector proposes CRM-side actions (fire automation, send email, send SMS, create task) plus internal operator alerts — every proposal queued for operator approval before execution. Hourly outcome-measurement job tracks post-intervention band change (improved / unchanged / worsened) over a 14-day measurement window so operators see which interventions actually move the needle.
+- **Real CRM dispatch + outcome-weighted recommendations** (Session 2): approved interventions now cross the wire to the connected CRM with idempotent retry semantics and per-subaccount concurrency locks — not stubs. As outcome data accumulates, the recommended intervention for any risk band promotes the option that historically produced the best band improvement, falling back to configured priority when trial data is thin. Operators see the recommendation rationale inline (outcome-weighted vs priority fallback).
+- **Per-client drilldown** (Session 2): one-click into any client surfaces current health score with 7-day delta, top contributing risk signals, 90-day band-transition timeline, full intervention history with outcome badges, and a contextual "Open Configuration Assistant" trigger seeded with that client's situation.
+- **Live CRM-data pickers** (Session 2): every intervention editor ships searchable dropdowns backed by the connected CRM — choose the real workflow, contact, assignee user, from-address, or from-number from live data instead of copy-pasting IDs. Rate-limit aware with graceful backoff.
+- **Multi-channel operator alerts** (Session 2): internal operator alerts fan out across email and configured chat webhooks based on per-channel availability — one alert, reaching the operator wherever they are. The in-app surface is the review queue itself (where the alert row is written at proposal time). A dedicated per-user in-app notification record is on the roadmap for an upcoming release.
+- **Configuration Assistant for account-health knobs** (Phase 4.5): operators change scoring weights, churn band thresholds, intervention cooldown hours, and alert limits via a guided confirm-before-write surface. Every change is audit-logged; changes to governance-critical knobs (weights, cooldowns, alert caps) route through the review queue for a second pair of eyes.
+
+**ClientPulse configuration capabilities (for capability-aware routing):**
+
+- `organisation.config.read` — inspect current operational_config values for the org.
+- `organisation.config.update` — propose a single dot-path change; routes through the sensitive-path gate when required.
+- `organisation.config.reset` — revert to the hierarchy template's defaults (factory reset semantic).
+- `organisation.config.history` — browse the audit trail of past changes with snapshot diffs.
 
 ### Customer Support Automation
 
@@ -577,11 +657,42 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Cohort queries filtered by subaccount tags for segment-level analysis
 - Org-level insight storage compounds pattern recognition across clients over time
 
+### LLM Spend Observability & Per-Client P&L
+
+| | |
+|---|---|
+| **Outcome** | Agency leadership sees, in near-real-time, exactly how LLM spend is tracking per client, per subaccount, per model, and per feature — and what margin is left after platform overhead |
+| **Trigger** | Live dashboard access, ad-hoc P&L review, or monthly billing reconciliation |
+| **Deliverable** | Cross-client financial dashboard with revenue, cost, gross profit, platform overhead, and net profit — sliced by organisation, subaccount, source of work, and provider/model — with a top-cost call inspector for runaway-cost triage |
+
+- **Every LLM call is attributed** — no "black box" usage. Each call carries the work that triggered it (agent run, scheduled process, automated workflow, platform background work) plus a feature tag so agencies can answer "how much did the weekly reporting agent actually cost this month?" without a log-scraping exercise.
+- **Platform overhead is surfaced, not hidden** — background work the platform performs on its own behalf (memory compilation, skill classification, orchestration hints) is cost-attributed separately and subtracted from gross profit to show true net margin. No surprise "platform tax" eating margin silently.
+- **Per-client P&L rolls up automatically** — revenue (what the client is billed after margin), cost (raw LLM spend), profit, and margin percentage for every organisation and every subaccount. 30-day trend sparkline per client. Exportable to CSV for invoicing workflows.
+- **Sort and total every view** — every column in every P&L table supports ascending/descending sort; each table footer shows live totals across the current view. Makes "who's eating my margin this month?" a one-click question.
+- **Per-source-type breakdown** — see which kinds of work drive spend (conversational agents vs scheduled processes vs automated workflows vs platform background) so agencies can price packaging decisions against real cost shapes.
+- **Per-provider + per-model breakdown** — with average latency — supports model-routing decisions on hard evidence, not vendor marketing.
+- **Cost-runaway triage** — top-cost calls list with one-click detail drawer surfaces the exact prompt context, token counts, provider response metadata, and abort reason for any call that looks anomalous. Continues to work for historical calls via a retention-safe archive.
+- **Structured parse-failure capture** — when an LLM returns output that fails schema validation, the failure is recorded with a safe truncated excerpt rather than silently retried or lost. Supports root-cause analysis and prompt-quality improvements.
+- **Cancellation-aware billing** — client disconnects and deadline timeouts are distinguished in the ledger, so cost attribution stays honest when a user navigates away mid-response.
+- **Double-bill protection on timeouts** — when a provider call exceeds the per-call timeout, the platform genuinely cancels the in-flight network request (rather than abandoning it silently) and refuses to auto-retry under the same logical attempt. Combined with a generous per-call window tuned above every documented provider ceiling, this eliminates the class of "retry storms" where a slow-but-valid generation would previously be abandoned mid-response and re-issued — incurring a second charge at the LLM provider for the same piece of work. Agencies see one billable attempt per logical call.
+- **Every terminal attempt produces a ledger row** — timeouts, provider-unavailable, provider-not-configured, auth failures, parse failures, and unrecognised errors all land on the P&L surface as a typed ledger row. No failure mode silently disappears from the cost view; "what just happened to this call?" is always answerable from the ledger, not the logs.
+- **Retention-safe historical access** — ledger rows older than the configured retention window (default 12 months) move to a historical archive with the same structure and access controls. Detail lookups continue to work seamlessly; the archive is indexed for year-over-year trend analysis.
+- **Real-time in-flight visibility** — every LLM call currently dispatched but not yet resolved shows up in an admin-only live view within milliseconds of dispatch, with provider/model, feature, source attribution, attempt number, and live-ticking elapsed time. Supports long-running reasoning-model calls (up to 10 minutes) without admins having to guess whether a call is stuck. Updates via WebSocket — no polling — and auto-reconciles against the ledger the moment the call lands.
+- **Pre-dispatch queue-wait visibility** — the in-flight view surfaces the gap between the moment a call is requested and the moment it actually hits the provider. When a call appears slow, agencies can distinguish "the provider is slow" from "we spent 43 seconds waiting for a budget lock" at a glance — the two look identical on elapsed-time alone but demand completely different responses.
+- **Logical-attempt sequencing across fallback providers** — when a call fails over from a primary provider to a fallback, the in-flight view shows the cumulative attempt number across the whole call rather than restarting the counter at 1 for every provider. "This is actually the third attempt of the logical call" is legible at a glance during debugging.
+- **Partial-external-success double-bill protection** — a provisional audit record is written before every LLM call. If the provider accepts and bills for a call but the durable cost record fails to write (rare — DB hiccup, constraint violation, crash), a retry under the same logical identity sees the provisional record and raises a typed reconciliation signal instead of re-dispatching. No auto-retry inside the platform — callers own the reconciliation decision. A background sweep reaps provisional records if a crash stops them from resolving so the retry window eventually self-heals. Closes the one class of silent double-bill that request-level idempotency headers (unsupported by every current LLM vendor) would otherwise be the only fix for.
+- **Single-terminal-transition invariant** — every terminal status (success, error, timeout, budget-block, etc.) is guarded against silent overwrite. Late-arriving results that race with the provisional-record sweep are detected as ghost arrivals and logged for operator reconciliation rather than silently rewriting the earlier signal. Sweep-classified "expired" outcomes stay authoritative even if the late provider response eventually arrives.
+- **Deterministic idempotency-key versioning** — every cost-attribution key carries an explicit version prefix. Changing the key derivation is a deliberate bump rather than a silent drift that would break deduplication across a deploy boundary. A load-time assertion guards the prefix shape.
+- **Click-through live payload inspection** — admins can click any in-flight call to see the exact prompt context the platform dispatched, right alongside live elapsed time. Short-TTL in-memory capture bounded to protect platform memory; once the call lands the full detail is preserved on the historical record. Removes the "we'll have to wait until the call finishes to debug it" delay.
+- **Forensic in-flight archive** — every dispatch and terminal transition is captured to a short-retention audit log (default 7 days). When an operator asks "what was running at 3:17am last Tuesday during the outage?", the answer no longer requires a server-log grep. Writes are fire-and-forget and gated by a self-disabling soft circuit so a degraded audit path never slows the real-time view.
+- **Mobile-responsive operations view** — the in-flight tab renders as a card layout on phones and tablets so on-call response doesn't require a desktop. Same data, same real-time updates.
+- **Token-level streaming progress (infrastructure ready)** — the platform supports token-by-token progress events from LLM providers that expose streaming. Admins see a live tokens-so-far indicator alongside elapsed time during multi-minute reasoning generations. Adapter-level wiring to specific providers rolls out as each vendor's streaming API is adopted.
+
 ---
 
 ## Skills Reference
 
-Complete list of all 110 skills.
+Complete list of all 112 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -628,11 +739,14 @@ Complete list of all 110 skills.
 |-------|-------------|------|------|
 | `compute_churn_risk` | Evaluate churn risk signals and produce risk score with intervention recommendation | LLM | — |
 | `compute_health_score` | Calculate composite health score (0-100) for account | LLM | — |
+| `compute_staff_activity_pulse` | Calculate weighted activity score from canonical CRM mutations; excludes automation users via outlier-volume classifier | Deterministic | — |
 | `detect_anomaly` | Compare current metrics against historical baseline and flag deviations | LLM | — |
 | `detect_churn_risk` | Analyse account health signals to identify at-risk accounts | LLM | — |
+| `scan_integration_fingerprints` | Match canonical artifacts against a seed fingerprint library; emit per-subaccount detections and queue novel observations for operator triage | Deterministic | — |
 | `draft_followup` | Draft contextual follow-up email for stale deal or at-risk contact | LLM | — |
 | `enrich_contact` | Retrieve enrichment data for contact and write back to CRM | Deterministic | — |
 | `read_crm` | Retrieve contact, deal, and pipeline data from CRM | Deterministic | — |
+| `crm.query` | Natural-language CRM read via the CRM Query Planner (canonical-first, AI fallback, read-only) | Hybrid | — |
 | `trigger_account_intervention` | Propose intervention action (check-in, pause, alert) | LLM | HITL |
 | `update_crm` | Write contact/deal updates to CRM | Deterministic | HITL |
 
@@ -732,7 +846,9 @@ Complete list of all 110 skills.
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
-| `ask_clarifying_question` | Pause run and ask user clarifying question | LLM | Universal |
+| `ask_clarifying_question` | Pause run and ask user clarifying question — surfaces a `ClarifyingQuestionsCard` artefact in the Brief conversation; run transitions to `awaiting_clarification` until the user replies | LLM | Universal |
+| `ask_clarifying_questions` | Structured multi-question clarification skill for complex Briefs — generates a scored question set ranked by informational value; rendered as a collapsible `ClarifyingQuestionsCard` in the Brief UI | LLM | Universal |
+| `challenge_assumptions` | Reviews a proposed action or plan and produces a `ChallengeOutput` listing potential concerns by severity (low/medium/high); surfaced on the `ApprovalCard` before the user approves | LLM | Universal |
 | `read_priority_feed` | Read, claim, or release prioritised work feed items | Deterministic | Universal |
 | `request_approval` | Escalate decision to human operator for review | LLM | — |
 | `spawn_sub_agents` | Split work into 2-3 parallel sub-tasks executed simultaneously | LLM | — |
@@ -784,7 +900,7 @@ Complete list of all 110 skills.
 | **Gmail** | OAuth2 | Send email, read inbox | Org or subaccount |
 | **Slack** | OAuth2 | Post messages, file uploads, thread conversations, HITL buttons (Block Kit), @mention agent dispatch, DM conversations | Org or subaccount |
 | **HubSpot** | OAuth2 | Contacts, deals, content; full CRM read/write | Org or subaccount |
-| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, location data; webhook ingestion (HMAC-SHA256) | Org (with concurrency cap) |
+| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, funnels, calendars, users, location and business metadata; webhook ingestion (HMAC-SHA256) covering 10 event types — contact / opportunity / conversation create + update, plus INSTALL / UNINSTALL / LocationCreate / LocationUpdate for sub-account lifecycle tracking | Org (with concurrency cap) |
 | **GitHub** | GitHub App | Fine-grained per-repo access, webhook events (issues, PRs, pushes), task creation from events | Org or subaccount |
 | **Teamwork Desk** | OAuth2 | Project and task management | Org or subaccount |
 | **Stripe** | API adapter | Payment transactions and subscription data | Org |
@@ -843,6 +959,13 @@ Complete list of all 110 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-22 | Universal Brief v1: ship the chat-first entry point. Polymorphic conversation model spans Briefs, tasks, agent runs, and agent configuration on a single transport-only table. Fast-path classifier short-circuits chatter and low-stakes intents before the Orchestrator runs. Typed artefact contract (structured result / approval card / error) persists per turn with client-side lifecycle resolution (chains / superseded / orphans / out-of-order arrival). Backend write-time integrity guard enforces "a parent result cannot be superseded twice" with idempotent re-writes. Per-write artefact cap with explicit rejection so runaway capability emission fails loud. Deterministic "Thinking…" pending-assistant state with 15-second fallback. Synchronous double-send protection via the shared conversation hook. Quality-gated rule capture — approval-suggested or low-confidence rules start paused for human review. Structured per-turn signal in the write response plus scraped operational counters (conflict total / over-limit total / validation-rejected total). Task-board and agent-run detail pages both embed the same conversation surface. | — |
+| 2026-04-22 | CRM Query Planner (P1–P3): add deterministic-first natural-language CRM query layer with canonical registry (Stage 1), in-process plan cache (Stage 2), AI fallback with single-escalation retry (Stage 3), and hybrid execution for canonical-base-plus-live-filter intents. Read-only by construction (CI guard + structural import restriction). Per-query trace, per-workspace cache isolation, per-query cost ceiling, router-level budget breaker, subaccount-level capability gate, row-level tenant isolation via principal session context. Dual surface: HTTP endpoint + `crm.query` agent skill. Observability dashboard surfaces stage-hit rate, escalation rate, live-call rate, cost-per-resolved-query. | — |
+| 2026-04-21 | LLM Spend Observability follow-ups — 8 deferred items from the in-flight tracker brief land as one release. Partial-external-success double-bill protection: a provisional audit record is written before every LLM call, a retry under the same logical identity sees the provisional record and surfaces a typed reconciliation signal instead of re-dispatching, and a background sweep reaps orphaned provisional records after the provider timeout ceiling. Single-terminal-transition invariant: every terminal status is guarded against silent overwrite; late-arriving results are detected and logged as ghost arrivals. Pre-dispatch queue-wait visibility surfaces the gap between call request and provider dispatch. Logical-attempt sequencing shows the cumulative attempt number across fallback providers. Click-through live payload inspection lets admins see the exact prompt context before the call completes. Forensic in-flight archive captures every dispatch + terminal transition for 7-day incident reconstruction, gated by a self-disabling soft circuit on write degradation. Mobile-responsive operations view. Token-level streaming progress infrastructure (adapter wiring rolls out per-vendor). Deterministic idempotency-key versioning with load-time shape assertion. | — |
+| 2026-04-20 | LLM cost protection — provider-call timeout hardening. The internal per-call timeout guard now genuinely aborts the underlying network request on timer fire (previously the outer promise rejected while the fetch kept running, so the retry loop fired a second concurrent call and the platform was double-billed upstream). The cap was raised from 30 s to 600 s — above every documented provider ceiling including reasoning models — so legitimate long generations (skill analyzer, long-form outputs, reasoning-mode responses) stop tripping false-positive timeouts. Ambiguous-state failures (timeouts, network resets) are now classified non-retryable, so a second billable provider call is never issued under the same logical attempt. Together these close the root cause behind the skill-analyzer timeout bug that triggered the LLM observability work. | — |
+| 2026-04-20 | LLM Spend Observability & Per-Client P&L: add new Agency Capability section covering cross-client financial dashboard, attribution-per-call (source type + feature tag), platform overhead surfacing, per-org / per-subaccount / per-source-type / per-provider+model breakdowns with sort + totals, top-cost call triage with detail drawer, structured parse-failure capture, cancellation-aware billing, and retention-safe historical access (12-month default retention with on-demand archive lookup). | — |
+| 2026-04-19 | ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension. Adds 5 namespaced CRM-side action primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`), all review-gated; an event-driven scenario detector (`proposeClientPulseInterventionsJob`) that fires after every churn assessment and quotas proposals at the org + subaccount layer; an hourly outcome-measurement job that closes B2 with band-change attribution within 14 days; a strict V1 merge-field resolver (5 namespaces, no fallback / no conditionals) with editor live-preview; the Configuration Assistant tool #29 `config_update_organisation_config` that closes B3 (config_history audit on every write) + B5 (sensitive paths route through the action→review queue); and operator-facing UI for both the Propose Intervention modal (5 editors + wrapper) and the Configuration Assistant chat popup. Lifecycle event `clientpulse.intervention.enqueued` is the single observability anchor for both scenario-detector and operator-driven proposals. | — |
+| 2026-04-19 | Sandboxed Runtime (IEE): add live-progress-on-long-running-browser-tasks bullet (real-time step count + heartbeat surfacing during delegated browser execution) and connection-health-validation bullet (on-demand login test for stored credentials before depending on them in a workflow). Reflects the IEE Phase 0 delegation lifecycle and Web Login Connection "Test Connection" UI. | — |
 | 2026-04-17 | Capability-aware Orchestrator + Platform Feature Request Pipeline: add two new customer-facing Product Capabilities sections covering deterministic four-path task routing (A configured / B narrow-configurable / C broad-configurable / D unsupported), atomic capability matching (capability map + active connection + granted scopes), graceful reference-degradation, auditable decision records, per-run budget, post-handoff verification, and the structured feature-request pipeline with system-promotion detection, 30-day dedupe, multi-channel delivery, and dogfooded task-board triage. Add machine-readable-source callout on Integrations Reference pointing to `docs/integration-reference.md` as the structured YAML backing the runtime capability catalogue. | — |
 | 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |
 | 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
@@ -856,3 +979,19 @@ Complete list of all 110 skills.
 | 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
 | 2026-04-13 | Add Core Value Proposition; compress Product Capabilities; reframe Agency to outcomes; add Type column to Skills | — |
 | 2026-04-12 | Initial capabilities registry created from full code audit | — |
+
+---
+
+## Non-goals: what Automation OS is NOT
+
+These are durable product stances. When an LLM provider or horizontal agent platform ships a new primitive (routines, agent SDKs, skills, memory, hosted managed agents, team chat), the reflex should be to **absorb the category into this capabilities registry's positioning, ship any UX polish that closes a demo gap, and never drift the pitch toward parity with the provider's primitive.** The moat is the operations layer, not any one feature.
+
+- **Not a better agent SDK.** Consume LLM-provider primitives under the hood rather than competing with them.
+- **Not a hosted routines / scheduled-prompt product.** We build the operations layer on top of supply from every provider — multi-tenant isolation, approval workflows, client portals, per-client P&L, model-agnostic routing — surfaces an LLM provider's hosted-agent or routine product structurally cannot ship, because their buyer is an individual or an internal team, not an agency serving many clients.
+- **Not a general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for org-level extensibility — not as a competitor to general-purpose coding assistants.
+- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
+- **Not a public skill or playbook marketplace.** Anthropic-scale distribution isn't the agency play.
+- **Not a bidirectional bridge to no-code workflow tools.** We import from them (supervised-migration wedge); we do not export back.
+
+If a PR, marketing asset, or sales deck drifts toward a non-goal, push back. The right response to a provider shipping a new primitive is never "we have that too" — it is "we're the operations system you use on top of that."

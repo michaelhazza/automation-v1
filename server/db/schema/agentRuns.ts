@@ -82,7 +82,12 @@ export const agentRuns = pgTable(
 
     // Status tracking
     // Sprint 5 P4.1: added 'awaiting_clarification' for ask_clarifying_question
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
+    // 'delegated' added in IEE Phase 0 (docs/iee-delegation-lifecycle-spec.md)
+    // — the run has been handed off to a delegated execution backend (currently
+    // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
+    // (iee_runs). Transitions to a terminal value when the backend reaches its
+    // own terminal state, via finaliseAgentRunFromIeeRun.
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -107,6 +112,14 @@ export const agentRuns = pgTable(
     // Migration 0137
     citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
     hadUncertainty: boolean('had_uncertainty').notNull().default(false),
+
+    // Phase 8 / W3c — memory_block provenance trail (migration 0199)
+    appliedMemoryBlockIds: jsonb('applied_memory_block_ids').notNull().default([]).$type<string[]>(),
+    appliedMemoryBlockCitations: jsonb('applied_memory_block_citations').notNull().default([]).$type<Array<{
+      memoryBlockId: string;
+      citedSnippet?: string;
+      citationScore: number;
+    }>>(),
 
     // Impact counters
     tasksCreated: integer('tasks_created').notNull().default(0),
@@ -147,6 +160,14 @@ export const agentRuns = pgTable(
     // to find the originating step run.
     playbookStepRunId: uuid('playbook_step_run_id'),
 
+    // IEE Phase 0 denormalised reference (migration 0176). When the run
+    // is delegated to an IEE worker, agentExecutionService writes the
+    // iee_runs.id here at delegation time. Read directly by the run
+    // detail API to avoid a read-time JOIN. Non-IEE runs leave this
+    // null. No FK constraint — this is a denormalised cache, not an
+    // integrity contract.
+    ieeRunId: uuid('iee_run_id'),
+
     // Heartbeat — stale run detection (GSD-2 adoption)
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
     lastToolStartedAt: timestamp('last_tool_started_at', { withTimezone: true }),
@@ -170,6 +191,26 @@ export const agentRuns = pgTable(
     principalId: text('principal_id').notNull().default(''),
     actingAsUserId: uuid('acting_as_user_id').references(() => users.id),
     delegationGrantId: uuid('delegation_grant_id'),
+
+    // Live Agent Execution Log (migration 0192). `nextEventSeq` is the
+    // atomic per-run counter for agent_execution_events; allocation is a
+    // single `UPDATE ... RETURNING next_event_seq` so there's no MAX scan
+    // or lock on the events table. `eventLimitReachedEmitted` is the
+    // one-shot flag that gates the exactly-once `run.event_limit_reached`
+    // signal event — see spec §4.1.
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+    eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
+
+    // Cached Context Infrastructure (migration 0209) — §5.8
+    // bundleSnapshotIds: array of bundle_resolution_snapshots.id for this run
+    bundleSnapshotIds: jsonb('bundle_snapshot_ids').$type<string[]>(),
+    // variableInputHash: SHA-256 of the dynamic (post-breakpoint) content
+    variableInputHash: text('variable_input_hash'),
+    // runOutcome: nullable while in-flight; set atomically at terminal write
+    runOutcome: text('run_outcome').$type<'completed' | 'degraded' | 'failed'>(),
+    softWarnTripped: boolean('soft_warn_tripped').notNull().default(false),
+    // degradedReason: diagnostic enum recorded alongside run_outcome='degraded' (§4.6)
+    degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -204,6 +245,17 @@ export const agentRuns = pgTable(
     // P3A: principal model index (migration 0164)
     principalIdx: index('agent_runs_principal_idx')
       .on(table.principalType, table.principalId),
+    // IEE Phase 0 denormalised cache + reverse lookup (migration 0176)
+    ieeRunIdIdx: index('agent_runs_iee_run_id_idx')
+      .on(table.ieeRunId)
+      .where(sql`${table.ieeRunId} IS NOT NULL`),
+    // IEE Phase 0 — hot path for live-count / dashboard / polling endpoints
+    // that filter on status IN ('pending','running','delegated'). A
+    // partial btree is much smaller than a general (org, status) index
+    // (migration 0176).
+    inflightOrgIdx: index('agent_runs_inflight_org_idx')
+      .on(table.organisationId)
+      .where(sql`${table.status} IN ('pending', 'running', 'delegated')`),
   })
 );
 

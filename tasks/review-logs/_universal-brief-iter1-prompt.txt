@@ -1,0 +1,57 @@
+You are reviewing a markdown spec document for the Automation OS codebase. This is iteration 1 of a structured review loop — the spec is fresh.
+
+The spec under review is `docs/universal-brief-dev-spec.md` — the implementation spec for the "universal brief" feature. A companion brief (`docs/universal-brief-dev-brief.md`, rev 5, locked) captures the session-level design decisions and has already been through five rounds of external review; the spec is the implementation-facing artefact built on top of it. The spec has not been reviewed before — a fresh 5-iteration lifetime budget is available.
+
+Also on this branch and already merged to main:
+- `docs/brief-result-contract.md` + `shared/types/briefResultContract.ts` — the cross-branch artefact contract this spec consumes. These are load-bearing context; you may cite them, but do not review them as standalone documents — they are stable.
+
+Project framing (from `docs/spec-context.md`):
+
+```yaml
+pre_production: yes
+live_users: no
+stage: rapid_evolution
+testing_posture: static_gates_primary
+runtime_tests: pure_function_only
+frontend_tests: none_for_now
+api_contract_tests: none_for_now
+e2e_tests_of_own_app: none_for_now
+performance_baselines: defer_until_production
+composition_tests: defer_until_stabilisation
+rollout_model: commit_and_revert
+feature_flags: only_for_behaviour_modes
+staged_rollout: never_for_this_codebase_yet
+migration_safety_tests: defer_until_live_data_exists
+prefer_existing_primitives_over_new_ones: yes
+```
+
+Do NOT raise findings about:
+- Adding frontend unit tests, E2E tests, API contract tests, supertest, playwright, vitest-for-own-app, or composition tests (the framing caps this explicitly).
+- Adding feature flags for rollout gating or staged rollout phasing.
+- Adding production-readiness items (monitoring, compliance, multi-region, rate limiting beyond what exists, circuit breaking, chaos engineering).
+- Introducing new service layers when `accepted_primitives` (policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, failure()/FailureReason, createWorker, agentExecutionEventService, agentRunPromptService, agentRunPayloadWriter, redaction, agentRunVisibility, RLS_PROTECTED_TABLES manifest, withOrgTx, withPrincipalContext) already fit.
+
+DO focus this pass on:
+
+1. **Contradictions between sections.** Same concept described differently in different sections. Especially: phase sequencing claims vs file inventory phase assignments; execution-model claims vs service descriptions; "deferred" prose vs the Deferred Items list.
+2. **File-inventory drift.** Prose references to files / migrations / columns / endpoints that don't appear in §14 File Inventory — or inventory entries that prose doesn't explain.
+3. **Phase dependency bugs.** Phase N references a column/table/service that's introduced in Phase N+k. Especially: §11 dependency graph vs the per-phase scope lists vs the migration-phase assignments.
+4. **Load-bearing claims without a named mechanism.** Claims that "X must be idempotent", "Y is the source of truth", "Z is fail-closed", "the backstop catches cross-tenant leaks" — does the spec pin a concrete mechanism for each, or is the claim floating?
+5. **Contract / type surface drift.** New types in §4 — are they all in the file inventory? Are producers/consumers named? Do the examples match the shapes?
+6. **RLS coverage gaps.** New tenant-scoped tables (conversations, conversation_messages, fast_path_decisions) — does the spec pin RLS policy + manifest entry + route guard + principal-scoped context for each, per `docs/spec-authoring-checklist.md` §4? Any table missing one of those four?
+7. **Unnamed primitives.** Places where the spec says "a new service does X" or "a new hook does Y" without giving the hook/service a concrete name + file path.
+8. **Missing per-item verdicts.** Every phase item should have an explicit in/out verdict. Any ambiguity?
+9. **Self-consistency — Goals vs Implementation.** The spec claims certain end-to-end behaviours in §1 / §17; does §6/§7/§8 actually deliver those behaviours, and does §11's phasing land them in a sensible order?
+10. **Framing-drift finds that are NOT in the "do not raise" list.** E.g., if the spec quietly introduces a feature-flag-like mechanism, call it out.
+
+For each finding, provide:
+- **Section / line reference** (be specific — "§6.3.2" or "§11 Phase 5 scope list").
+- **One-sentence description** of the problem.
+- **Concrete recommendation** for the fix.
+
+Use severity tiers: **P1** = must fix before implementation; **P2** = should fix; **P3** = nit.
+
+The spec contents follow below.
+
+---
+

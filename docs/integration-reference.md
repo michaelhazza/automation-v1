@@ -64,6 +64,12 @@ read_capabilities:
   - slug: subaccount_read
     aliases: [read_subaccount, location_read]
     description: Read subaccount/location metadata from a multi-tenant CRM
+  - slug: organisation.config.read
+    aliases: [pulse_config_read, clientpulse_config_list]
+    description: Read ClientPulse operational_config values (scoring factors, churn bands, intervention defaults, alert limits)
+  - slug: organisation.config.history
+    aliases: [pulse_config_history, config_audit_trail]
+    description: Browse the config_history audit trail for ClientPulse operational_config changes
 
 write_capabilities:
   - slug: send_email
@@ -96,6 +102,21 @@ write_capabilities:
   - slug: update_database_record
     aliases: [record_update, row_update, upsert_record]
     description: Create or update a record in a structured database
+  - slug: organisation.config.update
+    aliases: [pulse_config_update, config_patch, operational_config_update]
+    description: Apply a single dot-path patch to ClientPulse operational_config (sensitive paths route through the review queue)
+  - slug: organisation.config.reset
+    aliases: [pulse_config_reset, config_factory_reset]
+    description: Revert ClientPulse operational_config (or a specific path) to hierarchy template defaults
+  - slug: fire_automation
+    aliases: [trigger_workflow, run_automation, start_workflow]
+    description: Fire a CRM workflow / automation on a contact (ClientPulse Session 2 intervention primitive)
+  - slug: send_sms
+    aliases: [text_message, sms_send, compose_sms]
+    description: Send an SMS message via a CRM's messaging surface (ClientPulse Session 2 intervention primitive)
+  - slug: create_task
+    aliases: [task_create, add_task, assign_task]
+    description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
 
 skills:
   - slug: classify_email
@@ -113,6 +134,21 @@ skills:
   - slug: compute_health_score
     aliases: [health_score, account_health]
     description: Compute a health score for an account or workspace
+  - slug: config_update_organisation_config
+    aliases: [pulse_config_update_skill, clientpulse_config_skill]
+    description: Configuration Agent skill — apply a single dot-path patch to a hierarchy template's operational_config JSONB with sensitive-path gating (Phase 4.5)
+  - slug: crm.fire_automation
+    aliases: [fire_automation_skill, trigger_workflow_skill]
+    description: ClientPulse intervention primitive — fire a CRM workflow on a contact (Session 2; review-gated; idempotent)
+  - slug: crm.send_email
+    aliases: [crm_send_email_skill, client_email_skill]
+    description: ClientPulse intervention primitive — send an email via the client's CRM with merge-field resolution (Session 2; review-gated; idempotent)
+  - slug: crm.send_sms
+    aliases: [crm_send_sms_skill, client_sms_skill]
+    description: ClientPulse intervention primitive — send an SMS via the client's CRM with merge-field resolution + segment counting (Session 2; review-gated; idempotent)
+  - slug: crm.create_task
+    aliases: [crm_create_task_skill, client_task_skill]
+    description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
 
 primitives:
   - slug: scheduled_run
@@ -130,6 +166,12 @@ primitives:
   - slug: mcp_server
     aliases: [mcp, model_context_protocol]
     description: Model Context Protocol server for tool access
+  - slug: hierarchy_templates
+    aliases: [hierarchy_template, config_template, operational_config_template]
+    description: Per-org reusable blueprint that stores `operational_config` JSONB (ClientPulse scoring + governance knobs)
+  - slug: config_history
+    aliases: [audit_log, config_audit]
+    description: Append-only audit log for config entity changes (version + snapshot + change_source)
 ```
 
 ---
@@ -403,7 +445,15 @@ read_capabilities:
 write_capabilities:
   - create_contact
   - update_contact
-skills_enabled: []
+  - fire_automation
+  - send_email
+  - send_sms
+  - create_task
+skills_enabled:
+  - crm.fire_automation
+  - crm.send_email
+  - crm.send_sms
+  - crm.create_task
 primitives_required:
   - oauth_connection
   - webhook_receiver
@@ -415,21 +465,50 @@ required_scopes:
   - opportunities.readonly
   - opportunities.write
   - locations.readonly
+  - users.readonly
+  - calendars.readonly
+  - funnels.readonly
+  - conversations.readonly
+  - conversations/message.readonly
+  - businesses.readonly
+  - saas/subscription.readonly
+scope_behavior: |
+  Expanded scopes (ClientPulse Phase 1, added 2026-04-18) apply to new OAuth
+  authorisations only. Existing connections with the original 3-scope token
+  continue working for their originally-granted endpoints; endpoints that
+  require the new scopes (funnels, calendars, users, locations, saas) gate
+  themselves and mark observations `unavailable_missing_scope` when absent.
+  Re-consent is surfaced via a pilot-stage banner (Phase 5 surface).
+webhook_events:
+  - ContactCreate
+  - ContactUpdate
+  - OpportunityStageUpdate
+  - OpportunityStatusUpdate
+  - ConversationCreated
+  - ConversationUpdated
+  - INSTALL
+  - UNINSTALL
+  - LocationCreate
+  - LocationUpdate
 setup_steps_summary: Install the Synthetos GHL app and authorise sub-account access.
 setup_doc_link: null
 typical_use_cases:
   - Multi-tenant agency CRM automation
   - Per-subaccount pipeline reporting
   - Contact enrichment flows
+  - ClientPulse Staff Activity Pulse (weighted activity score from canonical CRM mutations)
+  - ClientPulse Integration Fingerprint Scanner (detects third-party tools from conversation providers, workflow action types, webhook domains, tag prefixes, custom-field prefixes, and contact sources)
 broadly_useful_patterns:
   - CRM pipeline reporting
   - Multi-location contact management
+  - Sub-account lifecycle tracking via INSTALL/UNINSTALL webhook events
 known_gaps:
   - Custom field propagation not fully automated
+  - SaaS-tier AI feature usage endpoint pending (ai_feature_usage signal currently placeholder)
 client_specific_patterns:
   - Subaccount IDs per agency client
 implemented_since: "2026-02-20"
-last_verified: "2026-04-17"
+last_verified: "2026-04-19"
 owner: platform-team
 ```
 
@@ -541,5 +620,44 @@ client_specific_patterns:
   - Target URLs specific to one client's site
 implemented_since: "2026-03-25"
 last_verified: "2026-04-17"
+owner: platform-team
+```
+
+### ClientPulse Configuration (pseudo-integration)
+
+```yaml integration
+slug: organisation-configuration
+name: ClientPulse Configuration
+provider_type: native
+status: fully_supported
+visibility: public
+read_capabilities:
+  - organisation.config.read
+  - organisation.config.history
+write_capabilities:
+  - organisation.config.update
+  - organisation.config.reset
+skills_enabled:
+  - config_update_organisation_config
+primitives_required:
+  - hierarchy_templates
+  - config_history
+auth_method: none
+required_scopes: []
+setup_steps_summary: No setup — available to every org out of the box once the GHL Agency Intelligence template is applied.
+setup_doc_link: null
+typical_use_cases:
+  - Operator bumps health-score weights via the Configuration Assistant chat
+  - Operator lowers an alert notification threshold after a noise complaint
+  - Operator tightens intervention cooldown hours after an over-firing incident
+broadly_useful_patterns:
+  - Audited config-as-data changes with change_source provenance
+  - Sensitive-path governance via review-queue gating (B5)
+known_gaps:
+  - V1 applies single-path patches per skill call; multi-path composed changes run as multiple calls
+client_specific_patterns:
+  - Per-org overrides live on hierarchy_templates.operational_config
+implemented_since: "2026-04-19"
+last_verified: "2026-04-19"
 owner: platform-team
 ```

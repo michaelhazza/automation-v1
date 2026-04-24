@@ -92,6 +92,29 @@ export function emitAgentRunUpdate(
   emitToRoom(`agent-run:${runId}`, event, runId, data);
 }
 
+// ─── Live Agent Execution Log — per-run execution event ─────────────────────
+// Spec: tasks/live-agent-execution-log-spec.md §5.10. The `eventId` carries
+// a deterministic `${runId}:${sequenceNumber}:${eventType}` shape so the
+// existing client dedup LRU works without changes. NOT routed through
+// buildEnvelope because the envelope is pre-assembled upstream.
+
+export function emitAgentExecutionEvent(
+  runId: string,
+  envelope: {
+    eventId: string;
+    type: 'agent-run:execution-event';
+    entityId: string;
+    timestamp: string;
+    payload: Record<string, unknown>;
+  },
+): void {
+  const io = getIO();
+  if (!io) return;
+  io.to(`agent-run:${runId}`).emit(envelope.type, envelope);
+  totalEventsEmitted++;
+  logStats();
+}
+
 // ─── Conversation events ──────────────────────────────────────────────────────
 
 export function emitConversationUpdate(
@@ -150,6 +173,22 @@ export function emitAgentRunPlan(
   data: { plan: unknown }
 ): void {
   emitToRoom(`agent-run:${runId}`, 'agent:run:plan', runId, data);
+}
+
+// ─── Universal Brief events ───────────────────────────────────────────────────
+
+export function emitBriefArtefactNew(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:new', briefId, data);
+}
+
+export function emitBriefArtefactUpdated(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
 }
 
 // ─── Observability exports (for health endpoint or admin) ─────────────────────

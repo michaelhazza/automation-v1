@@ -30,6 +30,10 @@ export interface BudgetContext {
   subaccountId?:    string;
   runId?:           string;
   subaccountAgentId?: string;
+  // Rev §6 — sourceType lets the service recognise non-billable system work
+  // ('system', 'analyzer') and skip reservation entirely. See checkAndReserve()
+  // and spec §7.2.
+  sourceType?:      string;
   billingDay:       string;   // 'YYYY-MM-DD'
   billingMonth:     string;   // 'YYYY-MM'
 }
@@ -244,7 +248,15 @@ export async function checkAndReserve(
   ctx:                  BudgetContext,
   estimatedCostCents:   number,
   idempotencyKey:       string,
-): Promise<string> {
+): Promise<string | null> {
+  // Rev §6 — system-level work (sourceType='system' | 'analyzer') has no
+  // billing line and no budget math to unwind. Skip reservation entirely
+  // and return null; the router tolerates null on both the success and the
+  // error release path. See spec §7.2.
+  if (ctx.sourceType === 'system' || ctx.sourceType === 'analyzer') {
+    return null;
+  }
+
   // Wrap the entire check-and-reserve flow in a serializable transaction.
   // acquireOrgBudgetLock() uses SELECT ... FOR UPDATE on the org_budgets row
   // (or pg_advisory_xact_lock for orgs without one) to serialize concurrent
@@ -393,9 +405,12 @@ export async function checkAndReserve(
 // ---------------------------------------------------------------------------
 
 export async function commitReservation(
-  reservationId:  string,
+  reservationId:  string | null,
   actualCostCents: number,
 ): Promise<void> {
+  // Tolerate null — system/analyzer calls never produce a reservation (see
+  // checkAndReserve) so there's nothing to commit.
+  if (reservationId === null) return;
   await db
     .update(budgetReservations)
     .set({ status: 'committed', actualCostCents })
@@ -406,7 +421,8 @@ export async function commitReservation(
 // Release reservation on error/timeout (no cost incurred)
 // ---------------------------------------------------------------------------
 
-export async function releaseReservation(reservationId: string): Promise<void> {
+export async function releaseReservation(reservationId: string | null): Promise<void> {
+  if (reservationId === null) return;
   await db
     .update(budgetReservations)
     .set({ status: 'released' })

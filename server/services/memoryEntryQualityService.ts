@@ -18,7 +18,7 @@
 
 import { eq, and, isNull, isNotNull, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workspaceMemoryEntries } from '../db/schema/index.js';
+import { workspaceMemoryEntries, memoryBlocks } from '../db/schema/index.js';
 import {
   computeDecayFactor,
   isPruneEligible,
@@ -54,12 +54,15 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
   let decayed = 0;
 
   try {
-    // Fetch all active entries with quality scoring data
+    // Fetch all active entries with quality scoring data. Phase B §6.6 —
+    // `entryType` is now passed into `computeDecayFactor` so per-type
+    // half-life rates apply.
     const entries = await db
       .select({
         id: workspaceMemoryEntries.id,
         qualityScore: workspaceMemoryEntries.qualityScore,
         lastAccessedAt: workspaceMemoryEntries.lastAccessedAt,
+        entryType: workspaceMemoryEntries.entryType,
       })
       .from(workspaceMemoryEntries)
       .where(
@@ -80,6 +83,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
           qualityScore: currentScore,
           lastAccessedAt: entry.lastAccessedAt,
           now,
+          entryType: entry.entryType,
         });
 
         if (factor < 1.0) {
@@ -285,6 +289,93 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
     boosted,
     reduced,
     skipped,
+    durationMs: Date.now() - started,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 / W3.5 — memory_blocks quality decay (exclusive owner of quality_score)
+// ---------------------------------------------------------------------------
+
+const BLOCK_DECAY_RATE = 0.02;
+const BLOCK_PRUNE_THRESHOLD = 0.10;
+const BLOCK_AUTO_DEPRECATE_THRESHOLD = 0.15;
+const BLOCK_AUTO_DEPRECATE_DAYS = 14;
+
+export interface BlockDecaySummary {
+  organisationId: string;
+  decayed: number;
+  autoDeprecated: number;
+  durationMs: number;
+}
+
+/**
+ * Applies nightly decay to memory_blocks quality_score.
+ * Blocks below BLOCK_AUTO_DEPRECATE_THRESHOLD for BLOCK_AUTO_DEPRECATE_DAYS
+ * are transitioned to deprecated_at.
+ *
+ * This is the ONLY path through which memory_blocks.quality_score is mutated.
+ */
+export async function applyBlockQualityDecay(organisationId: string): Promise<BlockDecaySummary> {
+  const started = Date.now();
+  const now = new Date();
+  let decayed = 0;
+  let autoDeprecated = 0;
+
+  const rows = await db
+    .select({
+      id: memoryBlocks.id,
+      qualityScore: memoryBlocks.qualityScore,
+      updatedAt: memoryBlocks.updatedAt,
+      deprecatedAt: memoryBlocks.deprecatedAt,
+    })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        isNull(memoryBlocks.deletedAt),
+        isNull(memoryBlocks.deprecatedAt),
+      ),
+    );
+
+  for (const row of rows) {
+    const currentScore = Number(row.qualityScore ?? 0.5);
+    const newScore = Math.max(0, currentScore - BLOCK_DECAY_RATE);
+
+    const daysSinceUpdate =
+      (now.getTime() - row.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (newScore < BLOCK_AUTO_DEPRECATE_THRESHOLD && daysSinceUpdate >= BLOCK_AUTO_DEPRECATE_DAYS) {
+      await db
+        .update(memoryBlocks)
+        .set({ deprecatedAt: now, deprecationReason: 'low_quality', updatedAt: now })
+        .where(and(
+          eq(memoryBlocks.id, row.id),
+          eq(memoryBlocks.organisationId, organisationId),
+        ));
+      autoDeprecated += 1;
+    } else if (newScore !== currentScore) {
+      // Do NOT bump `updatedAt` on a decay-only write. `daysSinceUpdate` above
+      // is measured against `updatedAt`, and if we bumped it here every rule
+      // would look freshly updated after the first decay pass — the
+      // `>= BLOCK_AUTO_DEPRECATE_DAYS` gate could then never fire for a rule
+      // whose score gradually falls below threshold. `updatedAt` tracks
+      // user-facing changes; decay is a background scoring adjustment.
+      await db
+        .update(memoryBlocks)
+        .set({ qualityScore: String(newScore.toFixed(2)) })
+        .where(and(
+          eq(memoryBlocks.id, row.id),
+          eq(memoryBlocks.organisationId, organisationId),
+        ));
+      decayed += 1;
+    }
+  }
+
+  return {
+    organisationId,
+    decayed,
+    autoDeprecated,
     durationMs: Date.now() - started,
   };
 }

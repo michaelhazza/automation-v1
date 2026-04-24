@@ -11,6 +11,8 @@ import { Link } from 'react-router-dom';
 import HandoffCard from '../HandoffCard';
 import { StatusBadge } from '../../lib/statusBadge';
 import { formatDuration } from '../../lib/formatDuration';
+import { isTerminalRunStatus } from '../../lib/runStatus';
+import { RunCostPanel } from '../run-cost/RunCostPanel';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -86,6 +88,10 @@ export interface RunDetail {
   deliverablesCreated: number;
   memoryStateAtStart: string | null;
   summary: string | null;
+  /** IEE Phase 0 — populated server-side when executionMode is iee_browser
+   *  or iee_dev so the UI can subscribe to progress without parsing the
+   *  summary string. Null for non-IEE runs. */
+  ieeRunId?: string | null;
   systemPromptTokens: number;
   handoffDepth: number;
   parentRunId: string | null;
@@ -409,6 +415,11 @@ export default function RunTraceView({ run, toolCallsRef }: RunTraceViewProps) {
           </div>
         </div>
         <div className="mt-2 text-[12px] text-slate-400 font-mono">ID: {run.id}</div>
+
+        {/* Hermes Tier 1 Phase A — per-run cost + call-site split. */}
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <RunCostPanel runId={run.id} runIsTerminal={isTerminalRunStatus(run.status)} />
+        </div>
       </div>
 
       {/* Stats grid */}

@@ -24,6 +24,7 @@ import { db } from '../db/index.js';
 import {
   agentRuns,
   memoryCitationScores,
+  memoryBlocks,
   workspaceMemoryEntries,
 } from '../db/schema/index.js';
 import {
@@ -172,4 +173,55 @@ export async function scoreRun(params: ScoreRunParams): Promise<ScoreRunResult> 
   });
 
   return { citedEntryIds, scoredEntryIds, alreadyScored: false };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 / W3c — memory_block citation scoring (extends scoreRun pattern)
+// ---------------------------------------------------------------------------
+
+export interface ScoreBlocksParams {
+  runId: string;
+  organisationId: string;
+  /** Block IDs from agent_runs.applied_memory_block_ids */
+  appliedBlockIds: string[];
+  /** The agent's generated text output for the run. */
+  runOutputText: string;
+  config?: { minCitationScore: number };
+}
+
+/**
+ * Scores applied memory blocks against run output and writes citations
+ * to agent_runs.applied_memory_block_citations. Best-effort — never throws.
+ */
+export async function scoreRunBlocks(params: ScoreBlocksParams): Promise<void> {
+  if (params.appliedBlockIds.length === 0) return;
+
+  try {
+    const { detectBlockCitationsPure } = await import('./memoryBlockCitationDetectorPure.js');
+    const blocks = await db
+      .select({ id: memoryBlocks.id, text: sql<string>`${memoryBlocks.content}` })
+      .from(memoryBlocks)
+      .where(inArray(memoryBlocks.id, params.appliedBlockIds));
+
+    const citations = detectBlockCitationsPure({
+      appliedBlockIds: params.appliedBlockIds,
+      blocks,
+      runOutputText: params.runOutputText,
+      config: params.config ?? { minCitationScore: 0.6 },
+    });
+
+    if (citations.length > 0) {
+      await db
+        .update(agentRuns)
+        .set({ appliedMemoryBlockCitations: citations })
+        .where(
+          and(
+            eq(agentRuns.id, params.runId),
+            eq(agentRuns.organisationId, params.organisationId),
+          ),
+        );
+    }
+  } catch (err) {
+    logger.warn({ err, runId: params.runId }, 'scoreRunBlocks: failed, skipping');
+  }
 }

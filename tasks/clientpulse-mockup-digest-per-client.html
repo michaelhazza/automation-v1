@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Weekly Digest — Bright Marketing Co (per-client)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .email-wrap { max-width: 680px; margin: 24px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+
+  .inbox-strip {
+    background: #fafbfc; padding: 12px 24px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .inbox-strip .from strong { color: #1a1d23; font-weight: 600; }
+
+  /* Header banner — client-specific digest palette: deep green */
+  .banner {
+    background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+    color: #fff; padding: 24px;
+  }
+  .banner h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 4px; }
+  .banner .sub { font-size: 13px; color: #a7f3d0; }
+  .banner .sub strong { color: #fff; }
+
+  .section { padding: 24px; border-bottom: 1px solid #f0f1f3; }
+  .section:last-child { border-bottom: none; }
+  .section h2 {
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #6b7280; margin-bottom: 12px;
+  }
+  .section h2 .badge {
+    background: #d1fae5; color: #065f46; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-left: 8px;
+  }
+
+  .tldr {
+    background: #ecfdf5; border-left: 4px solid #059669; padding: 16px 20px; border-radius: 6px;
+    margin-bottom: 18px;
+  }
+  .tldr h3 { font-size: 13px; font-weight: 700; color: #064e3b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tldr p { font-size: 14px; color: #1f2937; line-height: 1.6; }
+  .tldr p strong { color: #064e3b; }
+
+  /* KPI strip */
+  .kpi-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 6px; overflow: hidden;
+  }
+  .kpi-strip .kpi { padding: 14px; border-right: 1px solid #f0f1f3; text-align: center; }
+  .kpi-strip .kpi:last-child { border-right: none; }
+  .kpi-strip .kpi .val { font-size: 20px; font-weight: 700; line-height: 1.1; }
+  .kpi-strip .kpi .lbl { font-size: 10px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px; margin-top: 4px; }
+  .kpi-strip .kpi .delta { font-size: 11px; margin-top: 4px; font-weight: 600; }
+  .kpi-strip .kpi .delta.up   { color: #059669; }
+  .kpi-strip .kpi .delta.down { color: #dc2626; }
+  .kpi-strip .kpi .delta.flat { color: #6b7280; }
+
+  /* Work list */
+  .work-list { display: flex; flex-direction: column; gap: 6px; }
+  .work-item {
+    padding: 10px 12px; background: #fafbfc; border-radius: 4px; font-size: 13px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  }
+  .work-item .marker {
+    width: 18px; height: 18px; border-radius: 50%; background: #10b981; color: #fff;
+    font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .work-item .marker.outcome-fail { background: #dc2626; }
+  .work-item .marker.outcome-partial { background: #f59e0b; }
+  .work-item .label { color: #1a1d23; }
+  .work-item .meta { font-size: 11px; color: #6b7280; }
+
+  /* Intervention outcome */
+  .outcome-box {
+    padding: 14px; border-radius: 6px; margin-bottom: 10px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+  }
+  .outcome-box.success { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .outcome-box.neutral { background: #fafbfc; border: 1px solid #e5e7eb; }
+  .outcome-box.failure { background: #fef2f2; border: 1px solid #fecaca; }
+  .outcome-box .icon { font-size: 22px; }
+  .outcome-box .body .title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+  .outcome-box .body .detail { font-size: 12px; color: #4b5563; }
+  .outcome-box .delta { font-size: 15px; font-weight: 700; }
+  .outcome-box.success .delta { color: #059669; }
+  .outcome-box.neutral .delta { color: #6b7280; }
+  .outcome-box.failure .delta { color: #dc2626; }
+
+  /* Memory */
+  .memory-item {
+    font-size: 13px; padding: 10px 12px; background: #faf5ff; border-left: 3px solid #a855f7;
+    border-radius: 4px; margin-bottom: 6px;
+  }
+  .memory-item .tag {
+    display: inline-block; font-size: 10px; background: #e9d5ff; color: #6b21a8; padding: 2px 6px;
+    border-radius: 3px; font-weight: 600; margin-right: 6px; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  /* Forward bridge */
+  .bridge-box {
+    background: #ecfeff; border: 1px solid #a5f3fc; padding: 14px 16px; border-radius: 6px;
+    font-size: 13px;
+  }
+  .bridge-box strong { color: #155e75; }
+
+  .cta-bar { text-align: center; padding: 24px; background: #fafbfc; }
+  .cta-bar a {
+    display: inline-block; padding: 12px 24px; background: #059669; color: #fff;
+    text-decoration: none; font-weight: 600; font-size: 14px; border-radius: 6px;
+  }
+  .cta-bar a:hover { background: #047857; }
+
+  .footer { padding: 16px 24px; background: #1a1d23; color: #9ca3af; font-size: 11px; text-align: center; }
+  .footer a { color: #a7f3d0; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · DELIVERED BY existing playbook <code>weekly-digest.playbook.ts</code> · <code>scope: 'subaccount'</code> · Runs Fri 17:00 with <code>run.entity = subaccount</code> (ONE client) · Single-client focus; operator-view render · ClientPulse section gated by <code>skipWhen: !modules.client_pulse.enabled</code> · Backward-looking with small Monday-handoff forward bridge.</div>
+
+<div class="email-wrap">
+
+  <!-- Inbox preview strip -->
+  <div class="inbox-strip">
+    <div class="from"><strong>Synthetos &lt;digests@synthetos.app&gt;</strong> → kel@productivityhub.com</div>
+    <div class="date">Fri 21 Apr · 17:00</div>
+  </div>
+
+  <!-- Header -->
+  <div class="banner">
+    <h1>Bright Marketing Co — Weekly Digest</h1>
+    <div class="sub">Week ending <strong>Friday 21 April 2026</strong> · ClientPulse band: <strong>At Risk → At Risk (hold)</strong></div>
+  </div>
+
+  <!-- TL;DR -->
+  <div class="section">
+    <h2>The week behind — 30-second read</h2>
+    <div class="tldr">
+      <h3>Bright Marketing, this week</h3>
+      <p>
+        <strong>Band held steady (28 → 31, +3).</strong> The retention-call intervention you approved on Monday made contact;
+        Ben booked a 45-min DFY funnel audit for next Tuesday. Both stalled opportunities closed — <strong>one won ($4,200 Chavez Auto)</strong>,
+        one lost. Dormant funnel was refreshed mid-week (conversion back to 3.1%). <strong>Still not out of the woods</strong> — staff activity
+        recovered slightly but hasn't crossed healthy thresholds. Next week's Monday briefing will surface the funnel-audit prep.
+      </p>
+    </div>
+  </div>
+
+  <!-- KPI strip -->
+  <div class="section">
+    <h2>KPIs this week <span class="badge">backward-looking</span></h2>
+    <div class="kpi-strip">
+      <div class="kpi">
+        <div class="val" style="color:#059669;">31</div>
+        <div class="lbl">Health Score</div>
+        <div class="delta up">+3 WoW</div>
+      </div>
+      <div class="kpi">
+        <div class="val" style="color:#059669;">1</div>
+        <div class="lbl">Deals Won</div>
+        <div class="delta up">+$4,200</div>
+      </div>
+      <div class="kpi">
+        <div class="val" style="color:#dc2626;">1</div>
+        <div class="lbl">Deals Lost</div>
+        <div class="delta down">−$2,800</div>
+      </div>
+      <div class="kpi">
+        <div class="val" style="color:#6b7280;">14</div>
+        <div class="lbl">Staff Actions</div>
+        <div class="delta flat">was 6</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Work done -->
+  <div class="section">
+    <h2>What got done for Bright Marketing</h2>
+    <div class="work-list">
+      <div class="work-item">
+        <div class="marker">✓</div>
+        <div>
+          <div class="label">Retention call completed — Ben booked 45-min DFY funnel audit for Tue 25 Apr</div>
+          <div class="meta">VA · Sarah · Tue 18 Apr · 22 min · approved Monday</div>
+        </div>
+        <div class="meta">Action</div>
+      </div>
+      <div class="work-item">
+        <div class="marker">✓</div>
+        <div>
+          <div class="label">Chavez Auto Group deal closed — $4,200</div>
+          <div class="meta">Opportunity moved "Proposal Sent" → "Won" · Ben · Wed 19 Apr</div>
+        </div>
+        <div class="meta">Pipeline</div>
+      </div>
+      <div class="work-item">
+        <div class="marker outcome-fail">✗</div>
+        <div>
+          <div class="label">Mountain Ridge Clinic lost — went with a competitor</div>
+          <div class="meta">Opportunity "Proposal Sent" → "Lost" · reason: "too expensive"</div>
+        </div>
+        <div class="meta">Pipeline</div>
+      </div>
+      <div class="work-item">
+        <div class="marker">✓</div>
+        <div>
+          <div class="label">Homepage funnel refreshed — new hero + social proof</div>
+          <div class="meta">Conversion 1.8% → 3.1% in 3 days · Sarah · Tue 18 Apr</div>
+        </div>
+        <div class="meta">Funnel</div>
+      </div>
+      <div class="work-item">
+        <div class="marker">✓</div>
+        <div>
+          <div class="label">April Newsletter sent — 1,240 contacts · 24% open · 3.2% click</div>
+          <div class="meta">Above account baseline (22% / 2.9%) · Wed 19 Apr 10:00</div>
+        </div>
+        <div class="meta">Email</div>
+      </div>
+      <div class="work-item">
+        <div class="marker outcome-partial">~</div>
+        <div>
+          <div class="label">Spring Promo Facebook ad ended — under CPL target</div>
+          <div class="meta">$340/day · 4 leads at $85 CPL · target was $60 · Uphex · Thu 20 Apr</div>
+        </div>
+        <div class="meta">Ads</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Intervention outcomes -->
+  <div class="section">
+    <h2>Intervention outcomes this week <span class="badge">ClientPulse</span></h2>
+
+    <div class="outcome-box success">
+      <div class="icon">✓</div>
+      <div class="body">
+        <div class="title">Retention-call task → approved Mon, executed Tue, successful</div>
+        <div class="detail">Approved by Kel 07:34 Mon · VA completed Tue 18 Apr · Ben booked follow-up audit · health +3 in 72h window</div>
+      </div>
+      <div class="delta">+3</div>
+    </div>
+
+    <p style="font-size:12px;color:#6b7280;margin-top:8px;">
+      1 of 1 interventions attempted correlated with a band hold. Forecast last Monday was "Projected Critical (22) by Wed without intervention" — band held at At Risk (31), forecast averted.
+    </p>
+  </div>
+
+  <!-- What the system learned -->
+  <div class="section">
+    <h2>What the system learned this week</h2>
+    <div class="memory-item">
+      <span class="tag">belief</span>
+      <strong>Ben (Bright Marketing, owner) responds to text, not email.</strong>
+      Confirmed by the successful retention outreach — Ben replied to SMS within 4 hours; prior email thread had 12 days of silence.
+      This belief will influence future intervention proposals for Bright.
+    </div>
+    <div class="memory-item">
+      <span class="tag">pattern</span>
+      <strong>Funnel refresh (hero + social proof) moved conversion 1.8% → 3.1% in 3 days.</strong>
+      Added to the portfolio-wide "funnel-revival" template candidate list; if a similar lift appears for 2 more clients,
+      Orchestrator will propose this as a standard intervention template.
+    </div>
+    <div class="memory-item">
+      <span class="tag">cooldown</span>
+      <strong>Next retention-touch not permitted until Tue 9 May</strong> (18-day cooldown on retention-call interventions).
+    </div>
+  </div>
+
+  <!-- Forward bridge (Monday handoff) -->
+  <div class="section">
+    <h2>Monday handoff</h2>
+    <div class="bridge-box">
+      Monday's briefing will surface:
+      <ul style="margin-top:8px;margin-left:20px;line-height:1.7;color:#1f2937;">
+        <li><strong>Prep for the DFY funnel audit (Tue 25 Apr, 11:00)</strong> — suggested pre-work: pull latest conversion data + competitor landing pages</li>
+        <li><strong>Ad spend reallocation</strong> — Spring Promo ended under CPL target; the proposer will suggest Google-Ads redirect</li>
+        <li><strong>Tier-re-upgrade conversation</strong> — band trajectory supports a case for $347→$647 upgrade at the audit</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-bar">
+    <a href="clientpulse-mockup-drilldown.html">Open Bright Marketing dashboard →</a>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    Synthetos Weekly Digest · Bright Marketing Co · Productivity Hub (SaaS)<br>
+    <a href="#">Configure this digest</a> · <a href="#">Unsubscribe from per-client digests</a>
+  </div>
+
+</div>
+
+</body>
+</html>

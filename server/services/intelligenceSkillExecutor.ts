@@ -3,6 +3,33 @@ import { orgMemoryService } from './orgMemoryService.js';
 import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
+import { db } from '../db/index.js';
+import {
+  clientPulseHealthSnapshots,
+  clientPulseChurnAssessments,
+  type HealthTrend,
+  type ChurnBand,
+} from '../db/schema/clientPulseCanonicalTables.js';
+
+/**
+ * Map a 0–100 risk score to a churn band using the org's configured bands.
+ *
+ * Churn bands in operational_config are expressed on the HEALTH axis (e.g.
+ * `healthy: [70,100]` means a health-equivalent score of 70–100). Since this
+ * handler produces a risk score (higher = worse), we invert to a health
+ * equivalent (`100 - riskScore`) before band matching. Config-driven — no
+ * hardcoded thresholds.
+ */
+function riskScoreToBand(
+  riskScore: number,
+  bands: { healthy: readonly number[]; watch: readonly number[]; atRisk: readonly number[]; critical: readonly number[] },
+): ChurnBand {
+  const healthEquiv = 100 - riskScore;
+  if (healthEquiv >= bands.healthy[0] && healthEquiv <= bands.healthy[1]) return 'healthy';
+  if (healthEquiv >= bands.watch[0] && healthEquiv <= bands.watch[1]) return 'watch';
+  if (healthEquiv >= bands.atRisk[0] && healthEquiv <= bands.atRisk[1]) return 'atRisk';
+  return 'critical';
+}
 
 // ---------------------------------------------------------------------------
 // Intelligence Skill Executors (v2.0 — config-driven)
@@ -316,7 +343,8 @@ export async function executeComputeHealthScore(
   // Confidence: ratio of factors with data
   const confidence = Math.min(1.0, factorsWithData / factors.length);
 
-  // Write snapshot
+  // Write snapshot to the generic health_snapshots table (retained for
+  // existing non-ClientPulse readers during the deprecation window).
   const snapshot = await canonicalDataService.writeHealthSnapshot({
     organisationId: context.organisationId,
     accountId,
@@ -327,6 +355,33 @@ export async function executeComputeHealthScore(
     configVersion,
     algorithmVersion: ALGORITHM_VERSION,
   });
+
+  // Dual-write to client_pulse_health_snapshots (migration 0173, §11.2 R2).
+  // The ClientPulse dashboard + churn evaluator read from this table; the
+  // generic health_snapshots table is retained for legacy readers and will
+  // be deprecated in a follow-up PR once every caller has migrated.
+  //
+  // Keyed by subaccountId (ClientPulse's unit of observation) rather than
+  // the canonical accountId. Falls back gracefully if the canonical account
+  // has no subaccount linkage.
+  if (account.subaccountId) {
+    try {
+      await db.insert(clientPulseHealthSnapshots).values({
+        organisationId: context.organisationId,
+        subaccountId: account.subaccountId,
+        accountId,
+        score: compositeScore,
+        factorBreakdown: factorResults.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })),
+        trend: trend as HealthTrend,
+        confidence,
+        configVersion,
+        algorithmVersion: ALGORITHM_VERSION,
+      });
+    } catch (cpErr) {
+      console.error('[IntelligenceSkills] ClientPulse snapshot dual-write failed:',
+        cpErr instanceof Error ? cpErr.message : String(cpErr));
+    }
+  }
 
   // Top factors for explanation
   const topFactors = [...factorResults]
@@ -511,6 +566,49 @@ export async function executeComputeChurnRisk(
   const topDrivers = [...signalResults].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
 
   const latestSnapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, context.organisationId);
+
+  // Dual-write to client_pulse_churn_assessments (migration 0174, locked
+  // contract (f)). Skips cleanly if the canonical account has no subaccount
+  // linkage so legacy org-only accounts don't break the handler.
+  const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
+  if (account?.subaccountId) {
+    let assessmentId: string | null = null;
+    try {
+      const bands = await orgConfigService.getChurnBands(context.organisationId);
+      const band = riskScoreToBand(riskScore, bands);
+      const [inserted] = await db.insert(clientPulseChurnAssessments).values({
+        organisationId: context.organisationId,
+        subaccountId: account.subaccountId,
+        accountId,
+        riskScore,
+        band,
+        drivers: topDrivers.map(d => ({ signal: d.signal, contribution: d.contribution })),
+        interventionType,
+        configVersion,
+        algorithmVersion: ALGORITHM_VERSION,
+      }).returning({ id: clientPulseChurnAssessments.id });
+      assessmentId = inserted?.id ?? null;
+    } catch (cpErr) {
+      console.error('[IntelligenceSkills] ClientPulse churn assessment write failed:',
+        cpErr instanceof Error ? cpErr.message : String(cpErr));
+    }
+
+    // Phase 4 — enqueue the scenario-detector proposer. Wrapped in try/catch
+    // so a failure to enqueue does not roll back the churn assessment above.
+    if (assessmentId) {
+      try {
+        const { queueService } = await import('./queueService.js');
+        await queueService.sendJob('clientpulse:propose-interventions', {
+          organisationId: context.organisationId,
+          subaccountId: account.subaccountId,
+          churnAssessmentId: assessmentId,
+        });
+      } catch (enqErr) {
+        console.error('[IntelligenceSkills] proposer enqueue failed:',
+          enqErr instanceof Error ? enqErr.message : String(enqErr));
+      }
+    }
+  }
 
   return {
     accountId,

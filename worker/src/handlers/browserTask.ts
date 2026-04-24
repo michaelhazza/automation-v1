@@ -68,13 +68,22 @@ export async function registerBrowserHandler(boss: PgBoss, workerInstanceId: str
           throw new Error('login_test_unexpected_executor_returned');
         } catch (loginTestErr) {
           if (loginTestErr instanceof LoginTestComplete) {
+            // Audit fix (Non-blocker #10): surface post-login validation
+            // signals so the operator can see what the screenshot actually
+            // shows. `success: true` indicates login succeeded; the
+            // validation block tells them whether the screenshot is of
+            // an authenticated content page or just the landing page.
             await finalizeRun({
               ieeRunId: run.id,
               status: 'completed',
               failureReason: null,
               resultSummary: {
                 success: true,
-                output: { mode: 'login_test', screenshotPath: loginTestErr.screenshotPath },
+                output: {
+                  mode: 'login_test',
+                  screenshotPath: loginTestErr.screenshotPath,
+                  validation: loginTestErr.validation,
+                },
                 stepCount: 0,
                 durationMs: Date.now() - startMs,
               },

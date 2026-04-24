@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Send email — compose popup (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+
+  /* Background */
+  .bg-context {
+    position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; pointer-events: none; z-index: 1;
+  }
+  .bg-hint {
+    position: fixed; top: 50px; left: 28px; z-index: 2; pointer-events: none;
+    font-size: 11px; color: #9ca3af;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 680px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18), 0 6px 14px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  /* Header */
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 {
+    font-size: 16px; font-weight: 700; letter-spacing: -0.2px;
+  }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close {
+    font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer;
+    padding: 0 6px;
+  }
+
+  /* Template chooser strip */
+  .tmpl-strip {
+    padding: 10px 20px; background: #fafbfc; border-bottom: 1px solid #f0f1f3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .tmpl-strip label {
+    font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px;
+    white-space: nowrap;
+  }
+  .tmpl-strip select {
+    flex: 1; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; background: #fff; font-family: inherit;
+  }
+  .tmpl-strip .manage-link {
+    font-size: 11px; color: #4338ca; text-decoration: none; font-weight: 600; white-space: nowrap;
+  }
+
+  /* Body: stacked (compose on top, preview below) — matches SMS pattern */
+  .m-body {
+    padding: 16px 20px;
+  }
+  .compose-col {
+    padding-bottom: 16px; margin-bottom: 16px;
+    border-bottom: 1px solid #f0f1f3;
+  }
+  .preview-col {
+    /* stacked below compose */
+  }
+  .col-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+    color: #6b7280; margin-bottom: 8px;
+  }
+
+  /* Compose form */
+  .form-field { margin-bottom: 10px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 180px; resize: vertical; font-family: inherit; line-height: 1.55; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* Merge field palette */
+  .merge-palette {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  }
+  .merge-chip {
+    padding: 2px 7px; background: #f5f3ff; color: #5b21b6;
+    border: 1px solid #ddd6fe; border-radius: 3px; font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    cursor: pointer;
+  }
+  .merge-chip:hover { background: #ddd6fe; }
+  .merge-palette-label {
+    font-size: 10px; color: #6b7280; margin-top: 8px;
+  }
+
+  /* Preview */
+  .preview-email {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;
+  }
+  .preview-email .pe-head {
+    padding: 10px 14px; border-bottom: 1px solid #f0f1f3; font-size: 11px;
+  }
+  .preview-email .pe-head .from { color: #1a1d23; font-weight: 600; }
+  .preview-email .pe-head .to { color: #6b7280; font-size: 10px; margin-top: 2px; }
+  .preview-email .pe-head .subject {
+    font-size: 13px; font-weight: 600; margin-top: 8px; color: #1a1d23;
+  }
+  .preview-email .pe-body {
+    padding: 14px; font-size: 13px; color: #1f2937; line-height: 1.55;
+  }
+  .preview-email .pe-body p { margin-bottom: 10px; }
+  .preview-email .pe-body .merged {
+    background: #fef3c7; padding: 1px 3px; border-radius: 2px;
+  }
+
+  /* Destination callout */
+  .dest-callout {
+    margin-top: 12px; padding: 10px 12px; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 6px; font-size: 11px; color: #3730a3; line-height: 1.5;
+  }
+  .dest-callout strong { color: #312e81; }
+
+  /* Footer */
+  .m-foot {
+    padding: 12px 20px; background: #fafbfc; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-foot .save-toggle {
+    font-size: 11px; color: #4338ca; display: flex; align-items: center; gap: 5px; cursor: pointer;
+    font-weight: 600;
+  }
+  .m-foot .btns { display: flex; gap: 6px; }
+  .btn {
+    padding: 6px 13px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid transparent; font-family: inherit;
+  }
+  .btn-primary { background: #4338ca; color: #fff; }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #e5e7eb; }
+</style>
+</head>
+<body>
+<div class="annot-banner">📐 MOCKUP · Send email compose popup · <strong>Phase 6 build target</strong> — current implementation uses free-text "from" + "Contact ID" fields as stubs; this mockup shows the production design with live-fetched contact picker + sender-from picker (backed by <code>GET /api/clientpulse/subaccounts/:id/crm/contacts</code> + <code>GET /api/clientpulse/subaccounts/:id/crm/from-addresses</code>) · Platform primitive usable system-wide · Synthetos-native authoring with canonical merge fields · Send goes through the connected CRM to preserve domain authentication</div>
+
+<div class="bg-context"></div>
+<div class="bg-hint">← parent: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-propose-intervention.html</code> (modal) · behind that: <code style="background:rgba(255,255,255,0.5);padding:1px 5px;border-radius:3px;">clientpulse-mockup-drilldown.html</code></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+
+    <!-- Header -->
+    <div class="m-head">
+      <div>
+        <h2>Compose email · Smith Dental</h2>
+        <div class="sub">Synthetos compose · delivery via Smith Dental's connected CRM using productivityhub.com.au</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <!-- Template chooser -->
+    <div class="tmpl-strip">
+      <label>Start from:</label>
+      <select>
+        <option>Blank (ad-hoc compose)</option>
+        <option selected>Check-in — "everything OK?" · used 42× across all clients</option>
+        <option>Tier retention — "let's talk before Friday" · used 8×</option>
+        <option>Funnel-setup helper · used 34×</option>
+        <option>Calendar setup nudge · used 19×</option>
+        <option>Thank-you / anniversary · used 6×</option>
+        <option>+ Browse all 12 Synthetos templates…</option>
+      </select>
+      <a class="manage-link" href="#">Manage templates ↗</a>
+    </div>
+
+    <!-- Compose + preview -->
+    <div class="m-body">
+
+      <!-- LEFT — compose -->
+      <div class="compose-col">
+        <div class="col-label">Compose</div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label>From</label>
+            <select>
+              <option selected>hello@productivityhub.com.au · authenticated in Smith Dental's CRM</option>
+              <option>kel@kelmedia.com.au</option>
+              <option>sarah@productivityhub.com.au</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label>To</label>
+            <select>
+              <option selected>Dr. Marcia Smith · primary</option>
+              <option>Stephanie Rodriguez · practice manager</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>Subject</label>
+          <input type="text" value="Quick check-in, {{contact.firstName}}">
+        </div>
+
+        <div class="form-field">
+          <label>Body</label>
+          <textarea>Hi {{contact.firstName}},
+
+Noticed you haven't been in for a bit — everything OK with {{client.name}}?
+
+I'm seeing {{signals.funnelCount}} funnels built so far and it's been {{signals.lastActivityDays}} days since your team logged a new contact. Thought I'd check in rather than assume.
+
+If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call — or I can have Sarah handle a setup session free of charge.
+
+Kel @ Productivity Hub</textarea>
+        </div>
+
+        <div class="merge-palette-label">Canonical merge fields (same syntax across all CRMs):</div>
+        <div class="merge-palette">
+          <span class="merge-chip">{{contact.firstName}}</span>
+          <span class="merge-chip">{{contact.lastName}}</span>
+          <span class="merge-chip">{{contact.email}}</span>
+          <span class="merge-chip">{{client.name}}</span>
+          <span class="merge-chip">{{client.tier}}</span>
+          <span class="merge-chip">{{client.tierDirection}}</span>
+          <span class="merge-chip">{{signals.funnelCount}}</span>
+          <span class="merge-chip">{{signals.lastActivityDays}}</span>
+          <span class="merge-chip">{{signals.healthBand}}</span>
+          <span class="merge-chip">{{signals.healthScore}}</span>
+          <span class="merge-chip">{{agency.ownerFirstName}}</span>
+        </div>
+      </div>
+
+      <!-- RIGHT — preview + destination -->
+      <div class="preview-col">
+        <div class="col-label">Live preview · rendered with Smith Dental's real data</div>
+
+        <div class="preview-email">
+          <div class="pe-head">
+            <div class="from">Productivity Hub &lt;hello@productivityhub.com.au&gt;</div>
+            <div class="to">→ marcia@smithdental.com.au</div>
+            <div class="subject">Quick check-in, <span class="merged">Marcia</span></div>
+          </div>
+          <div class="pe-body">
+            <p>Hi <span class="merged">Marcia</span>,</p>
+            <p>Noticed you haven't been in for a bit — everything OK with <span class="merged">Smith Dental</span>?</p>
+            <p>I'm seeing <span class="merged">0</span> funnels built so far and it's been <span class="merged">26</span> days since your team logged a new contact. Thought I'd check in rather than assume.</p>
+            <p>If the platform's not clicking, I'd rather know. Happy to hop on a 15-min call — or I can have Sarah handle a setup session free of charge.</p>
+            <p>Kel @ Productivity Hub</p>
+          </div>
+        </div>
+
+        <div class="dest-callout">
+          <strong>How this sends:</strong> Synthetos resolves all canonical merge fields into concrete values (using our signal data — not available via the CRM's own fields), then calls Smith Dental's CRM API to dispatch. CRM uses the authenticated domain for delivery. Outcome is measured by the next band assessment (v1 signal).
+        </div>
+
+        <!-- Test-email control -->
+        <div style="margin-top: 12px; padding: 10px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div style="font-weight: 600; font-size: 12px; color: #1a1d23;">🧪 Test before submitting</div>
+            <div style="flex: 1;"></div>
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 5px 10px;">Send test to me</button>
+          </div>
+          <div style="font-size: 11px; color: #6b7280; line-height: 1.5;">
+            Dispatches this email — with all merge fields resolved against Smith Dental's real data — to <strong>kel@kelmedia.com.au</strong> via Smith Dental's connected CRM. Same path as the real send, so you're verifying genuine deliverability (domain auth, inbox placement, rendering). No intervention record created; no contact enrolled.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="m-foot">
+      <label class="save-toggle">
+        <input type="checkbox"> Save edits as a new Synthetos template (reusable across any CRM)
+      </label>
+      <div class="btns">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Submit to review queue →</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

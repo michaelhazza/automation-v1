@@ -10,6 +10,19 @@ import { ieeRuns } from './ieeRuns';
 // ---------------------------------------------------------------------------
 // llm_requests — append-only financial ledger
 // Every single LLM call produces exactly one row. Never update, never delete.
+//
+// Rev §6 (LLM observability generalisation, migration 0185):
+//   - `sourceId` (polymorphic FK, no RI) + `featureTag` (kebab-case identifier)
+//     let non-agent consumers (skill analyzer, future background jobs) plug in
+//     without adding a typed FK per consumer.
+//   - `parseFailureRawExcerpt` (≤2 KB) captures truncated LLM responses on
+//     post-processor schema failures so parse bugs are debuggable from our own
+//     data instead of the Anthropic console.
+//   - `abortReason` distinguishes caller-timeout from user-cancel on
+//     AbortController-initiated aborts.
+//   - `executionPhase` is now nullable — required for agent_run/process_execution/iee
+//     rows, NULL for system/analyzer rows. Enforced by DB CHECK constraint
+//     (see migration 0185).
 // ---------------------------------------------------------------------------
 
 export const llmRequests = pgTable(
@@ -24,8 +37,11 @@ export const llmRequests = pgTable(
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
     subaccountId:   uuid('subaccount_id').references(() => subaccounts.id),
     userId:         uuid('user_id').references(() => users.id),
-    sourceType:     text('source_type').notNull().default('agent_run'),
-    // 'agent_run' | 'process_execution' | 'system' | 'iee'  (IEE added rev 6)
+    // sourceType no longer has a default — every insert path must set it
+    // explicitly so the attribution CHECK constraint in migration 0185 can't
+    // be satisfied by accident.
+    sourceType:     text('source_type').notNull(),
+    // 'agent_run' | 'process_execution' | 'system' | 'iee' | 'analyzer'
     runId:          uuid('run_id').references(() => agentRuns.id),
     executionId:    uuid('execution_id').references(() => executions.id),
     // IEE attribution — added in rev 6/§13.1. When sourceType='iee', this MUST be set.
@@ -33,6 +49,15 @@ export const llmRequests = pgTable(
     //   1. Router-level guard in server/services/llmRouter.ts
     //   2. DB CHECK constraint llm_requests_iee_requires_run_id (see migration)
     ieeRunId:       uuid('iee_run_id').references(() => ieeRuns.id),
+    // Polymorphic FK — populated when sourceType IN ('system','analyzer').
+    // No referential integrity constraint (would need to reference multiple tables).
+    // For sourceType='analyzer', points to skill_analyzer_jobs.id.
+    sourceId:       uuid('source_id'),
+    // Feature identifier — kebab-case, e.g. 'skill-analyzer-classify',
+    // 'workspace-memory-compile'. Consumed by P&L dashboards and cost-attribution.
+    // Defaults to 'unknown' so the column can be NOT NULL without breaking legacy
+    // inserts; the router logs a warning when it sees the default in non-test code.
+    featureTag:     text('feature_tag').notNull().default('unknown'),
     // Spec §11.7.1 — distinguishes LLM calls made on the main app side from
     // those made by the IEE worker side, so the run-detail Cost panel can
     // split LLM cost between app and worker for the same run.
@@ -68,16 +93,33 @@ export const llmRequests = pgTable(
 
     // Status and retry
     status:        text('status').notNull().default('success'),
-    // 'success' | 'partial' | 'error' | 'timeout' | 'budget_blocked' | 'rate_limited' | 'provider_unavailable' | 'provider_not_configured'
+    // See LLM_REQUEST_STATUSES constant below.
     errorMessage:  text('error_message'),
     attemptNumber: integer('attempt_number').notNull().default(1),
+    // Truncated (≤2 KB) excerpt of the LLM response that failed post-processing
+    // schema validation — captured by the router when a caller's `postProcess`
+    // hook throws ParseFailureError. Used by the detail-drawer in the System P&L
+    // page and ad-hoc SQL for debugging parse regressions.
+    parseFailureRawExcerpt: text('parse_failure_raw_excerpt'),
+    // When status='aborted_by_caller', carries the caller's intent:
+    //   'caller_timeout' — caller-side timeout elapsed and fired abort()
+    //   'caller_cancel'  — user-initiated or job-level cancellation
+    // NULL for status='client_disconnected' (we can't tell which side
+    // initiated a mid-body network RST).
+    abortReason:   text('abort_reason'),
 
-    // Caching
+    // Caching — tokens read from Anthropic's ephemeral cache
     cachedPromptTokens: integer('cached_prompt_tokens').notNull().default(0),
+    // Tokens written to Anthropic's ephemeral cache on this call (migration 0210 §5.9)
+    cacheCreationTokens: integer('cache_creation_tokens').notNull().default(0),
+    // Call-level assembled prefix hash from cachedContextOrchestrator (migration 0210 §5.9)
+    prefixHash: text('prefix_hash'),
 
-    // Routing metadata
-    executionPhase:   text('execution_phase').notNull().default('planning'),
-    // 'planning' | 'execution' | 'synthesis'
+    // Routing metadata — now nullable (rev §6). Required for agent_run /
+    // process_execution / iee rows; NULL for system / analyzer rows.
+    // Enforced by DB CHECK constraint llm_requests_execution_phase_ck.
+    executionPhase:   text('execution_phase'),
+    // 'planning' | 'execution' | 'synthesis' | 'iee_loop_step'
     capabilityTier:   text('capability_tier').notNull().default('frontier'),
     // 'frontier' | 'economy'
     wasDowngraded:    boolean('was_downgraded').notNull().default(false),
@@ -112,6 +154,19 @@ export const llmRequests = pgTable(
     ieeRunIdIdx:          index('llm_requests_iee_run_id_idx')
       .on(table.ieeRunId)
       .where(sql`${table.ieeRunId} IS NOT NULL`),
+    // rev §6 — non-agent consumer attribution
+    sourceIdIdx:          index('llm_requests_source_id_idx')
+      .on(table.sourceId)
+      .where(sql`${table.sourceId} IS NOT NULL`),
+    featureTagMonthIdx:   index('llm_requests_feature_tag_month_idx').on(table.featureTag, table.billingMonth),
+    // Skip the common case (99%+ success rows); speed up 'show me all 499s this week' queries
+    statusIdx:            index('llm_requests_status_idx')
+      .on(table.status)
+      .where(sql`${table.status} <> 'success'`),
+    // Cached context infrastructure — §5.9
+    prefixHashIdx:        index('llm_requests_prefix_hash_idx')
+      .on(table.prefixHash)
+      .where(sql`${table.prefixHash} IS NOT NULL`),
   }),
 );
 
@@ -137,13 +192,17 @@ export const TASK_TYPES = [
   'context_enrichment',
   // Agent beliefs extraction — LLM call to extract/merge discrete facts after a run.
   'belief_extraction',
+  // CRM Query Planner Stage 3 LLM calls (spec §10.1)
+  'crm_query_planner',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];
 
-// Valid source types — 'iee' added rev 6 §13.1 for the Integrated Execution Environment.
-// When sourceType='iee', llmRequests.ieeRunId MUST be set (router guard + DB CHECK).
-export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee'] as const;
+// Valid source types:
+//   'iee'      — added rev 6 §13.1. When sourceType='iee', ieeRunId MUST be set.
+//   'analyzer' — added rev §6. Non-agent consumer (skill analyzer); sourceId MUST be set.
+//   'system'   — generic non-attributed catch-all for platform work.
+export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee', 'analyzer'] as const;
 export type SourceType = typeof SOURCE_TYPES[number];
 
 // Call sites — distinguishes LLM calls made on the main-app side from those
@@ -151,7 +210,19 @@ export type SourceType = typeof SOURCE_TYPES[number];
 export const CALL_SITES = ['app', 'worker'] as const;
 export type CallSite = typeof CALL_SITES[number];
 
-// Valid LLM request statuses
+// Valid LLM request statuses — rev §6 adds three values:
+//   'client_disconnected' — mid-body network RST, initiator unknown
+//   'parse_failure'       — schema-validation failure after all retries
+//   'aborted_by_caller'   — AbortController.abort() fired from caller code
+//
+// Deferred-items brief §1 adds one provisional value:
+//   'started'             — provisional row written BEFORE providerAdapter.call()
+//                           so a retry after a successful provider call + failed
+//                           DB insert sees the row and throws
+//                           ReconciliationRequiredError instead of re-dispatching.
+//                           Rows in this state are reaped by the
+//                           maintenance:llm-started-row-sweep job after
+//                           (providerTimeoutMs + 60s).
 export const LLM_REQUEST_STATUSES = [
   'success',
   'partial',
@@ -161,8 +232,37 @@ export const LLM_REQUEST_STATUSES = [
   'rate_limited',
   'provider_unavailable',
   'provider_not_configured',
+  'client_disconnected',
+  'parse_failure',
+  'aborted_by_caller',
+  'started',
 ] as const;
 export type LlmRequestStatus = typeof LLM_REQUEST_STATUSES[number];
+
+/**
+ * Statuses that represent a terminal, committed ledger row. A row with one
+ * of these statuses is the authoritative record of a completed LLM call.
+ * Used by the idempotency-check path to distinguish "work already done —
+ * return cached" from "work in flight — reconciliation needed".
+ */
+export const LLM_REQUEST_TERMINAL_STATUSES = [
+  'success',
+  'partial',
+  'error',
+  'timeout',
+  'budget_blocked',
+  'rate_limited',
+  'provider_unavailable',
+  'provider_not_configured',
+  'client_disconnected',
+  'parse_failure',
+  'aborted_by_caller',
+] as const;
+export type LlmRequestTerminalStatus = typeof LLM_REQUEST_TERMINAL_STATUSES[number];
+
+// Abort reasons — only meaningful when status='aborted_by_caller'.
+export const ABORT_REASONS = ['caller_timeout', 'caller_cancel'] as const;
+export type AbortReason = typeof ABORT_REASONS[number];
 
 // Execution phases for routing — 'iee_loop_step' added rev 6 §1.4 / §5.5.
 // Used by the IEE worker so the router can apply an IEE-specific model policy.

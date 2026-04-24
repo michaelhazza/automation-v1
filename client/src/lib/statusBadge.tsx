@@ -12,6 +12,8 @@ export const STATUS_BADGE_STYLES: Record<string, string> = {
   completed:       'bg-emerald-50 text-emerald-700 border-emerald-200',
   failed:          'bg-red-50 text-red-700 border-red-200',
   running:         'bg-blue-50 text-blue-700 border-blue-200',
+  // IEE delegated — waiting on a worker-side run to complete.
+  delegated:       'bg-indigo-50 text-indigo-700 border-indigo-200',
   pending:         'bg-slate-100 text-slate-600 border-slate-200',
   timeout:         'bg-amber-50 text-amber-700 border-amber-200',
   cancelled:       'bg-slate-100 text-slate-400 border-slate-200',

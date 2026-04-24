@@ -208,6 +208,10 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   // updatedAt) still dedup.
   const idempotencyKey = `orchestrator-from-task:${taskId}:${task.updatedAt.getTime()}`;
   try {
+    // `orchestratorDispatch` is consumed inside executeRun: the event fires
+    // immediately after `run.started` (sequence 2) so the dispatch decision
+    // lands inside the run's own timeline rather than after run.completed.
+    // Spec: tasks/live-agent-execution-log-spec.md §5.3.
     await agentExecutionService.executeRun({
       agentId: orchestratorLink.agentId,
       subaccountAgentId: orchestratorLink.subaccountAgentId,
@@ -228,6 +232,12 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         taskSubaccountId: task.subaccountId,
       },
       idempotencyKey,
+      orchestratorDispatch: {
+        taskId,
+        chosenAgentId: orchestratorLink.agentId,
+        idempotencyKey,
+        routingSource: 'rule',
+      },
     });
 
     logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: orchestratorLink.subaccountAgentId });

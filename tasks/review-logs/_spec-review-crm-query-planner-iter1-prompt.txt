@@ -1,0 +1,36 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase.
+
+SPEC: tasks/builds/crm-query-planner/spec.md — CRM Query Planner v1. A new service layer that classifies free-text CRM data questions and routes them to canonical / live / hybrid executors. 4-stage pipeline: intent normalisation → registry matcher (Stage 1) → plan cache (Stage 2) → LLM fallback (Stage 3) → validator (Stage 4) → executor → result normaliser.
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, no staged % rollout, no feature flags for new migrations. Commit-and-revert.
+- Testing posture: static gates primary + pure-function unit tests only. NO vitest / jest / playwright / supertest / frontend unit tests / E2E tests / API contract tests / composition tests / performance baselines.
+- Prefer existing primitives. Approved: llmRouter, canonicalDataService, ghlAdapter, ghlReadHelpers, runCostBreaker, getProviderRateLimiter, withPrincipalContext, actionRegistry, agentExecutionEventEmitter, systemSettings. Don't suggest NEW governance primitives.
+- The Brief surface itself is a separate branch. The result contract shared/types/briefResultContract.ts is already committed and unchanged.
+
+YOUR JOB: Review the spec for implementation-readiness issues. Focus on:
+
+1. CONTRADICTIONS — same concept described differently in different sections.
+2. STALE / RETIRED LANGUAGE — approaches explicitly retired still appearing in prose.
+3. LOAD-BEARING CLAIMS WITHOUT MECHANISMS — "must be idempotent" / "authoritative" / "single source of truth" without a named enforcement mechanism.
+4. FILE INVENTORY DRIFT — prose references files not in §5, or §5 lists files never mentioned.
+5. SCHEMA / TYPE OVERLAP — two types with adjacent purposes without a source-of-truth statement.
+6. SEQUENCING BUGS — Phase N depends on something shipped in Phase N+k.
+7. INVARIANT HOLES — an invariant stated in one section that another section could violate.
+8. MISSING VERDICTS — items without explicit BUILD / DEFER / WON'T DO verdict.
+9. UNNAMED NEW PRIMITIVES — "a new service that handles X" without naming the file / function / table.
+10. CONTRACT BOUNDARY MISMATCHES — especially: does QueryPlan.source (canonical|live|hybrid|unsupported) line up with BriefResultSource (canonical|live|hybrid, no unsupported)? Does the executor contract match the shape the result normaliser expects? Does §6.2 ExecutorResult line up with §15.2 construction?
+11. CANONICAL-PRECEDENCE TIE-BREAKER — §11.2 rule 8 forces source='live' → 'canonical' when canonicalCandidateKey is set. Does that interact correctly with Stage 1 (which always sets canonicalCandidateKey)? Is there a case where Stage 3 sets canonicalCandidateKey but the rule strips a filter the user actually needs?
+12. STAGE 1 BYPASSES STAGE 4 — §8.3 says Stage 1 hits skip Stage 4 validation. Does anything break if a Stage 1 parser returns a QueryPlan with an invalid field?
+13. HYBRID 10-CALL CAP — §14.3 says "Hard cap: if a hybrid query would require more than 10 live calls (after batching), the executor returns cost_exceeded." Is that determinable before work starts, or only after? If only after, the cap is post-hoc and wastes cost.
+14. APPROVAL CARD CONTRACT — §15.4 emits BriefApprovalCard with actionArgs.templatePickerRequired. That's not in the BriefApprovalCard type in shared/types/briefResultContract.ts. Does this need a contract update or is it smuggled inside actionArgs?
+15. TEST COUNTS — §20 claims specific case counts. Are the counts in §7.5, §8.4, §9.5, §10.5, §11.5, §15.5 consistent with the §20.1 table?
+16. PHASE 1 STAGE 3 STUB — §19.1 says "Stage 3 is stubbed — returns unsupported_query for any intent that misses Stages 1 and 2." Does the validator run against a stub output? Do the cache writes happen for stubs?
+17. DEFERRED ITEMS — §1.2 lists out-of-scope; §22 lists open questions; §19.1 lists "not in own phase". Is there a single ## Deferred Items section (the checklist requires one)?
+18. SCHEMA-CONTEXT CACHE INVALIDATION — §9.2 says plans flush when canonical_subaccount_mutations version changes for the subaccount. Is the mechanism for listening to that named anywhere in §5 files or §11.11?
+19. READ-ONLY ENFORCEMENT GAP — §13.3 says enforced by convention; §22.2 acknowledges no dependency-cruiser rule yet. §16.6 claims "two independent guards" but one of them is convention-level. Is that claim overblown?
+20. RISK/GOAL vs IMPLEMENTATION GAPS — are any success criteria in §24 or risks in §23 not actually backed by an implementation section?
+
+OUTPUT: A bulleted list of distinct findings. Each finding: cite the spec section (§N.N), one-sentence description of the issue, one-sentence suggested fix. No preamble, no summary, just the list. Aim for concrete, actionable findings — not "the spec could be clearer about X" without naming what X is.
+
+Here is the spec to review:

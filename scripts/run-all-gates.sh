@@ -73,6 +73,7 @@ run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 # ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"
+run_gate "$SCRIPT_DIR/verify-rls-session-var-canon.sh"
 run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 
 # ── Sprint 3 (P2.1 + P2.2 + P2.3) gates from docs/improvements-roadmap-spec.md ──
@@ -84,6 +85,9 @@ run_gate "$SCRIPT_DIR/verify-handoff-shape-versioned.sh"
 
 # ── Code quality gates ──
 run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
+
+# ── LLM observability spec (tasks/llm-observability-ledger-generalisation-spec.md) ──
+run_gate "$SCRIPT_DIR/verify-no-direct-adapter-calls.sh"
 
 # ── Configuration Agent guidelines protection gates ──
 run_gate "$SCRIPT_DIR/verify-protected-block-names.sh"
@@ -114,6 +118,9 @@ run_gate "$SCRIPT_DIR/verify-connection-shape.sh"
 
 # ── P3B: Canonical Data Platform — RLS + Visibility Parity ──
 run_gate "$SCRIPT_DIR/verify-visibility-parity.sh"
+
+# ── CRM Query Planner — read-only executor enforcement (spec §13.3 / §16.6) ──
+run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="

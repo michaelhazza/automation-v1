@@ -6,7 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
 import { useSocket } from '../hooks/useSocket';
 
-const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
+const SubaccountBlueprintsPage = lazy(() => import('./SubaccountBlueprintsPage'));
 const OrgAgentConfigsPage = lazy(() => import('./OrgAgentConfigsPage'));
 
 // Live run counts per agent (polled from subaccount live-status isn't per-agent,
@@ -149,10 +149,17 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
   useEffect(() => { load(); }, []);
 
-  // Fetch initial live running agent count, then update via WebSocket
+  // Fetch initial live running agent count, then update via WebSocket.
+  // Uses the dedicated /api/agent-activity/live-count endpoint which returns
+  // an SQL count over IN_FLIGHT_RUN_STATUSES (running + delegated + pending)
+  // scoped to this org, excluding sub-agent and test runs. This mirrors the
+  // subaccount-level /live-status endpoint and, unlike the former list-based
+  // approach, is not truncated at any page size — so the badge stays correct
+  // even when an org has more than 100 in-flight runs. Codex dual-review
+  // iteration 2 finding.
   useEffect(() => {
-    api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
-      .then(({ data }) => setLiveRunCount(Array.isArray(data) ? data.length : 0))
+    api.get('/api/agent-activity/live-count')
+      .then(({ data }) => setLiveRunCount(Number(data?.runningAgents ?? 0)))
       .catch((err) => console.error('[AdminAgents] Failed to fetch live agent count:', err));
   }, []);
 
@@ -344,7 +351,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
       {/* Team Templates Tab */}
       {pageTab === 'team-templates' && (
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
-          <AdminAgentTemplatesPage user={user} embedded />
+          <SubaccountBlueprintsPage user={user} embedded />
         </Suspense>
       )}
 

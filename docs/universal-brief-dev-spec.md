@@ -1,0 +1,2057 @@
+# Universal Brief — Development Spec
+
+**Status:** Draft implementation spec — ready for `spec-reviewer`
+**Branch:** `claude/research-questioning-feature-ddKLi`
+**Author:** Design session following `docs/universal-brief-dev-brief.md` (rev 5, locked)
+**Date:** 2026-04-22
+
+## Related artefacts
+
+- **Development brief:** `docs/universal-brief-dev-brief.md` — the locked product-level framing, rationale, and design decisions feeding this spec. The spec implements the brief; it does not re-argue it.
+- **Cross-branch contract (TypeScript):** `shared/types/briefResultContract.ts` — the machine-enforced source of truth for artefact types. Already merged to main.
+- **Cross-branch contract (doc):** `docs/brief-result-contract.md` — prose semantics for the contract. Already merged to main.
+- **Prior session notes:** `tasks/research-questioning-design-notes.md` — pre-brief thinking; superseded by the brief but preserved for history.
+- **Related-branch specs (not this spec):** CRM Query Planner spec lives on a separate branch. This spec does not cover its implementation; it only aligns on the cross-branch contract.
+
+## Framing
+
+This spec implements the universal Brief surface described in the dev brief: a single entry point where users interact with their virtual COO, backed by a polymorphic conversation model and a cross-branch artefact contract. Four capability workstreams land together: an Orchestrator fast path (triage + scope detection), Clarifying + Sparring Partner capability skills, user-triggered memory capture with rule precedence and provenance, and a pre-build retrieval audit.
+
+This spec explicitly follows the conventions in `docs/spec-context.md`:
+- **Testing posture:** `static_gates_primary` + `runtime_tests: pure_function_only`. No frontend, API-contract, or E2E tests for this work.
+- **Rollout model:** `commit_and_revert`. No staged rollouts, no feature flags beyond behaviour modes.
+- **Primitive reuse:** every new primitive has a "why not reuse" justification.
+- **Pre-production:** no live users; breaking changes expected.
+
+---
+
+## Table of contents
+
+1. Overview
+2. Background & current state
+3. Scope & dependencies
+4. Contracts
+5. Schema changes
+   - 5.1 `conversations` table (polymorphic)
+   - 5.2 `tasks` table additions (Brief lifecycle status)
+   - 5.3 `memory_blocks` additions (W3.5 precedence + conflict)
+   - 5.4 `agent_runs` additions (W3c provenance)
+   - 5.5 Classifier shadow-eval logging
+6. Services
+   - 6.1 Orchestrator fast path (W1)
+   - 6.2 Clarifying + Sparring Partner skills (W2)
+   - 6.3 User-triggered memory capture services (W3)
+   - 6.4 Artefact validation + orchestrator backstop
+   - 6.5 Lifecycle resolver (client)
+7. Routes
+8. Client
+9. Permissions / RLS
+10. Execution model
+11. Phased implementation
+12. Testing plan
+13. Deferred items
+14. File inventory
+15. Risks & mitigations
+16. Open questions
+17. Success criteria
+
+---
+
+## 1. Overview
+
+This spec delivers a universal entry point for users to interact with their virtual COO, backed by a first-class artefact contract and four intelligence primitives. What ships:
+
+1. **A renamed, chat-first Brief entity.** The existing `tasks` table's top-level records are relabelled "Brief" in the UI with a conversation attached. No schema rename, no data migration; the UI moves from form-first to chat-first.
+2. **A polymorphic `conversations` table.** Generalises the existing `agent_conversations` pattern. The schema admits four scope values (Agent / Brief / Task / Agent-run log); in v1 the new table is populated for Brief / Task / Agent-run-log only — the Agent-scope chat surface continues to read from `agent_conversations` during the dual-table period (§5.1 backward-compat). Adding another scope later is one enum value + one handler.
+3. **A universal global ask bar.** New `GlobalAskBar` component in the app header takes free text. Submission creates a Brief at the classified scope (subaccount / org / system) and routes it through the Orchestrator.
+4. **Orchestrator fast path (W1).** A cheap pre-LLM decision layer owned by the Orchestrator that decides per message: simple reply / needs clarification / needs full Orchestrator / cheap answer, plus scope detection. Two-tier (heuristic + Haiku fallback). Includes shadow-eval logging, risk-aware second-look, and confidence-decay recalibration.
+5. **Clarifying + Sparring Partner capability skills (W2).** Two new capability skill handlers alongside the existing four; Orchestrator masterPrompt gains two threshold gates that invoke them.
+6. **User-triggered memory capture (W3) — four sub-phases.** `/remember` slash command + Learned Rules library page (W3a), rule precedence + conflict detection + quality scoring + auto-deprecation (W3.5 — a new sub-phase inserted between W3a and W3b per rev-2 external review), approval-gate suggestion with teachability heuristic (W3b), provenance trail on agent outputs (W3c).
+7. **Retrieval audit (W4).** Half-day investigation before any W3 implementation begins; informs W3c scope.
+8. **Artefact contract (already merged to main).** Shared `BriefArtefactBase` types with lifecycle primitives, plus three artefact kinds: structured result, approval card, error. Implementation covers the orchestrator-side validation + backstop + lifecycle resolver.
+9. **Contract test harness.** New `server/lib/briefContractTestHarness.ts` (Phase 0) gates every capability before shipping.
+
+**What this spec does NOT cover.** CRM Query Planner implementation (separate branch); existing memory synthesis behaviour beyond W3's user-triggered additions (untouched); existing Orchestrator Path A–D routing (reused, not redesigned).
+
+**Classification.** This is a **Major** task per `CLAUDE.md`: cross-cutting concern, architectural change, new subsystem. Phased over ~10–14 weeks multi-session. Implementation starts after ClientPulse Phase 4+4.5 work stabilises.
+
+---
+
+## 2. Background & current state
+
+### 2.1 What exists today
+
+**Work-item entity.** `server/db/schema/tasks.ts` defines the `tasks` table. Top-level records are labelled "Issue" in the UI (`client/src/components/NewIssueDialog.tsx` or equivalent — UI label varies; backing storage is `tasks`). Full parent/sub-task hierarchy via `parentTaskId` + `isSubTask`. Eligible tasks (`status='inbox'`, unassigned, not sub-task, not agent-created, description ≥10 chars) trigger `orchestratorFromTaskJob` via the `org_task_created` trigger.
+
+**Orchestrator.** `server/jobs/orchestratorFromTaskJob.ts` dispatches eligible tasks to the Orchestrator agent. Orchestrator masterPrompt (migrations `0157_orchestrator_system_agent.sql` + `0158_orchestrator_routing_hardening.sql`) implements Path A/B/C/D routing with a capability-query budget of 8 calls, loop guards, and feature-request filing on unsupported capabilities. Four existing capability skills in `server/tools/capabilities/capabilityDiscoveryHandlers.ts`: `list_platform_capabilities`, `list_connections`, `check_capability_gap`, `request_feature`.
+
+**Chat surfaces.** Today's conversation storage is in `agent_conversations` + `agent_messages` (see `server/db/schema/agentConversations.ts`). Chat lives per-agent at `/agents/{agentId}` (`client/src/pages/AgentChatPage.tsx`). Each user turn creates a message; agent replies may carry a `triggeredExecutionId` linking to an agent run. **There is no Brief-level, Task-level, or Agent-run-level chat today.** The Config Assistant popup (`client/src/components/Layout.tsx`) is a workflow assistant, not free-text chat.
+
+**Global command palette.** `client/src/components/CommandPalette.tsx` — CMD+K navigation tool. Searches pages, subaccounts, agents. **Not a free-text "ask anything" input.** No submission creates a task or invokes the Orchestrator.
+
+**Memory pipeline.** Existing tables: `memory_blocks` + `memory_block_versions` + `memory_block_attachments`, `agent_beliefs`, `workspace_memory_entries` + `workspace_memories`, `org_memories` + `org_memory_entries`. Existing services: `memoryBlockSynthesisService` (weekly clustering), `agentBeliefService` (per-run belief extraction), `memoryEntryQualityService` (nightly decay + pruning — exclusive owner of `quality_score` mutations post-write per Apr 22 addition), `memoryCitationDetector` (cites workspace entries in run outputs; tracks `cited_entry_ids` on `agent_runs`).
+
+**Cost + observability.** `server/lib/runCostBreaker.ts` enforces hard per-run cost ceilings. `cost_aggregates` table aggregates across org/subaccount/run/agent dimensions. `/api/runs/:runId/cost` is wired (`server/routes/llmUsage.ts`). Agent Live Execution Logs shipped (PR #166) — `agent_execution_events` + `agent_run_prompts` + `agent_run_llm_payloads` provide persisted per-run transcripts.
+
+**Artefact contract.** Already merged to main (`shared/types/briefResultContract.ts` + `docs/brief-result-contract.md`). Rev 5 status: full lifecycle primitives + kind-specific fields + rules. This spec implements consumption of the contract; the contract itself is stable.
+
+**Scope infrastructure.** `tasks.organisationId` (always set) + `tasks.subaccountId` (nullable) + RLS via `withPrincipalContext` (`server/db/withPrincipalContext.ts`) + `rlsProtectedTables.ts` manifest. Three-layer fail-closed isolation already enforced by `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh`.
+
+### 2.2 What does NOT exist
+
+- **No Brief / Task / Agent-run / Recurring-task conversation surface.** `agent_conversations` exists but is agent-scoped only.
+- **No global free-text ask input.** CommandPalette is nav-only.
+- **No free-text → Orchestrator path.** The only way to reach the Orchestrator is via the structured "New Issue" dialog which creates a `tasks` row with `status='inbox'`.
+- **No pre-LLM triage.** Every orchestrator-eligible task fires a full LLM run regardless of intent.
+- **No scope detection.** Every Brief inherits its scope from where the form is filled; no interpretation of intent.
+- **No user-facing memory capture.** `/remember` slash command doesn't exist; user-captured rules are not a concept.
+- **No Learned Rules library UI.** Admin review queue exists (`MemoryReviewQueuePage`) for auto-synthesised blocks; no user-facing browse / edit / pause / delete surface for user rules.
+- **No rule precedence model.** `memory_blocks` has scope fields but no precedence / authoritative / deprecation lifecycle.
+- **No approval-gate teach-the-system prompt.** Approval cards don't currently exist in a conversational surface.
+- **No provenance trail on agent outputs.** `memory_citation_scores` exists for workspace entries, not for named `memory_blocks`. `agent_runs.citedEntryIds` tracks entry-level citations only.
+- **No artefact-level lifecycle enforcement.** The contract types exist on main, but the server-side validator + orchestrator backstop + client-side lifecycle resolver are not implemented.
+
+### 2.3 Why now
+
+Three gating prerequisites are either in place or nearly so:
+1. The Orchestrator's capability-aware routing is live (migrations 0157 + 0158).
+2. The cost ledger is trustworthy (Hermes Tier 1 shipped).
+3. The artefact contract is merged to main with rev-5 lifecycle primitives.
+
+Without these, the Brief surface would be either unsafe (no cost guardrails), opaque (no transparency), or incoherent (no shared artefact shape across capabilities). With them, the surface can ship to a durable foundation.
+
+## 3. Scope & dependencies
+
+### 3.1 In scope (this spec)
+
+- `conversations` polymorphic schema (rename + generalise `agent_conversations`)
+- `tasks` Brief-lifecycle status enum additions (no table rename — UI label only)
+- `memory_blocks` additions for W3.5 precedence + conflict + auto-deprecation
+- `agent_runs` additions for W3c provenance
+- Shadow-eval logging for classifier decisions
+- Services: Orchestrator fast path, Clarifying + Sparring skills, rule-capture pipeline (teachability, candidate drafter, conflict detector, quality scorer), artefact validator + backstop, lifecycle resolver
+- Routes: Brief creation from global ask bar, artefact stream, `/remember` slash command, Learned Rules library CRUD, contract-test harness invocation
+- Client: `GlobalAskBar`, Brief detail page (chat-first), conversation pane components for the four v1 scopes, artefact rendering components per kind, Learned Rules library page, approval-card suggestion panel
+- Contract test harness (`server/lib/briefContractTestHarness.ts`)
+- Retrieval audit (Phase 0 investigation; no code changes, produces `tasks/research-questioning-retrieval-audit.md`)
+
+### 3.2 Out of scope (this spec)
+
+- **CRM Query Planner implementation.** Separate branch, separate spec. This spec aligns only on the shared artefact contract.
+- **Changes to existing memory-synthesis behaviour.** The weekly synthesis, existing belief extraction, quality decay — untouched unless directly affected by W3.5 deprecated-state integration (minor, noted inline).
+- **Changes to Orchestrator Path A–D routing.** Existing routing logic is reused; masterPrompt gains two new threshold gates for clarifying + challenge skills, no existing paths modified.
+- **Changes to `actionRegistry` or the review gate.** Approval cards dispatch through existing `actionRegistry` pipeline; no new actions or gate changes here.
+- **Changes to existing `agent_conversations` usage on `AgentChatPage`.** Existing agent chat behaviour is preserved. The rename to `conversations` + polymorphic scope is backward-compatible (§5.1).
+- **E2E tests / frontend unit tests / API contract tests.** Per `docs/spec-context.md` framing.
+- **Feature flags for rollout gating.** Per framing. Behaviour modes (shadow vs active) permitted where applicable.
+
+### 3.3 Dependencies
+
+**Hard prerequisites** (must land before Phase 1):
+- ClientPulse Phase 4+4.5 work stabilised on `main`
+- Tier-1 tech-debt paydown from the other audit branch — specifically, `extractRunInsights()` success-gating. Without this, W3's Learned Rules library will be polluted with low-quality auto-extractions. Referenced as item #2 in the other branch's plan.
+
+**Soft prerequisites** (nice to have, not blocking):
+- Run-embeddings work from the other branch (Tier-2 item #5) — improves W3c provenance scoring if available; not required.
+
+**External dependencies:**
+- `shared/types/briefResultContract.ts` — already merged to main (rev 5).
+- `docs/brief-result-contract.md` — already merged to main (rev 5).
+- Existing primitives per `docs/spec-context.md::accepted_primitives`: `policyEngineService`, `actionService.proposeAction`, `runCostBreaker`, `withOrgTx` / `getOrgScopedDb`, `RLS_PROTECTED_TABLES`, `agentExecutionEventService`, `agentRunPromptService`, `agentRunPayloadWriter`, `agentRunVisibility` + mask, `redaction`.
+
+---
+
+## 4. Contracts
+
+This section pins every data shape crossing a service boundary. Shapes that already exist in `shared/types/briefResultContract.ts` are referenced, not duplicated.
+
+### 4.1 Cross-branch artefact contract (already on main)
+
+**Reference:** `shared/types/briefResultContract.ts` + `docs/brief-result-contract.md`.
+
+Pinned by:
+- `BriefArtefactBase` — `artefactId` (required), `status?`, `parentArtefactId?`, `relatedArtefactIds?`, `contractVersion?`
+- `BriefStructuredResult` — structured result with `columns?`, `freshnessMs?`, `budgetContext?`, `confidence?`, `confidenceSource?`
+- `BriefApprovalCard` — approval with `executionId?`, `executionStatus?`, `budgetContext?`, `confidence?`, `confidenceSource?`
+- `BriefErrorResult` — error with `severity?`, `retryable?`
+- `BriefCostPreview` — pre-dispatch cost preview
+- `BriefBudgetContext` — with `window?` for budget layer disambiguation
+- `BriefColumnHint` — soft schema hint
+
+Producers of each kind are defined in §6. Consumers (client + orchestrator backstop) are defined in §6.4 and §8.
+
+### 4.2 Fast-path routing decision (new)
+
+Produced by the Orchestrator fast path (§6.1), consumed by Brief creation flow + the full Orchestrator when escalated.
+
+**Name:** `FastPathDecision`
+**Type:** TypeScript discriminated union, new file `shared/types/briefFastPath.ts`
+**Location:** `shared/types/briefFastPath.ts`
+**Producer:** `chatTriageClassifier.ts` (tier 1 heuristic + tier 2 Haiku fallback)
+**Consumer:** `briefCreationService.ts` (dispatches based on route), Orchestrator masterPrompt (when escalated)
+
+**Shape:**
+
+```ts
+export type FastPathRoute =
+  | 'simple_reply'      // direct canned answer; no Orchestrator LLM call
+  | 'needs_clarification' // Orchestrator masterPrompt invokes ask_clarifying_questions skill
+  | 'needs_orchestrator' // full Path A/B/C/D routing
+  | 'cheap_answer';     // bounded direct answer (e.g. "what's my pipeline velocity" → canned query)
+
+export type BriefScope = 'subaccount' | 'org' | 'system';
+
+// UI-context envelope carried from the Brief creation call into the fast path.
+// Defined in the Phase-2 types file so Phase-2 callers (`createBrief`, `POST /api/briefs`) do
+// not depend on the Phase-3 classifier module.
+export interface BriefUiContext {
+  surface: 'global_ask_bar' | 'brief_chat' | 'task_chat' | 'agent_chat' | 'agent_run_chat';
+  currentSubaccountId?: string;   // if user is in a subaccount view
+  currentOrgId: string;
+  userPermissions: Set<string>;   // for scope downgrade decisions
+}
+
+export interface FastPathDecision {
+  route: FastPathRoute;
+  scope: BriefScope;
+  confidence: number;           // 0.0 - 1.0
+  tier: 1 | 2;                  // which tier produced the decision
+  secondLookTriggered: boolean; // risk-aware second-look forced confirmation
+  keywords?: string[];          // tier-1 keywords that fired (logging/debug)
+  reasoning?: string;           // tier-2 LLM reasoning (logging/debug)
+}
+```
+
+**Example:**
+
+```json
+{
+  "route": "needs_orchestrator",
+  "scope": "subaccount",
+  "confidence": 0.92,
+  "tier": 1,
+  "secondLookTriggered": false,
+  "keywords": ["email", "VIP contacts", "30 days"]
+}
+```
+
+**Nullability:** `route`, `scope`, `confidence`, `tier`, `secondLookTriggered` required. `keywords` + `reasoning` optional (present when tier 1 fired heuristic matching or tier 2 returned reasoning respectively).
+
+### 4.3 Shadow-eval logging entry (new)
+
+Produced by the fast path, written to `fast_path_decisions` table (§5.5). Used for drift detection + recalibration.
+
+**Name:** `FastPathShadowEvalRow`
+**Type:** Drizzle schema row (§5.5)
+**Producer:** `chatTriageClassifier.ts` emits; orchestrator appends on downstream outcome
+**Consumer:** Weekly drift analysis (deferred — post-launch tuning)
+
+**Shape:** See §5.5 for schema; prose semantics here:
+- `brief_id` — FK to the Brief this decision was for
+- `decided_route` / `decided_scope` / `decided_confidence` / `decided_tier` / `second_look_triggered` — fast-path output
+- `downstream_outcome` — enum: `proceeded` / `re_issued` / `clarified` / `abandoned` / `user_overrode_scope` — populated by the Brief lifecycle completion handler
+- `user_overrode_scope_to` — nullable enum `subaccount` / `org` / `system` — populated only if user re-scoped
+
+Example downstream outcome: user submitted the Brief, got a result, did not re-issue → `proceeded`. User re-scoped from subaccount to org → `user_overrode_scope` with `user_overrode_scope_to: 'org'`.
+
+### 4.4 Clarifying-question skill output (new)
+
+**Name:** `ClarifyingQuestionsPayload`
+**Type:** JSON returned by `ask_clarifying_questions` skill; validated + emitted as a `BriefStructuredResult` with `entityType: 'other'`
+**Producer:** `askClarifyingQuestionsHandler.ts`
+**Consumer:** Orchestrator (decides whether to present to user); Brief chat (renders each question as a user-selectable suggestion)
+
+**Shape:**
+
+```ts
+export interface ClarifyingQuestion {
+  question: string;         // human-readable; ≤ 140 chars
+  rationale: string;        // why this question reduces ambiguity
+  ambiguityDimension:       // which intent dimension this clarifies
+    | 'scope' | 'target' | 'action' | 'timing' | 'content' | 'other';
+  suggestedAnswers?: string[]; // optional multi-choice options
+}
+
+export interface ClarifyingQuestionsPayload {
+  questions: ClarifyingQuestion[]; // ≤ 5; ranked by ambiguity-reduction impact
+  confidenceBefore: number;        // Orchestrator's confidence before asking
+  expectedConfidenceAfter: number; // Expected confidence after all questions answered
+}
+```
+
+**Example:**
+
+```json
+{
+  "questions": [
+    {
+      "question": "Which subaccount's VIP contacts?",
+      "rationale": "Original Brief didn't specify a subaccount and the user has visibility into 4.",
+      "ambiguityDimension": "scope",
+      "suggestedAnswers": ["Acme Inc", "Beta Ltd", "Gamma Co", "Delta Corp"]
+    }
+  ],
+  "confidenceBefore": 0.55,
+  "expectedConfidenceAfter": 0.92
+}
+```
+
+### 4.5 Sparring challenge output (new)
+
+**Name:** `ChallengeAssumptionsPayload`
+**Type:** JSON returned by `challenge_assumptions` skill; surfaced inline on the associated approval card (not as a separate artefact).
+**Producer:** `challengeAssumptionsHandler.ts`
+**Consumer:** Orchestrator (attaches to approval card); Brief chat (renders as expandable "potential concerns" block on the card).
+
+**Shape:**
+
+```ts
+export interface ChallengeItem {
+  concern: string;             // human-readable concern, ≤ 140 chars
+  severity: 'low' | 'medium' | 'high';
+  dimension:                   // what class of risk
+    | 'irreversibility' | 'cost' | 'scope' | 'assumption'
+    | 'evidence' | 'timing' | 'compliance' | 'other';
+  evidenceRef?: string;        // optional reference (artefactId, rule name, data point)
+  recommendedAction?:          // how to address
+    'proceed_with_awareness' | 'defer' | 'narrow_scope' | 'gather_evidence' | 'reject';
+}
+
+export interface ChallengeAssumptionsPayload {
+  items: ChallengeItem[];      // ≤ 5; ranked by severity
+  overallRisk: 'low' | 'medium' | 'high'; // rolled up from items
+}
+```
+
+### 4.6 Rule capture request (new)
+
+Produced by the Learned Rules library UI (manual) or approval-gate suggestion UI (triggered).
+Consumed by `ruleCaptureService.saveRule()`.
+
+**Name:** `RuleCaptureRequest`
+**Type:** TypeScript interface + JSON body of `POST /api/rules`
+**Producer:** Client UI (Learned Rules library, approval-gate suggestion panel, `/remember` slash command)
+**Consumer:** `ruleCaptureService.ts`
+
+**Shape:**
+
+```ts
+export type RuleScope =
+  | { kind: 'subaccount'; subaccountId: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'org' };
+
+export interface RuleCaptureRequest {
+  text: string;                // the rule itself, plain English
+  scope: RuleScope;            // mandatory — no unscoped rules
+  context?: string;            // optional free-text note
+  originatingArtefactId?: string; // when captured from approval-gate suggestion
+  originatingBriefId?: string;    // when captured via /remember
+  priority?: 'low' | 'medium' | 'high'; // default medium
+  isAuthoritative?: boolean;   // default false
+}
+```
+
+**Example:**
+
+```json
+{
+  "text": "Always exclude contacts with recent opt-outs from VIP bulk email",
+  "scope": { "kind": "agent", "agentId": "agent_abc123" },
+  "context": "Derived from approval of Brief brief_xyz",
+  "originatingArtefactId": "art_007",
+  "originatingBriefId": "brief_xyz",
+  "priority": "medium",
+  "isAuthoritative": false
+}
+```
+
+**Nullability:** `text` + `scope` required (scope is mandatory per brief §8.3.1). `context`, `originatingArtefactId`, `originatingBriefId`, `priority`, `isAuthoritative` optional.
+
+**Governance of `isAuthoritative`.** Setting or clearing `is_authoritative = true` requires an **org-admin** permission on the target scope (new permission key `rules.set_authoritative`; see §9.5). Non-admin callers that POST with `isAuthoritative: true` (or PATCH to set it) receive `403 Forbidden` from `ruleCaptureService` / `PATCH /api/rules/:ruleId`. This closes the authoritative-tier governance gap created by authoritative rules outranking scope in the §5.3 precedence algorithm.
+
+### 4.7 Rule conflict report (new)
+
+Produced by `ruleConflictDetectorService.check()` during `saveRule()`. Drives the conflict-resolution UI.
+
+**Name:** `RuleConflictReport`
+**Type:** TypeScript interface
+**Producer:** `ruleConflictDetectorService.ts`
+**Consumer:** Client capture dialog (shows conflict-resolution options when non-empty)
+
+**Shape:**
+
+```ts
+export interface RuleConflict {
+  existingRuleId: string;          // memoryBlockId of the conflicting rule
+  existingText: string;            // existing rule's text
+  existingScope: RuleScope;
+  conflictKind: 'direct_contradiction' | 'scope_overlap' | 'subset' | 'superset';
+  confidence: number;              // LLM's confidence the overlap is real
+  suggestedResolution: 'keep_new' | 'keep_existing' | 'keep_both_with_priorities' | 'user_decides';
+}
+
+export interface RuleConflictReport {
+  conflicts: RuleConflict[];       // empty if no overlap
+  checkedAt: string;               // ISO timestamp
+}
+```
+
+## 5. Schema changes
+
+All migrations follow the existing convention (next free sequence number, Drizzle-generated SQL, RLS policies in-migration). Migration numbers assumed here; actual numbers assigned at implementation time.
+
+### 5.1 `conversations` table (polymorphic)
+
+**Why new, not reuse `agent_conversations`.** `agent_conversations` is scoped to a specific agent via `agentId` FK. Generalising in place would require either (a) making `agentId` nullable and adding a polymorphic discriminator (high risk of breaking existing agent-chat behaviour), or (b) renaming + polymorphising the existing table (requires data migration). Neither is safer than introducing `conversations` as a new table with a pragmatic path: new writes go to `conversations`; existing `agent_conversations` reads continue during migration; a short tail gradually ports existing agent chats over.
+
+**Alternative considered and rejected.** A distinct table per scope (`brief_conversations`, `task_conversations`, etc.) doesn't scale — four scopes v1, expected to expand. Polymorphic discriminator + single table is the documented preference.
+
+**Migration:** `migrations/0XXX_conversations_polymorphic.sql` (Phase 2).
+
+**Table shape (Drizzle):**
+
+```ts
+export const conversations = pgTable('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organisationId: uuid('organisation_id').notNull(),
+  subaccountId: uuid('subaccount_id'),              // nullable for org-scope / system-scope
+  scopeType: text('scope_type', { enum: ['agent', 'brief', 'task', 'agent_run'] }).notNull(),
+  scopeId: uuid('scope_id').notNull(),              // logical FK — validated at service layer
+  createdByUserId: uuid('created_by_user_id'),      // nullable for system-created conversations
+  status: text('status', { enum: ['open', 'archived'] }).default('open').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  archivedAt: timestamp('archived_at'),
+  metadata: jsonb('metadata').default({}).notNull(), // free-form, capability-specific
+}, (t) => ({
+  orgIdx: index('conversations_org_idx').on(t.organisationId),
+  subaccountIdx: index('conversations_subaccount_idx').on(t.subaccountId),
+  scopeIdx: index('conversations_scope_idx').on(t.scopeType, t.scopeId),
+  uniqueScopePerEntity: uniqueIndex('conversations_unique_scope').on(t.scopeType, t.scopeId),
+}));
+```
+
+**Unique constraint:** one conversation per `(scopeType, scopeId)` — a Brief can have one conversation, a Task can have one, etc. If a scope needs multi-thread (not v1), relax via migration.
+
+**Companion `conversation_messages` table** (replaces `agent_messages` for new scopes; existing `agent_messages` stays operational):
+
+```ts
+export const conversationMessages = pgTable('conversation_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  organisationId: uuid('organisation_id').notNull(), // denormalised for RLS
+  subaccountId: uuid('subaccount_id'),               // denormalised for RLS; nullable for org-/system-scope messages
+  role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
+  content: text('content').notNull(),
+  artefacts: jsonb('artefacts').default([]).notNull(), // BriefChatArtefact[] — one message can carry many artefact blobs; dedicated table deferred (§13)
+  senderUserId: uuid('sender_user_id'),    // nullable when role='assistant' / 'system'
+  senderAgentId: uuid('sender_agent_id'),  // nullable when role='user'
+  triggeredRunId: uuid('triggered_run_id'), // optional FK to agent_runs if message spawned a run
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  conversationIdx: index('conv_msgs_conversation_idx').on(t.conversationId),
+  orgIdx: index('conv_msgs_org_idx').on(t.organisationId),
+  subaccountIdx: index('conv_msgs_subaccount_idx').on(t.subaccountId),
+}));
+```
+
+**Denormalisation invariant.** `conversation_messages.organisationId` and `conversation_messages.subaccountId` MUST be copied from the parent `conversations` row on every insert (the `briefConversationWriter` — §6.1 — is the single write-path; no other caller inserts into `conversation_messages`). A CHECK-constraint-backed trigger is not added in v1; the service-layer invariant is sufficient given a single writer. A follow-up static gate (`verify-conversation-message-denorm.sh`) is listed in §13 as a hardening task.
+
+**Backward-compat strategy.** Existing `agent_conversations` + `agent_messages` tables remain. The `AgentChatPage` continues reading from them. New Brief / Task / Agent-run conversations write to `conversations` + `conversation_messages`. A future migration (deferred; not in this spec) can port existing agent conversations to the new tables; for v1, the two live side by side with the agent chat surface reading from the old tables.
+
+**RLS:**
+- Enable `row_level_security` on both tables.
+- Policy: `USING (organisation_id = current_setting('app.current_organisation_id')::uuid)` — org-scope baseline.
+- Supplementary policy for subaccount-scope: `USING (subaccount_id IS NULL OR subaccount_id = current_setting('app.current_subaccount_id')::uuid)`.
+- Add both to `server/config/rlsProtectedTables.ts` in the same migration.
+
+### 5.2 `tasks` table additions (Brief lifecycle status)
+
+**Why extend, not rename.** The `tasks` table is the backing store; user-facing rename to "Brief" is UI-only per the dev brief. No data migration. Task hierarchy (`parentTaskId`, `isSubTask`) already supports the Brief → sub-task model.
+
+**Migration:** `migrations/0YYY_tasks_brief_lifecycle.sql` (Phase 1).
+
+**Status enum expansion.** Existing `tasks.status` uses a string (default `'inbox'`). New values add semantic precision for Brief lifecycle without forcing a Drizzle enum migration:
+
+| Existing (preserved) | New Brief-lifecycle values |
+|---|---|
+| `inbox` (existing default) | `awaiting_clarification` — Brief paused for clarifying questions |
+| `in_progress` (existing) | `awaiting_approval` — Brief has a pending approval card |
+| `done` (existing) | `closed_with_answer` — Brief closed, answer rendered inline, no action taken |
+| `cancelled` (existing) | `closed_with_action` — Brief closed after sub-tasks completed |
+| | `closed_no_action` — Brief closed after filing a feature request (Path D) |
+
+**Rollout.** The application code migrates from the old values to the expanded set progressively. Both old and new values are accepted during transition (no CHECK constraint change needed — `text` column). Once all call sites are on the new values, a later migration can add a CHECK constraint.
+
+**No schema change to columns.** Only the semantics of the `status` text value evolves.
+
+**UI-facing label.** `client/src/components/BriefLabel.ts` (new, pure) maps status → display string. Label changes do not require schema.
+
+### 5.3 `memory_blocks` additions (W3.5 precedence + conflict + deprecation)
+
+**Why extend in place.** `memory_blocks` already has the scope hierarchy (`organisationId`, `subaccountId`, `ownerAgentId`), versioning (`memory_block_versions`), source discrimination (`source` enum), and confidence fields. Adding precedence / authoritative / deprecation fields is a small additive migration.
+
+**Migration:** `migrations/0ZZZ_memory_blocks_precedence_and_deprecation.sql` (Phase 5 / W3a prerequisite).
+
+**Columns added:**
+
+```sql
+ALTER TABLE memory_blocks
+  ADD COLUMN priority text CHECK (priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
+  ADD COLUMN is_authoritative boolean DEFAULT false NOT NULL,
+  ADD COLUMN paused_at timestamp,
+  ADD COLUMN deprecated_at timestamp,
+  ADD COLUMN deprecation_reason text CHECK (
+    deprecation_reason IN ('low_quality', 'user_replaced', 'conflict_resolved', 'user_deleted')
+  ),
+  -- Mirror of the workspace_memory_entries.quality_score pattern. Owned by
+  -- memoryEntryQualityService (post-write mutations only; see CLAUDE.md key-files table).
+  ADD COLUMN quality_score numeric(3, 2) NOT NULL DEFAULT 0.50
+    CHECK (quality_score >= 0.00 AND quality_score <= 1.00);
+
+CREATE INDEX memory_blocks_paused_idx ON memory_blocks (paused_at)
+  WHERE paused_at IS NOT NULL;
+CREATE INDEX memory_blocks_deprecated_idx ON memory_blocks (deprecated_at)
+  WHERE deprecated_at IS NOT NULL;
+
+-- Add source value for user-triggered rules (already on enum as 'manual' — we add a discriminator)
+ALTER TABLE memory_blocks
+  ADD COLUMN captured_via text CHECK (
+    captured_via IN ('manual_edit', 'auto_synthesised', 'user_triggered', 'approval_suggestion')
+  );
+-- Backfill: existing rows get 'manual_edit' when source='manual', 'auto_synthesised' otherwise.
+UPDATE memory_blocks SET captured_via = CASE
+  WHEN source = 'manual' THEN 'manual_edit'
+  WHEN source = 'auto_synthesised' THEN 'auto_synthesised'
+  ELSE 'manual_edit'
+END;
+ALTER TABLE memory_blocks ALTER COLUMN captured_via SET NOT NULL;
+```
+
+**Precedence algorithm** (implemented in `memoryBlockRetrievalServicePure.ts`, new):
+
+```
+1. Filter out paused_at IS NOT NULL (exclude paused rules).
+2. Filter out deprecated_at IS NOT NULL (exclude deprecated rules).
+3. Split candidates into authoritative (is_authoritative=true) and non-authoritative.
+4. Authoritative wins over non-authoritative regardless of scope.
+5. Within each tier, rank by scope specificity: subaccount > agent > org.
+6. Within the same scope specificity, rank by priority: high > medium > low.
+7. Within the same priority, use created_at DESC (most recent wins).
+```
+
+**Derived `status` field.** The rule library and route filters use a derived status:
+- `status = 'paused'` when `paused_at IS NOT NULL AND deprecated_at IS NULL`
+- `status = 'deprecated'` when `deprecated_at IS NOT NULL`
+- `status = 'active'` otherwise
+Derivation is pure — lives alongside `rankByPrecedencePure` in `memoryBlockRetrievalServicePure.ts`.
+
+**Auto-deprecation.** Quality score (existing `workspace_memory_entries.quality_score` pattern, but applied to `memory_blocks` via a new mirror column). Rules below threshold for N days transition to `deprecated_at`. Deprecation is not deletion — user can resurrect from the library.
+
+**Workspace quality integration.** `memory_blocks` gets a `quality_score` (numeric, 0.0–1.0) mirror column. `memoryEntryQualityService` (existing, Apr 22) extends to also decay + prune `memory_blocks` alongside existing `workspace_memory_entries`.
+
+### 5.4 `agent_runs` additions (W3c provenance)
+
+**Why extend in place.** `agent_runs.citedEntryIds` (JSONB) already tracks workspace entry citations. Extending to cover `memory_blocks` is the same pattern.
+
+**Migration:** `migrations/0WWW_agent_runs_applied_memory_blocks.sql` (Phase 8 / W3c).
+
+**Columns added:**
+
+```sql
+ALTER TABLE agent_runs
+  ADD COLUMN applied_memory_block_ids jsonb DEFAULT '[]' NOT NULL,
+  ADD COLUMN applied_memory_block_citations jsonb DEFAULT '[]' NOT NULL;
+-- applied_memory_block_ids: blocks injected into the run's context (may or may not be cited)
+-- applied_memory_block_citations: blocks actually cited by the agent output
+--   shape: [{ memoryBlockId: string, citedSnippet?: string, citationScore: number }]
+```
+
+**Producer.** `agentExecutionService.ts::assembleContext()` populates `applied_memory_block_ids` when blocks are injected. `memoryCitationDetector.scoreRun()` extends to also score `memory_blocks` and populate `applied_memory_block_citations` post-completion.
+
+### 5.5 Classifier shadow-eval logging
+
+**Why a table, not just structured logs.** Structured logs (stdout JSON) are sufficient for short-term drift detection, but the W1 tuning loop needs queryable access for weekly recalibration. A table enables cross-time analysis without log-aggregation tooling.
+
+**Migration:** `migrations/0VVV_fast_path_decisions.sql` (Phase 3 / W1).
+
+**Table shape:**
+
+```ts
+export const fastPathDecisions = pgTable('fast_path_decisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  briefId: uuid('brief_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  organisationId: uuid('organisation_id').notNull(),
+  subaccountId: uuid('subaccount_id'),
+  decidedRoute: text('decided_route', {
+    enum: ['simple_reply', 'needs_clarification', 'needs_orchestrator', 'cheap_answer']
+  }).notNull(),
+  decidedScope: text('decided_scope', { enum: ['subaccount', 'org', 'system'] }).notNull(),
+  decidedConfidence: numeric('decided_confidence', { precision: 4, scale: 3 }).notNull(),
+  decidedTier: integer('decided_tier').notNull(),         // 1 or 2
+  secondLookTriggered: boolean('second_look_triggered').default(false).notNull(),
+  downstreamOutcome: text('downstream_outcome', {
+    enum: ['proceeded', 're_issued', 'clarified', 'abandoned', 'user_overrode_scope']
+  }),                                                      // populated when Brief closes
+  userOverrodeScopeTo: text('user_overrode_scope_to', { enum: ['subaccount', 'org', 'system'] }),
+  decidedAt: timestamp('decided_at').defaultNow().notNull(),
+  outcomeAt: timestamp('outcome_at'),
+  metadata: jsonb('metadata').default({}).notNull(),       // keywords / reasoning as applicable
+}, (t) => ({
+  briefIdx: index('fast_path_brief_idx').on(t.briefId),
+  orgIdx: index('fast_path_org_idx').on(t.organisationId),
+  routeIdx: index('fast_path_route_idx').on(t.decidedRoute),
+  decidedAtIdx: index('fast_path_decided_at_idx').on(t.decidedAt),
+}));
+```
+
+**Retention.** 90 days via a new pg-boss retention job (`maintenance:fast-path-decisions-prune`, daily at 03:30 UTC). Deferred to Phase 3 completion; v1 keeps all rows.
+
+**RLS:** org-scoped (same policy shape as `conversations`). Added to `rlsProtectedTables.ts` in the same migration.
+
+## 6. Services
+
+### 6.1 Orchestrator fast path (W1)
+
+**Files:**
+- `server/services/chatTriageClassifier.ts` (new) — service wrapper + tier 2 LLM dispatch
+- `server/services/chatTriageClassifierPure.ts` (new) — pure heuristic tier 1 + decision function
+- `server/services/__tests__/chatTriageClassifierPure.test.ts` (new) — pure-function tests
+
+**Reuse precedent:** `server/lib/queryIntentClassifier.ts` + `server/services/topicClassifier.ts` + `topicClassifierPure.ts` + `server/services/pulseLaneClassifier.ts`. All three are existing heuristic-tier routers. `chatTriageClassifier` follows the same pattern.
+
+**Pure function signature:**
+
+```ts
+import type { BriefUiContext } from '../../../shared/types/briefFastPath.js';
+
+export interface ChatTriageInput {
+  text: string;
+  uiContext: BriefUiContext;         // reuses Phase-2 shared type (§4.2)
+  conversationContext?: {            // optional — last N turns for disambiguation
+    priorTurns: Array<{ role: 'user' | 'assistant'; content: string }>;
+  };
+  config: ChatTriageConfig;
+}
+
+export interface ChatTriageConfig {
+  tier1ConfidenceThreshold: number;      // default 0.75 — below → tier 2
+  riskySecondLookRoutes: FastPathRoute[]; // default ['needs_orchestrator'] with write-intent keyword
+  writeIntentKeywords: string[];          // default ['send', 'email', 'create', 'update', 'schedule', 'delete', 'cancel']
+  scopeOverrideKeywords: {
+    org: string[];                         // default ['all clients', 'across subaccounts', 'agency-wide']
+    system: string[];                      // default ['router config', 'platform-wide', 'add integration']
+  };
+}
+
+export function classifyChatIntentPure(input: ChatTriageInput): FastPathDecision;
+```
+
+**Tier 1 heuristics (pure):**
+
+1. **Length + fillers:** if `text.length < 4` OR `text` matches `/^(thanks|ok|yes|no|got it|lgtm|👍)$/i`, return `{ route: 'simple_reply', confidence: 0.95 }`.
+2. **Write-intent detection:** if `text` contains any `writeIntentKeywords`, route is `needs_orchestrator` with `secondLookTriggered: true`.
+3. **Scope keyword override:** scan for org / system scope keywords. If match, scope is overridden; otherwise scope inherits from `uiContext.surface`.
+4. **Read-vs-write heuristic:** absent write keywords, default to `needs_orchestrator` but not flagged for second-look.
+5. **Cheap-answer patterns:** fixed-template queries like "what's my pipeline velocity" → `cheap_answer` with canned query dispatch (enumerated in a config).
+6. **Clarification signals:** very short questions with deictic references ("that", "this", "them") → `needs_clarification` with low confidence.
+
+**Tier 1 confidence calculation:** weighted combination of pattern-match strength + context agreement (UI context agrees with detected scope). Default threshold 0.75; below → escalate to Tier 2.
+
+**Tier 2 (`chatTriageClassifier.ts::classifyWithLlm()`):** a Haiku-tier call via `llmRouter.routeCall` with a tight structured-output schema. Reuses `postProcess` + `ParseFailureError` pattern. Routes to the same `FastPathDecision` shape. Budget-bounded — `routeCall({ context: { featureTag: 'chat_triage', systemCallerPolicy: { maxCostCentsPerCall: 1 } } })`.
+
+**Risk-aware second-look.** When Tier 1 returns high confidence on a `riskySecondLookRoutes` route with a write-intent keyword, the fast path forces a Tier 2 confirmation regardless of Tier 1 confidence. This prevents the worst failure mode (high-confidence wrong classification on an irreversible action).
+
+**Shadow-eval logging.** Every classification calls `fastPathDecisionLogger.log(decision, briefId)` which writes to `fast_path_decisions` (§5.5). When the Brief closes, its lifecycle completion handler calls `fastPathDecisionLogger.recordOutcome(briefId, outcome)` to populate `downstream_outcome`.
+
+**Confidence decay + recalibration.** A nightly job `maintenance:fast-path-recalibrate` reads the last 7 days of `fast_path_decisions` and emits structured logs flagging thresholds that should be tuned. It does NOT auto-tune — tuning is human-reviewed during the first month post-launch, after that it can move to automatic.
+
+**Non-functional goals:**
+- Tier 1: P99 < 2ms (pure-function only).
+- Tier 2: P95 < 200ms (single Haiku call).
+- Tier 2 invocation rate: < 15% of traffic (measured post-launch; below this means heuristics are doing their job).
+
+**Integration point:** `server/services/briefCreationService.ts` (new, §6.3.1) invokes the fast path before dispatching the Brief. Result attaches to the Brief as metadata.
+
+**Inline-response generator.** `simple_reply` / `cheap_answer` routes bypass the Orchestrator and emit an artefact directly. The deterministic generator lives in `server/services/briefSimpleReplyGeneratorPure.ts` (new, Phase 3) — pure function taking `FastPathDecision` + `ChatTriageInput` and returning `BriefChatArtefact` (either `BriefStructuredResult` for cheap-answer canned queries, or `BriefErrorResult` with `errorCode: 'unsupported_query'` when the canned template catalogue misses). No LLM involvement; `confidenceSource: 'deterministic'`.
+
+**Conversation-message writer + websocket emitter.** The single server-side write path into `conversation_messages` — whether user input, assistant reply, or system message — is `server/services/briefConversationWriter.ts` (new, Phase 2). Responsibilities: (a) validate the artefact batch through `briefArtefactValidator` (§6.4); (b) run the `briefArtefactBackstop` identifier-scope + aggregate-invariant checks; (c) insert the message row copying `organisationId` + `subaccountId` from the parent conversation (see §5.1 denormalisation invariant); (d) emit `brief-artefact:new` / `brief-artefact:updated` via `server/websocket/emitters.ts` to the `brief:${briefId}` room. Both Orchestrator output and fast-path inline responses go through this single writer.
+
+---
+
+### 6.2 Clarifying + Sparring Partner skills (W2)
+
+**Files:**
+- `server/tools/capabilities/askClarifyingQuestionsHandler.ts` (new)
+- `server/tools/capabilities/challengeAssumptionsHandler.ts` (new)
+- `server/tools/capabilities/askClarifyingQuestionsHandlerPure.ts` (new) — prompt assembly + output validation
+- `server/tools/capabilities/challengeAssumptionsHandlerPure.ts` (new) — same
+- `server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts` (new)
+- `server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts` (new)
+- Registration in `server/config/actionRegistry.ts` and `server/services/skillExecutor.ts`
+- Migration `0UUU_orchestrator_clarify_challenge_gates.sql` (Phase 4) — updates Orchestrator masterPrompt to add two new gates
+
+**Reuse precedent.** Existing four capability handlers in `server/tools/capabilities/capabilityDiscoveryHandlers.ts` + `requestFeatureHandler.ts`. Same shape: async handler consuming `SkillExecutionContext`, returning structured JSON validated against a contract, logging to `agent_execution_events`.
+
+**Skill: `ask_clarifying_questions`**
+
+Purpose: when Orchestrator's self-assessed confidence in task specification is below threshold, drafts ≤5 ranked questions to resolve ambiguity.
+
+Handler signature:
+
+```ts
+export async function executeAskClarifyingQuestions(
+  ctx: SkillExecutionContext,
+  args: {
+    briefId: string;
+    briefText: string;
+    conversationContext?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    orchestratorConfidence: number;  // pre-call confidence estimate
+    ambiguityDimensions: Array<'scope' | 'target' | 'action' | 'timing' | 'content' | 'other'>;
+  }
+): Promise<ClarifyingQuestionsPayload>;
+```
+
+Dispatch: single LLM call via `llmRouter.routeCall` with structured output. Budget-bounded per-invocation. Post-call validation via pure helper: ensure `questions.length <= 5`, each `question.length <= 140`, `confidenceBefore <= expectedConfidenceAfter`.
+
+**Skill: `challenge_assumptions`**
+
+Purpose: when an approval card crosses cost / irreversibility / scope thresholds, runs an adversarial analysis identifying weakest assumptions.
+
+Handler signature:
+
+```ts
+export async function executeChallengeAssumptions(
+  ctx: SkillExecutionContext,
+  args: {
+    briefId: string;
+    approvalCard: BriefApprovalCard;
+    runtimeConfidence: number;
+    stakesDimensions: Array<'irreversibility' | 'cost' | 'scope' | 'compliance'>;
+  }
+): Promise<ChallengeAssumptionsPayload>;
+```
+
+Dispatch: single LLM call, structured output. Tone spec enforced in the prompt — target: "trusted colleague pushing back," never pedantic. Pure-function validator: `items.length <= 5`, each `concern.length <= 140`, `overallRisk` rolls up consistently from item severities (if any `high` → `high`; else if any `medium` → `medium`; else `low`).
+
+**Orchestrator masterPrompt gates (migration 0UUU).**
+
+Two new gating heuristics added to the Orchestrator masterPrompt:
+
+**Clarifying gate** (fires before Path A–D routing):
+- Trigger: Orchestrator's self-assessed confidence in Brief specification is < 0.85.
+- Action: invoke `ask_clarifying_questions` skill; suspend routing until user answers.
+- Loop guard: maximum 2 rounds of clarification before proceeding with best guess + low-confidence flag.
+- Budget: counts against existing 8-call capability-query budget.
+
+**Challenge gate** (fires before approval card emission):
+- Trigger: approval card's `riskLevel: 'high'` OR `estimatedCostCents > CHALLENGE_COST_THRESHOLD_CENTS` (default 20) OR `affectedRecordIds.length > CHALLENGE_SCOPE_THRESHOLD` (default 10) OR action targets external writes (`crm.send_email`, `crm.create_task`, etc.).
+- Action: invoke `challenge_assumptions` skill; output attaches to the approval card inline (not as a separate artefact).
+- Budget: also counts against capability-query budget.
+
+**Interaction with fast path.** W1 can flag `route: 'needs_clarification'` as a signal, but the actual decision to invoke the skill is masterPrompt-owned (fast path's signal is one input to the confidence calculation, not the deciding vote). Both systems share the `orchestratorConfidence` concept; double-invocation is prevented by checking whether clarification has already run on this Brief turn.
+
+**Tone / UX requirements:**
+- Clarifying questions are not condescending — they signal genuine uncertainty, not gatekeeping.
+- Challenge output uses "potential concerns" framing, not "problems with your plan."
+- Both surfaces prominently show "Not now" / "Proceed anyway" affordances — never blocking modals.
+
+**Per-org toggle.** Both skills can be disabled at org level via `org_settings.clarifyingEnabled` + `org_settings.sparringEnabled` (new columns on existing `org_settings` table — small migration folded into 0UUU). Default: both enabled.
+
+---
+
+### 6.3 User-triggered memory capture services (W3)
+
+Five services across the four sub-phases:
+
+#### 6.3.1 `briefCreationService.ts` (new, Phase 2) — not memory-specific but supporting
+
+**Purpose:** single entry point for Brief creation from the global ask bar, slash commands, or programmatic paths. Invokes fast path, dispatches to Orchestrator if needed, attaches results to the Brief's conversation.
+
+**Signature:**
+
+```ts
+import type { BriefUiContext, FastPathDecision } from '../../../shared/types/briefFastPath.js';
+
+export async function createBrief(input: {
+  organisationId: string;
+  subaccountId?: string;         // null for org / system scope
+  submittedByUserId: string;
+  text: string;
+  source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+  uiContext: BriefUiContext;     // Phase-2 shared type; not dependent on the Phase-3 classifier
+}): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }>;
+```
+
+**Phase-2 vs Phase-3 behaviour.** The `shared/types/briefFastPath.ts` types land in Phase 2 so the signature compiles, but the real classifier ships in Phase 3. In Phase 2, `createBrief` always returns a stub decision (`route: 'needs_orchestrator'`, `scope` inherited from `uiContext.surface` / `currentSubaccountId`, `confidence: 1.0`, `tier: 1`, `secondLookTriggered: false`), and the handler always enqueues `orchestratorFromTaskJob`. Phase 3 replaces the stub with the real `chatTriageClassifier` call — no call-site change required.
+
+#### 6.3.2 `ruleCaptureService.ts` (new, Phase 5 / W3a)
+
+**Purpose:** saves a user-captured rule to `memory_blocks` with `captured_via: 'user_triggered'` or `'approval_suggestion'`. Invokes conflict detector (§6.3.3) pre-save.
+
+**Signature:**
+
+```ts
+export interface SaveRuleResult {
+  ruleId: string;                      // memory_block id
+  conflicts: RuleConflictReport;       // empty if no conflicts; UI decides presentation
+  saved: boolean;                      // false if the user needs to resolve conflicts before save
+}
+
+export async function saveRule(
+  request: RuleCaptureRequest,
+  ctx: { userId: string; organisationId: string }
+): Promise<SaveRuleResult>;
+```
+
+**Flow:**
+1. Validate `request` (text non-empty, scope present, permission check — user must have `rules.write` on the target scope). If `isAuthoritative: true`, additionally assert the caller holds `rules.set_authoritative` (org-admin on the scope) — else return `403`. See §4.6 governance note.
+2. Invoke `ruleConflictDetectorService.check(request)` to get `RuleConflictReport`. In Phase 5 this is a named no-op stub returning `{ conflicts: [], checkedAt: now }`; Phase 6 replaces it with the real LLM-backed detector (§6.3.3). The call site and response shape are identical across phases so no call-site change is needed in Phase 6.
+3. If conflicts detected AND no `allowConflicts: true` flag, return `saved: false` with conflicts; UI surfaces conflict-resolution dialog. User re-submits with resolution.
+4. Otherwise, insert `memory_blocks` row with `captured_via`, `priority`, `is_authoritative`, scope fields, `createdByUserId`.
+5. Insert `memory_block_versions` row for audit.
+6. Return `saved: true`.
+
+#### 6.3.3 `ruleConflictDetectorService.ts` (new, Phase 6 / W3.5)
+
+**Purpose:** LLM-assisted overlap detection at capture time. Finds existing rules that contradict, subset, or overlap with the new rule.
+
+**Pure function:**
+
+```ts
+export interface RuleConflictInput {
+  newRule: { text: string; scope: RuleScope };
+  candidatePool: Array<{          // existing rules in same + adjacent scopes
+    id: string;
+    text: string;
+    scope: RuleScope;
+    isAuthoritative: boolean;
+    priority: 'low' | 'medium' | 'high';
+  }>;
+}
+
+export interface RuleConflictOutput {
+  conflicts: RuleConflict[];
+  checkedAt: string;
+}
+
+// Pure: accepts LLM response, validates + shapes.
+export function parseConflictReportPure(
+  llmRawOutput: unknown,
+  input: RuleConflictInput
+): RuleConflictOutput;
+```
+
+**Dispatch (non-pure):** `ruleConflictDetectorService.check()` fetches candidate pool from `memory_blocks` (scope-aware — exact scope + parent scope), invokes Haiku via `llmRouter.routeCall` with structured output prompt, then pure-parses.
+
+**Candidate pool scoping.** For a subaccount-scoped rule, pool = subaccount rules + org rules + agent-scoped rules that overlap the subaccount. For agent-scoped: agent rules + org rules. For org-scoped: org rules only (narrower scopes don't conflict with broader).
+
+**Budget-bounded.** `maxCostCentsPerCall: 1`. If the call fails for any reason, return empty conflicts — fail-open is the right posture for conflict detection (annoying false-negatives rather than blocking the user on a transient LLM failure).
+
+#### 6.3.4 `ruleTeachabilityClassifierPure.ts` (new, Phase 7 / W3b)
+
+**Purpose:** pre-filter deciding whether an approval / rejection triggers the "teach the system?" suggestion panel. Heuristic-first, LLM fallback, mirroring W1's two-tier pattern.
+
+**Pure function (tier 1):**
+
+```ts
+export interface TeachabilityInput {
+  approvalCard: BriefApprovalCard;
+  wasApproved: boolean;
+  userContext: {
+    priorSimilarApprovals: number;  // how often this user has approved similar actions
+    daysSinceLastCapture: number | null;
+    skipStreakCount: number;         // consecutive "Not now" skips
+  };
+  config: TeachabilityConfig;
+}
+
+export interface TeachabilityConfig {
+  minNoveltyScore: number;            // default 0.7 — below → skip
+  skipBackoffThreshold: number;       // default 5 consecutive skips → pause suggestions
+  skipBackoffWindowDays: number;      // default 7 days
+}
+
+export interface TeachabilityOutput {
+  shouldSuggest: boolean;
+  reason: 'novel' | 'routine' | 'on_backoff' | 'user_disabled';
+  noveltyScore: number;
+}
+
+export function classifyTeachabilityPure(input: TeachabilityInput): TeachabilityOutput;
+```
+
+**Backoff integration.** Per-user setting `user_settings.suggestionFrequency` (existing settings table; new column — small migration in Phase 7) with values `'off' | 'occasional' | 'frequent'`. Backoff state tracked in `user_settings.suggestionBackoffUntil` timestamp.
+
+#### 6.3.5 `ruleCandidateDrafter.ts` (new, Phase 7 / W3b)
+
+**Purpose:** LLM call producing 2–3 candidate rule texts fitting fixed categories, given approval context.
+
+**Categories (fixed taxonomy):** `'preference' | 'targeting' | 'content' | 'timing' | 'approval' | 'scope'`. LLM fills text within these drawers.
+
+**Signature:**
+
+```ts
+export interface CandidateDraftInput {
+  approvalCard: BriefApprovalCard;
+  wasApproved: boolean;
+  briefContext: string;              // short context summary from the originating Brief
+  existingRelatedRules: Array<{      // rules already in this scope — for conflict avoidance
+    id: string;
+    text: string;
+    category: string;
+  }>;
+}
+
+export interface CandidateRule {
+  text: string;                      // plain English, ≤ 140 chars
+  category: 'preference' | 'targeting' | 'content' | 'timing' | 'approval' | 'scope';
+  suggestedScope: RuleScope;
+  confidence: number;                // LLM's confidence in the candidate
+}
+
+export async function draftCandidates(
+  input: CandidateDraftInput
+): Promise<{ candidates: CandidateRule[]; confidenceSource: 'llm' }>;
+```
+
+**Dispatch.** Single Haiku call, structured output, budget-bounded. Pure parser validates shape + category membership.
+
+#### 6.3.6 `memoryBlockRetrievalServicePure.ts` (new, Phase 6 / W3.5)
+
+**Purpose:** precedence-aware retrieval of `memory_blocks` for a given context (agent, subaccount, org). Replaces ad-hoc queries with the precedence algorithm from §5.3.
+
+**Signature:**
+
+```ts
+export interface MemoryBlockRetrievalInput {
+  organisationId: string;
+  subaccountId?: string;
+  agentId?: string;
+  candidates: MemoryBlockRow[];      // raw rows from DB query
+}
+
+export function rankByPrecedencePure(input: MemoryBlockRetrievalInput): MemoryBlockRow[];
+```
+
+Pure function; no DB access. Implements the 7-step algorithm from §5.3 (paused/deprecated filters → authoritative tier → scope specificity → priority → recency). Deterministic output for given input. Module also exports a `deriveRuleStatus(row): 'active' | 'paused' | 'deprecated'` pure helper consumed by the rules API + library UI.
+
+#### 6.3.7 `memoryBlockCitationDetectorPure.ts` (new, Phase 8 / W3c)
+
+**Purpose:** extends existing `memoryCitationDetector` (which handles `workspace_memory_entries`) to also score `memory_blocks` against agent outputs.
+
+**Reuse:** extends the existing `memoryCitationDetector.scoreRun()` pattern. New pure helper for block-level scoring.
+
+**Signature:**
+
+```ts
+export interface BlockCitationInput {
+  appliedBlockIds: string[];         // from agent_runs.applied_memory_block_ids
+  blocks: Array<{ id: string; text: string }>;
+  runOutputText: string;
+  config: { minCitationScore: number }; // default 0.6
+}
+
+export interface BlockCitation {
+  memoryBlockId: string;
+  citedSnippet?: string;
+  citationScore: number;
+}
+
+export function detectBlockCitationsPure(input: BlockCitationInput): BlockCitation[];
+```
+
+---
+
+### 6.4 Artefact validation + orchestrator backstop
+
+**Files:**
+- `server/services/briefArtefactValidator.ts` (new, Phase 1) — runtime schema validation at orchestrator boundary
+- `server/services/briefArtefactValidatorPure.ts` (new) — pure validation + lifecycle checks
+- `server/services/briefArtefactBackstop.ts` (new, Phase 1) — async wrapper: resolves `scopedTotals` via DB reads, then delegates pure checks to `briefArtefactBackstopPure`
+- `server/services/briefArtefactBackstopPure.ts` (new, Phase 1) — pure: identifier-scope + aggregate-invariant checks given a fully-materialised input (no I/O)
+- `server/lib/briefContractTestHarness.ts` (new, Phase 0) — shared test harness for every capability
+- `server/services/__tests__/briefArtefactValidatorPure.test.ts` (new)
+- `server/services/__tests__/briefArtefactBackstopPure.test.ts` (new)
+- `server/lib/__tests__/briefContractTestHarness.test.ts` (new)
+
+**Reuse precedent.** `server/lib/redaction.ts` — cycle-safe JSON walker pattern, pure + extensible. `shared/types/agentExecutionLog.ts` validator — discriminated-union validation at the boundary.
+
+**Validator responsibilities (pure, `briefArtefactValidatorPure.ts`):**
+
+```ts
+export type ValidationError =
+  | { code: 'invalid_schema'; path: string; expected: string; got: string }
+  | { code: 'missing_required'; field: string }
+  | { code: 'invalid_enum'; field: string; value: unknown; validValues: string[] }
+  | { code: 'orphan_parent'; parentArtefactId: string }
+  | { code: 'duplicate_tip'; chainRoot: string; tips: string[] };
+
+export function validateArtefactPure(
+  artefact: unknown
+): { valid: true; artefact: BriefChatArtefact } | { valid: false; errors: ValidationError[] };
+
+export function validateLifecycleChainPure(
+  artefacts: BriefChatArtefact[]
+): { valid: boolean; errors: ValidationError[]; tips: string[] };
+```
+
+**Orchestrator-side validator (`briefArtefactValidator.ts`):**
+- Called at the boundary between a capability's output and the Brief's conversation message insertion.
+- On `valid: true`, artefact flows through.
+- On `valid: false`, orchestrator synthesises a substitute `BriefErrorResult` with `errorCode: 'internal_error'`, `severity: 'high'`, and logs structured producer error (capability name, validation errors).
+
+**Note on `errorCode` values.** The values `'internal_error'` and `'unsupported_query'` referenced in this spec are the subset of error codes emitted by this spec's own code paths (validator failure, backstop failure, unmatched cheap-answer template). The canonical error code enum for `BriefErrorResult` is defined in `shared/types/briefResultContract.ts` and `docs/brief-result-contract.md`. These spec-level references must stay in sync with the canonical enum; if the contract is revised, review §6.1 (`briefSimpleReplyGeneratorPure`) and §6.4 to ensure the referenced values are still valid members.
+
+**Backstop (§12.2 defence-in-depth RLS):**
+
+```ts
+export interface BackstopInput {
+  artefact: BriefChatArtefact;
+  briefContext: {
+    organisationId: string;
+    subaccountId?: string;
+    scope: 'subaccount' | 'org' | 'system';
+    userPrincipal: PrincipalContext;
+  };
+  scopedTotals?: {                 // optional — orchestrator supplies when aggregates are present
+    entityType: BriefResultEntityType;
+    scopedTotal: number;
+  };
+}
+
+export interface BackstopResult {
+  passed: boolean;
+  violations: Array<{
+    kind: 'id_scope_leak' | 'aggregate_invariant_violation' | 'referenced_field_violation';
+    detail: string;
+    offendingIds?: string[];
+  }>;
+}
+
+export async function runBackstopChecks(input: BackstopInput): Promise<BackstopResult>;
+```
+
+**On failure:** orchestrator synthesises `BriefErrorResult` with `errorCode: 'internal_error'`, flags the capability for review, logs a high-severity structured error. Does not return the offending artefact to the client — tenant-leakage must fail closed.
+
+**Contract test harness (`server/lib/briefContractTestHarness.ts`):**
+
+Exports helpers for capability tests:
+
+```ts
+export interface CapabilityTestContext {
+  organisationId: string;
+  subaccountId?: string;
+  userPrincipal: PrincipalContext;
+  scopedTotals: Map<BriefResultEntityType, number>;
+}
+
+export async function assertValidArtefact(a: unknown): Promise<asserts a is BriefChatArtefact>;
+export async function assertValidChain(artefacts: BriefChatArtefact[]): Promise<void>;
+export async function assertRlsScope(a: BriefChatArtefact, ctx: CapabilityTestContext): Promise<void>;
+export async function assertRelatedArtefactIntegrity(
+  artefacts: BriefChatArtefact[]
+): Promise<void>;
+export async function assertCanonicalFlowCoverage(
+  artefactChain: BriefChatArtefact[],
+  expectedFlow: 'read_refinement' | 'write_with_execution' | 'failure_retry'
+): Promise<void>;
+```
+
+Capability tests import these helpers and assert every emitted artefact satisfies them. Phase 0 task: produce the harness + a single example test demonstrating each assertion.
+
+**Budget enforcement ownership.** `budgetContext` on any artefact is **descriptive only**. Capabilities MUST NOT read `budgetContext` to make enforcement decisions (dispatch gating, skill selection, cost-based branching). Budget enforcement is orchestrator-owned via `runCostBreaker` (per `architecture.md`); over-budget conditions fire before the capability dispatches and produce a synthesised `BriefErrorResult` with `errorCode: 'internal_error'` and a budget-block marker in the error `message`. Capabilities consume `budgetContext` only to populate rendering intent for the client (e.g. surfacing `remainingCents` / `limitCents` via §8.3). This separation of concerns prevents drift between capabilities that would otherwise each reimplement budget logic.
+
+---
+
+### 6.5 Lifecycle resolver (client)
+
+**Files:**
+- `client/src/lib/briefArtefactLifecycle.ts` (new, Phase 1) — client-side tip-resolution logic
+- `client/src/lib/briefArtefactLifecyclePure.ts` (new) — pure resolver
+- `client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts` (new)
+
+**Reuse consideration.** Looked at `client/src/hooks/useAgentExecutionLog.ts` for similar chain-resolution logic — it handles agent-run event sequencing. Pattern borrowed; not a direct reuse because execution-log events are sequential, not chain-structured.
+
+**Pure signature:**
+
+```ts
+export interface ArtefactChainState {
+  artefacts: BriefChatArtefact[];    // all artefacts received in order
+}
+
+export interface ResolvedChains {
+  // Map from chain root's artefactId to the tip artefact for that chain
+  chainTips: Map<string, BriefChatArtefact>;
+  // Orphans — artefacts whose parent references aren't present
+  orphans: BriefChatArtefact[];
+  // Superseded artefacts — retained for history but not rendered as primary
+  superseded: Map<string, BriefChatArtefact[]>;
+}
+
+export function resolveLifecyclePure(state: ArtefactChainState): ResolvedChains;
+```
+
+**Algorithm (deterministic, single pass):**
+
+1. Build a parent → children index: `Map<parentArtefactId, artefactId[]>`.
+2. For each artefact, compute `isTip = !childrenIndex.has(artefact.artefactId)`.
+3. For each tip, walk parents to find chain root; accumulate superseded artefacts in order.
+4. Orphans: artefacts whose `parentArtefactId` points to an absent artefact. Treat as new chain roots (per §12.3 failure handling in the brief).
+5. Out-of-order handling: if a predecessor arrives after its successor, the predecessor's `parentArtefactId: X` is still honored — X's children index gains the predecessor, but the predecessor is not promoted to tip because its successor still has no children.
+
+**Ordering guarantee.** The `ArtefactChainState.artefacts` array is ordered by arrival position (append-only; each new artefact is pushed to the end of the array). The resolver does not sort by a separate timestamp — chain membership is determined exclusively by `parentArtefactId` linkage, not by time. `conversation_messages.createdAt` (§5.1) provides an audit-time ordering for persistence but is not read by `resolveLifecyclePure`. Tie-breaking within orphan sets (multiple artefacts with no `parentArtefactId`) uses array position: the first orphan in the array becomes the first chain root.
+
+**Partial-knowledge behaviour.** Chain resolution assumes complete local knowledge of the artefact set. Consumers operating on a partial artefact set (e.g., after a reconnect, mid-stream pagination, or log truncation) MAY temporarily identify multiple candidate tips — this is expected and not an error. In such cases, the most recently received artefact SHOULD be treated as the active candidate until the full chain is resolved. Consumers MUST NOT treat a multi-tip state as an error; they MUST render all candidate tips and converge to the true tip as missing artefacts arrive.
+
+**Client integration:** `BriefChatPage` subscribes to artefact stream, builds `ArtefactChainState`, calls `resolveLifecyclePure` after each new artefact, renders only tips with chain-root → tip visualisation.
+
+**Rendering consequences:**
+- `status: 'final'` artefacts render normally.
+- `status: 'updated'` at the tip renders in place of the parent; parent collapses into "view history" affordance.
+- `status: 'invalidated'` at the tip renders its parent as stale; the invalidation artefact is not rendered as primary content.
+- `status: 'pending'` renders with a spinner badge; when superseded by a `'final' / 'updated'`, transitions cleanly.
+
+## 7. Routes
+
+All routes follow repo conventions: `asyncHandler` wrapper, `authenticate` middleware first, permission guards as needed, services only (no direct DB access), structured errors via `{ statusCode, message, errorCode? }`.
+
+### 7.1 `POST /api/briefs` — create Brief from free text
+
+**File:** `server/routes/briefs.ts` (new, Phase 2)
+**Handler:** delegates to `briefCreationService.createBrief()` (§6.3.1)
+**Middleware:** `authenticate`, `resolveSubaccount` when `subaccountId` is in body, permissions check at service layer per scope
+
+**Request body:**
+
+```ts
+{
+  text: string;
+  explicitScope?: 'subaccount' | 'org' | 'system';  // optional; overrides UI-context default
+  explicitSubaccountId?: string;                     // when explicitScope='subaccount'
+  source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+  uiContext: {
+    surface: 'global_ask_bar' | 'brief_chat' | ...;
+    currentSubaccountId?: string;
+  };
+}
+```
+
+**Response:**
+
+```ts
+{
+  briefId: string;
+  conversationId: string;
+  fastPathDecision: FastPathDecision;
+  // If route was 'simple_reply' or 'cheap_answer', the initial artefact is included inline:
+  initialArtefacts?: BriefChatArtefact[];
+}
+```
+
+**Orchestrator dispatch.** If `fastPathDecision.route === 'needs_orchestrator'`, the handler enqueues `orchestratorFromTaskJob` (existing). If `'needs_clarification'`, the handler enqueues with a flag that causes the Orchestrator to start with the clarifying skill. If `'simple_reply'` or `'cheap_answer'`, the handler synthesises the inline artefact via `briefSimpleReplyGeneratorPure` (§6.1) and persists + emits it through `briefConversationWriter` (§6.1) before returning the artefact in the response body.
+
+### 7.2 `GET /api/briefs/:briefId/artefacts` — list artefacts
+
+**File:** `server/routes/briefs.ts` (same file)
+**Handler:** reads the `conversation_messages.artefacts` JSONB column for the Brief's conversation and flattens the per-message arrays into a single insertion-ordered list. No join — v1 stores artefacts inline on each message row; a dedicated artefact table is deferred (see §13).
+
+**Response:** array of `BriefChatArtefact`, in insertion order.
+
+### 7.3 `GET /api/briefs/:briefId/stream` — real-time artefact updates
+
+**File:** `server/routes/briefs.ts`
+**Mechanism:** WebSocket room `brief:${briefId}` (existing `useSocketRoom` + `joinRoom` pattern from Agent Live Execution Logs). Emitters: `brief-artefact:new`, `brief-artefact:updated` (same artefact with a higher-parent chain tip).
+**Room-join guard:** full `resolveBriefVisibility` check (new helper mirroring `resolveAgentRunVisibility`) — user must have scope-appropriate permissions.
+
+### 7.4 `POST /api/briefs/:briefId/messages` — add a user message to a Brief
+
+**File:** `server/routes/briefs.ts`
+**Handler:** appends a user message to the Brief's conversation. Re-invokes the fast path + Orchestrator if the message looks like a follow-up intent (rather than a passive "thanks").
+
+### 7.5 `/remember` slash command dispatch
+
+**File:** `server/routes/briefs.ts` — the slash command is parsed client-side; server accepts it via `POST /api/rules` (§7.6) with the `originatingBriefId` set.
+No dedicated `/api/remember` endpoint — it's just a UI affordance over the rules endpoint.
+
+### 7.6 `POST /api/rules` — save a user-triggered rule
+
+**File:** `server/routes/rules.ts` (new, Phase 5)
+**Handler:** delegates to `ruleCaptureService.saveRule()` (§6.3.2)
+**Middleware:** `authenticate`, permission guard `requirePermission('rules.write')` (new permission key)
+**Request body:** `RuleCaptureRequest` (§4.6), plus optional `allowConflicts: boolean` for re-submission after user resolves conflicts.
+**Response:** `SaveRuleResult` (§6.3.2). On `saved: false`, client renders conflict-resolution dialog.
+
+### 7.7 `GET /api/rules` — list Learned Rules for browsing
+
+**File:** `server/routes/rules.ts`
+**Handler:** `ruleLibraryService.listRules(filter)` — new service in Phase 5.
+**Filters:** `scopeType`, `scopeId`, `status` (active / paused / deprecated), `createdByUserId`, pagination.
+**Response:** `{ rules: Array<RuleRow>, totalCount: number, cursor?: string }`.
+
+### 7.8 `PATCH /api/rules/:ruleId` — edit / pause / resume / delete
+
+**File:** `server/routes/rules.ts`
+**Handler:** updates `memory_blocks` (text, priority, isAuthoritative, status transitions). Audit trail via `memory_block_versions`.
+**Permissions:** creator OR user with edit permission on the rule's scope (per brief §10.5 — "anyone with scope edit permission"). Additionally, any body that flips `isAuthoritative` requires `rules.set_authoritative` — see §4.6 governance note + §9.5 permission key.
+
+### 7.9 `DELETE /api/rules/:ruleId` — soft-delete a rule
+
+**File:** `server/routes/rules.ts`
+**Handler:** sets `deprecated_at` + `deprecation_reason: 'user_deleted'`. Hard delete is not exposed — rules stay in history for audit.
+
+### 7.10 Approval-card dispatch (reuses existing `actionRegistry`)
+
+**No new route.** Approval cards emit `actionSlug` + `actionArgs` per §4.1. When the user clicks "Approve," the existing `POST /api/review-items/:id/approve` path dispatches (see `server/routes/reviewItems.ts`). The approval card's `executionId` is populated from the existing action execution record created by the review-item approval path.
+
+### 7.11 Orchestrator fast path exposure (internal only)
+
+The fast path is not exposed as a standalone route — it's invoked server-side within `briefCreationService.createBrief()` only. Exposing it as an endpoint is deferred; no external caller needs it in v1.
+
+### 7.12 Generic conversation-message endpoints (Phase 2)
+
+The Task chat pane (Phase 2) and Agent-run-log chat pane (Phase 7) consume a scope-agnostic conversation API. Brief-specific routes in §7.1–§7.4 remain for Brief-level operations (Brief creation, artefact list, Brief stream), but message append / list and the WebSocket room are conversation-scoped, not Brief-scoped.
+
+**File:** `server/routes/conversations.ts` (new, Phase 2) — handles the routes below. Delegates to `conversationService.ts` (Phase 2, §14.1).
+
+- **`POST /api/conversations/:conversationId/messages`** — append a user message. Middleware: `authenticate` + scope-specific permission check derived from the conversation's `scopeType` + `scopeId` (resolved by `conversationService.assertUserCanMessage(principal, conversationId)`). On Task / Agent-run scopes, the handler does NOT re-invoke the fast path — it writes the user message via `briefConversationWriter` and, if the scope is `task`, optionally forwards to the Orchestrator via `orchestratorFromTaskJob`.
+- **`GET /api/conversations/:conversationId`** — returns the conversation metadata + paginated messages.
+- **WebSocket room:** `conversation:${conversationId}`. Room-join guard: `conversationService.assertUserCanView(principal, conversationId)`. Emitters: `conversation-message:new`, `conversation-message:updated`. The Brief stream room (`brief:${briefId}`, §7.3) is preserved for Brief-specific artefact events; the conversation room is for message-level events.
+
+**Phase 2 vs Phase 7 coverage.** Phase 2 ships the routes + the Task chat pane + the Agent-run-log chat pane's read path. Phase 7 turns on the agent-run-log-specific "why did you do this?" write path. Between Phase 2 and Phase 7, the Agent-run-log pane reads-only.
+
+**Inventory:** `server/routes/conversations.ts` added to §14.1.
+
+---
+
+## 8. Client
+
+Follows repo conventions: lazy-loaded page components with `Suspense` fallback, permissions-driven visibility via `/api/my-permissions`, real-time updates via WebSocket rooms, tables with column-header sort + filter (per `CLAUDE.md` architectural rule).
+
+### 8.1 `GlobalAskBar` component (Phase 2)
+
+**File:** `client/src/components/global-ask-bar/GlobalAskBar.tsx` (new) + `GlobalAskBarPure.ts` (pure: text-parsing, suggestion ranking)
+**Location in UI:** global header (`client/src/components/Layout.tsx` — positioned next to CommandPalette trigger, distinct from it)
+**Behaviour:**
+- Free-text input; submit on Enter
+- Rotating placeholder ("Find VIP contacts inactive 30d", "Draft the weekly client report", "What's blocking our deals?")
+- Submission calls `POST /api/briefs` (§7.1) with current UI context (subaccount, org, page)
+- On success, navigates to `/briefs/${briefId}` showing the chat
+- Keyboard shortcut: no new shortcut (would conflict with CMD+K); access via click or focus-when-typing-in-input
+
+**Not replacing CommandPalette.** CommandPalette remains CMD+K for navigation. `GlobalAskBar` is a separate, persistent, always-visible input for free-text intent. Different purposes, different shortcuts.
+
+### 8.2 Brief detail page (Phase 1 + 2)
+
+**File:** `client/src/pages/BriefDetailPage.tsx` (new) — replaces / generalises the existing "Issue detail" view
+**Route:** `/briefs/:briefId` (added to `client/src/App.tsx`)
+**Layout:**
+- Left rail: Brief metadata (title, priority, scope, created by, status), sub-tasks list, related artefacts links
+- Centre: conversation thread — chronological messages with artefact rendering inline
+- Right rail: "rules applied" panel (W3c — empty until provenance ships), "related Briefs" panel
+
+**Rendering:** subscribes to `brief:${briefId}` WebSocket room. New messages appended. New artefacts trigger `resolveLifecyclePure` (§6.5); superseded artefacts collapse with a "view history" affordance.
+
+### 8.3 Artefact rendering components (Phase 2 + 5 + 7)
+
+Per-kind components, each with a pure twin for table-data formatting:
+
+| Component | File | Phase |
+|---|---|---|
+| `StructuredResultCard` | `client/src/components/brief-artefacts/StructuredResultCard.tsx` | Phase 2 |
+| `ApprovalCard` | `client/src/components/brief-artefacts/ApprovalCard.tsx` | Phase 2 (basic) + Phase 4 (with sparring output) |
+| `ErrorArtefactCard` | `client/src/components/brief-artefacts/ErrorArtefactCard.tsx` | Phase 2 |
+| `ClarifyingQuestionsCard` | `client/src/components/brief-artefacts/ClarifyingQuestionsCard.tsx` | Phase 4 |
+| `RulesAppliedPanel` | `client/src/components/brief-artefacts/RulesAppliedPanel.tsx` | Phase 8 |
+| `ConfidenceBadge` | `client/src/components/brief-artefacts/ConfidenceBadge.tsx` | Phase 2 |
+| `BudgetContextStrip` | `client/src/components/brief-artefacts/BudgetContextStrip.tsx` | Phase 2 |
+
+**Pure formatters** (column rendering by type, currency formatting, relative time):
+- `client/src/components/brief-artefacts/StructuredResultCardPure.ts`
+- `client/src/components/brief-artefacts/ApprovalCardPure.ts`
+
+**Directive rules from the brief §12.1 + §12.5 applied:**
+- Never render an artefact without `artefactId` — surface a developer-only error toast if one arrives
+- Treat unknown `kind` values as error-boundary failure, not a hard crash
+- Respect `truncated` + `truncationReason`
+- Render `suggestions` as clickable follow-up chips that create a new Brief turn with `suggestion.intent` as the input
+- Surface `confidence` per thresholds in `docs/brief-result-contract.md` §"Confidence surfaces"
+- Render `budgetContext.window` alongside `remainingCents` / `limitCents`
+- `source` MUST be surfaced to the user when it materially affects trust — specifically, when `source: 'canonical'` with a non-trivial `freshnessMs` (indicating stale data) or when `source: 'hybrid'` (mixed freshness). Silently omitting `source` when it would change how a user interprets a result is not permitted. The `StructuredResultCard` component is the primary surface point; the exact visual treatment (label, badge, tooltip) is a Phase 2 UX decision.
+
+### 8.4 Learned Rules library page (Phase 5)
+
+**File:** `client/src/pages/LearnedRulesPage.tsx` (new)
+**Route:** `/rules` (top-level) + `/subaccounts/:id/rules` (subaccount-scoped filter applied)
+**Features:**
+- Filter by scope (all / subaccount / agent / org)
+- Filter by status (active / paused / deprecated)
+- Filter by creator
+- Sort / filter via column headers per `CLAUDE.md` UI rule
+- Per-row actions: edit (inline), pause, resume, delete
+- "Used N times" column — shows citation count (aggregated from `applied_memory_block_citations` in Phase 8; shows "—" until then)
+- Provenance click-through from agent output cards lands here with the rule pre-selected
+
+**Companion components:**
+- `LearnedRulesTable.tsx` (table rendering)
+- `RuleEditDialog.tsx` (edit in-place)
+- `RuleConflictResolutionDialog.tsx` (used by capture flow when conflicts detected)
+
+### 8.5 `/remember` slash command (Phase 5)
+
+**Location:** any Brief chat input. Typing `/remember ...` triggers the capture dialog pre-filled with the text after the command and optionally the current Brief's context.
+**Component:** `RuleCaptureDialog.tsx` — shared between the slash command and the approval-gate suggestion panel.
+
+### 8.6 Approval-gate suggestion panel (Phase 7)
+
+**Component:** `ApprovalSuggestionPanel.tsx` — renders inside `ApprovalCard.tsx` after the user approves or rejects. Shows candidate rules + scope picker + "Not now" / "Save rule" actions.
+
+### 8.7 Conversation-scope components (Phase 2 / Phase 7)
+
+Four conversation surfaces — three ship on the new tables, Agent scope stays on the old tables:
+
+| Surface | Ships in phase | Storage | UI component |
+|---|---|---|---|
+| **Brief chat** | Phase 2 | `conversations` + `conversation_messages` (new) | `BriefDetailPage` (§8.2) |
+| **Task chat** | Phase 2 | `conversations` + `conversation_messages` (new) | `client/src/components/task-chat/TaskChatPane.tsx` — embedded in existing task detail view |
+| **Agent-run-log chat** | Phase 7 | `conversations` + `conversation_messages` (new) | `client/src/components/agent-run-chat/AgentRunChatPane.tsx` — embedded in existing agent-run detail view (reuses Agent Live Execution Log infra) |
+| **Agent chat** | unchanged | `agent_conversations` + `agent_messages` (existing) | existing `AgentChatPage` — no change in v1 |
+
+The new polymorphic schema accepts `scopeType: 'agent'` rows, but Agent-scope writes are deferred until the `agent_conversations` port lands (§13 deferred).
+
+## 9. Permissions / RLS
+
+Every new tenant-scoped table follows the four-requirement checklist from `docs/spec-authoring-checklist.md` §4: RLS policy in-migration, entry in `rlsProtectedTables.ts`, route/middleware guard, principal-scoped context for agent-execution reads.
+
+### 9.1 `conversations` + `conversation_messages` (§5.1)
+
+- **RLS policy (in migration 0XXX):**
+  ```sql
+  ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY conversations_org_isolation ON conversations
+    USING (organisation_id = current_setting('app.current_organisation_id')::uuid);
+  -- Supplementary for subaccount-scoped rows:
+  CREATE POLICY conversations_subaccount_scope ON conversations
+    USING (subaccount_id IS NULL OR subaccount_id = current_setting('app.current_subaccount_id')::uuid);
+
+  ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY conversation_messages_org_isolation ON conversation_messages
+    USING (organisation_id = current_setting('app.current_organisation_id')::uuid);
+  CREATE POLICY conversation_messages_subaccount_scope ON conversation_messages
+    USING (subaccount_id IS NULL OR subaccount_id = current_setting('app.current_subaccount_id')::uuid);
+  ```
+- **`rlsProtectedTables.ts` entries added:** `conversations`, `conversation_messages`.
+- **Route guard:** `authenticate` + `resolveSubaccount` (for subaccount-scoped routes) + service-layer check that the user can view the Brief / Task / Agent / Agent-run referenced by `scopeId`.
+- **Principal-scoped context:** conversations are queried via `withPrincipalContext(principal, work)` inside `conversationService.ts`.
+
+### 9.2 `fast_path_decisions` (§5.5)
+
+- **RLS policy:** org-isolation only (no subaccount scoping — decisions are org-level observability). Policy in same migration.
+- **`rlsProtectedTables.ts`:** added.
+- **Route guard:** none — this table is not exposed via HTTP. Read access is confined to server-side jobs (retention sweeper + drift analyzer).
+- **Principal-scoped context:** not applicable (no user-driven reads).
+
+### 9.3 `memory_blocks` additions (§5.3)
+
+- **RLS:** existing `memory_blocks` RLS policies remain unchanged. New columns (`priority`, `is_authoritative`, `paused_at`, `deprecated_at`, `deprecation_reason`, `captured_via`) inherit the existing policy.
+- **`rlsProtectedTables.ts`:** already present; no change.
+- **Route guard:** new `rules.read` / `rules.write` permissions are added to `server/lib/permissions.ts`. Routes §7.6–7.9 check them. Scope-edit permission reuses existing `resolveSubaccount` + org-admin checks.
+- **Principal-scoped context:** existing pattern; unchanged.
+
+### 9.4 `agent_runs` additions (§5.4)
+
+- **RLS:** existing `agent_runs` RLS policies remain unchanged. New columns inherit.
+- **Route exposure:** `applied_memory_block_ids` and `applied_memory_block_citations` are returned on existing `GET /api/runs/:runId` response. Visibility follows existing `agent_runs` visibility rules via `agentRunVisibility.ts`.
+
+### 9.5 New permission keys
+
+Added to `server/lib/permissions.ts`:
+
+- `briefs.read` — view Briefs in a scope
+- `briefs.write` — create Briefs in a scope
+- `rules.read` — browse Learned Rules in a scope
+- `rules.write` — create / edit / pause / delete rules in a scope
+- `rules.set_authoritative` — flip `is_authoritative` on or off. Org-admin on the target scope. Required in addition to `rules.write` whenever a rule-save or rule-edit request includes `isAuthoritative: true` (§4.6 governance note, §6.3.2 flow step 1).
+
+Scope is derived from the resource (subaccount for sub-account rules, agent for agent-scoped rules, org for org-level rules). User-captured rules do not admit a `system` scope in v1 — `RuleScope` (§4.6) is `subaccount | agent | org`. Existing permission inheritance applies (org admins can always edit subaccount-scoped + agent-scoped rules within their org). System-scoped user-captured rules are deferred (see §13).
+
+### 9.6 Scope routing security
+
+The fast path classifies scope and the Brief is created at the classified scope. Two safety mechanisms:
+
+1. **Permission downgrade.** If the classifier picks a scope the user lacks permissions for (e.g., `system` scope for a non-system-admin), the fast-path handler downgrades to the highest scope the user can access. Downgrade is logged. User sees a soft message ("That's a platform-admin action — filed as a request to the platform team") if no valid scope exists.
+2. **Post-hoc override logging.** When a user explicitly re-scopes a Brief (via UI), the `fast_path_decisions.userOverrodeScopeTo` column is populated. Weekly drift analysis flags patterns (e.g., fast path frequently misclassifies as subaccount when the user meant org).
+
+### 9.7 Artefact-level RLS
+
+The artefact contract itself doesn't persist artefacts to a dedicated table in v1 — full `BriefChatArtefact` blobs are stored inline on `conversation_messages.artefacts` (JSONB array). RLS on `conversation_messages` therefore covers artefact visibility. When artefacts move to a dedicated table (deferred, §13), that table will have its own RLS policy mirroring `conversations`.
+
+The orchestrator backstop (§6.4) is additional defence: it scans artefact content for cross-scope references before the message is persisted. This is enforcement in depth, not the primary mechanism.
+
+---
+
+## 10. Execution model
+
+Each new service operation picks one execution model per `docs/spec-context.md` guidance (sync / async pg-boss / cached).
+
+| Operation | Model | Rationale |
+|---|---|---|
+| Brief creation (`POST /api/briefs` → `briefCreationService`) | **Inline / synchronous** | HTTP handler; returns once the Brief row + conversation row are written and the first artefact (for `simple_reply` / `cheap_answer`) or the enqueue receipt (for Orchestrator routes) is in hand. |
+| Conversation message persistence (`briefConversationWriter`) | **Inline / synchronous** | Single writer into `conversation_messages`; pure-in-memory validator + backstop run before the INSERT; websocket emission follows synchronously within the same request. |
+| Brief artefact websocket emission (`brief-artefact:new` / `:updated`) | **Inline / synchronous** (fire-and-observe, not fire-and-forget) | Emitted in the same request/transaction as the message insert; no pg-boss row; receiver-side socket delivery is best-effort per existing `emitters.ts` pattern. |
+| Fast-path classification (§6.1) | **Inline / synchronous** | Caller (`briefCreationService`) blocks on the decision. Tier 1 is ~ms; Tier 2 is ~100–200ms. Both within an HTTP request budget. No pg-boss involvement. |
+| Orchestrator dispatch (§6.3.1 → existing `orchestratorFromTaskJob`) | **Queued / async (pg-boss)** | Existing pattern. Fast path decides whether to enqueue; if yes, `createBrief` returns `HTTP 201` with the Brief record and the Orchestrator runs asynchronously. |
+| Simple-reply / cheap-answer dispatch | **Inline / synchronous** | No Orchestrator LLM call; direct artefact emission. Fits within HTTP request. |
+| Clarifying-question skill invocation (§6.2) | **Inline within Orchestrator run** | The skill executes during the Orchestrator's synchronous run (as other capability skills do). The Orchestrator run itself is async (pg-boss). |
+| Sparring challenge skill invocation (§6.2) | **Inline within Orchestrator run** | Same as clarifying. |
+| Rule save (§6.3.2) | **Inline / synchronous** | User-triggered POST; returns save status + conflicts. Conflict detection's LLM call is within the HTTP budget. |
+| Rule conflict detection (§6.3.3) | **Inline / synchronous LLM call** | Single Haiku call; P95 < 300ms. Budget-bounded at 1 cent. No pg-boss. |
+| Approval-gate suggestion (§6.3.4 teachability + §6.3.5 drafter) | **Inline / synchronous** | Fires on user approval-action; both tier-1 heuristic and LLM drafter run inline. User sees the suggestion on the same page without navigation. |
+| Artefact validation (§6.4) | **Inline / synchronous** | Pure function at the orchestrator boundary. Microsecond-level. |
+| Artefact backstop (§6.4) | **Inline / synchronous** | DB aggregate queries; sub-millisecond to low-ms. |
+| Memory-block citation scoring (§6.3.7) | **Queued / async (existing `agentBeliefService` pattern)** | Runs post-run; reuses the existing post-run citation-detection job. No new job row; extends existing. |
+| Auto-deprecation (low-quality rule sweep) | **Queued / async (pg-boss)** | Nightly. New job `maintenance:rule-auto-deprecate` registered in `queueService.ts`. |
+| Fast-path recalibration sweep | **Queued / async (pg-boss)** | Nightly. New job `maintenance:fast-path-recalibrate`. |
+| `fast_path_decisions` retention prune | **Queued / async (pg-boss)** | Daily at 03:30 UTC. New job `maintenance:fast-path-decisions-prune`. |
+| Shadow-eval outcome recording (`fastPathDecisionLogger.recordOutcome`) | **Inline / synchronous with soft-breaker fire-and-forget wrapping** | When a Brief closes, the lifecycle handler calls `fastPathDecisionLogger.recordOutcome(briefId, outcome)` in-process. The call is wrapped in `server/lib/softBreakerPure.ts` so failures are swallowed (structured log, breaker state update) and do not block Brief closure. **No pg-boss row** — the best-effort write happens synchronously inside the Brief-closure handler's request. Idempotency: the `downstream_outcome` column uses `WHERE brief_id = ? AND downstream_outcome IS NULL` on update so a retried close never double-writes. |
+
+### 10.1 Consistency pass
+
+Confirming spec-authoring-checklist §5 checks:
+1. Every pg-boss job has a corresponding job-idempotency entry if needed — the three nightly maintenance jobs are naturally idempotent (they're sweep-style, re-runnable).
+2. Route / service prose describes sync or enqueue consistent with the table above. No prose says "the service does X" when X is actually a job processor's responsibility.
+3. No non-functional goal contradicts the model. P95 targets for inline operations (fast path Tier 2 < 200ms, rule-save end-to-end < 500ms) are achievable within HTTP request budgets.
+
+## 11. Phased implementation
+
+Phases map to the dev brief's §14 sequencing. Each phase is independently shippable — stop after any phase and the app remains coherent. Phase numbers align with brief §14 + §15.1.
+
+**Prerequisites:** ClientPulse Phase 4+4.5 merged + stabilised on main; other-branch Tier-1 tech-debt paydown (especially `extractRunInsights()` success gating) completed.
+
+### Phase 0 — Foundation (contract harness + retrieval audit)
+
+**Duration estimate:** 1 week
+
+**Scope:**
+- Build `server/lib/briefContractTestHarness.ts` (§6.4) with all assertion helpers.
+- Build `server/services/briefArtefactValidator.ts` + `briefArtefactValidatorPure.ts` (§6.4).
+- Build `server/services/briefArtefactBackstop.ts` + `briefArtefactBackstopPure.ts` (§6.4) — async wrapper + pure shape/invariant module split.
+- Pure-function tests for validator + backstop pure modules + the contract harness — comprehensive coverage of the validation rules.
+- **W4 Retrieval audit** (§8.4 in the brief) — half-day investigation, produces `tasks/research-questioning-retrieval-audit.md`.
+
+**Schema changes:** none.
+
+**Services introduced:** `briefArtefactValidator`, `briefArtefactValidatorPure`, `briefArtefactBackstop`, `briefArtefactBackstopPure`, `briefContractTestHarness`.
+
+**Columns referenced by code:** none new — all work is on types already on main.
+
+**Exit gate:** contract test harness passes the local synthetic-capability example fixture (`briefContractTestHarness.example.test.ts`); retrieval audit findings written up with severity labels. Cross-branch CRM Planner adoption is out of Phase 0 scope — see Phase 9.
+
+### Phase 1 — Brief entity + artefact validation wiring
+
+**Duration estimate:** 1 week
+
+**Scope:**
+- Migration `0YYY` (§5.2): expanded `tasks.status` enum values — no schema change, application-level value expansion.
+- Wire `briefArtefactValidator` into the existing Orchestrator output path. For now, no capability emits into the Brief system yet — this wiring is prep.
+- Rename "Issue" → "Brief" in existing UI labels. `NewIssueDialog` becomes `NewBriefDialog`.
+- Add "COO" persona label configuration at org level (`org_settings.agentPersonaLabel`, default "COO") — new column, small migration folded into 0YYY.
+- Build client-side `briefArtefactLifecyclePure.ts` (§6.5). No actual artefacts flow through it yet.
+
+**Schema changes:** migration 0YYY (status-enum semantic expansion + `org_settings.agentPersonaLabel`).
+
+**Services introduced:** none new beyond the lifecycle pure helper.
+
+**Services modified:** Orchestrator output path gains validator wiring (no behaviour change when no new artefacts are emitted).
+
+**Exit gate:** UI shows "Brief" throughout; validator is wired but idle.
+
+### Phase 2 — Universal Brief entry (`GlobalAskBar` + `conversations`)
+
+**Duration estimate:** 1–2 weeks
+
+**Scope:**
+- Migration `0XXX` (§5.1): new `conversations` + `conversation_messages` tables + RLS policies + `rlsProtectedTables` entries.
+- New permission keys `briefs.read` + `briefs.write` added to `server/lib/permissions.ts` (scope-aware; enforced by the Phase 2 routes + WebSocket join guard). `rules.*` permissions land later with Phase 5.
+- `briefCreationService.ts` (§6.3.1) — without fast path (fast path lands in Phase 3). Sync flow: free-text submission → Brief created → straight to `orchestratorFromTaskJob` (existing behaviour, no triage).
+- `POST /api/briefs` endpoint (§7.1).
+- `GET /api/briefs/:briefId/artefacts` endpoint (§7.2).
+- `GET /api/briefs/:briefId/stream` WebSocket room (§7.3).
+- Generic conversation-message endpoints `POST /api/conversations/:conversationId/messages` + `GET /api/conversations/:conversationId` + `conversation:${conversationId}` WebSocket room (§7.12).
+- `GlobalAskBar` client component (§8.1).
+- `BriefDetailPage` client component (§8.2) — renders the Brief's conversation, reads artefacts from the stream, runs `resolveLifecyclePure` on each new artefact.
+- `StructuredResultCard`, `ApprovalCard` (basic, no sparring output yet), `ErrorArtefactCard`, `ConfidenceBadge`, `BudgetContextStrip` (§8.3).
+- Conversation-scope components for Brief + Task scopes (§8.7).
+
+**Schema changes:** migration 0XXX (new tables + RLS).
+
+**Services introduced:** `briefCreationService`, `briefConversationWriter`, `conversationService` (thin CRUD over `conversations`). `briefVisibility` helper in `server/lib/briefVisibility.ts`.
+
+**Routes introduced:** `/api/briefs` (POST, GET artefacts, GET stream, POST messages); `/api/conversations/:conversationId` (GET metadata + messages, POST messages, WebSocket room).
+
+**Exit gate:** a user can type a Brief into `GlobalAskBar`, submit, land on `BriefDetailPage`, and see the Orchestrator's response as a `StructuredResultCard` or `ApprovalCard` with lifecycle-aware rendering.
+
+### Phase 3 — Orchestrator fast path (W1)
+
+**Duration estimate:** 1 week
+
+**Scope:**
+- Migration `0VVV` (§5.5): `fast_path_decisions` table + RLS + retention job registration.
+- `chatTriageClassifier.ts` + `chatTriageClassifierPure.ts` (§6.1) — tier 1 heuristic + tier 2 Haiku fallback.
+- Shadow-eval logger (`fastPathDecisionLogger.ts`) — records decision at classify time and outcome when Brief closes.
+- Risk-aware second-look mechanism.
+- Confidence-decay recalibration nightly job `maintenance:fast-path-recalibrate`.
+- `fast_path_decisions` retention prune nightly job.
+- Integrate fast path into `briefCreationService.createBrief()` from Phase 2 — replace the straight dispatch with classifier → route.
+
+**Schema changes:** migration 0VVV.
+
+**Services introduced:** `chatTriageClassifier`, `chatTriageClassifierPure`, `briefSimpleReplyGeneratorPure` (Phase 3 — fast-path inline-response generator for `simple_reply` / `cheap_answer`), `fastPathDecisionLogger`, `fastPathRecalibrateJob`, `fastPathDecisionsPruneJob`.
+
+**Services modified:** `briefCreationService` (plug in classifier).
+
+**Exit gate:** `briefCreationService` uses the fast path; decisions logged; recalibration job runs nightly; simple-reply and cheap-answer routes return inline without invoking Orchestrator.
+
+### Phase 4 — Clarifying + Sparring Partner skills (W2)
+
+**Duration estimate:** 1 week
+
+**Scope:**
+- Migration `0UUU` (§6.2): Orchestrator masterPrompt updated with clarifying + challenge gates; `org_settings.clarifyingEnabled` + `sparringEnabled` columns added.
+- `askClarifyingQuestionsHandler.ts` + pure twin + tests (§6.2).
+- `challengeAssumptionsHandler.ts` + pure twin + tests (§6.2).
+- Registration in `actionRegistry.ts` + `skillExecutor.ts`.
+- `ClarifyingQuestionsCard` component (§8.3).
+- `ApprovalCard` enhanced to render challenge output inline.
+- `ChallengeAssumptionsPayload` type added to `shared/types/briefSkills.ts` (new shared types file).
+
+**Schema changes:** migration 0UUU (masterPrompt + org_settings columns).
+
+**Services introduced:** `askClarifyingQuestionsHandler`, `challengeAssumptionsHandler` + pure twins.
+
+**Exit gate:** Orchestrator threshold gates fire the skills when triggered; clarifying question UI appears and accepts user answers; challenge output appears on approval cards.
+
+### Phase 5 — Memory capture (§8.3.1 slash + library)
+
+**Duration estimate:** 1 week
+
+**Scope:**
+- Migration `0ZZZ` (§5.3): `memory_blocks` additions (`priority`, `is_authoritative`, `paused_at`, `deprecated_at`, `deprecation_reason`, `captured_via`, `quality_score` mirror) + `memory_blocks_paused_idx` + `memory_blocks_deprecated_idx`.
+- `ruleCaptureService.ts` (§6.3.2) — save path. Conflict detection is wired to a named no-op in `ruleConflictDetectorService.ts` (always returns empty conflicts in Phase 5); real LLM-backed detection replaces the implementation in Phase 6 behind the same signature.
+- `ruleLibraryService.ts` (new) — list / edit / pause / delete.
+- Routes `/api/rules` POST, GET, PATCH, DELETE (§7.6–7.9).
+- New permission keys: `rules.read`, `rules.write`, `rules.set_authoritative` added to `permissions.ts` (see §9.5).
+- `LearnedRulesPage` + `LearnedRulesTable` + `RuleEditDialog` + `RuleCaptureDialog` (§8.4–8.5).
+- `/remember` slash command handling in `BriefDetailPage` (§8.5).
+
+**Schema changes:** migration 0ZZZ.
+
+**Services introduced:** `ruleCaptureService`, `ruleLibraryService`.
+
+**Exit gate:** a user can `/remember` a rule in any Brief chat, see it in the Learned Rules library, edit / pause / delete it.
+
+### Phase 6 — Rule precedence + conflict detection (W3.5)
+
+**Duration estimate:** 1–2 weeks
+
+**Scope:**
+- `ruleConflictDetectorService.ts` + pure parser (§6.3.3).
+- `memoryBlockRetrievalServicePure.ts` (§6.3.6) — replaces ad-hoc retrieval with precedence algorithm.
+- `RuleConflictResolutionDialog.tsx` (§8.4).
+- Conflict detection wired into `ruleCaptureService.saveRule()` — `SaveRuleResult.conflicts` populated.
+- `memoryEntryQualityService` extended to also decay + prune `memory_blocks` alongside workspace entries (exclusive owner of `quality_score` mutations per Apr 22 addition).
+- Auto-deprecation nightly job `maintenance:rule-auto-deprecate`.
+- Existing Orchestrator context injection path updated to use precedence-aware retrieval.
+
+**Schema changes:** none new; Phase 5's migration already included the relevant columns.
+
+**Services introduced:** `ruleConflictDetectorService`, `memoryBlockRetrievalServicePure`, `ruleAutoDeprecateJob`.
+
+**Services modified:** `ruleCaptureService` (plugs conflict detector in), `memoryEntryQualityService` (extends to memory_blocks), existing orchestrator context assembly.
+
+**Exit gate:** conflict detection fires on rule save; user sees resolution dialog when conflicts detected; precedence-aware retrieval used by agents; auto-deprecation sweeps low-quality rules nightly.
+
+### Phase 7 — Approval-gate suggestion + teachability (W3b)
+
+**Duration estimate:** 1–2 weeks
+
+**Scope:**
+- `ruleTeachabilityClassifierPure.ts` (§6.3.4).
+- `ruleCandidateDrafter.ts` (§6.3.5).
+- `ApprovalSuggestionPanel` component (§8.6).
+- Migration `0TTT` (§14.1): `user_settings.suggestionFrequency` + `suggestionBackoffUntil` columns added.
+- Backoff logic integrated.
+- Per-user suggestion frequency setting in user preferences UI.
+- Conversation-scope expansion: agent-run-log chat (§8.7) — enables "why did you do this?" on specific execution logs.
+
+**Schema changes:** migration 0TTT (user_settings columns).
+
+**Services introduced:** `ruleTeachabilityClassifier`, `ruleCandidateDrafter`.
+
+**Exit gate:** approval cards surface "teach the system?" suggestion panel on teachable decisions; user can save a candidate rule; backoff triggers after consecutive skips; per-user preference honored.
+
+### Phase 8 — Provenance trail (W3c)
+
+**Duration estimate:** 2–3 weeks
+
+**Scope:**
+- Migration `0WWW` (§5.4): `agent_runs.applied_memory_block_ids` + `applied_memory_block_citations`.
+- `memoryBlockCitationDetectorPure.ts` (§6.3.7).
+- Context-assembly changes in `agentExecutionService.ts` — log injected block IDs into `applied_memory_block_ids`.
+- `memoryCitationDetector.scoreRun()` extension — populate `applied_memory_block_citations` post-completion.
+- Prompt-template changes — agents instructed to cite rules when acting on them.
+- `RulesAppliedPanel` component (§8.3).
+- Provenance rendered on agent output cards in the Brief chat.
+
+**Schema changes:** migration 0WWW.
+
+**Services introduced:** `memoryBlockCitationDetectorPure`.
+
+**Services modified:** `agentExecutionService` (context injection logging), `memoryCitationDetector` (extension).
+
+**Exit gate:** every agent output that used a `memory_block` surfaces "Rules applied: X, Y" with click-through to the Learned Rules library; citation rate per rule tracked.
+
+### Phase 9 — CRM Query Planner integration (cross-branch convergence)
+
+**Duration estimate:** Coordination, ~days of work
+
+**Scope:**
+- CRM Query Planner ships its v1 on the separate branch as a dedicated "Ask CRM" panel.
+- When this branch's universal Brief surface is ready, the Planner is registered as a capability the Orchestrator can route to.
+- **CRM Planner harness adoption.** The Planner's test suite imports `briefContractTestHarness` and adds its emitted-artefact assertions — done as part of Phase 9 convergence work, not earlier. (Phase 0 only requires the local synthetic fixture — see §12.2.)
+- Contract compatibility already ensured — both branches developed against `docs/brief-result-contract.md`.
+
+**Schema changes:** none from this branch.
+
+**Services introduced:** none (the Planner's service implementation ships in the other branch).
+
+**Exit gate:** a user typing "show me VIP contacts inactive 30 days" into `GlobalAskBar` gets a `BriefStructuredResult` rendered in the Brief chat, sourced from the CRM Query Planner.
+
+### Phase dependency graph
+
+```
+P0 (foundation)
+  └─ P1 (Brief entity + validator wiring)
+       └─ P2 (universal entry + conversations)
+            ├─ P3 (fast path)
+            │    └─ P4 (clarify + spar)
+            └─ P5 (memory capture + library)
+                 └─ P6 (precedence + conflict)  ← hard gate on W3b and W3c
+                      └─ P7 (approval suggestion)
+                           └─ P8 (provenance)
+
+P9 (CRM Planner convergence) — can start after P2 lands; independent of P3–P8
+```
+
+**Hard gates:**
+- P0 → P1: validator must exist before any artefact flows.
+- P5 → P6: capture must ship before conflict detection (conflict detection operates on captured rules).
+- P6 → P7 + P8: precedence + conflict MUST land before approval-gate suggestion scales and before provenance trail — both depend on a coherent rule substrate.
+
+**Parallelism:**
+- P3 + P4 + P5 can run with different owners after P2 lands.
+- P9 runs throughout; convergence point is any time after P2.
+
+## 12. Testing plan
+
+Per `docs/spec-context.md::testing_posture: static_gates_primary` + `runtime_tests: pure_function_only`. No frontend unit tests, no API contract tests, no E2E against the app, no performance baselines until production.
+
+### 12.1 Pure-function tests (the primary testing tier)
+
+Every pure module gets a companion `*.test.ts` alongside it. The list of pure modules:
+
+**Server-side:**
+- `server/services/chatTriageClassifierPure.test.ts` — tier 1 heuristic accuracy; config-threshold behaviour; scope detection; risk-aware second-look trigger conditions; keyword matching edge cases.
+- `server/services/briefArtefactValidatorPure.test.ts` — every validation rule; discriminated-union edge cases; orphan-parent handling; duplicate-tip detection.
+- `server/services/briefArtefactBackstopPure.test.ts` — ID-scope leak detection; aggregate-invariant checks; pass / fail classifications.
+- `server/services/memoryBlockRetrievalServicePure.test.ts` — precedence algorithm deterministic output for all scope combinations; authoritative tier winning correctly; paused / deprecated exclusion.
+- `server/services/ruleTeachabilityClassifierPure.test.ts` — novelty scoring; backoff logic; config-threshold behaviour.
+- `server/services/memoryBlockCitationDetectorPure.test.ts` — citation scoring against synthetic agent outputs.
+- `server/tools/capabilities/askClarifyingQuestionsHandlerPure.test.ts` — output validation (≤5 questions, lengths, confidence monotonicity).
+- `server/tools/capabilities/challengeAssumptionsHandlerPure.test.ts` — output validation (≤5 items, severity roll-up consistency).
+- `server/services/ruleConflictDetectorPure.test.ts` (i.e. `parseConflictReportPure`) — LLM-output validation + shape.
+
+**Client-side:**
+- `client/src/lib/briefArtefactLifecyclePure.test.ts` — tip resolution; orphan handling; out-of-order updates; multi-chain scenarios.
+- `client/src/components/brief-artefacts/StructuredResultCardPure.test.ts` — column rendering by type; formatter behaviour for each `type` variant.
+- `client/src/components/brief-artefacts/ApprovalCardPure.test.ts` — risk-level → UI treatment mapping; confidence threshold rendering.
+
+### 12.2 Contract-test harness coverage
+
+Every capability that emits artefacts into the Brief system runs the §6.4 test harness assertions as part of its own test suite. Phase 0 ships a local synthetic fixture at `server/lib/__tests__/briefContractTestHarness.example.test.ts` demonstrating each assertion type — no cross-branch dependency. CRM Query Planner's adoption of the harness is coordinated under Phase 9 (convergence), not Phase 0.
+
+Harness assertions:
+- `assertValidArtefact` — schema validity
+- `assertValidChain` — lifecycle chain integrity + single-active-tip
+- `assertRlsScope` — ID scope + aggregate invariants
+- `assertRelatedArtefactIntegrity` — no forward / broken references
+- `assertCanonicalFlowCoverage` — emitted chain matches one of the three canonical flows from brief §9
+
+### 12.3 Integration-test posture
+
+Per framing: API-contract tests, E2E tests, and supertest are explicitly deferred. No `*.integration.test.ts` files added for this spec. Any behaviour that's too complex for a pure test is redesigned until the pure test suffices.
+
+**One exception** accepted in `docs/spec-context.md`: `server/services/__tests__/rls.context-propagation.test.ts` — the integration test harness for Layer B RLS default-deny posture. New tables added here (`conversations`, `conversation_messages`, `fast_path_decisions`) must be covered by this existing harness. This is an extension, not a new test file.
+
+### 12.4 Static gates
+
+All new code passes:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build` (for client changes)
+- `scripts/gates/verify-rls-coverage.sh` — must pass after every migration adds a tenant table
+- `scripts/gates/verify-rls-contract-compliance.sh` — must pass (no direct DB access bypassing RLS)
+- `scripts/verify-no-direct-adapter-calls.sh` — any LLM call routes through `llmRouter.routeCall`
+
+### 12.5 Explicit test-plan deviations vs framing
+
+Per `docs/spec-context.md::convention_rejections`: this spec proposes NO vitest / playwright / supertest / frontend-unit tests / cross-tenant-drift-detection for own app. All tests are pure functions or extensions of the existing RLS integration harness.
+
+**Framing acknowledgment:** the contract test harness (§6.4) is not a framing deviation — it's a capability-test utility that runs inside pure tests, not an integration harness.
+
+---
+
+## 13. Deferred items
+
+Deferred to a future session or explicit non-goal of this spec. Listed here so prose mentions elsewhere don't imply in-scope deliverables.
+
+- **Dedicated artefact table.** V1 stores full `BriefChatArtefact` blobs inline on `conversation_messages.artefacts` (JSONB array). A dedicated `brief_artefacts` table with its own RLS + indexes is deferred — YAGNI until query patterns demand it. Rationale: in v1, artefacts are small and always retrieved with their conversation message; the extra table adds maintenance without clear value.
+- **Port existing `agent_conversations` to `conversations`.** Dual-table during v1. A future migration rolls agent chats onto the new table; deferred because the existing agent chat surface works and porting risks regressions without benefit.
+- **Multi-user Brief ownership.** A team member picking up a colleague's Brief. Schema allows (`submittedByUserId` is the only user-FK; others infer access from scope). UI for handoff deferred.
+- **Streaming / progressive result rendering.** Per brief non-goals, v1 is one-shot artefacts per turn. Streaming would be an additive `status: 'streaming'` variant with a terminal frame.
+- **Multi-turn clarification beyond 2 rounds.** Orchestrator's loop guard forces a best-guess proceed with low-confidence flag after 2 rounds. Deeper interrogation deferred.
+- **Per-filter confidence on `filtersApplied`.** Rev 2 feedback suggested; rev 3 rejected — artefact-level `confidence` is sufficient for v1.
+- **Hybrid sparring outputs** (challenge + suggested alternative approach together). v1: challenge surfaces concerns; approval alternatives come from suggestions in the underlying structured result. Coupled alternative generation deferred.
+- **Fully automatic fast-path threshold tuning.** V1: nightly recalibration sweep emits structured logs; a human reviews weekly for the first month. Automatic tuning deferred until drift patterns are understood.
+- **Cross-org Brief visibility / super-admin observability.** System-scope Briefs are visible to system admins within the scope; cross-org comparisons and multi-tenancy observability tools deferred.
+- **Conversation scopes beyond the v1 four.** Recurring task, playbook run, proposal/approval card, subaccount, canonical-entity chats — all deferred. Schema is polymorphic so additions are one enum value + one handler.
+- **Port existing memory admin UI to the new library page.** The admin review queue (`MemoryReviewQueuePage`) continues to serve auto-synthesised memory governance. The Learned Rules library is user-facing and separate. Unifying later, post-usage data.
+- **User-triggered rule A/B testing.** "Should this rule be a blanket policy or scope-limited?" deferred — UX is "user picks scope explicitly" for v1.
+- **System-scoped user-captured rules.** `RuleScope` is `subaccount | agent | org` in v1 (§4.6). System-scoped user rules (platform-wide, authored by system admins) are not modelled in the v1 contract, retrieval path, or UI. Adding them would require extending `RuleScope`, the candidate-pool scoping in the conflict detector (§6.3.3), and the precedence algorithm (§5.3). Deferred until a real user need surfaces.
+- **`verify-conversation-message-denorm.sh` static gate.** The denormalisation of `organisationId` + `subaccountId` from `conversations` into `conversation_messages` is enforced service-side by routing all writes through `briefConversationWriter` (§5.1 denormalisation invariant). A static gate that greps for any other insert into `conversation_messages` (and fails if it doesn't reference the writer) is a hardening task, deferred until Phase 2 ships.
+- **CRM Query Planner implementation.** Covered by a separate spec on a separate branch (see §13 of the dev brief + §3.2 of this spec).
+- **Embedded charts / time-series rendering in Brief chat.** V1 renders tables via `columns`; chart rendering (e.g., pipeline velocity over time) deferred. May require contract extension for chart kinds.
+
+**None** of the following are deferred — they are in-scope for this spec and listed elsewhere:
+- Four v1 conversation scopes (Brief, Agent, Task, Agent-run log) — in P2 + P7.
+- Rule precedence + conflict detection (W3.5) — in P6.
+- Provenance trail (W3c) — in P8.
+- Retrieval audit (W4) — in P0.
+
+## 14. File inventory
+
+Complete manifest of files this spec touches, grouped by phase. Every file referenced in prose above is cross-checked against this inventory.
+
+### 14.1 New files
+
+**Shared types:**
+- `shared/types/briefFastPath.ts` (Phase 2 — types only; `BriefUiContext`, `FastPathDecision`, `FastPathRoute`, `BriefScope`. The classifier behaviour lands in Phase 3 and imports `BriefUiContext` from this file; Phase 2 emits a stub decision — see §6.3.1)
+- `shared/types/briefSkills.ts` (Phase 4) — `ClarifyingQuestionsPayload`, `ChallengeAssumptionsPayload`, `ClarifyingQuestion`, `ChallengeItem`
+- `shared/types/briefRules.ts` (Phase 5) — `RuleScope`, `RuleCaptureRequest`, `RuleConflictReport`, `RuleConflict`
+
+**Migrations:**
+- `migrations/0XXX_conversations_polymorphic.sql` (Phase 2) — `conversations`, `conversation_messages`, RLS policies, `rlsProtectedTables` entries
+- `migrations/0YYY_tasks_brief_lifecycle.sql` (Phase 1) — `org_settings.agentPersonaLabel` (only schema change; tasks.status is value-level only)
+- `migrations/0ZZZ_memory_blocks_precedence_and_deprecation.sql` (Phase 5) — memory_blocks additions + `memory_blocks_paused_idx` + `memory_blocks_deprecated_idx`
+- `migrations/0WWW_agent_runs_applied_memory_blocks.sql` (Phase 8) — `applied_memory_block_ids`, `applied_memory_block_citations`
+- `migrations/0VVV_fast_path_decisions.sql` (Phase 3) — `fast_path_decisions` table + RLS
+- `migrations/0UUU_orchestrator_clarify_challenge_gates.sql` (Phase 4) — Orchestrator masterPrompt update + `org_settings.clarifyingEnabled`, `sparringEnabled`
+- `migrations/0TTT_user_settings_suggestion_frequency.sql` (Phase 7) — `user_settings.suggestionFrequency`, `user_settings.suggestionBackoffUntil`
+
+**Server services:**
+- `server/services/briefCreationService.ts` (Phase 2)
+- `server/services/briefConversationWriter.ts` (Phase 2) — single write-path into `conversation_messages`; runs validator + backstop + emits websocket events
+- `server/services/conversationService.ts` (Phase 2)
+- `server/services/briefSimpleReplyGeneratorPure.ts` (Phase 3) — deterministic canned-response generator for `simple_reply` / `cheap_answer` fast-path routes
+- `server/services/chatTriageClassifier.ts` (Phase 3)
+- `server/services/chatTriageClassifierPure.ts` (Phase 3)
+- `server/services/fastPathDecisionLogger.ts` (Phase 3)
+- `server/services/briefArtefactValidator.ts` (Phase 0)
+- `server/services/briefArtefactValidatorPure.ts` (Phase 0)
+- `server/services/briefArtefactBackstop.ts` (Phase 0)
+- `server/services/briefArtefactBackstopPure.ts` (Phase 0)
+- `server/services/ruleCaptureService.ts` (Phase 5)
+- `server/services/ruleLibraryService.ts` (Phase 5)
+- `server/services/ruleConflictDetectorService.ts` (Phase 5: no-op stub; Phase 6: LLM-backed implementation swapped in at the same import site)
+- `server/services/ruleConflictDetectorServicePure.ts` (Phase 6 — pure parser for LLM output, only meaningful once the stub is replaced)
+- `server/services/memoryBlockRetrievalServicePure.ts` (Phase 6)
+- `server/services/ruleTeachabilityClassifierPure.ts` (Phase 7)
+- `server/services/ruleCandidateDrafter.ts` (Phase 7)
+- `server/services/memoryBlockCitationDetectorPure.ts` (Phase 8)
+- `server/tools/capabilities/askClarifyingQuestionsHandler.ts` (Phase 4)
+- `server/tools/capabilities/askClarifyingQuestionsHandlerPure.ts` (Phase 4)
+- `server/tools/capabilities/challengeAssumptionsHandler.ts` (Phase 4)
+- `server/tools/capabilities/challengeAssumptionsHandlerPure.ts` (Phase 4)
+
+**Server jobs:**
+- `server/jobs/fastPathRecalibrateJob.ts` (Phase 3) — registered as `maintenance:fast-path-recalibrate`
+- `server/jobs/fastPathDecisionsPruneJob.ts` (Phase 3) — registered as `maintenance:fast-path-decisions-prune`
+- `server/jobs/ruleAutoDeprecateJob.ts` (Phase 6) — registered as `maintenance:rule-auto-deprecate`
+
+**Server libraries:**
+- `server/lib/briefContractTestHarness.ts` (Phase 0)
+- `server/lib/briefVisibility.ts` (Phase 2) — exports `resolveBriefVisibility(briefId, principal)` mirroring `resolveAgentRunVisibility`; used by the WebSocket room-join guard (§7.3) and the Brief routes (§7.2, §7.4)
+
+**Server routes:**
+- `server/routes/briefs.ts` (Phase 2)
+- `server/routes/conversations.ts` (Phase 2) — generic conversation-message endpoints + WebSocket room for Task / Agent-run-log scopes (§7.12)
+- `server/routes/rules.ts` (Phase 5)
+
+**Server schema (Drizzle):**
+- `server/db/schema/conversations.ts` (Phase 2) — exports both the `conversations` and `conversationMessages` Drizzle table definitions
+- `server/db/schema/fastPathDecisions.ts` (Phase 3)
+
+**Server tests (pure):**
+- `server/services/__tests__/briefArtefactValidatorPure.test.ts` (Phase 0)
+- `server/services/__tests__/briefArtefactBackstopPure.test.ts` (Phase 0)
+- `server/lib/__tests__/briefContractTestHarness.test.ts` (Phase 0)
+- `server/lib/__tests__/briefContractTestHarness.example.test.ts` (Phase 0) — local synthetic capability fixture exercising every harness assertion (§12.2)
+- `server/services/__tests__/chatTriageClassifierPure.test.ts` (Phase 3)
+- `server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts` (Phase 4)
+- `server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts` (Phase 4)
+- `server/services/__tests__/memoryBlockRetrievalServicePure.test.ts` (Phase 6)
+- `server/services/__tests__/ruleConflictDetectorPure.test.ts` (Phase 6)
+- `server/services/__tests__/ruleTeachabilityClassifierPure.test.ts` (Phase 7)
+- `server/services/__tests__/memoryBlockCitationDetectorPure.test.ts` (Phase 8)
+
+**Client:**
+- `client/src/pages/BriefDetailPage.tsx` (Phase 2)
+- `client/src/pages/LearnedRulesPage.tsx` (Phase 5)
+- `client/src/components/global-ask-bar/GlobalAskBar.tsx` (Phase 2)
+- `client/src/components/global-ask-bar/GlobalAskBarPure.ts` (Phase 2)
+- `client/src/components/brief-artefacts/StructuredResultCard.tsx` (Phase 2)
+- `client/src/components/brief-artefacts/StructuredResultCardPure.ts` (Phase 2)
+- `client/src/components/brief-artefacts/ApprovalCard.tsx` (Phase 2 basic, Phase 4 sparring integration)
+- `client/src/components/brief-artefacts/ApprovalCardPure.ts` (Phase 2)
+- `client/src/components/brief-artefacts/ErrorArtefactCard.tsx` (Phase 2)
+- `client/src/components/brief-artefacts/ClarifyingQuestionsCard.tsx` (Phase 4)
+- `client/src/components/brief-artefacts/RulesAppliedPanel.tsx` (Phase 8)
+- `client/src/components/brief-artefacts/ConfidenceBadge.tsx` (Phase 2)
+- `client/src/components/brief-artefacts/BudgetContextStrip.tsx` (Phase 2)
+- `client/src/components/brief-artefacts/ApprovalSuggestionPanel.tsx` (Phase 7)
+- `client/src/components/learned-rules/LearnedRulesTable.tsx` (Phase 5)
+- `client/src/components/learned-rules/RuleEditDialog.tsx` (Phase 5)
+- `client/src/components/learned-rules/RuleCaptureDialog.tsx` (Phase 5)
+- `client/src/components/learned-rules/RuleConflictResolutionDialog.tsx` (Phase 6)
+- `client/src/components/task-chat/TaskChatPane.tsx` (Phase 2)
+- `client/src/components/agent-run-chat/AgentRunChatPane.tsx` (Phase 7)
+- `client/src/lib/briefArtefactLifecycle.ts` (Phase 1)
+- `client/src/lib/briefArtefactLifecyclePure.ts` (Phase 1)
+- `client/src/components/BriefLabel.ts` (Phase 1)
+
+**Client tests (pure):**
+- `client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts` (Phase 1)
+- `client/src/components/brief-artefacts/__tests__/StructuredResultCardPure.test.ts` (Phase 2)
+- `client/src/components/brief-artefacts/__tests__/ApprovalCardPure.test.ts` (Phase 2)
+
+**Documents (deliverables):**
+- `tasks/research-questioning-retrieval-audit.md` (Phase 0) — retrieval audit findings
+
+### 14.2 Modified files
+
+**Server services (existing, modified):**
+- `server/services/agentExecutionService.ts` (Phase 1 validator wiring + Phase 8 context injection logging)
+- `server/services/memoryEntryQualityService.ts` (Phase 6 — extended to also decay / prune `memory_blocks`)
+- `server/services/memoryCitationDetector.ts` (Phase 8 — extended to score memory_blocks)
+- `server/services/queueService.ts` (Phase 3 + Phase 6 — register new maintenance jobs)
+- `server/config/actionRegistry.ts` (Phase 4 — register clarifying + challenge skills)
+- `server/services/skillExecutor.ts` (Phase 4 — register skills)
+- `server/config/rlsProtectedTables.ts` (Phases 2 + 3 — new tables added)
+
+**Server DB schema (existing files, modified):**
+- `server/db/schema/tasks.ts` (Phase 1 — `status` value expansion documented via Drizzle enum literal or `text` accepted values; no migration-level column change)
+- `server/db/schema/memoryBlocks.ts` (Phase 5 — `priority`, `is_authoritative`, `paused_at`, `deprecated_at`, `deprecation_reason`, `captured_via`, `quality_score` columns)
+- `server/db/schema/agentRuns.ts` (Phase 8 — `applied_memory_block_ids`, `applied_memory_block_citations`)
+- `server/db/schema/orgSettings.ts` (Phase 1 — `agentPersonaLabel`; Phase 4 — `clarifyingEnabled`, `sparringEnabled`)
+- `server/db/schema/userSettings.ts` (Phase 7 — `suggestionFrequency`, `suggestionBackoffUntil`)
+
+**Server libraries (existing, modified):**
+- `server/lib/permissions.ts` (Phase 2 — `briefs.read`, `briefs.write`; Phase 5 — `rules.read`, `rules.write`, `rules.set_authoritative`)
+- `server/websocket/emitters.ts` (Phase 2 — `brief-artefact:new`, `brief-artefact:updated`)
+- `server/websocket/rooms.ts` (Phase 2 — `brief:${briefId}` room join guard)
+
+**Client (existing, modified):**
+- `client/src/App.tsx` (Phase 2 + Phase 5 — new routes `/briefs/:briefId`, `/rules`)
+- `client/src/components/Layout.tsx` (Phase 2 — `GlobalAskBar` placement)
+- Existing "New Issue" dialog renamed + moved to `NewBriefDialog.tsx` (Phase 1)
+
+**Docs:**
+- `docs/capabilities.md` (Phase 4 — Skills Reference entries for clarifying + sparring; Phase 5 — Product Capabilities entry for Brief surface)
+- `architecture.md` (Phase 1 + Phase 2 — Brief entity + conversation scopes)
+- `CLAUDE.md` Key-files table (ongoing — add rows for each new major file as it lands)
+
+### 14.3 Cross-branch artefacts (not modified here, but referenced)
+
+- `shared/types/briefResultContract.ts` (already merged to main — rev 5)
+- `docs/brief-result-contract.md` (already merged to main — rev 5)
+- CRM Query Planner files (separate branch, out of this spec's scope)
+
+---
+
+## 15. Risks & mitigations
+
+### 15.1 Classifier producing high-confidence wrong routes
+
+**Risk:** tier 1 heuristic returns `confidence: 0.95` on a misclassified write intent, skipping tier 2 verification, dispatching straight to Orchestrator with wrong scope.
+
+**Mitigation:**
+- Risk-aware second-look (§6.1) forces tier 2 confirmation on any `needs_orchestrator` route with a write-intent keyword, regardless of tier 1 confidence.
+- Shadow-eval logging (§5.5) captures every classification with downstream outcome; weekly review during the first month detects drift patterns.
+- Recalibration job surfaces tuning candidates.
+
+**Residual risk:** low. The second-look forces LLM verification on the class of actions most sensitive to misclassification.
+
+### 15.2 Rule conflict detection producing false negatives
+
+**Risk:** conflict detector misses a genuine overlap at save time; both rules persist; agent behaviour becomes inconsistent.
+
+**Mitigation:**
+- Precedence algorithm (§6.3.6) resolves ambiguity at retrieval time even when conflicts exist — deterministic tie-breaker (authoritative tier > scope specificity > priority > recency; see §5.3 for the full 7-step algorithm).
+- Weekly admin digest (deferred beyond v1) would surface rules whose precedence is ambiguous; for v1, rule library surfaces all rules so admins can spot redundancy.
+
+**Residual risk:** medium. LLM-based detection is inherently lossy. The precedence algorithm is the safety net.
+
+### 15.3 Memory-block injection context-bloat
+
+**Risk:** many user-captured rules + existing auto-synthesised blocks produce a context that exceeds token budget.
+
+**Mitigation:**
+- Precedence-based ranking (§6.3.6) applied at retrieval — top-N cap before injection.
+- Existing `memoryEntryQualityService` decay + prune extends to memory_blocks (Phase 6).
+- Auto-deprecation (Phase 6) removes unused rules from retrieval automatically.
+
+**Residual risk:** low once Phase 6 ships; higher if Phase 5 ships without Phase 6 (which is why P6 is a hard gate on P7 + P8).
+
+### 15.4 Orphan `parentArtefactId` references
+
+**Risk:** capability emits an artefact with `parentArtefactId` pointing to a non-existent artefact; chain resolution breaks.
+
+**Mitigation:**
+- Orchestrator's `briefArtefactValidator` logs and accepts orphans as new chain roots (§6.4 + brief §12.3).
+- User-visible behaviour: orphan renders normally (no error), structured log captures the producer's bug for later review.
+
+**Residual risk:** low. Orphans are recoverable; producers get caught in review logs.
+
+### 15.5 Out-of-order execution updates
+
+**Risk:** `executionStatus: 'running'` arrives after `executionStatus: 'completed'` due to async message ordering; chain becomes incoherent.
+
+**Mitigation:**
+- Tip rule + terminal-state stickiness (brief §12.3): terminal states (`completed`, `failed`) are sticky; late arrivals of intermediate states are logged and ignored.
+- `resolveLifecyclePure` (§6.5) deterministically resolves the tip regardless of arrival order.
+
+**Residual risk:** low.
+
+### 15.6 Approval card dispatching an action that fails backstop
+
+**Risk:** approval card's `actionArgs` contains record IDs outside the caller's scope; dispatch succeeds but returns failure at RLS enforcement; user sees confusing "action failed" with no explanation.
+
+**Mitigation:**
+- `briefArtefactBackstop` (§6.4) runs on approval-card emission, not just on structured result. Out-of-scope IDs fail closed before the card is even rendered.
+
+**Residual risk:** very low — the backstop runs pre-render.
+
+### 15.7 Fast-path tier 2 Haiku model unavailability
+
+**Risk:** tier 2 Haiku call fails (model down, rate-limited, budget exceeded); fast path falls back to tier 1's low-confidence output.
+
+**Mitigation:**
+- Low-confidence tier 1 output routes to `needs_clarification` — safe fallback, asks user to clarify rather than guessing.
+- `runCostBreaker` guards against budget blow-up; `llmRouter` retry + fallback already handles transient failures.
+
+**Residual risk:** low; graceful degradation path exists.
+
+### 15.8 Cross-branch contract drift
+
+**Risk:** CRM Query Planner branch and this spec land at different contract versions without realising; integration at P9 breaks.
+
+**Mitigation:**
+- Contract versioning (`contractVersion`) both globally and per-artefact lets consumers detect drift at runtime.
+- Contract is locked on main; both branches pull from the same source.
+- Phase 9 convergence task explicitly validates CRM Planner's artefact output against this spec's backstop + validator.
+
+**Residual risk:** low if contract is not modified during this spec's implementation; medium if modifications happen during implementation (discouraged; emergency changes go through separate PR against main + notification to both branches).
+
+---
+
+## 16. Open questions
+
+These are implementation-level questions this spec does not resolve; they're expected to be answered during the respective phase's implementation.
+
+**16.1 Exact Haiku-tier model selection for fast path tier 2 and conflict detector.**
+The spec says "Haiku-tier" but doesn't pin a specific model. Selection happens during Phase 3 / Phase 6 implementation, likely configured via `llmRouter`'s existing model-registry. Worth confirming that the chosen model's structured-output reliability is acceptable at the budget cap.
+
+**16.2 Exact threshold values for fast-path classifier (`tier1ConfidenceThreshold`, `riskySecondLookRoutes`, keyword lists).**
+Starting values in §6.1 are educated guesses. Real tuning happens post-launch from shadow-eval logs. Open question: do we seed the keyword lists with a production-ready first cut, or ship intentionally conservative and tune up?
+
+**16.3 Exact challenge-gate thresholds (`CHALLENGE_COST_THRESHOLD_CENTS`, `CHALLENGE_SCOPE_THRESHOLD`).**
+§6.2 proposes 20 cents and 10 records; these are illustrative. Real thresholds should align with agency-use cost expectations; may be org-configurable.
+
+**16.4 `columns` rendering interaction with existing canonical entity views.**
+When a structured result's `entityType` matches a canonical entity, should the UI offer a "view in dashboard" link? Phase 2 decides.
+
+**16.5 Exact WebSocket event shape for `brief-artefact:updated`.**
+Message envelope design (what goes in the room broadcast vs fetched separately) decided in Phase 2.
+
+**16.6 Learned Rules library pagination + performance.**
+For orgs with thousands of rules, library performance matters. Default: cursor-based pagination on `created_at DESC`. Tuning deferred to Phase 5 implementation.
+
+**16.7 Conflict-detector false-positive rate.**
+Rev 3 accepted that the detector should bias toward false-positives (flag more, resolve interactively) to avoid silent conflicts. Actual rate will be known post-launch. Tuning loop deferred.
+
+**16.8 `confidenceSource` taxonomy evolution.**
+The taxonomy is `'llm' | 'heuristic' | 'deterministic'`. Rev 4 introduced this. Whether additional values ("hybrid", "user_override") emerge is a post-launch question.
+
+**16.9 `budgetContext.window` interaction with multiple overlapping budgets.**
+If both per-run AND per-day budgets are active, which does `budgetContext` report? Spec answers: populate the most constraining budget (lowest `remainingCents`). Implementation-level decision — confirm during Phase 2.
+
+**16.10 UI treatment for `status: 'invalidated'` vs `status: 'updated'`.**
+Both supersede a predecessor; both are currently treated via "in-place replace + history." Should invalidated artefacts have a distinct visual treatment (red stale badge on the predecessor)? Phase 1 decides UX.
+
+---
+
+## 17. Success criteria
+
+The spec is deliverable-ready for `spec-reviewer` when all of the following hold. Every capability implementer reviews this list at PR time.
+
+### Structural
+
+- [ ] Every new primitive has a "why not reuse" paragraph above or inline (covered by §6.1, §6.3, §5.1, §5.5).
+- [ ] Every new file / column / migration / endpoint is in the file inventory (§14).
+- [ ] Every data shape crossing a service boundary has a Contracts entry with an example (§4).
+- [ ] Every new tenant-scoped table has RLS policy + manifest entry + route guard + principal-scoped context (§9).
+- [ ] Execution model (sync / async / cached) picked explicitly per operation (§10).
+- [ ] Phase dependency graph has no backward references; hard gates explicit (§11).
+- [ ] `## Deferred Items` section exists and lists every "deferred / later / future" prose mention (§13).
+- [ ] Testing plan consistent with `docs/spec-context.md` framing — pure-function only + RLS integration extension (§12).
+
+### Behavioural
+
+- [ ] A user can type free text in the global ask bar, get a response from their COO, and know whether that response is certain (confidence surfaces in UI).
+- [ ] Every LLM-interpreted artefact emits `confidence`; every deterministic artefact omits it with intent.
+- [ ] Every approval card dispatches through `actionRegistry`; none bypass the review gate.
+- [ ] Every emitted artefact has an `artefactId` and survives the validator.
+- [ ] Every chain has exactly one tip renderable; predecessors are history.
+- [ ] Every rule capture goes through the conflict-detector call site (Phase 5: no-op stub always returns empty; Phase 6 onward: real LLM-backed detection).
+- [ ] Every agent output that used a memory_block surfaces provenance (Phase 8 onward).
+- [ ] RLS scope leaks are caught at either the capability layer or the orchestrator backstop.
+
+### Operational
+
+- [ ] Shadow-eval logs populated from day one of Phase 3; reviewed weekly for the first month.
+- [ ] `fast_path_decisions` retention prune runs daily.
+- [ ] Rule auto-deprecation runs nightly from Phase 6 onward.
+- [ ] Every new maintenance job appears in `queueService.ts` and survives a node restart.
+- [ ] Cost breaker + in-flight registry + cost ledger track every LLM call made by this spec's code paths.
+
+### Cultural
+
+- [ ] Every capability implementer has read brief §12 (implementation guidance) + §12.5 (anti-patterns).
+- [ ] Every capability's tests import from `briefContractTestHarness` and pass all assertions.
+- [ ] Every PR against this spec cites specific sections it implements; reviewers check against the brief's non-goals.
+
+---
+
+*End of development spec.*
+

@@ -181,7 +181,7 @@ Subaccount Agent (subaccountAgents table)
 |--------|--------------------|
 | `skillSlugs` | Per-link skill list. `null` means "inherit the agent's `defaultSkillSlugs`"; an array replaces it entirely. The skill picker (`SkillPickerSection`) shows org skills and system skills side by side. |
 | `customInstructions` | Appended to the agent's `additionalPrompt` at run time. Scoped per subaccount — lets an org agent speak the subaccount's language without org-wide edits. Max 10 000 chars. |
-| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). |
+| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). Callers: Slack + Whisper via `assertWithinRunBudget` (cost_aggregates rollup); the LLM router via the direct-ledger sibling `assertWithinRunBudgetFromLedger` (reads `llm_requests` to avoid aggregation lag — Hermes Tier 1 Phase C, `tasks/hermes-audit-tier-1-spec.md` §7.4.1). |
 | `heartbeatEnabled` / `heartbeatIntervalHours` / `heartbeatOffsetMinutes` | Per-subaccount schedule. Overrides the org agent's heartbeat so different clients can run at different cadences / offsets. |
 | `scheduleCron` / `scheduleEnabled` / `scheduleTimezone` | Cron-based schedule (alternative to heartbeat interval). Schedule changes go through `agentScheduleService.updateSchedule` — **never mutate these columns directly**, or the pg-boss cron registration drifts from the DB. |
 | `concurrencyPolicy` / `catchUpPolicy` / `catchUpCap` / `maxConcurrentRuns` | Concurrency and missed-run behaviour for the scheduler. |
@@ -522,6 +522,168 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 - `agent_runs.plan` (migration 0089) — structured plan field for the agent planning phase
 - `agents.complexity_hint` (migration 0090) — agent complexity classification for execution routing
 
+### Live Agent Execution Log (migration 0192 / spec: tasks/live-agent-execution-log-spec.md)
+
+Per-run timeline of every material agent decision — prompt assembly, context-source load, memory retrieval, rule evaluation, skill invocation, LLM call bookends, handoff, clarification, lifecycle start/end. Three new tables:
+
+- `agent_execution_events` — durable typed event log, keyed `UNIQUE (run_id, sequence_number)`. Sequence allocation is atomic against `agent_runs.next_event_seq` via a single `UPDATE … RETURNING` — no MAX scan. Every event carries `source_service`, `duration_since_run_start_ms`, an event-typed `payload jsonb`, and optional `linked_entity_{type,id}` (null-together, enforced by both the service validator and a DB `CHECK` constraint as belt-and-braces). `permissionMask` is **never persisted** — it's computed at read time from the caller's current permissions, closing the privilege-drift hazard where a revoked grant would still read `canEdit: true` on historical rows.
+- `agent_run_prompts` — fully-assembled `system_prompt` + `user_prompt` + `tool_definitions` + `layer_attributions` per run assembly. Closes the audit gap where only `systemPromptTokens` (count, not content) was persisted. Surrogate `id uuid PK` lets `agent_execution_events.linked_entity_id` point at prompts like any other entity; the `(run_id, assembly_number)` UNIQUE is still the drilldown key.
+- `agent_run_llm_payloads` — full request + response per `llm_requests.id` (1:1). Keyed by `llm_request_id`; carries a nullable denormalised `run_id` FK to `agent_runs` (null for non-agent callers — skill-analyzer, config assistant) for cheap per-run scans. Written through the redaction → tool-policy → size-cap pipeline in `server/services/agentRunPayloadWriter.ts::buildPayloadRow`. Defence-in-depth: pattern-based redaction in `server/lib/redaction.ts` scrubs bearer tokens + common secret shapes; per-tool `payloadPersistencePolicy: 'full' | 'args-redacted' | 'args-never-persisted'` lets credential-handling skills opt into stricter persistence. `redacted_fields` records pattern hits; `modifications` records everything else (truncation, tool-policy substitution) with original field sizes. Hard per-row cap at `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (1 MB default) with greatest-first truncation — TOAST compresses what's left transparently.
+
+Sequence-allocation semantics:
+
+- **Critical events** (`run.started` / `run.completed` / `llm.requested` / `llm.completed` / `handoff.decided` / `run.event_limit_reached`) bypass the cap — a lifecycle bookend always emits. `run.started` is **awaited** (`emitAgentEvent`, not `tryEmitAgentEvent`) so it always claims `sequence_number = 1` before any later emission can steal a lower number. Exactly-one retry with fixed 50 ms backoff on transient DB failure; persistent failure increments `agent_exec_log.critical_drops_total` and never fails the agent run.
+- **Non-critical events** use the `next_event_seq < AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN` guard in the `UPDATE`. Over the cap: drop + metric increment + one-shot `run.event_limit_reached` signal via atomic-claim on `agent_runs.event_limit_reached_emitted`. The claim + the signal-event insert run inside a single `tx.transaction(...)` so a DB failure on the insert rolls back the claim and allows a retry rather than losing the signal permanently.
+- **Orchestrator dispatch ordering.** `orchestrator.routing_decided` is emitted **inside `executeRun`** (sequence 2, immediately after `run.started`) rather than from the dispatch job after awaiting the run to completion — the earlier shape put the event after `run.completed` on the dispatched run's timeline, breaking the "timeline represents actual execution order" invariant. The job passes an `orchestratorDispatch` field on `AgentRunRequest` to signal the emit.
+
+Visibility model (spec §7):
+
+- View gate (`canView`) inherits from `ORG_PERMISSIONS.AGENTS_VIEW` at the run's tier; subaccount membership is enforced upstream via `resolveSubaccount`. Single-source-of-truth resolver: `server/lib/agentRunVisibility.ts::resolveAgentRunVisibility`.
+- Payload-read gate (`canViewPayload`) tightens to `AGENTS_EDIT` — raw system prompts + tool inputs can carry secrets past redaction, so the audience is the narrower "agent-editor" set. Redaction is defence-in-depth, not a security boundary.
+- Per-event edit links inherit from each linked entity's existing edit permission (WORKSPACE_MANAGE, SKILLS_MANAGE, AGENTS_EDIT, etc.). System-managed agents and immutable entities (`prompt`, `llm_request`, `action`) always return `canEdit: false`.
+
+Read path — `GET /api/agent-runs/:runId/events?fromSeq=&limit=` returns a 1000-row-capped page; `GET …/prompts/:assemblyNumber` returns one assembly; `GET …/llm-payloads/:llmRequestId` is stricter (AGENTS_EDIT) and double-gates via both the `llm_requests.run_id` upstream pre-check AND the denormalised `agent_run_llm_payloads.run_id` secondary check. Live stream via the existing `agent-run:${runId}` socket room and new `agent-run:execution-event` event kind; socket `join:agent-run` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check (not just org-membership) so the push channel matches the pull channel's gate. Client dedup uses the existing 500-entry LRU on `${runId}:${sequenceNumber}:${eventType}` event IDs.
+
+Client timeline (`AgentRunLivePage`) — snapshot + socket merge keyed on event `id` + sorted by `sequenceNumber`. Monotonic guard drops socket events with `sequenceNumber <= lastSeenSeq`; sliding-window cap at `TIMELINE_WINDOW_SIZE = 2000` bounds UI memory while the server-side snapshot endpoint remains the authoritative history. A cap-reached banner surfaces on any timeline that contains a `run.event_limit_reached` event, with a "View run trace →" deep-link for the full LLM ledger. Process-local counters `sequenceGapsTotal` + `sequenceCollisionsTotal` (exported via `getAgentRunLiveClientMetrics()`) complement the per-incident `console.warn` lines for diagnosing upstream invariant breaks.
+
+Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTHS` / `_WARM_MONTHS` / `_COLD_YEARS` env defaults 6 / 12 / 7 match the ledger archive shape from migration 0188.
+
+---
+
+## Universal Brief (spec: `docs/universal-brief-dev-spec.md`)
+
+The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
+
+### Mutation-path skeleton (applies to every write-class feature in this subsystem)
+
+Every write that lands user-or-capability content follows the same six layers — documented at length in `KNOWLEDGE.md` under *"Mutation-path skeleton for any write that lands user or capability content"*. In order:
+
+1. **Pure** — `*Pure.ts` module with no I/O. Pure decisions, plain inputs, plain outputs. Examples: `briefArtefactValidatorPure.ts`, `briefArtefactLifecyclePure.ts` (client), `ruleCapturePolicyPure.ts`.
+2. **Validate** — per-item schema + enum check independent of state. `validateArtefactForPersistence` wraps the pure validator and substitutes a `BriefErrorResult` on failure so the caller never sees raw contract violations.
+3. **Guard** — state-dependent invariant at write time. Pure core + async fetch wrapper. Scoped narrowly to invariants unambiguous regardless of arrival order. Reference: `validateLifecycleWriteGuardPure` + `validateLifecycleChainForWrite` enforce "a parent artefact can only be superseded once"; orphan parents stay an eventual-consistency case the UI's `resolveLifecyclePure` resolves.
+4. **Write** — single insertion point. Every caller goes through `writeConversationMessage` in `briefConversationWriter.ts`. No bypass routes. Validate → guard run in order; rejects drop via the existing log+counter pattern before the DB is touched.
+5. **Signal** — structured return shape + in-memory counters. `WriteMessageResult` carries `messageId`, `artefactsAccepted`, `artefactsRejected`, `assistantPending`, and (optional) `lifecycleConflicts: LifecycleConflictSignal[]`. Counters via `getBriefConversationWriterMetrics()` follow the `getAgentExecutionLogMetrics` pattern — structured log events remain source of truth; counters give dashboards a cheap aggregate.
+6. **Test** — per-layer, not per-integration. Pure tests run directly (`server/services/__tests__/briefArtefactValidatorPure.test.ts` — 41 tests; `ruleCapturePolicyPure.test.ts` — 10 tests). A dedicated *mixed valid + invalid in the same batch* test pins the partial-success contract so the write path is never accidentally all-or-nothing.
+
+Any new mutation-class feature (approval dispatch, rule idempotency keys, CRM writes) starts from this skeleton. If a feature cannot slot into all six layers cleanly, that is a design smell worth pausing on.
+
+### Conversation model
+
+Polymorphic `conversations` table (`server/db/schema/conversations.ts`, migration 0194) with `scopeType ∈ {'agent' | 'brief' | 'task' | 'agent_run'}` and unique `(scope_type, scope_id)`. Hard boundary — **conversations are transport only; domain logic must not depend on conversation structure**. The boundary comment lives at the table declaration; violations are blocking at code review. `findOrCreateBriefConversation` in `server/services/briefConversationService.ts` is the single create/read primitive. `conversation_messages` denormalises `organisation_id` + `subaccount_id` onto every row for RLS — message writes never need to re-read the parent conversation to establish scope.
+
+### Fast-path classifier
+
+`server/services/briefFastPathClassifier.ts` short-circuits obvious cases before the Orchestrator runs:
+
+- `simple_reply` — canned responses for conversational chatter that do not require a capability (greetings, acks).
+- `cheap_answer` — deterministic low-cost reply paths (see `briefSimpleReplyGeneratorPure.ts`). Note S4 in deferred items — current generator emits `source: 'canonical'` placeholder rows; this is a known pre-production gap.
+- `needs_clarification` — ambiguous intent dimensions; escalates to the `ask_clarifying_questions` skill at Orchestrator time.
+- `needs_orchestrator` — normal path; Orchestrator capability-aware routing handles everything.
+
+Classifier confidence + route are persisted to `fast_path_decisions` (migration 0195). `fastPathDecisionsPruneJob.ts` ages out old rows; `fastPathRecalibrateJob.ts` is scaffolded for future threshold tuning.
+
+### Artefact contract + lifecycle
+
+`shared/types/briefResultContract.ts` defines the discriminated union (`structured` / `approval` / `error`) every capability emits. Base shape carries `artefactId`, `status`, `parentArtefactId`, `confidenceSource`, `budgetContext`. Client-side lifecycle resolution (`client/src/lib/briefArtefactLifecyclePure.ts`) handles superseded chains, orphans, out-of-order arrival so the UI always renders the correct tip. Backend chain-integrity enforced at write time by the write-guard above — see also §"Key files per domain" for the full file inventory.
+
+**Defensive cap.** `MAX_ARTEFACTS_PER_WRITE = 25` in `briefConversationWriter.ts` rejects overflow explicitly via the existing rejection pattern (log `artefacts_over_limit` + increment `artefactsOverLimitTotal`). No silent truncation — runaway capability emission surfaces as an observable signal.
+
+### Orchestrator integration + Phase 4 gates
+
+The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Universal Brief skills land in the action registry:
+
+- `ask_clarifying_questions` — drafts up to 5 ranked questions when Orchestrator confidence `< 0.85`. Read-only; `idempotencyStrategy: 'read_only'`.
+- `challenge_assumptions` — adversarial analysis for high-stakes actions. Read-only; `idempotencyStrategy: 'read_only'`.
+
+Both are wired in `SKILL_HANDLERS`. Note S2 in deferred items — the file-based skill definition markdown (`server/skills/*.md` with frontmatter) for these two has not yet been authored; handlers run but the skills are invisible to the config assistant and Skill Studio UIs until the `.md` files land.
+
+### Rule capture + conflict detection + auto-pause policy
+
+`server/services/ruleCaptureService.ts::saveRule` is the single insertion point for rules harvested from approvals (or drafted manually). Conflict detection runs first via `ruleConflictDetectorServicePure.ts`; rules with conflicts return `saved: false` unless the caller passes `options.allowConflicts`. Status on insert is governed by `ruleCapturePolicyPure.ts::shouldAutoPauseRulePure`:
+
+- Approval-suggestion origin (`originatingArtefactId` set) → `pending_review` (pause for human review).
+- Explicit confidence `< AUTO_PAUSE_CONFIDENCE_THRESHOLD` (0.8) → `pending_review`.
+- Everything else → `active`.
+
+The policy module isolates the thresholds so future dimensions (source type, per-org overrides) land in one place instead of growing inline conditions in `saveRule`. `ruleAutoDeprecateJob.ts` handles decay of stale rules. Note B10 in deferred items — this job plus `fastPathDecisionsPruneJob` and `fastPathRecalibrateJob` currently read `memory_blocks`/`fast_path_decisions` outside the `withAdminConnection` / `withOrgTx` contract, so they are silent no-ops until the wrap lands; the feature paths still work end-to-end.
+
+### Client entry points
+
+- **Hook**: `client/src/hooks/useConversation.ts::useConversation(scopeType, scopeId)` is the single abstraction for every chat pane. Manages `conversationId`, `messages`, `sending`, `assistantPending` state. Includes a synchronous `useRef` lock that closes the double-send race React state cannot cover. `assistantPending` flips true on user POST, auto-clears when the next assistant message arrives, and has a 15s timeout fallback to prevent stuck-forever UI.
+- **Panes**: `TaskChatPane.tsx` + `AgentRunChatPane.tsx` consume the hook. Extracting a shared `ConversationPane` shell component is deferred as CGF4b — revisit when a third pane emerges.
+- **Brief detail page**: `client/src/pages/BriefDetailPage.tsx` renders the conversation stream + per-artefact cards (`ApprovalCard.tsx`, `StructuredResultCard.tsx`, `ErrorCard.tsx`, `ClarifyingQuestionsCard.tsx` — all with `*Pure.ts` companions so render logic is testable).
+- **Budget context**: `client/src/components/brief-artefacts/BudgetContextStrip.tsx` + `BudgetContextStripPure.ts` — centralised `shouldShowSource` trust logic so multiple surfaces cannot disagree.
+
+### Deferred (tracked in `tasks/todo.md`)
+
+- **B10** — admin/org-tx wrap for `ruleAutoDeprecateJob` / `fastPathDecisionsPruneJob` / `fastPathRecalibrateJob`.
+- **S2** — skill definition `.md` files for `ask_clarifying_questions` + `challenge_assumptions`.
+- **S3** — stronger tests for `ruleConflictDetectorServicePure.parseConflictReportPure` malformed-input cases.
+- **S4** — remove or re-label `cheap_answer` canned replies currently emitting `source: 'canonical'` placeholder rows.
+- **S6** — trajectory tests for Phase 4 orchestrator gates (clarify / challenge).
+- **S8** — move conversation-message websocket emits to a post-commit boundary (tx-outbox).
+- **N1–N7** — nit-level polish: UUID validation on artefactId, org-scoped index on `conversations_unique_scope`, clock injection in pure modules, `GET /api/briefs/:briefId/artefacts` pagination, etc.
+- **DR1** — `POST /api/rules/draft-candidates` route to wire `ApprovalSuggestionPanel` to `ruleCandidateDrafter.draftCandidates`; panel exists but is currently dark.
+- **DR2** — re-invoke fast path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).
+- **DR3** — wire `onApprove` / `onReject` on `ApprovalCard` artefacts; approvals currently render but the buttons are no-ops.
+- **CGF4b** — extract shared `ConversationPane` shell component.
+- **CGF6** — idempotency key for `saveRule` to dedupe retries (separate from the existing semantic-conflict path).
+- **CGF1** — *closed* in the final review pass via the write-guard shipped in this PR.
+
+---
+
+## CRM Query Planner (spec: `tasks/builds/crm-query-planner/spec.md`)
+
+A deterministic-first natural-language CRM read layer shipped as PR #177. Staged pipeline: registry match → plan cache → LLM fallback → validator → canonical / live / hybrid executor. Read-only by structural import restriction (CI guard `scripts/verify-crm-query-planner-read-only.sh`) — the planner cannot reach the write-side of `canonicalDataService` or any write helper.
+
+### Pipeline stages
+
+1. **Stage 1 (`registryMatcherPure.ts`)** — normalised intent tokens are matched against a curated canonical query registry (`executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`). Zero AI cost, sub-second latency, returns `null` on miss. Aliases are normalised + collision-detected at module load.
+
+2. **Stage 2 (`planCache.ts` + `planCachePure.ts`)** — LRU in-process cache keyed on `(intentHash, subaccountId)`. TTL tiers per `cacheConfidence` — high/medium = 60s, low = 15s. Cache key prefix includes `NORMALISER_VERSION` so any change to intent normalisation bumps cached entries automatically. Only `stageResolved === 3` plans are cached — Stage 1 hits never write cache. `.get()` returns a discriminated `{ hit: true, plan, entry } | { hit: false, reason: 'not_present' | 'expired' | 'principal_mismatch' }` so `planner.stage2_cache_miss` carries the specific miss reason.
+
+3. **Stage 3 (`llmPlanner.ts` + `llmPlannerPromptPure.ts`)** — LLM fallback with single-escalation retry. Hybrid-detection heuristic short-circuits directly to escalation tier (spec §10.4). Both escalation branches pass `wasEscalated: true` + `escalationReason` ('hybrid_detected' | 'low_confidence') on the router context so `getPlannerMetrics.escalationRate` populates correctly. Prompt packing is pure — schema context truncated at `schemaTokensDefault` / `schemaTokensEscalated` from `systemSettingsService`.
+
+4. **Stage 4 (`validatePlanPure.ts`)** — 10-rule validator. Rule 8 (canonical precedence) has three cases: promote `live → canonical` when no live-only filters present; promote `live → hybrid canonical_base_with_live_filter` when exactly one live-only filter present; stay `live` otherwise. The promotion guard additionally requires every non-live-only filter, sort, projection, and aggregation field to exist in the registry entry's `allowedFields` — otherwise `FieldOutOfScopeError` would escape canonical dispatch as a 500.
+
+5. **Executor dispatch** — `canonicalExecutor.ts` (routes through `canonicalDataService` with principal session context), `liveExecutor.ts` (rate-limiter keyed on real GHL `locationId` resolved via `resolveGhlContext` — **NOT** `context.subaccountLocationId` which is deprecated), `hybridExecutor.ts` (row-count guard before live dispatch; warn-logs `hybrid_base_at_plan_limit` when base hits the plan's row limit).
+
+### Key invariants
+
+- **RLS wrapping (§16.4).** `runQuery` wraps its pipeline in `withPrincipalContext(toPrincipalContext(context), …)` when an outer `withOrgTx` is active (HTTP auth middleware provides it). Programmatic callers without an outer org-tx skip the wrap (`getOrgTxContext()` guard) rather than triggering the primitive's throw. `withPrincipalContext` itself snapshots prior `app.current_*` values and restores in `finally` so the planner's nested context does not leak forward into a longer-lived parent transaction (the agent-run → `crm.query` → `runQuery` path).
+
+- **One terminal event per run.** `plannerEvents.ts` forwards `planner.result_emitted` / `planner.error_emitted` to `agentExecutionEventService` exactly once — `planner.classified` is NOT terminal for agent-log purposes. This prevents double-counting `skill.completed` when a run emits both classification and result/error.
+
+- **Budget-error classification.** `isBudgetExceededError` discriminates on `code === 'BUDGET_EXCEEDED'` for the plain-object 402 shape — `{ statusCode: 402, code: 'RATE_LIMITED' }` (router reservation-side rate limiting) falls through to `ambiguous_intent`. Also matches `BudgetExceededError` instance (legacy) and `FailureError` with `failureDetail === 'cost_limit_exceeded'` (post-ledger `runCostBreaker`).
+
+- **Error subcategory split (§16.2).** External artefact stays `ambiguous_intent` for UX stability, but `planner.error_emitted` payload carries `errorSubcategory: 'parse_failure' | 'rate_limited' | 'planner_internal_error' | 'validation_failed'` — operators distinguish internal failures from true user ambiguity without touching the user-facing copy.
+
+- **PlannerTrace accumulator (§6.7 + §17.1).** Every terminal emit carries a deep-frozen `PlannerTrace` snapshot with top-level `executionMode: 'stage1' | 'stage2_cache' | 'stage3_live'` + per-stage slots + `mutations[]` + `terminalOutcome` + `terminalErrorCode`. `freezeTrace()` + `finaliseTracePlan()` live in the service. Cache-reuse vs fresh-dispatch is unambiguously visible at the trace top level.
+
+- **Capability gate.** Route-level via `listAgentCapabilityMaps(orgId, subaccountId)` — unions `capabilityMap.skills + read_capabilities` across all enabled subaccount agents; missing `crm.query` returns `403 { error: 'missing_permission', requires: 'crm.query' }`. Skill-executor surface adds `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort` so agents cannot escalate horizontally via `input.subaccountId`. Forward-looking `canonical.*` slugs are skipped at the validator per §12.1 with a `canonical.capability_skipped` debug log for observability.
+
+- **Cache-write AFTER validation.** `planCache.set` is only called after `validatePlanPure` resolves successfully — structurally invalid plans never enter the cache.
+
+### Observability surfaces
+
+- Structured logs from `plannerEvents.ts` (13 event kinds).
+- Agent execution log — exactly one `skill.completed` per planner run, via `planner.result_emitted` or `planner.error_emitted` only.
+- `PlannerTrace` on every terminal event payload — top-level `executionMode` + per-stage slots.
+- Dashboard: `getPlannerMetrics` in `systemPnlService.ts` + `/api/admin/llm-pnl/planner-metrics` + `SystemPnlPage.tsx` panel.
+- `cost_prediction_drift` warn log when `actualCostCents.total > costPreview.predictedCostCents * 2`.
+
+### Dual invocation surface
+
+- **HTTP**: `POST /api/crm-query-planner/query` (`routes/crmQueryPlanner.ts`) — user-facing, goes through `authenticate` → `resolveSubaccount` → subaccount-capability gate → `runQuery`.
+- **Agent skill**: `'crm.query'` in `SKILL_HANDLERS` (`server/services/skillExecutor.ts`) — agent-facing, gated upstream by the agent's own `capabilityMap`, with `allowedSubaccountIds` enforcement in-handler. `principalType: 'agent'`, `principalId: context.agentId`, `runId: context.runId` (so per-run cost breaker binds).
+
+### Deferred (in `tasks/todo.md`)
+
+- ID-scoped live fetch for hybrid execution (current: canonical base → full-limit live list → in-memory intersect; future: pass canonical IDs into live query)
+- Runtime read-only enforcement at the adapter layer (complements the structural CI guard)
+- Live executor retry taxonomy (retryable vs terminal error classification, cross-provider primitive)
+- Principal `teamIds` resolution (all HTTP call-sites currently pass `[]` — zero production impact today since canonical rows default to `shared_subaccount`, but a proper resolver is cross-cutting and belongs with auth middleware)
+
 ---
 
 ## Skill System
@@ -542,14 +704,14 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
-| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `compute_staff_activity_pulse`, `scan_integration_fingerprints`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
 | GEO (AI Search) | `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare` |
 | Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
 | Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 
-`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
 ### Skill visibility cascade (migration 0074)
 
@@ -908,6 +1070,21 @@ Workspace memory entries can be mutated in-place by the dedup UPDATE path. Witho
 
 Treat `reembedEntry` as the only sanctioned write path for the embedding column outside of the initial insert. New callers must not write `embedding` directly without also writing `embedding_content_hash` to the matching content hash.
 
+### Outcome-Gated Entry-Type Promotion (Hermes Tier 1 Phase B)
+
+`workspaceMemoryService.extractRunInsights` takes a `RunOutcome` ({ `runResultStatus`, `trajectoryPassed`, `errorMessage` }) and uses it to gate how insights enter the memory store. The decision matrix lives in `server/services/workspaceMemoryServicePure.ts`:
+
+- **`selectPromotedEntryType(rawType, outcome)`** — on `success + trajectoryPassed=true`, observations may be promoted to patterns; on `failed`, observations/decisions/patterns get demoted to `issue` (preferences demote to `observation`). `success + trajectoryPassed=false` is pass-through (no modifier).
+- **`scoreForOutcome(baseScore, entryType, outcome)`** — applies an outcome-dependent score modifier per type (e.g. `success+true` bumps `pattern` / `decision` / `preference` scores; `failed` demotes everything). The +0.00 / 0.00 cases for `success+false` are pinned by tests.
+- **`computeProvenanceConfidence(outcome)`** — outcome-derived confidence floor for `isUnverified` classification. Anything sourced from a non-success run is unverified by default; `outcomeLearningService` passes explicit `overrides` to mark human-curated lessons verified regardless of outcome.
+- **`applyOutcomeDefaults(outcome, options, runId)`** — single pure helper that returns `{ provenanceConfidence, isUnverified, provenanceSourceType, provenanceSourceId }`. The service calls it in one place so the override chain (`overrides?.x ?? default`) is testable and cannot drift between the success and failure branches.
+
+**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
+
+**Per-entryType half-life decay** — `memoryEntryQualityServicePure.ts::computeDecayFactor` now switches on entry type. Known types use an exponential `0.5^(days/halfLife)` decay (observation 7d, issue 14d, preference 30d, pattern/decision 60d). Unknown types fall back to the pre-existing linear `DECAY_WINDOW_DAYS` path.
+
+Deferred: `runResultStatus='partial'` currently demotes a `completed` run whenever `hasSummary=false`, which couples outcome classification to summary-generation reliability. Tracked as H3 in `tasks/todo.md`; revisit before Tier 2 memory promotion work.
+
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
 `workspaceMemoryService._hybridRetrieve()` is the canonical path for injecting memory into agent prompts. It replaces the former single-CTE vector search with a multi-stage Reciprocal Rank Fusion pipeline:
@@ -1117,6 +1294,26 @@ Multi-subaccount rows (e.g. emails CC'd to multiple clients) use `canonical_row_
 
 RLS policies on all canonical and integration tables enforcing visibility based on principal type and scope. See the [RLS section](#row-level-security-rls--three-layer-fail-closed-data-isolation) for policy details.
 
+### P3C — ClientPulse canonical tables (migrations 0170–0177)
+
+ClientPulse Phases 0–3 + Phase 1 follow-ups add 12 new canonical and ClientPulse-specific tables. All land under the Canonical Data Platform contract: `UNIQUE(organisation_id, provider_type, external_id)` on canonical tables (global uniqueness), RLS + `canonical_writer` bypass, `rlsProtectedTables.ts` entry, `canonicalDictionaryRegistry.ts` entry.
+
+**Playbook engine scope refactor (migration 0171).** `playbook_runs.subaccount_id` becomes nullable; a new `scope` enum (`subaccount` | `org`) on both `playbook_runs` and `system_playbook_templates` disambiguates org-level vs sub-account-level runs. A CHECK constraint enforces valid scope/entity combinations. Callers requiring a sub-account use the `requireSubaccountId()` helper instead of asserting non-null.
+
+**Six canonical CRM-agnostic tables (migration 0172).** `canonical_subaccount_mutations` (per-mutation write log feeding the Staff Activity Pulse), `canonical_conversation_providers`, `canonical_workflow_definitions` (includes `actionTypes` + `outboundWebhookTargets` for fingerprint scanning), `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`. All share the column header `(organisation_id, subaccount_id, provider_type, external_id, observed_at, last_seen_at)` and the same RLS policy shape. Each is written by the connector-polling service; reads go through the ingestion + scanner services.
+
+**Three ClientPulse-specific timeseries (migrations 0172–0174).** `client_pulse_signal_observations` (8-signal observation timeseries), `client_pulse_health_snapshots` (health-score timeseries), `client_pulse_churn_assessments` (churn-band evaluations). Health snapshots + churn assessments are dual-written by the existing `compute_health_score` (`skillExecutor.ts:1269`) and `compute_churn_risk` (`:1279`) handlers — both write to the legacy `health_snapshots` table *and* the new ClientPulse-specific tables during the deprecation window. The legacy writes are scheduled for removal in a post-V1 cleanup.
+
+**Integration fingerprint scanner (migration 0177, bumped from 0176 after merge-conflict with IEE 0176).** `integration_fingerprints` (two-tier library — `scope='system'` rows are seeded and cross-tenant-readable; `scope='org'` rows are tenant-isolated and represent agency-specific learnings promoted from triaged unclassified signals), `integration_detections` (per-subaccount integration matches, non-partial unique on `(org, subaccount, integration_slug)`), `integration_unclassified_signals` (novel observations queue awaiting operator triage, with occurrence-count-based importance score). CloseBot + Uphex are seeded as `scope='system'` rows. The scanner runs via the new `scan_integration_fingerprints` skill; the observation-insert is the atomic win-gate against retry-driven counter inflation.
+
+**Two new skill handlers (Phase 1 follow-up).** `compute_staff_activity_pulse` (weighted-sum activity score from `canonical_subaccount_mutations` over configurable lookback windows; excludes automation users via outlier-volume classifier reading `operational_config.staffActivity.automationUserResolution`) and `scan_integration_fingerprints` (see above). Both use `idempotencyStrategy: 'keyed_write'` — poll cycles dedupe via `sourceRunId`; agent-skill invocations without a `sourceRunId` append fresh timeseries points by design.
+
+**Webhook handler expansion.** `server/routes/webhooks/ghlWebhook.ts` now writes `canonical_subaccount_mutations` for 10 GHL event types: the 6 existing canonical-upsert handlers (`ContactCreate`, `ContactUpdate`, `OpportunityStageUpdate`, `OpportunityStatusUpdate`, `ConversationCreated`, `ConversationUpdated`) are extended, and 4 new lifecycle handlers (`INSTALL`, `UNINSTALL`, `LocationCreate`, `LocationUpdate`) land as `entityType='account'` events. Outbound-message guard on conversation events: write only when `direction='outbound' AND userId IS NOT NULL AND conversationProviderId IS NULL`.
+
+**OAuth scope SSoT (locked contract g).** Expanded GHL scope list lives in `server/config/oauthProviders.ts` only — the duplicate in `server/routes/ghl.ts` was removed as part of Phase 0. `server/routes/ghl.ts` builds its authorisation URL from `OAUTH_PROVIDERS.ghl.scopes.join(' ')`. Expanded scopes apply to new authorisations only; existing tokens keep their originally-granted endpoints, and endpoints requiring new scopes gate themselves and mark observations `unavailable_missing_scope` when absent.
+
+**`operational_config` JSON Schema (Phase 0 ship-gate B4).** `server/services/operationalConfigSchema.ts` ships the JSON Schema for `hierarchyTemplates.operationalConfig` with `sensitive` flags on intervention-template paths. `SENSITIVE_CONFIG_PATHS` is the exported enumeration consumed by the (Phase 4.5) Configuration Agent's sensitive-path routing gate. Schema enforces weight-sum constraints (`healthScoreFactors` sums to 1.00) via Zod refinements.
+
 ### Key files
 
 | File | Purpose |
@@ -1138,9 +1335,12 @@ Sprint 2 introduces a defence-in-depth data isolation model. All three layers ar
 
 ### Layer 1 — Postgres RLS policies
 
-**Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
+**Org-level (migrations 0079–0081):** 10 tables protected: `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`. Migration `0188` extends this to `llm_requests_archive` with the same org-scoped policy + `FORCE ROW LEVEL SECURITY`; the nightly retention job routes through `withAdminConnection` + `SET LOCAL ROLE admin_role` to perform the cross-org move (see LLM router contract → LLM ledger retention).
 
 **Principal-scoped (migrations 0167–0169):** P3B extends org-level RLS with visibility predicates on canonical data and integration tables. Tables: `integration_connections`, `integration_ingestion_stats`, `canonical_fields`, `canonical_row_versions`, `canonical_metric_history`, `canonical_row_subaccount_scopes`, `service_principals`, `teams`, `team_members`, `delegation_grants`, `agent_runs` (extended). Policies enforce:
+
+**ClientPulse canonical + derived tables (migrations 0172–0177)** are also registered in `rlsProtectedTables.ts` with org-scoped RLS + `canonical_writer` bypass: `canonical_subaccount_mutations`, `canonical_conversation_providers`, `canonical_workflow_definitions`, `canonical_tag_definitions`, `canonical_custom_field_definitions`, `canonical_contact_sources`, `client_pulse_signal_observations`, `client_pulse_health_snapshots`, `client_pulse_churn_assessments`, `integration_fingerprints` (two-tier: system scope cross-tenant-readable, org scope tenant-isolated), `integration_detections`, `integration_unclassified_signals`. See the [ClientPulse Phase 1 follow-ups section](#p3c--clientpulse-canonical-tables-migrations-01700177) for the full roster.
+
 
 - **Org isolation** — all rows scoped to `app.organisation_id`
 - **Visibility predicates** — `private` rows visible only to `app.current_principal_id`; `shared_team` rows visible when `shared_team_ids && app.current_team_ids`; `shared_subaccount` and `shared_org` rows visible to all principals in scope
@@ -1169,10 +1369,25 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 
 `server/jobs/securityEventsCleanupJob.ts` prunes events beyond retention. `scripts/prune-security-events.ts` is the manual equivalent.
 
+### Canonical RLS session variables (hard rule)
+
+The only session variables that RLS policies may reference are:
+
+| Variable | Set by | Purpose |
+|---|---|---|
+| `app.organisation_id` | `server/middleware/auth.ts`, `server/lib/createWorker.ts` | Org-scope predicate for every tenant-owned table |
+| `app.current_subaccount_id` | `server/db/withPrincipalContext.ts` | Subaccount-scope predicate for principal-aware reads |
+| `app.current_principal_type` | `server/db/withPrincipalContext.ts` | `'user' \| 'service' \| 'delegated'` |
+| `app.current_principal_id` | `server/db/withPrincipalContext.ts` | User/service/acting-as ID |
+| `app.current_team_ids` | `server/db/withPrincipalContext.ts` | Team membership array for `shared_team` visibility |
+
+**Never use `app.current_organisation_id`** — that name is not set anywhere. A policy that references it silently disables itself (because `current_setting(..., true)` returns NULL when the variable is unset). The naming asymmetry (`app.organisation_id` without the `current_` prefix, while principal vars use it) is an accepted decision — see `docs/canonical-data-platform-roadmap.md` §P3B and `docs/canonical-data-platform-p1-p2-p3-impl.md` §623. Migration `0213_fix_cached_context_rls.sql` repairs earlier migrations that violated this rule. CI gate `verify-rls-session-var-canon.sh` enforces the ban going forward.
+
 ### CI gates
 
 - `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
 - `verify-rls-contract-compliance.sh` — verifies the three-layer contract is wired end-to-end
+- `verify-rls-session-var-canon.sh` — bans the phantom `app.current_organisation_id` variable from migrations and server code
 
 ---
 
@@ -1318,9 +1533,12 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Migrations
 
-109 migrations (0001–0109, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0177` — ClientPulse Phase 1 follow-up: `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals` (bumped from 0176 after merge with IEE 0176)
+- `0176` — IEE Phase 0: denormalised `agent_runs.iee_run_id` column + in-flight partial index
+- `0170–0175` — ClientPulse Phases 0–3: template extension, playbook scope refactor, canonical mutation/artifact tables, health snapshots, churn assessments, ingestion idempotency
 - `0109` — `skill_analyzer_results.classificationFailed` + `classificationFailureReason` — distinguish API failure from genuine partial-overlap in Skill Analyzer Phase 3
 - `0108` — `scraping_selectors` + `scraping_cache` — learned element fingerprints and HTTP response cache for the Scraping Engine
 - `0107` — unique constraint on `workspace_memory_entries` — deduplication key for org subaccount memory migration idempotency
@@ -1382,6 +1600,35 @@ Honours `Retry-After` headers, exponential backoff with full jitter, structured 
 
 Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
 
+**Five exports, two data-source contracts:**
+
+| Export | Reads from | Canonical caller(s) |
+|--------|------------|---------------------|
+| `resolveRunCostCeiling(ctx)` | `subaccount_agents.maxCostPerRunCents` + fallback via `agent_runs.subaccountAgentId` | Both breaker variants |
+| `getRunCostCents(runId)` | `cost_aggregates` (async rollup) | `sendToSlackService`, `transcribeAudioService` |
+| `assertWithinRunBudget(ctx)` | `cost_aggregates` via `getRunCostCents` | `sendToSlackService`, `transcribeAudioService` |
+| `getRunCostCentsFromLedger(runId)` | `llm_requests` directly | `llmRouter.routeCall` |
+| `assertWithinRunBudgetFromLedger(ctx)` | `llm_requests` via `getRunCostCentsFromLedger` | `llmRouter.routeCall` |
+
+The direct-ledger pair exists because `cost_aggregates` is updated asynchronously by `routerJobService.enqueueAggregateUpdate`, so a rollup-based read lags by up to one aggregation interval. The LLM router is the dominant cost surface; it cannot tolerate that lag. Slack and Whisper stay on the rollup path because their per-call magnitudes dwarf the lag and their concurrency profiles are low. The ledger helper takes `insertedLedgerRowId` as a REQUIRED parameter and fails closed on null or row-not-visible — a structural guarantee that a future refactor cannot re-order the call above the ledger insert. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 / §7.4.1.
+
+**Atomic visibility + SUM (ledger helper).** `assertWithinRunBudgetFromLedger` merges the row-visibility check and the cost aggregate into a single scan: one query returns both `SUM(cost_with_margin_cents)` and a `COALESCE(MAX(CASE WHEN id = $insertedId THEN 1 ELSE 0 END), 0)` flag under the same `WHERE run_id = $runId AND status IN ('success','partial')` predicate. This makes the decision atomic (no race window between visibility and aggregation), catches cross-run contamination (wrong-run insert fails visibility), and catches caller misuse (non-counted-status row fails visibility). Future refactors must keep these merged — splitting them re-opens the race window. See `tasks/hermes-audit-tier-1-spec.md` §7.3.1 "Implementation note — atomic aggregate".
+
+**Hard-ceiling `>=` semantics.** Both sibling helpers trip at `spent >= limit` (not `>`). The breaker runs **after** each cost is recorded; `>=` means the call that first hits the ceiling is the last one allowed, and the next call is refused. `>` would allow spend to equal the ceiling and only trip on the *following* call — a one-call overshoot window. Hard-ceiling semantics are the contract callers expect.
+
+### Per-run cost visibility — `client/src/components/run-cost/`
+
+The `RunCostPanel` component renders per-run LLM spend on every run-detail surface (`SessionLogCardList` compact row, `RunTraceView` full panel, `AdminAgentEditPage` compact row). Branch decisions + formatted strings live in `RunCostPanelPure.ts` so the full §9.1 rendering matrix (loading / error / zero / in-progress / data with compact + full breakdowns) is pinned by pure tests — the project does not ship React Testing Library, so the component is a thin shell around the pure module.
+
+The shared response type `RunCostResponse` (`shared/types/runCost.ts`) and the `/api/runs/:runId/cost` handler (`server/routes/llmUsage.ts`) return:
+
+- `totalCostCents` — from `cost_aggregates` (includes failed-call cost for accounting completeness).
+- `llmCallCount`, `totalTokensIn`, `totalTokensOut`, `callSiteBreakdown: { app, worker }` — from the archive-safe `llm_requests_all` view under a success/partial filter.
+
+The asymmetry between `totalCostCents` (rollup, includes failures) and the new fields (ledger, success/partial only) is intentional; the H1 deferred follow-up in `tasks/todo.md` proposes adding an explicit `successfulCostCents` field to remove the UI-interpretation trap.
+
+`formatCost` in the pure module handles the full range from zero to thousands-of-dollars, including a scientific-notation fallback for sub-penny values (`toPrecision(2)` emits `"1.2e-7"` below ~1e-6 — the fallback re-renders via `toFixed(12)` with trailing-zero trim so the UI never shows scientific notation).
+
 ### Failure helper — `shared/iee/failure.ts`
 
 **Single emit point for structured failures.** Every failure persisted to `agent_runs`, `execution_runs`, `execution_steps`, or any future run-like table must be constructed via `failure(reason, detail, metadata?)`. Inline `{ failureReason: '...' }` literals are banned by lint rule and a Zod check at the persistence boundary. Enriches metadata with `runId` + `correlationId` from AsyncLocalStorage.
@@ -1403,7 +1650,9 @@ Single canonicalisation path for URLs across the system (deduplication, comparis
 
 ### Agent run status enum — `shared/runStatus.ts`
 
-Single source of truth for the 11 agent run statuses (`queued`, `running`, `completed`, `failed`, `timeout`, `cancelled`, `budget_exceeded`, `loop_detected`, `pending_approval`, `pending_input`, `handoff`). Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `ReadonlySet`s, plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+Single source of truth for the 12 agent run statuses: `pending`, `running`, `delegated`, `completed`, `failed`, `timeout`, `cancelled`, `loop_detected`, `budget_exceeded`, `awaiting_clarification`, `waiting_on_clarification`, `completed_with_uncertainty`. Exports `TERMINAL_RUN_STATUSES`, `IN_FLIGHT_RUN_STATUSES`, `AWAITING_RUN_STATUSES` as `readonly arrays` (a single private `TERMINAL_SET` backs the hot-path `isTerminalRunStatus` check), plus type guards `isTerminalRunStatus()`, `isInFlightRunStatus()`, `isAwaitingRunStatus()`.
+
+**`delegated`** (IEE Phase 0, `docs/iee-delegation-lifecycle-spec.md`): non-terminal. The run has been handed off to a delegated execution backend (IEE worker today; OpenClaw in future). Detail lives on the backend's row (`iee_runs`). Transitions to a terminal value via `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun` when the worker publishes the `iee-run-completed` event, or via the `maintenance:iee-main-app-reconciliation` cron if the event is lost. Included in `IN_FLIGHT_RUN_STATUSES`.
 
 **Client duplicate:** `client/src/lib/runStatus.ts` is a structural copy — the client tsconfig does not reach `shared/`. Drift between the two is caught by `server/services/__tests__/runStatusDriftPure.test.ts` (5 assertions: dict match, terminal/in-flight/awaiting array match, `isTerminalRunStatus` agreement for every value).
 
@@ -1441,13 +1690,14 @@ A system-managed org-tier agent (`slug: configuration-assistant`, seeded by migr
 - **Heartbeat:** disabled — invoked on demand from the Configuration Assistant page
 - **Master prompt:** not editable by org admins (`isSystemManaged: true`); only `additionalPrompt` overrides allowed
 
-### Tool surface (28 skills, all file-backed in `server/skills/config_*.md`)
+### Tool surface (29 skills, all file-backed in `server/skills/config_*.md`)
 
 | Group | Count | Skills |
 |-------|-------|--------|
 | Mutation — agents & links | 9 | `config_create_agent`, `config_update_agent`, `config_activate_agent`, `config_link_agent`, `config_update_link`, `config_set_link_skills`, `config_set_link_instructions`, `config_set_link_schedule`, `config_set_link_limits` |
 | Mutation — subaccounts & tasks | 3 | `config_create_subaccount`, `config_create_scheduled_task`, `config_update_scheduled_task` |
 | Mutation — data sources | 3 | `config_attach_data_source`, `config_update_data_source`, `config_remove_data_source` |
+| Mutation — ClientPulse operational_config | 1 | `config_update_hierarchy_template` (Phase 4.5; sensitive paths route through review queue per `SENSITIVE_CONFIG_PATHS`) |
 | Read | 9 | `config_list_agents`, `config_list_subaccounts`, `config_list_links`, `config_list_scheduled_tasks`, `config_list_data_sources`, `config_list_system_skills`, `config_list_org_skills`, `config_get_agent_detail`, `config_get_link_detail` |
 | Plan / validation | 2 | `config_preview_plan`, `config_run_health_check` |
 | History | 2 | `config_view_history`, `config_restore_version` |
@@ -1543,6 +1793,10 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 
 `configHistoryService.restore(entityType, entityId, targetVersion)` replays the target snapshot back onto the entity's canonical service, then writes a **new** history entry with `changeSource: 'restore'`. The old versions stay in the table — restore is forward-only, never destructive.
 
+`configBackupService.restoreBackup({ backupId, organisationId, restoredBy })` is the bulk counterpart used by Skill Analyzer (and Configuration Assistant plan replay). It iterates every entity in the backup row, replays it via the canonical service for that entity type, flips the `config_backups.status` from `active` to `restored`, and returns a per-scope counter object. For the `skill_analyzer` scope the returned counters are `{ skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted }`. See the Skill Analyzer section for the specific entity-type shapes and back-compat handling.
+
+`configBackupService.describeRestore({ backupId, organisationId })` is a read-only dry-run that returns the same counter object a real restore would produce, without mutating anything. Used by the Skill Analyzer UI to preview impact before confirming.
+
 ### UI surfaces
 
 - **Config Session History** page (`/admin/config-history`) — browse every mutation grouped by Configuration Assistant session, with filter by entity type and user
@@ -1558,6 +1812,195 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 | `server/services/configHistoryService.ts` | `record()`, `restore()`, `list()`, change-summary generator, redaction |
 | `server/services/configBackupService.ts` | Bulk snapshot + restore used by Skill Analyzer and Configuration Assistant |
 | `client/src/pages/ConfigSessionHistoryPage.tsx` | Admin history browser grouped by session |
+
+---
+
+## ClientPulse Intervention Pipeline (Phases 4 + 4.5 + Session 2)
+
+The end-to-end loop that turns a churn assessment into an operator-approved CRM action and measures the outcome 24h later. Closes ship-gates **B2** (outcome attribution), **B3** (config_history audit), **B5** (sensitive-path gating); Session 2 closes **S2-6.1** (real adapter dispatch), **S2-6.3** (drilldown), **S2-8.1** (outcome-weighted recommendation), **S2-8.3** (notify_operator fan-out).
+
+### Architectural commitments (locked, do not violate)
+
+- **No parallel intervention table.** Interventions are `actions` rows + `intervention_outcomes` rows. Anything that looks like it needs a `client_pulse_interventions` table is wrong.
+- **All 5 primitives are review-gated.** Operators are the only execution path in V1. The scenario detector proposes; it never auto-fires.
+- **Single lifecycle entry point.** Every intervention proposal — operator-driven OR scenario-detector — flows through `enqueueInterventionProposal()` in `server/services/clientPulseInterventionContextService.ts`. Drift between the two paths is structurally impossible.
+- **Deterministic idempotency keys.** No timestamps in the key. Same logical intervention → same key, regardless of caller / retry / concurrent worker. See `clientPulseInterventionIdempotencyPure.ts`.
+- **Typed metadata contract.** `validateInterventionActionMetadata()` runs on every metadata write; the JSONB column has a schema even though Postgres doesn't enforce it.
+
+### The 5 namespaced action primitives
+
+Registered in `server/config/actionRegistry.ts`. All `defaultGateLevel='review'`, `idempotencyStrategy='keyed_write'`. Namespaced to avoid collision with the existing unprefixed `send_email` / `create_task`.
+
+| Action type | Category | Handler shape |
+|-------------|----------|---------------|
+| `crm.fire_automation` | api | Fires a CRM workflow on a contact. Payload: `{ automationId, contactId, scheduleHint, scheduledFor? }` |
+| `crm.send_email` | api | Sends an email via the client's CRM. Resolves merge-fields server-side before provider call. |
+| `crm.send_sms` | api | Sends an SMS via the client's CRM. Resolves merge-fields + segment-counts. |
+| `crm.create_task` | api | Creates a task on the client's CRM (distinct from the internal board `create_task`). |
+| `notify_operator` | worker | Internal operator-facing notification. Session 2 ships real channel fan-out across in-app (review queue), email (`emailService.sendGenericEmail`), and Slack (org-configured webhook on `organisations.settings.slackWebhookUrl`) via `notifyOperatorFanoutService`. Per-channel delivery results land on `actions.metadata_json.fanoutResults` for audit. |
+
+Each handler ships a Pure module (`server/skills/<slug>ServicePure.ts`) covering payload validation, idempotency-key shape, and provider-call construction.
+
+### apiAdapter dispatch (Session 2 §2)
+
+Approved `crm.*` actions flow through `executionLayerService.executeAction()` → precondition gate → `apiAdapter.execute()` → GHL REST API. The Phase-1A stub is gone.
+
+**Precondition gate (spec §2.6, contract (u)):** four checks run before dispatch:
+
+1. `actions.status === 'approved'` — enforced by `actionService.lockForExecution()` which atomically transitions to `executing`.
+2. Validation-digest re-check — if `metadata_json.validationDigest` was captured at propose-time (via `computeValidationDigest(payload)` SHA-256), it's recomputed and compared; drift → `blocked` with `blockedReason: 'drift_detected'`.
+3. PG advisory lock per `(organisation_id, subaccount_id)` — serialises dispatch within a subaccount; contention → `blocked: 'concurrent_execute'`.
+4. Timeout budget — if `metadata_json.timeoutBudgetMs` is already depleted, → `blocked: 'timeout_budget_exhausted'`.
+
+Fail-cases write to `actions.status='blocked'` with the reason on `metadata_json.blockedReason` via `actionService.markBlocked()`. No retry. Every block emits a structured `executionLayer.precondition_block` log line keyed on `actionId` + `organisationId` + `subaccountId` + `blockedReason` so ops can distinguish engine-side blocks (never reached the adapter) from provider-side failures (via the separate `apiAdapter.dispatch` log).
+
+**Dispatcher:** `apiAdapter.execute()` resolves the GHL endpoint via `GHL_ENDPOINTS[actionType]` (`server/services/adapters/ghlEndpoints.ts`), substitutes `{contactId}` / `{workflowId}` placeholders, forwards the caller's `idempotencyKey` as the `Idempotency-Key` header, and dispatches. GHL's OAuth access token is read directly from `integration_connections.accessToken` (scoped by `organisationId` + `subaccountId` + `providerType='ghl'` + `connectionStatus='active'`); the subaccount's location is `configJson.locationId`. Token expiry is monitored via `tokenExpiresAt` — a past or near-expiry (<5 min) token logs `apiAdapter.token_expired` / `apiAdapter.token_near_expiry` before dispatch. Full OAuth refresh-on-expire deferred to the upcoming `ghlOAuthService.getValidToken()` wiring (Session 3).
+
+**Retry classifier:** `classifyAdapterOutcome()` (`apiAdapterClassifierPure.ts`) is a pure function mapping `{ status }` | `{ networkError, timedOut }` to `terminal_success | retryable | terminal_failure`. Rules: 2xx → success; 429 → retryable (rate_limit); 502/503 → retryable (gateway); network timeout / error → retryable; 401/403 → terminal (auth); 404 → terminal (not_found); 422 → terminal (validation); other 5xx → retryable (outer loop's `maxRetries` caps); other 4xx → terminal. 10 pure-test cases pin every branch.
+
+**Return shape:** adapter returns `{ success, resultStatus, error?, errorCode?, retryable? }` where `retryable` drives the engine's retry decision. `executionLayerService` passes `retryable` into `actionService.markFailed()` which bumps `retry_count` and emits `retry_scheduled` when under `max_retries`.
+
+**notify_operator short-circuit:** `notify_operator` has `internal: true` in `GHL_ENDPOINTS` — the adapter does not cross the wire; `skillExecutor.ts`'s `notify_operator` case invokes `fanoutOperatorAlert()` directly on approve.
+
+**Migration 0185 — `actions.replay_of_action_id`:** pre-documented per contract (s) to support a future replay runtime. Nullable, indexed, stays NULL through Session 2.
+
+### Outcome-weighted recommendation (Session 2 §5)
+
+`clientPulseInterventionContextService.buildInterventionContext()` now derives `recommendedActionType` + `recommendedReason` from aggregated `intervention_outcomes` rows:
+
+- `aggregateOutcomesByTemplate(orgId, currentBand)` groups by `(templateSlug, bandBefore)` and computes `trials`, `improvedCount` (`bandChanged AND NOT executionFailed`), `avgScoreDelta` (`deltaHealthScore`).
+- Pure `pickRecommendedTemplate()` (`recommendedInterventionPure.ts`) returns `{ pickedSlug, reason: 'outcome_weighted' | 'priority_fallback' | 'no_candidates' }`. Rules: if ≥ N trials, score = `(improvedCount / trials) * 100 + avgScoreDelta`, sorted by score desc, trials desc, priority, slug; otherwise highest-priority wins.
+- Threshold N is tunable via `operationalConfig.interventionDefaults.minTrialsForOutcomeWeight` (default 5, non-sensitive leaf).
+
+`recommendedReason` surfaces to the client so `ProposeInterventionModal` can badge "Recommended · outcome-weighted" vs "Recommended · priority fallback".
+
+### Per-client drilldown (Session 2 §4)
+
+Route: `GET /clientpulse/clients/:subaccountId`. Minimal surface per Q5 scope lock — header (band + health score + 7d delta), signal panel (top drivers from latest churn assessment), band-transitions table (90d window derived from consecutive `clientPulseChurnAssessments` rows), intervention history table with outcome badges, contextual "Open Configuration Assistant" trigger seeded with subaccount-aware prompt, "Propose intervention" launcher.
+
+Backed by four GETs on `server/routes/clientpulseDrilldown.ts` (all `requireOrgPermission(AGENTS_VIEW)`): `/drilldown-summary`, `/signals`, `/band-transitions`, `/interventions`. Orchestration in `drilldownService.ts`; outcome-badge derivation in `drilldownOutcomeBadgePure.ts` (11 test cases).
+
+### Live-data pickers (Session 2 §3)
+
+Five subaccount-scoped GHL read endpoints back the intervention editors, replacing Session 1's free-text ID inputs: `/crm/automations`, `/crm/contacts`, `/crm/users`, `/crm/from-addresses`, `/crm/from-numbers`. All require `AGENTS_VIEW` + `resolveSubaccount`. Responses canonicalised in `crmLiveDataService.ts` (60 s in-memory cache, Redis upgrade deferred). On GHL 429 the service returns `{ rateLimited: true, retryAfterSeconds }` which the `<LiveDataPicker>` surfaces as a "retry in N seconds" banner + disabled input.
+
+`<LiveDataPicker>` (`client/src/components/clientpulse/pickers/`) is a reusable debounced-search dropdown (200 ms debounce, keyboard nav ↑/↓/Enter/Esc, preloadOnFocus variant for from-addresses / from-numbers).
+
+### Merge-field resolver (V1 grammar)
+
+`server/services/mergeFieldResolverPure.ts`. Strict — no fallback syntax, no conditionals. Five namespaces: `contact`, `subaccount`, `signals`, `org`, `agency`. Unknown tokens stay as literals AND surface in `unresolved: string[]` for the editor to highlight. Malformed grammar (unmatched `{{`, empty `{{}}`) throws.
+
+The I/O wrapper (`mergeFieldResolver.ts`) loads namespace inputs from canonical tables + the latest snapshot. HTTP preview at `POST /api/clientpulse/merge-fields/preview`.
+
+### Scenario detector — `proposeClientPulseInterventionsJob`
+
+Event-driven. Enqueued from the tail of `executeComputeChurnRisk` per sub-account on queue `clientpulse:propose-interventions`. Per tick:
+
+1. Load latest churn assessment + health snapshot for `(orgId, subaccountId)`.
+2. Load intervention templates from `operational_config.interventionTemplates[]` (cached per org across the loop).
+3. Build cooldown state by scope (deterministic — separate query per `executed` / `proposed` / `any_outcome` semantic; no shared `.limit(1)` ambiguity).
+4. Build quota state — count Phase-4 actions in the rolling 24h window per subaccount + per org.
+5. Delegate to `proposeClientPulseInterventionsPure()` for the matcher (band-targeting → cooldown → priority → quota).
+6. For each returned proposal: `enqueueInterventionProposal()` writes the `actions` row + creates the matching `review_items` row.
+
+### Outcome measurement — `measureInterventionOutcomeJob` (B2)
+
+Hourly cron (`7 * * * *`) on queue `clientpulse:measure-outcomes`. Selects Phase-4 intervention actions with `status IN ('completed','failed')`, `executed_at` between 1h and 14d ago, no existing `intervention_outcomes` row. Honours per-template `measurementWindowHours` (default 24).
+
+Pure decision logic in `measureInterventionOutcomeJobPure.ts` — `decideOutcomeMeasurement()` returns `'measure' | 'too_early' | 'no_post_snapshot'`. The B2 ship-gate fixture exercises the synthetic `atRisk → watch` band-change path end-to-end.
+
+`interventionService.recordOutcome()` writes the row including `bandBefore` / `bandAfter` / `bandChanged` / `executionFailed` (failed executions still get an outcome row so cooldown logic respects them).
+
+### Idempotency — three layers, aligned
+
+| Layer | Mechanism | Catches |
+|-------|-----------|---------|
+| App | Deterministic key derivation (scenario / operator) | Caller-side dedup: same logical intent → same key |
+| Service | `actionService.proposeAction` SELECT-then-INSERT | Read-side dedup against existing rows |
+| DB | `actions_idempotency_idx` UNIQUE(subaccount_id, idempotency_key) + `actions_org_idempotency_idx` partial unique for org-scoped + `actions_intervention_cooldown_day_idx` partial unique on (org, sub, templateSlug, day) | Write-side race protection — concurrent workers can't both succeed |
+
+Sensitive-path config writes additionally catch Postgres 23505 from `actionService.proposeAction` and re-look-up the existing row (because `actionService` itself doesn't yet wrap its insert in ON CONFLICT for the org-scope path).
+
+### Canonical JSON (idempotency + drift)
+
+Both the action-idempotency hash (`hashActionArgs`) and the Session-2 validation digest (`computeValidationDigest`) feed a single `canonicaliseJson` walker in `actionService.ts` so two logically-identical payloads always produce the same bytes regardless of JS surface accidents.
+
+Rules:
+
+1. **Recursive key sort.** Object keys are sorted alphabetically at every depth, not just the top level. This closed a latent bug where `JSON.stringify(x, Object.keys(x).sort())` — whose 2nd arg is an allowlist applied at every depth — was silently dropping nested keys.
+2. **Array order preserved.** Arrays are positional; order matters (e.g. `channels: ['in_app', 'email']` vs `['email', 'in_app']` are distinct by design).
+3. **`undefined` omitted; `null` distinct.** Object properties with `undefined` are filtered out before emit, matching `JSON.stringify`'s default behaviour. This closes the present-vs-absent trap where `{ x: 1 }` and `{ x: 1, y: undefined }` would otherwise hash differently for the same logical intent. Explicit `null` stays distinct because null is semantically meaningful ("explicitly unset"), whereas undefined-vs-absent is a JS surface accident.
+
+Pinned by `actionServiceCanonicalisationPure.test.ts` (9 cases). Any future changes to the canonicaliser must keep the present-vs-absent collapse + null-distinction + array-positional semantics.
+
+### Retry vs replay boundary
+
+Pinned contract (documented inline on `buildActionIdempotencyKey`):
+
+- **Retry** (same logical attempt) → same `runId` + `toolCallId` + `args` → **same key**. Existing `actions` row reused; `markFailed` bumps `retry_count`; no new row inserted.
+- **Replay** (new attempt after a terminal failure) → new `runId` or new `toolCallId` → **new key**. New `actions` row inserted with `replay_of_action_id` set to the original row. Migration 0185 (ClientPulse Session 2) added the column; the runtime that writes it lands in a future session.
+
+Anyone touching the key derivation later must preserve this distinction. Collapsing them (e.g. deriving from payload only, ignoring `runId`) would break both retry-idempotency (re-runs would bypass the dedup row) and replay auditability (a replay would silently clobber the original row).
+
+### Lifecycle event
+
+Every proposal — created or deduped — emits one structured log:
+
+```
+clientpulse.intervention.enqueued
+  { orgId, subaccountId, actionType, source, idempotencyKey,
+    outcome: 'created' | 'deduped', actionId, churnAssessmentId, templateSlug }
+```
+
+Single debugging anchor + analytics base. All previous per-path `*_deduped` events were collapsed into this.
+
+### Configuration Assistant extension (Phase 4.5 — closes B3 + B5)
+
+Adds tool #29: `config_update_hierarchy_template`. The skill applies a single dot-path patch to a hierarchy template's `operational_config`. Validation order:
+
+1. **Path allow-list** — `isValidConfigPath()` rejects unknown root keys (typo guard; `operationalConfigSchema` uses `passthrough()` so unknown roots would otherwise validate).
+2. **Schema-validate the merged proposed config** — catches sum-constraint violations (e.g. `healthScoreFactors` weights ≠ 1.00).
+3. **Classify the path** via `isSensitiveConfigPath()`:
+   - **Non-sensitive** → direct merge into `hierarchy_templates.operational_config` + `config_history` row written in the same transaction (B3).
+   - **Sensitive** → insert `actions` row with `gateLevel='review'`, status `proposed`, `metadataJson.validationDigest` snapshot (B5). Approval-execute handler re-validates against current config (drift check) before committing.
+
+The `validationDigest` is a stable hash of the proposed full config; if the live config drifts between proposal and approval, the action transitions to `failed` with `errorCode='DRIFT_DETECTED'` and the operator must re-propose.
+
+### Routes
+
+| Route | Owner | Purpose |
+|-------|-------|---------|
+| `GET /api/clientpulse/subaccounts/:id/intervention-context` | `clientPulseInterventionContextService.buildInterventionContext` | Modal context payload (band, score, top-signals, recent interventions, cooldown, recommendedActionType) |
+| `POST /api/clientpulse/subaccounts/:id/interventions/propose` | `clientPulseInterventionContextService.createOperatorProposal` | Operator submit from §10.D editors |
+| `POST /api/clientpulse/merge-fields/preview` | `mergeFieldResolver.previewMergeFields` | Editor live preview |
+| `POST /api/clientpulse/config/apply` | `configUpdateHierarchyTemplateService.applyHierarchyTemplateConfigUpdate` | Configuration Assistant chat popup confirm path |
+
+All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (config route additionally) `requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT)`.
+
+### Migrations
+
+| # | Purpose |
+|---|---------|
+| 0178 | Indexes on `actions.metadata_json->>'triggerTemplateSlug'` for proposer queries; partial composite index for the outcome-measurement query; partial unique index on `(organisation_id, idempotency_key)` for org-scoped actions; `intervention_outcomes` extended with `band_before` / `band_after` / `band_changed` / `execution_failed` |
+| 0179 | Defensive partial unique index on `(org, subaccount, triggerTemplateSlug, date_trunc('day', created_at))` — DB-level safety net so future code paths can't bypass the daily cooldown invariant |
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `server/skills/crm{Fire,SendEmail,SendSms,CreateTask}*ServicePure.ts` + `clientPulseOperatorAlertServicePure.ts` | 5 primitive payload-shapers |
+| `server/services/mergeFieldResolverPure.ts` + `mergeFieldResolver.ts` | V1 grammar + I/O wrapper |
+| `server/services/clientPulseInterventionProposerPure.ts` | Pure scenario-detector matcher |
+| `server/jobs/proposeClientPulseInterventionsJob.ts` | Event-driven proposer worker |
+| `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` | Hourly outcome-measurement (B2) |
+| `server/services/clientPulseInterventionContextService.ts` | Single lifecycle entry point — `enqueueInterventionProposal`, `buildInterventionContext`, `createOperatorProposal` |
+| `server/services/clientPulseInterventionIdempotencyPure.ts` | Deterministic key derivers + `canonicalStringify` |
+| `server/services/interventionActionMetadata.ts` | Typed metadata contract (zod) + `validateInterventionActionMetadata` |
+| `server/services/configUpdateHierarchyTemplate{,Pure}.ts` | Configuration Assistant write path (B3 + B5) |
+| `server/skills/config_update_hierarchy_template.md` | Skill definition (tool #29) |
+| `server/routes/clientpulse{Interventions,MergeFields,Config}.ts` | HTTP boundaries (thin — service layer owns the work) |
+| `client/src/components/clientpulse/{ProposeInterventionModal,FireAutomation,EmailAuthoring,SendSms,CreateTask,OperatorAlert}Editor.tsx` | Operator submit UI |
+| `client/src/components/clientpulse/ConfigAssistantChatPopup.tsx` | Configuration Assistant chat surface |
 
 ---
 
@@ -1593,6 +2036,26 @@ The v2 cycle closed seven correctness holes in the Review + Execute flow. Key ad
 - **Proposed-new-agent coupling.** Cluster recommendations write to `skill_analyzer_jobs.proposed_new_agents` (array, supports N-per-job) AND retro-inject synthetic entries into each affected DISTINCT result's `agentProposals`. UI banner renders per-agent Confirm/Reject; confirmed proposals become the top-ranked chip in per-skill assignment panels.
 - **Table drop remediation.** `remediateTables` runs before `validateMergeOutput` and auto-appends missing rows with `[SOURCE: library|incoming]` markers. Guards: column-count mismatch, cross-source first-column-key conflict, pre-marked rows, and `max_table_growth_ratio` aggregate cap.
 - **Skill-graph collision detection.** `detectSkillGraphCollision` splits merged instructions into `##` heading fragments, pre-filters library skills by bigram overlap (top-K + 200-pair budget), and emits `SKILL_GRAPH_COLLISION` warnings when fragment similarity exceeds `collision_detection_threshold`.
+
+### Revert previous execution
+
+Every successful Execute writes a pre-mutation `config_backups` row (`scope: 'skill_analyzer'`) containing the full pre-Execute state of every affected skill and system agent. The Skill Analyzer Results step (and the Execute step when reopening a finished job) surfaces a **Revert previous execution** button whenever an `active` backup exists for the job. Clicking it dry-runs the restore, shows the four counts in a confirmation dialog, then runs the real restore on confirm.
+
+Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntities`:
+
+| Entity type | Payload |
+|-------------|---------|
+| `system_skill` | Full skill snapshot for every skill that existed before Execute |
+| `system_agent` | Full mutable-field snapshot per affected system agent: `defaultSystemSkillSlugs`, `status`, `name`, `description`, `masterPrompt`, `agentRole`, `agentTitle`, `parentSystemAgentId` |
+
+`restoreSkillAnalyzerEntities` interprets the snapshot as follows:
+
+- **Skills** — rows present in the backup are replayed onto `system_skills` (counted as `skillsReverted`); rows absent from the backup but present live are deactivated via `isActive = false` rather than hard-deleted (counted as `skillsDeactivated`).
+- **Agents** — each `system_agent` entity is replayed in full onto `system_agents` (counted as `agentsReverted`). Agents present live but absent from the backup (i.e. created by the Execute that is now being reverted) are soft-deleted via `deletedAt = now()` — **not** via `status` (counted as `agentsSoftDeleted`). Soft-delete preserves the row for audit and is reversible; hard-delete would orphan history and config-backup references.
+
+**Legacy back-compat.** Backups written before this extension used a `system_agent_skills` entity type carrying only `defaultSystemSkillSlugs`. The restore path still accepts those entities and replays the slug array, but the post-backup soft-delete step is skipped for legacy-shape backups (there is no way to know which live agents existed at backup time from a slug-only payload). `agentsSoftDeleted` will be `0` for any legacy-shape restore.
+
+**Dry-run route.** `POST /api/system/skill-analyser/jobs/:jobId/restore?dryRun=true` calls `configBackupService.describeRestore` instead of `restoreBackup` and returns the same `{ skillsReverted, skillsDeactivated, agentsReverted, agentsSoftDeleted }` counters without mutating anything. Strict string comparison — only the literal `'true'` triggers dry-run mode; any other value (including `'1'`, `'yes'`, missing) runs the real restore.
 
 ### Schema (migration 0155)
 
@@ -1687,7 +2150,7 @@ Playbook Run (playbookRuns)
 | `systemPlaybookTemplateVersions` | Immutable version snapshots of system templates. |
 | `playbookTemplates` | Org-owned templates. `forkedFromSystemId`, `forkedFromVersion` nullable. |
 | `playbookTemplateVersions` | Immutable published versions of org templates. `definitionJson` holds the full DAG. |
-| `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
+| `playbookRuns` | Run instances. `subaccountId` (nullable since migration 0171), `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`, `scope` (`subaccount` \| `org`). CHECK constraint enforces scope/entity consistency: `subaccount` scope requires `subaccount_id`; `org` scope requires `subaccount_id IS NULL`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
 | `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
@@ -2036,15 +2499,17 @@ Main app (Replit/Express)        Worker (Docker, DigitalOcean)
 
 **Database is the only integration point.** No HTTP between app and worker.
 
-### Schema (migrations 0070, 0071)
+### Schema (migrations 0070, 0071, 0176)
 
 | Table | Purpose |
 |-------|---------|
-| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
-| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason`, `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
+| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), `failureReason` (shared `FailureReason` enum), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
+| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason` (shared `FailureReason` enum), `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
 | `ieeArtifacts` | Metadata for files/downloads emitted by a run. v1 stores metadata only; contents live on worker disk. |
 
 **LLM attribution** — `llmRequests` table gains `ieeRunId` (nullable FK) and `callSite` (`app`\|`worker`). Database CHECK constraint: `source_type <> 'iee' OR iee_run_id IS NOT NULL`.
+
+**Parent agent_run linkage** — migration 0176 adds `agent_runs.iee_run_id` (nullable, no FK) as a denormalised cache populated at delegation time by `agentExecutionService`. The run-detail API (`GET /api/agent-runs/:id`) and live-progress polling read it directly so callers never JOIN `iee_runs` at read time. Migration 0176 also adds a partial in-flight index `agent_runs_inflight_org_idx ON (organisation_id) WHERE status IN ('pending', 'running', 'delegated')` for hot-path live-count / dashboard queries.
 
 ### Routing — how a task reaches IEE
 
@@ -2055,11 +2520,29 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
   if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
   const { enqueueIEETask } = await import('./ieeExecutionService.js');
   const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
-  // Return synthetic loopResult — canonical state lives on the ieeRuns row.
+  // Park the parent agent_run in the non-terminal 'delegated' status (NOT
+  // a synthetic completion) and persist enqueueResult.ieeRunId on the
+  // denormalised iee_run_id column. Real terminal transition lands later
+  // via the iee-run-completed event handler (see §IEE delegation lifecycle).
 }
 ```
 
 `executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+
+### IEE delegation lifecycle (Phase 0 — `docs/iee-delegation-lifecycle-spec.md`)
+
+The IEE branch does NOT mark the parent `agent_run` complete at handoff time (the previous "synthetic completion" pattern lost real outcomes). Instead:
+
+1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
+2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
+3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun`. That service:
+   - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row.
+   - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
+   - Updates the parent with terminal status, summary, error fields, durationMs, token totals — gated on `status IN ('pending','running','delegated') AND completed_at IS NULL` for defence-in-depth.
+   - Emits `agent:run:completed` (run room) and `live:agent_completed` (subaccount room) post-commit so dashboards and sidebar counters decrement.
+4. **Reconciliation backstop** — `maintenance:iee-main-app-reconciliation` cron (every 2 min, registered in `queueService.ts`) calls `reconcileStuckDelegatedRuns()` to catch the "Class 2 orphan" case: parent stuck in `delegated` while `iee_runs` is already terminal (event handler crashed or event lost). 120-second grace window before reconciliation kicks in.
+
+Pure helpers live in `agentRunFinalizationServicePure.ts` (`mapIeeStatusToAgentRunStatus`, `buildSummaryFromIeeRun`) so the mapping table is testable without a DB. Tests in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` cover the full Appendix A mapping matrix plus summary-formatting edge cases.
 
 ### Services & Routes
 
@@ -2071,6 +2554,7 @@ if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
 | Route | File | Purpose |
 |-------|------|---------|
 | `GET /api/iee/runs/:ieeRunId/cost` | `iee.ts` | Per-run cost breakdown (app vs worker LLM, runtime) |
+| `GET /api/iee/runs/:ieeRunId/progress` | `iee.ts` | Live worker progress for a delegated run (step count, heartbeat age, status, failure reason). Subaccount-scoped boundary check via `?subaccountId=` query param. Backed by `ieeUsageService.getIeeRunProgress`. |
 | `GET /api/iee/usage/system` | `iee.ts` | System-wide explorer (system_admin) |
 | `GET /api/orgs/:orgId/iee/usage` | `iee.ts` | Org-scoped explorer |
 | `GET /api/subaccounts/:subaccountId/iee/usage` | `iee.ts` | Subaccount-scoped explorer |
@@ -2086,6 +2570,7 @@ Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerf
 | File | Purpose |
 |------|---------|
 | `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers) |
 | `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
 | `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
 | `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
@@ -2115,7 +2600,7 @@ runExecutionLoop():
 3. Step count exceeds `MAX_STEPS_PER_EXECUTION` → `step_limit_reached`
 4. Wall clock exceeds `MAX_EXECUTION_TIME_MS` → `timeout`
 
-`FailureReason` enum: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `unknown`.
+`FailureReason` enum is the canonical taxonomy in `shared/iee/failureReason.ts`. Both `ieeRuns.failureReason` and `ieeSteps.failureReason` reference the shared enum directly (no inline subsets). Core IEE execution-loop reasons: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `worker_terminated` | `unknown`. The full enum also includes connector reasons (`connector_timeout`, `rate_limited`, `data_incomplete`, `internal_error`), tenant-isolation reasons (`scope_violation`, `missing_org_context`), and playbook decision-step reasons (see `shared/iee/failureReason.ts`). `worker_terminated` is distinct from `cancelled` — it indicates the worker process died mid-run (e.g. SIGTERM during a deploy, container eviction, orphan detection) rather than a user-initiated cancel; the latter sets `iee_runs.status='cancelled'`.
 
 ### Idempotency & deduplication
 
@@ -2131,6 +2616,7 @@ Pattern in `ieeExecutionService`:
 | `running` | Return run id; let in-flight worker finish. |
 | `pending` | Return run id; queued job will pick it up. |
 | `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
+| `cancelled` | Treat like `failed` for retry-policy purposes. The retry-sweep on the worker (`worker/src/persistence/runs.ts`) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
 
 The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
 
@@ -2150,14 +2636,203 @@ Denormalized cost columns on `ieeRuns`:
 
 ### LLM router contract
 
+`llmRouter.routeCall` is the **only** supported entry point to any LLM provider. Direct imports of `anthropicAdapter` / `openaiAdapter` / `geminiAdapter` / `openrouterAdapter` from anywhere outside `llmRouter.ts` are forbidden:
+
+- **Static gate** — `scripts/verify-no-direct-adapter-calls.sh` (registered in `run-all-gates.sh`) fails CI on any direct import of a provider adapter from outside the router. Audit log: `tasks/direct-adapter-audit-2026-04-20.md`.
+- **Runtime assertion** — every adapter entry point calls `assertCalledFromRouter()` (`server/services/providers/callerAssert.ts`), walking the V8 stack frame to confirm `llmRouter.ts` is an ancestor caller. Bypass attempts throw `RouterContractError` before a single byte of payload leaves the process.
+
 `llmRouter.routeCall` enforces, at runtime:
 
 ```typescript
-if (ctx.sourceType === 'iee' && !ctx.ieeRunId) throw new RouterContractError(...);
-if (ctx.callSite === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
+if (ctx.sourceType === 'iee' && !ctx.ieeRunId)  throw new RouterContractError(...);
+if (ctx.callSite   === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
 ```
 
 The database CHECK constraint on `llmRequests` is the belt-and-braces backstop.
+
+#### Ledger attribution contract (spec §5.1)
+
+Every LLM call is observable. The ledger row carries enough dimensions that cost-per-feature, cost-per-source-type, and cost-per-call-site rollups are a single `GROUP BY` away. Every callable surface — agent loop, analyzer, process execution, IEE worker, system background — contributes a row.
+
+**Required `LLMCallContext` fields** (Zod-enforced in `llmRouter.ts`):
+
+| Field | Purpose |
+|-------|---------|
+| `sourceType` | `agent_run` \| `process_execution` \| `iee` \| `analyzer` \| `system` |
+| `sourceId` | UUID of the originating entity (`agent_run.id`, `execution.id`, `iee_run.id`, analyzer invocation id, or a stable system caller id). `null` for `sourceType='system'` is legal only when `systemCallerPolicy='respect_routing'` is set. |
+| `featureTag` | Stable short string (`'memory_compile'`, `'skill_classify'`, `'orchestrator_pick'`). Becomes a grouping dimension in System P&L. |
+| `callSite` | `'web' \| 'worker' \| 'job'` — where the call runs, not who requested it. |
+| `executionPhase` | Optional: `'plan' \| 'act' \| 'reflect' \| 'postprocess'`. Now nullable at the DB level; system/analyzer callers leave it null. |
+| `systemCallerPolicy` | `'respect_routing' \| 'override_to'` — when `'override_to'` is set, the system caller bypasses capability-tier routing. Defaulted to `'respect_routing'` at runtime. |
+
+**Row-level attribution columns** added by migration `0185` (`migrations/0185_llm_requests_generalisation.sql`):
+
+- `source_type text NOT NULL` — same five enum values above.
+- `source_id uuid` — polymorphic pointer; no FK because the target table varies by `sourceType`.
+- `feature_tag text NOT NULL DEFAULT 'unknown'`.
+- `execution_phase text` — now nullable (was `NOT NULL`; relaxed for system/analyzer callers).
+- Composite indexes on `(source_type, billing_month)`, `(feature_tag, billing_month)`, `(source_type, organisation_id, billing_month)` for the P&L rollups.
+- CHECK constraints mirror the router guards: `iee` requires `iee_run_id`; `agent_run` requires `run_id`; `process_execution` requires `execution_id`.
+
+#### Margin + budget contract for system callers
+
+`system` and `analyzer` source types represent platform overhead — work Synthetos performs on its own behalf (memory compilation, skill classification, orchestrator hints). They have no customer to bill:
+
+- `pricingService.resolveMarginMultiplier()` returns **1.0×** for `sourceType ∈ {'system', 'analyzer'}` — no margin applied. The `cost_with_margin` column equals `cost_raw`, and `cost_with_margin_cents` equals the raw-cost rounding.
+- `budgetService.checkAndReserve` returns **`string | null`** — a reservation id for customer-billable calls, `null` for system/analyzer. The commit and release paths tolerate the null id and no-op.
+- The System P&L page surfaces these as the "Platform Overhead" row and subtracts them from gross profit to derive net profit.
+
+#### Structured parse failures
+
+Callers that need schema-validated output pass a `postProcess` hook:
+
+```typescript
+const result = await llmRouter.routeCall({
+  ...ctx,
+  postProcess: (raw) => schema.parse(JSON.parse(raw)),  // may throw ParseFailureError
+});
+```
+
+`ParseFailureError` (`server/lib/parseFailureError.ts`) is a distinct error class. The router catches it, writes `status='parse_failed'` to the ledger, and stores a UTF-8-safe ≤2 KB excerpt of the raw response in `parse_failure_raw_excerpt` — never the full payload. The truncation utility (`server/lib/utf8Truncate.ts`) backs up through multi-byte continuation bytes so the excerpt is always valid UTF-8.
+
+#### Cancellation + client-disconnect handling
+
+Every router call accepts an `AbortSignal`. Adapters thread the signal into `fetch`, and `adapterErrors.ts::mapAbortError` inspects `signal.reason` to distinguish:
+
+- `'caller_timeout'` — the caller imposed a deadline.
+- `'caller_cancel'` — the caller proactively aborted (e.g. client disconnected mid-stream).
+
+The ledger row records the distinction in `abort_reason`. `isNonRetryableError` treats `CLIENT_DISCONNECTED` as non-retryable — no point retrying a call whose consumer has gone away.
+
+#### Provider-call timeout contract (April 2026 hardening)
+
+A separate internal timeout guards every provider call. `callWithTimeout` (`server/services/llmRouterTimeoutPure.ts`) owns the contract:
+
+- **Merged abort signal.** Creates an internal `AbortController`, merges it with the caller's signal via `AbortSignal.any([...])`, and passes the merged signal to the adapter factory. When the timer fires, the fetch is genuinely cancelled — the earlier `Promise.race` pattern left orphaned fetches running and caused provider-side double-billing when the retry loop fired a second concurrent call.
+- **Typed error.** On timer fire, the merged signal aborts with a `ProviderTimeoutError` (`code: 'PROVIDER_TIMEOUT'`, `statusCode: 504`). `callWithTimeout` re-throws that typed error rather than the generic `AbortError` so the router's classifier can distinguish internal timeouts from caller aborts.
+- **Non-retryable.** `isNonRetryableError` treats `PROVIDER_TIMEOUT` the same as `CLIENT_DISCONNECTED` — ambiguous state; the provider may have completed generation server-side, so a retry under the same idempotency key could double-bill at the provider. The caller decides whether to replay under a new idempotency key.
+- **Ledger row on every terminal attempt.** Non-retryable errors now `break providerLoop` and fall through to the shared ledger-write-on-failure path rather than `throw err`-ing out immediately. The pure classifier `classifyRouterError` in `server/services/llmRouterErrorMappingPure.ts` owns the error → status mapping (`timeout` / `client_disconnected` / `aborted_by_caller` / `provider_unavailable` / `provider_not_configured` / `parse_failure` / `error`), and is the single source of truth: every failure mode produces exactly one ledger row, and `status='error'` is the fallthrough — never a skip. This closes an April 2026 observability gap where `PROVIDER_TIMEOUT` + `PROVIDER_NOT_CONFIGURED` + auth errors produced no ledger row at all and became invisible to the System P&L surface.
+- **Generous cap.** `PROVIDER_CALL_TIMEOUT_MS` is **600 s** (`server/config/limits.ts`) — above every documented provider ceiling including OpenAI reasoning models. The earlier 30 s cap routinely tripped on legitimate long generations inside the skill analyzer, which was the original trigger for the LLM observability work.
+
+See spec §17 for why this is the internal mitigation rather than a provider-header fix: no LLM provider currently documents an idempotency header on its generation endpoints (verified April 2026 — Anthropic, OpenAI, OpenRouter, Gemini). Test pins live in `server/services/__tests__/llmRouterTimeoutPure.test.ts` (timeout guard) and `server/services/__tests__/llmRouterErrorMappingPure.test.ts` (ledger-status classifier — 14 cases, including the defensive "classifier never returns an undefined status" property test).
+
+#### LLM in-flight registry (spec `tasks/llm-inflight-realtime-tracker-spec.md`)
+
+The ledger is append-only and only observable after a call completes. The in-flight registry fills the gap between dispatch and completion for system admins — a real-time view of every LLM call currently running, with attribution and elapsed time.
+
+- **Interception point.** `registry.add()` fires inside the provider-retry loop in `llmRouter.ts`, **after** budget reservation and **immediately before** each `providerAdapter.call()` dispatch. `registry.remove()` fires (a) per intermediate retry failure with `terminalStatus='error'` + `ledgerRowId=null`, and (b) once at the end with `ledgerRowId` + `ledgerCommittedAt` populated after the ledger upsert. Pre-dispatch terminal states (`budget_blocked`, `rate_limited`) never add — they write the blocked-row and throw without a registry footprint.
+- **Runtime key.** `runtimeKey = ${idempotencyKey}:${attempt}:${startedAt}`. Crash-restart safe (same idempotencyKey + attempt but different startedAt → different runtimeKey), retry safe (same idempotencyKey + startedAt but different attempt → different runtimeKey).
+- **State machine (pure).** `server/services/llmInflightRegistryPure.ts` owns the add / remove / incoming-Redis-event transitions. Monotonic `stateVersion` ladder — `1=active, 2=removed` — plus a `startedAt` anchor so a late duplicate add can never resurrect a removed entry. Every transition's outcome tag drives a structured debug log (`add_noop_already_exists`, `remove_noop_already_removed`, `remove_noop_missing_key`, `event_stale_ignored`) so steady-state rates are visible and fanout loops diagnosable.
+- **Multi-instance fanout.** `server/services/llmInflightRegistry.ts` optionally connects to Redis pub/sub on channel `llm-inflight` when `REDIS_URL` is set and the `ioredis` module is installed. Local-only mode is the default — the feature works single-instance without Redis. Instances skip their own messages via an `origin` tag. On Redis partition, clients recover cross-fleet consistency via the snapshot endpoint (authoritative read) rather than server-side event replay.
+- **Bounded memory.** `MAX_INFLIGHT_ENTRIES = 5_000` (`server/config/limits.ts`). On overflow, the oldest `active` slot is force-evicted and the removal emission carries `terminalStatus: 'evicted_overflow'` + `evictionContext: { activeCount, capacity }` — sized at 100× steady-state headroom so any eviction is a real signal.
+- **Deadline-based sweep.** Every slot carries `deadlineAt = startedAt + timeoutMs + INFLIGHT_DEADLINE_BUFFER_MS` (30 s). A `60s ± 5s` jittered sweep reaps entries past `deadlineAt` as `terminalStatus: 'swept_stale'` + `sweepReason: 'deadline_exceeded'`. In practice this only fires on crashes between `add()` and `remove()` — the router's own `callWithTimeout` already aborts at `timeoutMs`.
+- **Admin surfaces.**
+  - `GET /api/admin/llm-pnl/in-flight?limit=500` — authoritative snapshot for first paint + reconnect resync. Hard cap 500; sort `startedAt DESC, runtimeKey DESC` for stable repeat reads.
+  - Socket room `system:llm-inflight` — events `llm-inflight:added` / `llm-inflight:removed`. Join handler in `server/websocket/rooms.ts` silently rejects non-`system_admin` sockets.
+  - `/system/llm-pnl` → In-Flight tab (`client/src/components/system-pnl/PnlInFlightTable.tsx`). Physically first, default-selected view stays on P&L.
+- **Ledger reconciliation.** The final-attempt removal carries `ledgerRowId` + `ledgerCommittedAt`. When a terminal upsert hits its `where: status = 'started'` guard and finds a non-started row (idempotency replay / sweep pre-empted), `.returning()` comes back empty; the UI falls back to idempotencyKey-based fetch.
+- **Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via `createEvent` with `byCallSite` + `byProvider` breakdowns — stuck workers or provider-specific hangs are spottable without digging logs.
+- **Pure tests pin every state-machine invariant:** `server/services/__tests__/llmInflightRegistryPure.test.ts`.
+
+#### Partial-external-success protection (provisional `'started'` row)
+
+The gap the tracker couldn't close on its own: `providerAdapter.call()` succeeds (provider has billed and generated tokens) → `db.insert(llmRequests)` fails for any reason (DB blip, constraint violation, crash) → caller retries under the same `idempotencyKey` → the pre-dispatch idempotency check finds no row → router dispatches a second concurrent call → **double-bill at the provider with no ledger trace of the first success**. No LLM provider currently ships a request-level dedup header.
+
+The `llm_requests.status` enum has a provisional value `'started'` (migration `0190_llm_requests_started_status.sql` — partial index on `created_at WHERE status = 'started'`). Flow:
+
+1. **Atomic idempotency check + provisional INSERT.** `llmRouter.routeCall` step 4+7 runs a single `db.transaction`. It does `SELECT … FOR UPDATE` on `idempotencyKey`; if a `'success'` row exists it returns the cached response; if a `'started'` row exists it returns an `inflight` marker; otherwise it INSERTs a fresh `'started'` row inside the same transaction (with `onConflictDoUpdate` on any non-success state so a retry after terminal-error resets `createdAt` to `now()` — preventing the revived row from being immediately sweep-eligible). A concurrent second caller blocks on the unique-constraint conflict; when the first tx commits, the second's own `FOR UPDATE` returns the `'started'` row and correctly takes the reconciliation branch.
+2. **`ReconciliationRequiredError` thrown on `inflight`.** `server/lib/reconciliationRequiredError.ts` — typed error class, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`, carries `idempotencyKey`. **The router never auto-retries this.** The caller decides (surface banner, poll, fail) — auto-retry inside the router would re-open the exact double-dispatch window this mechanism exists to prevent.
+3. **Single-terminal-transition invariant.** All three terminal writes in `llmRouter.routeCall` — success upsert, failure upsert, budget-blocked upsert — use `where: status = 'started'` (not `!= 'success'`). A mismatch means another transition already happened (sweep fired and claimed as `provisional_row_expired`, or sibling raced). The tightened guard preserves the earlier terminal signal; a ghost log (`llm_router.{budget_block,failure,success}_upsert_ghost` at warn level) surfaces the case so operators can reconcile rather than silently losing the audit trail.
+4. **DB-level sweep backstop.** `server/jobs/llmStartedRowSweepJob.ts` (+ pure cutoff math in `llmStartedRowSweepJobPure.ts`) runs every 2 minutes under `maintenance:llm-started-row-sweep`. It reaps `'started'` rows older than `PROVIDER_CALL_TIMEOUT_MS + STARTED_ROW_SWEEP_BUFFER_MS` (60 s) via a `UPDATE … SET status = 'error', error_message = 'provisional_row_expired'` with `FOR UPDATE SKIP LOCKED`. Admin-bypass (`withAdminConnection` + `SET LOCAL ROLE admin_role`). Telescopes with the in-memory sweep (30 s past timeout) — registry reaps first, DB reaps second.
+5. **Aggregation exclusion.** `systemPnlServicePure.ts::COUNTABLE_COST_STATUSES = ['success', 'partial']`. `contributesToCostAggregate()` is the predicate every P&L query uses in spirit (`status IN ('success','partial')`). Pure test pins the set; any future status-enum expansion trips the test if `'started'` (or another non-success status) accidentally lands inside the countable set.
+
+#### Idempotency-key versioning
+
+`server/lib/idempotencyVersion.ts` ships `IDEMPOTENCY_KEY_VERSION = 'v1'` prepended to every idempotency key produced by `llmRouter.generateIdempotencyKey` (extracted to `server/services/llmRouterIdempotencyPure.ts`) and `actionService.buildActionIdempotencyKey`. Any change to hash inputs, input ordering, or canonicalisation must bump the version in the same commit — without the bump, retries issued before the change don't match their originating rows (provider double-bill, duplicate action execution).
+
+- **Load-time assert** — `/^v\d+$/` check on the constant at module load. Catches the "still a string, but empty/null/unprefixed" failure mode that the type-level `as const` can't express.
+- **Deploy-boundary tradeoff** is explicit and documented: a request in-flight at the moment of a prefix bump will, on retry, hash to the new prefix and not match its prior attempt's row. Narrow window; acceptable risk given the rarity.
+- **Pure test pins** — both `llmRouterIdempotencyPure.test.ts` and `actionServiceCanonicalisationPure.test.ts` pin the `v1:`-prefixed output against a known-good fixture. Accidental prefix removal trips both suites.
+
+#### Queueing-delay + fallback visibility
+
+`InFlightEntry` carries four additional observability fields beyond the base registry contract:
+
+| Field | Populated at | Surface |
+|-------|--------------|---------|
+| `queuedAt` | Top of `routeCall()`, before budget/cooldown/resolver | Paired with `dispatchDelayMs` on the entry |
+| `dispatchDelayMs` | `startedAt - queuedAt`, clamped ≥0 | "Queued" column on the In-Flight tab (>1 s amber, >5 s red) |
+| `attemptSequence` | Monotonic across the entire `routeCall`, ticks once per attempt | Attempt column shows `#${attemptSequence}` when it diverges from the per-provider `attempt` |
+| `fallbackIndex` | 0 for primary provider, 1+ for each fallback | Small `↳fb#N` badge next to the attempt label |
+
+These close the "why is this call slow?" and "which attempt of the logical call is this?" gaps the base tracker left open.
+
+#### Historical archive + soft circuit breaker
+
+`llm_inflight_history` (migration `0191_llm_inflight_history.sql`) captures every add/remove event with its full payload. Retention: `env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS` days (default 7). Daily sweep via `maintenance:llm-inflight-history-cleanup` at 04:15 UTC.
+
+Writes are **fire-and-forget** — a DB hiccup must not delay the sub-second socket emit. Gated by a soft circuit breaker from `server/lib/softBreakerPure.ts`:
+
+- **Sliding-window** — 50 samples, 50% failure threshold, 5-minute open state. Below threshold: debug log per failure. On trip: single `inflight.history_breaker_opened` warn log. While open: silent drop. At expiry: half-open probe on next event.
+- **Pure state machine** — `createBreakerState` / `shouldAttempt(state, nowMs)` / `recordOutcome(state, success, nowMs, config)` returning `{ trippedNow }`. No clock/logger injection — the calling code owns those. **Reusable**: any future fire-and-forget persistence path (payment webhooks, outbound integration events) can adopt the same primitive.
+- **Env kill-switch** — `LLM_INFLIGHT_HISTORY_ENABLED=false` disables writes without a code deploy.
+
+Admin read: `GET /api/admin/llm-pnl/in-flight/history?from=…&to=…&runtimeKey=…&idempotencyKey=…&limit=…` — system-admin-only, 1 000-row hard cap.
+
+#### Per-caller live payload drawer
+
+`server/services/llmInflightPayloadStore.ts` — in-memory LRU keyed by `runtimeKey`. Cap 100 entries / 200 KB per payload (measured against the full stored object, not just `messages`). On truncation the snapshot carries `originalSizeBytes: number` so the admin can distinguish a 201 KB payload from a 50 MB one. Captured at dispatch in `routeCall` right after `inflightRegistry.add()`; cleared on every `remove()` / `updateLedgerLink()` path.
+
+Admin route: `GET /api/admin/llm-pnl/in-flight/:runtimeKey/payload` — 410 Gone when the entry has already completed or been evicted (with a user-friendly message directing to the ledger link). `PnlInFlightPayloadDrawer.tsx` opens on row-click, uses `AbortController` + a `currentRuntimeKey` closure check so a fast row-switch doesn't allow stale responses to overwrite the drawer.
+
+Process-local by design — multi-instance deployments see 410 for calls on sibling nodes. Extending to Redis is out of scope; the ledger detail is the authoritative post-completion surface.
+
+#### Token-level streaming progress (infrastructure only)
+
+The adapter contract (`server/services/providers/types.ts::LLMProviderAdapter`) has an optional streaming hook:
+
+```typescript
+stream?(params: ProviderCallParams): AsyncIterable<StreamTokenChunk> & {
+  done: Promise<ProviderResponse>;
+};
+```
+
+Router wiring in `llmRouter.ts`: when `params.stream === true` AND the adapter implements `stream()`, the router iterates tokens, throttles progress emissions at 1 Hz per runtimeKey via `llmInflightRegistry.emitProgress()`, and returns `await iterable.done` (with a pre-installed `.catch(() => {})` to silence the dangling rejection if the `for-await` exits via exception). Adapters without `stream()` transparently fall through to `call()`.
+
+Socket event: `llm-inflight:progress` carrying `InFlightProgress = { runtimeKey, idempotencyKey, tokensSoFar, lastTokenAt }`. Client merges into a per-runtimeKey `Map<string, InFlightProgress>`; token count renders inline with the Elapsed cell on both desktop table and mobile card.
+
+**No provider adapter implements `stream()` yet.** The infrastructure ships; the adapter wiring is the next-session handoff. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution, postProcess semantics on partial streams. The §1 partial-external-success protection is a **hard prerequisite** — streaming exposes a new partial-success window (tokens billed but stream aborted), and the `'started'` row is the durable reconciliation layer for that case too.
+
+### Cost aggregate dimensions (spec §6.2)
+
+`cost_aggregates` is the pre-rolled read model for every P&L dashboard. Entity types:
+
+`'organisation' \| 'subaccount' \| 'run' \| 'agent' \| 'task_type' \| 'provider' \| 'platform' \| 'execution_phase' \| 'source_type' \| 'feature_tag'`
+
+The last two — `source_type` and `feature_tag` — were added by spec §6.2 so platform-overhead, per-feature, and per-source-type rollups don't require live scans of `llm_requests`. `cost_aggregates` is NOT RLS-protected (it carries aggregated totals, not PII), which keeps the existing admin usage routes working without bypass wiring.
+
+### LLM ledger retention (spec §12.4 / §15.5)
+
+`llm_requests` rows older than `env.LLM_LEDGER_RETENTION_MONTHS` (default `12`) are moved to `llm_requests_archive` by the nightly `maintenance:llm-ledger-archive` pg-boss job (`server/jobs/llmLedgerArchiveJob.ts`, 03:45 UTC):
+
+- **10k-row chunks** — bounded transaction size keeps lock footprint small.
+- **Atomic move** — one CTE chain `SELECT FOR UPDATE SKIP LOCKED → INSERT ON CONFLICT DO NOTHING → DELETE RETURNING`. A row is either in the live table OR the archive, never both and never neither.
+- **Admin-bypass RLS** — both `llm_requests` and `llm_requests_archive` have `FORCE ROW LEVEL SECURITY`. The job runs under `withAdminConnection({ source: 'llmLedgerArchiveJob' }, …)` + `SET LOCAL ROLE admin_role` (BYPASSRLS). Direct `db.transaction` would fail closed.
+- **Cutoff math** is pure in `llmLedgerArchiveJobPure.ts::computeArchiveCutoff` so retention behaviour is test-pinned.
+
+`systemPnlService.getCallDetail()` UNIONs the archive so the detail drawer keeps working for rows moved out of the live table.
+
+### System P&L page (spec §11)
+
+`/system/llm-pnl` is the one UI that is intentionally cross-tenant. Routes (`server/routes/systemPnl.ts`) enforce `requireSystemAdmin`; the service (`server/services/systemPnlService.ts`) runs every read inside `adminRead(reason, fn)` — a thin wrapper over `withAdminConnection({source:'systemPnlService', reason}, tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); return fn(tx); })`. Cross-org reads without the role switch fail closed against the FORCE RLS policy on `llm_requests` + archive.
+
+Data split:
+
+- **Scalar KPIs + per-org / per-subaccount rollups** read `cost_aggregates` (sub-100 ms, no live scan).
+- **Source-type / provider+model rollups, top calls, call detail** read `llm_requests` live — bounded by the indexed `billing_month` scan.
+- **Daily trend** reads `cost_aggregates` (`entity_type='platform'`, `period_type='daily'`).
+
+Pure math — margin %, profit cents, KPI change % / pp, aggregated overhead row — lives in `systemPnlServicePure.ts` so every computation is test-pinned independently of SQL.
 
 ### Frontend
 
@@ -2281,3 +2956,91 @@ Set `OAUTH_CALLBACK_BASE_URL` in `.env` to the ngrok HTTPS URL. `APP_BASE_URL` s
 - `DATABASE_URL` — if Postgres is not on localhost on the other machine
 
 Everything else in `.env` is portable.
+
+---
+
+## Key files per domain
+
+Quick reference for "where do I start when adding X". This is the index, not the deep reference — see the relevant sections above in this document for full architectural details.
+
+| Task | Start here |
+|------|------------|
+| Modify the Universal Brief (chat-first COO entry) | `server/services/briefCreationService.ts` (create/update briefs) + `server/services/briefConversationWriter.ts` (persist artefacts) + `server/routes/briefs.ts` + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/pages/BriefDetailPage.tsx` + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Artefact lifecycle: `client/src/lib/briefArtefactLifecyclePure.ts`. Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). |
+| Add a task-scoped conversation pane | `client/src/components/task-chat/TaskChatPane.tsx` renders the chat UI; calls `GET /api/conversations/task/:taskId` (find-or-create, defined in `server/routes/conversations.ts`). Embedded in `TaskModal.tsx` as the "Conversation" tab. `scopeType='task'` row is created by `findOrCreateBriefConversation` in `server/services/briefConversationService.ts`. |
+| Add an agent-run-scoped conversation pane | `client/src/components/agent-run-chat/AgentRunChatPane.tsx` + `GET /api/conversations/agent-run/:runId` in `server/routes/conversations.ts`. Same `findOrCreateBriefConversation` with `scopeType='agent_run'`. |
+| Modify the Learned Rules citation trail | `server/services/memoryCitationDetector.ts::scoreRunBlocks` (scores applied memory blocks post-run) + `server/services/memoryBlockCitationDetectorPure.ts::detectBlockCitationsPure` (pure scorer). Called at run-completion in `agentExecutionService.ts` for `finalStatus='completed'` runs. Results land in `agent_runs.applied_memory_block_citations`. UI: `client/src/components/brief-artefacts/RulesAppliedPanel.tsx`. |
+| Modify Brief UI artefact cards | `client/src/components/brief-artefacts/StructuredResultCard.tsx` (table card) + `ApprovalCard.tsx` (approval-gate card). Pure data-transform helpers extracted to `StructuredResultCardPure.ts` + `ApprovalCardPure.ts` in the same directory; tests under `__tests__/`. |
+| Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
+| Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
+| Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |
+| Modify the ClientPulse intervention proposer | `server/jobs/proposeClientPulseInterventionsJob.ts` (orchestration) + `server/services/clientPulseInterventionProposerPure.ts` (matcher logic) — never bypass `enqueueInterventionProposal()` |
+| Modify the outcome measurement job | `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` (decision pure fn) — band attribution + cooldown integrity hinge on the args passed to `interventionService.recordOutcome()` |
+| Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
+| Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
+| Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
+| Add an LLM consumer (non-agent) | `llmRouter.routeCall({ context: { sourceType: 'system' \| 'analyzer', sourceId, featureTag, systemCallerPolicy, ... } })` — NEVER import a provider adapter directly (the `verify-no-direct-adapter-calls.sh` gate + runtime `assertCalledFromRouter()` block this). Use `postProcess` + `ParseFailureError` for schema-validation failures; AbortController for cancellation. Callers must also handle `ReconciliationRequiredError` (`server/lib/reconciliationRequiredError.ts`, `statusCode: 409`, `code: 'RECONCILIATION_REQUIRED'`) — thrown when a retry under an `idempotencyKey` finds a provisional `'started'` row. The router never auto-retries this; the caller decides (surface banner, poll, fail). |
+| Touch the idempotency-key derivation | Single version constant in `server/lib/idempotencyVersion.ts` (`IDEMPOTENCY_KEY_VERSION = 'v1'`) prepends every key from `llmRouter.generateIdempotencyKey` (pure at `server/services/llmRouterIdempotencyPure.ts`) and `actionService.buildActionIdempotencyKey`. Any change to hash inputs, ordering, or canonicalisation MUST bump the version in the same commit. Load-time assert enforces `/^v\d+$/`. Pure tests in `llmRouterIdempotencyPure.test.ts` + `actionServiceCanonicalisationPure.test.ts` pin the current shape. |
+| Modify the partial-external-success guard | `server/services/llmRouter.ts` §4+7 (idempotency-check transaction atomically writes provisional `'started'` row + throws `ReconciliationRequiredError` on retry). All three terminal writes (success, failure, budget-blocked) use `where: status = 'started'` — a mismatch fires `llm_router.{budget_block,failure,success}_upsert_ghost` at warn level. DB-side sweep: `server/jobs/llmStartedRowSweepJob.ts` + `llmStartedRowSweepJobPure.ts` reap aged-out rows at `PROVIDER_CALL_TIMEOUT_MS + 60s` (constant `STARTED_ROW_SWEEP_BUFFER_MS`); registered in `queueService.ts` as `maintenance:llm-started-row-sweep` every 2 min. Migration 0190 adds partial index on `created_at WHERE status = 'started'`. |
+| Modify the in-flight registry or its UI | In-memory registry at `server/services/llmInflightRegistry.ts` + `llmInflightRegistryPure.ts`. Router wiring in `llmRouter.ts` captures `queuedAt`, `attemptSequence`, `fallbackIndex` on every add; payload snapshot in `server/services/llmInflightPayloadStore.ts` (LRU 100 / 200 KB cap with `originalSizeBytes` metadata on truncation); history fire-and-forget into `llm_inflight_history` (migration 0191) gated by a soft circuit breaker from `server/lib/softBreakerPure.ts` (50-sample window, 50% threshold, 5-min open). Client at `client/src/components/system-pnl/PnlInFlightTable.tsx` + `PnlInFlightPayloadDrawer.tsx` (row-click opens live payload; mobile card layout under `md:` breakpoint). Admin routes: snapshot + history + payload all on `server/routes/systemPnl.ts`. |
+| Add a fire-and-forget persistence path | Use `server/lib/softBreakerPure.ts` — pure sliding-window breaker (config: `windowSize`, `minSamples`, `failThreshold`, `openDurationMs`). Pattern: wrap the write with `shouldAttempt(state, now)` before + `recordOutcome(state, success, now, config)` after; log exactly once on `trippedNow: true`. Example: `persistHistoryEvent` in `llmInflightRegistry.ts`. Never block the primary path on the breaker — it only gates the write, not the caller. |
+| Stream tokens from a provider adapter | Adapter contract in `server/services/providers/types.ts` — optional `stream?(): AsyncIterable<StreamTokenChunk> & { done: Promise<ProviderResponse> }`. Router opt-in via `RouterCallParams.stream: true`. Server-side 1 Hz throttle per runtimeKey in `llmInflightRegistry.emitProgress()`; socket event `llm-inflight:progress`. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution. No provider ships `stream()` yet — adding it is the hand-off from this branch. |
+| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
+| Modify the per-run cost panel | `client/src/components/run-cost/RunCostPanel.tsx` (thin shell) + `RunCostPanelPure.ts` (branch decisions + formatters) + `shared/types/runCost.ts` (response type) + `server/routes/llmUsage.ts` (`/api/runs/:runId/cost` handler). Panel is hosted on `SessionLogCardList`, `RunTraceView`, and `AdminAgentEditPage`. Pure module covers the full §9.1 rendering matrix. |
+| Modify the per-run cost breaker | `server/lib/runCostBreaker.ts` — five exports: `resolveRunCostCeiling`, `getRunCostCents` / `assertWithinRunBudget` (rollup-based; Slack + Whisper), `getRunCostCentsFromLedger` / `assertWithinRunBudgetFromLedger` (ledger-based; LLM router). Ledger helper uses a **merged visibility + SUM aggregate** (single scan returning both) — do not split; see `tasks/hermes-audit-tier-1-spec.md` §7.3.1. Hard-ceiling `>=` semantics (not `>`). |
+| Modify outcome-gated entry-type promotion | `server/services/workspaceMemoryServicePure.ts` (`selectPromotedEntryType` / `scoreForOutcome` / `computeProvenanceConfidence` / `applyOutcomeDefaults`) + `workspaceMemoryService.ts::extractRunInsights` (wires outcome through). `runResultStatus` is derived by `agentExecutionServicePure.ts::computeRunResultStatus` and written exactly once at 3 terminal sites (normal + catch in `agentExecutionService.ts`; IEE in `agentRunFinalizationService.ts`) with `AND run_result_status IS NULL` guard. Per-entryType half-life decay lives in `memoryEntryQualityServicePure.ts::computeDecayFactor`. |
+| Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
+| Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
+| Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
+| Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |
+| Modify the Live Agent Execution Log read path | `server/routes/agentExecutionLog.ts` (3 GETs) + `server/services/agentExecutionEventService.ts` (`streamEvents` / `getPrompt` / `getLlmPayload`) + `server/lib/agentRunVisibility.ts` (canView / canViewPayload rules) + `server/lib/agentRunPermissionContext.ts` (user-context hydration). Migration 0192 carries the three new tables (`agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads`) + adds `next_event_seq` + `event_limit_reached_emitted` to `agent_runs`. |
+| Modify the Live Agent Execution Log payload writer | `server/services/agentRunPayloadWriter.ts::buildPayloadRow` — redaction → tool-policy → greatest-first truncation pipeline. Patterns in `server/lib/redaction.ts` (bearer / openai / anthropic / github / slack / aws / google). Per-tool opt-in via `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'`. Size cap: `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB). Pure tests in `server/services/__tests__/agentRunPayloadWriterPure.test.ts`. Modifications recorded in `agent_run_llm_payloads.modifications` + `redacted_fields` (separate columns — never overloaded). |
+| Modify the Live Agent Execution Log client timeline | `client/src/pages/AgentRunLivePage.tsx` (snapshot+live merge, sliding-window cap `TIMELINE_WINDOW_SIZE = 2000`, cap-reached banner, sequence-gap + collision counters via `getAgentRunLiveClientMetrics()`) + `client/src/components/agentRunLog/{Timeline,EventRow,EventDetailDrawer}.tsx`. Socket hookup via `useSocketRoom('agent-run', runId, ...)`; server emitter `emitAgentExecutionEvent` in `server/websocket/emitters.ts`; room-join gate in `server/websocket/rooms.ts` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check. |
+| Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
+| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
+| Add a new permission key | `server/lib/permissions.ts` |
+| Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
+| Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
+| Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
+| Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
+| Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
+| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
+| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
+| Add a canonical data table | `server/db/schema/`, migration with `UNIQUE(organisation_id, provider_type, external_id)`, add to `rlsProtectedTables.ts`, add RLS policy, update `server/config/canonicalDictionary.ts` |
+| Add a connector adapter | `server/services/connectorPollingService.ts` (adapter wiring), `server/config/connectorPollingConfig.ts` (intervals) |
+| Modify principal/RLS context | `server/db/withPrincipalContext.ts`, `server/config/rlsProtectedTables.ts`, migration for new policies |
+| Modify a ClientPulse adapter dispatch path | `server/services/adapters/apiAdapter.ts` (dispatch) + `apiAdapterClassifierPure.ts` (retry classifier) + `ghlEndpoints.ts` (5 endpoint mappings) + `executionLayerService.ts` (precondition gate + per-subaccount advisory lock) |
+| Modify canonical-JSON or idempotency-key derivation | `server/services/actionService.ts` — `canonicaliseJson`, `hashActionArgs`, `buildActionIdempotencyKey`, `computeValidationDigest`. Pinned by `actionServiceCanonicalisationPure.test.ts` — nested-key sort + present-vs-absent collapse + null-distinction + array-positional semantics. Retry-vs-replay contract is non-negotiable (see `buildActionIdempotencyKey` header comment) |
+| Modify the ClientPulse drilldown | `server/routes/clientpulseDrilldown.ts` (4 routes) + `server/services/drilldownService.ts` + `server/services/drilldownOutcomeBadgePure.ts` (badge rules) + `client/src/pages/ClientPulseDrilldownPage.tsx` + `client/src/components/clientpulse/drilldown/` — always scope reads by `organisationId` + `subaccountId` |
+| Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
+| Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
+| Modify the CRM Query Planner | Spec: `tasks/builds/crm-query-planner/spec.md`. Orchestration: `server/services/crmQueryPlanner/crmQueryPlannerService.ts` (§3 / §19; wraps pipeline in `withPrincipalContext` per §16.4 when outer `withOrgTx` is active; `runLlmStage3` seam on `RunQueryDeps` for test stubbing). Pure layer: `normaliseIntentPure.ts`, `registryMatcherPure.ts`, `validatePlanPure.ts` (10-rule validator + three-case canonical-precedence — case b uses `isLiveOnlyField` from `liveExecutorPure.ts`), `planCachePure.ts`, `approvalCardGeneratorPure.ts`, `plannerCostPure.ts`, `resultNormaliserPure.ts`, `schemaContextPure.ts`, `llmPlannerPromptPure.ts`. Executors: `executors/canonicalExecutor.ts` (skip-unknown-capability rule §12.1 + debug `canonical.capability_skipped`), `executors/liveExecutor.ts` + `liveExecutorPure.ts` (rate-limiter keyed on real GHL `locationId` from `resolveGhlContext`, NOT `context.subaccountLocationId`), `executors/hybridExecutor.ts` + `hybridExecutorPure.ts` (row-count guard before live dispatch), `executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`. LLM fallback: `llmPlanner.ts` (single-escalation retry; passes `wasEscalated: true` + `escalationReason` on router context so `getPlannerMetrics.escalationRate` populates). Cache: `planCache.ts` (LRU with discriminated `{ hit, plan, entry } \| { hit: false, reason }` result). Events: `plannerEvents.ts` (forwards ONLY `planner.result_emitted` / `planner.error_emitted` to agent execution log — exactly one `skill.completed` per planner run). Budget classification: `isBudgetExceededError` helper discriminates `{statusCode: 402, code: 'BUDGET_EXCEEDED'}` vs `RATE_LIMITED`; `classifyStage3FallbackSubcategory` splits `parse_failure` / `rate_limited` / `planner_internal_error` / `validation_failed` on `errorSubcategory` (external `ambiguous_intent` unchanged). Route: `server/routes/crmQueryPlanner.ts` (authenticate → `resolveSubaccount` → `listAgentCapabilityMaps` union for `crm.query` gate). Skill surface: `'crm.query'` handler in `server/services/skillExecutor.ts` with `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort`. Observability: `getPlannerMetrics` in `server/services/systemPnlService.ts` + route in `server/routes/systemPnl.ts` + `SystemPnlPage.tsx` panel. Trace: `PlannerTrace` accumulator threaded through pipeline with top-level `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` + deep-frozen at terminal emission. CI guard: `scripts/verify-crm-query-planner-read-only.sh` (import-restriction enforcement; read-only is structural). |
+
+---
+
+## Architecture Rules (Automation OS specific)
+
+These are non-negotiable. Violations are blocking issues in any code review.
+
+### Server
+- **Routes** call services only — never access `db` directly in a route
+- **`asyncHandler`** wraps every async handler — no manual try/catch in routes
+- **Service errors** throw as `{ statusCode, message, errorCode? }` — never raw strings
+- **`resolveSubaccount(subaccountId, orgId)`** called in every route with `:subaccountId`
+- **Auth middleware** — `authenticate` always first, then permission guards as needed
+- **Org scoping** — all queries filter by `organisationId` using `req.orgId` (not `req.user.organisationId`)
+- **Soft deletes** — always filter with `isNull(table.deletedAt)` on soft-delete tables
+- **Schema changes** — Drizzle migration files only; never raw SQL schema changes
+
+### Agent system
+- **Three-tier model** (System → Org → Subaccount) must be respected in all agent-related changes
+- **System-managed agents** — `isSystemManaged: true` means masterPrompt is not editable; only additionalPrompt
+- **Idempotency keys** — all new agent run creation paths must support deduplication
+- **Heartbeat changes** — account for `heartbeatOffsetMinutes` (minute-level precision)
+- **Handoff depth** — check `MAX_HANDOFF_DEPTH` (5) in `server/config/limits.ts`
+
+### Client
+- **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
+- **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
+- **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
+- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.

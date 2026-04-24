@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { onboardingService } from '../services/onboardingService.js';
 import { subscriptionService } from '../services/subscriptionService.js';
 
@@ -10,12 +11,30 @@ const router = Router();
 router.get('/api/onboarding/status', authenticate, asyncHandler(async (req, res) => {
   const orgId = req.orgId;
   if (!orgId) {
-    res.json({ ghlConnected: false, agentsProvisioned: false, firstRunComplete: false });
+    // Absent org context — treat as already-onboarded so the wizard redirect
+    // doesn't fire for system-admin surfaces.
+    res.json({ needsOnboarding: false, ghlConnected: false, agentsProvisioned: false, firstRunComplete: false });
     return;
   }
   const status = await onboardingService.getOnboardingStatus(orgId);
   res.json(status);
 }));
+
+/** POST /api/onboarding/complete — mark organisations.onboarding_completed_at (spec §7.3 / §7.4).
+ *  Gated by ORG_PERMISSIONS.AGENTS_EDIT so read-only org members cannot
+ *  permanently dismiss the wizard for everyone else.
+ */
+router.post(
+  '/api/onboarding/complete',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+    await onboardingService.markOnboardingComplete(orgId);
+    res.json({ ok: true });
+  }),
+);
 
 /** GET /api/onboarding/sync-status — poll sync progress */
 router.get('/api/onboarding/sync-status', authenticate, asyncHandler(async (req, res) => {

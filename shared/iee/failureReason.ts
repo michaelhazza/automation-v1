@@ -24,6 +24,11 @@ export const FailureReason = z.enum([
   'rate_limited',       // external system returned 429 / equivalent
   'data_incomplete',    // expected data missing or malformed (e.g. transcript too short)
   'internal_error',     // bug or unexpected condition in our own code
+  // IEE Phase 0 addition (docs/iee-delegation-lifecycle-spec.md decision 1).
+  // Distinguishes worker-originated stoppage (shutdown drain, container
+  // eviction, orphan detection) from user-initiated cancellation. The
+  // latter sets iee_runs.status='cancelled' instead.
+  'worker_terminated',
   // Sprint 2 — P1.1 three-layer fail-closed data isolation additions.
   // See docs/improvements-roadmap-spec.md §P1.1 Layer 2 / Layer 3.
   'scope_violation',    // tenant boundary crossed — organisation / subaccount mismatch

@@ -93,6 +93,34 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
     });
   }
 
+  // Rev §6 — new dimensions for the System P&L page.
+  //
+  // Source type (monthly — enables 'overhead vs billable' splits).
+  // Entity ID is the raw sourceType value so 'system' and 'analyzer' each
+  // get their own row on the `By Source Type` tab per spec §11.5.
+  dimensions.push({
+    entityType: 'source_type',
+    entityId:   request.sourceType,
+    periodType: 'monthly',
+    periodKey:  request.billingMonth,
+  });
+  dimensions.push({
+    entityType: 'source_type',
+    entityId:   request.sourceType,
+    periodType: 'daily',
+    periodKey:  request.billingDay,
+  });
+
+  // Feature tag (monthly — enables per-feature cost attribution).
+  if (request.featureTag && request.featureTag !== 'unknown') {
+    dimensions.push({
+      entityType: 'feature_tag',
+      entityId:   request.featureTag,
+      periodType: 'monthly',
+      periodKey:  request.billingMonth,
+    });
+  }
+
   // Rate-limit windows (minute + hour) — only for subaccount
   if (request.subaccountId) {
     // minute key: 'YYYY-MM-DDTHH:mm'

@@ -41,7 +41,12 @@ export const hierarchyTemplates = pgTable(
 
     // Phase 4: Configuration template extension
     appliedConnectorConfigId: uuid('applied_connector_config_id'),
-    operationalConfig: jsonb('operational_config').$type<Record<string, unknown>>(),
+    // Session 1 (migration 0180) — renamed from `operational_config`. One-time
+    // informational snapshot copied from systemHierarchyTemplates.operationalDefaults
+    // when this blueprint is adopted. NOT a runtime source. The runtime source is
+    // organisations.operational_config_override (deep-merged with system defaults
+    // at read time). See spec §2 / contract (h).
+    operationalConfigSeed: jsonb('operational_config_seed').$type<Record<string, unknown>>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

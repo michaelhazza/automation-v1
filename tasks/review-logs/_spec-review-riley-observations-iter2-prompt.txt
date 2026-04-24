@@ -1,0 +1,54 @@
+You are reviewing iteration 2 of a Riley-observations development specification for Automation OS.
+
+Iteration 1 applied 22 mechanical fixes and routed 7 directional findings to tasks/todo.md. This pass looks for residual mechanical issues and new findings that landed with the iter-1 edits.
+
+FRAMING ASSUMPTIONS — unchanged, do NOT suggest changes against them:
+- Pre-production, no live users, no staged rollout, no feature flags for new migrations, commit-and-revert.
+- Testing posture: static gates primary + pure-function unit tests only. NO new vitest/jest/playwright/supertest/frontend/E2E/API-contract/composition/performance tests.
+- Prefer existing primitives. Known primitives don't need new wrappers.
+- Two deliberate behaviour-mode toggles are in scope: `heartbeat_activity_gate_enabled` and `safety_mode` (Explore vs Execute).
+- 5 migrations ship in ONE PR (0202 through 0206, renumbered in iter 1).
+
+KEY ITER-1 DECISIONS — don't raise these as findings:
+- Migrations renumbered 0172–0176 → 0202–0206. Confirmed to not collide with existing 0201.
+- `run_mode` on `workflow_runs` is NOT being added; a new column `safety_mode` is added instead. The old `run_mode (auto|supervised|background|bulk)` is preserved.
+- Per-row timeout override is deferred to architect; spec references existing `DEFAULT_TIMEOUT_SECONDS = 300` constant.
+- Workflow DSL uses `{{ steps.X.output.Y }}` templates; JSONPath was removed.
+- Runtime input/output validation is best-effort v1; validator choice deferred to §12.23.
+- `side_effects` runtime storage deferred to §12.22 (architect picks column vs JSONB vs seed-only).
+- "Check now" trigger / Rule 3 either shipped with explicit mechanism or dropped from v1 (§12.16).
+- Supervised-mode removal is decided; §12.14 is now an audit step.
+- `user_run_mode_preferences` ships with RLS policy, manifest entry, route guard, principal-scoped context (§6.3a).
+- New Contracts section §9a and Deferred Items section §9b.
+
+YOUR JOB THIS ITERATION — focus on:
+
+1. Residual contradictions introduced BY the iter-1 edits (e.g. a mechanical fix that references a symbol the rest of the spec didn't update).
+2. Unresolved self-inconsistencies the first pass missed.
+3. Inventory drift introduced by the expanded §4.6 and §4.8 tables (do the new rows cover all the consumers named in prose?).
+4. Schema / type precision gaps: does every new field declared in iter 1 (safety_mode, last_tick_evaluated_at, user_run_mode_preferences columns, gateResolutionServicePure) have consistent references elsewhere?
+5. §9a Contracts completeness — are any boundary shapes from the Parts missing from the table?
+6. §9b Deferred Items completeness — are any prose "deferred/later/v2/future" mentions NOT in §9b?
+7. Naming consistency: `safety_mode` (column) vs `runMode` (TS field) vs `run_mode` (prose carryover?). Flag any stale `run_mode` references in §6 or later that should have become `safety_mode`.
+8. `last_tick_evaluated_at` vs `last_meaningful_tick_at` — any place the spec still uses the ambiguous "last tick" term without qualification?
+9. §9b Deferred Items — does each bullet have a clear handle-and-condition for architect pass?
+10. Cross-section invariant holes: e.g. does §6.5's shared `gateResolutionServicePure` actually appear in §11.2's Part 3 test matrix mention of `resolveEffectiveGate`?
+11. §7.6 run-completion hook that updates `last_meaningful_tick_at` — does the spec name a specific file or is that an open question?
+12. Remaining stale references to "playbook_runs" in prose (§13 appendix) that should have become "workflow_runs (new)" — the appendix was not touched in iter 1.
+13. §13 Appendix mapping tables — do they still match after the renumbering and the safety_mode introduction?
+14. `HeartbeatGateInput.lastTickEvaluatedAt` is a new field in the type; the prose says the gate reads `last_tick_evaluated_at` from the DB. Does the call site in §7.6 actually pass that value in?
+15. Self-contradictions in the new §6.3 "Naming collision" note — does it explain the column name choice consistently with §13.1 glossary?
+
+REJECT CRITERIA (do NOT raise these):
+- "Add more tests."
+- "Add frontend / E2E / API-contract tests."
+- "Feature-flag the rollout."
+- "Stage the rollout."
+- "Introduce a new monitoring / observability primitive."
+- "Add a new retry/cost/gate primitive that duplicates known ones."
+- Open questions legitimately deferred to architect (§12 is for architect work).
+
+OUTPUT: Bulleted list. Each finding: section (§N.N), one-sentence issue, one-sentence suggested fix.
+
+Here is the updated spec:
+

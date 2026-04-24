@@ -43,9 +43,9 @@ interface WorkflowContext {
   workflowStatus: string;
 }
 
-// ── Issue (task) types ────────────────────────────────────────────────────────
+// ── Brief (task) types ────────────────────────────────────────────────────────
 
-interface Issue {
+interface Brief {
   id: string;
   title: string;
   description: string | null;
@@ -81,11 +81,11 @@ const PRIORITY_CLS: Record<string, string> = {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'issues' | 'review';
+type Tab = 'briefs' | 'review';
 
-// ── New Issue Modal ───────────────────────────────────────────────────────────
+// ── New Brief Modal ───────────────────────────────────────────────────────────
 
-function NewIssueModal({
+function NewBriefModal({
   subaccountId,
   agents,
   onCreated,
@@ -125,7 +125,7 @@ function NewIssueModal({
       onClose();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(msg ?? 'Failed to create issue');
+      setError(msg ?? 'Failed to create brief');
     } finally {
       setSaving(false);
     }
@@ -135,7 +135,7 @@ function NewIssueModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-[17px] font-bold text-slate-900 m-0">New Issue</h2>
+          <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
           <button onClick={onClose} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
@@ -191,7 +191,7 @@ function NewIssueModal({
               Cancel
             </button>
             <button type="submit" disabled={saving || !title.trim()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors">
-              {saving ? 'Creating...' : 'Create Issue'}
+              {saving ? 'Creating...' : 'Create Brief'}
             </button>
           </div>
         </form>
@@ -206,7 +206,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   const { subaccountId } = useParams<{ subaccountId: string }>();
 
   // Tab
-  const [tab, setTab] = useState<Tab>('issues');
+  const [tab, setTab] = useState<Tab>('briefs');
 
   // Review state
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
@@ -220,11 +220,11 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   // workflowContext keyed by actionId — populated from agent-inbox endpoint
   const [workflowContextByActionId, setWorkflowContextByActionId] = useState<Map<string, WorkflowContext>>(new Map());
 
-  // Issues state
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [issuesLoading, setIssuesLoading] = useState(true);
+  // Briefs state
+  const [briefs, setBriefs] = useState<Brief[]>([]);
+  const [briefsLoading, setBriefsLoading] = useState(true);
   const [agents, setAgents] = useState<SubaccountAgent[]>([]);
-  const [showNewIssue, setShowNewIssue] = useState(false);
+  const [showNewBrief, setShowNewBrief] = useState(false);
 
   const [error, setError] = useState('');
 
@@ -257,15 +257,15 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     } finally { setReviewLoading(false); }
   }, [subaccountId]);
 
-  const loadIssues = useCallback(async () => {
+  const loadBriefs = useCallback(async () => {
     if (!subaccountId) return;
-    setIssuesLoading(true);
+    setBriefsLoading(true);
     try {
       const res = await api.get(`/api/subaccounts/${subaccountId}/tasks`, { params: { status: 'inbox' } });
-      setIssues(res.data as Issue[]);
+      setBriefs(res.data as Brief[]);
     } catch {
       // silently fail — show empty state
-    } finally { setIssuesLoading(false); }
+    } finally { setBriefsLoading(false); }
   }, [subaccountId]);
 
   const loadAgents = useCallback(async () => {
@@ -278,9 +278,9 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
   useEffect(() => {
     loadReview();
-    loadIssues();
+    loadBriefs();
     loadAgents();
-  }, [loadReview, loadIssues, loadAgents]);
+  }, [loadReview, loadBriefs, loadAgents]);
 
   // ── Review actions ────────────────────────────────────────────────────────
 
@@ -488,49 +488,49 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     );
   };
 
-  // ── Tab: Issues ───────────────────────────────────────────────────────────
+  // ── Tab: Briefs ───────────────────────────────────────────────────────────
 
-  const renderIssues = () => {
-    if (issuesLoading) return (
+  const renderBriefs = () => {
+    if (briefsLoading) return (
       <div className="flex flex-col gap-3">
         {[1, 2, 3].map((i) => <div key={i} className="h-20 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
       </div>
     );
 
-    if (issues.length === 0) return (
+    if (briefs.length === 0) return (
       <div className="py-16 text-center bg-white border border-slate-200 rounded-xl">
         <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-[linear-gradient(135deg,#f0f9ff,#e0f2fe)]">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
         </div>
-        <p className="font-bold text-[16px] text-slate-900 mb-1.5">No open issues</p>
-        <p className="text-[13.5px] text-slate-500 mb-4">Create an issue to assign work to your AI team.</p>
+        <p className="font-bold text-[16px] text-slate-900 mb-1.5">No open briefs</p>
+        <p className="text-[13.5px] text-slate-500 mb-4">Create a brief to assign work to your AI team.</p>
         <button
-          onClick={() => setShowNewIssue(true)}
+          onClick={() => setShowNewBrief(true)}
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
         >
-          + New Issue
+          + New Brief
         </button>
       </div>
     );
 
     return (
       <div className="flex flex-col gap-2">
-        {issues.map((issue) => (
-          <div key={issue.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors">
+        {briefs.map((brief) => (
+          <div key={brief.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="font-semibold text-[14px] text-slate-900 truncate">{issue.title}</span>
-                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${PRIORITY_CLS[issue.priority] ?? PRIORITY_CLS.normal}`}>
-                  {issue.priority}
+                <span className="font-semibold text-[14px] text-slate-900 truncate">{brief.title}</span>
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${PRIORITY_CLS[brief.priority] ?? PRIORITY_CLS.normal}`}>
+                  {brief.priority}
                 </span>
               </div>
-              {issue.description && (
-                <p className="text-[13px] text-slate-500 m-0 leading-relaxed line-clamp-2">{issue.description}</p>
+              {brief.description && (
+                <p className="text-[13px] text-slate-500 m-0 leading-relaxed line-clamp-2">{brief.description}</p>
               )}
               <p className="text-[12px] text-slate-400 mt-1 m-0">
-                Created {new Date(issue.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                Created {new Date(brief.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
           </div>
@@ -628,7 +628,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Inbox</h1>
-            <p className="text-[14px] text-slate-500 m-0">Issues assigned to your AI team and agent actions awaiting approval.</p>
+            <p className="text-[14px] text-slate-500 m-0">Briefs assigned to your AI team and agent actions awaiting approval.</p>
           </div>
           <div className="flex gap-2 items-center">
             {tab === 'review' && (
@@ -644,12 +644,12 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
                 Refresh
               </button>
             )}
-            {tab === 'issues' && (
+            {tab === 'briefs' && (
               <button
-                onClick={() => setShowNewIssue(true)}
+                onClick={() => setShowNewBrief(true)}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
               >
-                + New Issue
+                + New Brief
               </button>
             )}
           </div>
@@ -666,12 +666,12 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6 w-fit">
         <button
-          onClick={() => setTab('issues')}
-          className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-colors border-0 cursor-pointer ${tab === 'issues' ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
+          onClick={() => setTab('briefs')}
+          className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-colors border-0 cursor-pointer ${tab === 'briefs' ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
         >
-          Issues
-          {issues.length > 0 && (
-            <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[11px] font-bold">{issues.length}</span>
+          Briefs
+          {briefs.length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[11px] font-bold">{briefs.length}</span>
           )}
         </button>
         <button
@@ -686,16 +686,16 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
       </div>
 
       {/* Tab content */}
-      {tab === 'issues' && renderIssues()}
+      {tab === 'briefs' && renderBriefs()}
       {tab === 'review' && renderReview()}
 
-      {/* New Issue modal */}
-      {showNewIssue && subaccountId && (
-        <NewIssueModal
+      {/* New Brief modal */}
+      {showNewBrief && subaccountId && (
+        <NewBriefModal
           subaccountId={subaccountId}
           agents={agents}
-          onCreated={loadIssues}
-          onClose={() => setShowNewIssue(false)}
+          onCreated={loadBriefs}
+          onClose={() => setShowNewBrief(false)}
         />
       )}
     </div>

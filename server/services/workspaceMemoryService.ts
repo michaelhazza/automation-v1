@@ -49,6 +49,28 @@ import { createHash } from 'crypto';
 import { sanitizeSearchQuery } from '../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../lib/queryIntent.js';
+import {
+  applyOutcomeDefaults,
+  scoreForOutcome,
+  selectPromotedEntryType,
+  type RunOutcome,
+} from './workspaceMemoryServicePure.js';
+
+// Phase B §8.3 — extended options bag for `extractRunInsights`. `taskSlug`
+// moves inside `options` alongside `overrides` so the tail argument has a
+// single consistent shape. Overrides are caller-specific (today only
+// `outcomeLearningService` uses them to preserve "run-sourced, verified"
+// semantics for human-curated lessons — §6.7.1).
+export interface ExtractRunInsightsOptions {
+  taskSlug?: string;
+  overrides?: {
+    isUnverified?: boolean;
+    provenanceConfidence?: number;
+  };
+  // Test injection point — allows unit tests to supply a mock without a real
+  // provider config. Production code always falls back to `routeCall`.
+  _routeCall?: typeof routeCall;
+}
 
 // ---------------------------------------------------------------------------
 // Workspace Memory Service — shared memory across agents in a workspace
@@ -218,7 +240,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
             messages: [{ role: 'user', content: `Given this short task context, generate a hypothetical memory entry (2-3 sentences) that would be relevant and useful. Include specific details and terminology.\n\nTask context: "${sanitizedQuery}"\n\nRespond with only the hypothetical memory entry.` }],
             temperature: 0.5,
             maxTokens: HYDE_MAX_TOKENS,
-            context: { organisationId: orgId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution', routingMode: 'ceiling' },
+            context: { organisationId: orgId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', routingMode: 'ceiling' },
           });
           const hydeText = hydeResponse?.content ?? null;
           if (hydeText) {
@@ -699,14 +721,31 @@ export const workspaceMemoryService = {
     organisationId: string,
     subaccountId: string,
     runSummary: string,
-    taskSlug?: string,
+    outcome: RunOutcome,
+    options?: ExtractRunInsightsOptions,
   ): Promise<void> {
+    const taskSlug = options?.taskSlug;
+    const overrides = options?.overrides;
     if (!runSummary || runSummary.trim().length < 20) return;
+
+    // Hermes Tier 1 Phase B §6.8 — short-summary guard on failed runs.
+    // Skip extraction when a failed run carries no meaningful signal
+    // (both structured error absent AND summary below 100 chars).
+    const hasStructuredError = Boolean(outcome.errorMessage && outcome.errorMessage.length > 0);
+    const hasMeaningfulSummary = runSummary.trim().length >= 100;
+    if (
+      outcome.runResultStatus === 'failed'
+      && !hasStructuredError
+      && !hasMeaningfulSummary
+    ) {
+      return;
+    }
 
     const insightsSpan = createSpan('memory.insights.extract', { runId, criticalPath: false });
 
     try {
-      const response = await routeCall({
+      const callFn = options?._routeCall ?? routeCall;
+      const response = await callFn({
         messages: [{ role: 'user', content: `Agent run summary:\n\n${runSummary}` }],
         system: `You are an insight extractor. Given an agent run summary, extract key insights as a JSON array.
 Each entry has "content" (string) and "entryType" (one of: "observation", "decision", "preference", "issue", "pattern").
@@ -762,9 +801,20 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
         runId,
       );
 
+      // Hermes Tier 1 Phase B §6.5 / §6.7 — apply outcome-driven
+      // promotion/demotion + quality modifier + provenance confidence
+      // via the pure helpers. Overrides from the caller (see §6.7.1)
+      // replace defaults field-by-field; omitted fields fall through.
+      const resolvedDefaults = applyOutcomeDefaults(outcome, overrides);
+      let promotedCount = 0;
       const baseValues = dedupedEntries
         .filter(e => e.op === 'ADD')
         .map(e => {
+          const rawEntryType = e.entryType as EntryType;
+          const finalEntryType = selectPromotedEntryType(rawEntryType, outcome);
+          if (finalEntryType !== rawEntryType) promotedCount += 1;
+          const baseline = scoreMemoryEntry({ content: e.content, entryType: finalEntryType });
+          const finalScore = scoreForOutcome(baseline, finalEntryType, outcome);
           // Phase 2C: auto-classify domain + topic at write time
           const { domain, topic } = classifyDomainTopic(e.content);
           return {
@@ -773,8 +823,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             agentRunId: runId,
             agentId,
             content: e.content,
-            entryType: e.entryType as EntryType,
-            qualityScore: scoreMemoryEntry(e),
+            entryType: finalEntryType,
+            qualityScore: finalScore,
             taskSlug: taskSlug ?? null,
             domain,
             topic,
@@ -782,10 +832,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
             // Citation provenance — PR Review Hardening Item 2
             provenanceSourceType: runId ? ('agent_run' as const) : null,
             provenanceSourceId: runId ?? null,
-            provenanceConfidence: null,
-            // runId is always a string here; !runId guards future call sites
-            // (e.g. manual/drop-zone inserts) where runId may be null.
-            isUnverified: !runId,
+            provenanceConfidence: resolvedDefaults.provenanceConfidence,
+            isUnverified:         resolvedDefaults.isUnverified,
             qualityScoreUpdater: 'initial_score' as const,
           };
         });
@@ -857,6 +905,17 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       }
 
       console.info(`[WorkspaceMemory] Extracted ${values.length} entries (${values.filter(v => (v.qualityScore ?? 0) >= threshold).length} above threshold) for subaccount ${subaccountId}`);
+
+      // Hermes Tier 1 Phase B §8.5 — structured log for post-hoc audit of
+      // outcome-driven promotion. Written once per extraction call.
+      console.info('[WorkspaceMemory] memory.insights.outcome_applied', {
+        runId,
+        runResultStatus:  outcome.runResultStatus,
+        trajectoryPassed: outcome.trajectoryPassed,
+        entriesWritten:   values.length,
+        entriesDropped:   Math.max(0, entries.length - values.length),
+        promotedCount,
+      });
 
       insightsSpan.end({ output: { insightsExtracted: values.length } });
 
@@ -943,7 +1002,6 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
         subaccountId,
         sourceType: 'system',
         taskType: 'memory_compile',
-        executionPhase: 'execution',
         routingMode: 'ceiling',
       },
     });
@@ -1842,7 +1900,6 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
         subaccountId: data.subaccountId,
         sourceType: 'system',
         taskType: 'context_enrichment',
-        executionPhase: 'execution',
         routingMode: 'ceiling',
       },
     });

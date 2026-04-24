@@ -1,4 +1,3 @@
-import { env } from '../lib/env.js';
 import { db } from '../db/index.js';
 import { processes, executions, executionPayloads } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -204,79 +203,6 @@ export async function executeTriggerredProcess(
 }
 
 // ---------------------------------------------------------------------------
-// Core LLM call (Anthropic Messages API via fetch)
-// ---------------------------------------------------------------------------
-
-export async function callAnthropic(params: {
-  modelId: string;
-  systemPrompt: string;
-  messages: LLMMessage[];
-  tools?: AnthropicTool[];
-  temperature: number;
-  maxTokens: number;
-}): Promise<LLMResponse> {
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw { statusCode: 503, message: 'ANTHROPIC_API_KEY is not configured. Please set it in your environment.' };
-  }
-
-  const body: Record<string, unknown> = {
-    model: params.modelId,
-    max_tokens: params.maxTokens,
-    temperature: params.temperature,
-    system: params.systemPrompt,
-    messages: params.messages,
-  };
-
-  if (params.tools && params.tools.length > 0) {
-    body.tools = params.tools;
-  }
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    let errorDetail = '';
-    try {
-      const err = await response.json() as { error?: { message?: string } };
-      errorDetail = err?.error?.message ?? response.statusText;
-    } catch {
-      errorDetail = response.statusText;
-    }
-    throw { statusCode: response.status >= 500 ? 503 : 400, message: `Anthropic API error: ${errorDetail}` };
-  }
-
-  const data = await response.json() as {
-    content: Array<{
-      type: string;
-      text?: string;
-      id?: string;
-      name?: string;
-      input?: Record<string, unknown>;
-    }>;
-    stop_reason: string;
-  };
-
-  const textBlock = data.content.find((b) => b.type === 'text');
-  const toolUseBlocks = data.content.filter((b) => b.type === 'tool_use');
-
-  return {
-    content: textBlock?.text ?? '',
-    toolCalls: toolUseBlocks.length > 0
-      ? toolUseBlocks.map((b) => ({ id: b.id!, name: b.name!, input: b.input! }))
-      : undefined,
-    stopReason: data.stop_reason,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Build the formatted system prompt including data source context
 // ---------------------------------------------------------------------------
 
@@ -381,7 +307,6 @@ export const llmService = {
   buildProcessTools,
   getOrgProcessesForTools,
   executeTriggerredProcess,
-  callAnthropic,
   buildSystemPrompt,
   resolveTemperature,
   resolveMaxTokens,

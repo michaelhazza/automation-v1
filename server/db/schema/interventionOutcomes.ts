@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations.js';
 import { canonicalAccounts } from './canonicalAccounts.js';
 
@@ -22,6 +22,11 @@ export const interventionOutcomes = pgTable(
     outcome: text('outcome').$type<'improved' | 'unchanged' | 'worsened'>(),
     measuredAfterHours: integer('measured_after_hours').notNull().default(24),
     deltaHealthScore: integer('delta_health_score'),
+    // Phase 4 — band-change attribution for B2 (migration 0178).
+    bandBefore: text('band_before'),
+    bandAfter: text('band_after'),
+    bandChanged: boolean('band_changed').notNull().default(false),
+    executionFailed: boolean('execution_failed').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

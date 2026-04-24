@@ -99,8 +99,21 @@ export async function executeAssignTask(
     };
   }
 
-  // Synchronous fallback for non-pg-boss deployments
+  // Synchronous fallback for non-pg-boss deployments. executionMode above
+  // is hardcoded to 'api', so result.status is always a terminal value and
+  // never 'delegated' — this path cannot see the IEE Phase 0 delegated
+  // response shape. If executionMode ever becomes configurable here, the
+  // returned status must be gated: a 'delegated' response would confuse
+  // the calling LLM which treats this result as terminal.
   const result = await agentExecutionService.executeRun(jobPayload);
+  if (result.status === 'delegated') {
+    // Defensive — should never happen with mode='api'. Fail loud so a
+    // future refactor that allows IEE modes here gets caught at the
+    // first test instead of silently feeding 'delegated' to the LLM.
+    throw new Error(
+      `assignTask sync fallback received delegated status — IEE execution is not supported on this path (runId=${result.runId})`,
+    );
+  }
   return {
     success: true,
     dispatched: false,

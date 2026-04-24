@@ -413,6 +413,22 @@ export const queueService = {
   },
 
   /**
+   * Generic job enqueue — used by event-driven follow-on jobs (e.g. the
+   * ClientPulse intervention proposer that fires after compute_churn_risk).
+   * Thin wrapper over the backend's send method so callers don't need to
+   * reach into getQueueBackend() directly.
+   */
+  async sendJob(queueName: string, data: object): Promise<void> {
+    if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+      // In-memory backend used in tests / dev has no named-queue routing;
+      // silently no-op so calling code stays the same.
+      return;
+    }
+    const boss = await getPgBoss();
+    await boss.send(queueName, data);
+  },
+
+  /**
    * M-17: Delete expired execution_files rows.
    */
   async cleanupExpiredExecutionFiles(): Promise<number> {
@@ -579,6 +595,88 @@ export const queueService = {
           throw err;
         }
       });
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
+      await (boss as any).work('maintenance:fast-path-decisions-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { pruneFastPathDecisions } = await import('../jobs/fastPathDecisionsPruneJob.js');
+          await withTimeout(pruneFastPathDecisions().then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-decisions-prune', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 6 — nightly rule quality decay + auto-deprecation.
+      await (boss as any).work('maintenance:rule-auto-deprecate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runRuleAutoDeprecate } = await import('../jobs/ruleAutoDeprecateJob.js');
+          await withTimeout(runRuleAutoDeprecate().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:rule-auto-deprecate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 3 — nightly recalibration log for classifier drift detection.
+      await (boss as any).work('maintenance:fast-path-recalibrate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFastPathRecalibrate } = await import('../jobs/fastPathRecalibrateJob.js');
+          await withTimeout(runFastPathRecalibrate().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-recalibrate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // LLM observability spec §12 — nightly llm_requests retention sweep.
+      // Moves rows older than env.LLM_LEDGER_RETENTION_MONTHS (default 12)
+      // to llm_requests_archive in 10k-row chunks. Bounded transaction size;
+      // FOR UPDATE SKIP LOCKED makes concurrent runs safe.
+      await (boss as any).work('maintenance:llm-ledger-archive', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { archiveOldLedgerRows } = await import('../jobs/llmLedgerArchiveJob.js');
+          await withTimeout(archiveOldLedgerRows().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-ledger-archive', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Deferred-items brief §1 — reap aged-out provisional `'started'` rows
+      // so a crashed mid-write doesn't permanently block retries under the
+      // same idempotencyKey. Cadence: every 2 minutes. Telescopes with the
+      // in-memory registry sweep (30s past timeoutMs) — this is the
+      // durable-layer backstop (providerTimeoutMs + 60s).
+      await (boss as any).work('maintenance:llm-started-row-sweep', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { sweepExpiredStartedRows } = await import('../jobs/llmStartedRowSweepJob.js');
+          await withTimeout(sweepExpiredStartedRows().then(() => undefined), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-started-row-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Deferred-items brief §6 — purge llm_inflight_history rows older
+      // than env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS (default 7).
+      await (boss as any).work('maintenance:llm-inflight-history-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { cleanOldInflightHistoryRows } = await import('../jobs/llmInflightHistoryCleanupJob.js');
+          await withTimeout(cleanOldInflightHistoryRows().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-inflight-history-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
 
       // Sprint 3 P2.1 Sprint 3A — agent_runs retention pruner. Admin-bypass
       // sweep that opens its own tx via withAdminConnection. Cascade on
@@ -680,6 +778,25 @@ export const queueService = {
         }
       });
 
+      // IEE Phase 0 — main-app reconciliation for "Class 2" stuck runs.
+      // See docs/iee-delegation-lifecycle-spec.md Step 4. The worker-side
+      // cleanup-orphans sweep already handles Class 1 (unemitted events) and
+      // Class 3 (worker death). This sweep catches the remaining case: a
+      // parent agent_run stuck in 'delegated' while its iee_runs row is
+      // already terminal (event handler crashed post-DB-write, or DLQ
+      // exhaustion).
+      await (boss as any).work('maintenance:iee-main-app-reconciliation', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { reconcileStuckDelegatedRuns } = await import('./agentRunFinalizationService.js');
+          await withTimeout(reconcileStuckDelegatedRuns().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:iee-main-app-reconciliation', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Memory & Briefings Phase 2 — weekly quality-adjust job (S4, feature-flagged)
       await (boss as any).work('maintenance:memory-entry-quality-adjust', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -701,6 +818,21 @@ export const queueService = {
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'maintenance:memory-block-synthesis', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
+      // Worker registered here; schedule NOT enabled until Phase 6 (pilot validation).
+      // To trigger manually: boss.send('maintenance:bundle-utilization', {})
+      await (boss as any).work('maintenance:bundle-utilization', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runBundleUtilization } = await import('../jobs/bundleUtilizationJob.js');
+          await withTimeout(runBundleUtilization(), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:bundle-utilization', jobId: job.id });
           }
           throw err;
         }
@@ -756,6 +888,40 @@ export const queueService = {
           throw err;
         }
       });
+
+      // ClientPulse Phase 4 — scenario-detector proposer (event-driven, fires
+      // at the tail of compute_churn_risk per sub-account).
+      await (boss as any).work('clientpulse:propose-interventions', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runProposeClientPulseInterventions } = await import('../jobs/proposeClientPulseInterventionsJob.js');
+          await withTimeout(
+            runProposeClientPulseInterventions(job.data).then(() => undefined),
+            60_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:propose-interventions', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // ClientPulse Phase 4 — hourly outcome-measurement sweep (B2 ship gate).
+      await (boss as any).work('clientpulse:measure-outcomes', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMeasureInterventionOutcomes } = await import('../jobs/measureInterventionOutcomeJob.js');
+          await withTimeout(
+            runMeasureInterventionOutcomes().then(() => undefined),
+            300_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'clientpulse:measure-outcomes', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
 
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
@@ -863,6 +1029,20 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner + recalibrator
+      await boss.schedule('maintenance:fast-path-decisions-prune', '30 3 * * *', {}); // 3:30am UTC daily
+      await boss.schedule('maintenance:fast-path-recalibrate', '0 4 * * *', {}); // 4am UTC daily
+      await boss.schedule('maintenance:rule-auto-deprecate', '0 3 * * *', {}); // 3am UTC daily
+      // LLM observability spec §12 — retention archival at 03:45 UTC so it
+      // runs after the 03:00 memory-decay and 03:30 security-events sweeps
+      // without contending on the same connection pool.
+      await boss.schedule('maintenance:llm-ledger-archive', '45 3 * * *', {});
+      // Deferred-items brief §1 — reap aged-out provisional 'started' rows
+      // every 2 minutes. Cadence matches the in-flight clarification sweep.
+      await boss.schedule('maintenance:llm-started-row-sweep', '*/2 * * * *', {});
+      // Deferred-items brief §6 — daily 04:15 UTC cleanup of
+      // llm_inflight_history rows older than the retention window.
+      await boss.schedule('maintenance:llm-inflight-history-cleanup', '15 4 * * *', {});
       // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
       // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
       // a clean shot at the same per-org row set without contending on
@@ -876,6 +1056,8 @@ export const queueService = {
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
       // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // IEE Phase 0 — main-app reconciliation for stuck 'delegated' runs (every 2 minutes)
+      await boss.schedule('maintenance:iee-main-app-reconciliation', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
       // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
@@ -885,6 +1067,8 @@ export const queueService = {
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
       // Memory & Briefings Phase 5 — daily protected-block divergence sweep (4am)
       await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
+      // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
+      await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

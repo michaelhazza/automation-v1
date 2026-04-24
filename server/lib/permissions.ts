@@ -70,12 +70,29 @@ export const ORG_PERMISSIONS = {
   PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
   PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
   PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
+  // Org-scope playbook runs (migration 0171 / ClientPulse §13.3). Distinct from
+  // SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START because org-scope runs operate
+  // across the whole organisation rather than a single subaccount.
+  PLAYBOOK_RUNS_START: 'org.playbook_runs.start',
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
   // ── GEO audits (Generative Engine Optimisation) ─────────────────────────
   GEO_AUDIT_VIEW: 'org.geo_audit.view',
   GEO_AUDIT_RUN: 'org.geo_audit.run',
+  // ── Universal Brief (Phase 2) ────────────────────────────────────────────
+  BRIEFS_READ: 'org.briefs.read',
+  BRIEFS_WRITE: 'org.briefs.write',
+  RULES_READ: 'org.rules.read',
+  RULES_WRITE: 'org.rules.write',
+  RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
+  // ── Cached Context Infrastructure ────────────────────────────────────────
+  REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
+  REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
+  REFERENCE_DOCUMENTS_DEPRECATE:  'reference_documents.deprecate',
+  DOCUMENT_BUNDLES_READ:          'document_bundles.read',
+  DOCUMENT_BUNDLES_WRITE:         'document_bundles.write',
+  DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -187,12 +204,27 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_RUNS_START,        description: 'Start org-scope Playbook runs',                 groupName: 'org.playbooks' },
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
   // org.geo_audit (Generative Engine Optimisation)
   { key: ORG_PERMISSIONS.GEO_AUDIT_VIEW, description: 'View GEO audit results and history',        groupName: 'org.geo_audit' },
   { key: ORG_PERMISSIONS.GEO_AUDIT_RUN,  description: 'Run on-demand GEO audits for subaccounts',  groupName: 'org.geo_audit' },
+  // org.briefs + org.rules (Universal Brief)
+  { key: ORG_PERMISSIONS.BRIEFS_READ,  description: 'View Briefs and their artefacts',                                          groupName: 'org.briefs' },
+  { key: ORG_PERMISSIONS.BRIEFS_WRITE, description: 'Create Briefs and post messages into a conversation',                      groupName: 'org.briefs' },
+  { key: ORG_PERMISSIONS.RULES_READ,   description: 'View Learned Rules',                                                       groupName: 'org.rules' },
+  { key: ORG_PERMISSIONS.RULES_WRITE,  description: 'Create, edit, pause, resume, and delete Rules',                            groupName: 'org.rules' },
+  { key: ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE,
+                                       description: 'Mark a Rule as authoritative (overrides non-authoritative rules)',        groupName: 'org.rules' },
+  // reference_documents + document_bundles (Cached Context Infrastructure)
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ,      description: 'View reference documents and their versions',                              groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE,     description: 'Create, edit, rename, pause, resume, and soft-delete reference documents', groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.REFERENCE_DOCUMENTS_DEPRECATE, description: 'Deprecate reference documents (forward-only lifecycle action)',            groupName: 'reference_documents' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_READ,         description: 'View document bundles and their members',                                  groupName: 'document_bundles' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_WRITE,        description: 'Create, edit, promote, and delete document bundles',                       groupName: 'document_bundles' },
+  { key: ORG_PERMISSIONS.DOCUMENT_BUNDLES_ATTACH,       description: 'Attach document bundles to agents, tasks, and scheduled tasks',            groupName: 'document_bundles' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
@@ -281,6 +313,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.AGENTS_CHAT,
       ORG_PERMISSIONS.WORKSPACE_VIEW,
       ORG_PERMISSIONS.WORKSPACE_MANAGE,
+      ORG_PERMISSIONS.BRIEFS_READ,
+      ORG_PERMISSIONS.BRIEFS_WRITE,
+      ORG_PERMISSIONS.RULES_READ,
+      ORG_PERMISSIONS.RULES_WRITE,
     ],
   },
   {
@@ -295,6 +331,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.AGENTS_VIEW,
       ORG_PERMISSIONS.AGENTS_CHAT,
       ORG_PERMISSIONS.WORKSPACE_VIEW,
+      ORG_PERMISSIONS.BRIEFS_READ,
+      ORG_PERMISSIONS.RULES_READ,
     ],
   },
   {

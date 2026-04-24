@@ -1,6 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { connectionTokenService } from '../services/connectionTokenService.js';
+import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import type {
   IntegrationAdapter,
   CrmCreateContactInput,
@@ -33,6 +34,19 @@ function getHeaders(accessToken: string) {
 function decryptAccessToken(connection: IntegrationConnection): string {
   if (!connection.accessToken) throw new Error('Connection has no access token');
   return connectionTokenService.decryptToken(connection.accessToken);
+}
+
+/**
+ * Acquire a rate-limit token from the GHL provider limiter before making any
+ * HTTP call. Ship-gate B1 (§23.1, §26.1) — the RateLimiter infra has existed
+ * at server/lib/rateLimiter.ts since before ClientPulse; Phase 1 wires it in.
+ *
+ * Keyed per-location so one noisy sub-account doesn't starve another. Callers
+ * that don't have a location yet (e.g. agency-level `listAccounts`) pass the
+ * string 'global' to share the agency-wide bucket.
+ */
+async function acquireGhlToken(locationKey: string): Promise<void> {
+  await getProviderRateLimiter('ghl').acquire(locationKey || 'global');
 }
 
 export const ghlAdapter: IntegrationAdapter = {
@@ -73,6 +87,7 @@ export const ghlAdapter: IntegrationAdapter = {
           }
         }
 
+        await acquireGhlToken(locationId);
         const response = await axios.post(`${GHL_API_BASE}/contacts/`, body, {
           headers: getHeaders(accessToken),
           timeout: TIMEOUT_MS,
@@ -96,6 +111,7 @@ export const ghlAdapter: IntegrationAdapter = {
       const companyId = config.companyId as string | undefined;
       if (!companyId) throw new Error('companyId required in connector config to list GHL locations');
 
+      await acquireGhlToken('global');
       const response = await axios.get(`${GHL_API_BASE}/locations/search`, {
         headers: getHeaders(accessToken),
         params: { companyId, limit: 100 },
@@ -116,6 +132,7 @@ export const ghlAdapter: IntegrationAdapter = {
       const params: Record<string, unknown> = { locationId: accountExternalId, limit: opts?.limit ?? 100 };
       if (opts?.since) params.startAfter = opts.since.toISOString();
 
+      await acquireGhlToken(accountExternalId);
       const response = await axios.get(`${GHL_API_BASE}/contacts/`, {
         headers: getHeaders(accessToken),
         params,
@@ -139,6 +156,7 @@ export const ghlAdapter: IntegrationAdapter = {
       const accessToken = decryptAccessToken(connection);
       const params: Record<string, unknown> = { location_id: accountExternalId, limit: opts?.limit ?? 100 };
 
+      await acquireGhlToken(accountExternalId);
       const response = await axios.get(`${GHL_API_BASE}/opportunities/search`, {
         headers: getHeaders(accessToken),
         params,
@@ -162,6 +180,7 @@ export const ghlAdapter: IntegrationAdapter = {
       const accessToken = decryptAccessToken(connection);
       const params: Record<string, unknown> = { locationId: accountExternalId, limit: opts?.limit ?? 100 };
 
+      await acquireGhlToken(accountExternalId);
       const response = await axios.get(`${GHL_API_BASE}/conversations/search`, {
         headers: getHeaders(accessToken),
         params,
@@ -184,6 +203,7 @@ export const ghlAdapter: IntegrationAdapter = {
       const params: Record<string, unknown> = { altId: accountExternalId, altType: 'location', limit: opts?.limit ?? 100 };
 
       try {
+        await acquireGhlToken(accountExternalId);
         const response = await axios.get(`${GHL_API_BASE}/payments/orders`, {
           headers: getHeaders(accessToken),
           params,
@@ -208,6 +228,7 @@ export const ghlAdapter: IntegrationAdapter = {
     async validateCredentials(connection: IntegrationConnection): Promise<{ valid: boolean; error?: string }> {
       try {
         const accessToken = decryptAccessToken(connection);
+        await acquireGhlToken('global');
         await axios.get(`${GHL_API_BASE}/locations/search`, {
           headers: getHeaders(accessToken),
           params: { limit: 1 },
@@ -253,7 +274,11 @@ export const ghlAdapter: IntegrationAdapter = {
       const mapping = mapGhlEventType(eventType);
       if (!mapping) return null;
 
-      const entityExternalId = (event.id as string) ?? (event.contactId as string) ?? '';
+      // Location-scoped events (INSTALL/UNINSTALL/LocationCreate/LocationUpdate)
+      // use locationId as their entity id — there is no separate entity record.
+      const entityExternalId = mapping.entityType === 'account'
+        ? locationId
+        : (event.id as string) ?? (event.contactId as string) ?? '';
       const sourceTs = event.dateAdded ? String(event.dateAdded) : event.dateUpdated ? String(event.dateUpdated) : '';
       const externalEventId = event.traceId
         ? String(event.traceId)
@@ -315,6 +340,12 @@ function mapGhlEventType(eventType: string): { normalisedType: string; entityTyp
       return { normalisedType: eventType, entityType: 'conversation' };
     case 'InvoiceCreated': case 'PaymentReceived':
       return { normalisedType: eventType, entityType: 'revenue' };
+    // Location-lifecycle events (§2.0b Phase 1 follow-up). We don't upsert a
+    // canonical row for these — they're recorded as canonical_subaccount_mutations
+    // only — so entityType='account' routes them past the upsert switch but
+    // still flows through the mutation writer.
+    case 'INSTALL': case 'UNINSTALL': case 'LocationCreate': case 'LocationUpdate':
+      return { normalisedType: eventType, entityType: 'account' };
     default:
       return null;
   }
@@ -408,3 +439,188 @@ function computeGhlMetrics(entityCounts: {
 
   return metrics;
 }
+
+// ---------------------------------------------------------------------------
+// ClientPulse Phase 1 fetch functions — GHL-specific ingestion paths for the
+// 6 new signals (§2.2). These return raw shapes the polling service
+// normalises into canonical rows. Each HTTP call goes through the GHL rate
+// limiter (B1). Endpoints that require scopes beyond the current token's
+// grant return `{ availability: 'unavailable_missing_scope' }` so the
+// polling service can record an observation without blowing up the cycle.
+// ---------------------------------------------------------------------------
+
+export interface GhlFunnel {
+  id: string;
+  name: string;
+  updatedAt?: string;
+  createdAt?: string;
+}
+
+export interface GhlFunnelPage {
+  id: string;
+  funnelId: string;
+  name: string;
+  slug?: string;
+  updatedAt?: string;
+}
+
+export interface GhlCalendar {
+  id: string;
+  name: string;
+  teamMembers?: Array<{ userId: string }>;
+  slug?: string;
+  updatedAt?: string;
+}
+
+export interface GhlUser {
+  id: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  roles?: string[];
+  deleted?: boolean;
+}
+
+export interface GhlLocationDetails {
+  id: string;
+  name: string;
+  companyId?: string;
+  timezone?: string;
+  businessInfo?: Record<string, unknown>;
+  socialUrls?: Record<string, string>;
+  [k: string]: unknown;
+}
+
+export interface GhlSubscription {
+  planId?: string;
+  tier?: string;
+  active?: boolean;
+  nextBillingDate?: string;
+  raw: Record<string, unknown>;
+}
+
+export type GhlFetchResult<T> =
+  | { availability: 'available'; data: T }
+  | { availability: 'unavailable_missing_scope'; data: null; errorCode: string }
+  | { availability: 'unavailable_tier_gated'; data: null; errorCode: string }
+  | { availability: 'unavailable_other'; data: null; errorCode: string; message: string };
+
+function classifyGhlHttpError(err: unknown): GhlFetchResult<never> {
+  const asAny = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
+  const status = asAny?.response?.status;
+  const message = asAny?.response?.data?.message ?? asAny?.message ?? 'unknown';
+  if (status === 401 || status === 403) {
+    return { availability: 'unavailable_missing_scope', data: null, errorCode: `http_${status}` };
+  }
+  if (status === 402 || status === 404) {
+    // GHL commonly returns 404 on SaaS endpoints for non-SaaS-mode agencies
+    return { availability: 'unavailable_tier_gated', data: null, errorCode: `http_${status}` };
+  }
+  return { availability: 'unavailable_other', data: null, errorCode: `http_${status ?? 'network'}`, message };
+}
+
+export const ghlClientPulseFetchers = {
+  async fetchFunnels(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlFunnel[]>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/funnels/funnel`, {
+        headers: getHeaders(accessToken),
+        params: { locationId },
+        timeout: TIMEOUT_MS,
+      });
+      const funnels = (response.data as { funnels?: GhlFunnel[] })?.funnels ?? [];
+      return { availability: 'available', data: funnels };
+    } catch (err) {
+      return classifyGhlHttpError(err);
+    }
+  },
+
+  async fetchFunnelPages(connection: IntegrationConnection, locationId: string, funnelId: string): Promise<GhlFetchResult<GhlFunnelPage[]>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/funnels/funnel/${funnelId}/page`, {
+        headers: getHeaders(accessToken),
+        timeout: TIMEOUT_MS,
+      });
+      const pages = (response.data as { pages?: GhlFunnelPage[] })?.pages ?? [];
+      return { availability: 'available', data: pages };
+    } catch (err) {
+      return classifyGhlHttpError(err);
+    }
+  },
+
+  async fetchCalendars(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlCalendar[]>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/calendars/`, {
+        headers: getHeaders(accessToken),
+        params: { locationId },
+        timeout: TIMEOUT_MS,
+      });
+      const calendars = (response.data as { calendars?: GhlCalendar[] })?.calendars ?? [];
+      return { availability: 'available', data: calendars };
+    } catch (err) {
+      return classifyGhlHttpError(err);
+    }
+  },
+
+  async fetchUsers(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlUser[]>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/users/search`, {
+        headers: getHeaders(accessToken),
+        params: { locationId },
+        timeout: TIMEOUT_MS,
+      });
+      const users = (response.data as { users?: GhlUser[] })?.users ?? [];
+      return { availability: 'available', data: users };
+    } catch (err) {
+      return classifyGhlHttpError(err);
+    }
+  },
+
+  async fetchLocationDetails(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlLocationDetails>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/locations/${locationId}`, {
+        headers: getHeaders(accessToken),
+        timeout: TIMEOUT_MS,
+      });
+      const location = (response.data as { location?: GhlLocationDetails })?.location;
+      if (!location) {
+        return { availability: 'unavailable_other', data: null, errorCode: 'empty_response', message: 'location endpoint returned no payload' };
+      }
+      return { availability: 'available', data: location };
+    } catch (err) {
+      return classifyGhlHttpError(err);
+    }
+  },
+
+  async fetchSubscription(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlSubscription>> {
+    try {
+      const accessToken = decryptAccessToken(connection);
+      await acquireGhlToken(locationId);
+      const response = await axios.get(`${GHL_API_BASE}/saas/location/${locationId}/subscription`, {
+        headers: getHeaders(accessToken),
+        timeout: TIMEOUT_MS,
+      });
+      const raw = response.data as Record<string, unknown>;
+      const sub: GhlSubscription = {
+        planId: raw.planId as string | undefined,
+        tier: raw.planName as string | undefined,
+        active: raw.active as boolean | undefined,
+        nextBillingDate: raw.nextBillingDate as string | undefined,
+        raw,
+      };
+      return { availability: 'available', data: sub };
+    } catch (err) {
+      // Subscription endpoint is commonly tier-gated (requires agency SaaS mode).
+      return classifyGhlHttpError(err);
+    }
+  },
+};
