@@ -224,7 +224,7 @@ export async function getPrioritisedClients(
       ca.band
     FROM client_pulse_churn_assessments ca
     WHERE ca.organisation_id = ${orgId}
-      AND ca.subaccount_id = ANY(${sql.raw(`ARRAY[${subIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})
+      AND ca.subaccount_id = ANY(${subIds})
     ORDER BY ca.subaccount_id, ca.observed_at DESC
   `);
 
@@ -243,7 +243,7 @@ export async function getPrioritisedClients(
       hs.score
     FROM client_pulse_health_snapshots hs
     WHERE hs.organisation_id = ${orgId}
-      AND hs.subaccount_id = ANY(${sql.raw(`ARRAY[${subIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})
+      AND hs.subaccount_id = ANY(${subIds})
       AND hs.observed_at <= ${sevenDaysAgo}
     ORDER BY hs.subaccount_id, hs.observed_at DESC
   `);
@@ -268,7 +268,7 @@ export async function getPrioritisedClients(
           AVG(hs.score)::int                     AS avg_score
         FROM client_pulse_health_snapshots hs
         WHERE hs.organisation_id = ${orgId}
-          AND hs.subaccount_id = ANY(${sql.raw(`ARRAY[${subIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})
+          AND hs.subaccount_id = ANY(${subIds})
           AND hs.observed_at >= NOW() - INTERVAL '28 days'
         GROUP BY hs.subaccount_id, week_bucket
         ORDER BY hs.subaccount_id, week_bucket ASC
@@ -307,7 +307,7 @@ export async function getPrioritisedClients(
       a.created_at
     FROM actions a
     WHERE a.organisation_id = ${orgId}
-      AND a.subaccount_id = ANY(${sql.raw(`ARRAY[${subIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})
+      AND a.subaccount_id = ANY(${subIds})
       AND a.status IN ('completed', 'approved')
     ORDER BY a.subaccount_id, a.created_at DESC
   `);
@@ -329,7 +329,7 @@ export async function getPrioritisedClients(
     SELECT DISTINCT ri.subaccount_id
     FROM review_items ri
     WHERE ri.organisation_id = ${orgId}
-      AND ri.subaccount_id = ANY(${sql.raw(`ARRAY[${subIds.map(id => `'${id}'`).join(',')}]::uuid[]`)})
+      AND ri.subaccount_id = ANY(${subIds})
       AND ri.review_status IN ('pending', 'edited_pending')
   `);
 
@@ -432,7 +432,7 @@ const MAX_LIMIT = 25;
 export function applyPagination(
   rows: ClientRow[],
   params: { limit: number; cursor?: string | null; orgId?: string },
-): { rows: ClientRow[]; nextCursor: string | null; cursorError?: true } {
+): { rows: ClientRow[]; nextCursor: string | null; hasMore: boolean; cursorError?: true } {
   const limit = Math.min(Math.max(1, params.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const secret = getCursorSecret(params.orgId ?? 'anonymous');
 
@@ -441,7 +441,7 @@ export function applyPagination(
   if (params.cursor) {
     const decoded = decodeCursor(params.cursor, secret);
     if (!decoded) {
-      return { rows: [], nextCursor: null, cursorError: true };
+      return { rows: [], nextCursor: null, hasMore: false, cursorError: true };
     }
     // Find the row after the cursor position using composite key
     const idx = rows.findIndex(
@@ -470,5 +470,5 @@ export function applyPagination(
     );
   }
 
-  return { rows: page, nextCursor };
+  return { rows: page, nextCursor, hasMore };
 }

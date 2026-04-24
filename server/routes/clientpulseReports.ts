@@ -109,7 +109,7 @@ router.get(
     // ── Fetch + filter + paginate ──────────────────────────────────────────
     const allRows = await getPrioritisedClients(orgId);
     const filtered = applyFilters(allRows, { band, q });
-    const { rows: page, nextCursor, cursorError } = applyPagination(filtered, { limit, cursor, orgId });
+    const { rows: page, nextCursor, hasMore, cursorError } = applyPagination(filtered, { limit, cursor, orgId });
 
     if (cursorError) {
       res.status(400).json({ errorCode: 'INVALID_CURSOR', message: 'The provided cursor is invalid or has been tampered with.' });
@@ -119,7 +119,7 @@ router.get(
     // ── Shape response ─────────────────────────────────────────────────────
     const response = {
       clients: page,
-      hasMore: nextCursor !== null,
+      hasMore,
       nextCursor,
     };
 
