@@ -1,0 +1,139 @@
+<!doctype html>
+<!--
+  Mock 01 / 09 — System agents library (admin landing)
+  ======================================================
+  Entry point. An existing admin page (client/src/pages/SystemAgentsPage.tsx)
+  with ONE addition: a ring-status pill on each row showing what's currently
+  in flight for that agent.
+
+  Frontend-principles compliance: admin-only view (relaxed budget). One primary
+  action per row (Open). One extra column beyond the existing table
+  (In flight). No KPI tiles, no charts, no hashes.
+
+  Primary task: "find the agent I want to update, see at a glance if anything
+  is mid-rollout for it, open it."
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 01 — System agents library</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+  .pill { display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:0.04em; padding:2px 8px; border-radius:999px; }
+  .pill-prod { background:#eef2ff; color:#4338ca; }
+  .pill-canary { background:#fef3c7; color:#92400e; }
+  .pill-test { background:#e0f2fe; color:#075985; }
+  .pill-dev { background:#f1f5f9; color:#334155; }
+  .row:hover { background:#fafbff; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[960px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 01 · System agents library</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- Breadcrumb — existing shell -->
+  <div class="text-[12px] text-slate-500 mb-3">
+    Synthetos admin <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">System agents</span>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <!-- Table header -->
+    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+      <div>
+        <h2 class="text-[15px] font-semibold text-slate-900">System agents</h2>
+        <p class="text-[12px] text-slate-500">Agents every organisation inherits. Changes roll out in stages.</p>
+      </div>
+      <a href="02-edit-agent-prompt.html" class="text-[12.5px] text-indigo-600 hover:text-indigo-800 font-medium no-underline">+ New agent</a>
+    </div>
+
+    <!-- Table -->
+    <div class="divide-y divide-slate-100 text-[13.5px]">
+      <!-- Column header -->
+      <div class="grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-2 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+        <div>Name</div>
+        <div>Live version</div>
+        <div>In flight</div>
+        <div></div>
+      </div>
+
+      <!-- Row: agent with canary in flight -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div>
+          <div class="font-semibold">Outreach Agent</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Drafts personalised outbound emails.</div>
+        </div>
+        <div><span class="pill pill-prod">rev 44 · prod</span></div>
+        <div class="text-[12.5px] text-slate-700">
+          <span class="pill pill-canary">rev 45 · canary</span>
+          <span class="text-slate-500 ml-1.5">7% · day 3</span>
+        </div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- Row: test in flight -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div>
+          <div class="font-semibold">CRM Agent</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Keeps CRM records consistent with live signals.</div>
+        </div>
+        <div><span class="pill pill-prod">rev 12 · prod</span></div>
+        <div class="text-[12.5px] text-slate-700">
+          <span class="pill pill-test">rev 13 · test</span>
+          <span class="text-slate-500 ml-1.5">day 4</span>
+        </div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- Row: dev only -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div>
+          <div class="font-semibold">Reporting Agent</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Produces weekly and monthly portfolio reports.</div>
+        </div>
+        <div><span class="pill pill-prod">rev 28 · prod</span></div>
+        <div class="text-[12.5px] text-slate-700">
+          <span class="pill pill-dev">rev 29 · dev</span>
+        </div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- Row: nothing in flight -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div>
+          <div class="font-semibold">GEO Audit Agent</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Runs generative-engine-optimisation audits.</div>
+        </div>
+        <div><span class="pill pill-prod">rev 7 · prod</span></div>
+        <div class="text-[12.5px] text-slate-400">—</div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- Row: paused canary -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div>
+          <div class="font-semibold">Portfolio Health Agent</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Monitors account health across the book.</div>
+        </div>
+        <div><span class="pill pill-prod">rev 18 · prod</span></div>
+        <div class="text-[12.5px] text-slate-700">
+          <span class="pill" style="background:#fee2e2;color:#991b1b;">rev 19 · paused</span>
+          <span class="text-slate-500 ml-1.5">auto-paused 2h ago</span>
+        </div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SystemAgentsPage.tsx</code>. One new column (<em>In flight</em>) shows whether the agent has a revision moving through rings right now. Click a row to see the rollout pipeline (Mock 03).
+  </p>
+</div>
+
+</body>
+</html>
