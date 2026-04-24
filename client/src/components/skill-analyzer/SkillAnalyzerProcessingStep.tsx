@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
 import type { AnalysisJob, AnalysisResult } from './SkillAnalyzerWizard';
+import { isTerminalAnalyzerStatus } from './analyzerStatus';
 
 interface Props {
   jobId: string;
@@ -86,7 +87,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
     // (On pollVersion > 0 this effect was re-run by Resume, so don't early-out
     // based on initialJob anymore — use currentJob.)
     const snapshot = pollVersion === 0 ? initialJob : currentJob;
-    if (snapshot.status === 'completed' || snapshot.status === 'failed') return;
+    if (isTerminalAnalyzerStatus(snapshot.status)) return;
 
     // Local `cancelled` flag instead of a ref — refs + StrictMode double-mount
     // leave the cleanup-set ref stuck at false across the second mount, which
@@ -128,13 +129,13 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
   }, [jobId, pollVersion]);
 
   const isFailed = currentJob.status === 'failed';
+  const isTerminal = isTerminalAnalyzerStatus(currentJob.status);
   const pct = currentJob.progressPct ?? 0;
-  const showPollWarning = !isFailed && currentJob.status !== 'completed' && pollErrorCount >= 2;
+  const showPollWarning = !isTerminal && pollErrorCount >= 2;
   // Stalled = worker likely died silently mid-pipeline. Job row still says
   // 'classifying'/'embedding'/etc., but no progress message in 5+ min.
   const isStalled =
-    !isFailed
-    && currentJob.status !== 'completed'
+    !isTerminal
     && currentJob.status !== 'pending'
     && nowMs - lastProgressAt > STALLED_THRESHOLD_MS;
   const canResume = isFailed || isStalled;
@@ -176,10 +177,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
   // their live state. Hash-matched (DUPLICATE) skills are never in the queue
   // and intentionally don't appear here — this view is the AI-classify view.
   const displaySlugs = classifyQueue;
-  const showSkillList =
-    !isFailed
-    && currentJob.status !== 'completed'
-    && displaySlugs.length > 0;
+  const showSkillList = !isTerminal && displaySlugs.length > 0;
 
   return (
     <div className="space-y-4">

@@ -9,8 +9,8 @@ import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind, ProposedMerge } from './skillAnalyzerServicePure.js';
-import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind, ProposedMerge, SkillAnalyzerJobStatus } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
 import { createHash, randomUUID } from 'crypto';
@@ -78,9 +78,19 @@ import { configBackupService } from './configBackupService.js';
 // Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
 // ---------------------------------------------------------------------------
 
-export type SkillAnalyzerJobStatus =
-  | 'pending' | 'parsing' | 'hashing' | 'embedding'
-  | 'comparing' | 'classifying' | 'completed' | 'failed';
+// Status union is defined once in skillAnalyzerServicePure.ts alongside the
+// mid-flight and terminal subsets. Re-export here so existing callers keep
+// their import path.
+export {
+  SKILL_ANALYZER_JOB_STATUSES,
+  SKILL_ANALYZER_MID_FLIGHT_STATUSES,
+  SKILL_ANALYZER_TERMINAL_STATUSES,
+  isSkillAnalyzerTerminalStatus,
+  isSkillAnalyzerMidFlightStatus,
+  type SkillAnalyzerJobStatus,
+  type SkillAnalyzerMidFlightStatus,
+  type SkillAnalyzerTerminalStatus,
+} from './skillAnalyzerServicePure.js';
 
 /** Create a new analysis job and enqueue it for background processing.
  *  For paste/github, rawInput is the text/url string.
@@ -159,6 +169,13 @@ export async function createJob(params: {
  *  Intermediate status (e.g. 'classifying') is accepted and reset — this
  *  is the common case where a worker was SIGKILL'd mid-pipeline and left
  *  the row in an in-flight state. */
+
+/** How long a mid-flight row must be silent before resume will force-expire
+ *  a lingering pg-boss `active` entry. 2× the stale-sweep threshold so
+ *  this path only trips on jobs that are clearly dead but haven't yet been
+ *  reaped by the periodic sweep. See Round 1 Finding 7. */
+const RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS = 30 * 60_000;
+
 export async function resumeJob(params: {
   jobId: string;
   organisationId: string;
@@ -182,10 +199,21 @@ export async function resumeJob(params: {
   // Guard against double-enqueue: if pg-boss already has a live row for
   // this jobId, resuming would run the handler twice in parallel and both
   // copies would fight over the Stage-8 insert set.
-  // Exception: if our DB row is 'failed', a lingering 'active' pg-boss entry
-  // means the worker process died without pg-boss detecting it (the lock
-  // expires after expireInSeconds, which is 4 hours). Force-expire it so the
-  // resume can proceed rather than blocking for hours.
+  //
+  // Exception: a lingering 'active' pg-boss entry combined with EITHER
+  //   (a) our DB row is 'failed', or
+  //   (b) our DB row is mid-flight but has been silent past the stale
+  //       resume threshold (2× the sweep threshold = 30 min by default),
+  // means the worker process died without pg-boss detecting it (pg-boss's
+  // own lock only expires after expireInSeconds, which is 4 hours). Force-
+  // expire the ghost so resume can proceed rather than blocking the user
+  // for hours on a dead worker.
+  //
+  // Case (b) matters because the sweep runs periodically; between worker
+  // death and the next sweep tick a user clicking Resume would otherwise
+  // get "already queued or running" for up to 15 min despite nothing
+  // actually running. See ChatGPT PR review Round 1 Finding 7.
+  //
   // drizzle-orm/postgres-js returns db.execute() as the row array directly
   // (NOT { rows }) — see server/services/jobQueueHealthService.ts for the
   // established cast pattern.
@@ -198,7 +226,13 @@ export async function resumeJob(params: {
   `);
   const aliveCount = (aliveRows as unknown as Array<{ n: number }>)[0]?.n ?? 0;
   if (aliveCount > 0) {
-    if (job.status === 'failed') {
+    const jobUpdatedMs = job.updatedAt instanceof Date
+      ? job.updatedAt.getTime()
+      : new Date(job.updatedAt as unknown as string).getTime();
+    const silenceMs = Date.now() - jobUpdatedMs;
+    const midFlightStale = isSkillAnalyzerMidFlightStatus(job.status)
+      && silenceMs > RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS;
+    if (job.status === 'failed' || midFlightStale) {
       // Dead worker left a ghost active entry — expire it so we can re-enqueue.
       await db.execute(sql`
         UPDATE pgboss.job
@@ -209,6 +243,12 @@ export async function resumeJob(params: {
           AND data->>'jobId' = ${jobId}
           AND state = 'active'
       `);
+      logger.info('skill_analyzer.resume_force_expired_ghost', {
+        jobId,
+        dbStatus: job.status,
+        silenceMs,
+        reason: job.status === 'failed' ? 'db_failed' : 'mid_flight_stale',
+      });
     } else {
       throw { statusCode: 409, message: 'Analysis is already queued or running.' };
     }

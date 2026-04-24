@@ -9,6 +9,7 @@ import {
   evaluateApprovalState,
   parseDemotedFields,
   parseDemotedFieldStatuses,
+  DEFAULT_WARNING_TIER_MAP,
   type MergeWarning,
   type MergeWarningCode,
   type WarningResolution,
@@ -82,6 +83,16 @@ function InlineDiff({ baseline, value }: { baseline: string; value: string }) {
   const tokens = useMemo(() => {
     if (baseline === value) {
       return [{ kind: 'unchanged' as const, value }];
+    }
+    // Explicit empty-string handling so an empty side renders as a pure
+    // addition or removal rather than tripping the "no shared tokens"
+    // fallback below with a misleading strikethrough of "". See ChatGPT
+    // PR review Round 1 Finding 5.
+    if (!baseline) {
+      return [{ kind: 'added' as const, value }];
+    }
+    if (!value) {
+      return [{ kind: 'removed' as const, value: baseline }];
     }
     const parts = diffWordsWithSpace(baseline, value);
     // When the two strings share no unchanged tokens the word diff produces a
@@ -676,6 +687,33 @@ const FORMATTING_WARNING_CODES = new Set<MergeWarningCode>([
   'NAME_MISMATCH',
   'CROSS_REFERENCES_DISTINCT',
 ]);
+
+// Dev-time guard: the partition is implicit — anything NOT in
+// FORMATTING_WARNING_CODES renders in the primary list. A new warning code
+// added in mergeTypes.ts will silently land in the primary group if this
+// file isn't updated. Catch that at module load in non-production builds
+// by walking DEFAULT_WARNING_TIER_MAP (exhaustive `Record<MergeWarningCode,
+// …>`, so adding a code without adding a tier is already a compile error).
+// Informational-tier codes are the ones that most naturally belong in the
+// Formatting & notes group — warn if a new informational code was added
+// without being classified here. See ChatGPT PR review Round 1 Finding 6.
+if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+  const unclassifiedInformational = (Object.entries(DEFAULT_WARNING_TIER_MAP) as Array<
+    [MergeWarningCode, string]
+  >)
+    .filter(([code, tier]) => tier === 'informational' && !FORMATTING_WARNING_CODES.has(code))
+    .map(([code]) => code);
+  if (unclassifiedInformational.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[MergeReviewBlock] Informational warning codes not classified into '
+        + 'FORMATTING_WARNING_CODES — will render in the primary list. '
+        + 'Review the partition and update FORMATTING_WARNING_CODES if '
+        + 'any of these should be secondary: '
+        + unclassifiedInformational.join(', '),
+    );
+  }
+}
 
 function WarningItem({
   warning,

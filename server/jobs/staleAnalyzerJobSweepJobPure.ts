@@ -15,34 +15,32 @@
 // 15 minutes preserves margin without leaving truly-stuck jobs visible to
 // the user for a punitive amount of time.
 //
-// Statuses considered "mid-flight" for sweep purposes match the set the job
-// pipeline writes: parsing, hashing, embedding, comparing, classifying.
-// `pending` is excluded — a row that hasn't been picked up yet doesn't
-// have a worker to die. The `comparing` status covers Stage 4 (similarity
-// computation, 40%→60%) — a substantial compute window where worker death
-// must still be reaped. Earlier drafts of this file mistakenly listed
-// `matching` (a name the pipeline never writes); see PR review log
-// pr-review-log-skill-analyzer-resilience-2026-04-24T08-50-00Z.md (B1).
+// Statuses considered "mid-flight" for sweep purposes are imported from the
+// canonical SKILL_ANALYZER_MID_FLIGHT_STATUSES constant in
+// `server/services/skillAnalyzerServicePure.ts` so they can never drift
+// from the service / schema definitions. Earlier drafts of this file
+// duplicated the list inline and introduced a `matching` typo (a name the
+// pipeline never writes) that missed an entire stage — see PR review log
+// pr-review-log-skill-analyzer-resilience-2026-04-24T08-50-00Z.md (B1) and
+// tasks/review-logs/chatgpt-pr-review-bugfixes-april26-*.md Round 1 Finding 2.
 // ---------------------------------------------------------------------------
+
+import {
+  SKILL_ANALYZER_MID_FLIGHT_STATUSES,
+  type SkillAnalyzerMidFlightStatus,
+} from '../services/skillAnalyzerServicePure.js';
 
 /** Threshold (ms) of `updated_at` silence after which a mid-flight job is
  *  considered stuck. See file header for derivation. */
 export const STALE_ANALYZER_JOB_THRESHOLD_MS = 15 * 60_000;
 
-/** Mid-flight statuses that the sweep can act on. MUST stay in sync with
- *  the `status` column enum in `server/db/schema/skillAnalyzerJobs.ts` and
- *  the `SkillAnalyzerJobStatus` type in `server/services/skillAnalyzerService.ts`.
- *  Drift here = silent failure to reap stuck jobs in the missing stage. */
-export const STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES = [
-  'parsing',
-  'hashing',
-  'embedding',
-  'comparing',
-  'classifying',
-] as const;
+/** Mid-flight statuses that the sweep can act on. Re-exported from the
+ *  canonical definition so the old import path keeps working but there is
+ *  only one list in the codebase. */
+export const STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES =
+  SKILL_ANALYZER_MID_FLIGHT_STATUSES;
 
-export type StaleAnalyzerJobStatus =
-  typeof STALE_ANALYZER_JOB_MID_FLIGHT_STATUSES[number];
+export type StaleAnalyzerJobStatus = SkillAnalyzerMidFlightStatus;
 
 /** Compute the `updated_at` cutoff before which a mid-flight job counts as
  *  stuck. Pure for testability. */
