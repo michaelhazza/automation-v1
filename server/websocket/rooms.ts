@@ -182,6 +182,16 @@ export function handleConnection(socket: Socket): void {
     socket.leave(`conversation:${conversationId}`);
   });
 
+  // ── Join the system incidents room (system-admin only) ──────────────
+  socket.on('join:sysadmin', () => {
+    if (socket.data.user?.role !== 'system_admin') return;
+    socket.join('system:sysadmin');
+  });
+
+  socket.on('leave:sysadmin', () => {
+    socket.leave('system:sysadmin');
+  });
+
   // ── Join the system-wide LLM in-flight room (system-admin only) ─────
   // Spec tasks/llm-inflight-realtime-tracker-spec.md §7. The room carries
   // cross-tenant attribution fields — non-admin sockets are silently

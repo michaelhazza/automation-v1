@@ -191,6 +191,16 @@ export function emitBriefArtefactUpdated(
   emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
 }
 
+// ─── System-admin incident events ────────────────────────────────────────────
+
+export function emitToSysadmin(
+  event: string,
+  entityId: string,
+  data: Record<string, unknown>
+): void {
+  emitToRoom('system:sysadmin', event, entityId, data);
+}
+
 // ─── Observability exports (for health endpoint or admin) ─────────────────────
 
 export function getWebSocketStats(): { totalEventsEmitted: number; connectionCount: number } {

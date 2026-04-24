@@ -158,6 +158,7 @@ import referenceDocumentsRouter from './routes/referenceDocuments.js';
 import documentBundlesRouter from './routes/documentBundles.js';
 import systemIncidentsRouter from './routes/systemIncidents.js';
 import { recordIncident } from './services/incidentIngestor.js';
+import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -445,6 +446,7 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     const boss = await getPgBoss();
     await startDlqMonitor(boss);
+    await registerSystemIncidentNotifyWorker(boss);
   }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
