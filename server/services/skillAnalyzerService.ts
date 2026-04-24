@@ -1991,23 +1991,37 @@ export async function insertSingleResult(
  *  row between runs. */
 export async function listResultIndicesForJob(
   jobId: string,
-): Promise<Array<{ candidateIndex: number; classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT' }>> {
-  const rows = await db
-    .select({
-      candidateIndex: skillAnalyzerResults.candidateIndex,
-      classification: skillAnalyzerResults.classification,
-    })
-    .from(skillAnalyzerResults)
-    .where(eq(skillAnalyzerResults.jobId, jobId))
-    .orderBy(
-      skillAnalyzerResults.candidateIndex,
-      desc(skillAnalyzerResults.createdAt),
-      desc(skillAnalyzerResults.id),
-    );
+): Promise<Array<{
+  candidateIndex: number;
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  matchedSkillId: string | null;
+  proposedMergedName: string | null;
+  proposedMergedInstructions: string | null;
+}>> {
+  // Raw SQL used to extract JSONB sub-fields without pulling the full JSONB blob.
+  const rawRows = await db.execute(sql`
+    SELECT
+      candidate_index        AS "candidateIndex",
+      classification,
+      matched_skill_id       AS "matchedSkillId",
+      proposed_merged_content->>'name'         AS "proposedMergedName",
+      proposed_merged_content->>'instructions' AS "proposedMergedInstructions"
+    FROM skill_analyzer_results
+    WHERE job_id = ${jobId}
+    ORDER BY candidate_index ASC, created_at DESC, id DESC
+  `);
+
+  type RawRow = {
+    candidateIndex: number;
+    classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+    matchedSkillId: string | null;
+    proposedMergedName: string | null;
+    proposedMergedInstructions: string | null;
+  };
 
   const seen = new Set<number>();
-  const deduped: typeof rows = [];
-  for (const row of rows) {
+  const deduped: RawRow[] = [];
+  for (const row of rawRows as unknown as RawRow[]) {
     if (seen.has(row.candidateIndex)) continue;
     seen.add(row.candidateIndex);
     deduped.push(row);

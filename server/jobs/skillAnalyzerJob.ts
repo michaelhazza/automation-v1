@@ -602,11 +602,20 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         confidence:                    0,
         similarityScore:               null,
         classificationReasoning:       null,
-        libraryId:                     null,
+        // v5 infra: hydrate libraryId + proposedMerge from DB so Stage 5c
+        // fork/overlap detection works correctly on resumed runs.
+        libraryId:                     existing.matchedSkillId ?? null,
         librarySlug:                   null,
         libraryName:                   null,
         diffSummary:                   null,
-        proposedMerge:                 null,
+        proposedMerge:                 existing.proposedMergedInstructions != null
+          ? {
+              name:        existing.proposedMergedName ?? '',
+              description: '',
+              definition:  {},
+              instructions: existing.proposedMergedInstructions,
+            }
+          : null,
         classificationFailed:          false,
         classificationFailureReason:   null,
       });
@@ -1000,31 +1009,51 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classifierFallbackApplied = true;
             }
           } else {
-            // LLM call failed or parse error — route through the shared
-            // buildClassifierFailureOutcome helper so the job path and the
-            // retry path (skillAnalyzerService.ts → classifySingleCandidate)
-            // emit identical fallback state.
-            const fallback = buildClassifierFailureOutcome({
-              candidate: {
-                name: candidate.name,
-                description: candidate.description,
-                definition: (candidate.definition as object | null) ?? null,
-                instructions: candidate.instructions ?? null,
-              },
-              library: {
-                name: matchedLib.name,
-                description: matchedLib.description,
-                definition: (matchedLib.definition as object | null) ?? null,
-                instructions: matchedLib.instructions ?? null,
-              },
-            });
-            finalResult = {
-              classification: fallback.classification,
-              confidence: fallback.confidence,
-              reasoning: fallback.reasoning,
-              proposedMerge: { ...fallback.proposedMerge, mergeRationale: fallback.mergeRationale },
-            };
-            classifierFallbackApplied = true;
+            // v5 Fix 6: if similarity < 70% AND incoming cross-references the
+            // library skill explicitly, the LLM would likely have said DISTINCT.
+            // Avoid a low-quality merge by classifying as DISTINCT instead.
+            const isDistinctFallback =
+              (match.similarity ?? 1) < 0.70 &&
+              skillAnalyzerServicePure.crossReferencesLibrarySkill(
+                candidate.description,
+                matchedLib.name,
+                matchedLib.slug,
+              );
+
+            if (isDistinctFallback) {
+              finalResult = {
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                reasoning: `Classifier unavailable. Matched at ${Math.round((match.similarity ?? 0) * 100)}% with "${matchedLib.name}" but incoming skill cross-references it as a separate tool — treated as distinct. Review manually.`,
+                proposedMerge: null,
+              };
+            } else {
+              // LLM call failed or parse error — route through the shared
+              // buildClassifierFailureOutcome helper so the job path and the
+              // retry path (skillAnalyzerService.ts → classifySingleCandidate)
+              // emit identical fallback state.
+              const fallback = buildClassifierFailureOutcome({
+                candidate: {
+                  name: candidate.name,
+                  description: candidate.description,
+                  definition: (candidate.definition as object | null) ?? null,
+                  instructions: candidate.instructions ?? null,
+                },
+                library: {
+                  name: matchedLib.name,
+                  description: matchedLib.description,
+                  definition: (matchedLib.definition as object | null) ?? null,
+                  instructions: matchedLib.instructions ?? null,
+                },
+              });
+              finalResult = {
+                classification: fallback.classification,
+                confidence: fallback.confidence,
+                reasoning: fallback.reasoning,
+                proposedMerge: { ...fallback.proposedMerge, mergeRationale: fallback.mergeRationale },
+              };
+              classifierFallbackApplied = true;
+            }
           }
 
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
@@ -1418,7 +1447,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       }));
 
     if (mergesForOverlap.length >= 2) {
-      const overlaps = detectContentOverlap(mergesForOverlap);
+      const overlaps = detectContentOverlap(mergesForOverlap, 0.60);
       if (overlaps.length > 0) {
         const overlapWarningsBySlug = new Map<string, MergeWarning[]>();
         for (const o of overlaps) {

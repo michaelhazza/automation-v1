@@ -1717,9 +1717,9 @@ export function validateMergeOutput(
     });
   }
 
-  // --- Fix 4 (v4): NEAR_REPLACEMENT — merged retains < 25% of source structure ---
+  // --- Fix 4 (v4/v5): NEAR_REPLACEMENT — merged retains < 30% of source structure ---
   const retentionScore = computeSourceRetention(base, merged, sourceLookup, mergedByHeader);
-  if (retentionScore < 0.25) {
+  if (retentionScore < 0.30) {
     const defRet = computeDefinitionRetention(base, merged);
     const tblRet = computeTableRetention(sourceLookup, mergedByHeader);
     const instrRet = wordOverlapRatio(base.instructions, merged.instructions);
@@ -1889,6 +1889,54 @@ export interface ClassifierFailureOutcome {
  *  `classifierFallbackApplied` flag. Validation (merge warnings) is applied
  *  separately by the caller — the job and retry paths each compose this
  *  outcome with their own validateMergeOutput / remediateTables plumbing. */
+/** Known ad-platform identifiers that the library skill's enum may omit. */
+const PLATFORM_PATTERNS: Array<{ pattern: RegExp; enumValue: string }> = [
+  { pattern: /\btiktok\b/i,            enumValue: 'tiktok_ads' },
+  { pattern: /\btwitter\b|\btwitter\/x\b|\bx ads\b/i, enumValue: 'twitter_x_ads' },
+  { pattern: /\bsnapchat\b/i,          enumValue: 'snapchat_ads' },
+  { pattern: /\byoutube\b/i,           enumValue: 'youtube_ads' },
+  { pattern: /\bpinterest\b/i,         enumValue: 'pinterest_ads' },
+];
+
+/** Return a copy of `definition` with any new platform enum values from
+ *  `incomingInstructions` injected into the first `enum` field found under
+ *  `input_schema.properties`. No-ops if the definition has no enum. */
+function expandPlatformEnum(
+  definition: object,
+  incomingInstructions: string | null,
+): object {
+  if (!incomingInstructions) return definition;
+  const def = definition as Record<string, unknown>;
+  const props = (def.input_schema as Record<string, unknown> | undefined)?.properties;
+  if (!props || typeof props !== 'object') return definition;
+
+  const propsObj = props as Record<string, unknown>;
+  const platformPropKey = Object.keys(propsObj).find(k => {
+    const p = propsObj[k] as Record<string, unknown> | undefined;
+    return Array.isArray(p?.enum) && (p.enum as string[]).some(v => v.includes('_ads') || v.includes('ads_'));
+  });
+  if (!platformPropKey) return definition;
+
+  const prop = propsObj[platformPropKey] as Record<string, unknown>;
+  const existing = new Set<string>(prop.enum as string[]);
+  const toAdd: string[] = [];
+  for (const { pattern, enumValue } of PLATFORM_PATTERNS) {
+    if (!existing.has(enumValue) && pattern.test(incomingInstructions)) toAdd.push(enumValue);
+  }
+  if (toAdd.length === 0) return definition;
+
+  return {
+    ...def,
+    input_schema: {
+      ...(def.input_schema as object),
+      properties: {
+        ...propsObj,
+        [platformPropKey]: { ...prop, enum: [...(prop.enum as string[]), ...toAdd] },
+      },
+    },
+  };
+}
+
 export function buildClassifierFailureOutcome(
   input: RuleBasedMergeInput & { fallbackConfidence?: number },
 ): ClassifierFailureOutcome {
@@ -1896,14 +1944,67 @@ export function buildClassifierFailureOutcome(
     candidate: input.candidate,
     library: input.library,
   });
+
+  // v5 Fix 1: use incoming name + description; keep library definition but
+  // expand any platform enums it has; show clear boundary in instructions.
+  const incomingName = input.candidate.name?.trim() ?? '';
+  const useName = incomingName || input.library.name?.trim() || fallback.merge.name;
+
+  const incomingDesc = input.candidate.description?.trim() ?? '';
+  const useDescription = incomingDesc.length > 50 ? incomingDesc : fallback.merge.description;
+
+  const libInstr  = input.library.instructions?.trim() ?? '';
+  const candInstr = input.candidate.instructions?.trim() ?? '';
+  let useInstructions: string | null;
+  if (libInstr && candInstr) {
+    useInstructions = `${libInstr}\n\n---\n\n## Extended Capabilities (from incoming skill)\n\n${candInstr}`;
+  } else {
+    useInstructions = libInstr || candInstr || fallback.merge.instructions;
+  }
+
+  const expandedDef = expandPlatformEnum(fallback.merge.definition, input.candidate.instructions);
+  const defWithName = (expandedDef as Record<string, unknown>).name !== undefined
+    ? { ...(expandedDef as Record<string, unknown>), name: useName }
+    : expandedDef;
+
+  const merge: typeof fallback.merge = {
+    name: useName,
+    description: useDescription,
+    definition: defWithName as object,
+    instructions: useInstructions,
+  };
+
   return {
     classification: 'PARTIAL_OVERLAP',
     confidence: input.fallbackConfidence ?? 0.3,
     reasoning: CLASSIFIER_FALLBACK_REASONING,
-    proposedMerge: fallback.merge,
+    proposedMerge: merge,
     mergeRationale: fallback.mergeRationale,
     classifierFallbackApplied: true,
   };
+}
+
+/** Returns true when the candidate description cross-references the library
+ *  skill by name or slug in a "see X" / "use X" / "for X" context — a signal
+ *  that the incoming skill treats the library skill as a separate, distinct
+ *  tool rather than an extension of it. Used for DISTINCT_FALLBACK (v5 Fix 6). */
+export function crossReferencesLibrarySkill(
+  candidateDescription: string | null,
+  libraryName: string,
+  librarySlug: string,
+): boolean {
+  if (!candidateDescription) return false;
+  const desc  = candidateDescription.toLowerCase();
+  const lName = libraryName.toLowerCase();
+  const lSlug = librarySlug.toLowerCase().replace(/_/g, '-');
+  // Match "see X", "use X", "refer to X", or "for X" where X contains the library label
+  const seeRe = /\b(see|use|refer to|for)\b(.{0,60})/g;
+  let m: RegExpExecArray | null;
+  while ((m = seeRe.exec(desc)) !== null) {
+    const ctx = m[2];
+    if (ctx.includes(lName) || ctx.includes(lSlug)) return true;
+  }
+  return false;
 }
 
 /** Merge two instruction bodies by (a) taking the dominant text as base and
@@ -2474,7 +2575,35 @@ function computeSourceRetention(
 
 // ---------------------------------------------------------------------------
 // Fix 2 — table drop recovery appendix (v4 brief)
+// Fix 3 (v5) — suppress reference appendix when merged output already covers data
 // ---------------------------------------------------------------------------
+
+/** Returns true if the merged output already contains table data that covers
+ *  at least 70% of the source table's non-header cell values. Used to prevent
+ *  duplicate reference appendices when the LLM restructured the table inline. */
+function mergedOutputCoversTableData(
+  sourceTable: ExtractedTableRows,
+  mergedInstructions: string,
+  coverageThreshold = 0.70,
+): boolean {
+  const sourceCells = sourceTable.rows.flatMap(row =>
+    row.split('|')
+      .map(c => c.replace(/\[SOURCE:[^\]]*\]/g, '').trim().toLowerCase())
+      .filter(c => c.length > 1 && !/^-+$/.test(c)),
+  );
+  if (sourceCells.length === 0) return false;
+
+  const mergedCells = new Set<string>(
+    extractTablesWithRows(mergedInstructions).flatMap(t =>
+      t.rows.flatMap(row =>
+        row.split('|').map(c => c.trim().toLowerCase()).filter(c => c.length > 1),
+      ),
+    ),
+  );
+
+  const covered = sourceCells.filter(c => mergedCells.has(c)).length;
+  return covered / sourceCells.length >= coverageThreshold;
+}
 
 /** When TABLE_ROWS_DROPPED warnings fire for tables with < 50% rows retained,
  *  append the original source table as a clearly-labelled reference appendix
@@ -2510,6 +2639,9 @@ export function recoverDroppedTableRows(
     if (sourceRows === 0 || mergedRows >= sourceRows * 0.5) continue;
     // Skip tables whose heading already says "Reference:" to prevent recursion.
     if (/reference:/i.test(headerKey)) continue;
+    // v5 Fix 3: skip if the merged output already contains a table that covers
+    // ≥70% of this source table's cell values — appending would be duplicate.
+    if (mergedOutputCoversTableData(sourceTable, mergedInstructions)) continue;
 
     const headingPart = headerKey.includes('>')
       ? headerKey.split('>')[0].replace(/\b\w/g, c => c.toUpperCase())
@@ -2677,6 +2809,7 @@ export const skillAnalyzerServicePure = {
   parseAgentSuggestionResponse,
   buildAgentClusterRecommendationPrompt,
   parseAgentClusterRecommendationResponse,
+  crossReferencesLibrarySkill,
   AGENT_RECOMMENDATION_THRESHOLD,
   AGENT_RECOMMENDATION_MIN_SKILLS,
 };
