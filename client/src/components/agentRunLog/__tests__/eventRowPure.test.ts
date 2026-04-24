@@ -299,6 +299,74 @@ test('builder output flows through mapEventToViewModel without any warns', () =>
   }
 });
 
+// ── R3-5: Trust the discriminator (half-migrated payload edges) ────────────
+
+console.log('\n── R3-5: Trust the structured discriminator ──');
+
+test('structured emitter with provider:null → no regex fallback, no warn (R3-5 main case)', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({
+    skillType: 'automation',
+    provider: null,
+    resultSummary: 'The Mailchimp connection is missing.',
+  });
+  const vm = mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(vm.provider, undefined, 'null provider stays undefined — emitter said "unknown", we trust them');
+  assertEqual(calls.length, 0, 'NO warn — structured emitter is authoritative even when fields are null');
+});
+
+test('structured emitter with provider:undefined and matching resultSummary → no regex fallback', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({
+    skillType: 'automation',
+    // provider intentionally not set
+    resultSummary: 'The Mailchimp connection is missing.',
+  });
+  const vm = mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(vm.provider, undefined, 'no regex parse despite resultSummary matching');
+  assertEqual(calls.length, 0, 'NO warn');
+});
+
+test('structured emitter with connectionKey:null → null becomes undefined in view model', () => {
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({
+    skillType: 'automation',
+    connectionKey: null,
+    errorCode: 'automation_missing_connection',
+  });
+  const vm = mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(vm.connectionKey, undefined, 'null normalised to undefined');
+  assertEqual(vm.errorCode, 'automation_missing_connection', 'errorCode passes through');
+  assertEqual(calls.length, 0, 'NO warn');
+});
+
+test('LEGACY emitter (no skillType) with matching resultSummary → DOES regex-fall-back and DOES warn', () => {
+  // Confirms the trust contract is properly bidirectional —
+  // legacy emitters still get the regex bridge.
+  const { sink, calls } = makeCapturingWarn();
+  const ev = makeSkillCompletedEvent({
+    skillSlug: 'invoke_automation',
+    // no skillType set — this is the legacy slug-shape path
+    resultSummary: 'The Mailchimp connection is missing.',
+  });
+  const vm = mapInvokeAutomationFailedViewModel(ev, sink);
+  assertEqual(vm.provider, 'Mailchimp', 'regex fallback fires for legacy emitter');
+  assertEqual(calls.length, 1, 'ONE warn (regex fallback hit)');
+  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacyProviderRegex, 'stable warn code');
+});
+
+// ── R3-3: Warn-code namespace verification ─────────────────────────────────
+
+console.log('\n── R3-3: Dot-namespaced warn codes ──');
+
+test('warn codes use dot-namespaced surface.signal format', () => {
+  // R3-3: confirms the rename from underscore_only to dot-separated landed.
+  // Future callers can rely on event_row.* prefix matching for log filters.
+  assertEqual(FALLBACK_WARN_CODES.legacySkillSlugDetection, 'event_row.legacy_skill_slug_detection', 'slug code namespaced');
+  assertEqual(FALLBACK_WARN_CODES.legacyProviderRegex, 'event_row.legacy_provider_regex', 'regex code namespaced');
+  assertEqual(FALLBACK_WARN_CODES.legacySkillSlugDetection.startsWith('event_row.'), true, 'shared prefix for log filtering');
+});
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed`);

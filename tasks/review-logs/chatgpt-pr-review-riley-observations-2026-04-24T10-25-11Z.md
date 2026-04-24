@@ -199,3 +199,88 @@ Reviewer is reading the GitHub PR diff view, which shows the *deleted* state of 
 | R2-5 | architectural | defer | Route to tasks/todo.md for retry-endpoint design |
 
 2 technical fixes auto-applied; 2 technical rejected (factually wrong); 1 architectural deferred.
+
+---
+
+## Round 3 — Findings + triage
+
+**Reviewer verdict:** Approve and merge. No blockers. "Tightening, not fixing."
+**Captured:** 2026-04-24 round 3
+
+### R3-1. Add metrics counter alongside warn — ARCHITECTURAL · DEFER
+
+**Reviewer:**
+> Without aggregation you're relying on manual log inspection / grep-based ops. Add `metrics.increment('event_row.fallback.legacy_provider_regex')` for dashboards / alerting / "zero → safe to delete" signal.
+
+**Triage:** ARCHITECTURAL · DEFER
+**Rationale:** Verified — no client-side metrics infrastructure exists (`grep -rn "metrics\.increment" client/src/` → zero hits). Adding a metrics system is net-new infrastructure outside this PR's scope. The reviewer themselves marked this as "tightening, not fixing." For now, the warn codes are stable strings → grep-able from log aggregation tools. When a client metrics system lands, threading these counters through is a one-line follow-up.
+**Action:** Capture in `tasks/todo.md` so the next observability PR remembers to wire these.
+
+---
+
+### R3-2. Define migration endgame phases — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> Phase 1: builder introduced (now). Phase 2: warn rate monitored. Phase 3: block non-builder emitters. Phase 4: delete fallback. You've done 1 and 2; not formalised 3 and 4.
+
+**Triage:** TECHNICAL · ACCEPT
+**Rationale:** Sensible — without explicit removal criteria the fallback can rot. Inline the 4-phase plan as a JSDoc block at the top of `eventRowPure.ts` so future readers see the contract.
+**Fix:** JSDoc block listing all four phases with explicit "remove this code when:" criteria for each fallback branch.
+
+---
+
+### R3-3. Namespace warn codes (dot-separated) — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> Use `event_row.legacy_provider_regex` instead of underscore-only codes. Otherwise: collisions later, hard-to-query logs.
+
+**Triage:** TECHNICAL · ACCEPT
+**Rationale:** Dot-separated namespace is a small but meaningful improvement for log queryability and prevents collisions across the codebase. Easy rename — only 2 codes + their tests.
+**Fix:** `event_row_legacy_skill_slug_detection_used` → `event_row.legacy_skill_slug_detection`. `event_row_legacy_provider_regex_used` → `event_row.legacy_provider_regex`.
+
+---
+
+### R3-4. Retry contract still UI-first — ALREADY DEFERRED (R2-5)
+
+**Reviewer:**
+> UI guarantees don't hold under direct API usage. Future invariant: non-idempotent retry requires explicit `force: true`; server logs every forced retry.
+
+**Triage:** ALREADY DEFERRED — R2-5 captured this exact concern.
+**Rationale:** R2-5 already routed to `tasks/todo.md` with the design constraints (server-side guard, audit log, optional `force: true` post-confirm bypass). Reviewer is reinforcing the same point. No new action — entry stays in backlog.
+
+---
+
+### R3-5. Test for malformed structured payload — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> `{ skillType: 'automation', status: 'error', provider: null }` — does it silently fall back, or treat as structured-but-incomplete? Add a test. Protects against half-migrated emitters.
+
+**Triage:** TECHNICAL · ACCEPT
+**Rationale:** Real bug. Current logic `if (!provider && p.resultSummary)` treats `provider: null` (emitter explicitly says unknown) the same as `provider: undefined` (emitter hasn't migrated). Fix: trust the discriminator — when `skillType === 'automation'` is set, do NOT fall back to regex even if `provider` is null/undefined. Only fall back when no structured discriminator exists at all (the legacy slug-shape path).
+**Fix:** In `mapInvokeAutomationFailedViewModel`, gate the regex fallback on `p.skillType !== 'automation'`. Add tests for: (a) `{ skillType: 'automation', provider: null }` → no fallback, no warn; (b) `{ skillType: 'automation', resultSummary: 'The Mailchimp...' }` → no fallback even though resultSummary would match.
+
+---
+
+### R3-6. Don't over-engineer the fallback layer — TECHNICAL · ACCEPT
+
+**Reviewer:**
+> Once builder adoption hits ~100% and warn rate → zero, aggressively remove regex + slug-prefix detection. Do NOT keep them "just in case."
+
+**Triage:** TECHNICAL · ACCEPT (as documentation, not code)
+**Rationale:** Bake the deletion criteria into the JSDoc block from R3-2. The phases doc explicitly states "remove this code when warn rate is zero for 30 days" so future maintainers don't preserve dead code defensively.
+**Fix:** Combined with R3-2 — single JSDoc block.
+
+---
+
+## Round 3 — Decisions matrix
+
+| # | Triage | Decision | Action |
+|---|---|---|---|
+| R3-1 | architectural | defer | Note in tasks/todo.md (no client metrics infra yet) |
+| R3-2 | technical | accept | Add 4-phase JSDoc block to eventRowPure.ts |
+| R3-3 | technical | accept | Rename warn codes to dot-namespaced |
+| R3-4 | architectural | already-deferred | R2-5 covers this |
+| R3-5 | technical | accept | Trust skillType discriminator; gate regex fallback; add 2 tests |
+| R3-6 | technical | accept | Combined with R3-2 JSDoc — explicit removal criteria |
+
+3 technical fixes auto-applied; 1 architectural deferred (no infra yet); 1 already-deferred (rein); 1 documentation merged with R3-2.

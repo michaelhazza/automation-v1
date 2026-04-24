@@ -5,6 +5,33 @@
  * construction live here, the .tsx file just renders the result.
  *
  * Tests live in __tests__/eventRowPure.test.ts.
+ *
+ * ─── Migration endgame for legacy fallbacks ───────────────────────────────
+ * This module contains two transitional fallback paths that exist only to
+ * support emitters which have not yet migrated to the structured payload
+ * (see `buildAutomationSkillCompletedPayload` in shared/types/agentExecutionLog.ts).
+ * Both fallbacks emit a stable warn code on every hit so production usage is
+ * observable.
+ *
+ *   Phase 1 (DONE): Strict builder + fallback paths shipped together.
+ *   Phase 2 (DONE): Warn-on-fallback emits stable codes that ops can grep.
+ *   Phase 3 (PENDING): When client metrics infra lands, increment a counter
+ *                      in the same callsite as the warn so dashboards can
+ *                      show fallback rate over time per emitter.
+ *   Phase 4 (REMOVAL CRITERIA): When the warn rate for both codes has been
+ *                      zero for ≥30 days in production, delete:
+ *                        (a) the slug-shape fallback in `isAutomationSkillFailure`
+ *                        (b) the regex fallback in `mapInvokeAutomationFailedViewModel`
+ *                        (c) the optional fields on the base `skill.completed`
+ *                            union member (force the strict shape only)
+ *                      DO NOT preserve the fallbacks "just in case" — keeping
+ *                      them silently re-permits drift.
+ *
+ * Trust contract: when an emitter has set `skillType: 'automation'`, we trust
+ * its structured fields completely. We do NOT regex-fall-back even when those
+ * fields are null/undefined — that's the emitter explicitly saying "unknown",
+ * not a request to re-parse the human summary. Regex fallback only fires when
+ * NO structured discriminator is present (the slug-shape legacy path).
  */
 
 import type { AgentExecutionEvent } from '../../../../shared/types/agentExecutionLog';
@@ -41,10 +68,14 @@ export type EventRowViewModel =
  * Stable warn codes — log lines emit these so ops can grep for transitional
  * fallback usage and notice when emitters haven't migrated to the structured
  * fields. Tests can assert against these codes too.
+ *
+ * Naming convention: `<surface>.<specific_signal>` — dot-namespaced so log
+ * aggregation tools can filter by surface (`event_row.*`) cleanly and
+ * codes from different surfaces never collide.
  */
 export const FALLBACK_WARN_CODES = {
-  legacySkillSlugDetection: 'event_row_legacy_skill_slug_detection_used',
-  legacyProviderRegex: 'event_row_legacy_provider_regex_used',
+  legacySkillSlugDetection: 'event_row.legacy_skill_slug_detection',
+  legacyProviderRegex: 'event_row.legacy_provider_regex',
 } as const;
 
 /**
@@ -90,12 +121,13 @@ export function isAutomationSkillFailure(payload: unknown, warn: WarnSink = defa
  * Maps a `skill.completed` event with status 'error' (and the automation
  * shape) into a view model the row component can render declaratively.
  *
- * Falls back to the legacy `match(/The (\w+) connection/i)` regex on
- * resultSummary only when the structured `provider` field is absent. When
- * the regex branch fires, emits a warn with code
- * `event_row_legacy_provider_regex_used` so ops can track unmigrated
- * emitters. Once all emitters provide structured fields, the regex branch
- * + warning can be removed.
+ * Trust contract (per R3-5): when the emitter has set `skillType:'automation'`,
+ * its structured fields are authoritative — including a deliberate `null` or
+ * `undefined` for unknown values. We do NOT regex-fall-back in that case.
+ * The regex fallback only fires when no `skillType` discriminator is present
+ * (the legacy slug-shape path got us here). When it fires, emits a warn with
+ * code `event_row.legacy_provider_regex` so ops can track unmigrated emitters.
+ * Removal criteria for the fallback: see the module-level Phase 4 block.
  */
 export function mapInvokeAutomationFailedViewModel(
   event: AgentExecutionEvent,
@@ -105,10 +137,11 @@ export function mapInvokeAutomationFailedViewModel(
     skillSlug?: string;
     skillName?: string;
     resultSummary?: string;
-    provider?: string;
-    connectionKey?: string;
+    skillType?: string;
+    provider?: string | null;
+    connectionKey?: string | null;
     idempotent?: boolean;
-    errorCode?: string;
+    errorCode?: string | null;
   };
 
   const stepName =
@@ -116,9 +149,13 @@ export function mapInvokeAutomationFailedViewModel(
 
   const errorMessage = p.resultSummary ?? 'Automation step failed.';
 
-  // Prefer structured provider; fall back to regex on the human summary.
-  let provider = p.provider;
-  if (!provider && p.resultSummary) {
+  // Trust the discriminator — when the emitter has set skillType:'automation',
+  // their structured fields (including a deliberate `null`/`undefined` for
+  // unknown values) win. Only fall back to regex when no discriminator is
+  // present at all (the legacy slug-shape path took us here).
+  let provider: string | undefined = p.provider ?? undefined;
+  const isStructuredEmitter = p.skillType === 'automation';
+  if (!isStructuredEmitter && !provider && p.resultSummary) {
     const match = p.resultSummary.match(/The (\w+) connection/i);
     if (match) {
       provider = match[1];
@@ -134,9 +171,9 @@ export function mapInvokeAutomationFailedViewModel(
     stepName,
     errorMessage,
     provider,
-    connectionKey: p.connectionKey,
+    connectionKey: p.connectionKey ?? undefined,
     idempotent: p.idempotent,
-    errorCode: p.errorCode,
+    errorCode: p.errorCode ?? undefined,
   };
 }
 
