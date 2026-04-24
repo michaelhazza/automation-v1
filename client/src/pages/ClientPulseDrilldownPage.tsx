@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
 import SignalPanel from '../components/clientpulse/drilldown/SignalPanel';
@@ -51,6 +51,12 @@ const WINDOW_DAYS = 90;
 export default function ClientPulseDrilldownPage(_: Props) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const { openConfigAssistant } = useConfigAssistantPopup();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const rawIntent = searchParams.get('intent');
+  const intent = rawIntent === 'approve' || rawIntent === 'reject' ? rawIntent : null;
+  const [staleIntent, setStaleIntent] = useState(false);
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [signals, setSignals] = useState<SignalsResponse | null>(null);
@@ -86,14 +92,24 @@ export default function ClientPulseDrilldownPage(_: Props) {
   }, [subaccountId]);
 
   const { approve, reject, conflict: interventionConflict, error: interventionError } = usePendingIntervention({
-    onApproved: load,
-    onRejected: load,
+    onApproved: () => { load(); navigate(location.pathname, { replace: true }); },
+    onRejected: () => { load(); navigate(location.pathname, { replace: true }); },
     onConflict: load,
   });
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (loading || !intent) return;
+    if (!summary?.pendingIntervention) {
+      setStaleIntent(true);
+      navigate(location.pathname, { replace: true });
+    } else {
+      setStaleIntent(false);
+    }
+  }, [loading, intent, summary?.pendingIntervention, navigate, location.pathname]);
 
   const handleOpenConfigAssistant = () => {
     if (!summary) return;
@@ -107,12 +123,19 @@ export default function ClientPulseDrilldownPage(_: Props) {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
+      {staleIntent && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-[13px] text-slate-600">
+          This item is no longer pending.
+        </p>
+      )}
       <PendingHero
         pendingIntervention={summary.pendingIntervention}
         onApprove={approve}
         onReject={reject}
         conflict={interventionConflict}
         error={interventionError}
+        autoFocusApprove={intent === 'approve'}
+        initialShowRejectInput={intent === 'reject'}
       />
 
       <header className="rounded-lg border border-slate-200 bg-white p-5">

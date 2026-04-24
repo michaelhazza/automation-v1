@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface PendingHeroProps {
   pendingIntervention: {
@@ -11,6 +11,9 @@ interface PendingHeroProps {
   onReject: (reviewItemId: string, comment: string) => Promise<void>;
   conflict?: boolean;
   error?: string | null;
+  autoFocusApprove?: boolean;
+  /** Opens the reject textarea on first render only. Prop changes after mount are ignored. */
+  initialShowRejectInput?: boolean;
 }
 
 function formatRelativeTime(isoString: string): string {
@@ -35,10 +38,19 @@ export function PendingHero({
   onReject,
   conflict = false,
   error = null,
+  autoFocusApprove = false,
+  initialShowRejectInput = false,
 }: PendingHeroProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [showRejectInput, setShowRejectInput] = useState(initialShowRejectInput);
   const [rejectComment, setRejectComment] = useState('');
+  const approveButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!autoFocusApprove || !pendingIntervention) return;
+    const t = setTimeout(() => approveButtonRef.current?.focus(), 100);
+    return () => clearTimeout(t);
+  }, [autoFocusApprove, pendingIntervention]);
 
   if (!pendingIntervention) return null;
 
@@ -82,6 +94,7 @@ export function PendingHero({
       )}
       <div className="flex gap-2 mt-3">
         <button
+          ref={approveButtonRef}
           onClick={handleApprove}
           disabled={isDisabled}
           className="rounded px-3 py-1.5 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
