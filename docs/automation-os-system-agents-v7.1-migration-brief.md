@@ -337,7 +337,31 @@ Every side-effect skill must be idempotent under retry. The existing job/retry s
 | `deliver_report` | Idempotency key on `(report_id, channel, period)`. |
 | `prepare_renewal_brief` | Read-only output; no idempotency concern, but must accept a `brief_id` to allow repeated drafts without duplicating board tasks. |
 
-Add an `idempotency` field to each new action-registry entry: `{ keyShape: string, scope: 'subaccount' | 'org' }`. The handler wrapper hashes the inputs per `keyShape` and records the result in a small `skill_idempotency_keys` table (or a Redis-backed equivalent) before executing. Replays return the cached result.
+Add an `idempotency` field to each new action-registry entry: `{ keyShape: string, scope: 'subaccount' | 'org', ttlClass: 'permanent' | 'long' | 'short' }`. The handler wrapper hashes the inputs per `keyShape` and records the result in `skill_idempotency_keys` before executing. Replays return the cached result.
+
+**Idempotency store contract** (keep it simple — do not over-design):
+
+```sql
+CREATE TABLE skill_idempotency_keys (
+  subaccount_id   uuid NOT NULL,
+  skill_slug      text NOT NULL,
+  key_hash        text NOT NULL,
+  request_hash    text NOT NULL,
+  response_payload jsonb NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT NOW(),
+  expires_at      timestamptz NULL, -- NULL = no expiry (financial)
+  PRIMARY KEY (subaccount_id, skill_slug, key_hash)
+);
+```
+
+- **Scope (primary key)** — `(subaccount_id, skill_slug, key_hash)`. Org-scoped skills (none yet, but reserved) use the org-subaccount UUID.
+- **Replay behaviour** — on hit, the handler **must** return the original stored `response_payload` verbatim. It must not recompute, re-hit external APIs, or re-emit side effects.
+- **TTL by class:**
+  - `permanent` — financial / accounting skills (`generate_invoice`, `send_invoice`, `process_bill`, `reconcile_transactions`, `chase_overdue`, `prepare_month_end`). Audit trail must never expire. `expires_at = NULL`.
+  - `long` — CRM / commitments (`update_crm`, `book_meeting`, `deliver_report`). 30 days. Long enough to absorb retry cycles, short enough to keep the table from rotting.
+  - `short` — communications (`send_email`). 14 days. Same recipient + same content within 14 days is treated as a duplicate.
+- **Cleanup** — a daily pg-boss job deletes rows where `expires_at < NOW()`. `permanent` rows never match.
+- **Request-hash mismatch** — if the same `key_hash` is invoked with a different `request_hash`, that is a contract violation. Log `skill.error` and return `{ status: 'idempotency_collision' }` rather than overwrite. Almost always a caller bug.
 
 #### 4.11.5 Manager behaviour contract
 
@@ -347,7 +371,17 @@ Encode at three layers:
 
 1. **In each manager's `AGENTS.md`** — the system prompt explicitly states: *"You do not execute domain skills. You decompose, delegate via `reassign_task` or `spawn_sub_agents`, aggregate, and report."*
 2. **Manager skill bundle is closed** — managers are wired with the universal bundle + delegation bundle + at most one domain-read skill (e.g. `read_revenue` for the CRO). They do not get worker-execution skills (`draft_post`, `update_crm`, `send_email`, `write_patch`, etc.).
-3. **Runtime guard** — extend `executeWithActionAudit` so when a `system_agents` row's role is `manager` (set by frontmatter `role: manager` on the four department heads), it rejects any skill not in an allowlist of manager-permissible skills. Manager-permissible = universal bundle + delegation bundle + listed read skills only.
+3. **Runtime guard — explicit allowlist, not a denylist.** Extend `executeWithActionAudit` so when a `system_agents` row's role is `manager` (set by frontmatter `role: manager` on the four department heads), it accepts **only** the skills present in the manager allowlist. Anything outside the allowlist — worker skill, another department's read skill, an unrecognised slug — is a hard reject with `{ status: 'blocked', reason: 'manager_role_violation' }`.
+
+   The allowlist per manager:
+   ```
+   manager_allowlist = universal_bundle ∪ delegation_bundle ∪ this_manager_specific_reads
+   ```
+   - `universal_bundle` = `read_workspace`, `write_workspace`, `move_task`, `update_task`, `request_approval`, `add_deliverable`, `create_task`
+   - `delegation_bundle` = `list_my_subordinates`, `spawn_sub_agents`, `reassign_task`
+   - `this_manager_specific_reads` = the read skills declared in that manager's `AGENTS.md` (e.g. `read_codebase` for the CTO; `read_revenue` + `read_crm` for the CRO).
+
+   Allowlist semantics close two edge cases the original "reject worker-only skills" wording missed: (a) a manager invoking another manager's read skill, and (b) a manager invoking a read skill whose handler indirectly triggers a side effect. If it isn't on the list, it doesn't run.
 
 This makes the violation a hard error rather than a slow drift into "super-managers" that bypass the workers.
 
@@ -367,24 +401,37 @@ The brief's dependency on Workstream B (`canonical_prospect_profiles` extension)
 
 Pre-production. Idempotent re-seeding will not delete the `client-reporting-agent` row from the DB. Two viable paths:
 
-### Path A (recommended) — wipe system-agent state, re-seed
+### Path A (recommended) — soft-delete system-agent state, re-seed
 
-Fastest, cleanest, no seed-script changes required.
+Fastest, cleanest, FK-safe. No seed-script changes required.
+
+**All reset operations must respect FK constraints and use soft-delete semantics consistent with system tables.** A hard `DELETE FROM agents` violates `agent_runs.agent_id` FK on any DB that has been used. Soft-delete leaves the rows in place; the seed already filters lookups by `isNull(deletedAt)` so soft-deleted rows are correctly treated as not-existing during re-seed.
 
 ```bash
 # 1. Make all the file-on-disk changes (§4.1 – §4.9)
 
-# 2. From a psql session, wipe the system-agent surface in the dev DB:
+# 2. From a psql session, soft-delete the system-agent surface in the dev DB:
 psql $DATABASE_URL <<'SQL'
 BEGIN;
--- Subaccount-level activations of system-managed agents
-DELETE FROM subaccount_agents WHERE agent_id IN (
-  SELECT id FROM agents WHERE is_system_managed = true
-);
--- Org-level rows linked to system_agents
-DELETE FROM agents WHERE is_system_managed = true;
--- The authoritative system_agents rows themselves (incl. Playbook Author)
-DELETE FROM system_agents;
+
+-- Deactivate subaccount-level activations linked to system-managed agents
+-- (subaccount_agents uses an is_active boolean, not deleted_at)
+UPDATE subaccount_agents
+   SET is_active = false, updated_at = NOW()
+ WHERE agent_id IN (
+   SELECT id FROM agents WHERE is_system_managed = true
+ );
+
+-- Soft-delete org-level rows linked to system_agents
+UPDATE agents
+   SET deleted_at = NOW(), updated_at = NOW()
+ WHERE is_system_managed = true AND deleted_at IS NULL;
+
+-- Soft-delete the authoritative system_agents rows (incl. Playbook Author)
+UPDATE system_agents
+   SET deleted_at = NOW(), status = 'inactive', updated_at = NOW()
+ WHERE deleted_at IS NULL;
+
 COMMIT;
 SQL
 
@@ -392,9 +439,11 @@ SQL
 npm run seed
 ```
 
-The seed will recreate all 22 v7.1 agents + Playbook Author = 23 rows in `system_agents`, set `parentSystemAgentId` correctly across all three tiers, and reactivate them in the Synthetos Workspace subaccount via Phase 5.
+The seed will recreate all 22 v7.1 agents + Playbook Author = 23 fresh rows in `system_agents` (the soft-deleted rows are ignored by the `isNull(deletedAt)` filters in `phase2_systemAgents` and `phase3_playbookAuthor`), set `parentSystemAgentId` correctly across all three tiers, and reactivate them in the Synthetos Workspace subaccount via Phase 5.
 
-User passwords are preserved by the seed (`upsertUser` deliberately omits `passwordHash` on update). Integration-connection placeholders use `onConflictDoNothing` and won't be re-overwritten.
+Existing `agent_runs` rows continue to satisfy the FK because the `agents` rows they reference are still present (just soft-deleted). User passwords are preserved by the seed (`upsertUser` deliberately omits `passwordHash` on update). Integration-connection placeholders use `onConflictDoNothing` and won't be re-overwritten.
+
+> **Why not `DELETE`?** `agent_runs.agent_id` references `agents.id` with no cascade. A hard delete on a populated dev DB raises a foreign-key violation and rolls the whole transaction back — Path A then silently fails. Soft-delete is the only correct choice.
 
 ### Path B — full DB reset
 
@@ -466,6 +515,7 @@ The migration is complete when:
 16. **Manager guard** (§4.11.5) — runtime guard in `executeWithActionAudit` rejects worker-only skills when called by an agent with `role: manager`. Test: invoke `draft_post` from `head-of-growth` → returns `{ status: 'blocked', reason: 'manager_role_violation' }`.
 17. **Manifest JSON** (§4.9) is at `version: "7.1.0"` with all 22 agents listed and `reportsTo` matching frontmatter.
 18. **Foundational-skill assertion** (§4.4) — every skill in `APP_FOUNDATIONAL_SKILLS` declares no external integration in its registry entry.
+19. **No orphan skills** — every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list, **OR** is explicitly tagged `reusable: true` in its own frontmatter (Reporting Agent skills like `fetch_paywalled_content`, `analyse_42macro_transcript`; Playbook Studio skills like `playbook_validate`). Verified by `scripts/verify-agent-skill-contracts.ts` (extending the §4.11.1 check). Stale skills rot the registry and confuse delegation routing — every file must justify its existence.
 
 ## 8. Out of scope for this brief
 
