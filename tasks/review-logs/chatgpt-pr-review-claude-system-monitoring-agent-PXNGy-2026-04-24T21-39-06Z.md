@@ -121,3 +121,137 @@ Appended to `## Deferred from chatgpt-pr-review — PR #188 (2026-04-25)` with i
 - error_handling (finding #3 — surfacing the multi-instance limitation as a tagged log)
 
 ---
+
+## Round 2 — 2026-04-25T08-30-00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+
+This round is clean. The changes you made tightened the only real correctness gap (self-check ambiguity), and your deferral decisions are rational given Phase 0 scope.
+
+There are no new blocking issues introduced in this PR. What remains are edge-case correctness and scale behaviours, not architectural flaws.
+
+Verdict: merge-ready with high confidence.
+
+What improved in this round
+1. Self-check clarity is now correct
+failureTimestamps → processLocalFailureCounter
+explicit self_check_process_local_only log
+
+This removes a subtle but dangerous ambiguity. Operators now understand the limitation immediately.
+
+This was the only thing I'd consider "must fix before scale".
+
+2. Ingestor contract is still intact (good sign)
+
+Re-checking core guarantees:
+- fire-and-forget ✔
+- never throws ✔
+- transaction boundary respected ✔
+- notify after commit ✔
+- async mode safe from double-increment ✔
+
+No regressions introduced.
+
+3. Suppression uniqueness fix is solid
+
+The NULLS NOT DISTINCT correction is exactly the right move:
+- Prevents duplicate "global suppressions" where organisation_id IS NULL
+- cleanup migration before index recreate ✔
+- rollup logic preserves counters ✔
+
+This is production-grade.
+
+4. RLS bypass is at least explicitly guarded
+
+You doubled down on:
+- schema comments
+- config warnings
+- service-level gating
+
+Still a risk long-term, but for Phase 0 this is handled responsibly.
+
+Final pass: anything left that could bite you? (not blockers)
+
+1. Occurrence event duplication (still present, consciously deferred). High-frequency failures (LLM loops, connector storms) is the first scaling pain point.
+2. Ingest hot-loop risk (no throttle). Second scaling breakpoint.
+3. Notification pipeline = best effort, no observability. Becomes relevant when push channels (Phase 0.75) or external alerts (Slack, email) are added.
+4. Badge count query will degrade — currently no cache.
+5. Escalation flow has a subtle partial-failure window — `escalation_blocked` logged, but full failure modes not.
+6. Multi-instance ingest semantics (future). Process-local failure counter is documented; eventually you'll want shared failure tracking (Redis/DB).
+
+Subtle correctness check: partial unique index + upsert alignment is correct. `ON CONFLICT (fingerprint) WHERE status IN ('open', 'investigating', 'remediating', 'escalated')` matches `CREATE UNIQUE INDEX ... WHERE status IN (...)`. Worth calling out because this is commonly done incorrectly.
+
+Final verdict: Merge status: ✅ APPROVED. Architecturally sound, operationally safe for Phase 0, correct on all critical invariants.
+
+Sequencing for next phases:
+- Phase 0.75: ingest throttling (per fingerprint), notification observability (basic metric + retry), shared failure counter (replace process-local).
+- Phase 1: incident clustering (root cause grouping), frequency-based severity escalation, operator SLA signals (time-to-ack, time-to-resolve).
+
+Bottom line: handled the review process properly, fixed the only real correctness ambiguity, deferred the right things, avoided premature complexity. Not carrying hidden architectural debt.
+
+### Triage — Round 2 is an acknowledgement round
+
+Round 2 is an explicit ACK ("Merge status: APPROVED" + "merge-ready with high confidence"). The 6 "anything left that could bite you" items are all re-statements of round-1 decisions, not new findings. Per-item mapping:
+
+| R2 # | R2 framing | Maps to | Round-1 outcome | Net new action |
+|------|-----------|---------|-----------------|----------------|
+| R2#1 | Occurrence event duplication | R1#1 — idempotency key | deferred | none — already in `tasks/todo.md § PR #188` |
+| R2#2 | Ingest hot-loop risk / no throttle | R1#5 — per-fingerprint throttle | deferred | none — already in backlog |
+| R2#3 | Notification observability — metric + retry + DLQ | R1#7 — notify metrics + retry | rejected (tagged-log-as-metric is the codebase convention) | none — ChatGPT itself frames this as Phase 0.75 boundary work, agreeing with the rejection rationale |
+| R2#4 | Badge-count cache degradation | R1#10 — badge-count cache | deferred | none — already in backlog |
+| R2#5 | Escalation partial-failure window | R1#6 — escalation tx + fallback | rejected (premise was wrong — escalation is already inside `db.transaction`) | none — ChatGPT re-states the same concern; the actual code is atomic |
+| R2#6 | Multi-instance ingest semantics — shared failure tracking | partially-addressed by R1#3 (rename + WARN) | implemented | none — ChatGPT explicitly flags "Not a concern yet"; the future Redis/DB tracker is a Phase 0.75 enhancement, already implied by the deferred backlog framing |
+
+**Net new findings: zero.**
+
+**Positive correctness callout:** ChatGPT verified the partial unique index + upsert WHERE-clause alignment (`ON CONFLICT (fingerprint) WHERE status IN ('open', 'investigating', 'remediating', 'escalated')` matches `CREATE UNIQUE INDEX ... WHERE status IN (...)`). This is a known footgun that produces duplicate active rows when the predicate drifts; the codebase has it right.
+
+### Recommendations and Decisions
+
+| Finding | Recommendation | User Decision | Severity | Rationale |
+|---------|----------------|---------------|----------|-----------|
+| R2 ACK — no new findings, merge-approved | n/a | n/a (no decision required) | n/a | Round 2 is a clean acknowledgement; the 6 "still bite you" items map 1:1 to round-1 decisions already routed (deferred or rejected). Recorded for audit; no per-item user gate triggered because there is nothing actionable. |
+
+### Implemented (round 2)
+
+None. Round 2 produced zero implementations because zero findings were net new and zero existing decisions were overturned.
+
+### Top themes
+
+- scope (round 2 is an ACK — every "still bite you" item maps to a round-1 decision already in flight)
+- architecture (positive correctness verification — partial unique index + upsert WHERE-clause alignment confirmed)
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Implemented: 1 (round 1 finding #3 — process-local counter rename + WARN log; commit `4af29c84`)
+- Rejected: 3 (round 1 findings #4 RLS rename, #6 escalation tx — premise wrong, #7 notify metrics — codebase convention is tagged-log-as-metric)
+- Deferred: 6 (round 1 findings #1, #2, #5, #8, #9, #10)
+- Round 2 net new: 0 (clean ACK + positive correctness callout)
+- Index write failures: 0
+- Deferred to `tasks/todo.md § Deferred from chatgpt-pr-review — PR #188`:
+  - #1 — Idempotency guard at ingestion boundary — needs design (key derivation, dedupe-window scope)
+  - #2 — Severity escalation policy — thresholds are product decisions
+  - #5 — Per-fingerprint ingestion throttle — Phase 0/0.5 has no tight-loop scenarios today
+  - #8 — Incident-lifecycle SLA/aging signals — Phase 1 scope, pair with ops-dashboard planning
+  - #9 — Incident correlation clusters — Phase 1, needs correlation pass + cluster summary UI
+  - #10 — Badge-count cache — low priority until query shows in slow-query logs
+- Architectural items surfaced (user decisions):
+  - #1 idempotency guard — defer (architectural)
+  - #2 severity escalation — defer (architectural)
+  - #4 RLS rename — reject (architectural; rename is cosmetic, lint/CI rule and DB-role restriction are larger design decisions)
+  - #6 escalation tx — reject (architectural; premise was wrong — escalation is already inside `db.transaction`)
+  - #8 SLA signals — defer (architectural)
+  - #9 correlation clusters — defer (architectural)
+- KNOWLEDGE.md updated: yes (3 entries — process-local counter pattern, partial-unique-index+upsert alignment, tagged-log-as-metric convention)
+- architecture.md updated: no (no [missing-doc] >2; codebase conventions cited in rejections are already documented or implicit in existing patterns like `delegation_outcome_write_failed`)
+- PR: #188 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/188
+- Verdict: ChatGPT explicit `Merge status: ✅ APPROVED` after round 2
+
+### Consistency Warnings
+
+None. All decisions are internally consistent across rounds; round 2 contains no decisions that contradict round 1.
