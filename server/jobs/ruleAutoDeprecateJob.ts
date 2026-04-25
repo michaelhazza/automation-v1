@@ -21,12 +21,13 @@ export async function runRuleAutoDeprecate(): Promise<void> {
       totalDecayed += summary.decayed;
       totalAutoDeprecated += summary.autoDeprecated;
     } catch (err) {
-      logger.error({ err, organisationId: org.id }, 'ruleAutoDeprecateJob: org failed');
+      logger.error('ruleAutoDeprecateJob: org failed', { err, organisationId: org.id });
     }
   }
 
-  logger.info(
-    { totalDecayed, totalAutoDeprecated, orgsProcessed: allOrgs.length },
-    'ruleAutoDeprecateJob: complete',
-  );
+  logger.info('ruleAutoDeprecateJob: complete', {
+    totalDecayed,
+    totalAutoDeprecated,
+    orgsProcessed: allOrgs.length,
+  });
 }

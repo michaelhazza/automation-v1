@@ -911,10 +911,7 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 **Source log:** `tasks/review-logs/spec-conformance-log-audit-remediation-2026-04-25T11-00-13Z.md`
 **Spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
 
-- [ ] **REQ #11 / #12 — `skillStudioService.ts` conditional org filter (§4.3).** Lines 168 / 304-305 / 312-313 use the pattern `orgId ? and(eq(skills.id, ...), eq(skills.organisationId, orgId)) : eq(skills.id, ...)` — when `orgId` is undefined the org filter is not applied. Spec §4.3's "current (defective) -> required (canonical)" table required UNCONDITIONAL `and(...)`-wrapped filter. The `verify-org-scoped-writes.sh` gate currently passes (it sees the `and(eq(skills.organisationId, ...))` token), but the runtime guard is incomplete. The `getSkillStudioContext(skillId, scope, orgId?)` and `saveSkillVersion(skillId, scope, orgId | null, ...)` signatures make `orgId` optional today.
-  - Spec section: §4.3
-  - Gap: the spec's table listed verbatim line edits that did not mention the conditional pattern; the implementer made the call to keep `orgId?` optional which fails open in the no-orgId branch.
-  - Suggested approach: decide whether `getSkillStudioContext` and `saveSkillVersion` should require an explicit `orgId` (signature change touching ~3 call sites in `server/routes/skills.ts` and a system-admin path) OR whether the system-admin scope path is the legitimate fallback that intentionally bypasses the org filter — in which case add an inline `// system-admin scope: org filter intentionally absent` comment per spec §2.4 carve-out.
+- [x] **REQ #11 / #12 — `skillStudioService.ts` conditional org filter (§4.3).** RESOLVED in-branch (2026-04-25 main session). Both `getSkillStudioContext` and `saveSkillVersion` now throw if `orgId` is missing for non-system scopes, and apply the `and(eq(skills.organisationId, orgId))` filter unconditionally. System-scope paths take the existing `if (scope === 'system')` branch which never used the org filter and is unchanged.
 
 - [ ] **REQ #35 — `verify-input-validation.sh` (44) and `verify-permission-scope.sh` (13) warnings (§5.7).** The two warning-level gates report violations. Spec §5.7 says "best-effort triage", not a Phase 2 ship blocker. However, spec §5.7 step 3 states "new regressions introduced by Phase 2 work itself MUST be resolved before merge"; no `main`-state baseline was captured pre-Chunk-2 to confirm whether the Chunk 2 PR introduced any of these warnings.
   - Spec section: §5.7, §5.8
@@ -925,4 +922,33 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
   - Spec section: §6.3, §13.3
   - Gap: Chunk 3's DoD checkbox `npx madge --circular --extensions ts server/ | wc -l ≤ 5` cannot be met without a Phase 5A-scope follow-up.
   - Suggested approach: (1) confirm against an isolated `main`-state run whether the 175 figure was real or an over-count (the gap cannot be diagnosed without that comparison); (2) if the 43-cycle base is genuinely pre-existing, update spec §6.3 / §13.3 / §13.5A so the DoD ≤ 5 target moves to Phase 5A and Phase 3's actual target reflects "schema-leaf cascade resolved" only; (3) if Chunk 3 is meant to drive ≤ 5 in absolute terms, extend Chunk 3 with an additional cycle-cluster fix (the `skillExecutor` <-> tools cluster is the largest). Operator picks the framing.
+
+---
+
+## Deferred from pr-reviewer review — audit-remediation (2026-04-25)
+
+**Captured:** 2026-04-25T12:21:49Z
+**Source log:** `tasks/review-logs/pr-reviewer-log-audit-remediation-2026-04-25T12-21-49Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
+
+### Resolved in-branch (no follow-up required)
+- [x] **B-1 / B-2 / B-3 — Migration 0227 over-scope (`reference_documents` + `reference_document_versions`).** RESOLVED: removed both blocks from `migrations/0227_rls_hardening_corrective.sql`; added a header note explaining 0202/0203 hardening belongs in a follow-on migration with a parent-EXISTS policy variant.
+- [x] **S-1 — `rollbackSkillVersion` signature footgun.** RESOLVED: tightened `scope` parameter type to `'system'` only (matches the only caller).
+- [x] **S-3 — `automationConnectionMappingService.listMappings` / `cloneAutomation` defensive `organisationId` filter.** RESOLVED: added `eq(automationConnectionMappings.organisationId, organisationId)` to all three `listMappings`/`replaceMappings` queries (including the post-replace return SELECT and the delete WHERE); changed `cloneAutomation` source SELECT to filter by `(scope = 'system' OR organisationId = caller-orgId)` directly in the WHERE clause; updated route caller to pass `req.orgId!`.
+
+### Routed to follow-on phases
+- [ ] **S-2 — Principal-context propagation is import-only across 4 of 5 files.** `actionRegistry.ts`, `connectorPollingService.ts`, `canonicalQueryRegistry.ts`, `webhooks/ghlWebhook.ts` import `fromOrgId` to satisfy the gate but never call it. Spec §5.4 prescribes per-call-site `fromOrgId(...)` invocations at every `canonicalDataService` call. The mismatch likely needs the canonicalDataService signatures to accept `PrincipalContext` first (upstream change). `intelligenceSkillExecutor.ts` is import-presence-only per spec line 919 and is correct.
+  - Spec section: §5.4
+  - Gap: implementation does not reach defence-in-depth at the per-call boundary.
+  - Suggested approach: (a) extend Phase 5 with a `canonicalDataService` signature migration to accept `PrincipalContext`, then thread `fromOrgId(...)` calls at all five call sites; OR (b) update spec §5.4 to acknowledge that the propagation work is import-presence-only across all five files in this phase and route the actual propagation to a later phase. Document the choice in the next PR description.
+
+- [ ] **S-4 — Server cycle count 43 vs spec DoD ≤ 5.** Same item as the existing REQ #43 above; cross-reference only. Operator decision required on framing (re-scope DoD vs extend Chunk 3 vs accept residual to Phase 5A).
+
+- [ ] **S-5 — Pure unit test for `saveSkillVersion` orgId-required throw contract.** Add `server/services/__tests__/skillStudioServicePure.test.ts` (or extend an existing pure test) covering: (1) `saveSkillVersion(id, 'org', null, …)` throws with message `saveSkillVersion: orgId is required for scope=org`; (2) same for `'subaccount'`; (3) `saveSkillVersion(id, 'system', null, …)` happy-path executes. Compatible with `runtime_tests: pure_function_only` posture — no DB required.
+
+- [ ] **N-1 — `briefVisibilityService` and `onboardingStateService` use `db` direct, not `getOrgScopedDb`.** Pre-existing inconsistency; the new services lock in the older pattern. Future audit will surface; not a Phase 1 ship blocker.
+- [ ] **N-2 — `measureInterventionOutcomeJob.resolveAccountIdForSubaccount` fetches all org accounts then `.find()`s.** Add a targeted `findAccountBySubaccountId(orgId, subaccountId)` to `canonicalDataService` if cost shows up. Phase 5+.
+- [ ] **N-3 — `actionRegistry.ts:2-4` comment is aspirational.** Tighten to reflect that the file does not actually call `canonicalDataService` today; the import is gate-presence-only.
+- [ ] **N-4 — Migration 0227 header says "8 tables".** Now correct after B-3 fix removed the 2 over-scope blocks. Verify on next pass.
+- [ ] **N-5 — `configDocuments` route's in-memory `parsedCache` is per-process (multi-process bug class).** Pre-existing; flagged for Phase 5A `rateLimitStoreService` runbook to clean up alongside §8.1's rate-limiter durability work — same defect class (key-value with TTL, per-process state).
 

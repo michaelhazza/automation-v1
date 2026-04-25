@@ -8,6 +8,7 @@
  */
 
 export interface MemoryBlockForPrompt {
+  id: string;
   name: string;
   content: string;
   permission: 'read' | 'read_write';

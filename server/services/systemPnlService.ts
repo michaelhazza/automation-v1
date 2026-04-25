@@ -700,7 +700,7 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
         AND status IN ('success', 'partial')
     `);
 
-    const r = rows.rows?.[0] ?? (rows as unknown as { rows: unknown[] }).rows?.[0] ?? rows[0];
+    const r = rows[0];
     const totalCalls     = r ? Number((r as Record<string, unknown>).total_calls)      || 0 : 0;
     const escalatedCalls = r ? Number((r as Record<string, unknown>).escalated_calls)  || 0 : 0;
     const avgCostCents   = r ? (Number((r as Record<string, unknown>).avg_cost_cents)  || null) : null;

@@ -18,6 +18,7 @@ import { readFile } from 'fs/promises';
 import { resolve as resolvePath } from 'path';
 import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import type { OrgScopedTx } from '../db/index.js';
 import {
   memoryBlocks,
   memoryBlockVersions,
@@ -54,7 +55,7 @@ export interface WriteVersionParams {
   actorUserId?: string | null;
   notes?: string;
   /** Optional transactional DB handle so writes happen atomically. */
-  tx?: typeof db;
+  tx?: typeof db | OrgScopedTx;
 }
 
 export async function writeVersionRow(params: WriteVersionParams): Promise<MemoryBlockVersion | null> {

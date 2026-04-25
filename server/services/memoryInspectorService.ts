@@ -186,7 +186,8 @@ export async function askInspector(input: AskInspectorInput): Promise<InspectorR
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
       correlationId: input.correlationId,
-      taskType: 'memory_inspector',
+      sourceType: 'system',
+      taskType: 'general',
     } as Parameters<typeof routeCall>[0]['context'],
   });
 

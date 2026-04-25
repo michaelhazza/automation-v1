@@ -13,10 +13,11 @@ export const automationConnectionMappingService = {
   /**
    * List connection mappings for an automation in a subaccount.
    */
-  async listMappings(subaccountId: string, automationId: string) {
+  async listMappings(organisationId: string, subaccountId: string, automationId: string) {
     return db.select()
       .from(automationConnectionMappings)
       .where(and(
+        eq(automationConnectionMappings.organisationId, organisationId),
         eq(automationConnectionMappings.subaccountId, subaccountId),
         eq(automationConnectionMappings.processId, automationId),
       ));
@@ -55,6 +56,7 @@ export const automationConnectionMappingService = {
     // Delete existing mappings and insert new ones (atomic replace)
     await db.delete(automationConnectionMappings)
       .where(and(
+        eq(automationConnectionMappings.organisationId, organisationId),
         eq(automationConnectionMappings.subaccountId, subaccountId),
         eq(automationConnectionMappings.processId, automationId),
       ));
@@ -75,6 +77,7 @@ export const automationConnectionMappingService = {
     return db.select()
       .from(automationConnectionMappings)
       .where(and(
+        eq(automationConnectionMappings.organisationId, organisationId),
         eq(automationConnectionMappings.subaccountId, subaccountId),
         eq(automationConnectionMappings.processId, automationId),
       ));
@@ -89,16 +92,20 @@ export const automationConnectionMappingService = {
     sourceId: string,
     name?: string,
   ) {
+    // System-scope sources are global; for any other scope, require the source's
+    // organisationId to match the caller's. Defence-in-depth via the WHERE clause.
     const [source] = await db.select()
       .from(automations)
-      .where(and(eq(automations.id, sourceId), isNull(automations.deletedAt)));
+      .where(and(
+        eq(automations.id, sourceId),
+        isNull(automations.deletedAt),
+        or(
+          eq(automations.scope, 'system'),
+          eq(automations.organisationId, organisationId),
+        ),
+      ));
 
     if (!source) throw { statusCode: 404, message: 'Source process not found' };
-
-    // Can only clone system automations or automations from the same org
-    if (source.scope !== 'system' && source.organisationId !== organisationId) {
-      throw { statusCode: 403, message: 'Cannot clone automations from another organisation' };
-    }
 
     const [cloned] = await db.insert(automations).values({
       organisationId,

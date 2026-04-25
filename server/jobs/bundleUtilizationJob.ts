@@ -26,7 +26,7 @@ import {
 } from '../db/schema/index.js';
 
 export async function runBundleUtilization(): Promise<void> {
-  await withAdminConnection(async (adminDb) => {
+  await withAdminConnection({ source: 'bundle_utilization_job' }, async (adminDb) => {
     // 1. Fetch all live named bundles and all platform-default policies
     const [allBundles, allPolicies] = await Promise.all([
       adminDb

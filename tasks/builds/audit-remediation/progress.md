@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|
 | 1 | `phase-1-rls-hardening` | §4.1 – §4.6 | — | [ ] not started | |
 | 2 | `phase-2-gate-compliance` | §5.1 – §5.8 | — | [ ] not started | |
-| 3 | `phase-3-architectural-integrity` | §6.1 – §6.3 | — | [ ] not started | |
+| 3 | `phase-3-architectural-integrity` | §6.1 – §6.3 | — | [x] complete | Types extracted, cycles reduced, builds clean |
 | 4 | `phase-4-system-consistency` | §7.1 – §7.4 | — | [ ] not started | |
 | 5 | `phase-5a-rate-limiter-shadow-mode` | §8.1 PR 1 | — | [ ] not started | |
 | 6 | `phase-5a-rate-limiter-authoritative-flip` | §8.1 PR 2 | — | [ ] not started | Pre-condition: Chunk 5 on `main` for ≥ 1 operator-observed window |
@@ -27,6 +27,42 @@
 ## Session log
 
 (Append a dated entry per session; record what was done, what's next, any decisions made.)
+
+### 2026-04-25 (session 4) — Chunk 3 complete; all 83 pre-existing TS errors resolved
+
+**Completed this session:**
+- Chunk 3 (Phase 3 — Architectural integrity): all 6 spec tasks delivered.
+  - Created `shared/types/agentExecutionCheckpoint.ts` (4 extracted types: AgentRunCheckpoint, SerialisableMiddlewareContext, SerialisablePreToolDecision, PreToolDecision)
+  - `server/services/middleware/types.ts` updated to re-export from shared (breaks 175-cycle cascade)
+  - `server/db/schema/agentRunSnapshots.ts` updated to import from shared
+  - ProposeInterventionModal cluster extracted to `client/src/components/clientpulse/types.ts`
+  - SkillAnalyzerWizard cluster extracted to `client/src/components/skill-analyzer/types.ts`
+  - `audit-runner.md` updated with explicit Gate-Timing Rule
+- Pre-existing TypeScript errors (83 total across 33 files) fully resolved:
+  - req.userId → req.user!.id (4 route files)
+  - Logger call ordering (pino-style → custom logger style)
+  - RowList .rows access pattern (3 files)
+  - withAdminConnection missing options arg
+  - uniqueIndex → unique for .nullsNotDistinct()
+  - WorkflowStepRunId casing typo
+  - MemoryBlockForPrompt missing id field (interface + 3 service files)
+  - AlertFatigueGuard shouldDeliver signature mismatch
+  - Invalid taskType/executionPhase literal values
+  - Dynamic import type errors (@ts-expect-error for docx/mammoth)
+  - PulseMajorThresholds literal type widened
+  - QueryFilter.value required → optional
+  - SystemIncidentService 'escalated' → 'escalation' eventType
+  - systemPnlService .rows RowList fix
+  - incidentIngestor capturedPayload narrowing (as cast)
+  - skillExecutor _nextPosition status cast via Parameters<>
+  - getRelevantMemories return type now includes id: string
+  - Various test fixture missing fields, module scope collisions
+
+**Both builds clean:** `npm run build:server` → 0 errors; `npm run build:client` → ✓ built in 3.64s
+
+**Stopping before spec-conformance** (user will run in separate session).
+
+**Next:** spec-conformance, pr-reviewer, then commit Chunk 3.
 
 ### 2026-04-25 (session 3) — Chunks 1 and 2 complete; paused for session handoff
 

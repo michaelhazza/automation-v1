@@ -97,7 +97,11 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
     normalised.endsWith('docx')
   ) {
     // Dynamic import to avoid hard dependency at test time
-    const mammoth = await import('mammoth').catch(() => null as unknown as typeof import('mammoth') | null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // @ts-expect-error — optional peer dep, not declared in this project's deps
+    const mammoth = await (import('mammoth') as Promise<any>).catch(() => null) as {
+      extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }>;
+    } | null;
     if (!mammoth) {
       throw { statusCode: 500, message: 'mammoth package not available for DOCX parsing', errorCode: 'MAMMOTH_UNAVAILABLE' };
     }
@@ -186,7 +190,8 @@ async function parseWithLLM(input: LlmParseInput): Promise<ParsedConfigField[]> 
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
       correlationId: input.correlationId,
-      taskType: 'config_document_parse',
+      sourceType: 'system',
+      taskType: 'general',
     } as Parameters<typeof routeCall>[0]['context'],
   });
 

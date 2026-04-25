@@ -20,6 +20,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const mappings = await automationConnectionMappingService.listMappings(
+      req.orgId!,
       subaccount.id,
       req.params.automationId,
     );

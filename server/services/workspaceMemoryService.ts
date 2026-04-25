@@ -1053,7 +1053,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     taskSlug?: string,
     orgId?: string,
     domain?: string,
-  ): Promise<Array<{ content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
+  ): Promise<Array<{ id: string; content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
     const results = await _hybridRetrieve({
       subaccountId,
       orgId,
@@ -1066,6 +1066,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     });
 
     return results.map(r => ({
+      id: r.id,
       content: r.content,
       similarity: r.combined_score,
       confidence: (r.source_count >= 2 ? 'high' : r.rrf_score > 0.01 ? 'medium' : 'low') as 'high' | 'medium' | 'low',

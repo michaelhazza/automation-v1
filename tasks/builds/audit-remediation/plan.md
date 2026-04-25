@@ -1099,7 +1099,7 @@ Read these BEFORE touching any file in this build. They are non-negotiable invar
 
 10. **`docs/capabilities.md` is governed by editorial law (Chunk 4 §7.3):** customer-facing sections never name a specific LLM/AI provider or product. Editorial fixes are operator-led — never auto-rewritten by an agent. Per spec §2.7.
 
-11. **Gate scripts run TWICE only — never per-chunk.** The bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers; running them after each chunk adds significant overhead with no benefit. The timing is: (a) **Before Chunk 1 begins** — run all relevant gates once to capture the baseline violation set; (b) **After all chunks complete** — run the full gate set to confirm everything is clean. Between these two moments, per-chunk verification uses only `npm run build:server` (fast typecheck) and any targeted unit tests added in that chunk. Do not run bash gate scripts between chunks.
+11. **Gate scripts run TWICE only — never per-chunk.** The bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers; running them after each chunk adds significant overhead with no benefit. The timing is: (a) **Before Chunk 1 begins** — run all relevant gates once to capture the baseline violation set; (b) **After ALL chunks complete AND `spec-conformance` has returned CONFORMANT** — run the full gate set to confirm everything is clean. Between these two moments, per-chunk verification uses only `npm run build:server` (fast typecheck) and any targeted unit tests added in that chunk. Do not run bash gate scripts between chunks, and do not run them before spec-conformance has completed at programme end.
 
 ### Existing primitives — use these, do not reinvent
 

@@ -7,6 +7,7 @@
 **Base (merge-base with main):** `f8c83962091aacfb9ca4072aaaed324782405d78`
 **Scope:** Chunks 1+2+3 — Phase 1 (§4.1–§4.6), Phase 2 (§5.1–§5.8), Phase 3 (§6.1–§6.3). Phases 4 & 5 explicitly out of scope per caller.
 **Run at:** 2026-04-25T11:00:13Z
+**Commit at finish:** `5bc3b19c`
 
 ---
 

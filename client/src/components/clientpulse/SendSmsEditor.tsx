@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../lib/api';
-import type { InterventionContext } from './ProposeInterventionModal';
+import type { InterventionContext } from './types';
 import LiveDataPicker from './pickers/LiveDataPicker';
 
 type Contact = { id: string; firstName: string; lastName: string; email: string | null; phone: string | null };

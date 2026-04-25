@@ -68,7 +68,7 @@ export async function executeRequestFeature(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<RequestFeatureOutput | { success: false; error: string }> {
-  const typed = input as RequestFeatureInput;
+  const typed = input as unknown as RequestFeatureInput;
 
   if (!typed.category || !typed.summary || !typed.user_intent || !typed.requested_by_user_id) {
     return { success: false, error: 'category, summary, user_intent, and requested_by_user_id are required' };

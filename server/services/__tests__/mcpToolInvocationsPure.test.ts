@@ -7,6 +7,7 @@
  * and agentActivityService (mcpCallSummary computation).
  * No DB required.
  */
+export {};
 
 let passed = 0;
 let failed = 0;

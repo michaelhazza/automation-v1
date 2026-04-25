@@ -7,6 +7,9 @@ import {
   boardConfigs,
   agents,
 } from '../db/schema/index.js';
+import type { Task } from '../db/schema/tasks.js';
+
+type TaskStatus = Task['status'];
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { triggerService } from './triggerService.js';
 import { subtaskWakeupService } from './subtaskWakeupService.js';
@@ -48,7 +51,7 @@ export const taskService = {
       isNull(tasks.deletedAt),
     ];
 
-    if (filters?.status) conditions.push(eq(tasks.status, filters.status));
+    if (filters?.status) conditions.push(eq(tasks.status, filters.status as TaskStatus));
     if (filters?.priority) conditions.push(eq(tasks.priority, filters.priority as 'low' | 'normal' | 'high' | 'urgent'));
     if (filters?.assignedAgentId) conditions.push(eq(tasks.assignedAgentId, filters.assignedAgentId));
     if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
@@ -128,7 +131,7 @@ export const taskService = {
     },
     userId?: string
   ) {
-    const status = data.status ?? 'inbox';
+    const status = (data.status ?? 'inbox') as TaskStatus;
 
     await this._validateStatus(organisationId, subaccountId, status);
     const position = await this._nextPosition(subaccountId, status);
@@ -326,7 +329,7 @@ export const taskService = {
 
     const [updated] = await db
       .update(tasks)
-      .set({ status: data.status, position: data.position, updatedAt: new Date() })
+      .set({ status: data.status as TaskStatus, position: data.position, updatedAt: new Date() })
       // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
       .where(eq(tasks.id, id))
       .returning();
@@ -478,7 +481,7 @@ export const taskService = {
     }
   },
 
-  async _nextPosition(subaccountId: string, status: string) {
+  async _nextPosition(subaccountId: string, status: TaskStatus) {
     const [last] = await db
       .select({ position: tasks.position })
       .from(tasks)

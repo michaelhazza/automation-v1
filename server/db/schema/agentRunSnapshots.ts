@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { agentRuns } from './agentRuns';
-import type { AgentRunCheckpoint } from '../../services/middleware/types.js';
+import type { AgentRunCheckpoint } from '../../../shared/types/agentExecutionCheckpoint.js';
 
 // ---------------------------------------------------------------------------
 // Agent Run Snapshots — large blob data extracted from agent_runs (H-5)

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { InterventionContext } from './ProposeInterventionModal';
+import type { InterventionContext } from './types';
 
 interface Props {
   context: InterventionContext;

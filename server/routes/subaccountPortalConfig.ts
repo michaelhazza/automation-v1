@@ -37,7 +37,7 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const userId = req.userId!;
+    const userId = req.user!.id;
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, orgId);
 

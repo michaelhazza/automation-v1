@@ -1,5 +1,5 @@
 // BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer.
-import { pgTable, uuid, text, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { users } from './users';
 
@@ -28,7 +28,7 @@ export const systemIncidentSuppressions = pgTable(
     // schema drifts from the DB and a future drizzle-kit generate would try
     // to recreate the index with the old (NULLS DISTINCT) semantics, silently
     // reverting the fix that makes ON CONFLICT work for global suppressions.
-    fpOrgUnique: uniqueIndex('system_incident_suppressions_fp_org_unique').on(table.fingerprint, table.organisationId).nullsNotDistinct(),
+    fpOrgUnique: unique('system_incident_suppressions_fp_org_unique').on(table.fingerprint, table.organisationId).nullsNotDistinct(),
   })
 );
 

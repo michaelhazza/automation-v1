@@ -197,7 +197,7 @@ export interface AgentRunRequest {
    * completion hook can route the result back to the engine.
    * Spec tasks/Workflows-spec.md §5.2 / step 6 wiring.
    */
-  WorkflowStepRunId?: string;
+  workflowStepRunId?: string;
   /**
    * The principal that initiated this run, when known. Plumbed into the
    * SkillExecutionContext so user-scoped tools (e.g. Workflow Studio
@@ -402,7 +402,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
-        WorkflowStepRunId: request.WorkflowStepRunId ?? null,
+        workflowStepRunId: request.workflowStepRunId ?? null,
         isTestRun: request.isTestRun ?? false,
         delegationScope: request.delegationScope ?? null,
         delegationDirection: request.delegationDirection ?? null,
@@ -821,7 +821,7 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
       }
       // Phase 8 / W3c — log injected block IDs for provenance trail
-      const injectedBlockIds = memoryBlocksForPrompt.map((b: { id: string }) => b.id);
+      const injectedBlockIds = memoryBlocksForPrompt.map((b) => b.id);
       if (injectedBlockIds.length > 0) {
         void db
           .update(agentRuns)

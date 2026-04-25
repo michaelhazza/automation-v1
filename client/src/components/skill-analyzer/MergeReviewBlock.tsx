@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import api from '../../lib/api';
-import type { AnalysisResult, ProposedMergedContent } from './SkillAnalyzerWizard';
+import type { AnalysisResult, ProposedMergedContent } from './types';
 import {
   computeMergeConfidence,
   warningLabel,

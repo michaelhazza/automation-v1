@@ -12,45 +12,12 @@
 -- Idempotent: all DROP POLICY statements use IF EXISTS.
 -- Append-only: the original migration files are NOT edited.
 
--- ── reference_documents ──────────────────────────────────────────────────────
--- Migration 0202 was missing FORCE ROW LEVEL SECURITY.
-
-ALTER TABLE reference_documents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reference_documents FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS reference_documents_org_isolation ON reference_documents;
-
-CREATE POLICY reference_documents_org_isolation ON reference_documents
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
-
--- ── reference_document_versions ──────────────────────────────────────────────
--- Migration 0203 was missing FORCE ROW LEVEL SECURITY.
-
-ALTER TABLE reference_document_versions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reference_document_versions FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS reference_document_versions_org_isolation ON reference_document_versions;
-
-CREATE POLICY reference_document_versions_org_isolation ON reference_document_versions
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
+-- NOTE: `reference_documents` (0202) and `reference_document_versions` (0203)
+-- are deliberately OUT OF SCOPE for this migration per spec §0/§3.5/§4.1. The
+-- versions table has no `organisation_id` column (it scopes via parent
+-- `document_id`), so the canonical policy shape used below cannot be applied
+-- verbatim. Hardening 0202/0203 belongs in a separate follow-on migration with
+-- a parent-EXISTS policy variant; routed to backlog.
 
 -- ── memory_review_queue ───────────────────────────────────────────────────────
 

@@ -39,9 +39,8 @@ export class AlertFatigueGuard extends AlertFatigueGuardBase {
     return 'account';
   }
 
-  /** Check if an alert should be delivered or suppressed (preserves original API) */
+  /** Check if an alert should be delivered or suppressed. */
   async shouldDeliver(
-    organisationId: string,
     accountId: string,
     severity: 'low' | 'medium' | 'high' | 'critical'
   ): Promise<{ deliver: boolean; reason?: string }> {

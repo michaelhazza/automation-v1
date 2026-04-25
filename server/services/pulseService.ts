@@ -125,7 +125,7 @@ export async function getRunTotalCostMinor(
     .where(and(
       eq(actions.agentRunId, runId),
       eq(actions.organisationId, orgId),
-      inArray(actions.status, ['pending', 'pending_approval', 'approved', 'executing', 'completed']),
+      inArray(actions.status, ['pending_approval', 'approved', 'executing', 'completed'] as const),
     ));
   return row?.total ?? 0;
 }
@@ -144,7 +144,7 @@ export async function getRunTotalCostMinorBatch(
     .where(and(
       inArray(actions.agentRunId, runIds),
       eq(actions.organisationId, orgId),
-      inArray(actions.status, ['pending', 'pending_approval', 'approved', 'executing', 'completed']),
+      inArray(actions.status, ['pending_approval', 'approved', 'executing', 'completed'] as const),
     ))
     .groupBy(actions.agentRunId);
   const map = new Map<string, number>();
@@ -426,7 +426,7 @@ export async function getAttention(scope: PulseScope): Promise<PulseAttentionRes
       ackText: null,
       ackAmountMinor: null,
       ackCurrencyCode: null,
-      subaccountId: task.subaccountId,
+      subaccountId: task.subaccountId ?? '',
       subaccountName: subName,
       agentId: task.assignedAgentId,
       agentName: task.assignedAgentId ? agentNameMap.get(task.assignedAgentId) || null : null,
@@ -594,7 +594,7 @@ export async function getItem(
       id: row.id, kind: 'task', lane: 'internal', title: row.title, reasoning: row.description,
       evidence: null, costSummary: '', estimatedCostMinor: null, reversible: true,
       ackText: null, ackAmountMinor: null, ackCurrencyCode: null,
-      subaccountId: row.subaccountId, subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
+      subaccountId: row.subaccountId ?? '', subaccountName: (row.subaccountId && subMap.get(row.subaccountId)) || '',
       agentId: row.assignedAgentId, agentName: null, createdAt: row.createdAt.toISOString(),
       detailUrl: `task:${row.id}`, resolvedUrl: _resolveUrlForItem('task', row.id, row.subaccountId),
       actionType: null, runId: null,

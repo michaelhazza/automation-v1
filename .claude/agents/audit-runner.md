@@ -210,6 +210,18 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 - **Architectural decisions mid-pass-2:** stop and escalate. Do not unilaterally make architectural decisions inside an audit run.
 - **Critical findings (Rule 8 severity):** any RLS gap, idempotency hole, three-tier agent invariant violation, or capabilities editorial breach in customer-facing sections of `docs/capabilities.md` is `critical` severity and requires user sign-off before any pass-2 fix attempt.
 
+## Gate-Timing Rule (for remediation programmes that follow this audit)
+
+When an audit produces findings that are resolved through a multi-chunk remediation programme:
+
+- **Bash gate scripts (`scripts/verify-*.sh`) do NOT run per-chunk.** They are slow static analyzers; per-chunk overhead adds no benefit.
+- **Timing:** (a) baseline run before Chunk 1 begins; (b) final pass after ALL chunks **and after `spec-conformance` has returned CONFORMANT** — never before spec-conformance completes.
+- Per-chunk verification uses only `npm run build:server` (fast typecheck) and targeted unit tests. Document this in the remediation plan's Executor notes and in any per-chunk "Verification commands" sections.
+
+See also: `architect.md` § Gate-Timing Rule — the architect enforces the same rule when producing implementation plans.
+
+---
+
 ## Rules
 
 - You are the **executor** of the framework, not its rewriter. Do not modify `docs/codebase-audit-framework.md` as part of an audit run. If you find a real framework gap, append it to `KNOWLEDGE.md` and surface it to the user — they decide whether to bump the framework version.

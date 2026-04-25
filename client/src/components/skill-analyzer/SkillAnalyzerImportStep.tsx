@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import api from '../../lib/api';
-import type { AnalysisJob } from './SkillAnalyzerWizard';
+import type { AnalysisJob } from './types';
 
 type Tab = 'paste' | 'upload' | 'github' | 'download';
 

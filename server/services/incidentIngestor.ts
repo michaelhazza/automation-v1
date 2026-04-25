@@ -235,7 +235,7 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
       RETURNING id, occurrence_count, severity, (xmax = 0) AS was_inserted
     `);
 
-    const row = rows.rows?.[0] ?? (rows as unknown as { rows: typeof rows }[])[0];
+    const row = rows[0];
     if (!row) throw new Error('incident upsert returned no rows');
 
     const incidentId: string = row.id;
@@ -285,16 +285,18 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
   // occurrence event on the conflict path. Notification is best-effort — the
   // incident is recorded either way, and the sysadmin UI polls the list every
   // 10s independently of the notify pipeline.
-  if (notifyPayload) {
+  // TypeScript cannot track mutations inside the async tx callback; cast back to the declared type.
+  const capturedPayload = notifyPayload as { incidentId: string; fingerprint: string; severity: SystemIncidentSeverity; occurrenceCount: number; correlationId: string | null } | null;
+  if (capturedPayload) {
     try {
       const boss = await getPgBoss();
-      await boss.send('system-monitor-notify', notifyPayload);
+      await boss.send('system-monitor-notify', capturedPayload);
     } catch (err) {
       logger.error('incident_notify_enqueue_failed', {
         error: err instanceof Error ? err.message : String(err),
-        incidentId: notifyPayload.incidentId,
-        fingerprint: notifyPayload.fingerprint,
-        severity: notifyPayload.severity,
+        incidentId: capturedPayload.incidentId,
+        fingerprint: capturedPayload.fingerprint,
+        severity: capturedPayload.severity,
       });
     }
   }

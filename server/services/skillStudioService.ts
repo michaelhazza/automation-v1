@@ -162,10 +162,13 @@ export async function getSkillStudioContext(
       .limit(1);
     skillRow = rows[0];
   } else {
+    if (!orgId) {
+      throw new Error(`getSkillStudioContext: orgId is required for scope=${scope}`);
+    }
     const rows = await db
       .select({ id: skills.id, slug: skills.slug, name: skills.name, description: skills.description, definition: skills.definition, instructions: skills.instructions })
       .from(skills)
-      .where(orgId ? and(eq(skills.id, skillId), eq(skills.organisationId, orgId)) : eq(skills.id, skillId))
+      .where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId)))
       .limit(1);
     skillRow = rows[0];
   }
@@ -296,21 +299,23 @@ export async function saveSkillVersion(
         updatedAt: new Date(),
       }).where(eq(systemSkills.id, skillId));
     } else if (scope === 'org') {
+      if (!orgId) {
+        throw new Error(`saveSkillVersion: orgId is required for scope=${scope}`);
+      }
       await tx.update(skills).set({
         definition: payload.definition as Record<string, unknown>,
         instructions: payload.instructions ?? null,
         updatedAt: new Date(),
-      }).where(orgId
-        ? and(eq(skills.id, skillId), eq(skills.organisationId, orgId), isNull(skills.subaccountId))
-        : and(eq(skills.id, skillId), isNull(skills.subaccountId)));
+      }).where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId), isNull(skills.subaccountId)));
     } else {
+      if (!orgId) {
+        throw new Error(`saveSkillVersion: orgId is required for scope=${scope}`);
+      }
       await tx.update(skills).set({
         definition: payload.definition as Record<string, unknown>,
         instructions: payload.instructions ?? null,
         updatedAt: new Date(),
-      }).where(orgId
-        ? and(eq(skills.id, skillId), eq(skills.organisationId, orgId))
-        : eq(skills.id, skillId));
+      }).where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId)));
     }
 
     return {
@@ -350,11 +355,13 @@ export async function listSkillVersions(
 }
 
 /**
- * Rollback to a prior version (atomic pointer flip).
+ * Rollback to a prior version (atomic pointer flip). System scope only —
+ * org/subaccount rollback is not currently exposed at the route layer, and
+ * `saveSkillVersion` requires a non-null `orgId` for non-system scopes.
  */
 export async function rollbackSkillVersion(
   skillId: string,
-  scope: 'system' | 'org' | 'subaccount',
+  scope: 'system',
   versionId: string,
   authorUserId: string,
 ): Promise<void> {

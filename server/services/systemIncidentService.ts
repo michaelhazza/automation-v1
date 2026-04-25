@@ -9,7 +9,7 @@ import {
   systemIncidentEvents,
   systemIncidentSuppressions,
 } from '../db/schema/index.js';
-import type { SystemIncident, SystemIncidentStatus } from '../db/schema/systemIncidents.js';
+import type { SystemIncident, SystemIncidentStatus, SystemIncidentSeverity, SystemIncidentSource, SystemIncidentClassification } from '../db/schema/systemIncidents.js';
 import type { SystemIncidentEvent } from '../db/schema/systemIncidentEvents.js';
 import type { SystemIncidentSuppression } from '../db/schema/systemIncidentSuppressions.js';
 import {
@@ -69,15 +69,15 @@ export const systemIncidentService = {
     }
     if (filters.severity) {
       const severities = Array.isArray(filters.severity) ? filters.severity : [filters.severity];
-      conditions.push(inArray(systemIncidents.severity, severities) as unknown as ReturnType<typeof eq>);
+      conditions.push(inArray(systemIncidents.severity, severities as SystemIncidentSeverity[]) as unknown as ReturnType<typeof eq>);
     }
     if (filters.source) {
       const sources = Array.isArray(filters.source) ? filters.source : [filters.source];
-      conditions.push(inArray(systemIncidents.source, sources) as unknown as ReturnType<typeof eq>);
+      conditions.push(inArray(systemIncidents.source, sources as SystemIncidentSource[]) as unknown as ReturnType<typeof eq>);
     }
     if (filters.classification) {
       const classes = Array.isArray(filters.classification) ? filters.classification : [filters.classification];
-      conditions.push(inArray(systemIncidents.classification, classes) as unknown as ReturnType<typeof eq>);
+      conditions.push(inArray(systemIncidents.classification, classes as SystemIncidentClassification[]) as unknown as ReturnType<typeof eq>);
     }
     if (filters.organisationId) {
       conditions.push(eq(systemIncidents.organisationId, filters.organisationId) as unknown as ReturnType<typeof eq>);
@@ -310,7 +310,7 @@ export const systemIncidentService = {
 
       await tx.insert(systemIncidentEvents).values({
         incidentId: id,
-        eventType: 'escalated',
+        eventType: 'escalation',
         actorKind: 'user',
         actorUserId: userId,
         payload: {
