@@ -16,6 +16,7 @@
 - [§1. Framing and non-negotiables](#1-framing-and-non-negotiables)
 - [§2. Execution rules](#2-execution-rules)
 - [§3. Phase overview](#3-phase-overview)
+  - [§3.6 Phase ownership and delivery estimates](#36-phase-ownership-and-delivery-estimates)
 - [§4. Phase 1 — Multi-tenancy and RLS hardening (CRITICAL)](#4-phase-1--multi-tenancy-and-rls-hardening-critical)
   - [§4.1 Phase 1A — Corrective migration for un-protected tables](#41-phase-1a--corrective-migration-for-un-protected-tables)
   - [§4.2 Phase 1B — Direct-DB-access removal](#42-phase-1b--direct-db-access-removal)
@@ -146,11 +147,22 @@ Every schema-state correction ships as a NEW migration with the next available n
 
 ### §2.6 Smallest viable PR per phase
 
-Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — one per top-level subsection (§8.1, §8.2, §8.3) plus one PR per independent §8.4 tail item, since each subsection and each tail item is a self-contained category. This gives roughly four canonical PRs (Phases 1–4) plus a stream of small Phase 5 PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
+Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — Phase 5A ships §8.1 and §8.2 as two independent PRs (each is a self-contained category with its own gate); Phase 5B ships §8.3 and each §8.4 tail item as additional small PRs in any order. This gives roughly four canonical PRs (Phases 1–4) plus two mandatory Phase 5A PRs and a stream of optional Phase 5B PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
 
 ### §2.7 Auto-rewrite prohibition on `docs/capabilities.md`
 
 The Phase 4 editorial fix in §7.3 is operator-led. The agent provides the diff; the operator reviews and applies. The agent does not commit `docs/capabilities.md` changes without the operator's explicit go-ahead in the same session.
+
+### §2.8 Service-layer expansion constraint
+
+New service files created by Phase 1B (§4.2) are mechanical relocations, not new abstractions. A new service file is justified only when:
+
+1. The route has **more than one DB interaction**, meaning a thin one-liner in the route handler cannot express the query; OR
+2. The service logic is **reused by more than one route** (shared DB query path).
+
+If neither condition holds, the handler's single DB call stays inline in the route and the direct `db` import is replaced with `withOrgTx(req.orgId, …)` directly in the route. Do not create a service file as a formatting exercise.
+
+**Max one service per domain.** Two service files covering the same business domain in the same PR is a signal the split is wrong — merge them. A "domain" is a Postgres table or a closely coupled pair (e.g. `memoryReviewQueue` and `memoryBlock` form one domain). The §4.2 table explicitly marks each file as "extend" (existing service) or "new" (no service exists today); both create-vs-extend decisions are locked at spec authoring time. Any deviation from the table during implementation requires an explicit explanation in the PR description — not a unilateral new file.
 
 ---
 
@@ -164,7 +176,8 @@ The Phase 4 editorial fix in §7.3 is operator-led. The agent provides the diff;
 | 2 | Gate compliance | High | 11 | `verify-action-call-allowlist`, `verify-canonical-read-interface`, `verify-no-direct-adapter-calls`, `verify-principal-context-propagation`, `verify-skill-read-paths`, `verify-canonical-dictionary` | Bring every architectural-contract gate to green. |
 | 3 | Architectural integrity | High | 3 | `madge --circular` (server + client) | Remove the schema-imports-services circular root and the two largest client cycle clusters. |
 | 4 | System consistency | Medium | 5 | `npm run skills:verify-visibility`, `scripts/verify-integration-reference.mjs`, `npm install` | Skill registry coherence; explicit deps; YAML gate tooling; operator-led capabilities edit. |
-| 5 | Controlled improvements | Low–Medium | 18 | `verify-no-silent-failures` (must drop from WARN to PASS); type-check still passes | Multi-process-safe rate limiter; silent-failure closure; targeted type strengthening; tail items. |
+| 5A | Controlled improvements (mandatory) | Low–Medium | 2 | `verify-no-silent-failures` (must drop from WARN to PASS); madge cycle count = 0 | Multi-process-safe rate limiter; silent-failure closure. Programme blocker. |
+| 5B | Controlled improvements (optional) | Low | 16 | type-check still passes | Targeted type strengthening; tail items. Not a programme blocker — items may be formally deferred. |
 
 **Total findings addressed:** 26 (Phase 1) + 11 (Phase 2) + 3 (Phase 3) + 5 (Phase 4) + 18 (Phase 5) = **63**, vs 47 in the original audit. The +16 delta is:
 
@@ -265,6 +278,23 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 | `madge --circular` (server) | 175 | §6.1 |
 | `madge --circular` (client) | 10 (`ProposeInterventionModal` cluster) + 4 (`SkillAnalyzerWizard` cluster) | §6.2 |
 
+### §3.6 Phase ownership and delivery estimates
+
+This table is a planning aid, not a commitment. Durations are expressed in implementation-days (single developer, focused session). Each phase is blocked by the one above it per §2.1; parallel work is only possible within Phase 5 (5A/5B are both independent of each other once Phase 4 ships).
+
+| Phase | Owner | Estimated duration | Blocking dependency |
+|---|---|---|---|
+| 1 (RLS hardening) | Platform/backend lead | 3–4 days | None — start here |
+| 2 (Gate compliance) | Platform/backend lead | 2–3 days | Phase 1 ship gate green |
+| 3 (Architectural integrity) | Platform/backend lead | 1–2 days | Phase 2 ship gate green |
+| 4 (System consistency) | Backend lead + operator (§7.3) | 1 day | Phase 3 ship gate green |
+| 5A (Mandatory improvements) | Platform/backend lead | 2–3 days | Phase 4 ship gate green |
+| 5B (Optional backlog) | Any dev, any sprint | Ongoing | Phase 4 ship gate green (can begin after Phase 4 ships independently of 5A) |
+
+**Duration assumptions:** each "day" assumes the developer has the repo open, gates running, and is not context-switching to feature work. Phase 1 is the longest because it involves 13 route refactors + the corrective migration + the gate baseline update — all in one PR. Phase 3 is the shortest because it is a single type extraction plus 14 file import updates.
+
+**Owner note.** "Operator" in Phase 4 refers to the capabilities editorial fix (§7.3), which is not a code change and can be done asynchronously. The §7.3 edit does not block the §7.1/§7.2 code PRs.
+
 ---
 
 ## §4. Phase 1 — Multi-tenancy and RLS hardening (CRITICAL)
@@ -278,6 +308,16 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 ### §4.1 Phase 1A — Corrective migration for un-protected tables
 
 **Finding origin:** P3-C1, P3-C2, P3-C3, P3-C4 (audit), plus the two `verify-rls-coverage` gaps the audit missed: `0153_agent_test_fixtures` and `0192_agent_execution_log` (3 tables).
+
+**Pre-step: write-path audit (mandatory before the migration is drafted).** Before 0227 is written, enumerate every write site (`INSERT`, `UPDATE`, `DELETE`) against the eight tables in scope and confirm each passes `organisationId` explicitly in the payload or WHERE clause. The migration adds `WITH CHECK` enforcement that will reject any write whose session var is unset; unchecked write sites will fail at runtime after the migration lands and before Phase 1B's service-layer work closes them. Running the audit first bounds the blast radius and lets Phase 1B's PR description enumerate every affected write site with confidence.
+
+```bash
+# Run from the repo root. Inspect every match for an explicit organisationId arg.
+grep -rn "\.insert\(\|\.update\(\|\.delete\(" server/ \
+  | grep -E "memory_review_queue|drop_zone_upload_audit|onboarding_bundle_configs|trust_calibration_state|agent_test_fixtures|agent_execution_events|agent_run_prompts|agent_run_llm_payloads"
+```
+
+For each match, confirm the query either (a) runs inside `withOrgTx(organisationId, …)` (which sets the session var so RLS accepts the write) OR (b) runs via `withAdminConnection()` (which bypasses RLS by design). Any match that does neither is a defect that Phase 1C or Phase 1B must fix before the migration merges — not after.
 
 **Migration filename:** `migrations/0227_rls_hardening_corrective.sql` (next available number after `0226_fix_suppression_unique_nulls.sql`).
 
@@ -545,6 +585,8 @@ bash scripts/verify-rls-coverage.sh
 
 **Naming convention.** New service filenames mirror the existing repo convention — singular-noun service suffix (e.g. `automationService.ts`, not `automationsService.ts`). The §12 file inventory uses these exact names; deviation between prose and inventory is treated as inventory drift (§docs/spec-authoring-checklist.md §2).
 
+**Service creation rule (§2.8 applies here).** A new service file is permitted only when the route has more than one DB interaction OR the logic is shared. See §2.8 for the full constraint. Every file in the §4.2 table is pre-adjudicated — "extend" means an existing service file absorbs the DB query; "new" means no service file exists today and one is justified. Neither column changes without an explicit rationale in the PR description.
+
 Where a service file already exists for the route, **extend it** rather than create a parallel service. Where a service does not exist, create one whose name matches the route file. Keep service files thin — accept the parameters the route currently passes, return what the route currently returns, no new abstractions. The goal is mechanical relocation, not redesign.
 
 **Refactor pattern (template):**
@@ -658,9 +700,19 @@ The fix lands inside the §4.2 service-extraction PR for these two files (handle
 2. **`# baseline:rls-session-var-canon` directive.** Add support for a magic comment in the .sql file and ignore violations on lines beneath such a comment. More flexible, but invites abuse.
 3. **Runtime-state check.** Have the gate query the live DB for current policy text instead of grepping files. Most accurate but requires DB connectivity in CI; rejects the static-gates-primary posture.
 
-**Decision:** ship option 1. It is the minimum change, mirrors how other gates in this repo handle historical noise (compare `scripts/verify-no-silent-failures.sh`'s in-file `# baseline-allow` markers), and keeps CI fast. Option 2 may be revisited if the baseline list grows beyond a handful of files.
+**Decision:** ship option 1 with an additional inline-comment requirement described below. The filename allowlist is the minimum gate change; the inline comment is the human-readable audit trail that makes it safe to grow the list without revisiting a separate document.
 
-**Implementation sketch:**
+**Inline comment requirement (mandatory).** Each of the six historically-baselined migration files MUST contain the following comment on the line immediately before (or on the same line as) the phantom-var policy text:
+
+```sql
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
+```
+
+This comment serves two purposes: (a) it explains to a reader why the file contains the phantom var without triggering a code-review alarm, and (b) the gate's baseline check is doubly verified — the filename must be in the allowlist AND the relevant line must have this annotation. If either condition is absent, the gate still reports a violation.
+
+Adding these comments is part of Phase 1E's deliverable. It is a six-file, one-line-each edit; the migration files are read-only at the Postgres level (they have already run) but their `.sql` source files on disk are editable.
+
+**Implementation sketch (gate + inline comment):**
 
 ```bash
 # scripts/verify-rls-session-var-canon.sh
@@ -674,23 +726,34 @@ HISTORICAL_BASELINE_FILES=(
   "0212_bundle_suggestion_dismissals.sql"
 )
 
+BASELINE_ANNOTATION="@rls-baseline:"
+
 is_baselined() {
-  local basename="$1"
+  local filepath="$1"
+  local basename
+  basename=$(basename "$filepath")
   for entry in "${HISTORICAL_BASELINE_FILES[@]}"; do
-    if [[ "$basename" == "$entry" ]]; then return 0; fi
+    if [[ "$basename" == "$entry" ]]; then
+      # Filename matches allowlist — also require the annotation comment
+      if grep -q "$BASELINE_ANNOTATION" "$filepath"; then
+        return 0  # baselined + annotated — skip
+      else
+        echo "ERROR: $basename is in the baseline allowlist but missing the @rls-baseline: comment" >&2
+        return 1  # annotation missing — emit violation
+      fi
+    fi
   done
-  return 1
+  return 1  # not in allowlist — fall through to emit_violation
 }
 
 # In the violation-emitting loop:
-basename=$(basename "$file")
-if is_baselined "$basename"; then
+if is_baselined "$file"; then
   continue
 fi
 emit_violation ...
 ```
 
-**`verify-rls-coverage.sh` parallel baseline.** The same gate-noise problem affects `verify-rls-coverage.sh` for the same six historical files (`0204`, `0205`, `0206`, `0207`, `0208`, `0212` — the files that 0213 repaired at runtime but whose source `.sql` text remains as originally written). Apply the same hard-coded-allowlist fix to `verify-rls-coverage.sh` for those six files. The four files genuinely missing FORCE/POLICY at runtime (`0139`, `0141`, `0142`, `0147`) and the two re-assertion candidates (`0153`, `0192`) are addressed by the §4.1 migration and are NOT baselined. (Migrations `0202` and `0203` introduce the `reference_documents` and `reference_document_versions` tables; their original RLS text is correct and does not need a baseline entry — they are not part of this set.)
+**`verify-rls-coverage.sh` parallel baseline.** The same gate-noise problem affects `verify-rls-coverage.sh` for the same six historical files (`0204`, `0205`, `0206`, `0207`, `0208`, `0212` — the files that 0213 repaired at runtime but whose source `.sql` text remains as originally written). Apply the same hard-coded-allowlist + annotation check to `verify-rls-coverage.sh` for those six files. The four files genuinely missing FORCE/POLICY at runtime (`0139`, `0141`, `0142`, `0147`) and the two re-assertion candidates (`0153`, `0192`) are addressed by the §4.1 migration and are NOT baselined. (Migrations `0202` and `0203` introduce the `reference_documents` and `reference_document_versions` tables; their original RLS text is correct and does not need a baseline entry — they are not part of this set.)
 
 **Verification (after both gate updates):**
 
@@ -757,6 +820,8 @@ If any of the above fails, the Phase 1 PR does not merge. There is no "ship Phas
 **The violation.** `server/jobs/measureInterventionOutcomeJob.ts:213-218` executes a direct Drizzle SELECT against `canonicalAccounts` outside `canonicalDataService`. The architectural rule is: every read of a `canonical_*` table must go through `canonicalDataService`. The gate `verify-canonical-read-interface.sh` enforces this.
 
 **Why the rule exists.** Canonical tables have a unified read interface that handles cross-tenant isolation, principal-aware row scoping, and integration-source attribution. Direct queries bypass that interface and re-implement the wrappers ad-hoc, which silently diverges over time.
+
+**`canonicalDataService` is a read-only abstraction layer — no side effects.** Any method added to the service in Phase 2 (or after) must be a read-only query with no side effects. The service's contract is: "given a principal and a query predicate, return canonical rows". It never writes, never triggers background work, and never caches with mutation. If a caller needs to write to a canonical table, it does so through the table's owning service (e.g. the CRM ingestion service), not through `canonicalDataService`. This constraint is enforced at code-review time (no automated gate exists yet); see §15.2 for the corresponding durable invariant.
 
 **Fix.** The job is checking whether a `canonicalAccount` exists for a given `(organisationId, subaccountId, accountId)`. `canonicalDataService` should expose that check. Two concrete patterns:
 
@@ -1044,7 +1109,7 @@ npm run build:client                                                          # 
 npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts # named test passes (run by direct path; scripts/run-all-unit-tests.sh ignores `--` filters)
 ```
 
-**Cycle-count discipline.** A "≤ 5" rather than "= 0" target reflects that this PR fixes the root and the largest clusters; tail-cycles are surgical and intermixed with active feature areas. The Phase 3 PR ships once the *count drops sharply*; eradicating the last few is appended to Phase 5 as a tail item.
+**Cycle-count discipline — two-stage target.** Phase 3 sets a target of ≤ 5, not 0. The root fix drives the 175→≤5 reduction; the last few cycles (the two schema-leaf tail items: `agentRuns.ts:3` and `skillAnalyzerJobs.ts:15`) are surgical and route to Phase 5A (§8.4). **Phase 5A is where the count must reach 0** — the programme is not declared complete while any server-side cycles remain. The Phase 3 PR ships once the count drops sharply; the Phase 5A tail items close the final gap. This two-stage sequencing is intentional: the Phase 3 type-extraction is the architecturally significant change; the Phase 5A tail items are one-file extractions with trivial review cost. Inverting the order would delay Phase 3 on minor mechanical work.
 
 ---
 
@@ -1200,11 +1265,14 @@ For §7.3 (capabilities edit), verification is operator-led — the operator con
 
 ## §8. Phase 5 — Controlled improvements (LOW–MEDIUM)
 
-**Goal:** the codebase is multi-process-safe at every rate-limit boundary; silent-failure paths are closed; the deprecated `toolCallsLog` column is removed; tail items from the audit are either resolved or formally deferred.
+**Goal:** the codebase is multi-process-safe at every rate-limit boundary; silent-failure paths are closed; tail items from the audit are either resolved or formally deferred.
 
-**Ship gate:** `verify-no-silent-failures` returns clean (no `WARNING`); rate limiter functional under multiple workers; type-check still passes; tail items are either committed or appear in §14 Deferred Items with the operator's explicit acknowledgement.
+**Phase 5 is split into two sub-phases:**
 
-**Multiple PRs.** Unlike Phases 1–4, Phase 5 is not a single PR. Each subsection below is independent of the others. Ship them in any order; review cost stays low because each PR is small and targeted. The phase is "complete" when every subsection has either landed or been formally deferred.
+- **Phase 5A — Mandatory.** Rate limiter durability (§8.1) and silent-failure path closure (§8.2). These are *blocking* items: the programme is not declared complete until both ship. They carry a concrete ship gate (see §8.5A below).
+- **Phase 5B — Optional / backlog.** Targeted type strengthening (§8.3) and tail items (§8.4). These are improvements that *can* ship in any order and any sprint; they are formally tracked (each has a DoD checkbox in §13.5B) but do not block programme completion. If the operator decides to defer all of §8.3/§8.4 to future feature sprints, Phase 5 is still "complete" as long as every §8.3/§8.4 item appears in §14 Deferred Items with an operator note.
+
+**Multiple PRs.** Unlike Phases 1–4, Phase 5 is not a single PR. Each subsection below is independent of the others. Ship them in any order within their sub-phase; review cost stays low because each PR is small and targeted.
 
 ### §8.1 Rate limiter durability
 
@@ -1246,8 +1314,10 @@ The new primitive's surface is narrow: two pure-friendly functions (`incrementBu
 4. **Refactor the public-route inline limiters.** `formSubmission.ts:31` (`checkRateLimit`) and `pageTracking.ts:29` (`checkTrackRateLimit`) — replace each with a call into `rateLimitStoreService`. Bucket-key prefixes distinguish the two surfaces (e.g. `form-ip:`, `form-page:`, `track-ip:`); the existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) move from inline constants to the call site. The new code paths are async — update the surrounding handlers to `await` accordingly.
 5. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap. Register the job in `server/jobs/index.ts` (the canonical job-export aggregator) and register the worker + cron schedule in `server/services/queueService.ts` (the actual worker / pg-boss schedule registration site — verified at spec authoring time).
 
+**Env-flag rollback shim (mandatory, ships alongside DB implementation).** `server/services/rateLimitStoreService.ts` checks `process.env.USE_DB_RATE_LIMITER` at module load. When the flag is `false` (or unset in a legacy env), the service exports a no-op in-memory shim with identical function signatures. The shim reverts to the pre-Phase-5A in-process Map behaviour. This allows the rollback described in §11.2 without reverting code. See §11.2 for the rollback procedure.
+
 **Verification.** Add unit tests (pure-function-only per `runtime_tests: pure_function_only`):
-- `server/services/__tests__/rateLimitStoreService.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle.
+- `server/services/__tests__/rateLimitStoreService.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle. Also test the env-flag shim path: when `USE_DB_RATE_LIMITER=false`, the service returns without touching the DB.
 - `server/lib/__tests__/testRunRateLimit.test.ts` — preserves existing test-run rate-limit semantics on top of the shared store.
 
 Manual verification: spin up two processes locally, hammer (a) a public form and (b) the test-run path, observe the per-process behaviour matches a single shared bucket in both cases.
@@ -1335,13 +1405,24 @@ If Sprint 3B is still active and owns the removal, this item moves to §14 Defer
 
 Each ships as its own small Phase 5 PR (§2.6 — one PR per §8.4 tail item). Together they close the residual leaf-rule gap that §6.1 deliberately scoped out.
 
-### §8.5 Phase 5 verification
+### §8.5A Phase 5A verification (mandatory — programme blocker)
 
-Phase 5 has no single ship gate. Each subsection's verification is local to its PR. The phase is "complete" when every subsection above has either:
-- Landed on `main` with passing typecheck and the relevant gate green, OR
+Phase 5A is the mandatory half of Phase 5. The programme is not declared complete until both of these PRs land:
+
+| Subsection | Ship gate |
+|---|---|
+| §8.1 Rate limiter durability | `server/lib/testRunRateLimit.ts` is DB-backed; `rateLimitBucketCleanupJob` registered; both pure-function test files pass; `npm run build:server` passes. |
+| §8.2 Silent-failure path closure | `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line); `npm run build:server` passes. |
+
+**Server circular-dependency gate (carried from Phase 3).** Phase 5A is also where the server cycle count target drops from "≤ 5" (Phase 3 target) to **0**. See §6.3 and §13.5A — the two schema-leaf tail items (§8.4) are the remaining cycles; they land in Phase 5A if operator elects to close them here, or they are escalated to §14 Deferred Items with the remaining count documented.
+
+### §8.5B Phase 5B verification (optional — backlog)
+
+Phase 5B has no single ship gate. Each subsection's verification is local to its PR. A §8.3 or §8.4 item is "done" when it has either:
+- Landed on `main` with passing typecheck, OR
 - Appeared in §14 Deferred Items with operator-documented rationale.
 
-The audit-remediation programme as a whole is "complete" when Phases 1–5 satisfy this criterion. See §13 Definition of Done.
+The audit-remediation programme as a whole is "complete" when Phase 5A is satisfied and every §8.3/§8.4 item is either landed or formally deferred. See §13 Definition of Done.
 
 ---
 
@@ -1556,8 +1637,17 @@ No new alerts, dashboards, or metrics are introduced. The framing is `static_gat
 **Phase 4:**
 - If `npm install` fails with a peer-dep warning after adding the four production deps, run `npm ls <dep>` for each new dep and resolve any peer-dep mismatches. The pre-existing `@tiptap/pm` situation (depcheck false positive) is unrelated and should not be touched.
 
-**Phase 5:**
-- The phase has no single ship gate. Each subsection's PR carries its own failure mode; treat them in isolation.
+**Phase 5A:**
+- If `verify-no-silent-failures` stays `WARNING` after the fix pass, re-run the gate with `--verbose` (or the modified-gate approach in §8.2) to surface the exact file. A WARNING that the fix pass introduced means a `catch` block added during the fix itself swallows the error — rethrow or add a log line.
+- **Rate limiter rollback.** If the DB-backed rate limiter (§8.1) causes a production regression after merging (e.g. DB connection exhaustion from bucket writes, or degraded form-submission latency), revert to the in-memory fallback via an environment-variable toggle without reverting the PR:
+  1. Set `USE_DB_RATE_LIMITER=false` in the production environment (or `.env`).
+  2. `server/services/rateLimitStoreService.ts` MUST check this env flag at startup and return a no-op in-memory shim when it is `false`. The shim preserves the same function signatures so callers need no change.
+  3. Restart the workers. The in-memory limiter resumes immediately; the DB table accumulates no new rows but is not dropped (flip the flag back to re-enable without a migration).
+  4. Document the toggle in the migration header comment so operators can find it under incident pressure.
+  The env-flag shim is part of the §8.1 deliverable — it ships alongside the DB implementation, not as a separate follow-up.
+
+**Phase 5B:**
+- Each subsection's PR carries its own failure mode; treat them in isolation.
 
 ### §11.3 Rollback
 
@@ -1744,14 +1834,21 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 
 ### §13.5 Phase 5 DoD
 
+#### §13.5A Phase 5A DoD (mandatory — programme blocker)
+
 - [ ] `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line).
 - [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at merge time per §2.5) exists and applies cleanly.
 - [ ] `server/lib/testRunRateLimit.ts` is DB-backed; `server/jobs/rateLimitBucketCleanupJob.ts` exists and is registered in pg-boss schedule.
-- [ ] All five pure-function tests in §10.1 exist and pass (`rateLimitStoreService`, `testRunRateLimit`, `agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`).
-- [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites.
+- [ ] `server/services/__tests__/rateLimitStoreService.test.ts` and `server/lib/__tests__/testRunRateLimit.test.ts` exist and pass.
 - [ ] `npm run build:server` passes.
-- [ ] Tail items (§8.4) are either resolved or appear in §14 Deferred Items with operator sign-off.
-- [ ] `npx madge --circular --extensions ts server/` cycle count remains at the Phase 3 target (≤ 5) or lower; any residual cycles unchanged from Phase 3 are triaged in §14. Phase 5 does NOT introduce a server-cycle reduction work item — the Phase 3 root fix is the canonical reduction; cycle eradication beyond ≤ 5 is operator-led tail work.
+- [ ] `npx madge --circular --extensions ts server/` cycle count = **0**. The two schema-leaf tail items (§8.4 — `agentRuns.ts`, `skillAnalyzerJobs.ts`) must either have landed in Phase 5A PRs or appear in §14 Deferred Items with the residual cycle count documented. No new cycles introduced.
+
+#### §13.5B Phase 5B DoD (optional — backlog)
+
+- [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites; OR each appears in §14 Deferred Items with operator sign-off.
+- [ ] All §8.4 tail items are either resolved or appear in §14 Deferred Items with operator sign-off.
+- [ ] Three remaining pure-function tests from §10.1 exist and pass (`agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`); OR deferred with operator sign-off.
+- [ ] `npm run build:server` passes for any Phase 5B PRs that land.
 
 ### §13.6 Programme DoD
 
@@ -1811,6 +1908,7 @@ For every new feature touching tenant data, the implementer answers yes to all f
 | Canonical-table reads go through `canonicalDataService` | `verify-canonical-read-interface.sh` | Principal-aware scoping bypassed silently |
 | Migrations are append-only | (file-level discipline) | Audit-trail loss; gate-baseline drift |
 | `app.organisation_id` is the only canonical org session var | `verify-rls-session-var-canon.sh` | RLS silently fails open |
+| `canonicalDataService` is a read-only abstraction — no side effects | (code-review discipline) | Business logic bleeds into the read-interface layer; canonical tables acquire unexpected write paths |
 | Editorial law on `docs/capabilities.md` is operator-led | (process discipline) | Marketing-collateral drift; provider-name leakage |
 
 ### §15.3 Development discipline
