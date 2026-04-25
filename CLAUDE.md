@@ -84,6 +84,7 @@ Run these after every non-trivial change. No task is complete until all relevant
 - If you notice unrelated dead code, mention it in your response — don't delete it. LLMs are overconfident about what's "certainly unused." The cost of a wrong deletion is high; the cost of mentioning it is zero.
 - Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
 - Match existing style, even if you'd do it differently. No drive-by reformatting.
+- Never duplicate logic — if the same behaviour is needed in two or more places, extract it into a shared function, helper, or service before writing it twice.
 
 ## 7. Autonomous Bug Fixing
 
