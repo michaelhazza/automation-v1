@@ -302,6 +302,9 @@ Classify every task before starting:
 "feature-coordinator: implement [feature name]"
 
 # Codebase audit per docs/codebase-audit-framework.md
+# IMPORTANT: audit-runner runs INLINE in the current session — do NOT use the Agent tool.
+# Read .claude/agents/audit-runner.md and execute the instructions directly so the
+# TodoWrite task list is visible to the user.
 # Default to Hotspot mode. Subsystems: rls, agent-execution, queues, skills, webhooks, frontend
 "audit-runner: hotspot rls"
 "audit-runner: hotspot agent-execution"
