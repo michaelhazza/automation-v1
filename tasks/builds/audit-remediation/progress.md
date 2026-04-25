@@ -53,6 +53,18 @@
 
 ---
 
+## Audit closure status
+
+Rollup of items routed to `tasks/todo.md` from the original audit and any subsequent re-runs. Updated as items move between states. Filter source: `tasks/todo.md` entries tagged `[origin:audit:<scope>:<timestamp>]`. See `tasks/review-logs/README.md` § *Item format — origin tag + status*.
+
+| Audit (origin) | Open | In progress | Resolved | Won't fix | Total |
+|---|---:|---:|---:|---:|---:|
+| `audit:full:2026-04-25T07-09-00Z` (full audit, 47+16) | TBD | 0 | 0 | 0 | TBD |
+
+(Update the row counts when triaging audit findings into chunks. A new row is added per re-run.)
+
+---
+
 ## Programme completion checklist (from spec §13.6)
 
 - [ ] All five phase DoDs satisfied (Chunks 1–7 ship gates green; Chunk 8 items landed or deferred).

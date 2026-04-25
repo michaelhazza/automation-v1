@@ -27,7 +27,7 @@ Every invocation runs in exactly this sequence. Do not reorder, do not merge ste
 
 Every session starts with this list. You can add more items in Step 3 but these must all be present:
 
-1. Load context — `CLAUDE.md`, `architecture.md`, `docs/spec-authoring-checklist.md`, `DEVELOPMENT_GUIDELINES.md` (when in scope), `KNOWLEDGE.md`, the feature/spec description
+1. Load context — see [Context files](#context-files) below for the canonical list and order. Do not restate the list here; collapse all context loading into this single skeleton item.
 2. Primitives-reuse search — for every candidate new service / table / column, confirm no existing primitive to extend
 3. File inventory — cross-reference the spec's §File inventory (or derive from feature description if no spec)
 4. Contracts — TypeScript interfaces, Zod schemas, DB columns, route shapes, error codes

@@ -139,7 +139,11 @@ Append all pass-3 items to `tasks/todo.md` under a new dated section, using the 
 
 The `origin:audit:<scope>:<timestamp>` tag is **mandatory** on every pass-3 item — it joins findings back to this audit log so closure can be traced from a future PR. `<scope>` and `<timestamp>` match the audit log filename's discriminating fields exactly.
 
-**Append-only.** Dedup before appending — scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates. Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
+**Append-only.** Dedup before appending — for each candidate finding:
+1. **Origin-scope match (preferred)** — if any existing item carries an `[origin:audit:<scope>:*]` tag matching this run's `<scope>` (timestamp ignored), and the candidate's description matches that item by the heuristic below, treat as duplicate and skip. This catches re-runs of the same hotspot or audit area.
+2. **Heuristic match (fallback)** — for items without an origin tag (pre-tagged-era entries) or items from a different `<scope>`, scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates.
+
+Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
 
 ### E) spec-conformance note
 
