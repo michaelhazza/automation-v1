@@ -16,6 +16,9 @@
 5. Recommendations beyond the dev brief
 6. Risks the audit surfaced
 7. Concrete first commit
+8. What each workstream gap means — plain English
+9. Fix-and-benefit summary
+10. Does this close the loop on the business plan?
 
 ---
 
@@ -165,4 +168,98 @@ The business plan's #1 dependency is the **Breakout Solutions case study** (the 
 Run the Breakout Solutions POC manually using existing skills, capture the data, and ship the branded report surface (item 2 above) — **before** touching the dev brief implementation. The case study is the gating asset for every channel in §6 of the business plan.
 
 After that, rebase the dev brief and proceed with Phase 1 (Workstreams A + B in parallel).
+
+---
+
+## 8. What each workstream gap means — plain English
+
+The dev brief uses internal terminology. Here's what each gap actually means in business terms.
+
+**Workstream A — CRM adapter polymorphism.** The platform was built assuming one CRM (GoHighLevel). Today, every "look up a contact" or "list opportunities" call is hardwired to GHL. To run a service business where each client might have a different CRM — or none at all (Synthetos as the CRM) — we need a way to ask "for this client, what CRM do they use?" and route the call accordingly. Without it, every client must use GHL, which limits which SMBs we can serve and creates a single-vendor dependency.
+
+**Workstream B — Prospect lifecycle.** We can store contacts (clients, leads). What we can't store is the lifecycle of a prospect — what stage of outreach they're in, what their lead score is, whether they've converted. The agency model needs this to track "200 LinkedIn DMs sent → 30 replies → 7 audits booked → 2 retainers won." Without it, the BD pipeline lives in spreadsheets and is invisible to the platform's automation.
+
+**Workstream C — Event-rule routing.** Today the system reacts to events in hardcoded ways: a webhook arrives, code runs. We need a database-driven rules table that says "when X happens, do Y" — configurable per agency, per subaccount. The headline use case: "when a positive email reply lands, create a subaccount and kick off onboarding." Without it, the conversion flow has to be re-coded for every variation, and a second agency tenant cannot adopt the same model without engineer time.
+
+**Workstream D — Email infrastructure.** We can send a one-shot email. We can't:
+- Send from per-client domains (every email looks like it's coming from Synthetos)
+- Track delivery / opens / bounces (no audit trail of what landed)
+- Run multi-step sequences with delays (single sends only)
+- Detect inbound replies and classify them (the conversion trigger is dark)
+
+This is the operational backbone of cold outreach. Without it, the 50 DMs/week + 50–75 cold emails/week target cannot be measured or automated.
+
+**Workstream E — Lead discovery.** Today, finding 200 target prospects per vertical is manual. The `lead_discover` skill calls Google Places to find candidate businesses; `lead_score` uses Hunter.io + GBP completeness + GEO gap to rank them. Without it, the operator is the bottleneck for prospect sourcing — fine for the first 2–3 months, ceiling at the 5-hour/week budget.
+
+**Workstream F — Domain health monitoring.** Watches Resend bounce rate, spam complaint rate, and blacklist status. Alerts the operator if metrics degrade. Without it, a deliverability problem can persist undetected long enough to burn the sending domain. Not a launch blocker — a safety net for ongoing outreach.
+
+---
+
+## 9. Fix-and-benefit summary
+
+Every issue, what it takes to fix, and what changes when it's done.
+
+| Issue | What we do | What we get |
+|---|---|---|
+| All CRM calls assume GoHighLevel | Build the adapter layer (Workstream A) — one switch point picks GHL or "Synthetos Native" per client | We can serve clients who don't use GHL. Reduces vendor risk if GHL changes terms. |
+| No prospect pipeline data | Add the prospect profile extension table (Workstream B) | Outreach → reply → audit → retainer is tracked in the platform, not in a spreadsheet. Powers the §12 sales funnel metrics. |
+| Hardcoded event reactions | Build the event-rules engine (Workstream C) | When a positive reply lands, the platform automatically creates the client subaccount and starts onboarding. No engineer needed for variations. |
+| Single sender, no tracking | Build `outreach_sends` + Resend webhook (Workstream D1+D2) | We send from each client's own domain. We see what was delivered, opened, bounced. Required both for the agency's own outreach and for retainer service delivery. |
+| No reply detection | Build IMAP polling + reply classification (Workstream D3) | Inbound replies get auto-classified. Positive replies trigger conversion. Out-of-office and bad-fit replies suppress further outreach automatically. |
+| Manual prospecting | Build lead discovery skills (Workstream E) | Operator stops sourcing prospects by hand. Pipeline scales past the 5-hour/week ceiling. |
+| No deliverability watch | Build domain-health monitor (Workstream F) | Catch sending-reputation problems before they kill the channel. |
+| No recurring GEO audits | Schedule weekly audits (~1 day) | "Weekly AI citation tracking" — the headline retainer feature — actually runs without manual triggers. |
+| GBP "Autopilot" can draft but not publish | Add `google_business_profile` to `publish_post` enum + GBP API caller (~3 days) | We deliver the GBP service we sell. Currently we can only generate drafts. |
+| 80/20 auto-approve target needs confidence emission | Wire `tool_intent_confidence` emission (LAEL-P1-1, already in backlog) | Operator review queue stays at 20% of agent outputs. Without it, every output hits the queue and the 5-hr/week budget breaks at 4+ clients. |
+| Branded report does not exist | Extend `reportService` with PDF + AI Answer Coverage Review template (~2 days) | The named monthly deliverable referenced throughout the business plan exists. Primary sales artefact is real. |
+| Two run tables (`workflow_runs` + `flow_runs`) after PR #186 | Pick one as the canonical event-rule target | One-time engineering decision — without it, Workstream C cannot ship cleanly. |
+| Dev brief references stale names (playbook → workflow rename) | Rebase the brief against current schema | New session reading the brief doesn't waste time on dead references. Migration numbering stays correct. |
+
+---
+
+## 10. Does this close the loop on the business plan?
+
+**Mostly yes. The dev brief plus the audit's three add-ons (items 12–14) cover the platform side end-to-end. Seven smaller items in the business plan are NOT in the brief and need to be added as follow-ups — none of them block launch.**
+
+### What this roadmap covers vs. what the business plan requires
+
+**✅ Delivery model (audits + retainers)**
+- 9 GEO skills are production-ready today → audit + monitoring service can run
+- HITL gate + approval UX is ready → operator's 5-hr/week budget is achievable once confidence emission lands
+- Branded report (item 12) + GBP publishing (item 13) close the two visible service gaps
+- 12 months of accumulated citation history (the retainer stickiness mechanism) is already supported by the existing `geoAudits` table
+
+**✅ Sales pipeline + automation**
+- Workstreams B + C + D together produce: prospect tracking → outbound → reply detection → auto-conversion → onboarding
+- This is the agency-of-one delivery loop the business plan describes
+- Lead-gen automation (E) is the only piece that's deferred, and the plan explicitly tolerates manual prospecting for the first 2–3 months
+
+**✅ Multi-tenant generalisation (§13 architecture summary)**
+- Workstream A makes a second agency tenant possible with zero code changes
+- Combined with C (configurable event rules) and D (per-subaccount sending domains), the platform-as-product transition signal in §7 of the plan becomes reachable
+
+### Things this audit does NOT close the loop on
+
+These are in the business plan but not in the dev brief. They need to be added as follow-up work — none are launch blockers, but they should be tracked so they don't fall through.
+
+1. **Free Snapshot landing page (Layer 0).** Public single-input domain submission page that runs 3 GEO skills and emails a 2-page PDF in under 10 minutes. The skills exist; the public landing page + email-the-PDF flow does not. ~3–5 days of frontend + delivery wiring. Should be added as a Phase 2.5 workstream.
+
+2. **Anti-abuse for the snapshot.** Email verification, IP rate limiting (3/24h), domain dedup with 30-day cache. ~2 days. Pairs with item 1.
+
+3. **Async report walkthrough video.** 5-minute pre-recorded walkthrough embedded in the portal. Not platform work — content production. Flagged so it doesn't fall through.
+
+4. **Vertical prompt library.** 20 prompts × initial vertical (B2B professional services), expanding to 3 verticals = 60 prompts hand-tuned. Not platform work — methodology. Operator deliverable; can be stored as canonical reference docs.
+
+5. **Subcontract VA scaling path (§7 Path A).** Hire a part-time VA at month 6+. Platform requirements: (a) per-user permissions on the review queue (likely already supported via existing role system — verify), (b) a QA playbook codified during launch months 1–3 (operator deliverable, not platform work).
+
+6. **Partnership revenue share tracking (§7 Channel 3).** 15% revenue share on referrals for first 6 months. Not in any workstream. Either a spreadsheet for v1, or extend Stripe integration with referral attribution. Flag as deferred.
+
+7. **Ethics policy enforcement (§3 content and ethics policy).** The policy is binding per the plan, but no platform-side enforcement exists today. Examples: blocking fake-persona content, requiring affiliation disclosure on Reddit/LinkedIn posts, factual-accuracy review on AI-generated claims. Some of this is HITL discipline (already enforced); some needs additional rules in `policy_rules`. Worth a small spec.
+
+### Bottom line
+
+Phase 0–3 of this roadmap closes the loop on **everything in the dev brief plus the business plan's core delivery, sales, and operator-economics targets.** The seven items above are tier-2 polish that can ship in months 1–3 of active operation without affecting the launch path.
+
+If the operator-as-agency goal is "be in market with paid clients within 90 days of launch," this audit's recommendations are sufficient. If the goal also includes the public Free Snapshot funnel (which the business plan §3 Layer 0 strongly implies), add items 1 + 2 to the Phase 2 schedule.
+
 
