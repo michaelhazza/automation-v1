@@ -156,6 +156,17 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
     return;
   }
 
+  // Surface end-to-end correlation-id gaps via the tagged-log-as-metric
+  // convention. Spec §6.9 explicitly tolerates incomplete correlation-id
+  // coverage during ramp-up; this WARN gives visibility into how often it's
+  // missing without making it a hard requirement.
+  if (!input.correlationId) {
+    logger.warn('incident_missing_correlation_id', {
+      source: input.source,
+      fingerprint,
+    });
+  }
+
   // 2. Resolve severity
   const resolvedSeverity: SystemIncidentSeverity = input.severity ??
     inferDefaultSeverity({
