@@ -8,7 +8,7 @@
 | Date | 2026-04-25 |
 | Branch | audit/full-codebase-2026-04-25 |
 | Starting commit SHA | b8f4aac5a188cc0c99ca46b218a1951f096acc92 |
-| Final commit SHA | TBD |
+| Final commit SHA | TBD — see final handoff commit |
 | Layers run | Layer 1 Areas 1–9. Layer 2 Modules I, J, K, L, M, A, B, E |
 | Subagents invoked | None (inline execution per audit-runner spec) |
 | Linked review logs | TBD — pr-reviewer to be run after audit completes |
@@ -410,8 +410,9 @@ Three new patterns identified in this audit:
 
 ## Post-audit Actions Required
 
-- `pr-reviewer: review the audit branch audit/full-codebase-2026-04-25. Files changed in pass 2: <TBD after user approves pass 2>. Audit log: tasks/review-logs/codebase-audit-log-full-codebase-2026-04-25T00-00-00Z.md`
 - No spec-conformance required — this audit did not touch any spec-driven contract (`docs/superpowers/specs/*.md`).
+- No pass-2 code changes were applied, so `pr-reviewer` is not required for this audit branch. The branch contains only: the audit log, the progress file, the `tasks/todo.md` append, the 3 KNOWLEDGE.md patterns, and the `audit-runner.md` fix.
+- **Next action:** Merge this branch, then open a new Opus session to draft the remediation spec against the findings in `tasks/todo.md § Deferred from codebase audit — 2026-04-25`.
 
 ---
 

@@ -735,3 +735,15 @@ While drafting `docs/codebase-audit-framework.md`, the §4 Protected Files list 
 **Rule for future doc authoring (especially canonical/protected lists):** never trust a recon agent's file path summary verbatim — every path that lands in a "Protected Files" or "must not delete" list must be verified by `test -f <path>` or a direct `grep -rn "export.*<symbol>"` before the doc is committed. Recon agents synthesise paths from descriptions and are wrong often enough that a list of 30 paths will typically contain 1-3 wrongly-shaped ones. Wrong paths in a protected-file list are dangerous because audit/cleanup passes use them to decide what is safe to delete; a wrong path can lead to deleting the real file (false-negative protection).
 
 **Applied to:** v1.3 of `docs/codebase-audit-framework.md`. Path-verification sweep added as a pre-commit step for any future canonical doc that asserts file locations.
+
+### [2026-04-25] Audit — Schema-as-leaf circular dependency root cause
+
+When a `server/db/schema/` file imports from `server/services/` (even a `type`-only import), it creates a root circular dependency from which hundreds of `madge` cycles cascade. Schema files must be leaf nodes — no upward imports into services, middleware, or any other non-schema layer. In this codebase, `server/db/schema/agentRunSnapshots.ts` contained `import type { AgentRunCheckpoint } from '../../services/middleware/types.js'`, which drove all 175 server circular dependency cycles detected by `madge --circular`. The fix is to extract shared types to `shared/types/` or `server/db/schema/types.ts` and remove the import from the schema file. Verify the cycle count before and after with `npx madge --circular --extensions ts server/` to confirm the root fix resolved derived cycles.
+
+### [2026-04-25] Audit — Audit framework gate-path stale reference
+
+The codebase audit framework v1.3 §2 and §4 reference `scripts/gates/*.sh` as the location for gate scripts. The actual path is `scripts/*.sh` — there is no `gates/` subdirectory. Any session using the framework's path verbatim will fail to find or run the gate scripts. Always verify actual gate paths with `ls scripts/*.sh` before running. This stale reference should be corrected in a framework v1.4 bump. Added to the audit log as a §2 context block finding.
+
+### [2026-04-25] Audit — Phantom RLS session variable pattern
+
+RLS policy migrations can silently reference `app.current_organisation_id` instead of the canonical `app.organisation_id`. The phantom variable is never set by `withOrgTx` or `getOrgScopedDb`, so all RLS policies that reference it evaluate `current_setting('app.current_organisation_id', true)` as `NULL` and fail-open — every tenant can read every other tenant's rows on those tables. In this codebase, migrations 0205–0208 all contained the phantom var. The canonical var is `app.organisation_id`; see migration 0213 for the correct `current_setting('app.organisation_id', true)` pattern. Detect new occurrences with `verify-rls-session-var-canon.sh`. Fix via a new corrective migration — never edit an existing migration.

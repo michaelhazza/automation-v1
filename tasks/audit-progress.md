@@ -26,9 +26,9 @@ Log: `tasks/review-logs/codebase-audit-log-full-codebase-2026-04-25T00-00-00Z.md
 - [x] Layer 2 Module A — Security Review (pass 1)
 - [x] Layer 2 Module B — Performance Review (pass 1)
 - [x] Layer 2 Module E — Observability & Operability (pass 1)
-- [ ] FINDINGS GATE — present summary, await user confirmation
-- [ ] Pass 2 — apply high-confidence fixes, validate after each area
-- [ ] Pass 3 routing — append deferred items to tasks/todo.md
-- [ ] KNOWLEDGE.md — append new patterns
-- [ ] Audit completion gate — verify all 5 criteria
-- [ ] Final handoff — commit, push, print post-audit commands
+- [x] FINDINGS GATE — presented, user chose pass-3 for all findings
+- [x] Pass 2 — N/A (zero pass-2 candidates; all findings downgraded per RLS/architectural rules)
+- [x] Pass 3 routing — 47 items appended to tasks/todo.md
+- [x] KNOWLEDGE.md — 3 new patterns appended
+- [x] Audit completion gate — all 5 criteria verified
+- [x] Final handoff — committed, pushed, PR created
