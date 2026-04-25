@@ -388,9 +388,391 @@ From spec §14:
 
 ## Chunk 3 — Phase 3: Architectural integrity
 
+**Objective.** Cut the schema → services circular-dependency root that drives 175 server-side cycles, and eliminate the two largest client cycle clusters. Server cycle count drops from 175 to ≤ 5; client cycle count drops from at least 14 to ≤ 1. (Phase 5A drives the server count to 0; the two schema-leaf tail items live in §8.4.)
+
+### a) Files to create
+
+| File | Purpose |
+|---|---|
+| `shared/types/agentExecutionCheckpoint.ts` | New home for `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision`. (§6.1) |
+| `client/src/components/clientpulse/types.ts` | Extracted shared interfaces for `ProposeInterventionModal` ↔ five sub-editor components. (§6.2.1) |
+| `client/src/components/skill-analyzer/types.ts` | Extracted shared interfaces for `SkillAnalyzerWizard` ↔ four step components. (§6.2.2) |
+
+### b) Files to modify
+
+**§6.1 — Server cycle root.**
+
+- `server/services/middleware/types.ts` — replace the four type definitions (`AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision`) with re-exports: `export type { AgentRunCheckpoint, SerialisableMiddlewareContext, SerialisablePreToolDecision, PreToolDecision } from '../../../shared/types/agentExecutionCheckpoint.js';`. Service-layer call sites continue to import from `middleware/types` and work unchanged.
+- `server/db/schema/agentRunSnapshots.ts` (line 3) — change import from `'../../services/middleware/types.js'` to `'../../../shared/types/agentExecutionCheckpoint.js'`. The schema file's only outbound import is now to `shared/`, satisfying the leaf rule.
+
+**§6.2.1 — `ProposeInterventionModal` cluster.** Update interface imports to point at the new `client/src/components/clientpulse/types.ts`. Component implementations stay in their current files; only type definitions migrate.
+
+- `client/src/components/clientpulse/ProposeInterventionModal.tsx`
+- `client/src/components/clientpulse/CreateTaskEditor.tsx`
+- `client/src/components/clientpulse/EmailAuthoringEditor.tsx`
+- `client/src/components/clientpulse/FireAutomationEditor.tsx`
+- `client/src/components/clientpulse/OperatorAlertEditor.tsx`
+- `client/src/components/clientpulse/SendSmsEditor.tsx`
+
+**§6.2.2 — `SkillAnalyzerWizard` cluster.** Update interface imports to point at the new `client/src/components/skill-analyzer/types.ts` (kebab-case directory; verified at spec authoring time).
+
+- `client/src/components/skill-analyzer/SkillAnalyzerWizard.tsx`
+- `client/src/components/skill-analyzer/SkillAnalyzerImportStep.tsx`
+- `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx`
+- `client/src/components/skill-analyzer/SkillAnalyzerProcessingStep.tsx`
+- `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx`
+
+### c) Implementation steps
+
+1. **§6.1 — Type extraction.**
+
+   Phase 3 fixes the LARGEST violation of the leaf rule (the 175-cycle cascade driver). Two other schema files also violate the leaf rule today (`agentRuns.ts:3`, `skillAnalyzerJobs.ts:15`) — those are deliberately scoped OUT of Phase 3 and live in Phase 5B (Chunk 8 / spec §8.4). Do not touch them in this chunk.
+
+   **Step 1.1 — Create `shared/types/agentExecutionCheckpoint.ts`.** Move the four type definitions verbatim from `server/services/middleware/types.ts:245`+ (preserving JSDoc). Add the header comment:
+
+   ```ts
+   // Persisted in agent_run_snapshots.checkpoint JSONB. Read by server resume path
+   // and AgentRunLivePage debug surface. Schema files import this directly; services
+   // may import from here OR from server/services/middleware/types (which re-exports).
+   ```
+
+   The four types form a closed cluster: `AgentRunCheckpoint` → `SerialisableMiddlewareContext` → `SerialisablePreToolDecision` (alias) → `PreToolDecision` (underlying union). Extracting only `AgentRunCheckpoint` would leave the schema file transitively importing from services. All four move together.
+
+   **Step 1.2 — Update `server/services/middleware/types.ts`.** Replace the four definitions with the re-export shown in the file-modify entry. Existing service call sites are unchanged.
+
+   **Step 1.3 — Update `server/db/schema/agentRunSnapshots.ts:3`.** Change the import per the file-modify entry. The schema file now imports only from `drizzle-orm`, sibling schema files, and `shared/**`.
+
+2. **§6.2.1 — `ProposeInterventionModal` cluster (10 cycles).**
+
+   Identify every interface that BOTH the parent modal AND any of the five sub-editors import. Move those interfaces to the new sibling `client/src/components/clientpulse/types.ts`. Update both sides to import from the new file. Component implementations stay in-place.
+
+3. **§6.2.2 — `SkillAnalyzerWizard` cluster (4 cycles).**
+
+   Same pattern: extract step-level interfaces (`StepProps`, `WizardState`, etc.) to `client/src/components/skill-analyzer/types.ts`. Update wizard + four step components to import from the new file.
+
+4. **Re-run `madge --circular`.**
+
+   ```bash
+   npx madge --circular --extensions ts server/ | wc -l
+   ```
+
+   Expect ≤ 5. The two remaining cycles will be the §8.4 schema-leaf tail items (`agentRuns.ts:3`, `skillAnalyzerJobs.ts:15`); document them in the PR description and confirm they are routed to Phase 5B.
+
+   ```bash
+   npx madge --circular --extensions ts,tsx client/src/ | wc -l
+   ```
+
+   Expect ≤ 1. Any residual cycle is documented and routed to Phase 5.
+
+5. **Build + targeted test.**
+
+   ```bash
+   npm run build:server
+   npm run build:client
+   npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts
+   ```
+
+   The named test exercises checkpoint serialisation; it must continue to pass.
+
+6. **Note on out-of-scope cleanup:** `agentRunSnapshots.ts` also has a `toolCallsLog` column flagged DEPRECATED with a Sprint 3B removal note. **Do NOT remove it in this chunk** — that removal is independent and lives in §8.4 (Phase 5B), gated on Sprint 3B status.
+
+### d) Verification commands
+
+Verbatim from spec §6.3:
+
+```bash
+npx madge --circular --extensions ts server/ | wc -l                                # ≤ 5
+npx madge --circular --extensions ts,tsx client/src/ | wc -l                        # ≤ 1
+npm run build:server                                                                # typecheck passes
+npm run build:client                                                                # build passes
+npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts      # named test passes (run by direct path; scripts/run-all-unit-tests.sh ignores `--` filters)
+```
+
+### e) Definition of done (verbatim from spec §13.3)
+
+- [ ] `npx madge --circular --extensions ts server/ | wc -l` ≤ 5.
+- [ ] `npx madge --circular --extensions ts,tsx client/src/ | wc -l` ≤ 1.
+- [ ] `shared/types/agentExecutionCheckpoint.ts` exists and exports `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision`.
+- [ ] `server/db/schema/agentRunSnapshots.ts` imports only from `drizzle-orm`, `drizzle-orm/pg-core`, sibling schema files, or `shared/**`. No `server/services/**`, `server/lib/**`, or `server/middleware/**` imports. (Note: the broader leaf-rule guarantee for every schema file is NOT in Phase 3 scope — `agentRuns.ts` and `skillAnalyzerJobs.ts` also violate it today; those are tail items in §8.4. The Phase 3 fix is the cascade-driver only.)
+- [ ] `npm run build:server` passes.
+- [ ] `npm run build:client` passes.
+- [ ] `npm test -- agentExecutionServicePure.checkpoint` passes.
+
+### f) Deferred items (related to this chunk)
+
+From spec §14 / §8.4:
+- `agentRuns.ts:3` schema-leaf tail item — extract `AgentRunHandoffV1` to `shared/types/agentRunHandoff.ts`. Lives in Phase 5B.
+- `skillAnalyzerJobs.ts:15` schema-leaf tail item — extract `SkillAnalyzerJobStatus` to `shared/types/skillAnalyzerJob.ts`. Lives in Phase 5B.
+- `toolCallsLog` column drop on `agentRunSnapshots` — Phase 5B, gated on Sprint 3B status.
+- Any residual client cycles after the two cluster extractions — document inline; Phase 5B as needed.
+
+---
+
 ## Chunk 4 — Phase 4: System consistency
 
+**Objective.** Skill registry coherence; explicit dependency declarations; YAML gate tooling re-verified; operator-led editorial fix on `docs/capabilities.md`.
+
+**§7.1 and §7.2 are mechanical and ship together. §7.3 is operator-led** — the agent provides the diff; the operator reviews and applies. The §7.3 edit may ship in a separate small operator-led PR but does not block §7.1/§7.2.
+
+### a) Files to create
+
+None.
+
+### b) Files to modify
+
+**§7.1.1 — visibility flips.** Driven by `npx tsx scripts/apply-skill-visibility.ts` (idempotent script).
+
+- `server/skills/smart_skip_from_website.md` — visibility flip from `internal` to `basic`.
+- `server/skills/weekly_digest_gather.md` — same.
+
+**§7.1.2 — workflow skills missing YAML frontmatter.** Add a frontmatter block at the very top of each file.
+
+- `server/skills/workflow_estimate_cost.md`
+- `server/skills/workflow_propose_save.md`
+- `server/skills/workflow_read_existing.md`
+- `server/skills/workflow_simulate.md`
+- `server/skills/workflow_validate.md`
+
+**§7.2.1 — explicit dependency declarations.**
+
+- `package.json` — add `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` under `dependencies`. (`yaml` is already declared as a devDependency — no edit needed for §7.2.2's dep concern.)
+- `package-lock.json` — updated by `npm install`; commit alongside.
+
+**§7.2.2 — `verify-integration-reference` gate triage.** Edits driven by re-running the gate at Phase 4 start.
+
+- `docs/integration-reference.md` — add the integration-block entries for any MCP presets the gate flags as missing (Discord, Twilio, SendGrid, GitHub at spec-authoring time). Mirror the shape of an existing block.
+
+**§7.3 — capabilities editorial fix.**
+
+- `docs/capabilities.md` (line 1001) — replace `"Anthropic-scale distribution isn't the agency play."` with one of three operator-selected options. **Operator-led only — never auto-applied.**
+
+### c) Implementation steps
+
+1. **§7.1.1 — Visibility drift.**
+
+   ```bash
+   npx tsx scripts/apply-skill-visibility.ts
+   ```
+
+   The script is idempotent — it walks `server/skills/**/*.md`, computes the desired visibility from `scripts/lib/skillClassification.ts`, and rewrites only the out-of-sync files. Expect exactly two files to change: `smart_skip_from_website.md` and `weekly_digest_gather.md`. **If the apply script touches anything outside the two named skills, stop and investigate before committing** — that would indicate an unintended classification-table change.
+
+   Re-run:
+
+   ```bash
+   npm run skills:verify-visibility
+   ```
+
+   Expect 0 violations.
+
+2. **§7.1.2 — YAML frontmatter for workflow skills.**
+
+   For each of the five `workflow_*` files, add a frontmatter block at the very top of the markdown file (before any heading):
+
+   ```yaml
+   ---
+   slug: workflow_estimate_cost
+   category: workflow
+   visibility: internal      # or basic — confirm against scripts/lib/skillClassification.ts
+   description: |
+     <one-line description>
+   ---
+   ```
+
+   For each file:
+   - Look up the desired `visibility` value in `scripts/lib/skillClassification.ts`.
+   - Copy the `description` line from the file's existing first paragraph.
+
+   Re-run `npm run skills:verify-visibility` — count of "missing YAML frontmatter" drops to 0.
+
+3. **§7.2.1 — Add explicit deps.**
+
+   ```bash
+   npm install --save express-rate-limit zod-to-json-schema docx mammoth
+   ```
+
+   Verify `package.json` lists all four under `dependencies` (not `devDependencies`). Verify `package-lock.json` is updated and committed. Pin exactly using whatever resolved version `npm install` returns — match the existing pin convention in the file (no `^`/`~` if neighbouring entries don't use range pins).
+
+   Verify both builds:
+
+   ```bash
+   npm run build:server
+   npm run build:client
+   ```
+
+4. **§7.2.2 — `verify-integration-reference` triage.**
+
+   Re-run the gate at the start of Phase 4 to capture the current warning set:
+
+   ```bash
+   node scripts/verify-integration-reference.mjs 2>&1 | tee /tmp/verify-integration-reference.log
+   ```
+
+   The gate should run to completion (no `ERR_MODULE_NOT_FOUND: 'yaml'` crash — `yaml ^2.8.3` is already declared in `package.json` devDependencies as of spec authoring time). Triage warnings:
+
+   - **Capability-naming convention drift** (e.g. `organisation.config.read` not matching `<resource>_read`):
+     - Load-bearing in stored data (permission keys) → `# baseline-allow` per spec §2.4 with one-line rationale.
+     - Internal only → rename.
+   - **MCP preset wired but no integration block** (e.g. `discord`, `twilio`, `sendgrid`, `github`) → add the missing block to `docs/integration-reference.md` (mechanical — copy shape of an existing block).
+
+5. **§7.3 — Capabilities editorial fix.**
+
+   **Operator-led only — agent provides the diff, operator applies.** From spec §7.3:
+
+   The current line 1001 is:
+
+   > *Not a public skill or playbook marketplace. **Anthropic**-scale distribution isn't the agency play.*
+
+   Three replacement options for the operator to choose between:
+
+   | Option | Replacement | Rationale |
+   |---|---|---|
+   | A (recommended) | "Hyperscaler-scale distribution isn't the agency play." | Same syllable count; same punch; no provider name. |
+   | B | "Provider-marketplace-scale distribution isn't the agency play." | More specific to marketplace context; slightly less marketing-ready. |
+   | C | "Foundation-model-platform distribution isn't the agency play." | Most neutral; possibly too technical for a Non-goals bullet. |
+
+   **Same-pass scan.** While editing line 1001, scan customer-facing sections (Core Value Proposition, Positioning & Competitive Differentiation, Product Capabilities, Agency Capabilities, Replaces / Consolidates, Non-goals) for any other provider names the audit may have missed. Lines 778, 893, 912–913 are in support-facing sections (Skills Reference, Integrations Reference) and are PERMITTED by editorial rule 2 — do not touch.
+
+   **Process:** the agent does NOT commit `docs/capabilities.md` changes without explicit operator approval in the same session (per spec §2.7). Present the diff with the three options; wait for operator's choice; apply; commit.
+
+6. **Run all four gates plus build:**
+
+   ```bash
+   npm run skills:verify-visibility               # 0 violations
+   node scripts/verify-integration-reference.mjs  # runs cleanly (no crash)
+   npm install                                    # no missing-dep warnings
+   npm run build:server && npm run build:client   # both pass
+   ```
+
+### d) Verification commands
+
+Verbatim from spec §7.4:
+
+```bash
+npm run skills:verify-visibility               # 0 violations
+node scripts/verify-integration-reference.mjs  # runs cleanly
+npm install                                    # no missing-dep warnings
+npm run build:server && npm run build:client   # both pass
+```
+
+For §7.3 (capabilities edit), verification is operator-led — the operator confirms the diff applies cleanly and the file no longer references Anthropic in customer-facing sections.
+
+### e) Definition of done (verbatim from spec §13.4)
+
+- [ ] `npm run skills:verify-visibility` returns 0 violations.
+- [ ] `node scripts/verify-integration-reference.mjs` runs without crashing — the dependency fix unblocks the gate's execution. Any genuine findings the gate then surfaces (i.e. real violations that were hidden by the pre-fix crash) are out of scope for the dependency fix and are triaged in a separate PR per §7.2.2.
+- [ ] `npm install` runs cleanly (no missing-dep warnings; no peer-dep warnings introduced by this phase).
+- [ ] `package.json` lists `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` under `dependencies` and `yaml` under `devDependencies`.
+- [ ] All five `workflow_*` skill files have YAML frontmatter blocks.
+- [ ] `docs/capabilities.md:1001` no longer contains "Anthropic" (or any other specific provider name); operator has applied and committed the edit.
+- [ ] `npm run build:server && npm run build:client` both pass.
+
+### f) Deferred items (related to this chunk)
+
+None for this chunk. All §7 items either ship in this chunk (§7.1, §7.2) or in the operator-led companion edit (§7.3).
+
+---
+
 ## Chunk 5 — Phase 5A PR 1: Rate limiter shadow mode
+
+**Objective.** Land the multi-process-safe DB-backed rate-limiter primitive (`rateLimitStoreService`) in shadow / dual-evaluate mode. **The legacy in-memory limiter remains authoritative** — every call site invokes BOTH limiters and emits a structured-log line on allow/deny decision divergence. No request behaviour changes in this PR.
+
+**Why two PRs (5 + 6):** even with `pre_production: yes`, the DB-backed rate limiter cannot become authoritative on first deploy. The failure mode the env-flag does not catch is *behavioural divergence under load* — different bucket boundaries, different sliding-window math, different concurrency outcome. Catching that requires running both side-by-side under real traffic before either becomes the source of truth.
+
+### a) Files to create
+
+| File | Purpose |
+|---|---|
+| `migrations/<NNNN>_rate_limit_buckets.sql` | New `rate_limit_buckets` table (system-scoped — no `organisation_id`). Number assigned at merge time per spec §2.5. |
+| `server/services/rateLimitStoreService.ts` | New shared sliding-window primitive. Two pure-friendly functions: `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)`. DB access goes through `withAdminConnection()`. |
+| `server/jobs/rateLimitBucketCleanupJob.ts` | Hourly pg-boss cron — `DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '1 hour'`. |
+| `server/services/__tests__/rateLimitStoreService.test.ts` | Pure-function tests — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject in-memory mock for DB handle. Also tests env-flag shim path. |
+| `server/lib/__tests__/testRunRateLimit.test.ts` | Pure-function tests preserving test-run rate-limit semantics on top of the shared store. |
+
+### b) Files to modify (shadow-mode dual-evaluate scaffolding)
+
+- `server/lib/testRunRateLimit.ts` — extend to dual-evaluate: invoke BOTH the existing in-memory map AND the new `rateLimitStoreService`. The in-memory return value is what callers see (authoritative). Emit a structured-log line on allow/deny decision divergence: `{event: 'rate_limit_shadow_divergence', surface, key, db_decision, mem_decision}`. The lib file does not import `db` directly — it imports the service.
+- `server/routes/agents.ts` — `await` the now-async `checkTestRunRateLimit` call (the dual-evaluate wrapper is async due to the DB write).
+- `server/routes/skills.ts` — same.
+- `server/routes/subaccountAgents.ts` — same.
+- `server/routes/subaccountSkills.ts` — same.
+- `server/routes/public/formSubmission.ts` (lines 31, 54) — wrap inline `checkRateLimit` and `rateLimitMiddleware` in dual-evaluate scaffolding. Existing in-memory `Map<string, number[]>` decisions remain authoritative; DB store called as side-effect; divergence logged.
+- `server/routes/public/pageTracking.ts` (line 29) — same pattern around inline `checkTrackRateLimit`.
+- `server/jobs/index.ts` — register `rateLimitBucketCleanupJob` in the canonical job-export aggregator.
+- `server/services/queueService.ts` — register the worker + hourly pg-boss cron schedule alongside existing scheduled jobs.
+
+### c) Implementation steps
+
+1. **Pre-step: `USE_DB_RATE_LIMITER` env-flag shim is mandatory.** `server/services/rateLimitStoreService.ts` MUST check `process.env.USE_DB_RATE_LIMITER` at module load. When the flag is `false` (or unset in a legacy env), the service exports a no-op in-memory shim with identical function signatures. The shim reverts to pre-Phase-5A in-process Map behaviour. This allows the rollback in spec §11.2 without reverting code. Document the toggle in the migration header so operators can find it under incident pressure.
+
+2. **Migration filename rule.** Use a placeholder filename in the PR (`migrations/<NNNN>_rate_limit_buckets.sql`); rebase against latest `main` immediately before merge and rename to claim the next available number against `main` as it stands at that moment (spec §2.5 — concurrent-PR safety). **Do not pre-allocate migration numbers across Phase 5 PRs.**
+
+3. **Migration body (verbatim from spec §8.1):**
+
+   ```sql
+   CREATE TABLE rate_limit_buckets (
+     bucket_key text NOT NULL,
+     window_start timestamptz NOT NULL,
+     count integer NOT NULL DEFAULT 0,
+     PRIMARY KEY (bucket_key, window_start)
+   );
+   CREATE INDEX rate_limit_buckets_window_idx ON rate_limit_buckets (window_start);
+   ```
+
+   Header comment: `-- System-scoped table — intentionally not tenant-scoped (rate limits are per-public-key / per-user, not per-tenant). NOT in RLS_PROTECTED_TABLES — system rate-limit infrastructure. Rollback: set USE_DB_RATE_LIMITER=false and restart workers; table contents are best-effort.`
+
+4. **Build `rateLimitStoreService.ts`.** Implement `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)` using sliding-window algorithm: bucket the current minute, atomically increment with `INSERT ... ON CONFLICT DO UPDATE`, sum last N minutes' rows for the limit check. DB access goes through `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Pure-function-friendly contract — accepts an injectable DB handle for testing. Implement env-flag shim (step 1).
+
+   **Why a service-tier file (not lib):** `server/lib/**` files MUST NOT import `db` directly (architecture rule + spec §1 boundary 2 + §15.2 invariant). DB-touching primitives belong in `server/services/**`. Existing precedent: `server/services/testRunIdempotency.ts`. `webhookDedupe.ts` is in `lib/` only because it's in-memory.
+
+5. **Wire dual-evaluate scaffolding into `testRunRateLimit.ts`.** Wrap the existing in-memory check with a parallel call to `rateLimitStoreService`. The exported function signature stays the same except now async. Compare allow/deny decisions; emit divergence log on mismatch.
+
+6. **Wire dual-evaluate into the public-route limiters.** In both `formSubmission.ts` and `pageTracking.ts`, wrap each existing inline limit check in the same dual-evaluate pattern. Bucket-key prefixes distinguish surfaces: `form-ip:`, `form-page:`, `track-ip:`. Existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) stay; the comparison is decision-vs-decision, not threshold-vs-threshold.
+
+7. **Update the four routes that call `checkTestRunRateLimit`** (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) — add `await`.
+
+8. **Write the cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron deleting expired rows. Hourly cadence. Register in `server/jobs/index.ts` AND in `server/services/queueService.ts` (verified at spec authoring time as the worker / pg-boss schedule registration site).
+
+9. **Pure-function tests.**
+   - `server/services/__tests__/rateLimitStoreService.test.ts` — exercise `incrementBucket`, `sumWindow`, expiry cutoff, env-flag shim path (when `USE_DB_RATE_LIMITER=false`, returns without touching DB).
+   - `server/lib/__tests__/testRunRateLimit.test.ts` — preserves existing test-run rate-limit semantics on top of the shared store.
+
+   Run via `npx tsx <path>` (per repo convention; `scripts/run-all-unit-tests.sh` ignores `--` filters).
+
+10. **Divergence definition (precise — from spec §8.1).** A "divergence" is a difference in **allow/deny decision** for the same `(bucket_key, evaluation window)` pair within a single request invocation. Counts: in-memory returns *allow* and DB returns *deny* (or vice versa). Does NOT count: internal counter values that differ but produce the same decision; timing skew; ordering differences across concurrent requests where each call's decision is consistent; rounding at window boundaries where both stores cross the threshold on the same request.
+
+11. **Manual smoke check.** Spin up two processes locally, hammer the public form path and the test-run path, observe the per-process behaviour. The DB store should accumulate buckets; the in-memory limiter should still drive the throttling decision; divergence count should be zero (or every observed divergence should be reproducible and explainable).
+
+12. **PR description (mandatory).** Include the divergence-log volume observed locally. Note: PR 1 must remain on `main` for at least one full operator-observed window — minimum one PR cycle, with the operator confirming divergence-log volume is zero (or every observed divergence has been triaged and explained) before PR 2 (Chunk 6) opens.
+
+### d) Verification commands
+
+```bash
+npx tsx server/services/__tests__/rateLimitStoreService.test.ts
+npx tsx server/lib/__tests__/testRunRateLimit.test.ts
+npm run build:server
+```
+
+Manual:
+- Apply the migration locally; confirm `rate_limit_buckets` exists.
+- Trigger a public form submission and a test-run; confirm DB rows are written AND in-memory throttling still drives the response.
+- Confirm `rate_limit_shadow_divergence` log lines appear if/when decisions differ; count is zero under expected traffic.
+
+### e) Definition of done (subset of spec §13.5A — PR-1-specific items)
+
+- [ ] `migrations/<NNNN>_rate_limit_buckets.sql` exists and applies cleanly against a fresh DB.
+- [ ] `server/services/rateLimitStoreService.ts` exists, includes the `USE_DB_RATE_LIMITER` env-flag shim path, and runs through `withAdminConnection()`.
+- [ ] `server/jobs/rateLimitBucketCleanupJob.ts` exists; registered in `server/jobs/index.ts` and scheduled in `server/services/queueService.ts` (hourly cron).
+- [ ] Both pure-function test files pass.
+- [ ] Dual-evaluate scaffolding wired into `testRunRateLimit.ts`, `formSubmission.ts`, `pageTracking.ts`. In-memory limiter remains AUTHORITATIVE — no behaviour change in this PR.
+- [ ] Structured-log divergence emission verified locally (`{event: 'rate_limit_shadow_divergence', ...}` lines appear when decisions differ; expected count under normal smoke traffic is zero).
+- [ ] `npm run build:server` passes.
+- [ ] PR description documents the local divergence-log volume observed.
+
+### f) Deferred items (related to this chunk)
+
+None — Chunk 6 is the natural follow-on (authoritative flip). Chunk 7 (silent-failure closure) and Chunk 8 (Phase 5B) are independent.
+
+---
 
 ## Chunk 6 — Phase 5A PR 2: Rate limiter authoritative flip
 
