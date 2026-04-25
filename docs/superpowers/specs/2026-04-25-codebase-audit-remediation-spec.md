@@ -99,7 +99,7 @@ This spec is governed by the framing established in `docs/spec-context.md`. Thre
 
 **`testing_posture: static_gates_primary` / `runtime_tests: pure_function_only`** — gates are the source of truth, not unit/integration tests of the live stack. Every phase's "definition of done" terminates in a named gate (or set of gates) returning a clean run. New runtime tests are written only for pure functions extracted by this spec; no vitest/jest/playwright/supertest expansions are introduced. This matches the `convention_rejections` block of `docs/spec-context.md` verbatim.
 
-**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts`. The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **The new files this spec introduces are mechanical service-tier homes for code being relocated out of routes/lib (§4.2) plus one narrow new shared primitive in Phase 5 §8.1 (`server/lib/rateLimitStore.ts`) — no new architectural primitives or service layers.** The Phase 5 §8.1 primitive has an explicit "why not reuse" paragraph in §8.1; the §4.2 service files are pure relocations (no new abstractions, no new public API surface). Where a fix appears to need a primitive that does not yet exist, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
+**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts`. The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **The new files this spec introduces are mechanical service-tier homes for code being relocated out of routes/lib (§4.2) plus one narrow new shared primitive in Phase 5 §8.1 (`server/services/rateLimitStoreService.ts`) — no new architectural primitives or service layers.** The Phase 5 §8.1 primitive has an explicit "why not reuse" paragraph in §8.1; the §4.2 service files are pure relocations (no new abstractions, no new public API surface). Where a fix appears to need a primitive that does not yet exist, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
 
 **Non-negotiable boundaries derived from the canon:**
 
@@ -237,7 +237,10 @@ The pass-3 list in the audit log (47 items) is correct as a record of what the a
 | P3-H6 | §5.3 | Carried |
 | P3-H7 | §5.4 | Carried; file count locked at 5 (gate-confirmed) |
 | P3-H8 | §5.5 | Carried |
-| P3-M1 … P3-M16, P3-L1 … P3-L10 | §7, §8 | Carried with tail enumeration in §8.4 |
+| P3-M13, P3-M14 | §5.7 | Carried as warning-level Phase 2 work — best-effort triage, not a Phase 2 ship-gate blocker |
+| P3-M15 | §5.6 | Carried |
+| P3-M16 | §7.3 | Carried (operator-led editorial fix) |
+| P3-M1 … P3-M12, P3-L1 … P3-L10 | §7 (skill registry, deps, capabilities) and §8 (Phase 5) | Carried with tail enumeration in §8.4 |
 
 ### §3.5 Ground-truth gate state (captured 2026-04-25 against `main` SHA `f8c8396`)
 
@@ -1235,15 +1238,16 @@ For §7.3 (capabilities edit), verification is operator-led — the operator con
 
 Both share the same multi-process bug: in-memory state is per-process, so under N Node workers the effective limit is N-multiplied; under restarts the counter resets to zero. P3-M1 originally referenced the test-run limiter (the one with the TODO), but the same defect applies to the public-route limiters with the same operator-led pre-production-flip risk.
 
-**Phase 5 §8.1 scope (decision).** Rewrite **both** limiters in the same Phase 5 PR — they share the same table, the same sliding-window algorithm, the same cleanup job, and the same multi-process correctness argument. Splitting them would force two migrations and two reviews of the same conceptual change. The new shared primitive is `server/lib/rateLimitStore.ts` (new file — see step 2 below); `testRunRateLimit.ts` and the public-route inline limiters both delegate to it.
+**Phase 5 §8.1 scope (decision).** Rewrite **both** limiters in the same Phase 5 PR — they share the same table, the same sliding-window algorithm, the same cleanup job, and the same multi-process correctness argument. Splitting them would force two migrations and two reviews of the same conceptual change. The new shared primitive is `server/services/rateLimitStoreService.ts` (new file — see step 2 below); `testRunRateLimit.ts` and the public-route inline limiters both delegate to it.
 
-**Why a new primitive (`server/lib/rateLimitStore.ts`) rather than reuse / extension.** Per `docs/spec-authoring-checklist.md` §1, every new primitive needs a "why not reuse, why not extend" paragraph:
+**Why a new primitive (`server/services/rateLimitStoreService.ts`) rather than reuse / extension.** Per `docs/spec-authoring-checklist.md` §1, every new primitive needs a "why not reuse, why not extend" paragraph:
 - **Why not reuse `webhookDedupe.ts`** — webhookDedupe is a single-bucket idempotency check (one row per dedupe key). Rate limiting needs sliding-window math (multiple rows per bucket key, summed over a time range). The shapes are different.
 - **Why not extend `testRunIdempotency.ts`** — testRunIdempotency holds singleton run-level state. Rate-limit-buckets need millions of small rows over time and a cleanup job. Cohabiting two shapes in one file would obscure both.
 - **Why not Redis** — the codebase has no Redis primitive today; introducing one is a new infrastructure dependency. Postgres handles a few hundred requests per minute per limit-key well within its comfort zone.
-- **Why a separate `rateLimitStore.ts` rather than putting the logic inside `testRunRateLimit.ts` or each public-route file** — the same algorithm (bucket increment + window sum + cleanup) services both surfaces; duplicating it across files (with subtle drift) is the failure mode this primitive prevents.
+- **Why a separate `rateLimitStoreService.ts` rather than putting the logic inside `testRunRateLimit.ts` or each public-route file** — the same algorithm (bucket increment + window sum + cleanup) services both surfaces; duplicating it across files (with subtle drift) is the failure mode this primitive prevents.
+- **Why the service tier and not `server/lib/**`** — `server/lib/**` files MUST NOT import `db` directly (per §1 boundary 2 and §15.2's invariant). DB-touching primitives belong in `server/services/**` per the codebase's three-layer fail-closed pattern. The existing DB-backed pattern in `server/services/testRunIdempotency.ts` is the precedent (a service, not a lib helper). `webhookDedupe.ts` is also in `server/lib/**` but is in-memory only — it does not import `db`.
 
-The new primitive's surface is narrow: two pure-friendly functions (`incrementBucket`, `sumWindow`) plus the shared bucket table contract. It is not a service; it is a leaf utility on top of the existing `db` connection.
+The new primitive's surface is narrow: two pure-friendly functions (`incrementBucket`, `sumWindow`) plus the shared bucket table contract. It runs through `withAdminConnection()` (system-scoped table; no org context) — matching how `testRunIdempotency` accesses its DB-backed table.
 
 **Implementation outline:**
 
@@ -1258,13 +1262,13 @@ The new primitive's surface is narrow: two pure-friendly functions (`incrementBu
    CREATE INDEX rate_limit_buckets_window_idx ON rate_limit_buckets (window_start);
    ```
    System-scoped table (no `organisation_id`) — rate limits are per-public-key / per-user, not per-tenant. Add to `RLS_PROTECTED_TABLES` only if it ever takes an `organisation_id` column; until then, document inline as "intentionally not tenant-scoped — system rate-limit infrastructure".
-2. **New shared primitive.** `server/lib/rateLimitStore.ts` (new file). Exports `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)` (or equivalent) implementing the sliding-window algorithm: bucket the current minute, atomically increment with `INSERT … ON CONFLICT DO UPDATE`, sum the last N minutes' rows for the limit check. Pure-function-friendly contract — accepts an injectable DB handle for testing.
-3. **Rewrite `server/lib/testRunRateLimit.ts`** to delegate to `rateLimitStore.ts`. Preserve the existing exported function signatures (`checkTestRunRateLimit(userId)` and the helper) so the four callers (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) need only an `await` change.
-4. **Refactor the public-route inline limiters.** `formSubmission.ts:31` (`checkRateLimit`) and `pageTracking.ts:29` (`checkTrackRateLimit`) — replace each with a call into `rateLimitStore.ts`. Bucket-key prefixes distinguish the two surfaces (e.g. `form-ip:`, `form-page:`, `track-ip:`); the existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) move from inline constants to the call site. The new code paths are async — update the surrounding handlers to `await` accordingly.
+2. **New shared primitive.** `server/services/rateLimitStoreService.ts` (new file in the service tier — see "Why the service tier and not `server/lib/**`" above). Exports `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)` (or equivalent) implementing the sliding-window algorithm: bucket the current minute, atomically increment with `INSERT … ON CONFLICT DO UPDATE`, sum the last N minutes' rows for the limit check. DB access goes through `withAdminConnection()` from `server/lib/adminDbConnection.ts` (the table is system-scoped; no org context). Pure-function-friendly contract — accepts an injectable DB handle for testing.
+3. **Rewrite `server/lib/testRunRateLimit.ts`** to delegate to `rateLimitStoreService`. Preserve the existing exported function signatures (`checkTestRunRateLimit(userId)` and the helper) so the four callers (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) need only an `await` change. Note: `testRunRateLimit.ts` itself stays in `server/lib/**` because it is a thin facade that does not touch `db` directly — it imports the service.
+4. **Refactor the public-route inline limiters.** `formSubmission.ts:31` (`checkRateLimit`) and `pageTracking.ts:29` (`checkTrackRateLimit`) — replace each with a call into `rateLimitStoreService`. Bucket-key prefixes distinguish the two surfaces (e.g. `form-ip:`, `form-page:`, `track-ip:`); the existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) move from inline constants to the call site. The new code paths are async — update the surrounding handlers to `await` accordingly.
 5. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap. Register the job in `server/jobs/index.ts` (the canonical job-export aggregator) and add the schedule entry to `server/lib/queueSchedule.ts` (or whichever module holds the cron definitions — confirm at implementation time).
 
 **Verification.** Add unit tests (pure-function-only per `runtime_tests: pure_function_only`):
-- `server/lib/__tests__/rateLimitStore.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle.
+- `server/services/__tests__/rateLimitStoreService.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle.
 - `server/lib/__tests__/testRunRateLimit.test.ts` — preserves existing test-run rate-limit semantics on top of the shared store.
 
 Manual verification: spin up two processes locally, hammer (a) a public form and (b) the test-run path, observe the per-process behaviour matches a single shared bucket in both cases.
@@ -1423,9 +1427,9 @@ CREATE POLICY memory_review_queue_org_isolation ON memory_review_queue
 
 **Name:** `rate_limit_buckets`
 **Type:** Postgres table; system-scoped (no `organisation_id`)
-**Producer:** `server/lib/rateLimitStore.ts` (Phase 5 §8.1 — the new shared sliding-window primitive). The store's `incrementBucket(key, windowStart)` function is the single write surface; no other caller writes directly.
+**Producer:** `server/services/rateLimitStoreService.ts` (Phase 5 §8.1 — the new shared sliding-window primitive). The store's `incrementBucket(key, windowStart)` function is the single write surface; no other caller writes directly.
 **Consumers (callers of the store):**
-- `server/lib/testRunRateLimit.ts` — wraps `rateLimitStore` for `is_test_run` test agent runs (callers: `agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`).
+- `server/lib/testRunRateLimit.ts` — wraps `rateLimitStoreService` for `is_test_run` test agent runs (callers: `agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`).
 - `server/routes/public/formSubmission.ts` — replaces inline `Map`-based `checkRateLimit` / `rateLimitMiddleware`.
 - `server/routes/public/pageTracking.ts` — replaces inline `Map`-based `checkTrackRateLimit`.
 - `server/jobs/rateLimitBucketCleanupJob.ts` — hourly cleanup; performs `DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '1 hour'` and does not read or update other rows.
@@ -1500,8 +1504,8 @@ Every phase's verification terminates in a named gate. New runtime tests are add
 
 | Spec section | Test file | Type | What it asserts |
 |---|---|---|---|
-| §8.1 | `server/lib/__tests__/rateLimitStore.test.ts` | Pure-function | Sliding-window math on the shared primitive: bucket increment, window-sum read, expiry cutoff. Inject an in-memory mock for the DB handle. |
-| §8.1 | `server/lib/__tests__/testRunRateLimit.test.ts` | Pure-function | Wrapper-semantics: `testRunRateLimit` correctly delegates to `rateLimitStore` for the `is_test_run` use case (key shape, threshold, behavior on limit). |
+| §8.1 | `server/services/__tests__/rateLimitStoreService.test.ts` | Pure-function | Sliding-window math on the shared primitive: bucket increment, window-sum read, expiry cutoff. Inject an in-memory mock for the DB handle. |
+| §8.1 | `server/lib/__tests__/testRunRateLimit.test.ts` | Pure-function | Wrapper-semantics: `testRunRateLimit` correctly delegates to `rateLimitStoreService` for the `is_test_run` use case (key shape, threshold, behavior on limit). |
 | §8.4 (P3-M8) | `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts` | Pure-function | Depth check rejects > 5; accepts ≤ 5; produces correct error shape. |
 | §8.4 (P3-M9) | Same file (additional `describe` block) | Pure-function | Degraded fallback: when active-lead resolution returns no row, the resolver picks the documented fallback path. |
 | §8.4 (P3-L9) | `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts` | Pure-function | `is_test_run = true` rows are excluded from the cost-ledger sum. |
@@ -1596,9 +1600,9 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `shared/types/agentExecutionCheckpoint.ts` | 3 (§6.1) | New home for `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision` |
 | `client/src/components/clientpulse/types.ts` | 3 (§6.2.1) | Extracted shared interfaces for `ProposeInterventionModal` ↔ sub-editors |
 | `client/src/components/skill-analyzer/types.ts` | 3 (§6.2.2) | Extracted shared interfaces for `SkillAnalyzerWizard` ↔ four step components (kebab-case directory matches the repo) |
-| `server/lib/rateLimitStore.ts` | 5 (§8.1) | New shared sliding-window primitive backing both `testRunRateLimit.ts` and the public-route limiters |
+| `server/services/rateLimitStoreService.ts` | 5 (§8.1) | New shared sliding-window primitive backing both `testRunRateLimit.ts` and the public-route limiters |
 | `server/jobs/rateLimitBucketCleanupJob.ts` | 5 (§8.1) | Hourly cleanup of expired rate-limit-bucket rows |
-| `server/lib/__tests__/rateLimitStore.test.ts` | 5 (§8.1) | Pure-function tests for sliding-window math (mock DB handle) |
+| `server/services/__tests__/rateLimitStoreService.test.ts` | 5 (§8.1) | Pure-function tests for sliding-window math (mock DB handle) |
 | `server/lib/__tests__/testRunRateLimit.test.ts` | 5 (§8.1) | Pure-function tests preserving test-run rate-limit semantics on top of the shared store |
 | `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts` | 5 (§8.4) | Pure-function tests for depth ≤ 5 invariant + degraded-fallback |
 | `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts` | 5 (§8.4) | Pure-function test for `is_test_run = true` cost-ledger exclusion |
@@ -1656,13 +1660,13 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `package.json` | 4 (§7.2.1, §7.2.2) | Add `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` as direct deps; add `yaml` as dev dep. |
 | `package-lock.json` | 4 (§7.2) | Updated by `npm install`; committed alongside `package.json`. |
 | `docs/capabilities.md` | 4 (§7.3) | Edit line 1001 — replace "Anthropic-scale distribution" with operator-chosen replacement. **Operator-led only.** |
-| `server/lib/testRunRateLimit.ts` | 5 (§8.1) | Rewrite from in-memory to delegate to `rateLimitStore.ts`. Preserve exported function signatures. |
+| `server/lib/testRunRateLimit.ts` | 5 (§8.1) | Rewrite from in-memory to delegate to `rateLimitStoreService`. Preserve exported function signatures. The lib file itself does not import `db` — it imports the service. |
 | `server/routes/agents.ts` | 5 (§8.1) | `await` the now-async `checkTestRunRateLimit` call. |
 | `server/routes/skills.ts` | 5 (§8.1) | Same. |
 | `server/routes/subaccountAgents.ts` | 5 (§8.1) | Same. |
 | `server/routes/subaccountSkills.ts` | 5 (§8.1) | Same. |
-| `server/routes/public/formSubmission.ts` | 5 (§8.1) | Replace inline `checkRateLimit` + `rateLimitMiddleware` (lines 31, 54) with calls into `rateLimitStore.ts`; await the async path. |
-| `server/routes/public/pageTracking.ts` | 5 (§8.1) | Replace inline `checkTrackRateLimit` (line 29) with calls into `rateLimitStore.ts`; await the async path. |
+| `server/routes/public/formSubmission.ts` | 5 (§8.1) | Replace inline `checkRateLimit` + `rateLimitMiddleware` (lines 31, 54) with calls into `rateLimitStoreService`; await the async path. |
+| `server/routes/public/pageTracking.ts` | 5 (§8.1) | Replace inline `checkTrackRateLimit` (line 29) with calls into `rateLimitStoreService`; await the async path. |
 | `server/jobs/index.ts` | 5 (§8.1) | Register `rateLimitBucketCleanupJob` in the canonical job-export aggregator. |
 | `server/lib/queueSchedule.ts` (or equivalent cron-schedule module — confirm at implementation time) | 5 (§8.1) | Add the hourly cron schedule entry for `rateLimitBucketCleanupJob`. |
 | `server/services/executionBudgetResolver.ts` | 5 (§8.3) | Replace `as any` on lines 71–72 with `InferSelectModel<...>` types. |
@@ -1745,9 +1749,9 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 ### §13.5 Phase 5 DoD
 
 - [ ] `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line).
-- [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at PR-open time) exists and applies cleanly.
+- [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at merge time per §2.5) exists and applies cleanly.
 - [ ] `server/lib/testRunRateLimit.ts` is DB-backed; `server/jobs/rateLimitBucketCleanupJob.ts` exists and is registered in pg-boss schedule.
-- [ ] All five pure-function tests in §10.1 exist and pass (`rateLimitStore`, `testRunRateLimit`, `agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`).
+- [ ] All five pure-function tests in §10.1 exist and pass (`rateLimitStoreService`, `testRunRateLimit`, `agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`).
 - [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites.
 - [ ] `npm run build:server` passes.
 - [ ] Tail items (§8.4) are either resolved or appear in §14 Deferred Items with operator sign-off.
@@ -1816,7 +1820,7 @@ For every new feature touching tenant data, the implementer answers yes to all f
 ### §15.3 Development discipline
 
 - **Fix root causes, not symptoms.** Phase 1's largest finding (the circular dep) is one import line; the right fix is to extract the type, not to suppress 175 cycles individually. Apply the same posture to future findings.
-- **Prefer existing primitives over new abstractions.** Every Phase 1–4 fix invokes existing primitives — `withOrgTx`, `withAdminConnection`, `withPrincipalContext`, `fromOrgId`, `llmRouter`, `canonicalDataService`, `resolveSubaccount`. The §4.2 new service files are pure relocations (DB access moves from routes/lib into the service tier; no new public API). The single new architectural primitive this spec introduces is Phase 5 §8.1's `server/lib/rateLimitStore.ts` — justified inline in §8.1 against the alternatives (Redis would be a new infrastructure dependency; the existing in-memory `Map<>`-based limiters do not meet the multi-process correctness requirement). New primitives have a high evidentiary bar (per `prefer_existing_primitives_over_new_ones: yes`); every other section of this spec satisfies that bar by extending or reusing the listed primitives.
+- **Prefer existing primitives over new abstractions.** Every Phase 1–4 fix invokes existing primitives — `withOrgTx`, `withAdminConnection`, `withPrincipalContext`, `fromOrgId`, `llmRouter`, `canonicalDataService`, `resolveSubaccount`. The §4.2 new service files are pure relocations (DB access moves from routes/lib into the service tier; no new public API). The single new architectural primitive this spec introduces is Phase 5 §8.1's `server/services/rateLimitStoreService.ts` — justified inline in §8.1 against the alternatives (Redis would be a new infrastructure dependency; the existing in-memory `Map<>`-based limiters do not meet the multi-process correctness requirement). New primitives have a high evidentiary bar (per `prefer_existing_primitives_over_new_ones: yes`); every other section of this spec satisfies that bar by extending or reusing the listed primitives.
 - **Smallest viable PR per category.** Phase 1 is one PR because the work is causally tied. Phase 5 is multiple PRs because each subsection is independent. The default unit is "smallest reviewable change that closes a single category".
 - **Gates are the source of truth.** When in doubt about whether a fix is correct, run the gate. The gate is more accurate than the implementer's mental model — if the gate disagrees with what you're sure is right, the gate is right.
 - **No drive-by cleanup.** This spec deliberately separates each finding from adjacent unrelated work. Do not bundle "while I'm in this file, let me also fix X" — that bloats review and introduces blast-radius.
