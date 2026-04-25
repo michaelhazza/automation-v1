@@ -99,7 +99,7 @@ This spec is governed by the framing established in `docs/spec-context.md`. Thre
 
 **`testing_posture: static_gates_primary` / `runtime_tests: pure_function_only`** — gates are the source of truth, not unit/integration tests of the live stack. Every phase's "definition of done" terminates in a named gate (or set of gates) returning a clean run. New runtime tests are written only for pure functions extracted by this spec; no vitest/jest/playwright/supertest expansions are introduced. This matches the `convention_rejections` block of `docs/spec-context.md` verbatim.
 
-**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts`. The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **The new files this spec introduces are mechanical service-tier homes for code being relocated out of routes/lib (§4.2) plus one narrow new shared primitive in Phase 5 §8.1 (`server/services/rateLimitStoreService.ts`) — no new architectural primitives or service layers.** The Phase 5 §8.1 primitive has an explicit "why not reuse" paragraph in §8.1; the §4.2 service files are pure relocations (no new abstractions, no new public API surface). Where a fix appears to need a primitive that does not yet exist, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
+**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts` (org-scoped helpers), plus `withAdminConnection` from `server/lib/adminDbConnection.ts` (admin / system-scoped helper). The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **The new files this spec introduces are mechanical service-tier homes for code being relocated out of routes/lib (§4.2) plus one narrow new shared primitive in Phase 5 §8.1 (`server/services/rateLimitStoreService.ts`) — no new architectural primitives or service layers.** The Phase 5 §8.1 primitive has an explicit "why not reuse" paragraph in §8.1; the §4.2 service files are pure relocations (no new abstractions, no new public API surface). Where a fix appears to need a primitive that does not yet exist, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
 
 **Non-negotiable boundaries derived from the canon:**
 
@@ -593,7 +593,7 @@ export const <feature>Service = {
 **Three patterns chosen by route type:**
 
 1. **Org-scoped HTTP routes** (rows 3, 5, 6, 7, 8, 9, 10, 11, 13 in the table). Service uses `withOrgTx(req.orgId, …)` from `server/instrumentation.ts`. The `req.orgId` is set by the existing auth middleware. Every query inside `withOrgTx` runs with `app.organisation_id` set, and the RLS policies enforce isolation. The service should still pass `organisationId` explicitly to every `where` clause (defence-in-depth — the gate `verify-org-scoped-writes` enforces this at write sites and the principle generalises).
-2. **System-admin HTTP routes** (rows 4, 12 — `systemAutomations`, `systemPnl`). These already require `requireSystemAdmin` middleware and operate without an org scope (admin views span all orgs). Wrap DB access in `withAdminConnection()` from `server/lib/orgScopedDb.ts`. This bypasses RLS by design — admins are explicitly trusted.
+2. **System-admin HTTP routes** (rows 4, 12 — `systemAutomations`, `systemPnl`). These already require `requireSystemAdmin` middleware and operate without an org scope (admin views span all orgs). Wrap DB access in `withAdminConnection()` from `server/lib/adminDbConnection.ts`. This bypasses RLS by design — admins are explicitly trusted.
 3. **Lib-tier files** (rows 1, 2 — `briefVisibility`, `onboardingStateHelpers`). The lib tier is for pure helpers and small utilities. When a "lib" file is doing DB access, it has outgrown the tier. Move the DB-touching code into a peer service and leave the pure-function helpers in lib.
 
 **`server/lib/briefVisibility.ts` → `server/services/briefVisibilityService.ts`.** Per the gate output, line 1 imports `db`. The fix is wholesale: any non-pure logic moves to the new service file; pure helpers (e.g. visibility-rule calculators) stay in `lib`. The new service exports the same callable surface — every caller updates its import path. The scope of caller-updates must be enumerated in the PR description (find with `grep -rn "from.*briefVisibility" server/`).
@@ -714,10 +714,10 @@ bash scripts/verify-subaccount-resolution.sh
 Plus:
 
 ```bash
-npm run build:server                 # typecheck still passes
-npm run test:gates                   # wraps the gates above + adjacent gates
-npm test -- server/services          # any service-relocated test still green
-node scripts/run-migrations.mjs      # 0227 applies cleanly against a fresh DB
+npm run build:server                                      # typecheck still passes
+npm run test:gates                                        # wraps the gates above + adjacent gates
+npx tsx server/services/__tests__/<relocated-test>.test.ts # any service-relocated test still green (per repo convention; scripts/run-all-unit-tests.sh ignores `--` filters)
+npx tsx scripts/migrate.ts                                # 0227 applies cleanly against a fresh DB
 ```
 
 If any of the above fails, the Phase 1 PR does not merge. There is no "ship Phase 1A and defer Phase 1E" — the phase is a unit.
@@ -732,46 +732,23 @@ If any of the above fails, the Phase 1 PR does not merge. There is no "ship Phas
 
 **One PR.** Each subsection below is a self-contained file-or-two change; bundling them keeps review cost low and the gate-state delta atomic.
 
-### §5.1 Action-call allowlist file
+### §5.1 Action-call allowlist gate path correction
 
 **Finding origin:** P3-H4.
 
-**The gate.** `scripts/verify-action-call-allowlist.sh` checks that every slug listed in `ACTION_CALL_ALLOWED_SLUGS` resolves to a registered handler in `server/config/actionRegistry.ts` or `server/services/skillExecutor.ts`. The gate currently fails with: `allowlist file not found at /home/user/automation-v1/server/lib/playbook/actionCallAllowlist.ts`. The directory `server/lib/playbook/` does not exist; nor does the file.
+**The gate.** `scripts/verify-action-call-allowlist.sh` checks that every slug listed in `ACTION_CALL_ALLOWED_SLUGS` resolves to a registered handler in `server/config/actionRegistry.ts` or `server/services/skillExecutor.ts`.
 
-**Origin context.** The gate was introduced by `docs/onboarding-playbooks-spec.md` Final-gates section. The gate's expected file path is `server/lib/playbook/actionCallAllowlist.ts`. The file was never created.
+**The actual situation (verified at spec authoring time).** A populated, live allowlist already exists at `server/lib/workflow/actionCallAllowlist.ts` — it exports `ACTION_CALL_ALLOWED_SLUGS` as a `ReadonlySet<string>` containing 32 slugs, with a colocated pure unit test at `server/lib/workflow/__tests__/actionCallAllowlistPure.test.ts`. The runtime validator at `server/lib/workflow/validator.ts:34` already imports from this file. The gate, however, was hand-coded to look at `server/lib/playbook/actionCallAllowlist.ts` (a path that does not exist) — `scripts/verify-action-call-allowlist.sh:29` hard-codes the wrong directory.
 
-**Decision.** Create the file at the expected path with an explicit empty allowlist. Empty is the correct initial state — playbook steps that need to invoke actions go through the registry by slug today, with no allowlist exemption required. The file exists to:
+**Decision.** The fix is to point the gate at the existing canonical file — **not** to create a new empty file at the wrong path. The existing populated allowlist is the source of truth; forking it would leave the validator, the test, and the gate disagreeing on which file matters.
 
-1. Satisfy the gate (turning a runtime "file not found" into a structured-data check).
-2. Provide a single source of truth for any future "this slug is allowed to be invoked from a playbook step" exemption.
-3. Document the intent at the file head so future authors do not re-add an allowlist entry by mistake.
+**Required edits:**
 
-**File body (full content — small enough to inline):**
+1. **`scripts/verify-action-call-allowlist.sh:29`** — change `ALLOWLIST_FILE="$ROOT_DIR/server/lib/playbook/actionCallAllowlist.ts"` to `ALLOWLIST_FILE="$ROOT_DIR/server/lib/workflow/actionCallAllowlist.ts"`. No other changes to the gate are needed — the slug-extraction regex already matches the `Set([ … ])` literal shape.
+2. **No code changes** — `server/lib/workflow/actionCallAllowlist.ts` is already correctly populated and imported by `server/lib/workflow/validator.ts`. Do not create `server/lib/playbook/actionCallAllowlist.ts`. Do not move the existing file.
+3. **`docs/onboarding-playbooks-spec.md`** — if the originating spec still references the `playbook/` path, update that reference too as a docs-cleanup pass (not strictly required for the gate to pass; do it opportunistically).
 
-```ts
-// server/lib/playbook/actionCallAllowlist.ts
-//
-// Single source of truth for slugs that may be invoked from a playbook step
-// without going through the standard action-registry resolution path.
-//
-// Empty by design. Every entry is an architectural exemption — adding one
-// requires confirming that:
-//   1. The slug genuinely cannot route through the action registry, AND
-//   2. The caller has no alternative (no relevant service primitive exists), AND
-//   3. The handler is documented in this file with a one-line rationale.
-//
-// The CI gate `verify-action-call-allowlist.sh` enforces that every slug
-// in ACTION_CALL_ALLOWED_SLUGS resolves to a registered handler in:
-//   - server/config/actionRegistry.ts (mutation actions), OR
-//   - server/services/skillExecutor.ts (read-only or direct handlers).
-//
-// A slug listed here without a backing handler is a dead reference and a
-// silent runtime failure when a playbook step tries to invoke it.
-
-export const ACTION_CALL_ALLOWED_SLUGS: readonly string[] = [] as const;
-```
-
-**Verification:** `bash scripts/verify-action-call-allowlist.sh` returns clean exit with `0 violations`.
+**Verification:** `bash scripts/verify-action-call-allowlist.sh` returns clean exit with `0 violations` after the gate's path is corrected. The 32 existing slugs all resolve to registered handlers in `actionRegistry.ts` or `skillExecutor.ts` — verified by the colocated pure unit test.
 
 ### §5.2 Canonical-read interface enforcement
 
@@ -995,6 +972,8 @@ Fixing the root resolves the cascade.
 
 They do NOT import from `server/services/**`, `server/lib/**`, `server/middleware/**`, `server/routes/**`, or `server/jobs/**`. The schema is a leaf; the service tier reads schema, never the other way.
 
+**Phase 3 scope vs the leaf rule.** Phase 3 fixes the **largest** violation of the leaf rule — the `agentRunSnapshots.ts` import that drives the 175-cycle cascade. Verified at spec authoring time, two other schema files also violate the leaf rule today: `server/db/schema/agentRuns.ts:3` imports `AgentRunHandoffV1` from `server/services/agentRunHandoffServicePure.ts`, and `server/db/schema/skillAnalyzerJobs.ts:15` imports `SkillAnalyzerJobStatus` from `server/services/skillAnalyzerServicePure.ts`. These are smaller cycles that did not surface in the audit's headline finding. Phase 3 does **not** include those two — they are tail items routed to §8.4 with the same "extract type to `shared/types/`" pattern. The Phase 3 DoD reflects this: the goal is the 175→≤5 cycle reduction, not an absolute leaf-rule guarantee for every schema file.
+
 **Fix.** Extract `AgentRunCheckpoint` and its type dependencies to a new file in `shared/types/`. The dependencies form a small closed graph already (verified during spec authoring):
 
 | Type | Currently in | Move to |
@@ -1058,11 +1037,11 @@ After §6.2.1 and §6.2.2, run `madge --circular --extensions ts,tsx client/src/
 The Phase 3 PR is mergeable when:
 
 ```bash
-npx madge --circular --extensions ts server/ | wc -l   # ≤ 5
-npx madge --circular --extensions ts,tsx client/src/ | wc -l   # ≤ 1
-npm run build:server                                    # typecheck passes
-npm run build:client                                    # build passes
-npm test -- agentExecutionServicePure.checkpoint        # named test passes
+npx madge --circular --extensions ts server/ | wc -l                          # ≤ 5
+npx madge --circular --extensions ts,tsx client/src/ | wc -l                  # ≤ 1
+npm run build:server                                                          # typecheck passes
+npm run build:client                                                          # build passes
+npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts # named test passes (run by direct path; scripts/run-all-unit-tests.sh ignores `--` filters)
 ```
 
 **Cycle-count discipline.** A "≤ 5" rather than "= 0" target reflects that this PR fixes the root and the largest clusters; tail-cycles are surgical and intermixed with active feature areas. The Phase 3 PR ships once the *count drops sharply*; eradicating the last few is appended to Phase 5 as a tail item.
@@ -1154,23 +1133,23 @@ Verify `package.json` lists the four packages under `dependencies` (not `devDepe
 
 **Version pinning.** Use the version `npm install` resolves at the time of execution; pin exactly (no `^`/`~` if the rest of `package.json` does not use range pins). Match the existing pin convention in the file.
 
-#### §7.2.2 `yaml` dev-dependency for integration-reference gate
+#### §7.2.2 `verify-integration-reference` gate triage
 
-**The violation.** `node scripts/verify-integration-reference.mjs` crashes immediately with `ERR_MODULE_NOT_FOUND: 'yaml'`. The gate cannot run; whatever it would have caught is silently undetected.
+**The audit-time violation.** When the audit ran, `node scripts/verify-integration-reference.mjs` was reported as crashing with `ERR_MODULE_NOT_FOUND: 'yaml'`. Re-verified at spec authoring time: `yaml ^2.8.3` is already declared in `package.json` devDependencies, and the gate now runs to completion. The original "missing dep" remediation is stale.
 
-**Fix.** Run:
+**Current state.** The gate runs and emits warnings (capability-naming convention drift, MCP preset / integration-reference.md mismatches). These are real but minor system-consistency findings.
 
-```bash
-npm install --save-dev yaml
-```
-
-Verify the gate then runs:
+**Fix.** Re-run the gate at the start of Phase 4 to capture the current warning set:
 
 ```bash
-node scripts/verify-integration-reference.mjs
+node scripts/verify-integration-reference.mjs 2>&1 | tee /tmp/verify-integration-reference.log
 ```
 
-If the gate now reports unrelated violations (i.e. real findings that were hidden by the crash), open a separate PR to address them — they are out of scope for the dependency fix but should be triaged before Phase 5 begins. If the gate reports clean, Phase 4 of this finding is done.
+Triage each warning:
+- **Capability-naming convention drift** (e.g. `organisation.config.read` not matching `<resource>_read`): if the capability's name is load-bearing in stored data (permission keys), do NOT rename — instead, `# baseline-allow` the warning per §2.4 with a one-line rationale. If the capability is purely internal, rename it.
+- **MCP preset wired but no integration block** (e.g. `discord`, `twilio`, `sendgrid`, `github`): add the missing block to `docs/integration-reference.md` (operator-led, but mechanical — copy the shape of an existing block).
+
+Phase 4 ships these triaged edits. The "ship gate" criterion is unchanged — `npm run skills:verify-visibility`, `node scripts/verify-integration-reference.mjs runs cleanly` (no crash), and `npm install` returns no missing-dep warnings — but with the understanding that "runs cleanly" means "no crash"; the warning content is reviewed and either fixed or baselined.
 
 ### §7.3 Capabilities editorial fix
 
@@ -1265,7 +1244,7 @@ The new primitive's surface is narrow: two pure-friendly functions (`incrementBu
 2. **New shared primitive.** `server/services/rateLimitStoreService.ts` (new file in the service tier — see "Why the service tier and not `server/lib/**`" above). Exports `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)` (or equivalent) implementing the sliding-window algorithm: bucket the current minute, atomically increment with `INSERT … ON CONFLICT DO UPDATE`, sum the last N minutes' rows for the limit check. DB access goes through `withAdminConnection()` from `server/lib/adminDbConnection.ts` (the table is system-scoped; no org context). Pure-function-friendly contract — accepts an injectable DB handle for testing.
 3. **Rewrite `server/lib/testRunRateLimit.ts`** to delegate to `rateLimitStoreService`. Preserve the existing exported function signatures (`checkTestRunRateLimit(userId)` and the helper) so the four callers (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) need only an `await` change. Note: `testRunRateLimit.ts` itself stays in `server/lib/**` because it is a thin facade that does not touch `db` directly — it imports the service.
 4. **Refactor the public-route inline limiters.** `formSubmission.ts:31` (`checkRateLimit`) and `pageTracking.ts:29` (`checkTrackRateLimit`) — replace each with a call into `rateLimitStoreService`. Bucket-key prefixes distinguish the two surfaces (e.g. `form-ip:`, `form-page:`, `track-ip:`); the existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) move from inline constants to the call site. The new code paths are async — update the surrounding handlers to `await` accordingly.
-5. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap. Register the job in `server/jobs/index.ts` (the canonical job-export aggregator) and add the schedule entry to `server/lib/queueSchedule.ts` (or whichever module holds the cron definitions — confirm at implementation time).
+5. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap. Register the job in `server/jobs/index.ts` (the canonical job-export aggregator) and register the worker + cron schedule in `server/services/queueService.ts` (the actual worker / pg-boss schedule registration site — verified at spec authoring time).
 
 **Verification.** Add unit tests (pure-function-only per `runtime_tests: pure_function_only`):
 - `server/services/__tests__/rateLimitStoreService.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle.
@@ -1348,6 +1327,13 @@ If Sprint 3B is still active and owns the removal, this item moves to §14 Defer
 **P3-L9 — Add named test asserting `is_test_run=true` runs are excluded from cost ledger.** Pure-function test in `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts`.
 
 **P3-L10 — Verify prompt prefix caching (`stablePrefix`) coverage across all run types.** Add to the observability backlog (§14) — requires a live Langfuse trace to confirm, which is out of scope for the static-gates posture.
+
+**Phase 3 schema-leaf-rule tail items.** Two additional schema files violate the leaf rule today and were intentionally NOT scoped into Phase 3 (which fixes only the cascade-driver). Each is a small type-extraction PR following the `shared/types/` pattern from §6.1:
+
+- **`server/db/schema/agentRuns.ts:3`** — imports `AgentRunHandoffV1` from `server/services/agentRunHandoffServicePure.ts`. Extract `AgentRunHandoffV1` to `shared/types/agentRunHandoff.ts`; update the schema file's import; update the service to re-export from the new location (mirror the §6.1 pattern). Run `madge --circular` to confirm no new cycles.
+- **`server/db/schema/skillAnalyzerJobs.ts:15`** — imports `SkillAnalyzerJobStatus` from `server/services/skillAnalyzerServicePure.ts`. Extract `SkillAnalyzerJobStatus` to `shared/types/skillAnalyzerJob.ts`; same pattern.
+
+Each ships as its own small Phase 5 PR (§2.6 — one PR per §8.4 tail item). Together they close the residual leaf-rule gap that §6.1 deliberately scoped out.
 
 ### §8.5 Phase 5 verification
 
@@ -1455,34 +1441,33 @@ form-A:1.2.3.4   | 2026-04-25T10:23:00.000Z  | 14
 
 **Cleanup posture:** rows with `window_start < now() - interval '1 hour'` are deleted by `rateLimitBucketCleanupJob` on an hourly cron. The retention is generous to allow for replay-style debugging; tighten only if the table grows beyond comfort.
 
-### §9.3 Action-call allowlist file (`server/lib/playbook/actionCallAllowlist.ts`)
+### §9.3 Action-call allowlist (existing — `server/lib/workflow/actionCallAllowlist.ts`)
 
 **Name:** `ACTION_CALL_ALLOWED_SLUGS`
-**Type:** TypeScript `readonly string[]`
-**Producer:** Manual edits to the file
-**Consumer:** `scripts/verify-action-call-allowlist.sh`; (optional future) playbook-step dispatch logic
+**Type:** TypeScript `ReadonlySet<string>` (the existing populated form)
+**Producer:** Manual edits to `server/lib/workflow/actionCallAllowlist.ts`. Currently 32 slugs as of spec authoring time.
+**Consumers:**
+- `server/lib/workflow/validator.ts` — imports the set; rejects `action_call` workflow steps whose `actionSlug` is not in the set.
+- `scripts/verify-action-call-allowlist.sh` — verifies every slug in the set resolves to a registered handler in `server/config/actionRegistry.ts` or `server/services/skillExecutor.ts`. Phase 2 §5.1 corrects the gate's hard-coded path so it reads the canonical file.
+- `server/lib/workflow/__tests__/actionCallAllowlistPure.test.ts` — pure unit test covering set size + resolvability.
 
-**Required shape:**
-
-```ts
-export const ACTION_CALL_ALLOWED_SLUGS: readonly string[] = [/* slugs */] as const;
-```
-
-The default is `[]`. Every entry must:
-1. Resolve to a registered handler in `server/config/actionRegistry.ts` or `server/services/skillExecutor.ts`.
-2. Have a one-line comment naming the playbook that requires the exemption and why the registry path is insufficient.
-
-**Example (illustrative, not currently required):**
+**Existing shape (do NOT change in this spec — Phase 2 §5.1 only updates the gate's path):**
 
 ```ts
-export const ACTION_CALL_ALLOWED_SLUGS: readonly string[] = [
-  // 'send_clarification_dm' — used by onboarding-playbooks Phase 2 step 4;
-  //                          registry path is gated by org-permissions that
-  //                          the onboarding wizard needs to bypass.
-] as const;
+export const ACTION_CALL_ALLOWED_SLUGS: ReadonlySet<string> = new Set([
+  'slug_1',
+  'slug_2',
+  // … 30 more
+]);
+
+export function isActionCallAllowed(slug: string): boolean {
+  return ACTION_CALL_ALLOWED_SLUGS.has(slug);
+}
 ```
 
-The gate checks the exported binding's identifier (`ACTION_CALL_ALLOWED_SLUGS`) — renaming requires updating the gate.
+Every entry in the set must resolve to a registered handler in `server/config/actionRegistry.ts` or `server/services/skillExecutor.ts`. Adding a slug requires bumping the size assertion in `actionCallAllowlistPure.test.ts` — the test is a guard against accidental drift.
+
+The gate checks the exported binding's identifier (`ACTION_CALL_ALLOWED_SLUGS`) — renaming the export, or restructuring it back to a `readonly string[]`, requires updating the gate's slug-extraction regex.
 
 ---
 
@@ -1527,10 +1512,14 @@ If the implementer believes a finding *requires* a test category from the not-ad
 Any code touched by this spec re-runs its co-located test file. The minimum set:
 
 ```bash
-npm test -- agentExecutionServicePure.checkpoint        # §6.1 — type extraction
-npm test -- rls.context-propagation                     # §4 — RLS isolation
-npm test -- agentRunVisibility                          # §4.2 — any test colocated with the agentRunVisibility / agentRunEditPermissionMask logic must continue to pass (confirm exact filename(s) at implementation time via `find server/ -name "agentRunVisibility*.test.ts"`)
+npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts  # §6.1 — type extraction
+npx tsx server/services/__tests__/rls.context-propagation.test.ts               # §4 — RLS isolation
+# §4.2 — any test colocated with the agentRunVisibility / agentRunEditPermissionMask logic must continue to pass.
+# Find the exact paths at implementation time, then run each directly with `npx tsx <path>`:
+#   find server/ -name 'agentRunVisibility*.test.ts'
 ```
+
+**Test-runner convention.** Per the repo's pure-function-test posture, individual tests are run directly with `npx tsx <test-file-path>` — `scripts/run-all-unit-tests.sh` ignores `--` filter arguments and runs every discovered test. Use direct paths in spec verification steps so the documented commands are executable as written.
 
 Any failure in the above set blocks the corresponding phase's PR. There is no "test was already flaky" defence — flakiness is a separate finding that should already be in the backlog or surfaced as one.
 
@@ -1590,7 +1579,6 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `migrations/0227_rls_hardening_corrective.sql` | 1A | FORCE RLS + canonical policy on 8 tables across 6 historical migrations. Phase 1 ships first, so `0227` is the only pre-allocated migration number in this spec. |
 | `migrations/<NNNN>_rate_limit_buckets.sql` | 5 (§8.1) | New `rate_limit_buckets` table for multi-process-safe sliding window. Number assigned at merge time per §2.5. |
 | `migrations/<NNNN>_drop_tool_calls_log.sql` (conditional) | 5 (§8.4 — P3-M6) | Drop deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. Number assigned at merge time per §2.5. |
-| `server/lib/playbook/actionCallAllowlist.ts` | 2 (§5.1) | Empty-by-default allowlist; satisfies `verify-action-call-allowlist` gate |
 | `server/services/briefVisibilityService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/briefVisibility.ts` |
 | `server/services/onboardingStateService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/workflow/onboardingStateHelpers.ts` |
 | `server/services/systemAutomationService.ts` | 1B (§4.2) | Service for `systemAutomations` route (admin tier — uses `withAdminConnection`) |
@@ -1598,6 +1586,8 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/services/portfolioRollupService.ts` | 1B (§4.2) | Service for `portfolioRollup` route handlers |
 | `server/services/automationConnectionMappingService.ts` | 1B (§4.2) | Service for `automationConnectionMappings` route handlers (singular-noun naming) |
 | `shared/types/agentExecutionCheckpoint.ts` | 3 (§6.1) | New home for `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision` |
+| `shared/types/agentRunHandoff.ts` | 5 (§8.4 — schema-leaf tail) | New home for `AgentRunHandoffV1`; extracted from `server/services/agentRunHandoffServicePure.ts` so `server/db/schema/agentRuns.ts` can import from `shared/**` instead. |
+| `shared/types/skillAnalyzerJob.ts` | 5 (§8.4 — schema-leaf tail) | New home for `SkillAnalyzerJobStatus`; extracted from `server/services/skillAnalyzerServicePure.ts` so `server/db/schema/skillAnalyzerJobs.ts` can import from `shared/**` instead. |
 | `client/src/components/clientpulse/types.ts` | 3 (§6.2.1) | Extracted shared interfaces for `ProposeInterventionModal` ↔ sub-editors |
 | `client/src/components/skill-analyzer/types.ts` | 3 (§6.2.2) | Extracted shared interfaces for `SkillAnalyzerWizard` ↔ four step components (kebab-case directory matches the repo) |
 | `server/services/rateLimitStoreService.ts` | 5 (§8.1) | New shared sliding-window primitive backing both `testRunRateLimit.ts` and the public-route limiters |
@@ -1613,6 +1603,10 @@ This is the single source of truth for every file the spec touches. Any file ref
 |---|---|---|
 | `server/services/middleware/types.ts` | 3 (§6.1) | Replace `AgentRunCheckpoint`/`SerialisableMiddlewareContext`/`SerialisablePreToolDecision`/`PreToolDecision` definitions with `export type { … } from '../../../shared/types/agentExecutionCheckpoint.js'` re-exports. |
 | `server/db/schema/agentRunSnapshots.ts` | 3 (§6.1) | Update import on line 3 from `../../services/middleware/types.js` to `../../../shared/types/agentExecutionCheckpoint.js`. (Phase 5 §8.4 P3-M6 also drops the `toolCallsLog` column declaration here — conditional on Sprint 3B status.) |
+| `server/db/schema/agentRuns.ts` | 5 (§8.4 — schema-leaf tail) | Update import on line 3 from `../../services/agentRunHandoffServicePure` to `../../../shared/types/agentRunHandoff.js`. |
+| `server/db/schema/skillAnalyzerJobs.ts` | 5 (§8.4 — schema-leaf tail) | Update import on line 15 from `../../services/skillAnalyzerServicePure.js` to `../../../shared/types/skillAnalyzerJob.js`. |
+| `server/services/agentRunHandoffServicePure.ts` | 5 (§8.4 — schema-leaf tail) | Replace `AgentRunHandoffV1` definition with `export type { AgentRunHandoffV1 } from '../../shared/types/agentRunHandoff.js'` re-export. |
+| `server/services/skillAnalyzerServicePure.ts` | 5 (§8.4 — schema-leaf tail) | Replace `SkillAnalyzerJobStatus` definition with `export type { SkillAnalyzerJobStatus } from '../../shared/types/skillAnalyzerJob.js'` re-export. |
 | `server/lib/briefVisibility.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
 | `server/lib/workflow/onboardingStateHelpers.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
 | `server/routes/memoryReviewQueue.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; extend existing `memoryReviewQueueService`. Add `resolveSubaccount(req.params.subaccountId, req.orgId!)` at every handler with the `:subaccountId` param (replaces the inline subaccount check). |
@@ -1630,6 +1624,7 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/services/skillStudioService.ts` | 1C (§4.3) | Add `eq(skills.organisationId, organisationId)` to WHERE clauses on lines 168 and 309. |
 | `scripts/verify-rls-session-var-canon.sh` | 1E (§4.5) | Implement hard-coded historical-baseline allowlist for 0204–0208 + 0212. |
 | `scripts/verify-rls-coverage.sh` | 1E (§4.5) | Implement parallel hard-coded historical-baseline allowlist for the same six files. |
+| `scripts/verify-action-call-allowlist.sh` | 2 (§5.1) | Update line 29 `ALLOWLIST_FILE` from `server/lib/playbook/actionCallAllowlist.ts` to `server/lib/workflow/actionCallAllowlist.ts` (the existing canonical file). |
 | `server/jobs/measureInterventionOutcomeJob.ts` | 2 (§5.2) | Replace direct `canonicalAccounts` SELECT (lines 213–218) with `canonicalDataService.accountExistsInScope(principal, accountId)` (or existing equivalent). |
 | `server/services/llmRouter.ts` | 2 (§5.3) | Add `countTokens` method + re-export `SUPPORTED_MODEL_FAMILIES`/`SupportedModelFamily`. |
 | `server/services/referenceDocumentService.ts` | 2 (§5.3) | Replace import from `./providers/anthropicAdapter.js` (line 7) with import from `./llmRouter.js`. Update call-site to pass `context` object. |
@@ -1657,7 +1652,8 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/skills/workflow_read_existing.md` | 4 (§7.1.2) | Same. |
 | `server/skills/workflow_simulate.md` | 4 (§7.1.2) | Same. |
 | `server/skills/workflow_validate.md` | 4 (§7.1.2) | Same. |
-| `package.json` | 4 (§7.2.1, §7.2.2) | Add `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` as direct deps; add `yaml` as dev dep. |
+| `package.json` | 4 (§7.2.1) | Add `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` as direct deps. (`yaml` is already declared as a devDependency — no edit needed for §7.2.2.) |
+| `docs/integration-reference.md` | 4 (§7.2.2) | Add the integration-block entries for any MCP presets the gate flags as missing (Discord, Twilio, SendGrid, GitHub at spec-authoring time). |
 | `package-lock.json` | 4 (§7.2) | Updated by `npm install`; committed alongside `package.json`. |
 | `docs/capabilities.md` | 4 (§7.3) | Edit line 1001 — replace "Anthropic-scale distribution" with operator-chosen replacement. **Operator-led only.** |
 | `server/lib/testRunRateLimit.ts` | 5 (§8.1) | Rewrite from in-memory to delegate to `rateLimitStoreService`. Preserve exported function signatures. The lib file itself does not import `db` — it imports the service. |
@@ -1668,7 +1664,7 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/routes/public/formSubmission.ts` | 5 (§8.1) | Replace inline `checkRateLimit` + `rateLimitMiddleware` (lines 31, 54) with calls into `rateLimitStoreService`; await the async path. |
 | `server/routes/public/pageTracking.ts` | 5 (§8.1) | Replace inline `checkTrackRateLimit` (line 29) with calls into `rateLimitStoreService`; await the async path. |
 | `server/jobs/index.ts` | 5 (§8.1) | Register `rateLimitBucketCleanupJob` in the canonical job-export aggregator. |
-| `server/lib/queueSchedule.ts` (or equivalent cron-schedule module — confirm at implementation time) | 5 (§8.1) | Add the hourly cron schedule entry for `rateLimitBucketCleanupJob`. |
+| `server/services/queueService.ts` | 5 (§8.1) | Register the `rateLimitBucketCleanupJob` worker and its hourly pg-boss cron schedule alongside the existing scheduled jobs. |
 | `server/services/executionBudgetResolver.ts` | 5 (§8.3) | Replace `as any` on lines 71–72 with `InferSelectModel<...>` types. |
 | `server/services/dlqMonitorService.ts` | 5 (§8.3) | Replace `(boss as any).work(` on line 28 with typed wrapper. |
 | `server/jobs/bundleUtilizationJob.ts` | 5 (§8.3) | Replace `as any` on line 125 with derived correct type. |
@@ -1731,7 +1727,7 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 - [ ] `npx madge --circular --extensions ts server/ | wc -l` ≤ 5.
 - [ ] `npx madge --circular --extensions ts,tsx client/src/ | wc -l` ≤ 1.
 - [ ] `shared/types/agentExecutionCheckpoint.ts` exists and exports `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision`.
-- [ ] `server/db/schema/agentRunSnapshots.ts` imports only from `drizzle-orm`, `drizzle-orm/pg-core`, sibling schema files, or `shared/**`. No `server/services/**`, `server/lib/**`, or `server/middleware/**` imports.
+- [ ] `server/db/schema/agentRunSnapshots.ts` imports only from `drizzle-orm`, `drizzle-orm/pg-core`, sibling schema files, or `shared/**`. No `server/services/**`, `server/lib/**`, or `server/middleware/**` imports. (Note: the broader leaf-rule guarantee for every schema file is NOT in Phase 3 scope — `agentRuns.ts` and `skillAnalyzerJobs.ts` also violate it today; those are tail items in §8.4. The Phase 3 fix is the cascade-driver only.)
 - [ ] `npm run build:server` passes.
 - [ ] `npm run build:client` passes.
 - [ ] `npm test -- agentExecutionServicePure.checkpoint` passes.
