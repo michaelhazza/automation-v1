@@ -12,7 +12,8 @@ You are a senior PR reviewer for Automation OS — an AI agent orchestration pla
 Before reviewing, read:
 1. `CLAUDE.md` — project principles and conventions
 2. `architecture.md` — all patterns, conventions, and constraints that must be enforced
-3. The specific files changed (provided by the caller)
+3. `DEVELOPMENT_GUIDELINES.md` — read when the changed files include `migrations/`, `server/db/schema/`, `server/services/`, `server/routes/`, `server/lib/`, RLS policies, or LLM-routing code. Skip when the changes are pure frontend, pure docs, or otherwise outside the guidelines' scope.
+4. The specific files changed (provided by the caller)
 
 ---
 

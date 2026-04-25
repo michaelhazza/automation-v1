@@ -40,8 +40,9 @@ The frontmatter `name:` + `description:` + `tools:` fields exist for tooling com
 Before Setup, read:
 1. `CLAUDE.md` — project conventions (fleet ordering, review-log persistence rules, deferred-items routing)
 2. `architecture.md` — patterns and contracts your mechanical fixes must follow
+3. `DEVELOPMENT_GUIDELINES.md` — read when the spec touches tenant data, migrations, schema, RLS, the service/route/lib tier, LLM routing, or gates. Skip when the spec is pure frontend, pure docs, or otherwise outside the guidelines' scope.
 
-The third context input — the spec file itself — is read **after** Setup Step A identifies its path (see Step A's closing instruction "Once detected, read the spec in full"). It can't be read before Setup because Setup is what resolves which spec to read.
+The fourth context input — the spec file itself — is read **after** Setup Step A identifies its path (see Step A's closing instruction "Once detected, read the spec in full"). It can't be read before Setup because Setup is what resolves which spec to read.
 
 ---
 
@@ -287,7 +288,7 @@ If any re-verification fails, reclassify the affected REQ as DIRECTIONAL_GAP, re
 
 Write the consolidated review log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` with this structure.
 
-**Filename convention:** follows the canonical review-log shape defined in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Summary: `<slug>` is the feature/spec slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name derived from the spec path otherwise; `<chunk-slug>` is included ONLY when the caller named a specific plan chunk (e.g. `feature-coordinator` per-chunk invocations) — omit it for manual whole-branch invocations — and is derived deterministically as kebab-case of the chunk name (lowercase, ASCII, hyphen-separated, no spaces/underscores/duplicate hyphens); `<timestamp>` is ISO 8601 UTC with seconds (e.g. `2026-04-22T07-08-30Z`). Use the same slug/chunk-slug in the scratch filename (Step 1) and in the `tasks/todo.md` source-log reference (Step 4b) — all three must match.
+**Filename convention:** follows the canonical review-log shape defined in `tasks/review-logs/README.md`. Summary: `<slug>` is the feature/spec slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name derived from the spec path otherwise; `<chunk-slug>` is included ONLY when the caller named a specific plan chunk (e.g. `feature-coordinator` per-chunk invocations) — omit it for manual whole-branch invocations — and is derived deterministically as kebab-case of the chunk name (lowercase, ASCII, hyphen-separated, no spaces/underscores/duplicate hyphens); `<timestamp>` is ISO 8601 UTC with seconds (e.g. `2026-04-22T07-08-30Z`). Use the same slug/chunk-slug in the scratch filename (Step 1) and in the `tasks/todo.md` source-log reference (Step 4b) — all three must match.
 
 ```markdown
 # Spec Conformance Log

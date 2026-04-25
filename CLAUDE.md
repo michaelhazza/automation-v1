@@ -6,17 +6,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 >
 > **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, and multi-tenant safety checklist. Read it before any PR that touches tenant data, migrations, schema, or the service/route/lib tier.
 >
-> **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills.
->
-> **Editorial rules for `docs/capabilities.md` (persistent — apply to every update):**
->
-> 1. **No specific LLM / AI provider or product names** in the customer-facing sections — Core Value Proposition, Positioning & Competitive Differentiation, Product Capabilities, Agency Capabilities, Replaces / Consolidates. Do not reference Anthropic, Claude, Claude Code, Cowork, Routines, Managed Agents, Agent SDK, OpenAI, ChatGPT, GPT, Gemini, Google, Microsoft Copilot, or any other named provider or their product lines in these sections. Use generic category language instead: *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs,"* etc.
-> 2. **Named provider references are permitted only in the Support-facing sections** — Integrations Reference and Skills Reference — where they are factual product documentation, not marketing. Even there, prefer neutral factual phrasing over marketing language.
-> 3. **Use marketing- and sales-ready terminology throughout the customer-facing sections.** Write for end-users, agency owners, and buyers — not engineers. Avoid internal technical identifiers (table names, service names, library names such as `pg-boss`, `BullMQ`, `Drizzle`) in customer-facing sections. Industry-standard terms (OAuth, HTTP, webhook, Docker, Playwright) are acceptable when they clarify the offering.
-> 4. **Positioning stays vendor-neutral even under objection.** If a prospect asks "why not Anthropic / Claude / OpenAI specifically?", the written collateral still uses generic category language — *"LLM providers sell capability; Synthetos sells the business."* Specific vendor responses belong in live sales conversations, not in the registry.
-> 5. **Model-agnostic is the north star.** When the topic of LLM choice comes up, frame Synthetos as *"model-agnostic across every frontier and open-source LLM — we route to the best one per task."* Never imply a default, preferred, or premium provider in customer-facing copy.
->
-> Violations of rules 1–5 block the edit — revise before committing.
+> **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills. **Editorial Rules** (vendor-neutral, marketing-ready, model-agnostic) live in `docs/capabilities.md` § *Editorial Rules* — violations block the edit.
 
 ---
 
@@ -25,10 +15,11 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - Write detailed specs upfront to reduce ambiguity
 - Define both execution steps AND verification steps before starting
-- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation. Strong success criteria let you loop independently; vague instructions ("make it work") require constant clarification.
+- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation.
 - If something goes sideways, STOP and re-plan immediately. Do not keep pushing.
-- **Stuck detection rule:** If you attempt the same approach twice and it fails both times, you are stuck. Do not try a third time.
 - Use plan mode for verification steps, not just building
+
+**Stuck detection.** If the same approach fails twice (same file edit failing the same check, same command erroring with the same message, same architectural approach hitting the same wall — rephrasing the same logic does NOT count as different), you are stuck. STOP. Write the blocker to `tasks/todo.md` under `## Blockers` (what was attempted, exact failure, root-cause hypothesis, what you'd try next), then ask the user. Do not try a third time. Try a fundamentally different approach, read more context, or check if the problem is upstream — never retry-with-rephrasing.
 
 ## 2. Subagent Strategy
 
@@ -102,54 +93,12 @@ Run these after every non-trivial change. No task is complete until all relevant
 - Find root cause, not symptoms
 - Fix failing CI tests proactively without being told how
 
-## Stuck Detection Protocol
-
-When stuck (same approach fails twice):
-
-1. **STOP** — do not retry the same thing a third time
-2. **Write the blocker** to `tasks/todo.md` under a `## Blockers` heading:
-   - What was attempted (be specific — file, function, approach)
-   - Exact error or failure mode
-   - Why you think it failed (root cause hypothesis)
-   - What you would try next if unblocked
-3. **Ask the user** — present the blocker summary and wait for direction
-
-### What counts as "the same approach"
-- Same file edit that fails the same check twice
-- Same command that errors twice with the same message
-- Same architectural approach that hits the same wall
-- Rephrasing the same logic does NOT count as a different approach
-
-### What to do instead of retrying
-- Try a fundamentally different approach (different algorithm, different file, different pattern)
-- Read more context (maybe you're missing something)
-- Check if the problem is upstream (wrong assumption, stale data, missing dependency)
-
----
-
 ## 8. Skills = System Layer
 
-- Skills are NOT just markdown files. They are modular systems the agent can explore and execute.
-- Each skill folder can include: reference knowledge, executable scripts, datasets, workflows, and automation
+- Skills are NOT just markdown files. They are modular systems the agent can explore and execute — reference knowledge, executable scripts, datasets, workflows, automation.
 - The agent does not just read skills. It uses them.
-- Use skills for: verification, automation, data analysis, scaffolding, and review
-- Skills are reusable intelligence. Treat them as internal products.
-
-**Skill categories to build toward:**
-
-| Category | Purpose |
-|---|---|
-| Knowledge | Teach APIs, CLIs, and system behaviour |
-| Verification | Test flows, assert correctness, check outputs |
-| Data | Fetch, analyse, and compare signals |
-| Automation | Run repeatable workflows |
-| Scaffolding | Generate structured code and boilerplate |
-| Review | Enforce quality and standards |
-| CI/CD | Deploy, monitor, and rollback |
-| Runbooks | Debug real production issues |
-| Infra ops | Manage systems safely |
-
-Each skill should have a single clear responsibility.
+- Use skills for: verification, automation, data analysis, scaffolding, review, CI/CD, runbooks, infra ops.
+- Each skill has a single clear responsibility. Skills are reusable intelligence — treat them as internal products.
 
 ## 9. File System = Context Engine
 
@@ -203,21 +152,13 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 
 ## Long Document Writing
 
-Large single-shot `Write` calls to long documentation files can freeze Claude Code. Any time you are about to produce a documentation file (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, or an extensionless `README`/`CHANGELOG`/`LICENSE`) that will exceed **~10,000 characters** (roughly 250–300 lines of typical markdown), use the chunked workflow — no exceptions.
+Documentation files (`.md`, `.mdx`, `.rst`, `README`/`CHANGELOG`/`LICENSE`) over ~10,000 characters must use the chunked workflow — `.claude/hooks/long-doc-guard.js` blocks single Writes that exceed the threshold:
 
-### Workflow
+1. `TodoWrite` task list — one todo per chunk, named after its section. The list is mandatory; the user needs to see the phases move through.
+2. Single `Write` for the skeleton (header + ToC + headings only).
+3. `Edit` to append each section. Mark its todo `in_progress` before, `completed` immediately after. Never batch completions.
 
-1. **Create a `TodoWrite` task list first.** One todo per chunk. The user needs to SEE the phases move through — the task list is **mandatory, not optional**. Name each todo after the section it covers (e.g. "Chunk 2/5 — Testing philosophy").
-2. **Write the skeleton once.** A single `Write` call containing only the file header, table of contents, and section headings. Keep the skeleton well under the 10,000-char threshold.
-3. **Append each section via `Edit`.** For every chunk: mark its todo `in_progress`, use `Edit` to append the section content, mark the todo `completed`, give the user a one-line summary of what landed, then move to the next chunk.
-4. **Never batch completions.** Update the task list one chunk at a time so the user watches live progress through the phases.
-5. **Track chunks in `tasks/todo.md`** for Significant or Major documents, the same as any other multi-step task.
-
-### Enforcement
-
-`.claude/hooks/long-doc-guard.js` runs as a `PreToolUse` hook on every `Write` tool call. If the target file is a documentation file and the content exceeds 10,000 characters, the hook blocks the call (exit 2) and feeds instructions back to Claude. If you ever see `BLOCKED by long-doc-guard`, do not try to "work around" it — follow the chunked workflow above.
-
-Threshold and scope live in `.claude/hooks/long-doc-guard.js` (`LONG_DOC_THRESHOLD`, `DOC_EXT_RE`, `DOC_BASENAME_RE`). Update them there, not in settings.
+If you see `BLOCKED by long-doc-guard`, follow the workflow — don't work around it. Threshold and scope live in `.claude/hooks/long-doc-guard.js`.
 
 ---
 
@@ -278,123 +219,34 @@ Classify every task before starting:
 | **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then `spec-conformance` (if spec-driven), then `pr-reviewer`. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
 | **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → `spec-conformance` → `pr-reviewer`). `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
 
-### Invoking agents
+### Common invocations
 
 ```
-# Capture an idea without stopping the session
-"triage-agent: idea: [description]"
-
-# Capture a bug
-"triage-agent: bug: [description]"
-
-# Get an architecture plan before implementing
-"architect: [feature description]"
-
-# Verify the code matches the spec — runs BEFORE pr-reviewer on spec-driven tasks
-# Auto-detects the spec and changed files. Auto-fixes mechanical gaps.
-# Routes directional gaps to tasks/todo.md. Never edits the spec.
+"triage-agent: idea: [description]"     # capture without derailing
+"architect: [feature description]"       # plan before implementing (Significant/Major)
 "spec-conformance: verify the current branch against its spec"
-# (optionally scope to a phase/chunk if a long plan is only partially implemented)
-"spec-conformance: verify phase 1 of [spec path]"
-
-# Independent review after implementation
 "pr-reviewer: review the changes I just made to [file list]"
-
-# Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
-
-# Codebase audit per docs/codebase-audit-framework.md
-# IMPORTANT: audit-runner runs INLINE in the current session — do NOT use the Agent tool.
-# Read .claude/agents/audit-runner.md and execute the instructions directly so the
-# TodoWrite task list is visible to the user.
-# Default to Hotspot mode. Subsystems: rls, agent-execution, queues, skills, webhooks, frontend
-"audit-runner: hotspot rls"
-"audit-runner: hotspot agent-execution"
-"audit-runner: targeted areas 1,2,7 modules I,J"
-"audit-runner: full"
-
-# Second-phase Codex loop for CODE — LOCAL DEV ONLY, manual trigger only.
-# dual-reviewer depends on the local Codex CLI. It is NOT available in Claude
-# Code on the web. Never auto-invoke — only run when the user explicitly asks.
-"dual-reviewer: [brief description of what was implemented]"
-
-# Spec review loop for SPEC DOCUMENTS (not code)
-# Run AFTER a draft spec is written, BEFORE implementing against it
+"audit-runner: hotspot rls"              # see audit-runner.md for full mode list
+"dual-reviewer: [brief description]"     # local-only, user must explicitly ask
 "spec-reviewer: review docs/path-to-spec.md"
 ```
 
-### Independent review is not optional
+`audit-runner` runs INLINE in the current session — do NOT use the Agent tool. Read `.claude/agents/audit-runner.md` and execute its instructions directly so the TodoWrite task list is visible.
 
-For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done. The main session has implementation bias. The reviewer eliminates it.
+### Review pipeline (mandatory order)
 
-**For spec-driven tasks, run `spec-conformance` before `pr-reviewer`.** The development session can silently miss spec items (missed files, missed exports, missed columns, missed error codes) while claiming completion. `spec-conformance` catches those gaps: it auto-fixes the mechanical ones (where the spec explicitly names the missing item) and routes directional gaps to `tasks/todo.md` for human resolution. If `spec-conformance` applied any mechanical fixes, re-run `pr-reviewer` on the expanded changed-code set — the reviewer needs to see the final state, not the pre-fix state.
+For Standard/Significant/Major tasks, before marking done or opening a PR:
 
-**Processing `spec-conformance` NON_CONFORMANT findings — standalone contract.** When `spec-conformance` returns `NON_CONFORMANT` (directional/ambiguous gaps routed to `tasks/todo.md`), the caller — whether `feature-coordinator` or a manual invocation by the main session — processes the dated section the same way `pr-reviewer` findings are processed: (1) non-architectural gaps → fix in-session, then re-invoke `spec-conformance` to confirm closure (max 2 re-invocations); (2) architectural gaps (significant redesign, contract change, multi-service impact) → leave in the dated section as the raw record AND promote into `## PR Review deferred items / ### <slug>` so they survive across review cycles — do not re-invoke `spec-conformance`, escalate instead. This rule applies identically regardless of whether `spec-conformance` was invoked by `feature-coordinator` per-chunk or manually via `spec-conformance: verify the current branch against its spec`.
+1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
+2. `pr-reviewer` — always.
+3. `dual-reviewer` — optional, local-only, user must explicitly ask.
 
-If no spec was the source of truth for the task (ad-hoc bug fix, small refactor), `spec-conformance` is not applicable — skip it.
-
-**Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request. For spec-driven work, that means: `spec-conformance` → `pr-reviewer` (re-run after any mechanical fixes `spec-conformance` applied) → (optionally `dual-reviewer`) → PR.
-
-### `dual-reviewer` is a local-development-only optional add-on
-
-`dual-reviewer` runs a Codex CLI review loop with Claude adjudicating each recommendation. It is **only available when the session is running locally** on a machine with the Codex CLI installed and authenticated — it does **not** run in Claude Code on the web, in CI, or in any remote sandbox.
-
-**Never auto-invoke `dual-reviewer`.** The main session must not spawn this agent on its own judgement, even for Significant or Major tasks. Auto-invocation in a non-local environment hangs the session waiting on a command that cannot execute, and silently burns time on a review the user did not ask for.
-
-**Only invoke `dual-reviewer` when:**
-
-1. The user **explicitly** asks for it (e.g. "run dual-reviewer", "do the Codex pass"), AND
-2. The session is local. If uncertain, ask the user before spawning.
-
-The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking findings are addressed. `dual-reviewer` is a power-user add-on for an extra pass when the local environment supports it — not a gate on the PR.
-
-### Review logs must be persisted
-
-Every review-loop invocation — `pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review` — produces a durable log on disk under `tasks/review-logs/`. All review logs live in that single directory to keep the main `tasks/` tree uncluttered. The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
-
-- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context. **After persisting**, process findings in this order: (1) Blocking non-architectural findings → implement in-session; (2) Blocking findings that are architectural in nature (significant redesign, contract change, multi-service impact) → route to `tasks/todo.md` under `## PR Review deferred items / ### <slug>` rather than attempting in-place; (3) Strong Recommendations → implement if in-scope, otherwise defer to the same backlog section.
-- **`spec-conformance` self-writes.** `spec-conformance` writes its own log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` per its agent spec. `<chunk-slug>` is present when the agent is invoked by `feature-coordinator` per-chunk (matches the `pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` precedent), and omitted for manual whole-branch invocations. The agent also appends its directional/ambiguous findings to `tasks/todo.md` under a dated section (`## Deferred from spec-conformance review — <spec-slug>`). The caller does not need to persist anything — just read the log path the agent returns. If the log's Next-step verdict is `CONFORMANT_AFTER_FIXES`, the agent modified files in-session and the caller must re-run `pr-reviewer` on the expanded changed-code set. If the Next-step verdict is `NON_CONFORMANT`, triage the dated section: non-architectural gaps resolve in-session the same way as `pr-reviewer` blocking findings, then re-invoke `spec-conformance` to confirm closure; architectural gaps stay in the dated section (the raw record), and the caller additionally promotes them into `## PR Review deferred items / ### <slug>` so they survive across review cycles — do not re-invoke `spec-conformance` if the remaining gap set is architectural-only or ambiguous-only, escalate to the user instead.
-- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
-- **`chatgpt-pr-review` and `chatgpt-spec-review` self-write.** Both agents write their own session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md` and `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md` respectively. The caller does not need to persist anything.
-
-If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
-
-### Review-log filename convention — canonical definition
-
-All review-log filenames use the shape:
-
-```
-tasks/review-logs/<agent>-log-<slug>[-<chunk-slug>]-<timestamp>.md
-```
-
-- **`<slug>`** — the feature/spec slug when working under `tasks/builds/<slug>/`, otherwise a short kebab-case name derived from the branch or spec path.
-- **`<chunk-slug>`** — present ONLY when the review is scoped to a single plan chunk (e.g. `feature-coordinator` per-chunk invocations of `spec-conformance` or `pr-reviewer`); omitted for manual whole-branch invocations. **Format: kebab-case of the chunk name — lower-case, ASCII, hyphen-separated, no spaces or underscores, no duplicate hyphens.** Derive deterministically: lowercase the chunk name, replace any run of non-alphanumeric characters with a single hyphen, trim leading/trailing hyphens. Example: chunk name `"DB schema — agent_runs"` → `db-schema-agent-runs`.
-- **`<timestamp>`** — ISO 8601 UTC with seconds and hyphens between time fields (e.g. `2026-04-22T07-08-30Z`).
-
-Every agent that writes a review log (`pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review`) uses this shape. When referencing the review log from another artifact (`tasks/todo.md` source-log field, `progress.md` Notes column, a scratch file), use the same slug and chunk-slug so all three match.
-
-### Deferred actions route to `tasks/todo.md` — single source of truth
-
-Every review loop — `pr-reviewer`, `dual-reviewer`, `spec-reviewer`, `spec-conformance`, `chatgpt-pr-review`, `chatgpt-spec-review` — that produces deferred action items writes them to **`tasks/todo.md`**, not to per-session side files. The review log in `tasks/review-logs/` keeps the raw finding-by-finding record; `tasks/todo.md` carries the curated backlog.
-
-Why one file: a future session picking up deferred work needs to grep one place, not scan a directory of session logs. Existing sections (Hermes Tier 1, Live Agent Execution Log) already use this pattern.
-
-Append rules:
-- **New dated section per review session** — heading shape `## Deferred from <agent> review — <PR-or-spec-ref>` with `**Captured**`, `**Source log**`, and a checkbox list. Never mix a new review's items into an existing feature's section.
-- **Append-only** — never rewrite or delete existing sections. Future triage sessions close items by checking the box, not by deleting the line.
-- **Dedup before append** — scan for a similar existing entry (same `finding_type` OR same leading ~5 words); skip if already present so re-runs don't duplicate.
-- **Docs-cleanup trigger.** The ChatGPT review agents call this step automatically at finalization (see `docs/superpowers/specs/2026-04-22-chatgpt-review-agents-design.md` §Agent: `chatgpt-pr-review` Finalization step 5, and the mirror step in the spec-review agent). Manual reviewers (humans, or sessions running `pr-reviewer` / `spec-reviewer`) follow the same convention when promoting a review finding to a backlog item.
-- **No concurrent review agents against the same repo.** `tasks/todo.md` is a single shared file — two review agents appending simultaneously will race on the write. The human-in-the-loop invocation model already prevents this in practice; don't fight it by fanning out review agents in parallel on the same branch.
-
-The superseded file `tasks/review-logs/_deferred.md` was never created — the convention is `tasks/todo.md` from day one.
+Full caller contracts (filename convention, deferred-items routing, NON_CONFORMANT triage, log persistence) live in [`tasks/review-logs/README.md`](./tasks/review-logs/README.md). Each agent definition under `.claude/agents/` carries its own copy of the contract relevant to that agent.
 
 ### Before you write a spec
 
-For any Significant or Major spec, read `docs/spec-authoring-checklist.md` before drafting. It is a pre-authoring checklist derived from patterns the `spec-reviewer` has caught across 15+ production specs — primitives-reuse search, file-inventory lock, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, and testing posture.
-
-The checklist points back at the deep references in `architecture.md` and `docs/spec-context.md`; it does not restate them. Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop — every unchecked box is a finding the reviewer will raise anyway.
-
-Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checklist — just write and move on.
+For Significant/Major specs, read [`docs/spec-authoring-checklist.md`](./docs/spec-authoring-checklist.md) before drafting. Trivial specs (typos, one-liners, pure ADRs) skip it.
 
 ---
 
@@ -433,12 +285,7 @@ See [`architecture.md` § Architecture Rules](./architecture.md). Violations are
 
 ## Core Principles
 
-- **Simplicity First** -- Make every change as simple as possible. Impact minimal code.
-- **No Lazy Fixes** -- Find root causes. No temporary patches. Senior developer standards.
-- **Systems over Prompts** -- Better systems scale. Better prompts do not.
-- **Verification over Generation** -- Proving something works matters more than producing it fast.
-- **Iteration over Perfection** -- Ship, learn, improve. Do not stall waiting for perfect.
-- **Structure over Volume** -- A well-organised project with less content beats a dumped context window.
+Simplicity first — minimal code, root causes, no lazy patches. Systems over prompts. Verification over generation. Iteration over perfection. Structure over volume.
 
 ---
 
@@ -450,19 +297,17 @@ See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are dur
 
 ## Frontend Design Principles
 
-**Automation OS is a consumer-simple product built on enterprise-grade backend capability.** Backend specs stay thorough — they must cover the full capability surface. Frontend surfaces stay minimal — they must be usable by non-technical operators without training. A rich backend does not justify a rich UI; those are two different decisions.
+Automation OS is a consumer-simple product built on enterprise-grade backend capability. A rich backend does not justify a rich UI — frontend surfaces must be usable by non-technical operators without training.
 
-The failure mode to avoid: surfacing every backend capability the spec exposes as a frontend screen. Utilization metrics, attribution hashes, per-tenant aggregations, diagnostic panels — the backend needs to compute them; the UI almost never needs to render them by default. Most of them either belong in admin-only views, behind progressive disclosure, or deferred out of v1 entirely.
+**Five hard rules — applied to every UI artifact:**
 
-**Five hard rules — applied to every UI artifact (mockup, component, page):**
+1. **Start with the user's primary task, not the data model.** Design the minimum surface for that task. If you're mapping backend columns to UI panels, stop and restart from the task.
+2. **Default to hidden.** Metric dashboards, KPI boards, trend charts, diagnostic panels, ID exposure, aggregated-cost views — deferred by default. Ship only when a specific workflow requires them, or behind admin-only views.
+3. **One primary action per screen.** ≥2 primary actions → split. ≥3 sidebar panels → cut one. Table + chart + ranking + KPI tiles means you're rebuilding a monitoring product on top of the core product.
+4. **Inline state beats dashboards.** A status dot beats a utilization dashboard. A "last run · succeeded" line beats a run-history panel. Ask: can this live as inline state on an existing page?
+5. **The re-check.** Before committing a UI artifact: would a non-technical operator complete the primary task without feeling overwhelmed? If not, cut information.
 
-1. **Start with the user's primary task, not the data model.** Before sketching any screen, answer: *what single task is the user here to complete?* Design the minimum surface for that task. If you find yourself designing from "the backend exposes columns X, Y, Z — so the UI shows panels X, Y, Z", stop and start over from the task.
-2. **Default to hidden.** Metric dashboards, KPI boards, trend charts, diagnostic panels, prefix-hash / ID exposure, aggregated-cost views, per-tenant financial breakdowns, observability surfaces — all **deferred by default**. Ship them only when a specific user asks for a specific workflow that requires them, or when they go in an admin-only view that the average user never sees.
-3. **One primary action per screen.** If a screen has ≥ 2 primary actions, split it. If it has ≥ 3 sidebar panels, cut one. If it has a table AND a chart AND a ranking AND KPI tiles, you're rebuilding a monitoring product on top of the core product.
-4. **Inline state beats dashboards.** A status dot next to a name beats a utilization dashboard. A single "last run · succeeded" line beats a run-history panel. Before adding a new page, ask: *can this live as inline state on a page that already exists?* Usually yes.
-5. **The re-check.** Before committing any UI artifact, ask: *would a non-technical operator complete the primary task on this screen without feeling overwhelmed?* If the answer is anything other than "yes, obviously", cut information until it is.
-
-**Deep rationale, pre-design checklist, worked good-vs-bad examples:** see [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read that doc before generating a mockup or designing a new page.
+**Deep rationale, pre-design checklist, worked examples:** [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read it before generating a mockup or designing a new page.
 
 ---
 

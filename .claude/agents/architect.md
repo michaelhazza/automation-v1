@@ -48,7 +48,8 @@ Load these in order in Step 2:
 1. `CLAUDE.md` — project principles, task workflow, and conventions
 2. `architecture.md` — backend structure, route conventions, auth model, three-tier agent hierarchy, skill system, service patterns, and all key patterns
 3. `docs/spec-authoring-checklist.md` — pre-authoring checklist for Significant/Major plans. Every plan you produce must satisfy its appendix (primitives search, file inventory, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, testing posture) or document an explicit deviation.
-4. The specific task, bug report, or feature description provided
+4. `DEVELOPMENT_GUIDELINES.md` — read when the task touches tenant data, migrations, schema, RLS, the service/route/lib tier, LLM routing, or gates. Skip when the task is pure frontend, pure docs, or otherwise outside the guidelines' scope.
+5. The specific task, bug report, or feature description provided
 
 Do not skip context loading. Architecture decisions made without understanding the existing patterns create inconsistency.
 
