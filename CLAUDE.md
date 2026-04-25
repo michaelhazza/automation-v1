@@ -247,6 +247,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
+| `audit-runner` | Runs codebase audits per `docs/codebase-audit-framework.md`. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings → high-confidence fixes → deferred), self-writes the audit log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`, routes deferred items to `tasks/todo.md`, and hands off to `spec-conformance` (if spec-driven changes were made) and `pr-reviewer` at the end. Auto-commits and auto-pushes within its own flow. Does not create PRs — the user does. | Periodic codebase hygiene (quarterly), pre-major-release gating, post-incident health check, or any time a subsystem (RLS, agent execution, queues, skills, webhooks, frontend) feels gnarly. Default to Hotspot mode. |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
 | `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
 
@@ -299,6 +300,13 @@ Classify every task before starting:
 
 # Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
+
+# Codebase audit per docs/codebase-audit-framework.md
+# Default to Hotspot mode. Subsystems: rls, agent-execution, queues, skills, webhooks, frontend
+"audit-runner: hotspot rls"
+"audit-runner: hotspot agent-execution"
+"audit-runner: targeted areas 1,2,7 modules I,J"
+"audit-runner: full"
 
 # Second-phase Codex loop for CODE — LOCAL DEV ONLY, manual trigger only.
 # dual-reviewer depends on the local Codex CLI. It is NOT available in Claude
@@ -456,5 +464,5 @@ The failure mode to avoid: surfacing every backend capability the spec exposes a
 ## User Preferences
 
 - Concise communication, no emojis
-- No auto-commits or auto-pushes from the main session — the user commits explicitly after reviewing changes. **Exception:** review agents (`spec-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`, `chatgpt-spec-review`) auto-commit and auto-push within their own flows; the user has explicitly opted in so review output persists to the remote and is visible across sessions. Read-only reviewers (`pr-reviewer`) never commit.
+- No auto-commits or auto-pushes from the main session — the user commits explicitly after reviewing changes. **Exception:** review agents (`spec-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`, `chatgpt-spec-review`, `audit-runner`) auto-commit and auto-push within their own flows; the user has explicitly opted in so review output persists to the remote and is visible across sessions. Read-only reviewers (`pr-reviewer`) never commit.
 - Stop and ask when requirements are ambiguous enough to affect architecture
