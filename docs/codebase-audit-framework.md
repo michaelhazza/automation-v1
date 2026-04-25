@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.1 — Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary clause, invariant-in-code clause (1.0: 2026-04-25 initial calibration from generic v5.0) |
+| Version | 1.2 — Audit Completion Criteria added (1.1: Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary clause, invariant-in-code clause; 1.0: 2026-04-25 initial calibration from generic v5.0) |
 | Status | Active. Reusable across audits. |
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
@@ -1449,6 +1449,18 @@ Record the chosen mode in the audit report header (`Layers run` field of §11 te
 13. Update §2 of this framework if any context-block fact changed.
 14. Hand the audit branch to the user with the final report. The user pushes and creates the PR.
 
+### Audit Completion Criteria
+
+An audit is complete when **all** of the following are true. Anything less is an incomplete audit — do not declare done.
+
+- [ ] All pass-2 fixes applied and validated (Rule 6 checks pass for every area touched, with `N/A` reasons recorded for any check marked not applicable per the no-silent-skip clause).
+- [ ] All pass-3 items recorded in `tasks/todo.md` under `## Deferred from codebase audit — <YYYY-MM-DD>`.
+- [ ] `pr-reviewer` has been run on the audit branch and its log persisted to `tasks/review-logs/pr-review-log-audit-<scope>-<timestamp>.md` (plus `spec-conformance` log if any spec-driven contract was touched).
+- [ ] The audit report itself is persisted at `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md` using the §11 template.
+- [ ] `KNOWLEDGE.md` has been appended with any new patterns or framework gaps the audit surfaced (per §10 and `CLAUDE.md` §3).
+
+The user signing off after reviewing the report is not part of completion criteria — they are the consumer of a complete audit, not the producer of one.
+
 ### Common pitfalls (prevent these)
 
 - **Running pass 2 without finishing pass 1.** Forbidden by Rule 3.
@@ -1477,5 +1489,5 @@ The audit is a tool for protecting the codebase. Better to escalate than to ship
 
 ---
 
-*AutomationOS Codebase Audit Framework v1.1 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code) added 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
+*AutomationOS Codebase Audit Framework v1.2 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code) and v1.2 Audit Completion Criteria added 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
 
