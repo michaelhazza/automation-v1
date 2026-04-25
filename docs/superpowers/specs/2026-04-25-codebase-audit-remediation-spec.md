@@ -61,7 +61,7 @@
 
 The 2026-04-25 full-codebase audit identified 47 findings spanning RLS multi-tenancy, architectural boundaries, schema layering, gate compliance, skill registry coherence, and editorial law. All 47 were routed to pass-3 — none could be auto-applied because every fix either (a) required a new corrective migration (append-only constraint), (b) touched RLS-protected files (auto-downgraded confidence per audit framework Universal Rule 8), (c) touched architectural boundaries (cross-cutting impact), or (d) was governed by editorial law on `docs/capabilities.md` (never auto-rewritten).
 
-This spec is the consolidated remediation contract for the audit's 47 findings plus 18 additional items surfaced by the ground-truth gate run, minus 2 items the audit double-counted — **63 total** in scope (`47 + 8 routes + 2 migration gaps + 8 historical-noise entries − 2 dedupe`). The full reconciliation lives in §3.1 ("Total findings addressed") and the per-gate breakdown in §3.5. The spec exists for one reason: to lock the system invariants — multi-tenancy, RLS, routing, orchestration — before the codebase ships its first agency client. Once these invariants are locked, future feature development inherits the protections without re-litigating them per PR.
+This spec is the consolidated remediation contract for the audit's 47 findings plus 16 additional items surfaced by the ground-truth gate run, minus 2 items the audit double-counted — **63 total** in scope (`47 + 8 routes + 2 migration gaps + 6 historical-noise entries − 2 dedupe + 2 §4.5 gate-baseline deliverables`). The full reconciliation lives in §3.1 ("Total findings addressed") and the per-gate breakdown in §3.5. Migrations `0202` and `0203` are first-creation migrations whose original RLS text is correct and are explicitly NOT part of the historical-noise set (see §4.5). The spec exists for one reason: to lock the system invariants — multi-tenancy, RLS, routing, orchestration — before the codebase ships its first agency client. Once these invariants are locked, future feature development inherits the protections without re-litigating them per PR.
 
 **In scope:**
 - New corrective migration restoring `FORCE ROW LEVEL SECURITY`, `CREATE POLICY`, and the canonical `app.organisation_id` session var on every protected table currently missing them
@@ -245,7 +245,7 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 
 | Gate | Captured violations | Spec section |
 |---|---|---|
-| `verify-rls-coverage` | 19 (across 14 migrations: 0139, 0141, 0142, 0147, 0153, 0192, 0202, 0203, 0204, 0205, 0206, 0207, 0208, 0212) | §4.1, §4.5 |
+| `verify-rls-coverage` | 19 raw matches (the gate's static scan flags entries across 14 migrations: 0139, 0141, 0142, 0147, 0153, 0192, 0202, 0203, 0204, 0205, 0206, 0207, 0208, 0212). Of these, 0202 and 0203 are first-creation migrations with correct RLS text — the gate's flags on those two are noise unrelated to this remediation and are not counted. The remaining 12 distinct issues split into: 4 missing FORCE/POLICY at runtime (0139, 0141, 0142, 0147 — fixed by `0227`), 2 FORCE re-assertion (`0153`, `0192` — also fixed by `0227`), 6 historical-noise allowlist entries needed (`0204`–`0208` + `0212` — fixed by §4.5 baseline). | §4.1, §4.5 |
 | `verify-rls-contract-compliance` | 13 (2 lib, 11 route) | §4.2 |
 | `verify-rls-session-var-canon` | 8 (all in 0204, 0205, 0206, 0207, 0208, 0212) | §4.5 |
 | `verify-org-scoped-writes` | 4 (`documentBundleService` 2, `skillStudioService` 2) | §4.3 |
@@ -253,7 +253,7 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 | `verify-no-direct-adapter-calls` | 1 (`referenceDocumentService:7`) | §5.3 |
 | `verify-canonical-read-interface` | 1 (`measureInterventionOutcomeJob:213-218`) | §5.2 |
 | `verify-action-call-allowlist` | 1 (file missing) | §5.1 |
-| `verify-skill-read-paths` | 1 summary line: -5 actions missing `readPath` (94 vs 99) | §5.5 |
+| `verify-skill-read-paths` | 1 summary line: count mismatch of 5 between literal action entries (94) and entries with `readPath` (99). The direction-of-mismatch ambiguity is documented in §5.5; the captured-state row reports the raw mismatch only — the diagnosis (which entries are wrong, in which direction) is enumerated at execution time. | §5.5 |
 | `verify-principal-context-propagation` | 5 (`actionRegistry:112`, `intelligenceSkillExecutor:1`, `connectorPollingService:7`, `crmQueryPlanner/executors/canonicalQueryRegistry:4`, `webhooks/ghlWebhook:7`) | §5.4 |
 | `verify-canonical-dictionary` | TBD — re-run before Phase 2 begins | §5.6 |
 | `verify-input-validation` | WARNING (no specific files printed) | §5.7 |
@@ -513,7 +513,9 @@ bash scripts/verify-rls-coverage.sh
 # Expected: PASS, 0 violations on memory_review_queue, drop_zone_upload_audit,
 # onboarding_bundle_configs, trust_calibration_state, agent_test_fixtures,
 # agent_execution_events, agent_run_prompts, agent_run_llm_payloads.
-# (Historical 0202–0208/0212 noise still present — see §4.5.)
+# (Historical noise on 0204–0208 + 0212 still present in source files — see §4.5
+#  for the gate-baseline mechanism that suppresses it. Migrations 0202 and 0203
+#  are NOT part of the noise set and have correct original policies.)
 ```
 
 **Risk note.** `WITH CHECK` enforcement on `memory_review_queue`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `trust_calibration_state`, and `agent_test_fixtures` is *new* — these tables previously had `USING`-only policies. After 0227 ships, any caller that writes to these tables without a valid `app.organisation_id` session var will fail. This RLS-rejection is a *temporary fail-closed backstop* during the in-PR window between the migration applying and the route refactors landing; it is **not** the long-term posture. The §15.1 invariant (`never rely on RLS alone`) still applies — Phase 1B must complete its application-level org-scoping pass on every write site before the Phase 1 PR merges, and the §15.1 multi-tenant safety checklist applies to all future write paths regardless. If a write path is uncovered during the in-PR window, the failure mode is a runtime error (write rejected) rather than silent cross-tenant leakage — failing-closed is the desired default for that brief window only.
@@ -527,7 +529,7 @@ bash scripts/verify-rls-coverage.sh
 | 1 | `server/lib/briefVisibility.ts` | 1 | lib | Promote to `server/services/briefVisibilityService.ts` (new) |
 | 2 | `server/lib/workflow/onboardingStateHelpers.ts` | 12 | lib | Move queries into `server/services/onboardingStateService.ts` (new); helpers retain pure-function role |
 | 3 | `server/routes/memoryReviewQueue.ts` | 16 | route | Existing `server/services/memoryReviewQueueService.ts` (extend) |
-| 4 | `server/routes/systemAutomations.ts` | 9 | route (admin) | `server/services/systemAutomationsService.ts` (new) — uses `withAdminConnection()` because system routes operate without an org context |
+| 4 | `server/routes/systemAutomations.ts` | 9 | route (admin) | `server/services/systemAutomationService.ts` (new) — uses `withAdminConnection()` because system routes operate without an org context |
 | 5 | `server/routes/subaccountAgents.ts` | 14 | route | Existing `server/services/subaccountAgentService.ts` (extend) |
 | 6 | `server/routes/configDocuments.ts` | 21 | route | `server/services/configDocumentService.ts` (new) |
 | 7 | `server/routes/portfolioRollup.ts` | 16 | route | `server/services/portfolioRollupService.ts` (new) |
@@ -721,7 +723,7 @@ If any of the above fails, the Phase 1 PR does not merge. There is no "ship Phas
 
 ## §5. Phase 2 — Gate compliance (HIGH)
 
-**Goal:** every architectural-contract gate that currently fails or warns returns clean exit. After Phase 2, the codebase honours every architectural rule it claims to enforce.
+**Goal:** every architectural-contract gate that currently *fails* (blocking) returns clean exit; warning-level gates (`verify-input-validation`, `verify-permission-scope`) do not regress and have any newly introduced regressions resolved (see §5.7). After Phase 2, the codebase honours every blocking architectural rule it claims to enforce; warning-level signals remain as observability for operator-led cleanup, not as ship-blockers.
 
 **Ship gate:** the six gates in §3.1's Phase-2 row return clean exit. See §5.8.
 
@@ -1245,7 +1247,7 @@ The new primitive's surface is narrow: two pure-friendly functions (`incrementBu
 
 **Implementation outline:**
 
-1. **New table.** `migrations/<NNNN>_rate_limit_buckets.sql` — pick the next available migration number at implementation time. Phase 5 PRs land in any order (§2.6, §8.5); the rate-limit-buckets PR claims whichever number is next available when it is opened. Other Phase 5 migrations (e.g. §8.4 P3-M6's `<NNNN>_drop_tool_calls_log.sql`) follow the same rule. **Do not pre-allocate migration numbers across Phase 5 PRs** — every PR resolves the next number against the live state of `migrations/` at the moment it opens.
+1. **New table.** `migrations/<NNNN>_rate_limit_buckets.sql` — the migration number is assigned at merge time per §2.5's concurrent-PR rule (rebase against latest `main` immediately before merge, then rename the file to claim the next available number). Phase 5 PRs land in any order (§2.6, §8.5); other Phase 5 migrations (e.g. §8.4 P3-M6's `<NNNN>_drop_tool_calls_log.sql`) follow the same rule. **Do not pre-allocate migration numbers across Phase 5 PRs** — the rebase-and-rename happens at the head of the merge queue.
    ```sql
    CREATE TABLE rate_limit_buckets (
      bucket_key text NOT NULL,
@@ -1313,7 +1315,7 @@ Each of the items below is small enough to ship as its own one-or-two-file PR. T
 
 **P3-M6 — Remove deprecated `toolCallsLog` column.** `server/db/schema/agentRunSnapshots.ts:52` declares `toolCallsLog` as DEPRECATED with a Sprint 3B removal note. Sprint 3B has not yet shipped. This finding requires:
 - Confirm Sprint 3B's status with the operator (check `tasks/current-focus.md` and `tasks/todo.md`).
-- If 3B is no-longer-in-flight or is rolled into a separate workstream, write `migrations/<NNNN>_drop_tool_calls_log.sql` (next-available number at PR-open time — do not pre-allocate; see §8.1 step 1) that drops the column.
+- If 3B is no-longer-in-flight or is rolled into a separate workstream, write `migrations/<NNNN>_drop_tool_calls_log.sql` (number assigned at merge time per §2.5; do not pre-allocate) that drops the column.
 - Update the schema file to remove the column declaration.
 - Remove any code that reads from or writes to `toolCallsLog` — should be none after 3B's `toolCallsLogProjectionService` deprecation, but verify.
 
@@ -1426,7 +1428,7 @@ CREATE POLICY memory_review_queue_org_isolation ON memory_review_queue
 - `server/lib/testRunRateLimit.ts` — wraps `rateLimitStore` for `is_test_run` test agent runs (callers: `agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`).
 - `server/routes/public/formSubmission.ts` — replaces inline `Map`-based `checkRateLimit` / `rateLimitMiddleware`.
 - `server/routes/public/pageTracking.ts` — replaces inline `Map`-based `checkTrackRateLimit`.
-- `server/jobs/rateLimitBucketCleanupJob.ts` — hourly cleanup of expired rows (read-only against the table; deletes rows older than 1 hour).
+- `server/jobs/rateLimitBucketCleanupJob.ts` — hourly cleanup; performs `DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '1 hour'` and does not read or update other rows.
 
 **Schema:**
 
@@ -1582,12 +1584,12 @@ This is the single source of truth for every file the spec touches. Any file ref
 | File | Phase | Purpose |
 |---|---|---|
 | `migrations/0227_rls_hardening_corrective.sql` | 1A | FORCE RLS + canonical policy on 8 tables across 6 historical migrations. Phase 1 ships first, so `0227` is the only pre-allocated migration number in this spec. |
-| `migrations/<NNNN>_rate_limit_buckets.sql` | 5 (§8.1) | New `rate_limit_buckets` table for multi-process-safe sliding window. Use the next available number at PR-open time. |
-| `migrations/<NNNN>_drop_tool_calls_log.sql` (conditional) | 5 (§8.4 — P3-M6) | Drop deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. Use the next available number at PR-open time. |
+| `migrations/<NNNN>_rate_limit_buckets.sql` | 5 (§8.1) | New `rate_limit_buckets` table for multi-process-safe sliding window. Number assigned at merge time per §2.5. |
+| `migrations/<NNNN>_drop_tool_calls_log.sql` (conditional) | 5 (§8.4 — P3-M6) | Drop deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. Number assigned at merge time per §2.5. |
 | `server/lib/playbook/actionCallAllowlist.ts` | 2 (§5.1) | Empty-by-default allowlist; satisfies `verify-action-call-allowlist` gate |
 | `server/services/briefVisibilityService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/briefVisibility.ts` |
 | `server/services/onboardingStateService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/workflow/onboardingStateHelpers.ts` |
-| `server/services/systemAutomationsService.ts` | 1B (§4.2) | Service for `systemAutomations` route (admin tier — uses `withAdminConnection`) |
+| `server/services/systemAutomationService.ts` | 1B (§4.2) | Service for `systemAutomations` route (admin tier — uses `withAdminConnection`) |
 | `server/services/configDocumentService.ts` | 1B (§4.2) | Service for `configDocuments` route handlers (singular-noun naming per repo convention) |
 | `server/services/portfolioRollupService.ts` | 1B (§4.2) | Service for `portfolioRollup` route handlers |
 | `server/services/automationConnectionMappingService.ts` | 1B (§4.2) | Service for `automationConnectionMappings` route handlers (singular-noun naming) |
@@ -1610,7 +1612,7 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/lib/briefVisibility.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
 | `server/lib/workflow/onboardingStateHelpers.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
 | `server/routes/memoryReviewQueue.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; extend existing `memoryReviewQueueService`. Add `resolveSubaccount(req.params.subaccountId, req.orgId!)` at every handler with the `:subaccountId` param (replaces the inline subaccount check). |
-| `server/routes/systemAutomations.ts` | 1B (§4.2) | Remove direct `db` import; call new `systemAutomationsService`. |
+| `server/routes/systemAutomations.ts` | 1B (§4.2) | Remove direct `db` import; call new `systemAutomationService`. |
 | `server/routes/subaccountAgents.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `subaccountAgentService` (singular). The existing `resolveSubaccount(...)` calls must be preserved verbatim during the extraction. |
 | `server/routes/configDocuments.ts` | 1B (§4.2) | Remove direct `db` import; call new `configDocumentService` (singular). The existing `resolveSubaccount(...)` calls must be preserved. |
 | `server/routes/portfolioRollup.ts` | 1B (§4.2) | Remove direct `db` import; call new `portfolioRollupService`. |
