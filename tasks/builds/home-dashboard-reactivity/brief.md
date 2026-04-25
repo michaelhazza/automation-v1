@@ -41,7 +41,7 @@ So this brief doesn't accidentally re-propose existing work:
 
 - **Component library** — `PendingApprovalCard`, `WorkspaceFeatureCard`, `UnifiedActivityFeed`, `MetricCard`, shimmer skeletons, fade-in animations.
 - **WebSocket infrastructure** — Socket.IO rooms including `org:{orgId}` and `system:sysadmin`. Server-side emitters for execution, agent runs, workflow runs, brief updates.
-- **The live-update pattern itself** — proven in `ClientPulseDashboardPage`. REST snapshot loads instantly; WebSocket pushes deltas into local state.
+- **The live-update pattern itself** — reference UI pattern in `ClientPulseDashboardPage` (REST snapshot + `useSocket` merge). Note: the server emit path for that page's `dashboard:update` channel is not yet wired — captured under §6 emitter coverage. ClientPulse demonstrates the client-side shape; the missing emitter is in scope for this build.
 - **Approval routing + telemetry** — `handleAct` flow, intent tracking, deep-linking.
 
 ## 3. The proposed work — three pieces, two in scope
@@ -52,16 +52,18 @@ Pieces 1 and 2 are the active scope. Piece 3 is deferred but layout-reserved.
 
 **What:** Wire deterministic, scope-limited live updates into `DashboardPage`. Each WebSocket event maps to specific blocks; only those blocks refetch.
 
-**Event → block contract** (locked at brief level, finalised in spec):
+**Event → block contract** (logical mapping locked; wire-level event names resolved in spec):
 
-| Event | Updates |
+| Logical event | Updates |
 |---|---|
 | `approval.changed` | `PendingApprovalCard` list + `MetricCard(Pending Approval)` |
 | `agent.run.completed` | `UnifiedActivityFeed` + `MetricCard(Runs 7d)` |
 | `workflow.run.updated` | `UnifiedActivityFeed` |
 | `client.health.changed` | `MetricCard(Clients Needing Attention)` + `WorkspaceFeatureCard(ClientPulse)` |
 
-No generic `dashboard:update` catch-all. The spec must enumerate every event-to-block mapping; anything not enumerated does not trigger a refetch.
+> **Note on event names.** The names above are **illustrative logical events**, not the wire-level Socket.IO channels. Existing emitters use different conventions (e.g. `review:item_updated` in `server/routes/reviewItems.ts:176`, `agent:run:completed` in `server/services/agentRunFinalizationService.ts:287`, `Workflow:run:status` in `server/services/workflowEngineService.ts:742/854`). The spec resolves the final contract — recommended approach is normalisation to `domain.entity.action` form, but that decision belongs in the spec, not here. What is locked at brief level is the **logical mapping**, not the channel names.
+
+No generic `dashboard:update` catch-all. The spec must enumerate every wire-level event-to-block mapping; anything not enumerated does not trigger a refetch.
 
 **Refetch granularity rule (hard):**
 
