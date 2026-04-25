@@ -822,3 +822,83 @@ Medium-leverage improvements deferred from ChatGPT round 1. All are valid observ
 - [ ] **#10 — `/api/system/incidents/badge-count` caching.** Badge-count query scans active incidents on every poll; becomes expensive at scale. Proposed: short-TTL cache (Redis or in-memory with revocation on write) or materialised-count table updated in the ingest path. Low priority until badge-count query shows up in slow-query logs.
 - [ ] **#R3.1 — Service-layer `assertSystemAdminContext(ctx)` defence-in-depth on RLS-bypass tables.** Architectural decision deferred to Phase 2 system-principal work (cross-cutting principal context model). Per-service assertions diverge from existing `withPrincipalContext` / route-layer `requireSystemAdmin`. From ChatGPT PR-review round 3.
 - [ ] **#R3.3 — Badge endpoint dual-count shape `{ criticalCount, totalActionableCount }`.** Speculative, no concrete UX requirement yet. Non-breaking-additive shape change available later when a real dual-count UX surfaces. From ChatGPT PR-review round 3.
+
+## Deferred from codebase audit — 2026-04-25
+
+**Captured:** 2026-04-25T00:00:00Z
+**Source log:** `tasks/review-logs/codebase-audit-log-full-codebase-2026-04-25T00-00-00Z.md`
+**Branch:** `audit/full-codebase-2026-04-25`
+**Mode:** Full (Layer 1 Areas 1–9 + Layer 2 Modules I, J, K, L, M, A, B, E)
+**Totals:** 11 critical / 8 high / 16 medium / 10 low = 47 findings. 0 auto-applied in pass 2.
+
+Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
+
+---
+
+### Phase 1 — Multi-Tenancy & RLS Hardening (Critical)
+
+- [ ] **P3-C5 — Phantom RLS session var `app.current_organisation_id`** in migrations 0205, 0206, 0207, 0208. critical/high. RLS policies reference a var that is never set by `withOrgTx` — policies silently fail-open. Fix: new corrective migration replacing all occurrences with `current_setting('app.organisation_id', true)` per migration 0213 pattern.
+- [ ] **P3-C1 — Missing `FORCE ROW LEVEL SECURITY` + `CREATE POLICY` on `memory_review_queue`** (migration 0139). critical/high. Fix: new patch migration `ALTER TABLE memory_review_queue ENABLE ROW LEVEL SECURITY; ALTER TABLE memory_review_queue FORCE ROW LEVEL SECURITY;` + `CREATE POLICY` keyed on `app.organisation_id`.
+- [ ] **P3-C2 — Missing `FORCE ROW LEVEL SECURITY` on `drop_zone_upload_audit`** (migration 0141). critical/high. Fix: new patch migration `ALTER TABLE drop_zone_upload_audit FORCE ROW LEVEL SECURITY`.
+- [ ] **P3-C3 — Missing `FORCE ROW LEVEL SECURITY` on `onboarding_bundle_configs`** (migration 0142). critical/high. Fix: new patch migration `ALTER TABLE onboarding_bundle_configs FORCE ROW LEVEL SECURITY`.
+- [ ] **P3-C4 — Missing `FORCE ROW LEVEL SECURITY` on `trust_calibration_state`** (migration 0147). critical/high. Fix: new patch migration `ALTER TABLE trust_calibration_state FORCE ROW LEVEL SECURITY`.
+- [ ] **P3-C6 — Direct `db` import in `server/routes/memoryReviewQueue.ts`** — bypasses RLS middleware. critical/high. Also missing `resolveSubaccount` call on `:subaccountId` param. Fix: move all DB access to `server/services/memoryReviewQueueService.ts`; add `resolveSubaccount(req.params.subaccountId, req.orgId!)`.
+- [ ] **P3-C7 — Direct `db` import in `server/routes/systemAutomations.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer.
+- [ ] **P3-C8 — Direct `db` import in `server/routes/subaccountAgents.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer.
+- [ ] **P3-C9 — Missing `resolveSubaccount` in `server/routes/clarifications.ts`** on `:subaccountId` param. critical/high. Fix: add `resolveSubaccount(req.params.subaccountId, req.orgId!)`.
+- [ ] **P3-C10 — Missing `organisationId` filter in `server/services/documentBundleService.ts:679,685`** — queries `agents` and `tasks` tables by `id` only. critical/high. Fix: add `eq(table.organisationId, organisationId)` to both WHERE clauses.
+- [ ] **P3-C11 — Missing `organisationId` filter in `server/services/skillStudioService.ts:168,309`** — queries `skills` table by `id` only. critical/high. Fix: add `eq(skills.organisationId, organisationId)` to both WHERE clauses.
+- [ ] **P3-H2 — Direct `db` import in `server/lib/briefVisibility.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer.
+- [ ] **P3-H3 — Direct `db` import in `server/lib/workflow/onboardingStateHelpers.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer.
+
+---
+
+### Phase 2 — Gate Compliance (High)
+
+- [ ] **P3-H4 — `server/lib/playbook/actionCallAllowlist.ts` does not exist** but is expected by `verify-action-call-allowlist.sh`. high/high. Fix: create file at expected path or update gate path; confirm with domain owner.
+- [ ] **P3-H5 — `measureInterventionOutcomeJob.ts:213-218` queries `canonicalAccounts` outside `canonicalDataService`**. high/high. Fix: move query into `canonicalDataService.getCanonicalAccounts()` or equivalent.
+- [ ] **P3-H6 — `server/services/referenceDocumentService.ts:7` imports directly from `providers/anthropicAdapter`** — bypasses `llmRouter`. high/high. Fix: use `llmRouter.routeCall()` or expose token-count via router; no adapter imports from services.
+- [ ] **P3-H7 — 5+ files import `canonicalDataService` without `PrincipalContext` / `fromOrgId` migration shim**: `actionRegistry.ts`, `intelligenceSkillExecutor.ts`, `connectorPollingService.ts`, `canonicalQueryRegistry.ts`, `ghlWebhook.ts`. high/medium. Fix: add `PrincipalContext` parameter or apply `fromOrgId()` shim per gate remediation notes.
+- [ ] **P3-H8 — 5 actions in `actionRegistry` missing `readPath` field** — `verify-skill-read-paths.sh` fails (94 literal entries vs 99 with readPath). high/high. Fix: add `readPath` tag to each of the 5 missing entries; re-run gate.
+- [ ] **P3-M15 — `canonical_flow_definitions` + `canonical_row_subaccount_scopes` missing from canonical dictionary registry**. medium/high. Fix: add both table entries to registry.
+- [ ] **P3-M13 — `verify-input-validation.sh` WARNING** — some routes may lack Zod validation. medium/medium. Fix: manual scan of routes added in last 3 PRs; add Zod schemas where missing.
+- [ ] **P3-M14 — `verify-permission-scope.sh` WARNING** — some permission checks incomplete. medium/medium. Fix: manual scan; add missing `requireOrgMember` / RBAC checks.
+
+---
+
+### Phase 3 — Architectural Integrity
+
+- [ ] **P3-H1 — Root server circular dependency: `server/db/schema/agentRunSnapshots.ts` imports `AgentRunCheckpoint` from `../../services/middleware/types.js`**. high/high. This single schema-imports-service violation drives all 175 server circular dependency cycles. Fix: extract `AgentRunCheckpoint` to `shared/types/agentExecution.ts` or `server/db/schema/types.ts`; remove import from schema file.
+- [ ] **P3-M7 — Client circular deps: `ProposeInterventionModal.tsx` ↔ sub-editors** (`CreateTaskEditor`, `EmailAuthoringEditor`, `FireAutomationEditor`, `OperatorAlertEditor`, `SendSmsEditor`) — 10 cycles. medium/medium. Fix: extract shared interfaces to `types.ts` in the `clientpulse/` directory.
+- [ ] **P3-L8 — Client circular deps: `SkillAnalyzerWizard.tsx` ↔ step components** — 4 cycles. low/low. Fix: extract step interfaces to `types.ts` in wizard directory.
+
+---
+
+### Phase 4 — System Consistency
+
+- [ ] **P3-M10 — Skill visibility drift**: `smart_skip_from_website` and `weekly_digest_gather` have visibility `internal`, expected `basic`. medium/high. Fix: run `npx tsx scripts/apply-skill-visibility.ts`; re-run `skills:verify-visibility`.
+- [ ] **P3-M11 — 5 workflow skills missing YAML frontmatter**: `workflow_estimate_cost`, `workflow_propose_save`, `workflow_read_existing`, `workflow_simulate`, `workflow_validate`. medium/high. Fix: add YAML frontmatter block to each skill markdown file.
+- [ ] **P3-M12 — `scripts/verify-integration-reference.mjs` crashes** with `ERR_MODULE_NOT_FOUND: 'yaml'`. medium/high. Fix: `npm install --save-dev yaml`; re-run gate to confirm pass.
+- [ ] **P3-L1 — Missing explicit `package.json` deps**: `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` — currently hoisted from transitive deps. low/high. Fix: add as direct `package.json` dependencies.
+- [ ] **P3-M16 — `docs/capabilities.md:1001` — "Anthropic-scale distribution" in customer-facing Non-goals section**. medium/high. Editorial rule violation (CLAUDE.md rule 1). Fix: human edit required — replace with "hyperscaler-scale distribution" or "provider-marketplace-scale distribution". Never auto-rewrite capabilities.md.
+
+---
+
+### Phase 5 — Controlled Improvements
+
+- [ ] **P3-M1 — `server/lib/testRunRateLimit.ts` in-memory rate limiter** — not safe for multi-process deployments; `TODO(PROD-RATE-LIMIT)` comment in file. medium/high. Fix: replace with DB-backed or Redis-backed sliding window; affects `routes/public/formSubmission.ts` and `pageTracking.ts`.
+- [ ] **P3-M2 — `verify-no-silent-failures.sh` WARNING** — at least one silent catch path detected. medium/medium. Fix: re-run gate with `--verbose`; add structured log or rethrow to each flagged site.
+- [ ] **P3-M3 — 7 `as any` suppressions in `server/services/cachedContextOrchestrator.ts`** on `resolveResult.assemblyResult`, `bundleSnapshotIds`, `knownBundleSnapshotIds`. medium/low. Fix: derive correct discriminated union types when next touching this file.
+- [ ] **P3-M4 — `as any` on Drizzle query results in `server/services/executionBudgetResolver.ts:71-72`**. medium/medium. Fix: replace with `InferSelectModel<typeof table>` types.
+- [ ] **P3-M5 — `(boss as any).work(` in `server/services/dlqMonitorService.ts:28`** — pg-boss API not fully typed. medium/medium. Fix: check pg-boss type stubs; if `work` is missing, file upstream issue and add a typed wrapper.
+- [ ] **P3-M6 — `toolCallsLog` column marked DEPRECATED in `server/db/schema/agentRunSnapshots.ts`** — Sprint 3B removal pending. medium/low. Fix: confirm Sprint 3B timeline; write removal migration.
+- [ ] **P3-M8 — Agent handoff depth ≤ 5 not verified by code or named test**. medium/low. Fix: trace depth check in `server/services/agentRunHandoffService.ts`; add trajectory test.
+- [ ] **P3-M9 — Degraded fallback (missing active lead) not covered by named test**. medium/low. Fix: add trajectory test for missing-lead fallback in `server/services/agentRunHandoffService.ts`.
+- [ ] **P3-L2 — `server/routes/ghl.ts` Module C GHL OAuth stubs** — intentional deferred feature work. low/high. Track: feature implementation sprint.
+- [ ] **P3-L3 — `server/services/staleRunCleanupService.ts:21` dual threshold** (`LEGACY_STALE_THRESHOLD_MS`) for pre-migration `agent_runs`. low/low. Fix: confirm whether rows with `lastActivityAt IS NULL` exist in production; remove legacy branch if safe.
+- [ ] **P3-L4 — `actionRegistry.ts` stub comments** at lines 1342, 1428, 1577 (Support Agent, Ads Management Agent, Email Outreach Agent). low/high. Fix: convert stub labels to tracked tasks; gate or remove stub actions until implemented.
+- [ ] **P3-L5 — `EventRow.tsx` exports `SetupConnectionRequest`** — possible shared-type duplication. low/low. Fix: trace all consumers before moving; verify no circular import.
+- [ ] **P3-L6 — `ScheduleCalendar.tsx` exports `ScheduleCalendarResponse` locally**. low/low. Fix: consider moving to `shared/types/` if consumed by server.
+- [ ] **P3-L7 — `bundleUtilizationJob.ts:125` — `utilizationByModelFamily as any`** type mismatch. low/medium. Fix: derive correct type from source.
+- [ ] **P3-L9 — Test runs (`is_test_run = true`) cost-exclusion from ledger not verified by named test**. low/medium. Fix: add unit test asserting `is_test_run=true` runs are excluded from cost ledger in `queueService.ts` / `runCostBreaker.ts`.
+- [ ] **P3-L10 — Prompt prefix caching (`stablePrefix`) not verified across all run types**. low/low. Fix: add to observability backlog; verify in live trace.

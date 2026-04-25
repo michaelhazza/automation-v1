@@ -52,9 +52,12 @@ Before doing anything else:
 
 ### A) Reconnaissance & branch setup
 
+**FIRST — before any reconnaissance or verification — build the task list.**
+
+0. **Build a TodoWrite task list immediately.** This is step zero, before reading the framework, before verifying paths, before anything else. The task list must be visible to the user from the moment the audit starts. Cover every area / module in scope plus fixed pipeline steps: context verification, each Layer 1 area, each Layer 2 module, findings gate, pass 2 fixes, pass 3 routing, KNOWLEDGE.md, completion gate, final handoff. Mark each `in_progress` when you start it and `completed` immediately when done. This list is your execution contract — do not skip ahead.
+
 1. Re-validate framework §2 context block against current repo state. Spot-check 3–5 facts (a script in `package.json`, an actual file path from §4 Protected Files, the framework version). If anything is stale, note it in the audit log and tell the user.
-2. **Build a TodoWrite task list** covering every area / module in scope, plus the fixed pipeline steps (pass 2, pass 3 routing, KNOWLEDGE.md, completion gate). One todo item per area or module. Mark each `in_progress` when you start it and `completed` immediately when done. This list is your execution contract — do not skip ahead.
-3. **Write a progress file** at `tasks/audit-progress.md` (overwrite if it exists) with a checkbox list matching the TodoWrite task list — one line per area / module. After completing each area, update the checkbox from `[ ]` to `[x]` and commit the file with message `audit: progress — <area name>`. This file is the main session's window into your progress; keep it current.
+2. **Write a progress file** at `tasks/audit-progress.md` (overwrite if it exists) with a checkbox list matching the TodoWrite task list — one line per area / module. After completing each area, update the checkbox from `[ ]` to `[x]` and commit the file with message `audit: progress — <area name>`. This file is the main session's window into your progress; keep it current.
 3. Resolve in-scope paths from the mode:
    - **Full** — `server/`, `client/`, `shared/` (entire codebase).
    - **Hotspot rls** — `server/db/`, `server/instrumentation.ts`, `server/lib/orgScopedDb.ts`, `server/config/rlsProtectedTables.ts`, `server/lib/agentRunVisibility.ts`, `server/lib/agentRunPermissionContext.ts`, `scripts/gates/verify-rls-*.sh`, `scripts/gates/verify-org-id-source.sh`, `scripts/gates/verify-no-db-in-routes.sh`, `scripts/gates/verify-subaccount-resolution.sh`. Layer 2 Module I.
