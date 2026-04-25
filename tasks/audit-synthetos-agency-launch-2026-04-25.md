@@ -19,6 +19,7 @@
 8. What each workstream gap means — plain English
 9. Fix-and-benefit summary
 10. Does this close the loop on the business plan?
+11. Re-audit corrections (post-review by user)
 
 ---
 
@@ -261,5 +262,80 @@ These are in the business plan but not in the dev brief. They need to be added a
 Phase 0–3 of this roadmap closes the loop on **everything in the dev brief plus the business plan's core delivery, sales, and operator-economics targets.** The seven items above are tier-2 polish that can ship in months 1–3 of active operation without affecting the launch path.
 
 If the operator-as-agency goal is "be in market with paid clients within 90 days of launch," this audit's recommendations are sufficient. If the goal also includes the public Free Snapshot funnel (which the business plan §3 Layer 0 strongly implies), add items 1 + 2 to the Phase 2 schedule.
+
+---
+
+## 11. Re-audit corrections (post-review by user)
+
+After the user pushed back on three claims in §2, deeper code searches surfaced corrections. The original §2 / §4 / §8 statements remain in place as the audit-of-record; this section captures what changed.
+
+### Correction A — Per-subaccount integration storage was partly built
+
+**Original claim:** "all CRM calls assume GoHighLevel; integration_configs missing."
+
+**Reality:** Per-subaccount **connector storage** exists. `connector_configs.subaccountId` is wired (`server/db/schema/connectorConfigs.ts:11`); `listBySubaccount` / `createForSubaccount` services exist (`connectorConfigService.ts:19–29, 83–103`); CRUD routes at `/api/subaccounts/:subaccountId/connectors` are live (`connectorConfigs.ts:108–133`). Subaccounts CAN have their own connectors today.
+
+**Still missing — the routing layer, not the storage layer:**
+
+- `connector_configs.connectorType` is a specific provider (`'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom'`), not a category. Cannot ask "what's this subaccount's CRM?" — only "does this subaccount have a GHL connector?"
+- No `synthetos_native` value in the provider union.
+- No `is_primary` / `is_default` per-category flag — multiple connectors of the same type per subaccount are allowed with no constraint.
+- No `resolveCrmAdapter(orgId, subaccountId)` function. `executionLayerService.ts:214` reads provider from the action payload, not from per-subaccount config.
+
+**Useful adjacency:** `projectIntegrations.purpose` (`server/db/schema/projectIntegrations.ts:5–21`) already has the closed category enum (`'crm' | 'payments' | 'email' | 'ads' | 'analytics'`) — pattern proven, just at project scope not subaccount scope.
+
+**Revised Workstream A scope:** add `category` + `is_primary` columns to `connector_configs`, add `'synthetos_native'` to the provider union, write `resolveCrmAdapter`. Smaller than building a fresh `integration_configs` table from scratch.
+
+### Correction C — Event-rules unification design
+
+**Original claim:** "no generic event-dispatch system; build event_rules from scratch."
+
+**Reality confirmed.** No event bus, no generic dispatcher. Webhooks are hardcoded reactions. `agent_triggers` is narrowly scoped (closed enum of 6 types, fires agent runs only — `triggerService.ts:131` enqueues to `TRIGGER_RUN_QUEUE` only). `policy_rules` is a tool-gate middleware, returns `auto/review/block`, not an event dispatcher.
+
+**Refinement to design:** the user's request — "build it so it caters for the existing triggers as well as events/rules" — points to a unified design:
+
+1. Build `event_rules` as a **new table alongside** `agent_triggers` (do not extend `agent_triggers` — its column names like `subaccountAgentId` lock it into agent-run semantics).
+2. Extract `server/lib/ruleMatcher.ts` from `triggerService.matchesFilter()` (`:44–52`) AND `policyEngineService.matchesRule()` (`:96–116`). Both are flat exact-match today; the shared library can grow richer predicates later for all three consumers.
+3. Make `start_agent_run` one of the `target_type` values in `event_rules`. This is the migration path: existing `agent_triggers` rows can later become `event_rules` rows with `target_type: 'start_agent_run'`. `agent_triggers` keeps working untouched in the meantime.
+4. New `event_rules` rows handle the broader use cases: `start_workflow`, `create_subaccount`, `send_notification`, `update_record`.
+
+This is one rule system at the matcher-library level today, with a clean path to one rule system at the table level later — without a big-bang rename.
+
+### Correction D — Email config: scaffolding yes, resolution no, plus a latent bug
+
+**Original claim:** "emailService is hardcoded to env.EMAIL_FROM; no per-subaccount/org config exists."
+
+**Reality:** The framing the user remembered IS partly in place:
+- `subaccounts.settings` (`server/db/schema/subaccounts.ts:27`) and `organisations.settings` (`organisations.ts:13`) are jsonb buckets that could hold email config.
+- `integration_connections` supports per-subaccount and per-org provider connections.
+- `crm.send_email` (GHL contact emails) IS properly per-subaccount via GHL API — `crmLiveDataService.listFromAddresses` (`crmLiveDataService.ts:191–211`) resolves valid from-addresses per subaccount.
+
+**Still missing — the resolution layer:**
+- `emailService.ts` (lines 1–278) is fully hardcoded to `env.EMAIL_FROM` across all 7 send functions and all 3 providers (Resend/SendGrid/SMTP). No `resolveEmailConfig`, no fallback chain, no consumption of `integration_connections`.
+- No `org_email_configs` / `subaccount_email_configs` table. Settings jsonb columns are unused for email.
+
+**Latent bug — must fix before any D work matters:** the bare `send_email` action is registered with `actionCategory: 'api'`, which routes to `apiAdapter`. But `apiAdapter` only handles GHL endpoints in `GHL_ENDPOINTS` (`ghlEndpoints.ts:7–12`), and `send_email` is not one of them. When a human approves a `send_email` review item, `apiAdapter.execute()` returns terminal failure: `"apiAdapter does not handle actionType: send_email"`. The action is unreachable in production today. The fix is short: route bare `send_email` through `emailService.sendGenericEmail` instead of `apiAdapter`. `crm.send_email` (the GHL one) is unaffected.
+
+**Revised Workstream D1 scope:** (1) fix the bare-`send_email` routing bug; (2) write `resolveEmailConfig(orgId, subaccountId)` walking subaccount.settings → org.settings → env defaults; (3) update `emailService.send()` to accept `orgId`/`subaccountId` and use the resolver. Step 1 is a one-day fix. Steps 2+3 are the proper hierarchy build. The dev brief's `outreach_sends` table and Resend webhook (D1+D2) layer on top.
+
+### Correction E + F — Lead discovery via the v7.1 SDR Agent; F belongs in D
+
+**Original claim:** Workstream E is a fully-missing pile (skills + job + agent seed + handlers + env vars). Workstream F is a separate workstream.
+
+**Reality after the v7.1 agent structure:** The `sdr-agent` (Agent 21, T3, under Head of Commercial, Phase 5) is the natural home for everything in Workstream E. Skills already on the SDR agent: `web_search`, `enrich_contact`, `draft_outbound`, `score_lead`, `send_email`, `update_crm`, `book_meeting`, `request_approval`. This covers most of the dev brief's lead-gen workflow.
+
+**Revised Workstream E scope:** add ONE new skill (`discover_prospects` — Google Places API caller); wire `enrich_contact` to call Hunter.io as a provider; defer the rest to Phase 5 when the SDR agent ships. No standalone `leadDiscoverJob.ts`, no `lead-discover` system agent seed, no "Sales Pipeline subaccount" pattern needed — the SDR agent uses its existing on-demand schedule and writes to canonical contact tables under whichever subaccount it runs in.
+
+**Reclassification: F belongs to D, not standalone.** `domain_health_monitor` watches Resend bounce rate, complaint rate, and blacklist status. That's email deliverability monitoring, a peer of the outbound + webhook + inbound pieces in D, not a peer of lead generation. Move it to **D4** under Email Infrastructure.
+
+### What this means for the §4 sequencing
+
+- **Phase 1 (Workstream A):** smaller than originally scoped. `connector_configs` already supports per-subaccount; just add category + is_primary + `synthetos_native` provider + the resolver function.
+- **Phase 2 (Workstream C):** unchanged in shape, but framed as "extract shared matcher + new table alongside" rather than "build greenfield."
+- **Phase 2 (Workstream D):** add the bare-`send_email` bug fix as Day 1 work — without it, the rest of D ships against a broken approval path. Then proceed with config hierarchy + outreach_sends + Resend webhook + IMAP.
+- **Phase 3 (Workstream E):** drops to one new skill plus a Hunter wiring on `enrich_contact`. Deferred to Phase 5 of the agent rollout. No separate job/agent/seed needed.
+- **Workstream F dissolves into D4.**
+
+The §4 phasing remains correct in calendar order. The total work shrinks slightly (E becomes a pair of skills, F becomes a sub-item), and one new urgent item (the `send_email` bug) gets prioritised at Day 1 of Phase 2.
 
 
