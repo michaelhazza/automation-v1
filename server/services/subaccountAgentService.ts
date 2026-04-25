@@ -1,6 +1,6 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentDataSources, systemAgents, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
@@ -475,5 +475,22 @@ export const subaccountAgentService = {
     if (!source) throw { statusCode: 404, message: 'Data source not found' };
 
     await db.delete(agentDataSources).where(eq(agentDataSources.id, id));
+  },
+
+  async checkConfigAssistantRestriction(orgId: string, subaccountId: string, agentId: string): Promise<void> {
+    const [targetAgent] = await db
+      .select({ systemAgentSlug: systemAgents.slug })
+      .from(agents)
+      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    if (targetAgent?.systemAgentSlug === 'configuration-assistant') {
+      const [sa] = await db
+        .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
+        .from(subaccounts)
+        .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, orgId)));
+      if (!sa?.isOrgSubaccount) {
+        throw { statusCode: 400, message: 'Configuration Assistant can only be linked to the org subaccount' };
+      }
+    }
   },
 };

@@ -165,7 +165,7 @@ export async function getSkillStudioContext(
     const rows = await db
       .select({ id: skills.id, slug: skills.slug, name: skills.name, description: skills.description, definition: skills.definition, instructions: skills.instructions })
       .from(skills)
-      .where(eq(skills.id, skillId))
+      .where(and(eq(skills.id, skillId), ...(orgId ? [eq(skills.organisationId, orgId)] : [])))
       .limit(1);
     skillRow = rows[0];
   }
@@ -306,7 +306,7 @@ export async function saveSkillVersion(
         definition: payload.definition as Record<string, unknown>,
         instructions: payload.instructions ?? null,
         updatedAt: new Date(),
-      }).where(eq(skills.id, skillId));
+      }).where(and(eq(skills.id, skillId), ...(orgId ? [eq(skills.organisationId, orgId)] : [])));
     }
 
     return {

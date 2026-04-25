@@ -18,6 +18,9 @@
 import type { ConfigQuestion } from '../types/configSchema.js';
 import { INTELLIGENCE_BRIEFING_SCHEMA } from '../workflows/intelligence-briefing.schema.js';
 import { WEEKLY_DIGEST_SCHEMA } from '../workflows/weekly-digest.schema.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { organisations } from '../db/schema/index.js';
+import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Schema registry — playbook slug → ConfigQuestion[]
@@ -27,6 +30,12 @@ const SCHEMA_REGISTRY: Readonly<Record<string, ConfigQuestion[]>> = Object.freez
   'intelligence-briefing': INTELLIGENCE_BRIEFING_SCHEMA,
   'weekly-digest': WEEKLY_DIGEST_SCHEMA,
 });
+
+export async function getOrgName(orgId: string): Promise<string> {
+  const db = getOrgScopedDb('configDocumentGeneratorService.getOrgName');
+  const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.name ?? 'Agency';
+}
 
 export function resolveBundleSchemas(bundleSlugs: readonly string[]): ConfigQuestion[] {
   const out: ConfigQuestion[] = [];

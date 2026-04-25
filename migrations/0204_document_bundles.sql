@@ -60,6 +60,7 @@ ALTER TABLE document_bundles
 
 ALTER TABLE document_bundles ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY document_bundles_org_isolation ON document_bundles
   USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
 

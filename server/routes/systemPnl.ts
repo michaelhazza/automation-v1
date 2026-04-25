@@ -6,7 +6,7 @@ import { systemPnlService } from '../services/systemPnlService.js';
 import * as llmInflightRegistry from '../services/llmInflightRegistry.js';
 import * as llmInflightPayloadStore from '../services/llmInflightPayloadStore.js';
 import { INFLIGHT_SNAPSHOT_HARD_CAP } from '../config/limits.js';
-import { db } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import type { PnlResponse, PnlResponseMeta } from '../../shared/types/systemPnl.js';
 
@@ -214,12 +214,13 @@ router.get(
       conditions.push(eq(llmInflightHistory.idempotencyKey, idempotencyKey));
     }
 
-    const rows = await db
-      .select()
-      .from(llmInflightHistory)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(llmInflightHistory.createdAt))
-      .limit(limit);
+    const rows = await withAdminConnection({ source: 'systemPnl.inflightHistory' }, (tx) =>
+      tx.select()
+        .from(llmInflightHistory)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(llmInflightHistory.createdAt))
+        .limit(limit),
+    );
 
     res.json({
       events: rows.map((r) => ({

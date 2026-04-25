@@ -39,6 +39,7 @@ CREATE INDEX document_bundle_attachments_org_idx
 
 ALTER TABLE document_bundle_attachments ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY document_bundle_attachments_org_isolation ON document_bundle_attachments
   USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
 

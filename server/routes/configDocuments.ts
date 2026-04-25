@@ -18,13 +18,11 @@ import { randomUUID } from 'crypto';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { organisations } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import {
   generateConfigurationDocument,
   resolveBundleSchemas,
+  getOrgName,
 } from '../services/configDocumentGeneratorService.js';
 import { parseDocument } from '../services/configDocumentParserService.js';
 import type { ConfigDocumentSummary } from '../types/configSchema.js';
@@ -47,12 +45,7 @@ router.post(
     const { bundleSlugs, format } = req.body ?? {};
 
     const sa = await resolveSubaccount(subaccountId, orgId);
-
-    const [org] = await db
-      .select({ name: organisations.name })
-      .from(organisations)
-      .where(eq(organisations.id, orgId))
-      .limit(1);
+    const agencyName = await getOrgName(orgId);
 
     const slugs =
       Array.isArray(bundleSlugs) && bundleSlugs.length > 0
@@ -62,7 +55,7 @@ router.post(
     const requestedFormat = format === 'markdown' ? 'markdown' : 'docx';
 
     const doc = await generateConfigurationDocument({
-      agencyName: org?.name ?? 'Agency',
+      agencyName,
       subaccountName: sa.name ?? 'Subaccount',
       bundleSlugs: slugs,
       format: requestedFormat,

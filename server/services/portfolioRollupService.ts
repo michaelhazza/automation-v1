@@ -32,6 +32,46 @@ import { logger } from '../lib/logger.js';
 
 export const PORTFOLIO_AUTO_ENABLE_THRESHOLD = 3;
 
+// ── Settings helpers (for portfolioRollup route) ─────────────────────────────
+
+export async function getPortfolioRollupSettings(orgId: string) {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(and(eq(subaccounts.organisationId, orgId), eq(subaccounts.isOrgSubaccount, true), isNull(subaccounts.deletedAt)))
+    .limit(1);
+  if (!orgSub) return null;
+  const settings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const portfolioConfig = (settings.portfolioRollup as { optIn?: boolean; deliveryChannels?: unknown } | undefined) ?? {};
+  return {
+    orgSubaccountId: orgSub.id,
+    optIn: portfolioConfig.optIn ?? true,
+    deliveryChannels: portfolioConfig.deliveryChannels ?? { email: true, portal: false, slack: false },
+  };
+}
+
+export async function updatePortfolioRollupSettings(
+  orgId: string,
+  patch: { optIn?: boolean; deliveryChannels?: unknown },
+) {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(and(eq(subaccounts.organisationId, orgId), eq(subaccounts.isOrgSubaccount, true), isNull(subaccounts.deletedAt)))
+    .limit(1);
+  if (!orgSub) return null;
+  const existingSettings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const nextSettings = {
+    ...existingSettings,
+    portfolioRollup: {
+      optIn: patch.optIn === undefined ? true : Boolean(patch.optIn),
+      deliveryChannels: patch.deliveryChannels ?? { email: true, portal: false, slack: false },
+    },
+  };
+  await db.update(subaccounts).set({ settings: nextSettings, updatedAt: new Date() }).where(and(eq(subaccounts.id, orgSub.id), eq(subaccounts.organisationId, orgId)));
+  return { orgSubaccountId: orgSub.id, ...nextSettings.portfolioRollup };
+}
+
 export type RollupKind = 'briefing' | 'digest';
 
 export interface RunRollupInput {

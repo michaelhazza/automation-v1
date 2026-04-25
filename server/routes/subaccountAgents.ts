@@ -11,9 +11,6 @@ import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
-import { db } from '../db/index.js';
-import { agents, subaccounts, systemAgents } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -44,18 +41,7 @@ router.post(
     }
 
     // Configuration Assistant org subaccount restriction guard
-    const [targetAgent] = await db
-      .select({ systemAgentSlug: systemAgents.slug })
-      .from(agents)
-      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!)));
-    if (targetAgent?.systemAgentSlug === 'configuration-assistant') {
-      const [sa] = await db.select({ isOrgSubaccount: subaccounts.isOrgSubaccount }).from(subaccounts)
-        .where(and(eq(subaccounts.id, req.params.subaccountId), eq(subaccounts.organisationId, req.orgId!)));
-      if (!sa?.isOrgSubaccount) {
-        throw { statusCode: 400, message: 'Configuration Assistant can only be linked to the org subaccount' };
-      }
-    }
+    await subaccountAgentService.checkConfigAssistantRestriction(req.orgId!, req.params.subaccountId, agentId);
 
     const link = await subaccountAgentService.linkAgent(req.orgId!, req.params.subaccountId, agentId);
     res.status(201).json(link);

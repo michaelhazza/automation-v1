@@ -39,6 +39,37 @@ GUARD_NAME="RLS Session Variable Canonical Names"
 
 source "$SCRIPT_DIR/lib/guard-utils.sh"
 
+# ── §4.5 Historical baseline (0204–0208 + 0212) ────────────────────────────
+# These migrations used 'app.current_organisation_id' (the phantom variable)
+# and were corrected at runtime by 0213_fix_cached_context_rls.sql. Their source
+# .sql files are immutable; the phantom-var text is historical noise, not a live
+# policy. New occurrences in any other file remain blocking.
+
+HISTORICAL_BASELINE_FILES=(
+  "0204_document_bundles.sql"
+  "0205_document_bundle_members.sql"
+  "0206_document_bundle_attachments.sql"
+  "0207_bundle_resolution_snapshots.sql"
+  "0208_model_tier_budget_policies.sql"
+  "0212_bundle_suggestion_dismissals.sql"
+)
+BASELINE_ANNOTATION="@rls-baseline:"
+
+is_baselined() {
+  local filepath="$1"
+  local basename
+  basename=$(basename "$filepath")
+  for entry in "${HISTORICAL_BASELINE_FILES[@]}"; do
+    if [[ "$basename" == "$entry" ]]; then
+      if grep -q "$BASELINE_ANNOTATION" "$filepath"; then
+        return 0  # baselined + annotated — skip
+      fi
+      return 1  # in allowlist but annotation missing — still a violation
+    fi
+  done
+  return 1  # not in allowlist
+}
+
 emit_header "$GUARD_NAME"
 
 VIOLATIONS=0
@@ -54,6 +85,7 @@ while IFS= read -r line; do
   rel="${file#$ROOT_DIR/}"
 
   is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
+  is_baselined "$file" && continue
 
   emit_violation "$GUARD_ID" "error" "$rel" "$lineno" \
     "Uses phantom session var 'app.current_organisation_id' — this variable is never set anywhere." \

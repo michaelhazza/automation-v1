@@ -20,7 +20,7 @@
 
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { integrationConnections } from '../db/schema/index.js';
+import { integrationConnections, subaccountAgents, agents } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
@@ -336,6 +336,47 @@ export const webLoginConnectionService = {
    * should NEVER need this — they hand the connection ID to the worker via
    * the pg-boss payload.
    */
+  async listTestEligibleAgents(organisationId: string, subaccountId: string) {
+    return db
+      .select({
+        id: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        isActive: subaccountAgents.isActive,
+        name: agents.name,
+      })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
+  },
+
+  async validateSubaccountAgentLink(
+    subaccountAgentId: string,
+    subaccountId: string,
+    agentId: string,
+  ) {
+    const [link] = await db
+      .select({
+        id: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        subaccountId: subaccountAgents.subaccountId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.id, subaccountAgentId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.agentId, agentId),
+        ),
+      );
+    return link ?? null;
+  },
+
   resolveCredentials(row: IntegrationConnection): WebLoginCredentials {
     const config = (row.configJson as WebLoginConfigStored | null) ?? null;
     if (!config || !config.loginUrl || !config.username) {

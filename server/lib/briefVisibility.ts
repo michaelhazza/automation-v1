@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from './orgScopedDb.js';
 import { tasks, conversations } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { ORG_PERMISSIONS } from './permissions.js';
@@ -19,6 +19,7 @@ export async function resolveBriefVisibility(
   principal: BriefPrincipal,
   briefId: string,
 ): Promise<BriefVisibility> {
+  const db = getOrgScopedDb('briefVisibility.resolveBriefVisibility');
   const [task] = await db
     .select({ id: tasks.id, organisationId: tasks.organisationId })
     .from(tasks)
@@ -38,6 +39,7 @@ export async function resolveConversationVisibility(
   principal: BriefPrincipal,
   conversationId: string,
 ): Promise<BriefVisibility> {
+  const db = getOrgScopedDb('briefVisibility.resolveConversationVisibility');
   const [conv] = await db
     .select({ id: conversations.id, organisationId: conversations.organisationId })
     .from(conversations)

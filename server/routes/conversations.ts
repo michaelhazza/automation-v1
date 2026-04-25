@@ -6,11 +6,9 @@ import {
   getBriefConversation,
   assertCanViewConversation,
   findOrCreateBriefConversation,
+  getConversationMessages,
 } from '../services/briefConversationService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
-import { db } from '../db/index.js';
-import { conversationMessages } from '../db/schema/index.js';
-import { eq, asc } from 'drizzle-orm';
 
 const router = Router();
 
@@ -23,11 +21,7 @@ async function handleScopedConversation(
   subaccountId?: string,
 ) {
   const conv = await findOrCreateBriefConversation({ organisationId: orgId, subaccountId, scopeType, scopeId });
-  const messages = await db
-    .select()
-    .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, conv.id))
-    .orderBy(asc(conversationMessages.createdAt));
+  const messages = await getConversationMessages(conv.id);
   return { conversationId: conv.id, messages };
 }
 

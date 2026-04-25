@@ -91,3 +91,11 @@ export async function assertCanViewConversation(
     .limit(1);
   return conv ?? null;
 }
+
+export async function getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+  return db
+    .select()
+    .from(conversationMessages)
+    .where(eq(conversationMessages.conversationId, conversationId))
+    .orderBy(asc(conversationMessages.createdAt));
+}
