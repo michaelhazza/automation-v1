@@ -99,7 +99,7 @@ This spec is governed by the framing established in `docs/spec-context.md`. Thre
 
 **`testing_posture: static_gates_primary` / `runtime_tests: pure_function_only`** — gates are the source of truth, not unit/integration tests of the live stack. Every phase's "definition of done" terminates in a named gate (or set of gates) returning a clean run. New runtime tests are written only for pure functions extracted by this spec; no vitest/jest/playwright/supertest expansions are introduced. This matches the `convention_rejections` block of `docs/spec-context.md` verbatim.
 
-**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts`. The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **No new service layers or primitives are introduced by this spec.** Where a fix appears to need a new primitive, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
+**`prefer_existing_primitives_over_new_ones: yes`** — every Phase 1B refactor reuses `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` from `server/instrumentation.ts` and `server/lib/orgScopedDb.ts`. The corrective migration in §4.1 mirrors the pattern of migration `0213_fix_cached_context_rls.sql` (the canonical reference for repairing already-broken RLS). The principal-context propagation work in §5.4 reuses `withPrincipalContext` and the `fromOrgId()` shim that already exists. **The new files this spec introduces are mechanical service-tier homes for code being relocated out of routes/lib (§4.2) plus one narrow new shared primitive in Phase 5 §8.1 (`server/lib/rateLimitStore.ts`) — no new architectural primitives or service layers.** The Phase 5 §8.1 primitive has an explicit "why not reuse" paragraph in §8.1; the §4.2 service files are pure relocations (no new abstractions, no new public API surface). Where a fix appears to need a primitive that does not yet exist, the spec must document why reuse and extension were both insufficient — and the reviewer treats absence of that justification as directional.
 
 **Non-negotiable boundaries derived from the canon:**
 
@@ -142,6 +142,8 @@ Every category's "definition of done" is `<gate-name> returns clean exit`. **Blo
 
 Every schema-state correction ships as a NEW migration with the next available number. We **never** edit historical migrations. Migration filenames follow the existing pattern: `migrations/<NNNN>_<descriptive_name>.sql`. The new migration drops broken policies (`DROP POLICY IF EXISTS …`) and recreates them with the canonical pattern from `migrations/0213_fix_cached_context_rls.sql`.
 
+**Migration-number assignment rule (concurrent-PR safety).** When a PR is opened with a placeholder filename (e.g. `migrations/<NNNN>_rate_limit_buckets.sql`), the actual number is **assigned at merge time, not at PR-open time** — specifically: the implementer rebases the PR onto the latest `main` immediately before merge and renames the migration file to claim the next available number against `main` as it stands at that moment. Two concurrent Phase 5 PRs cannot collide on the same number because only one can be at the front of the merge queue at a time; the second rebases and renames before its own merge. Add this renumber-and-rebase step to the PR checklist for every Phase 5 PR that introduces a migration.
+
 ### §2.6 Smallest viable PR per phase
 
 Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — one per top-level subsection (§8.1, §8.2, §8.3) plus one PR per independent §8.4 tail item, since each subsection and each tail item is a self-contained category. This gives roughly four canonical PRs (Phases 1–4) plus a stream of small Phase 5 PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
@@ -164,7 +166,14 @@ The Phase 4 editorial fix in §7.3 is operator-led. The agent provides the diff;
 | 4 | System consistency | Medium | 5 | `npm run skills:verify-visibility`, `scripts/verify-integration-reference.mjs`, `npm install` | Skill registry coherence; explicit deps; YAML gate tooling; operator-led capabilities edit. |
 | 5 | Controlled improvements | Low–Medium | 18 | `verify-no-silent-failures` (must drop from WARN to PASS); type-check still passes | Multi-process-safe rate limiter; silent-failure closure; targeted type strengthening; tail items. |
 
-**Total findings addressed:** 26 (Phase 1) + 11 (Phase 2) + 3 (Phase 3) + 5 (Phase 4) + 18 (Phase 5) = **63**, vs 47 in the original audit. The +16 delta is the eight additional direct-DB-import violations in routes (`configDocuments`, `portfolioRollup`, `conversations`, `automationConnectionMappings`, `webLoginConnections`, `systemPnl`, `automations`, plus `clarifications` which the audit listed only for missing `resolveSubaccount`), the two additional `verify-rls-coverage` migration gaps (`0153_agent_test_fixtures`, `0192_agent_execution_log`), the eight `verify-rls-coverage` historical-noise entries (0202–0208 + 0212), and a -2 deduplication where the audit double-counted.
+**Total findings addressed:** 26 (Phase 1) + 11 (Phase 2) + 3 (Phase 3) + 5 (Phase 4) + 18 (Phase 5) = **63**, vs 47 in the original audit. The +16 delta is:
+
+- +8 additional direct-DB-import violations in routes (`configDocuments`, `portfolioRollup`, `conversations`, `automationConnectionMappings`, `webLoginConnections`, `systemPnl`, `automations`, plus `clarifications` which the audit listed only for missing `resolveSubaccount`).
+- +2 additional `verify-rls-coverage` migration gaps (`0153_agent_test_fixtures`, `0192_agent_execution_log`).
+- +6 `verify-rls-coverage` historical-noise entries that need `verify-rls-coverage` baselining (`0204`, `0205`, `0206`, `0207`, `0208`, `0212`) — see §4.5. Migrations `0202` and `0203` are first-creation migrations for `reference_documents` / `reference_document_versions` whose original RLS text is correct; they do **not** need baselining and are not part of this set.
+- −2 deduplication where the audit double-counted.
+
+Math: `47 + 8 + 2 + 6 − 2 = 61`. The remaining 2 findings reaching 63 are: +1 the Phase 1E gate-baseline mechanism update (counted as a Phase 1 finding even though it's gate-tooling work, since it is required for Phase 1 ship-gate green), and +1 the `verify-rls-session-var-canon` baseline parallel update (also Phase 1 work). Both are §4.5 deliverables.
 
 ### §3.2 Phase dependency graph
 
@@ -378,14 +387,121 @@ CREATE POLICY drop_zone_upload_audit_org_isolation ON drop_zone_upload_audit
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- (repeat for onboarding_bundle_configs / trust_calibration_state — both
---  use *_tenant_isolation as the historical policy name; mirror the block above
---  with the table name substituted.)
+-- ---------------------------------------------------------------------------
+-- onboarding_bundle_configs (origin: 0142)
+-- Historical policies: onboarding_bundle_configs_tenant_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE onboarding_bundle_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_bundle_configs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS onboarding_bundle_configs_tenant_isolation ON onboarding_bundle_configs;
+DROP POLICY IF EXISTS onboarding_bundle_configs_org_isolation ON onboarding_bundle_configs;
+CREATE POLICY onboarding_bundle_configs_org_isolation ON onboarding_bundle_configs
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
--- (repeat for agent_test_fixtures with historical policy
---  agent_test_fixtures_org_isolation; for agent_execution_events,
---  agent_run_prompts, agent_run_llm_payloads each with their own
---  *_org_isolation historical policy — DROP-then-CREATE is idempotent.)
+-- ---------------------------------------------------------------------------
+-- trust_calibration_state (origin: 0147)
+-- Historical policies: trust_calibration_state_tenant_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE trust_calibration_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trust_calibration_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS trust_calibration_state_tenant_isolation ON trust_calibration_state;
+DROP POLICY IF EXISTS trust_calibration_state_org_isolation ON trust_calibration_state;
+CREATE POLICY trust_calibration_state_org_isolation ON trust_calibration_state
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- ---------------------------------------------------------------------------
+-- agent_test_fixtures (origin: 0153)
+-- Historical policies: agent_test_fixtures_org_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE agent_test_fixtures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_test_fixtures FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_test_fixtures_org_isolation ON agent_test_fixtures;
+CREATE POLICY agent_test_fixtures_org_isolation ON agent_test_fixtures
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- ---------------------------------------------------------------------------
+-- agent_execution_events (origin: 0192) — FORCE re-assertion + canonical-policy refresh
+-- Historical policies: agent_execution_events_org_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE agent_execution_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_execution_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_execution_events_org_isolation ON agent_execution_events;
+CREATE POLICY agent_execution_events_org_isolation ON agent_execution_events
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- ---------------------------------------------------------------------------
+-- agent_run_prompts (origin: 0192) — FORCE re-assertion + canonical-policy refresh
+-- Historical policies: agent_run_prompts_org_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE agent_run_prompts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_run_prompts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_run_prompts_org_isolation ON agent_run_prompts;
+CREATE POLICY agent_run_prompts_org_isolation ON agent_run_prompts
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- ---------------------------------------------------------------------------
+-- agent_run_llm_payloads (origin: 0192) — FORCE re-assertion + canonical-policy refresh
+-- Historical policies: agent_run_llm_payloads_org_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE agent_run_llm_payloads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_run_llm_payloads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_run_llm_payloads_org_isolation ON agent_run_llm_payloads;
+CREATE POLICY agent_run_llm_payloads_org_isolation ON agent_run_llm_payloads
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 ```
 
 **Drizzle schema changes:** None. The migration only touches policies; no column additions, removals, or type changes. No corresponding `server/db/schema/**` edits are required.
@@ -732,7 +848,7 @@ Update the call-site to pass the `context` object (orgId, sourceType, etc.) that
 | `server/services/intelligenceSkillExecutor.ts` | 1 | Skill executor — runs inside agent runs which already have `PrincipalContext`. |
 | `server/services/connectorPollingService.ts` | 7 | Worker-side polling; runs in `createWorker` jobs. |
 | `server/services/crmQueryPlanner/executors/canonicalQueryRegistry.ts` | 4 | Query planner executor; receives `PrincipalContext` at the entry point already. |
-| `server/routes/webhooks/ghlWebhook.ts` | 7 | Webhook handler; receives `req.orgId` from auth middleware. |
+| `server/routes/webhooks/ghlWebhook.ts` | 7 | Webhook handler; **unauthenticated** (HMAC signature only — no JWT, no `req.orgId`). The org and subaccount are resolved by looking up `connectorConfigs` + `canonicalAccounts` via `locationId` from the webhook payload before any `canonicalDataService` activity. |
 
 **The rule.** Per `architecture.md` "P3B — Principal-scoped RLS", every caller of `canonicalDataService` must pass a `PrincipalContext` so the service can apply principal-aware row scoping (used for cross-subaccount visibility decisions, agent-vs-user attribution, and team filtering). The migration shim `fromOrgId(orgId, subaccountId?)` synthesises a basic `PrincipalContext` from the legacy org-scoped call signature; it is acceptable during the P3A→P3B migration window.
 
@@ -1119,11 +1235,13 @@ Both share the same multi-process bug: in-memory state is per-process, so under 
 
 **Phase 5 §8.1 scope (decision).** Rewrite **both** limiters in the same Phase 5 PR — they share the same table, the same sliding-window algorithm, the same cleanup job, and the same multi-process correctness argument. Splitting them would force two migrations and two reviews of the same conceptual change. The new shared primitive is `server/lib/rateLimitStore.ts` (new file — see step 2 below); `testRunRateLimit.ts` and the public-route inline limiters both delegate to it.
 
-**Why Postgres rather than Redis:**
+**Why a new primitive (`server/lib/rateLimitStore.ts`) rather than reuse / extension.** Per `docs/spec-authoring-checklist.md` §1, every new primitive needs a "why not reuse, why not extend" paragraph:
+- **Why not reuse `webhookDedupe.ts`** — webhookDedupe is a single-bucket idempotency check (one row per dedupe key). Rate limiting needs sliding-window math (multiple rows per bucket key, summed over a time range). The shapes are different.
+- **Why not extend `testRunIdempotency.ts`** — testRunIdempotency holds singleton run-level state. Rate-limit-buckets need millions of small rows over time and a cleanup job. Cohabiting two shapes in one file would obscure both.
+- **Why not Redis** — the codebase has no Redis primitive today; introducing one is a new infrastructure dependency. Postgres handles a few hundred requests per minute per limit-key well within its comfort zone.
+- **Why a separate `rateLimitStore.ts` rather than putting the logic inside `testRunRateLimit.ts` or each public-route file** — the same algorithm (bucket increment + window sum + cleanup) services both surfaces; duplicating it across files (with subtle drift) is the failure mode this primitive prevents.
 
-1. The codebase has no Redis primitive today; introducing one is a new infrastructure dependency.
-2. The DB-backed pattern already exists in `server/lib/webhookDedupe.ts` and `server/services/testRunIdempotency.ts` — both use Postgres tables with unique-constraint-driven upserts.
-3. The rate-limit budget (a few hundred requests per minute per public form / per user-test-run) is well within Postgres's comfort zone.
+The new primitive's surface is narrow: two pure-friendly functions (`incrementBucket`, `sumWindow`) plus the shared bucket table contract. It is not a service; it is a leaf utility on top of the existing `db` connection.
 
 **Implementation outline:**
 
@@ -1303,8 +1421,12 @@ CREATE POLICY memory_review_queue_org_isolation ON memory_review_queue
 
 **Name:** `rate_limit_buckets`
 **Type:** Postgres table; system-scoped (no `organisation_id`)
-**Producer:** `server/lib/testRunRateLimit.ts` (after Phase 5 §8.1 rewrite)
-**Consumer:** Same file's window-sum read path; `server/jobs/rateLimitBucketCleanupJob.ts` (cleanup)
+**Producer:** `server/lib/rateLimitStore.ts` (Phase 5 §8.1 — the new shared sliding-window primitive). The store's `incrementBucket(key, windowStart)` function is the single write surface; no other caller writes directly.
+**Consumers (callers of the store):**
+- `server/lib/testRunRateLimit.ts` — wraps `rateLimitStore` for `is_test_run` test agent runs (callers: `agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`).
+- `server/routes/public/formSubmission.ts` — replaces inline `Map`-based `checkRateLimit` / `rateLimitMiddleware`.
+- `server/routes/public/pageTracking.ts` — replaces inline `Map`-based `checkTrackRateLimit`.
+- `server/jobs/rateLimitBucketCleanupJob.ts` — hourly cleanup of expired rows (read-only against the table; deletes rows older than 1 hour).
 
 **Schema:**
 
@@ -1376,7 +1498,8 @@ Every phase's verification terminates in a named gate. New runtime tests are add
 
 | Spec section | Test file | Type | What it asserts |
 |---|---|---|---|
-| §8.1 | `server/lib/__tests__/testRunRateLimit.test.ts` | Pure-function | Sliding-window math: bucket increment, window-sum read, expiry cutoff. No DB connection — feed in-memory bucket state. |
+| §8.1 | `server/lib/__tests__/rateLimitStore.test.ts` | Pure-function | Sliding-window math on the shared primitive: bucket increment, window-sum read, expiry cutoff. Inject an in-memory mock for the DB handle. |
+| §8.1 | `server/lib/__tests__/testRunRateLimit.test.ts` | Pure-function | Wrapper-semantics: `testRunRateLimit` correctly delegates to `rateLimitStore` for the `is_test_run` use case (key shape, threshold, behavior on limit). |
 | §8.4 (P3-M8) | `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts` | Pure-function | Depth check rejects > 5; accepts ≤ 5; produces correct error shape. |
 | §8.4 (P3-M9) | Same file (additional `describe` block) | Pure-function | Degraded fallback: when active-lead resolution returns no row, the resolver picks the documented fallback path. |
 | §8.4 (P3-L9) | `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts` | Pure-function | `is_test_run = true` rows are excluded from the cost-ledger sum. |
@@ -1508,7 +1631,7 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/services/intelligenceSkillExecutor.ts` | 2 (§5.4) | Add `import type { PrincipalContext }`; thread principal through to `canonicalDataService` calls. |
 | `server/services/connectorPollingService.ts` | 2 (§5.4) | Use `fromOrgId(organisationId, subaccountId)` at `canonicalDataService` call-sites. |
 | `server/services/crmQueryPlanner/executors/canonicalQueryRegistry.ts` | 2 (§5.4) | Thread incoming `PrincipalContext` down to `canonicalDataService` calls. |
-| `server/routes/webhooks/ghlWebhook.ts` | 2 (§5.4) | Use `fromOrgId(req.orgId!, subaccountId)` at `canonicalDataService` call-sites. |
+| `server/routes/webhooks/ghlWebhook.ts` | 2 (§5.4) | Unauthenticated route. After the existing `connectorConfigs` + `canonicalAccounts` lookup resolves `config` and `dbAccount`, call `fromOrgId(config.organisationId, dbAccount.subaccountId ?? undefined)` and thread the resulting principal through every `canonicalDataService` call downstream. Do not reference `req.orgId` — it is not set on this route. |
 | `server/services/canonicalDataService.ts` (or adjacent registry) | 2 (§5.6) | Add registry entries for `canonical_flow_definitions` and `canonical_row_subaccount_scopes`. (Re-verify gate before fix.) |
 | `client/src/components/clientpulse/ProposeInterventionModal.tsx` | 3 (§6.2.1) | Update interface imports to point at new `types.ts`. |
 | `client/src/components/clientpulse/CreateTaskEditor.tsx` | 3 (§6.2.1) | Same. |
@@ -1622,7 +1745,7 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 - [ ] `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line).
 - [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at PR-open time) exists and applies cleanly.
 - [ ] `server/lib/testRunRateLimit.ts` is DB-backed; `server/jobs/rateLimitBucketCleanupJob.ts` exists and is registered in pg-boss schedule.
-- [ ] All four pure-function tests in §10.1 exist and pass.
+- [ ] All five pure-function tests in §10.1 exist and pass (`rateLimitStore`, `testRunRateLimit`, `agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`).
 - [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites.
 - [ ] `npm run build:server` passes.
 - [ ] Tail items (§8.4) are either resolved or appear in §14 Deferred Items with operator sign-off.
@@ -1691,7 +1814,7 @@ For every new feature touching tenant data, the implementer answers yes to all f
 ### §15.3 Development discipline
 
 - **Fix root causes, not symptoms.** Phase 1's largest finding (the circular dep) is one import line; the right fix is to extract the type, not to suppress 175 cycles individually. Apply the same posture to future findings.
-- **Prefer existing primitives over new abstractions.** This spec introduces zero new architectural primitives — every fix invokes `withOrgTx`, `withAdminConnection`, `withPrincipalContext`, `fromOrgId`, `llmRouter`, `canonicalDataService`, or `resolveSubaccount`. New primitives have a high evidentiary bar (per `prefer_existing_primitives_over_new_ones: yes`).
+- **Prefer existing primitives over new abstractions.** Every Phase 1–4 fix invokes existing primitives — `withOrgTx`, `withAdminConnection`, `withPrincipalContext`, `fromOrgId`, `llmRouter`, `canonicalDataService`, `resolveSubaccount`. The §4.2 new service files are pure relocations (DB access moves from routes/lib into the service tier; no new public API). The single new architectural primitive this spec introduces is Phase 5 §8.1's `server/lib/rateLimitStore.ts` — justified inline in §8.1 against the alternatives (Redis would be a new infrastructure dependency; the existing in-memory `Map<>`-based limiters do not meet the multi-process correctness requirement). New primitives have a high evidentiary bar (per `prefer_existing_primitives_over_new_ones: yes`); every other section of this spec satisfies that bar by extending or reusing the listed primitives.
 - **Smallest viable PR per category.** Phase 1 is one PR because the work is causally tied. Phase 5 is multiple PRs because each subsection is independent. The default unit is "smallest reviewable change that closes a single category".
 - **Gates are the source of truth.** When in doubt about whether a fix is correct, run the gate. The gate is more accurate than the implementer's mental model — if the gate disagrees with what you're sure is right, the gate is right.
 - **No drive-by cleanup.** This spec deliberately separates each finding from adjacent unrelated work. Do not bundle "while I'm in this file, let me also fix X" — that bloats review and introduces blast-radius.
