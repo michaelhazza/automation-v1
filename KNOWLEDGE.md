@@ -726,3 +726,12 @@ Until one of those is on the roadmap, every "add a counter" suggestion gets reje
 **Why this looks like a hack but isn't.** Metric libraries solve cardinality, aggregation, and retention. The log sink already solves all three for tagged-event payloads — adding a separate counter library would mean reproducing the aggregation in two places and reconciling them. Single-source-of-truth wins.
 
 **Applied to:** PR #188 ChatGPT round 1 finding 7 — rejected `incident_notify_failures_total` counter + retry suggestion because `logger.error('incident_notify_enqueue_failed', ...)` already IS the metric, and the "best effort" contract on the notify path explicitly excludes retry. Session log: `tasks/review-logs/chatgpt-pr-review-claude-system-monitoring-agent-PXNGy-2026-04-24T21-39-06Z.md`.
+
+
+### [2026-04-25] Correction — Audit framework cited wrong file paths (RLS plumbing, client entry, scheduling/briefing services)
+
+While drafting `docs/codebase-audit-framework.md`, the §4 Protected Files list and §3 Rule 13 cited several paths that were filename-shaped guesses, not facts. The reviewer caught five: (a) `withOrgTx` lives in `server/instrumentation.ts`, not `server/lib/withOrgTx.ts`; (b) `getOrgScopedDb` lives in `server/lib/orgScopedDb.ts`, not `server/lib/getOrgScopedDb.ts`; (c) the client entrypoint is `client/src/main.tsx`, not `client/main.tsx`; (d) `scheduleCalendarServicePure.ts` lives under `server/services/`, not `server/lib/`; (e) `agentBriefingService.ts` lives under `server/services/` and `agentBeliefs` is a schema at `server/db/schema/agentBeliefs.ts` (no separate `server/lib/agentBeliefs.ts` file exists).
+
+**Rule for future doc authoring (especially canonical/protected lists):** never trust a recon agent's file path summary verbatim — every path that lands in a "Protected Files" or "must not delete" list must be verified by `test -f <path>` or a direct `grep -rn "export.*<symbol>"` before the doc is committed. Recon agents synthesise paths from descriptions and are wrong often enough that a list of 30 paths will typically contain 1-3 wrongly-shaped ones. Wrong paths in a protected-file list are dangerous because audit/cleanup passes use them to decide what is safe to delete; a wrong path can lead to deleting the real file (false-negative protection).
+
+**Applied to:** v1.3 of `docs/codebase-audit-framework.md`. Path-verification sweep added as a pre-commit step for any future canonical doc that asserts file locations.

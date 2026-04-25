@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.2 — Audit Completion Criteria added (1.1: Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary clause, invariant-in-code clause; 1.0: 2026-04-25 initial calibration from generic v5.0) |
+| Version | 1.3 — path corrections (`withOrgTx` is in `server/instrumentation.ts`, `getOrgScopedDb` is in `server/lib/orgScopedDb.ts`, client entry is `client/src/main.tsx`, `scheduleCalendarServicePure` and `agentBriefingService` are under `server/services/`, `agentBeliefs` is a schema at `server/db/schema/`) + completion-criteria tightening to require final audit branch state (1.2: Audit Completion Criteria; 1.1: Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary, invariant-in-code; 1.0: 2026-04-25 initial calibration from generic v5.0) |
 | Status | Active. Reusable across audits. |
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
@@ -344,11 +344,11 @@ Any change involving the following is high-risk by default. AutomationOS specifi
 - **Shared mutable state.** Module-level caches in `server/lib/` (skill text cache, model registry cache, prompt prefix cache, system prompts).
 - **pg-boss queue.** Any job handler, retry policy, dedup table, idempotency key.
 - **Webhook receivers.** Signing, dedup, replay handling.
-- **Cron/scheduled tasks.** `scheduleCalendarServicePure.ts`, heartbeat math, rrules / cron expressions on `scheduled_tasks`.
+- **Cron/scheduled tasks.** `server/services/scheduleCalendarServicePure.ts`, heartbeat math, rrules / cron expressions on `scheduled_tasks`.
 - **Cost & rate enforcement.** `server/lib/runCostBreaker.ts`, `server/lib/rateLimiter.ts`, `testRunRateLimit.ts`.
 - **Backoff utilities.** `server/lib/withBackoff.ts` (the canonical retry primitive per `docs/spec-context.md`).
 - **Agent execution loop.** `server/services/agentExecution*.ts`, the LLM call dispatcher, budget enforcement.
-- **Memory & briefing extraction.** `agentBriefingService.ts`, `agentBeliefs.ts`, `memoryWeeklyDigestJob` — these read across many runs and are sensitive to subtle behaviour shifts.
+- **Memory & briefing extraction.** `server/services/agentBriefingService.ts`, the `server/db/schema/agentBeliefs.ts` storage surface, `memoryWeeklyDigestJob` — these read across many runs and are sensitive to subtle behaviour shifts.
 - **Time-dependent logic.** TTL columns, retention windows, archival cutoffs (`llm_requests_archive`, tiered LLM payload retention).
 
 These are never `confidence: high` unless: the change is isolated to a single execution path, that path has named test coverage, and no shared state is read or written as a side effect. Otherwise → pass 3.
@@ -392,7 +392,7 @@ The files and patterns below must **never** be deleted or modified without expli
 ### RLS, Tenant Isolation & Permissions
 
 - `server/config/rlsProtectedTables.ts` — **canonical RLS manifest**. Every new tenant-scoped table must be added in the same migration that creates it. Removing or renaming entries here is a security-critical change.
-- `server/db/middleware/rls*.ts`, `server/lib/withOrgTx.ts`, `server/lib/getOrgScopedDb.ts` (or equivalent) — three-layer fail-closed RLS plumbing.
+- `server/db/middleware/rls*.ts`, `server/instrumentation.ts` (defines `withOrgTx`), `server/lib/orgScopedDb.ts` (defines `getOrgScopedDb`) — three-layer fail-closed RLS plumbing.
 - `server/lib/agentRunPermissionContext.ts` — canary for run visibility rules.
 - `server/lib/agentRunVisibility.ts` — single source of truth for three-tier `canView` / `canViewPayload`.
 - Any file matching `*permissionSet*`, `*permissions*`, or `*visibility*` under `server/lib/` or `server/services/`.
@@ -549,7 +549,7 @@ When running areas in parallel via independent subagents, this order does not ap
 - Do not remove anything on the Protected Files list (§4).
 - Do not remove code used only by tests (`server/**/__tests__/`, `scripts/run-trajectory-tests.ts`, fixtures). Tests count.
 - Do not remove anything loaded via `import()` with computed paths.
-- Do not remove server/client entry points (`server/index.ts`, `client/main.tsx`, `worker/`).
+- Do not remove server/client entry points (`server/index.ts`, `client/src/main.tsx`, `worker/`).
 - Do not remove anything referenced by name in `server/config/*.ts` registries — even if static analysis shows zero direct imports.
 - Do not remove skill markdown files in `server/skills/` without verifying the slug isn't in `actionRegistry.ts`.
 - Do not remove any `*.d.ts` declaration file.
@@ -1455,7 +1455,7 @@ An audit is complete when **all** of the following are true. Anything less is an
 
 - [ ] All pass-2 fixes applied and validated (Rule 6 checks pass for every area touched, with `N/A` reasons recorded for any check marked not applicable per the no-silent-skip clause).
 - [ ] All pass-3 items recorded in `tasks/todo.md` under `## Deferred from codebase audit — <YYYY-MM-DD>`.
-- [ ] `pr-reviewer` has been run on the audit branch and its log persisted to `tasks/review-logs/pr-review-log-audit-<scope>-<timestamp>.md` (plus `spec-conformance` log if any spec-driven contract was touched).
+- [ ] `pr-reviewer` has been run against the final audit branch state (after all pass-2 fixes are committed) and its log persisted to `tasks/review-logs/pr-review-log-audit-<scope>-<timestamp>.md` (plus `spec-conformance` log if any spec-driven contract was touched).
 - [ ] The audit report itself is persisted at `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md` using the §11 template.
 - [ ] `KNOWLEDGE.md` has been appended with any new patterns or framework gaps the audit surfaced (per §10 and `CLAUDE.md` §3).
 
@@ -1489,5 +1489,5 @@ The audit is a tool for protecting the codebase. Better to escalate than to ship
 
 ---
 
-*AutomationOS Codebase Audit Framework v1.2 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code) and v1.2 Audit Completion Criteria added 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
+*AutomationOS Codebase Audit Framework v1.3 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code), v1.2 Audit Completion Criteria, v1.3 path corrections + completion-criteria tightening, all 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
 
