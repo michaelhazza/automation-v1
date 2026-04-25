@@ -1567,3 +1567,10 @@ async function enqueueAggregateUpdate(idempotencyKey: string): Promise<void> {
 // ---------------------------------------------------------------------------
 export type { TaskType, SourceType, ExecutionPhase, RoutingMode };
 export { TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES };
+
+// ---------------------------------------------------------------------------
+// Token counting — re-exported from anthropicAdapter so callers import from
+// one place (llmRouter) instead of reaching into the provider layer directly.
+// ---------------------------------------------------------------------------
+export { countTokens, SUPPORTED_MODEL_FAMILIES } from './providers/anthropicAdapter.js';
+export type { SupportedModelFamily } from './providers/anthropicAdapter.js';

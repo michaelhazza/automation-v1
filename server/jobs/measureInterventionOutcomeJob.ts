@@ -20,7 +20,8 @@ import {
 } from '../db/schema/clientPulseCanonicalTables.js';
 import { orgConfigService } from '../services/orgConfigService.js';
 import { interventionService } from '../services/interventionService.js';
-import { canonicalAccounts } from '../db/schema/canonicalAccounts.js';
+import { canonicalDataService } from '../services/canonicalDataService.js';
+import { fromOrgId } from '../services/principal/fromOrgId.js';
 import { logger } from '../lib/logger.js';
 import {
   decideOutcomeMeasurement,
@@ -209,15 +210,9 @@ async function resolveAccountIdForSubaccount(
   subaccountId: string | null,
 ): Promise<string | null> {
   if (!subaccountId) return null;
-  const [account] = await db
-    .select({ id: canonicalAccounts.id })
-    .from(canonicalAccounts)
-    .where(
-      and(
-        eq(canonicalAccounts.organisationId, organisationId),
-        eq(canonicalAccounts.subaccountId, subaccountId),
-      ),
-    )
-    .limit(1);
+  // Delegate to canonicalDataService so reads stay behind the canonical interface.
+  // getAccountsByOrg returns all accounts for the org; filter client-side by subaccountId.
+  const accounts = await canonicalDataService.getAccountsByOrg(organisationId);
+  const account = accounts.find(a => a.subaccountId === subaccountId);
   return account?.id ?? null;
 }

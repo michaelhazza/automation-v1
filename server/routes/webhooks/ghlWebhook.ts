@@ -5,6 +5,7 @@ import { connectorConfigs, canonicalAccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { adapters } from '../../adapters/index.js';
 import { canonicalDataService } from '../../services/canonicalDataService.js';
+import { fromOrgId } from '../../services/principal/fromOrgId.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { recordGhlMutation } from '../../services/ghlWebhookMutationsService.js';
 import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';

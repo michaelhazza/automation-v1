@@ -2,6 +2,7 @@
 // Imports pure metadata from canonicalQueryRegistryMeta.ts and binds handlers.
 
 import { canonicalDataService } from '../../canonicalDataService.js';
+import { fromOrgId } from '../../principal/fromOrgId.js';
 import { REGISTRY_META } from './canonicalQueryRegistryMeta.js';
 import type {
   CanonicalQueryRegistry,

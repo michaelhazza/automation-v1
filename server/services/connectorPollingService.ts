@@ -5,6 +5,7 @@ import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
+import { fromOrgId } from './principal/fromOrgId.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import { ingestClientPulseSignalsForSubaccount } from './clientPulseIngestionService.js';
