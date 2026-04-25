@@ -28,6 +28,24 @@
 
 (Append a dated entry per session; record what was done, what's next, any decisions made.)
 
+### 2026-04-25 (session 3) — Chunks 1 and 2 complete; paused for session handoff
+
+**Completed this session:**
+- Chunk 1 (Phase 1 — RLS hardening): commit `c6f491c3` — migration 0227, 6 new services, 13 route refactors, cross-org write guards, subaccount resolution, gate baselines. TypeScript errors in Phase 1 files fixed (req.userId → req.user!.id, webLoginConnections incomplete refactor, findLink() added to subaccountAgentService).
+- Chunk 2 (Phase 2 — Gate compliance): commit `79b6e89f` — allowlist path fixed, canonical-read enforcement, countTokens re-routed through llmRouter, principal context propagation in 6 files, canonical dictionary additions (canonical_flow_definitions + canonical_row_subaccount_scopes). §5.5 skill read-path skipped (lowest priority, enumeration not quick).
+- plan.md updated: gate scripts only run at programme start (baseline) and end (final pass), not per chunk.
+- architect.md updated: explicit Gate-Timing Rule added to Architecture Constraints section.
+
+**Next: Chunk 3 — Phase 3 Architectural integrity**
+- Create `shared/types/agentExecutionCheckpoint.ts` (extract 4 types: AgentRunCheckpoint, SerialisableMiddlewareContext, SerialisablePreToolDecision, PreToolDecision)
+- Update `server/services/middleware/types.ts` to re-export from shared
+- Update `server/db/schema/agentRunSnapshots.ts:3` to import from shared (breaks 175-cycle cascade)
+- Extract ProposeInterventionModal cluster to `client/src/components/clientpulse/types.ts`
+- Extract SkillAnalyzerWizard cluster to `client/src/components/skill-analyzer/types.ts`
+- Ship gate: `npx madge --circular --extensions ts server/ | wc -l` ≤ 5; client cycles ≤ 1; build passes
+
+**Deferred from Chunk 2:** §5.5 skill read-path completeness (enumerate missing readPath entries in actionRegistry.ts) — not a blocker; left for Chunk 2 follow-up or Phase 5B.
+
 ### 2026-04-25 (session 2) — Implementation session started, paused for operator login change
 
 - Branch: `feat/codebase-audit-remediation-spec` (all implementation happens here)
