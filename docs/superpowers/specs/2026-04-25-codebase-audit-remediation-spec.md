@@ -139,6 +139,8 @@ Every category's "definition of done" is `<gate-name> returns clean exit`. **Blo
 
 **Warning-level gates** (those whose intent is "look at this, decide if it's OK" rather than "this is forbidden") are different: a `# baseline-allow` directive at a specific match point with an explanatory comment is the canonical way to acknowledge a reviewed, intentionally-permitted pattern. The Phase 2 §5.7 (`verify-input-validation`, `verify-permission-scope`) and Phase 5 §8.2 (`verify-no-silent-failures`) approaches use this pattern for reviewed false-positives or genuinely intentional patterns. The carve-out is narrow: warning-level gates only, with one-line rationale per directive — never a blanket suppression and never on a blocking gate.
 
+**CI enforcement (non-bypassable).** Every phase ship-gate listed in §3.1 — and every per-category gate referenced in a §X.N "Verification" subsection — MUST run in CI and block merge on failure. Local-only validation is insufficient: a gate that only runs on the implementer's machine is not a durable invariant guard, and the entire point of this programme is to lock invariants permanently. Any gate that is currently invoked only by `npm run test:gates` or `scripts/verify-*.sh` ad-hoc must be wired into the merge-blocking CI workflow as part of the phase that introduces or repairs it. If a phase ships before its gate runs in CI, the phase has not satisfied its DoD. This rule applies to the gates listed in §3.1, §13.1–§13.5, and the verification subsections of §4.6, §5.8, §6.3, §7.4, §8.5A, §8.5B.
+
 ### §2.5 Migration discipline
 
 Every schema-state correction ships as a NEW migration with the next available number. We **never** edit historical migrations. Migration filenames follow the existing pattern: `migrations/<NNNN>_<descriptive_name>.sql`. The new migration drops broken policies (`DROP POLICY IF EXISTS …`) and recreates them with the canonical pattern from `migrations/0213_fix_cached_context_rls.sql`.
@@ -147,7 +149,7 @@ Every schema-state correction ships as a NEW migration with the next available n
 
 ### §2.6 Smallest viable PR per phase
 
-Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — Phase 5A ships §8.1 and §8.2 as two independent PRs (each is a self-contained category with its own gate); Phase 5B ships §8.3 and each §8.4 tail item as additional small PRs in any order. This gives roughly four canonical PRs (Phases 1–4) plus two mandatory Phase 5A PRs and a stream of optional Phase 5B PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
+Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — Phase 5A ships §8.1 as **two PRs in sequence** (PR 1 shadow-mode + PR 2 authoritative flip; see §8.1 for the rationale) and §8.2 as a single independent PR; Phase 5B ships §8.3 and each §8.4 tail item as additional small PRs in any order. This gives roughly four canonical PRs (Phases 1–4) plus three mandatory Phase 5A PRs (two for §8.1, one for §8.2) and a stream of optional Phase 5B PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
 
 ### §2.7 Auto-rewrite prohibition on `docs/capabilities.md`
 
@@ -282,16 +284,18 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 
 This table is a planning aid, not a commitment. Durations are expressed in implementation-days (single developer, focused session). Each phase is blocked by the one above it per §2.1; parallel work is only possible within Phase 5 (5A/5B are both independent of each other once Phase 4 ships).
 
-| Phase | Owner | Estimated duration | Blocking dependency |
-|---|---|---|---|
-| 1 (RLS hardening) | Platform/backend lead | 3–4 days | None — start here |
-| 2 (Gate compliance) | Platform/backend lead | 2–3 days | Phase 1 ship gate green |
-| 3 (Architectural integrity) | Platform/backend lead | 1–2 days | Phase 2 ship gate green |
-| 4 (System consistency) | Backend lead + operator (§7.3) | 1 day | Phase 3 ship gate green |
-| 5A (Mandatory improvements) | Platform/backend lead | 2–3 days | Phase 4 ship gate green |
-| 5B (Optional backlog) | Any dev, any sprint | Ongoing | Phase 4 ship gate green (can begin after Phase 4 ships independently of 5A) |
+| Phase | Owner | Estimated duration | Blocking dependency | Success signal (binary, agent-friendly) |
+|---|---|---|---|---|
+| 1 (RLS hardening) | Platform/backend lead | 3–4 days | None — start here | All five RLS gates green in CI; every write site against the eight §4.1 tables succeeds under FORCE RLS in local verification |
+| 2 (Gate compliance) | Platform/backend lead | 2–3 days | Phase 1 ship gate green | All six architectural-contract gates (§3.1 row 2) green in CI; no `db` import remains in `server/routes/**` or `server/lib/**` |
+| 3 (Architectural integrity) | Platform/backend lead | 1–2 days | Phase 2 ship gate green | `madge --circular` server count ≤ 5; client count ≤ 1; `agentRunSnapshots.ts` imports only `drizzle-orm` / `shared/**` / sibling schema files |
+| 4 (System consistency) | Backend lead + operator (§7.3) | 1 day | Phase 3 ship gate green | `npm run skills:verify-visibility` returns 0 violations; `npm install` returns no missing-dep warnings; `verify-integration-reference.mjs` runs without crashing; operator-led `docs/capabilities.md` edit applied |
+| 5A (Mandatory improvements) | Platform/backend lead | 2–3 days | Phase 4 ship gate green | DB-backed rate limiter authoritative after the §8.1 shadow-mode PR; `verify-no-silent-failures` returns clean (no WARNING line); server `madge --circular` count = 0 |
+| 5B (Optional backlog) | Any dev, any sprint | Ongoing | Phase 4 ship gate green (can begin after Phase 4 ships independently of 5A) | Every §8.3/§8.4 item is either landed on `main` with passing typecheck OR appears in §14 with operator sign-off |
 
 **Duration assumptions:** each "day" assumes the developer has the repo open, gates running, and is not context-switching to feature work. Phase 1 is the longest because it involves 13 route refactors + the corrective migration + the gate baseline update — all in one PR. Phase 3 is the shortest because it is a single type extraction plus 14 file import updates.
+
+**Why "Success signal" is binary.** The signals above are written so a reviewer or an automated check can answer "satisfied?" with yes/no — no interpretation. Subjective phrases ("looks good", "feels solid") are deliberately absent. If a phase's signal cannot be evaluated as binary, the signal is wrong; revise it before starting the phase.
 
 **Owner note.** "Operator" in Phase 4 refers to the capabilities editorial fix (§7.3), which is not a code change and can be done asynchronously. The §7.3 edit does not block the §7.1/§7.2 code PRs.
 
@@ -304,6 +308,14 @@ This table is a planning aid, not a commitment. Durations are expressed in imple
 **Ship gate:** all five RLS gates return clean exit. See §4.6.
 
 **One PR.** Sub-phases 1A → 1E ship together. The migration must be applied (locally + CI) before the route refactors are merged so the route-level integration paths actually exercise the corrected policies.
+
+**Hard ordering preconditions for migration 0227 (non-bypassable).** Migration 0227 (§4.1) MUST NOT be applied — locally to the working tree's DB, in CI, or to any shared environment — until **all three** of the following are true:
+
+1. The Phase 1A write-path audit (§4.1 "Pre-step: write-path audit") has been executed against the eight tables in scope and every write site has been confirmed to either run inside `withOrgTx(organisationId, …)` or `withAdminConnection()`. Any write site that does neither is fixed before the migration is run.
+2. Every Phase 1B service-layer change (§4.2) and Phase 1C cross-org-write guard (§4.3) is staged in the same PR as the migration. The migration's `WITH CHECK` enforcement will reject writes whose session var is unset; staging the service-tier work in the same PR bounds the in-PR fail-closed window to the brief moment between migration-apply and route-refactor-merge inside that PR.
+3. Local verification has confirmed that `npx tsx scripts/migrate.ts` applies 0227 cleanly against a fresh DB AND every affected write path succeeds under FORCE RLS — exercise each route once locally with a real `app.organisation_id` set, observe the write completes, observe `verify-rls-coverage.sh` returns 0 violations.
+
+**Why this ordering is hard.** Applying 0227 before condition 1 turns silent cross-tenant leakage (the pre-migration failure mode) into runtime write rejections at *unknown* call sites — a debugging-cost spike that the audit step in §4.1 was specifically added to prevent. Applying 0227 before condition 2 leaves the in-PR fail-closed window open for longer than necessary. Applying 0227 without condition 3 means the first time the migration meets a real write path is in production CI, not on the implementer's machine. None of the three preconditions are negotiable; the order in which they are satisfied within the PR's commit history is at the implementer's discretion, but all three must be green before the merge button is pushed.
 
 ### §4.1 Phase 1A — Corrective migration for un-protected tables
 
@@ -1316,6 +1328,20 @@ The new primitive's surface is narrow: two pure-friendly functions (`incrementBu
 
 **Env-flag rollback shim (mandatory, ships alongside DB implementation).** `server/services/rateLimitStoreService.ts` checks `process.env.USE_DB_RATE_LIMITER` at module load. When the flag is `false` (or unset in a legacy env), the service exports a no-op in-memory shim with identical function signatures. The shim reverts to the pre-Phase-5A in-process Map behaviour. This allows the rollback described in §11.2 without reverting code. See §11.2 for the rollback procedure.
 
+**Shadow-mode rollout (mandatory — two-PR sequence).** Even with `pre_production: yes`, the DB-backed rate limiter cannot become authoritative on first deploy. The failure mode the env-flag does not catch is *behavioural divergence under load*: the DB store could throttle subtly differently from the in-memory map (different bucket boundaries, different sliding-window math, different concurrency outcome). Catching that divergence requires running both side-by-side under real traffic before either becomes the source of truth. Phase 5A §8.1 therefore ships as **two PRs in sequence**:
+
+1. **PR 1 — Shadow mode.** Land the DB-backed primitive AND every caller-side `await` change in dual-evaluate mode: every call site invokes BOTH the legacy in-memory limiter AND the DB-backed `rateLimitStoreService`. The in-memory limiter remains *authoritative* (its return value is what the route enforces). The DB-backed store runs as a side-effect that records buckets, sums windows, and emits a single structured-log line per call when the two implementations disagree (`{event: 'rate_limit_shadow_divergence', surface, key, db_decision, mem_decision}`). No request is throttled or admitted differently than today. PR 1 must remain on `main` for at least one full operator-observed window — minimum one PR cycle, with the operator confirming divergence-log volume is zero (or every observed divergence has been triaged and explained) before PR 2 opens.
+2. **PR 2 — Authoritative flip.** Remove the dual-evaluate scaffolding. The DB-backed store becomes authoritative; the in-memory limiter is removed (or retained behind the `USE_DB_RATE_LIMITER=false` env-flag shim from the previous paragraph as the rollback path, never the default). PR 2's PR description references the divergence-log evidence from the PR-1 window.
+
+**Divergence — precise definition.** A "divergence" between the in-memory and DB-backed limiters is a difference in **allow/deny decision** for the same `(bucket_key, evaluation window)` pair within a single request invocation. Specifically:
+
+- **Counts as a divergence:** in-memory returns *allow* and DB returns *deny* (or vice versa) for the same call.
+- **Does NOT count as a divergence:** internal counter values that differ but produce the same allow/deny outcome; timing skew between when the two stores observe a request; ordering differences across concurrent requests where each call's individual decision is consistent; minor rounding in window-boundary math where both stores still cross the threshold on the same request.
+
+The shadow-window pass criterion is decision-equivalence under identical inputs, not implementation-equivalence. Under-reporting (treating a real allow/deny mismatch as "noise") is rejected; over-reporting (treating internal-state drift as a divergence when both stores still agree on allow/deny) is also rejected. If the gate logic encounters a class of difference not covered by the rules above, halt and triage with the operator before deciding which bucket it falls into.
+
+The shadow window is lightweight by design: log-only comparison, no thresholds, no metrics dashboard, no alerting. The only artifact is a structured-log line per divergence. If divergence volume is non-zero, the divergence cause is fixed in PR 1 (or in a follow-up PR 1b) before PR 2 opens — never by adjusting the comparison logic to mask the difference. The §13.5A DoD check "DB-backed rate limiter authoritative after the §8.1 shadow-mode PR" is satisfied only after PR 2 lands.
+
 **Verification.** Add unit tests (pure-function-only per `runtime_tests: pure_function_only`):
 - `server/services/__tests__/rateLimitStoreService.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle. Also test the env-flag shim path: when `USE_DB_RATE_LIMITER=false`, the service returns without touching the DB.
 - `server/lib/__tests__/testRunRateLimit.test.ts` — preserves existing test-run rate-limit semantics on top of the shared store.
@@ -1407,12 +1433,13 @@ Each ships as its own small Phase 5 PR (§2.6 — one PR per §8.4 tail item). T
 
 ### §8.5A Phase 5A verification (mandatory — programme blocker)
 
-Phase 5A is the mandatory half of Phase 5. The programme is not declared complete until both of these PRs land:
+Phase 5A is the mandatory half of Phase 5. The programme is not declared complete until all three of these PRs have landed:
 
-| Subsection | Ship gate |
-|---|---|
-| §8.1 Rate limiter durability | `server/lib/testRunRateLimit.ts` is DB-backed; `rateLimitBucketCleanupJob` registered; both pure-function test files pass; `npm run build:server` passes. |
-| §8.2 Silent-failure path closure | `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line); `npm run build:server` passes. |
+| Subsection | PR | Ship gate |
+|---|---|---|
+| §8.1 Rate limiter durability — PR 1 | Shadow-mode | DB-backed `rateLimitStoreService` lands; every call site dual-evaluates against the legacy in-memory limiter; divergence emits a structured-log line; in-memory limiter remains authoritative; both pure-function test files pass; `npm run build:server` passes. |
+| §8.1 Rate limiter durability — PR 2 | Authoritative flip | Dual-evaluate scaffolding removed; DB-backed store is authoritative; in-memory limiter removed (or retained behind `USE_DB_RATE_LIMITER=false` env-flag shim only); PR 2 description references PR-1 divergence-log evidence (count zero or every divergence triaged and explained); `rateLimitBucketCleanupJob` registered; `npm run build:server` passes. |
+| §8.2 Silent-failure path closure | Single PR | `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line); `npm run build:server` passes. |
 
 **Server circular-dependency gate (carried from Phase 3).** Phase 5A is also where the server cycle count target drops from "≤ 5" (Phase 3 target) to **0**. See §6.3 and §13.5A — the two schema-leaf tail items (§8.4) are the remaining cycles; they land in Phase 5A if operator elects to close them here, or they are escalated to §14 Deferred Items with the remaining count documented.
 
@@ -1639,12 +1666,21 @@ No new alerts, dashboards, or metrics are introduced. The framing is `static_gat
 
 **Phase 5A:**
 - If `verify-no-silent-failures` stays `WARNING` after the fix pass, re-run the gate with `--verbose` (or the modified-gate approach in §8.2) to surface the exact file. A WARNING that the fix pass introduced means a `catch` block added during the fix itself swallows the error — rethrow or add a log line.
-- **Rate limiter rollback.** If the DB-backed rate limiter (§8.1) causes a production regression after merging (e.g. DB connection exhaustion from bucket writes, or degraded form-submission latency), revert to the in-memory fallback via an environment-variable toggle without reverting the PR:
-  1. Set `USE_DB_RATE_LIMITER=false` in the production environment (or `.env`).
+- **Rate limiter rollback.** If the DB-backed rate limiter (§8.1) causes a regression after the PR 2 authoritative-flip merges, revert to the in-memory fallback via an environment-variable toggle without reverting the PR:
+  1. Set `USE_DB_RATE_LIMITER=false` in the affected environment (or `.env`).
   2. `server/services/rateLimitStoreService.ts` MUST check this env flag at startup and return a no-op in-memory shim when it is `false`. The shim preserves the same function signatures so callers need no change.
   3. Restart the workers. The in-memory limiter resumes immediately; the DB table accumulates no new rows but is not dropped (flip the flag back to re-enable without a migration).
   4. Document the toggle in the migration header comment so operators can find it under incident pressure.
   The env-flag shim is part of the §8.1 deliverable — it ships alongside the DB implementation, not as a separate follow-up.
+
+  **Trigger conditions (when to flip the env-flag back to false).** The codebase is `pre_production: yes` / `live_users: no`, so there is no metric-driven trigger today — the trigger is operator judgement during smoke testing or first-customer activation. The operator flips the env-flag back to `false` immediately, no hesitation, when ANY of the following is true:
+
+  - **DB error from rate-limit-bucket writes** is observed for > 5 minutes during smoke testing (anything beyond a transient connection blip — sustained INSERT/UPDATE failures against `rate_limit_buckets` indicate the store is degrading the surface it is supposed to protect).
+  - **Form-submission latency regression** is observed during smoke or first-customer rollout — operator-judged, no fixed threshold, but the heuristic is "noticeably slower than the in-memory baseline on the same surface".
+  - **Allow/deny divergence post-flip** — once the in-memory limiter is removed in PR 2, divergence detection itself is gone. If a route exhibits unexpectedly aggressive throttling (legitimate traffic blocked) or unexpectedly permissive throttling (an obvious overuse pattern admitted), and the in-memory shim under the env-flag would have throttled it correctly, flip the flag.
+  - **DB connection-pool saturation events** that trace back to `rate_limit_buckets` writes (e.g. wait-time spikes coincident with rate-limit traffic).
+
+  The bias under uncertainty is "flip first, diagnose after" — the env-flag is the cheap, fully-reversible action; diagnosis can happen with the system on its known-good path. The §11.3 commit-and-revert posture applies: do not hesitate to invoke this rollback while figuring out whether it was needed.
 
 **Phase 5B:**
 - Each subsection's PR carries its own failure mode; treat them in isolation.
@@ -1840,6 +1876,7 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 - [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at merge time per §2.5) exists and applies cleanly.
 - [ ] `server/lib/testRunRateLimit.ts` is DB-backed; `server/jobs/rateLimitBucketCleanupJob.ts` exists and is registered in pg-boss schedule.
 - [ ] `server/services/__tests__/rateLimitStoreService.test.ts` and `server/lib/__tests__/testRunRateLimit.test.ts` exist and pass.
+- [ ] §8.1 shipped as the two-PR shadow-mode sequence (PR 1 dual-evaluate, PR 2 authoritative flip). PR 2's description references the divergence-log evidence from the PR-1 window, and divergence count is zero (or every divergence has been triaged and explained inline) before PR 2 merges.
 - [ ] `npm run build:server` passes.
 - [ ] `npx madge --circular --extensions ts server/` cycle count = **0**. The two schema-leaf tail items (§8.4 — `agentRuns.ts`, `skillAnalyzerJobs.ts`) must either have landed in Phase 5A PRs or appear in §14 Deferred Items with the residual cycle count documented. No new cycles introduced.
 
