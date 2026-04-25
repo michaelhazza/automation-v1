@@ -1,0 +1,22 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase. This is iteration 4 — convergence verification.
+
+Iter1 applied 24 fixes (RLS policy DROPs, file-path drift, finding counts, PR boundaries, rate-limit conflation).
+Iter2 applied 7 cascade fixes (full SQL enumeration, ghlWebhook full cascade, §9.2 contract, §10.1 test plan, §3.1 math, primitive justification, concurrent-PR rule).
+Iter3 applied 6 tertiary cascade fixes (0202/0203 carve-out cascade, merge-time numbering wording cascade, systemAutomationService naming, §5 Phase 2 goal scope, §3.5 stale diagnosis, §9.2 cleanup-job wording).
+
+SPEC: docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, commit-and-revert.
+- Static gates + pure-function tests only.
+- Prefer existing primitives.
+- Migrations are append-only.
+
+YOUR JOB: Final convergence check. Look ONLY for mechanical issues. The spec has been through three rounds; further mechanical findings should be rare.
+
+If the spec is mechanically tight, output a single line: "No findings — spec is mechanically tight."
+
+Otherwise output a bulleted list of distinct findings (cite §N.N, one-sentence description, one-sentence fix). No preamble.
+
+Here is the spec to review:
+

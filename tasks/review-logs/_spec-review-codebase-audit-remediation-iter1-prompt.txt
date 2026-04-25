@@ -1,0 +1,40 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase.
+
+SPEC: docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md — Codebase Audit Remediation, a 5-phase remediation plan covering 47+ findings from a full-codebase audit. Phase 1 hardens multi-tenancy and RLS (corrective migration 0227 + direct-DB-access removal + cross-org write guards + subaccount resolution + gate baselines). Phase 2 brings architectural-contract gates to green. Phase 3 fixes the schema-imports-services circular root and the two largest client cycle clusters. Phase 4 covers skill registry coherence, explicit deps, yaml gate fix, and the operator-led capabilities.md editorial fix. Phase 5 ships controlled improvements (DB-backed rate limiter, silent-failure closure, type strengthening, tail items).
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, commit-and-revert. NO feature flags, NO staged rollout, NO canary.
+- Testing posture: static gates primary + pure-function unit tests only. NO vitest/jest/playwright/supertest expansions, NO frontend tests, NO E2E tests, NO API contract tests, NO performance baselines, NO composition tests.
+- Prefer existing primitives. Approved: withOrgTx, getOrgScopedDb, withAdminConnection, withPrincipalContext, fromOrgId, llmRouter, canonicalDataService, resolveSubaccount, RLS_PROTECTED_TABLES manifest, scripts/verify-*.sh gates. Do not suggest NEW governance primitives.
+- Migrations are append-only — never edit historical migrations.
+- docs/capabilities.md editorial law: customer-facing sections never name specific LLM/AI providers.
+
+This is a freshly-written spec — no prior review passes. Expect the full range of findings.
+
+YOUR JOB: Review the spec for implementation-readiness issues. Focus on:
+
+1. CONTRADICTIONS — same concept described differently in different sections. Check phase counts in §3.1 (26+11+3+5+18=63) reconcile with §3.5 captured violations + §3.3 delta.
+2. STALE / RETIRED LANGUAGE — earlier audit framing (47 findings) vs spec-expanded scope (63). Any place the spec still says 47 without the +16 reconciliation.
+3. LOAD-BEARING CLAIMS WITHOUT MECHANISMS — every "atomic", "idempotent", "single source of truth", "fail-closed", "canonical pattern" needs a named enforcement mechanism. E.g. §4.1 claims the IS NOT NULL guards make fail-closed unambiguous regardless of planner — proven? §4.5 claims migrations 0204-0208/0212 are replaced at runtime by 0213 — does 0213 actually drop+recreate every policy on those six tables, or only some?
+4. FILE INVENTORY DRIFT — every prose mention of a new file/migration/column must appear in §12. Specifically check:
+   - §6.2.1 mentions client/src/components/clientpulse/types.ts OR InterventionEditorTypes.ts (pick the shorter form) — only ONE name lands in §12.
+   - §6.2.2 mentions step components for skillAnalyzer without listing concrete file names.
+   - §5.4 fix per file — does connectorPollingService receive both organisationId and subaccountId in scope?
+5. SEQUENCING BUGS — §2.1 says strict phase ordering. Check:
+   - Phase 1B refactors routes that hit RLS-protected tables — does Phase 1A migration 0227 cover EVERY table the routes in Phase 1B touch? E.g. configDocuments.ts is Phase 1B but is config_documents covered by 0227?
+   - Phase 5 §8.1 introduces migration 0228 — but Phase 5 is multiple PRs landing in undefined order. If §8.4 P3-M6 0229 lands before §8.1 0228, ordering breaks.
+6. INVARIANT HOLES — §15.1 says "Every read/write filters by organisationId. Defence-in-depth — never rely on RLS alone." But §4.1 risk note says "any caller that writes to these tables without a valid app.organisation_id will fail. This is the correct behaviour" — that is RLS-only behaviour, not defence-in-depth. Verify all 13 routes in §4.2 follow the §15.1 invariant.
+7. CONTRACT BOUNDARY MISMATCHES — §9.1 canonical RLS policy shape vs §4.1 per-table policy creation. §9.1 shows DROP POLICY IF EXISTS only on table_org_isolation. §4.1 SQL skeleton for memory_review_queue drops only memory_review_queue_org_isolation. If the historical policy name in migration 0139 differs (e.g. has subaccount in the name), the DROP misses it and the historical policy remains alongside the new one — applies BOTH and the conjunction may fail-open or fail-closed depending on guard semantics. THIS IS THE MOST IMPORTANT FINDING.
+8. MIGRATION 0227 POLICY-NAME ENUMERATION — 0227 must DROP every historical policy on each affected table, including subaccount-isolation ones (per 0213 precedent). Spec does not enumerate historical policy names per table.
+9. PHASE 5 INDEPENDENCE — §2.6 says Phase 5 is one PR per category. §8.1, §8.2, §8.3, §8.4 are FOUR top-level subsections with 18 items in §8.4 alone. §13.5 Phase 5 DoD bundles all of Phase 5 into one set of checkboxes. Reconcile PR boundaries with DoD.
+10. RATE LIMITER FILE NAMING — §8.1 talks about server/lib/testRunRateLimit.ts as the in-memory rate limiter for public form submission. The file name implies test-run rate limiting, not public-form. Is testRunRateLimit.ts actually misnamed, or is the spec conflating two different rate limiters?
+11. CAPABILITIES.MD EDITORIAL — §7.3 says line 1001 contains "Anthropic-scale distribution". Has the file been verified at line 1001? If the file changed since 2026-04-25 the line number may be wrong.
+12. RESOLVE-SUBACCOUNT SCOPE — §4.4 says only memoryReviewQueue and clarifications. Do any OTHER routes in §4.2 have :subaccountId URL params (e.g. subaccountAgents.ts)? Spec does not say.
+13. CIRCULAR DEP TARGET ESCALATION — §6.3 Phase 3 says <= 5 server cycles. §13.5 Phase 5 DoD says 0 cycles. Targets escalate Phase 3 -> Phase 5. Reconcile.
+14. UNNAMED NEW PRIMITIVES — any "a new helper" or "a thin wrapper" without a concrete file/function name?
+15. DEFERRED ITEMS COVERAGE — every prose mention of "deferred", "later", "future" should resolve to §14.
+
+OUTPUT: A bulleted list of distinct findings. Each finding: cite the spec section (§N.N), one-sentence description of the issue, one-sentence suggested fix. No preamble, no summary, just the list. Aim for concrete, actionable findings. If you see zero findings in a category, do not list the category.
+
+Here is the spec to review:
+

@@ -1,0 +1,20 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase. This is iteration 5 — the final iteration in the spec-reviewer cap.
+
+The spec has been through 4 prior iterations: 24 + 7 + 6 + 3 = 40 mechanical fixes total. Findings have been converging (the iter4 round resolved an architecture-rule violation by moving rateLimitStore from lib/ to services/).
+
+SPEC: docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, commit-and-revert.
+- Static gates + pure-function tests only.
+- Prefer existing primitives.
+- Migrations are append-only.
+
+YOUR JOB: Final mechanical-tightness check. The spec should be at or near full convergence after four rounds of fixes.
+
+If the spec is mechanically tight, output a single line: "No findings — spec is mechanically tight."
+
+Otherwise output a bulleted list of distinct findings (cite §N.N, one-sentence description, one-sentence fix). Be strict — only mechanical issues. No directional findings should remain.
+
+Here is the spec to review:
+
