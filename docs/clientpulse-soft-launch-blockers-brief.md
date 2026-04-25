@@ -26,13 +26,15 @@ The audit flagged ROI delta tracking as non-negotiable for the soft-launch story
 
 ### What we're proposing
 
-**Baseline capture at onboarding.** When a client sub-account is first connected and their CRM data has been ingested for the first time, we take a permanent snapshot of their key metrics at that moment. This snapshot is write-once — it can never be modified or overwritten. It becomes the anchor point for every ROI calculation going forward.
+**Baseline capture at onboarding.** When a client sub-account is first connected and their CRM data has been ingested for the first time, we take a permanent snapshot of their key metrics at that moment. This snapshot is write-once — it can never be modified or overwritten. It becomes the anchor point for every ROI calculation going forward. The single exception is an admin-level reset: if a sync bug or manual entry error produces a clearly wrong baseline, a platform admin (not the agency) can void the snapshot, log the reason, and trigger a fresh capture. All resets are audit-logged with the admin's identity, timestamp, and stated reason.
 
-**Baseline readiness condition.** The snapshot is only triggered when: (1) the sub-account's first full sync has completed, (2) all required metrics are present and non-null, and (3) ingestion coverage spans at least five calendar days. A partial or in-progress sync does not trigger baseline capture — a corrupted starting point is worse than no starting point.
+**Baseline readiness condition.** The snapshot is only triggered when: (1) the sub-account's first full sync has completed, (2) all required metrics are present and non-null, and (3) ingestion coverage spans at least five calendar days, or Tier 1 metrics have remained stable across at least two consecutive sync cycles (for low-activity accounts where five days of data may never arrive). A partial or in-progress sync does not trigger baseline capture — a corrupted starting point is worse than no starting point.
 
 The snapshot uses data we are already pulling. Metrics are tiered by reporting importance: **Tier 1 — headline metrics** (pipeline value, revenue) that appear in every client report and must be present before baseline capture completes; **Tier 2 — supporting metrics** (lead count, average response time, conversation engagement) that enrich the picture and are captured when available. No new data sources required. We are stamping what we already know at a specific point in time.
 
 **ROI delta computation.** Once the baseline exists, the delta is arithmetic: current metric minus baseline metric, as an absolute number and a percentage. This feeds into the reporting agent — which already exists — so reports can say things like "since you connected this client in January, their pipeline has grown from $120k to $183k."
+
+**Reporting fallback rules.** Clean data cannot be assumed. If both Tier 1 metrics (pipeline value and revenue) are present, the full ROI section renders. If revenue is missing but pipeline value is present, the report shows a pipeline-only ROI with an explanatory note. If both Tier 1 metrics are absent or incomplete, the ROI section is suppressed entirely — no partial or potentially misleading delta is shown. Tier 2 metric gaps are displayed as "not yet available" rather than zero.
 
 **Manual entry for existing clients.** A design-partner agency will almost certainly have clients they've worked with for months or years before installing the platform. For those clients we need a simple way to enter prior-period numbers manually — what their metrics looked like on the day the agency relationship started, even if that was 18 months ago. The baseline table accepts both automated captures and manual entries equally.
 
@@ -42,7 +44,7 @@ The snapshot uses data we are already pulling. Metrics are tiered by reporting i
 
 ### What we're not doing
 
-- No seasonality normalisation in v1. If a client's business has strong Q4 peaks, the delta reflects that — we do not adjust for it.
+- No seasonality normalisation in v1. If a client's business has strong Q4 peaks, the delta reflects that — we do not adjust for it. *(Deliberate v1 constraint.)*
 - No full historical data import. The manual entry covers the engagement-start numbers only, not a complete backfill.
 - No changes to how we collect metrics. The GHL adapter already pulls everything we need.
 
@@ -103,7 +105,7 @@ Neither problem has been caught yet because we've only ever tested against our o
 
 ### What we're not doing
 
-- No per-sub-account install fallback. The architecture is agency-level. We are not building a compatibility mode for single-location installs.
+- No per-sub-account install fallback. The architecture is agency-level. We are not building a compatibility mode for single-location installs. *(Deliberate v1 constraint.)*
 - No public marketplace listing. We stay private with the 5-agency cap during soft launch.
 - No changes to the core data model. The existing schema already handles multi-location connections correctly.
 
@@ -127,6 +129,7 @@ A design-partner agency with 30 clients connects in a single OAuth flow — one 
 - [ ] Install webhook handler confirmed or built: sub-accounts auto-listed and data sync started on install event
 - [ ] Uninstall event handled: token revoked, syncs stopped, agency owner notified
 - [ ] Agency-level token vs location-token exchange question resolved and implementation confirmed
+- [ ] Sub-account enumeration verified for agencies with >100 sub-accounts (pagination handled correctly)
 
 **UX surface:** Agency-facing only. The OAuth flow and post-install sub-account enumeration are part of the agency onboarding sequence. No end-client visibility into the connection mechanism.
 
@@ -150,7 +153,7 @@ There are two paths. We recommend choosing one before the technical spec.
 
 **Option A — Constrained deployment (practical for soft launch).** At one or two design-partner agencies with modest data volumes, a single server instance is more than sufficient to handle the load. We formally document that the soft-launch deployment runs on a single instance, which means the in-memory counter is accurate by definition. We add a monitoring alert to detect if a second instance starts. We treat this as a hard constraint to revisit before a third design partner or any public launch.
 
-Option A is only valid if two infrastructure conditions are enforced, not just documented: (1) the deployment platform is configured to run exactly one server instance (no auto-scaling), and (2) background job concurrency is capped so a sync spike cannot be mistaken for multi-instance activity. If either condition cannot be enforced at the infrastructure level, Option B is the only safe choice.
+Option A is only valid if three infrastructure conditions are enforced, not just documented: (1) the deployment platform is configured to run exactly one server instance (no auto-scaling), (2) background job concurrency is capped so a sync spike cannot be mistaken for multi-instance activity, and (3) total concurrent outbound GHL API calls are capped globally — job fan-out, webhook bursts, and retry floods on a single instance can still spike API throughput beyond safe thresholds. If any condition cannot be enforced at the infrastructure level, Option B is the only safe choice.
 
 This costs almost nothing to implement and resolves the risk for soft launch. The trade-off is that it is a manually enforced constraint rather than a technical guarantee.
 
@@ -204,6 +207,7 @@ For each item, the minimum observable signal that the feature is working correct
 |------|-----------|----------------|
 | Baseline capture | `baseline.captured` | First successful immutable snapshot written for a sub-account |
 | Baseline capture | `baseline.failed` | Three consecutive capture attempts failed — requires manual action |
+| Baseline capture | `baseline.delayed` | Readiness condition not met after N syncs — possible stuck baseline or low-data account |
 | Manual entry | `baseline.manual_entry_submitted` | Agency user submitted a manual baseline |
 | GHL OAuth | `ghl.agency_oauth_completed` | Agency-level OAuth completed, sub-account list returned |
 | GHL OAuth | `ghl.subaccount_enrolled` | Individual sub-account record created post-install |
