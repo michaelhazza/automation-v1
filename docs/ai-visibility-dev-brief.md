@@ -118,6 +118,8 @@ What an agent *can do* with the brand once it has read the site. This is the **n
 
 Not a primitive in its own right — a clustering construct over `Query`s. A `Category` is *the segment a brand wants to own* (e.g. "performance marketing for SaaS in the $1k–$10k range"). It is the unit at which the product reports **share of AI voice** over time, which is the headline retention metric.
 
+> **Metric philosophy — share of AI voice is probabilistic, not deterministic.** It reflects how often agents choose the brand under repeated runs across a defined query set. It is not a fixed ranking like Google organic position. Two consecutive weeks of the same query set will produce slightly different numbers even with no real change to the world. This expectation must be set in onboarding, in dashboard tooltips, and in every retainer trend chart — a probabilistic metric oversold as deterministic destroys client trust the first time it wobbles. The N-run aggregation rules in §5.5 are what make the variance bounded enough to be useful; they don't make the metric deterministic.
+
 **Category integrity rules** (must hold for share-of-voice to be a defensible metric):
 
 - **Finite.** A Category contains 10–30 queries. Below 10 the metric is too noisy; above 30 the cost-per-trend-point gets prohibitive and definitions blur.
@@ -204,6 +206,12 @@ The entire product hinges on a noisy substrate. LLM outputs are non-deterministi
 
 1. **N-run aggregation per outcome.** Every `Query × Engine` is run multiple times (default N=3 for paid tiers, N=1 for free tier with explicit "low confidence" flag). The persisted `AgentOutcome` is the aggregate — citation rate across runs, modal rank, attribute-set union — not any single response. Single-run mode is allowed but always carries a confidence stamp the dashboard surfaces.
 
+   **Canonical aggregation rules (lock these once, do not redefine elsewhere):**
+   - **Rank = median across runs** (not modal, not best). Median tolerates a single outlier without distorting the trend; modal collapses on noisy 2+2+1 splits; best inflates the metric.
+   - **Attributes = frequency-weighted across runs**, surfaced as `{attribute: presence_rate}` (not a flat union). A pricing attribute that appears in 3/3 runs ranks higher in the comparison simulation than one that appears in 1/3.
+   - **Citation = `cited_runs / total_runs`** as a continuous value (not a binary per-probe flag). A 2/3 citation rate is meaningfully different from 3/3 and must trend separately.
+   These three definitions are the single canonical interpretation. The tech spec must surface them in the data model; the UI must render them consistently. Drift here means clients see different "realities" depending on which view they open.
+
 2. **Confidence model per outcome.** Every `AgentOutcome` carries a confidence band:
    - **High** — explicit ranked list, brand cited with attributes, consistent across N runs
    - **Medium** — brand mentioned in prose, inconsistent placement across runs, partial attribute extraction
@@ -212,6 +220,8 @@ The entire product hinges on a noisy substrate. LLM outputs are non-deterministi
    Trend charts default to High+Medium only; Low and No-signal are surfaced explicitly when the user expands.
 
 3. **Raw + parsed dual storage.** Every probe persists the raw engine response alongside the parsed outcome structure. This is what lets us re-parse historical data when we improve the parser, and what lets us audit a disputed citation by hand. **Parsers are versioned** — every `AgentOutcome` records the parser version that produced it, so we can re-derive parsed outcomes from raw responses without losing prior runs.
+
+4. **No-signal output framing.** When an outcome resolves to "No signal" (the brand was not cited at all), it is **always** rendered to the user as *"not currently selected by agents for this query"* — never as *"no data"*, *"unavailable"*, or any phrasing that reads like a system failure. No-signal is the strongest sales lever in the product (*"you are invisible for this query"*) and the easiest one to fumble with bad copy. This is a UI/reporting constraint, but it lives in the brief because it changes how the data layer must label states (a `not_cited` enum, not a `null`) and because the constraint must hold across every surface — dashboard, report card, retainer email, deliverable PDF.
 
 **Why this is in the brief, not deferred to the spec:** if the team builds the Measurement Engine without these three controls baked in, the data model is wrong and retrofitting them later means a migration. They shape the schema, not just the code.
 
@@ -233,7 +243,7 @@ Measurement is the dominant cost line in this product. Naive scaling — every c
 - **Recent regression** — a rank drop or share-of-voice dip auto-escalates the query to daily probes for a recovery window
 This keeps the average client cost flat while concentrating spend on the queries where the signal is moving.
 
-**Cross-tenant reuse where lawful.** Identical (`Query × Engine × N-run-window`) probes from different subaccounts can share a single underlying probe — the response is parsed N times against N different brand lists. This is a meaningful cost reducer for popular generic queries and respects each tenant's brand normalisation independently. Where vendor ToS forbids reuse, we fall back to per-tenant probes.
+**Cross-tenant reuse where lawful — raw responses only, never parsed outcomes.** Identical (`Query × Engine × N-run-window`) probes from different subaccounts can share a single underlying probe **at the raw-response layer only**. Parsing is strictly tenant-isolated: each tenant's brand list, normalisation rules, and competitor mapping run independently against the shared raw response. **No parsed `AgentOutcome` ever crosses a tenant boundary.** This rule is non-negotiable — it prevents the silent attribution-leakage failure mode where one tenant's brand normalisation contaminates another tenant's outcome record. Where vendor ToS forbids any reuse, we fall back to per-tenant probes for the raw fetch as well.
 
 **Hard ceilings ride existing primitives.** Per-subaccount probe budgets plug into the existing `runCostBreaker` so a runaway probe schedule fails closed, not silently. No new cost-control infrastructure required.
 
@@ -249,6 +259,13 @@ The system gets smarter the more clients run through it. That's a slogan unless 
 A new client gets recommendations ranked by what *actually moved outcomes* for similar businesses, not by what the LLM predicts will work.
 
 **Privacy and data scope.** The Learning Layer holds **anonymised, aggregated correlations only** — the gap type, the vertical, the observed lift distribution. It never stores another client's brand, copy, or outcome detail in a form a tenant can read. Cross-tenant insights are statistical, not specific.
+
+**Attribution discipline — single-change vs multi-change deployments.** Every fix logged to the Learning Layer is tagged with a deployment isolation flag:
+- **`isolated`** — a single fix shipped during the observation window, no other detected changes to site, schema, or trust graph. Outcome lift attributed to this fix at full confidence.
+- **`co-deployed`** — multiple fixes shipped together during the observation window. Outcome lift split across the cohort with explicitly downgraded confidence and the co-deployed fix list recorded.
+- **`confounded`** — external changes detected during the window (competitor moved, large mention burst, query drift, seasonal variance). Outcome lift logged but excluded from ranking calculations.
+
+**Only `isolated` correlations contribute to the high-confidence recommendation rankings used by Phase D.** Co-deployed and confounded data are still captured (they're useful in aggregate and for spotting patterns) but never carry the weight of an isolated observation. This single rule is what stops the Learning Layer from learning the wrong lessons at scale — without it, the system would confidently recommend whatever fix happened to ship next to a real winner.
 
 **Why it's in v1 even though the value compounds in Phase D.** The data structure has to be in place from the first probe, otherwise we lose the early correlation data permanently. The *scoring* of recommendations switches from theoretical to empirical only when N is large enough — that's a Phase D activation — but the *capture* starts on day one. Building it later means the moat starts compounding from day Y instead of day 1.
 
@@ -349,6 +366,8 @@ Four phases. Each ends in a usable, sellable output — no phase is purely inter
 | **Phase D — Learning Layer activation** | Recommendation ranking flips from theoretical to empirical (§5.7) once N is large enough. Vertical-specific query expansion suggestions. Cross-tenant outcome correlations surface in recommendation explanations. | The flywheel becomes auto-tuning — recommendation quality improves with every retainer client's data. The moat is now compounding from data captured since Phase A. |
 
 Phases A and B are the minimum viable product. Phase C is what makes the business model recurring. Phase D is when the moat starts paying — but the **data capture for Phase D begins in Phase A**, not Phase D. Building reliability, cost-tiering, and learning-capture later means migrations and lost data; they go in from day one.
+
+> **Phase A vertical-slice discipline.** Phase A is now intentionally heavier than a typical MVP because reliability + cost + learning-capture all ship in it. To prevent "boil the ocean" drift, the team builds Phase A as a **vertical slice first**: one engine end-to-end (ChatGPT), one Category, one tenant, the full Query → AgentOutcome → leaderboard loop working — with N-run aggregation, confidence bands, raw+parsed storage, and Learning Layer capture all wired up — *before* fanning out to the other four engines. The vertical slice is the architectural proof. The fan-out is configuration. If the team tries to land all five engines and all controls simultaneously, the schedule slips and the core loop never gets its early stress test.
 
 ---
 
