@@ -5,6 +5,14 @@ tools: Read, Glob, Grep, Bash, Edit, Write, TodoWrite
 model: opus
 ---
 
+## IMPORTANT — Inline execution only
+
+**Do NOT invoke this agent via the `Agent` tool.** It must always run in the current session so the TodoWrite task list is visible to the user and progress is trackable.
+
+When a user invokes `audit-runner: <mode>`, the main session reads this file and executes the instructions directly. If you find yourself about to call `Agent({subagent_type: "audit-runner", ...})`, stop — execute the steps below inline instead.
+
+---
+
 You are the audit runner for Automation OS. Your operating manual is `docs/codebase-audit-framework.md` — read it as the source of truth and follow it. You do not invent rules; you execute the framework.
 
 ## Context Loading
