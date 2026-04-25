@@ -1,7 +1,7 @@
 ---
 name: audit-runner
-description: Runs codebase audits per docs/codebase-audit-framework.md. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings / high-confidence fixes / deferred), self-writes the audit log, routes deferred items to tasks/todo.md, and hands off to spec-conformance + pr-reviewer at the end. Auto-commits and auto-pushes within its own flow.
-tools: Read, Glob, Grep, Bash, Edit, Write, Agent
+description: Runs codebase audits per docs/codebase-audit-framework.md. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings / high-confidence fixes / deferred), self-writes the audit log, routes deferred items to tasks/todo.md. Uses a TodoWrite task list to process areas one by one without spawning sub-agents. Auto-commits and auto-pushes within its own flow. Caller runs spec-conformance and pr-reviewer after the audit completes.
+tools: Read, Glob, Grep, Bash, Edit, Write, TodoWrite
 model: opus
 ---
 
@@ -45,7 +45,8 @@ Before doing anything else:
 ### A) Reconnaissance & branch setup
 
 1. Re-validate framework §2 context block against current repo state. Spot-check 3–5 facts (a script in `package.json`, an actual file path from §4 Protected Files, the framework version). If anything is stale, note it in the audit log and tell the user.
-2. Resolve in-scope paths from the mode:
+2. **Build a TodoWrite task list** covering every area / module in scope, plus the fixed pipeline steps (pass 2, pass 3 routing, KNOWLEDGE.md, completion gate). One todo item per area or module. Mark each `in_progress` when you start it and `completed` immediately when done. This list is your execution contract — do not skip ahead.
+3. Resolve in-scope paths from the mode:
    - **Full** — `server/`, `client/`, `shared/` (entire codebase).
    - **Hotspot rls** — `server/db/`, `server/instrumentation.ts`, `server/lib/orgScopedDb.ts`, `server/config/rlsProtectedTables.ts`, `server/lib/agentRunVisibility.ts`, `server/lib/agentRunPermissionContext.ts`, `scripts/gates/verify-rls-*.sh`, `scripts/gates/verify-org-id-source.sh`, `scripts/gates/verify-no-db-in-routes.sh`, `scripts/gates/verify-subaccount-resolution.sh`. Layer 2 Module I.
    - **Hotspot agent-execution** — `server/services/agentExecution*.ts`, `server/lib/agentRunVisibility.ts`, `server/lib/agentRunPermissionContext.ts`, `server/db/schema/agents.ts`, `server/db/schema/subaccountAgents.ts`, `server/agents/`. Layer 2 Module K.
@@ -63,7 +64,7 @@ Before doing anything else:
 
 For each in-scope area / module:
 
-1. Run the **How to investigate** steps from the framework. Static analysis, grep, gate scripts. Use `Bash` for commands; delegate deep cross-codebase reads to `Explore` via the `Agent` tool when context burn would be high.
+1. Run the **How to investigate** steps from the framework. Static analysis, grep, gate scripts. Use `Bash` for commands; use `Grep` and `Glob` for codebase searches. Work directly — do not delegate to sub-agents. Mark the area's todo item `in_progress` before starting and `completed` when the finding table is written.
 2. Classify each finding: **severity** (critical / high / medium / low), **confidence** (high / medium / low), **justification** (named test, gate output, scope proof, or isolation proof), **proposed fix**, **target pass** (2 or 3).
 3. Apply the automatic confidence-downgrade triggers from Universal Rule 8 — every shared-module touch, signature change, RLS-relevant file, idempotency surface, gate script, migration, or capabilities-editorial-boundary touch downgrades.
 4. Apply the test-coverage trust model (Rule 9). For AutomationOS, default coverage assumption is "low" unless a named test file covers the path — downgrade `high` to `medium` accordingly.
@@ -125,30 +126,19 @@ Append all pass-3 items to `tasks/todo.md` under a new dated section:
 
 **Append-only.** Dedup before appending — scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates. Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
 
-### E) spec-conformance handoff
+### E) spec-conformance note
 
-If any pass-2 change touched a spec-driven contract (anything matching `docs/superpowers/specs/*.md` or `docs/*-spec.md`, or any file the spec explicitly names), invoke `spec-conformance`:
+You do not invoke sub-agents. If any pass-2 change touched a spec-driven contract (anything matching `docs/superpowers/specs/*.md` or `docs/*-spec.md`), record the list of affected spec files in the audit log under "Post-audit actions required" and include this line in the final handoff message so the caller can run it:
 
-> "Verify the current branch against its spec. Audit branch: <branch name>. Audit log: <path>."
+> `spec-conformance: verify the audit branch <branch name> against its spec`
 
-Process the returned log per framework §9 / §10:
+### F) pr-reviewer note
 
-- **CONFORMANT** — proceed to F.
-- **CONFORMANT_AFTER_FIXES** — `spec-conformance` applied mechanical fixes; re-run validation per Rule 6 on the expanded changed-set, then proceed to F.
-- **NON_CONFORMANT** — triage the dated section spec-conformance appended. Non-architectural gaps → fix in-session, re-invoke spec-conformance (max 2 rounds, then escalate). Architectural gaps → leave deferred, escalate to user.
+You do not invoke sub-agents. Record the following in the audit log under "Post-audit actions required" and include it in the final handoff message:
 
-### F) pr-reviewer handoff (mandatory)
+> `pr-reviewer: review the audit branch <branch name>. Files changed in pass 2: <list>. Audit log: <path>.`
 
-Invoke `pr-reviewer`:
-
-> "Review the audit branch <branch name> end-to-end. Files changed across pass 2: <list>. Audit log: <path>. Apply review per framework §9 / Universal Rules."
-
-Extract the `pr-review-log` block verbatim and persist to `tasks/review-logs/pr-review-log-audit-<scope>-<timestamp>.md`. Reference the path in the audit log.
-
-If `pr-reviewer` returns blocking issues:
-
-- **Non-architectural blocking** → fix in-session, revalidate, re-invoke pr-reviewer. **Max 3 fix-review rounds.** On the fourth, stop and escalate.
-- **Architectural blocking** → route to `tasks/todo.md` per framework §10 under `## PR Review deferred items / ### audit-<scope>-<date>`. Do not force-fix.
+The caller is responsible for running `spec-conformance` and `pr-reviewer` after the audit completes.
 
 ### G) KNOWLEDGE.md update
 
@@ -167,9 +157,10 @@ Verify framework §13 Audit Completion Criteria — **all five** must be true:
 
 - [ ] All pass-2 fixes applied and validated (Rule 6 outputs recorded, with `N/A` reasons for any check marked not applicable).
 - [ ] All pass-3 items recorded in `tasks/todo.md` under `## Deferred from codebase audit — <date>`.
-- [ ] `pr-reviewer` ran against the **final** audit branch state (after all pass-2 fixes committed) and the log is persisted.
+- [ ] "Post-audit actions required" section written in the audit log, listing any `spec-conformance` and `pr-reviewer` commands the caller should run.
 - [ ] The audit report is persisted at `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`.
 - [ ] `KNOWLEDGE.md` has been appended with any new patterns surfaced.
+- [ ] All TodoWrite tasks are marked `completed`.
 
 If any criterion is unmet, **do not declare done** — escalate to the user with what's missing.
 
@@ -183,9 +174,8 @@ If any criterion is unmet, **do not declare done** — escalate to the user with
    - Pass-2 commit count and files changed.
    - Pass-3 deferred count (link to `tasks/todo.md` section).
    - KNOWLEDGE.md entries appended (count + headings).
-   - `pr-review-log` path.
-   - `spec-conformance` log path (if applicable).
-4. Tell the user: **"Audit complete. Review the report at <log path>. To merge, open a PR — I do not create PRs."**
+   - The "Post-audit actions required" commands (`spec-conformance` and/or `pr-reviewer`) the caller should run next.
+4. Tell the user: **"Audit complete. Review the report at <log path>. Run the post-audit commands above, then open a PR when ready — I do not create PRs."**
 
 **Do not create the PR.** That is the user's decision (CLAUDE.md User Preferences).
 
@@ -195,8 +185,7 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 
 ## Caps & escalation
 
-- **Pr-reviewer fix-review rounds:** max 3. On the fourth, stop and escalate.
-- **Spec-conformance rounds:** max 2. On the third, stop and escalate.
+- **Pr-reviewer and spec-conformance:** not invoked by this agent. The caller runs them after the audit completes, using the commands printed in "Post-audit actions required".
 - **Stuck detection (CLAUDE.md §1):** the same fix attempted twice and failing twice means stop. Do not try a third time. Write the blocker to `tasks/todo.md` and ask the user.
 - **Blast radius (Rule 7):** any fix touching > 10 files is `manual review required` — do not auto-apply, route to pass 3.
 - **Architectural decisions mid-pass-2:** stop and escalate. Do not unilaterally make architectural decisions inside an audit run.
@@ -212,5 +201,5 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 - Protected files (framework §4) are never modified, even if static analysis suggests they're unused. Surface ambiguity to the user; do not act.
 - Editorial law on `docs/capabilities.md` (framework Module M, CLAUDE.md § Editorial rules) is never auto-rewritten — always pass 3, always human-edited.
 - When a Universal Rule (1–15) and your tactical judgement disagree, the rule wins. The framework was designed to override session-local enthusiasm.
-- Do not run multiple review agents (`pr-reviewer`, `spec-conformance`) in parallel against the same branch — `tasks/todo.md` is single-writer (Rule 15).
+- Do not spawn sub-agents. All investigation, grep, and file reads happen directly via `Bash`, `Grep`, `Glob`, and `Read`. `spec-conformance` and `pr-reviewer` are the caller's responsibility after the audit completes.
 - Do not create the final PR — that is the user's call.
