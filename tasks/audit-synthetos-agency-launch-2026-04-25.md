@@ -326,6 +326,8 @@ This is one rule system at the matcher-library level today, with a clean path to
 
 **Revised Workstream E scope:** add ONE new skill (`discover_prospects` — Google Places API caller); wire `enrich_contact` to call Hunter.io as a provider; defer the rest to Phase 5 when the SDR agent ships. No standalone `leadDiscoverJob.ts`, no `lead-discover` system agent seed, no "Sales Pipeline subaccount" pattern needed — the SDR agent uses its existing on-demand schedule and writes to canonical contact tables under whichever subaccount it runs in.
 
+**Handed off** to the agent-build session as a self-contained dev brief: [`tasks/dev-brief-lead-discovery-sdr-agent.md`](./dev-brief-lead-discovery-sdr-agent.md). Workstream E is **removed from the active scope of this audit** — track it under Phase 5 of the v7.1 agent rollout instead.
+
 **Reclassification: F belongs to D, not standalone.** `domain_health_monitor` watches Resend bounce rate, complaint rate, and blacklist status. That's email deliverability monitoring, a peer of the outbound + webhook + inbound pieces in D, not a peer of lead generation. Move it to **D4** under Email Infrastructure.
 
 ### What this means for the §4 sequencing
