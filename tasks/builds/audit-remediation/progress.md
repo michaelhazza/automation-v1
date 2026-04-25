@@ -3,9 +3,10 @@
 **Build slug:** `audit-remediation`
 **Source spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
 **Plan:** `tasks/builds/audit-remediation/plan.md`
-**Status:** `not_started`
-**Started:** —
-**Last updated:** 2026-04-25 (plan authored)
+**Status:** `phases-1-2-3-merge-ready` (PR #196)
+**Started:** 2026-04-25
+**Last updated:** 2026-04-26 (final-review close-out)
+**Follow-up spec:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` (20 deferred items across groups A–H)
 
 ---
 
@@ -13,14 +14,35 @@
 
 | # | Chunk | Spec sections | Branch / PR | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | `phase-1-rls-hardening` | §4.1 – §4.6 | — | [ ] not started | |
-| 2 | `phase-2-gate-compliance` | §5.1 – §5.8 | — | [ ] not started | |
-| 3 | `phase-3-architectural-integrity` | §6.1 – §6.3 | — | [x] complete | Types extracted, cycles reduced, builds clean |
+| 1 | `phase-1-rls-hardening` | §4.1 – §4.6 | PR #196 | [x] complete | Migration 0227 (8 in-spec tables + canonical policies) + 13 route refactors + 6 new services + 7 service extensions + cross-org write guards + subaccount resolution + baseline annotations |
+| 2 | `phase-2-gate-compliance` | §5.1 – §5.8 | PR #196 | [x] complete | Allowlist path fix + canonical-read consolidation + adapter removal + principal-context import wiring + canonical dictionary entries. §5.5 skill-read-paths deferred per spec (P3-H8). |
+| 3 | `phase-3-architectural-integrity` | §6.1 – §6.3 | PR #196 | [x] complete | Types extracted, schema-leaf cascade resolved (175→43 cycles), builds clean. Residual 43 cycles routed to follow-up spec D2 (operator framing decision). |
 | 4 | `phase-4-system-consistency` | §7.1 – §7.4 | — | [ ] not started | |
 | 5 | `phase-5a-rate-limiter-shadow-mode` | §8.1 PR 1 | — | [ ] not started | |
 | 6 | `phase-5a-rate-limiter-authoritative-flip` | §8.1 PR 2 | — | [ ] not started | Pre-condition: Chunk 5 on `main` for ≥ 1 operator-observed window |
 | 7 | `phase-5a-silent-failure-path-closure` | §8.2 | — | [ ] not started | Independent of Chunks 5/6 |
 | 8 | `phase-5b-optional-backlog` | §8.3, §8.4 | — | [ ] not started | Multiple PRs in any order; programme blocker only as listed in spec §13.5B |
+
+---
+
+## PR #196 review pipeline outcome (Phases 1+2+3)
+
+| Pass | Verdict | Outcome |
+|---|---|---|
+| spec-reviewer | 5 iterations | Spec finalised before implementation |
+| spec-conformance | CONFORMANT_AFTER_FIXES | 1 mechanical fix applied (`SkillAnalyzerResultsStep` import path); 4 directional items routed to backlog |
+| pr-reviewer | REQUEST_CHANGES | 3 blocking + 2 strong fixed in-branch (migration 0227 over-scope removed; `rollbackSkillVersion` signature tightened; `automationConnectionMappingService` defensive org filters added); 5 strong + 5 nice deferred |
+| dual-reviewer | PR ready | 3 iterations; 1 minor comment fix on `skillExecutor.ts` `anyBlocked`; Codex's revert proposal rejected (would have triggered TS2367) |
+| chatgpt-pr-review | APPROVED with controlled rollout | 2 rounds; 3 auto-rejects (no-op) + 7 escalated all defer; Round 2 added 2 high-leverage spec items (H1 cross-service null-safety; B2-ext concurrency-vs-idempotency) |
+
+**Gate posture at close-out:**
+- `npm run build:server`: clean ✅
+- `npm run build:client`: clean ✅
+- `npm run test:gates`: 44 pass, 4 warn, 3 BLOCKING — all pre-existing on `main` HEAD `ee428901`, not branch regressions
+- `npm run test:unit`: 188 pass, 4 fail — all pre-existing on `main`
+
+**Pre-merge action:** G1 from follow-up spec — migration verification (fresh DB bootstrap + staging migrate + FORCE RLS smoke test).
+**Post-merge action:** G2 from follow-up spec — smoke test runbook (agent / automation / webhook / job cycle + log/LLM/job monitoring).
 
 ---
 
