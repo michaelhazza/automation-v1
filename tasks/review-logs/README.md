@@ -82,6 +82,21 @@ Why one file: a future session picking up deferred work needs to grep one place,
 - **Dedup before append** — scan for a similar existing entry (same `finding_type` OR same leading ~5 words); skip if already present so re-runs don't duplicate.
 - **No concurrent review agents against the same repo.** `tasks/todo.md` is a single shared file — two review agents appending simultaneously will race on the write.
 
+### Item format — origin tag + status
+
+Each deferred item line uses this shape so findings stay traceable to their source review and can be triaged at a glance:
+
+```
+- [ ] [origin:<agent>:<slug>:<timestamp>] [status:open] <finding description>
+```
+
+- **`origin:<agent>:<slug>:<timestamp>`** — references the source review log filename's discriminating fields. For audits: `origin:audit:<scope>:<timestamp>` (e.g. `origin:audit:rls:2026-04-25T07-35-00Z`). The tag exists so a future PR closing the item can grep back to the original finding.
+- **`status:<state>`** — one of `open` (default), `in-progress`, `resolved`, `wont-fix`. Status is updated by editing the tag in place when work begins or completes; the checkbox flips to `[x]` only when `resolved` or `wont-fix`.
+
+When a PR closes an item: include the `origin:` tag in the PR description so the audit trail joins. When marking `wont-fix`, append a one-line justification to the same line.
+
+Triage sessions filter by `[status:open]` to see live work; by `[origin:audit:*]` to see all unresolved audit findings; by `[origin:audit:rls:2026-04-25T07-35-00Z]` to check closure of a specific audit.
+
 ---
 
 ## Persistence rule

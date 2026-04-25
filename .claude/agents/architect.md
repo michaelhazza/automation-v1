@@ -27,7 +27,7 @@ Every invocation runs in exactly this sequence. Do not reorder, do not merge ste
 
 Every session starts with this list. You can add more items in Step 3 but these must all be present:
 
-1. Load context — `CLAUDE.md`, `architecture.md`, `docs/spec-authoring-checklist.md`, the feature/spec description
+1. Load context — `CLAUDE.md`, `architecture.md`, `docs/spec-authoring-checklist.md`, `DEVELOPMENT_GUIDELINES.md` (when in scope), `KNOWLEDGE.md`, the feature/spec description
 2. Primitives-reuse search — for every candidate new service / table / column, confirm no existing primitive to extend
 3. File inventory — cross-reference the spec's §File inventory (or derive from feature description if no spec)
 4. Contracts — TypeScript interfaces, Zod schemas, DB columns, route shapes, error codes
@@ -49,7 +49,8 @@ Load these in order in Step 2:
 2. `architecture.md` — backend structure, route conventions, auth model, three-tier agent hierarchy, skill system, service patterns, and all key patterns
 3. `docs/spec-authoring-checklist.md` — pre-authoring checklist for Significant/Major plans. Every plan you produce must satisfy its appendix (primitives search, file inventory, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, testing posture) or document an explicit deviation.
 4. `DEVELOPMENT_GUIDELINES.md` — read when the task touches tenant data, migrations, schema, RLS, the service/route/lib tier, LLM routing, or gates. Skip when the task is pure frontend, pure docs, or otherwise outside the guidelines' scope.
-5. The specific task, bug report, or feature description provided
+5. `KNOWLEDGE.md` — past corrections and recurring patterns. Scan for entries that match the task's domain (e.g. RLS, agent execution, queues) so the plan inherits prior lessons rather than rediscovering them.
+6. The specific task, bug report, or feature description provided
 
 Do not skip context loading. Architecture decisions made without understanding the existing patterns create inconsistency.
 

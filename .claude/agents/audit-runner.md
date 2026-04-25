@@ -127,15 +127,17 @@ For each area / module approved for pass 2, in the framework's Default Execution
 
 ### D) Pass 3 routing
 
-Append all pass-3 items to `tasks/todo.md` under a new dated section:
+Append all pass-3 items to `tasks/todo.md` under a new dated section, using the **origin-tag + status** item shape from `tasks/review-logs/README.md` § *Item format — origin tag + status*:
 
 ```
 ## Deferred from codebase audit — <YYYY-MM-DD>
 **Captured:** <ISO timestamp>
 **Source log:** tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md
 
-- [ ] <finding>: <one-line description>. <severity>/<confidence>. <recommended action>.
+- [ ] [origin:audit:<scope>:<timestamp>] [status:open] <finding>: <one-line description>. <severity>/<confidence>. <recommended action>.
 ```
+
+The `origin:audit:<scope>:<timestamp>` tag is **mandatory** on every pass-3 item — it joins findings back to this audit log so closure can be traced from a future PR. `<scope>` and `<timestamp>` match the audit log filename's discriminating fields exactly.
 
 **Append-only.** Dedup before appending — scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates. Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
 
