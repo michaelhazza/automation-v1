@@ -902,3 +902,27 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] **P3-L7 — `bundleUtilizationJob.ts:125` — `utilizationByModelFamily as any`** type mismatch. low/medium. Fix: derive correct type from source.
 - [ ] **P3-L9 — Test runs (`is_test_run = true`) cost-exclusion from ledger not verified by named test**. low/medium. Fix: add unit test asserting `is_test_run=true` runs are excluded from cost ledger in `queueService.ts` / `runCostBreaker.ts`.
 - [ ] **P3-L10 — Prompt prefix caching (`stablePrefix`) not verified across all run types**. low/low. Fix: add to observability backlog; verify in live trace.
+
+---
+
+## Deferred from spec-conformance review — audit-remediation (2026-04-25)
+
+**Captured:** 2026-04-25T11:00:13Z
+**Source log:** `tasks/review-logs/spec-conformance-log-audit-remediation-2026-04-25T11-00-13Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
+
+- [ ] **REQ #11 / #12 — `skillStudioService.ts` conditional org filter (§4.3).** Lines 168 / 304-305 / 312-313 use the pattern `orgId ? and(eq(skills.id, ...), eq(skills.organisationId, orgId)) : eq(skills.id, ...)` — when `orgId` is undefined the org filter is not applied. Spec §4.3's "current (defective) -> required (canonical)" table required UNCONDITIONAL `and(...)`-wrapped filter. The `verify-org-scoped-writes.sh` gate currently passes (it sees the `and(eq(skills.organisationId, ...))` token), but the runtime guard is incomplete. The `getSkillStudioContext(skillId, scope, orgId?)` and `saveSkillVersion(skillId, scope, orgId | null, ...)` signatures make `orgId` optional today.
+  - Spec section: §4.3
+  - Gap: the spec's table listed verbatim line edits that did not mention the conditional pattern; the implementer made the call to keep `orgId?` optional which fails open in the no-orgId branch.
+  - Suggested approach: decide whether `getSkillStudioContext` and `saveSkillVersion` should require an explicit `orgId` (signature change touching ~3 call sites in `server/routes/skills.ts` and a system-admin path) OR whether the system-admin scope path is the legitimate fallback that intentionally bypasses the org filter — in which case add an inline `// system-admin scope: org filter intentionally absent` comment per spec §2.4 carve-out.
+
+- [ ] **REQ #35 — `verify-input-validation.sh` (44) and `verify-permission-scope.sh` (13) warnings (§5.7).** The two warning-level gates report violations. Spec §5.7 says "best-effort triage", not a Phase 2 ship blocker. However, spec §5.7 step 3 states "new regressions introduced by Phase 2 work itself MUST be resolved before merge"; no `main`-state baseline was captured pre-Chunk-2 to confirm whether the Chunk 2 PR introduced any of these warnings.
+  - Spec section: §5.7, §5.8
+  - Gap: cannot prove Phase 2 ship-gate compliance for the "no new regressions" sub-clause without a baseline.
+  - Suggested approach: stash the working tree, check out `main`, run both warning gates, capture the counts; restore the working tree and diff. If counts are unchanged or lower, append baseline numbers to spec §5.7 / progress.md; if Phase 2 introduced any new warnings, fix them per spec §5.7 step 3 before considering Chunk 2 finalized.
+
+- [ ] **REQ #43 — Server `madge --circular` count is 43, spec §6.3 DoD target is ≤ 5.** The schema-leaf root fix in `agentRunSnapshots.ts` worked — no cycles touch that file anymore. The 43 remaining cycles are unrelated pre-existing chains: (a) `services/skillExecutor.ts` <-> `tools/capabilities/*`, `tools/config/*`, `tools/internal/*`, `tools/readDataSource.ts`; (b) `services/agentExecutionService.ts` <-> `services/middleware/index.ts` chains; (c) `services/agentService.ts` <-> `services/llmService.ts` <-> `services/queueService.ts` <-> `jobs/proposeClientPulseInterventionsJob.ts` <-> `services/clientPulseInterventionContextService.ts` <-> `services/reviewService.ts` <-> `services/workflowActionCallExecutor.ts`. Spec §3.5 captured 175 cycles on `main` SHA `f8c8396` — the audit's 175 figure may have been inflated by counting derived edges of the now-fixed schema-leaf cascade; the true pre-existing count was likely closer to 43.
+  - Spec section: §6.3, §13.3
+  - Gap: Chunk 3's DoD checkbox `npx madge --circular --extensions ts server/ | wc -l ≤ 5` cannot be met without a Phase 5A-scope follow-up.
+  - Suggested approach: (1) confirm against an isolated `main`-state run whether the 175 figure was real or an over-count (the gap cannot be diagnosed without that comparison); (2) if the 43-cycle base is genuinely pre-existing, update spec §6.3 / §13.3 / §13.5A so the DoD ≤ 5 target moves to Phase 5A and Phase 3's actual target reflects "schema-leaf cascade resolved" only; (3) if Chunk 3 is meant to drive ≤ 5 in absolute terms, extend Chunk 3 with an additional cycle-cluster fix (the `skillExecutor` <-> tools cluster is the largest). Operator picks the framing.
+
