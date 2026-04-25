@@ -9,6 +9,7 @@
 import type PgBoss from 'pg-boss';
 import { logger } from '../lib/logger.js';
 import { safeSerialize } from '../lib/jobErrors.js';
+import { recordIncident } from './incidentIngestor.js';
 
 const DLQ_QUEUES = [
   'agent-scheduled-run__dlq',
@@ -36,6 +37,15 @@ export async function startDlqMonitor(boss: PgBoss): Promise<void> {
           agentId: payload.agentId,
           subaccountId: payload.subaccountId,
           payload: safeSerialize(payload),
+        });
+        recordIncident({
+          source: 'job',
+          summary: `Job reached DLQ: ${sourceQueue}`,
+          errorCode: 'job_dlq',
+          organisationId: typeof payload.organisationId === 'string' ? payload.organisationId : null,
+          subaccountId: typeof payload.subaccountId === 'string' ? payload.subaccountId : null,
+          fingerprintOverride: `job:${sourceQueue}:dlq`,
+          errorDetail: { jobId: job.id },
         });
       },
     );

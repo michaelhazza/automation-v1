@@ -227,6 +227,10 @@ export const agentRuns = pgTable(
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
     handoffSourceRunId: uuid('handoff_source_run_id'),
 
+    // System monitoring — carries a request/job tracing ID into incident events
+    // so a system incident can be correlated back to the agent run that caused it.
+    correlationId: text('correlation_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from './logger.js';
+import { recordIncident } from '../services/incidentIngestor.js';
 
 /**
  * Wraps an async Express route handler to eliminate repetitive try/catch blocks.
@@ -47,6 +48,17 @@ export function asyncHandler(
           statusCode,
           message,
         });
+        const rec = err as Record<string, unknown> & { __incidentRecorded?: boolean };
+        if (!rec.__incidentRecorded) {
+          rec.__incidentRecorded = true;
+          recordIncident({
+            source: 'route',
+            summary: message,
+            errorCode,
+            stack: err instanceof Error ? err.stack : undefined,
+            correlationId,
+          });
+        }
       }
 
       const body: Record<string, unknown> = {

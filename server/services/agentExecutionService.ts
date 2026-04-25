@@ -1,5 +1,6 @@
 ﻿import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
+import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -1470,6 +1471,19 @@ export const agentExecutionService = {
           eventCount,
         },
       });
+
+      // Surface terminal failures as system incidents for operator visibility.
+      if (finalStatus === 'failed' || finalStatus === 'timeout' || finalStatus === 'loop_detected') {
+        recordIncident({
+          source: 'agent',
+          summary: `Agent run ${finalStatus}: ${loopResult.summary?.slice(0, 200) ?? '(no summary)'}`,
+          errorCode: finalStatus,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          correlationId: run.correlationId ?? undefined,
+          errorDetail: { runId: run.id, finalStatus },
+        });
+      }
 
       // Brain Tree OS adoption P1 — build the structured handoff document
       // and persist it. Best-effort: a build failure logs and leaves the

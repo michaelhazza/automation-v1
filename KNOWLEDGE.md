@@ -645,3 +645,84 @@ During round 3 of a ChatGPT PR review, the reviewer suggested rewriting a user-v
 **Why this is a convention, not a gotcha.** The backlog is authoritative for "things already planned" regardless of whether the planner is the same reviewer or a prior one. Ignoring it produces PR-level churn (apply → revert → apply different version) and a split commit history that obscures the refactor's intent. Applies to every review-agent loop: ChatGPT PR review, Codex dual-reviewer, human reviewers.
 
 **Applied to:** PR #185 ChatGPT review round 3 finding 6 — rejected the "already running" error-string rewrite because round-1 finding 3 had already deferred the resume tagged-union contract (see `tasks/todo.md § Deferred from chatgpt-pr-review — PR #185`). Session log: `tasks/review-logs/chatgpt-pr-review-bugfixes-april26-2026-04-24T11-55-28Z.md`.
+
+### 2026-04-25 Pattern — Process-local counters in multi-instance services need explicit naming + first-consultation log
+
+When a counter / set / map lives at module scope inside a service that runs in multiple instances (web pool, worker pool, multi-pod), the variable's identifier is the operator's only protection against silently confusing "this process saw N failures" with "the system saw N failures." A neutral name like `failureTimestamps` reads as global — the failure mode is invisible until production.
+
+**Rule:** for any module-level mutable accumulator inside a multi-instance code path, the identifier must contain `processLocal`, `instanceLocal`, or an equivalent explicit qualifier — and the first consultation per process must emit a tagged log (e.g. `logger.warn('self_check_process_local_only', { window, threshold })`) gated by a `hasWarned*` latch so operators see the limitation in logs without spamming on every call.
+
+```ts
+// BAD — looks global, reads as "all failures"
+const failureTimestamps: number[] = [];
+
+// GOOD — name + warn-on-first-use latch
+const processLocalFailureCounter: number[] = [];
+let hasWarnedProcessLocal = false;
+
+export async function runSelfCheck() {
+  if (!hasWarnedProcessLocal) {
+    logger.warn('self_check_process_local_only', { windowMinutes, threshold });
+    hasWarnedProcessLocal = true;
+  }
+  // ...
+}
+```
+
+**Why naming alone is insufficient.** The operator reading a JSON dashboard or running a query may never see the source. The tagged log gives them a search-string they can correlate across instances — N log entries = N processes participating, which is the actual signal they need to interpret the counter.
+
+**Why it's a convention, not a hack.** The codebase already uses tagged-log-as-metric (see `delegation_outcome_write_failed` in `server/services/delegationOutcomeService.ts` and `architecture.md` notification/delegation section). Adding a dedicated metric counter for this kind of operational caveat is overkill and conflicts with the established pattern.
+
+**Future evolution.** When the service genuinely needs cross-instance counting (real backpressure, shared rate limit), replace the process-local store with Redis or a DB row — the explicit `processLocal*` naming makes the migration target obvious. Until then, the name + warn keep the limitation visible without premature complexity.
+
+**Applied to:** `server/services/incidentIngestor.ts` (rename `failureTimestamps` → `processLocalFailureCounter`) and `server/jobs/systemMonitorSelfCheckJob.ts` (added `hasWarnedProcessLocal` + `self_check_process_local_only` warn log) — PR #188 ChatGPT round 1 finding 3. Session log: `tasks/review-logs/chatgpt-pr-review-claude-system-monitoring-agent-PXNGy-2026-04-24T21-39-06Z.md`.
+
+### 2026-04-25 Gotcha — Partial unique index predicate must match the upsert WHERE clause exactly
+
+Postgres lets you create a partial unique index (`CREATE UNIQUE INDEX ... WHERE status IN (...)`) and use it as the conflict target via `ON CONFLICT (col) WHERE status IN (...)`. The two predicates must be **structurally identical**, not just semantically equivalent — a single status value missing from one side, a different ordering of an `IN` list with NULLs, or `IS DISTINCT FROM` vs `=` differences produce silent failures: the upsert misses the index and either creates a duplicate row (if the unique index is also missed) or throws `there is no unique or exclusion constraint matching the ON CONFLICT specification`.
+
+**Verified-correct example (PR #188 system_incidents):**
+
+```sql
+-- Index
+CREATE UNIQUE INDEX system_incidents_active_fingerprint_idx
+  ON system_incidents (fingerprint)
+  WHERE status IN ('open', 'investigating', 'remediating', 'escalated');
+
+-- Upsert (Drizzle)
+.onConflictDoUpdate({
+  target: systemIncidents.fingerprint,
+  targetWhere: sql`status IN ('open', 'investigating', 'remediating', 'escalated')`,
+  set: { /* ... */ },
+})
+```
+
+The two `WHERE` predicates are literally identical — same column, same operator, same value list, same order. That is the bar.
+
+**Why this is a footgun.** When a new status is added to the lifecycle (e.g. `'paused'`) the developer typically updates the upsert (because the application code surfaces the new status) but forgets the index migration. The upsert path then either silently creates duplicate active rows under the new status or starts throwing in production after the first conflict. Both modes are subtle — the duplicate-row mode is only visible as drift, the throw mode only triggers when the second incident with the same fingerprint arrives.
+
+**Detection heuristic.** Whenever you change the lifecycle status enum or any state-bearing column referenced in a partial unique index, grep for `CREATE UNIQUE INDEX.*WHERE` and `onConflictDoUpdate.*targetWhere` and diff the predicates side-by-side. If they don't match character-for-character (modulo whitespace and SQL casing), fix the migration before the next deploy.
+
+**Applied to:** `server/db/schema/systemMonitoring.ts` + `server/services/incidentIngestor.ts` — verified by ChatGPT review round 2 (PR #188) as correct. Generalises to any "active record per fingerprint / per resource / per tenant" upsert pattern that uses a partial unique index for the active-state predicate.
+
+### 2026-04-25 Convention — Tagged-log-as-metric is the project's metrics convention; resist adding new metric infrastructure without a scaling driver
+
+The codebase deliberately treats `logger.error('event_name', { ...payload })` and `logger.warn('event_name', { ...payload })` as the metrics surface. The log pipeline (downstream sink — PostHog / Datadog / similar) counts occurrences of each `event_name` tag and builds rate / count / latency series from them. There is no in-process counter library, no `metrics.increment(...)` API, and no Prometheus registry — by design.
+
+**Anchors in the codebase:**
+- `server/services/delegationOutcomeService.ts` — `delegation_outcome_write_failed` tag is the metric for delegation-outcome write failures.
+- `server/services/incidentNotifyService.ts` — `incident_notify_enqueue_failed` is the metric for notification-pipeline drops.
+- `architecture.md` notification/delegation section documents the convention.
+
+**Rule for review agents and contributors:** when a reviewer recommends "add a counter metric `foo_failures_total` + a 1-retry on best-effort path", check whether the relevant `logger.error` / `logger.warn` tag already exists. If it does, the metric is already wired via the log pipeline — adding a parallel counter creates two sources of truth and contradicts the codebase convention. The right action is to reject the metric suggestion and reference this convention.
+
+**When to actually add metric infra.** When any of the following becomes true:
+1. A specific scaling driver requires sub-log-pipeline latency (e.g. circuit-breaker decisions inside a hot loop where the log roundtrip is too slow).
+2. A push-channel or external-alert surface needs a counter primitive that isn't satisfied by tagged logs (Phase 0.75+).
+3. The log volume itself becomes a cost driver and downsampling is needed at the source.
+
+Until one of those is on the roadmap, every "add a counter" suggestion gets rejected with a pointer to the existing tagged log.
+
+**Why this looks like a hack but isn't.** Metric libraries solve cardinality, aggregation, and retention. The log sink already solves all three for tagged-event payloads — adding a separate counter library would mean reproducing the aggregation in two places and reconciling them. Single-source-of-truth wins.
+
+**Applied to:** PR #188 ChatGPT round 1 finding 7 — rejected `incident_notify_failures_total` counter + retry suggestion because `logger.error('incident_notify_enqueue_failed', ...)` already IS the metric, and the "best effort" contract on the notify path explicitly excludes retry. Session log: `tasks/review-logs/chatgpt-pr-review-claude-system-monitoring-agent-PXNGy-2026-04-24T21-39-06Z.md`.

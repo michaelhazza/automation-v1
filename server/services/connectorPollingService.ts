@@ -8,6 +8,7 @@ import { canonicalDataService } from './canonicalDataService.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import { ingestClientPulseSignalsForSubaccount } from './clientPulseIngestionService.js';
+import { recordIncident } from './incidentIngestor.js';
 
 // ---------------------------------------------------------------------------
 // Connector Polling Service — scheduled data ingestion from external platforms
@@ -77,6 +78,13 @@ export const connectorPollingService = {
         lastSyncError: 'Failed to get decrypted connection — credentials may be expired',
       });
       await connectorConfigService.update(config.id, config.organisationId, { status: 'error' });
+      recordIncident({
+        source: 'connector',
+        summary: `Connector connection error: ${config.connectorType}`,
+        errorCode: 'connector_connection_error',
+        organisationId: config.organisationId,
+        fingerprintOverride: `connector:${config.connectorType}:connection_error`,
+      });
       return { success: false, accountsSynced: 0, errors: [{ accountId: 'all', error: 'Connection error' }] };
     }
 
@@ -281,6 +289,14 @@ export const connectorPollingService = {
         lastSyncAt: new Date(),
         lastSyncStatus: 'error',
         lastSyncError: msg,
+      });
+      recordIncident({
+        source: 'connector',
+        summary: `Connector sync failed: ${config.connectorType} — ${msg.slice(0, 200)}`,
+        errorCode: 'connector_sync_failed',
+        stack: err instanceof Error ? err.stack : undefined,
+        organisationId: config.organisationId,
+        fingerprintOverride: `connector:${config.connectorType}:sync_failed`,
       });
       return { success: false, accountsSynced: 0, errors: [{ accountId: 'all', error: msg }] };
     }

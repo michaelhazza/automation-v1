@@ -1094,6 +1094,17 @@ export const queueService = {
       // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
       await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
 
+      // System Monitor — self-check (every 5 minutes)
+      await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
+      await (boss as any).work('system-monitor-self-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { runSystemMonitorSelfCheck } = await import('../jobs/systemMonitorSelfCheckJob.js');
+          await runSystemMonitorSelfCheck();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-self-check', error: String(err) });
+        }
+      });
+
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
       await (boss as any).work('subscription-trial-check', { teamSize: 1, teamConcurrency: 1 }, async () => {

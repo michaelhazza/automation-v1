@@ -2,6 +2,7 @@ import { eq, and, gte, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { anomalyEvents } from '../db/schema/index.js';
 import type { AlertLimits } from './orgConfigService.js';
+import { AlertFatigueGuardBase } from './alertFatigueGuardBase.js';
 
 // ---------------------------------------------------------------------------
 // Alert Fatigue Guard — portfolio-level alert limiting
@@ -10,31 +11,15 @@ import type { AlertLimits } from './orgConfigService.js';
 // Used by the Portfolio Health Agent during scan cycles.
 // ---------------------------------------------------------------------------
 
-export class AlertFatigueGuard {
-  private alertsThisRun = 0;
-  private readonly limits: AlertLimits;
+export class AlertFatigueGuard extends AlertFatigueGuardBase {
+  private readonly organisationId: string;
 
-  constructor(limits: AlertLimits) {
-    this.limits = limits;
+  constructor(limits: AlertLimits, organisationId: string) {
+    super(limits);
+    this.organisationId = organisationId;
   }
 
-  /** Check if an alert should be delivered or suppressed */
-  async shouldDeliver(
-    organisationId: string,
-    accountId: string,
-    severity: 'low' | 'medium' | 'high' | 'critical'
-  ): Promise<{ deliver: boolean; reason?: string }> {
-    // Low priority batching
-    if (this.limits.batchLowPriority && severity === 'low') {
-      return { deliver: false, reason: 'alert_batched_low_priority' };
-    }
-
-    // Per-run cap
-    if (this.alertsThisRun >= this.limits.maxAlertsPerRun) {
-      return { deliver: false, reason: `alert_suppressed_run_cap: ${this.alertsThisRun}/${this.limits.maxAlertsPerRun}` };
-    }
-
-    // Per-account per-day cap
+  protected async queryTodayCount(accountId: string): Promise<number> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -42,22 +27,24 @@ export class AlertFatigueGuard {
       .select({ count: count() })
       .from(anomalyEvents)
       .where(and(
-        eq(anomalyEvents.organisationId, organisationId),
+        eq(anomalyEvents.organisationId, this.organisationId),
         eq(anomalyEvents.accountId, accountId),
         gte(anomalyEvents.createdAt, todayStart),
       ));
 
-    const todayCount = Number(result?.count ?? 0);
-    if (todayCount >= this.limits.maxAlertsPerAccountPerDay) {
-      return { deliver: false, reason: `alert_suppressed_account_day_cap: ${todayCount}/${this.limits.maxAlertsPerAccountPerDay}` };
-    }
-
-    this.alertsThisRun++;
-    return { deliver: true };
+    return Number(result?.count ?? 0);
   }
 
-  /** Get count of alerts delivered this run */
-  get alertCount(): number {
-    return this.alertsThisRun;
+  protected getDayCapDimension(): string {
+    return 'account';
+  }
+
+  /** Check if an alert should be delivered or suppressed (preserves original API) */
+  async shouldDeliver(
+    organisationId: string,
+    accountId: string,
+    severity: 'low' | 'medium' | 'high' | 'critical'
+  ): Promise<{ deliver: boolean; reason?: string }> {
+    return super.shouldDeliver(accountId, severity);
   }
 }

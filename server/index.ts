@@ -156,6 +156,9 @@ import rulesRouter from './routes/rules.js';
 import { delegationOutcomesRouter } from './routes/delegationOutcomes.js';
 import referenceDocumentsRouter from './routes/referenceDocuments.js';
 import documentBundlesRouter from './routes/documentBundles.js';
+import systemIncidentsRouter from './routes/systemIncidents.js';
+import { recordIncident } from './services/incidentIngestor.js';
+import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -351,6 +354,7 @@ app.use(crmQueryPlannerRouter);
 app.use(delegationOutcomesRouter);
 app.use(referenceDocumentsRouter);
 app.use(documentBundlesRouter);
+app.use(systemIncidentsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -407,6 +411,20 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     stack: err instanceof Error ? err.stack : undefined,
   });
 
+  if (statusCode >= 500) {
+    const e = err as Record<string, unknown> & { __incidentRecorded?: boolean };
+    if (!e.__incidentRecorded) {
+      e.__incidentRecorded = true;
+      recordIncident({
+        source: 'route',
+        summary: message,
+        errorCode,
+        stack: err instanceof Error ? err.stack : undefined,
+        correlationId,
+      });
+    }
+  }
+
   const isProduction = env.NODE_ENV === 'production';
   res.status(statusCode).json({
     error: {
@@ -428,6 +446,7 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     const boss = await getPgBoss();
     await startDlqMonitor(boss);
+    await registerSystemIncidentNotifyWorker(boss);
   }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();

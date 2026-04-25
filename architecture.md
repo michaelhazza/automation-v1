@@ -3125,3 +3125,81 @@ Three detectors for the delegation subsystem (all in `server/services/workspaceH
 - `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
 - `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
 - `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.
+
+---
+
+## System Monitor (Phase 0 + 0.5)
+
+### Schema
+
+Three tables, all bypass RLS (gated at route layer via `requireSystemAdmin`):
+
+- `system_incidents` — one row per deduplicated fingerprint while active; partial unique index on `fingerprint WHERE status IN ('open','investigating','remediating','escalated')`
+- `system_incident_events` — append-only audit log; 14 event types including `occurrence`, `acknowledged`, `resolved`, `escalated`, `escalation_blocked`, `resolution_linked_to_task`
+- `system_incident_suppressions` — named mute rules with `suppressedCount`/`lastSuppressedAt` feedback counters
+
+### Fingerprinting
+
+`computeFingerprint` (pure, in `incidentIngestorPure.ts`) hashes `source|errorCode|normaliseMessage(summary)|topFrameSignature(stack)|affectedResourceKind`.
+
+`normaliseMessage` applies replacements in order: ISO timestamps first, then large numbers — critical ordering to prevent year digits being eaten by the number stripper.
+
+`fingerprintOverride` (binding contract: `^[a-z_]+:[a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)+$`) bypasses stack-derived fingerprinting for well-known integrations.
+
+### Ingest
+
+`recordIncident(input)` (in `incidentIngestor.ts`) — fire-and-forget, never throws. Mode:
+
+- `SYSTEM_INCIDENT_INGEST_MODE=sync` (default) — ingest inline in the calling process
+- `SYSTEM_INCIDENT_INGEST_MODE=async` — enqueue to `system-monitor-ingest` pg-boss queue; worker in `incidentIngestorAsyncWorker.ts`
+- `NODE_ENV=test` forces sync regardless
+
+Kill switch: `SYSTEM_INCIDENT_INGEST_ENABLED=false`.
+
+Upsert + occurrence event + notify-enqueue happen in a single DB transaction to prevent phantom pg-boss jobs on tx rollback. The post-commit `boss.send` is best-effort (try/catch → `incident_notify_enqueue_failed` log) so async-mode pg-boss retries can't double-increment `occurrenceCount`.
+
+Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missing_correlation_id` when `input.correlationId` is absent (per spec §6.9 — correlation-ID coverage is best-effort during ramp-up). Tagged-log-as-metric means the log pipeline counts occurrences; no separate counter primitive.
+
+### Integration points
+
+| Caller | Source | Fingerprint |
+|--------|--------|-------------|
+| `asyncHandler.ts` | `route` | stack-derived |
+| Global error handler (`server/index.ts`) | `route` | stack-derived |
+| `dlqMonitorService.ts` | `job` | `job:<queue>:dlq` |
+| `agentExecutionService.ts` — failed/timeout/loop_detected | `agent` | stack-derived |
+| `connectorPollingService.ts` — connection error | `connector` | `connector:<type>:connection_error` |
+| `connectorPollingService.ts` — sync failure | `connector` | `connector:<type>:sync_failed` |
+| `skillExecutor.ts` — `fail_run` directive | `skill` | `skill:<slug>:fail_run` |
+| `llmRouter.ts` — all providers exhausted | `llm` | `llm:<provider>:<status>` |
+| `systemMonitorSelfCheckJob.ts` — ingest pipeline degraded | `self` | `self:ingestor:ingest_pipeline_degraded` |
+
+### Notification
+
+pg-boss `system-monitor-notify` queue → `registerSystemIncidentNotifyWorker` (in `systemIncidentNotifyJob.ts`) → `emitToSysadmin('system_incident:updated', ...)` → `system:sysadmin` WebSocket room.
+
+Clients join via `socket.emit('join:sysadmin')` (system_admin role only).
+
+### Escalation
+
+`escalateIncidentToAgent` in `systemIncidentService.ts`:
+1. `computeEscalationVerdict` — hard cap 3, 60s rate limit per incident
+2. `resolveSystemOpsContext()` — resolves System Operations org (is_system_org=true) + its sentinel subaccount
+3. Creates task via `taskService.createTask` in System Operations org
+4. Updates incident to `escalated`, increments `escalationCount`, writes escalation event
+
+Guardrail failures write `escalation_blocked` event and throw 429.
+
+### AlertFatigueGuardBase
+
+Abstract base in `alertFatigueGuardBase.ts`. `AlertFatigueGuard` (Portfolio Health Agent) and `SystemIncidentFatigueGuard` (Phase 0.75 push channels) both extend it. Critical bypass: `SystemIncidentFatigueGuard.shouldDeliver` passes `severity='critical'` directly. `SystemIncidentFatigueGuard.queryTodayCount` joins `system_incidents` and filters by `fingerprint`, so the per-day cap is per-fingerprint — Phase 0.5 doesn't invoke the guard, but the join is in place so Phase 0.75 push channels inherit correct scoping.
+
+### Self-check
+
+`systemMonitorSelfCheckJob.ts` runs every 5 minutes (pg-boss scheduled). Reads process-local `getIngestFailuresInWindow(15)` (backed by the `processLocalFailureCounter` deque in `incidentIngestor.ts`). If `>= 3` failures, records a `self` incident with fingerprint `self:ingestor:ingest_pipeline_degraded`.
+
+The counter is process-local — multi-instance deployments under-count globally, so each process can only detect ingest degradation in its own scope. The job emits `self_check_process_local_only` once per process on first consultation to make this limitation observable; shared failure tracking (Redis or DB-backed) is a Phase 0.75 hardening item.
+
+### Admin UI
+
+`/system/incidents` — `SystemIncidentsPage.tsx` with sortable/filterable table, inline detail drawer (ack/resolve/suppress/escalate), WebSocket-updated nav badge.

@@ -54,6 +54,12 @@ export const tasks = pgTable(
     // Populated by reassign_task when hierarchy is active.
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
 
+    // ── System incident escalation (migration 0223) ─────────────────────
+    // When a system incident is escalated to an agent, the created task carries
+    // these two fields so the escalation can be traced back to the source row.
+    linkedEntityKind: text('linked_entity_kind'),
+    linkedEntityId: uuid('linked_entity_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

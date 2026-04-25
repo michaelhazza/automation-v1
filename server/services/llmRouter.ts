@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
+import { recordIncident } from './incidentIngestor.js';
 import { llmRequests, ieeRuns, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
 import { createGeneration, createEvent } from '../lib/tracing.js';
 import type { TaskType, SourceType, ExecutionPhase, RoutingMode, CallSite } from '../db/schema/index.js';
@@ -1042,6 +1043,16 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     console.error('[llmRouter] All providers failed', {
       idempotencyKey, organisationId: ctx.organisationId, runId: ctx.runId,
       provider: effectiveProvider, model: effectiveModel, status: callStatus, error: callError,
+    });
+    recordIncident({
+      source: 'llm',
+      summary: `LLM router failure (${callStatus}): ${callError.slice(0, 200)}`,
+      errorCode: callStatus,
+      organisationId: ctx.organisationId,
+      subaccountId: ctx.subaccountId,
+      correlationId: ctx.runId,
+      fingerprintOverride: `llm:${effectiveProvider}:${callStatus}`,
+      errorDetail: { provider: effectiveProvider, model: effectiveModel },
     });
 
     const hasFallbackFailures = fallbackAttempts.some(a => a.error);
