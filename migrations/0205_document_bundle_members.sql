@@ -36,6 +36,7 @@ CREATE INDEX document_bundle_members_doc_idx
 
 ALTER TABLE document_bundle_members ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY document_bundle_members_org_isolation ON document_bundle_members
   USING (
     EXISTS (

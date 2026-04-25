@@ -1,4 +1,4 @@
-import { eq, and, isNull, ilike } from 'drizzle-orm';
+import { eq, and, isNull, ilike, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { automations, automationEngines, executions, executionPayloads } from '../db/schema/index.js';
 import { webhookService } from './webhookService.js';
@@ -295,6 +295,102 @@ export class AutomationService {
 
       return { executionId: execution.id, status: 'failed', outputData: null, errorMessage, durationMs, isTestExecution: true };
     }
+  }
+
+  /** List system automations (scope='system', status='active', not deleted). */
+  async listSystemAutomations() {
+    return db.select()
+      .from(automations)
+      .where(and(eq(automations.scope, 'system'), eq(automations.status, 'active'), isNull(automations.deletedAt)))
+      .orderBy(desc(automations.createdAt));
+  }
+
+  /**
+   * Link a system automation to an org. Creates an org-scoped wrapper that
+   * references the system automation. Enforces dedup.
+   */
+  async linkSystemAutomation(
+    organisationId: string,
+    systemAutomationId: string,
+    overrides?: { name?: string; description?: string; defaultConfig?: unknown },
+  ) {
+    const [systemProcess] = await db.select()
+      .from(automations)
+      .where(and(
+        eq(automations.id, systemAutomationId),
+        eq(automations.scope, 'system'),
+        isNull(automations.deletedAt),
+      ));
+
+    if (!systemProcess) throw { statusCode: 404, message: 'System process not found' };
+    if (systemProcess.status !== 'active') {
+      throw { statusCode: 400, message: 'Cannot link an inactive system process' };
+    }
+
+    const [existing] = await db.select()
+      .from(automations)
+      .where(and(
+        eq(automations.organisationId, organisationId),
+        eq(automations.systemAutomationId, systemProcess.id),
+        isNull(automations.deletedAt),
+      ));
+    if (existing) {
+      throw { statusCode: 409, message: 'This system process is already linked to your organisation' };
+    }
+
+    const [linked] = await db.insert(automations).values({
+      organisationId,
+      automationEngineId: null,
+      name: overrides?.name || systemProcess.name,
+      description: overrides?.description ?? systemProcess.description,
+      webhookPath: '',
+      scope: 'organisation',
+      isEditable: true,
+      isSystemManaged: true,
+      systemAutomationId: systemProcess.id,
+      defaultConfig: overrides?.defaultConfig ?? null,
+      status: 'active',
+    }).returning();
+
+    return linked;
+  }
+
+  /**
+   * Clone an automation (from system or same org) into the given org.
+   */
+  async cloneProcess(
+    sourceId: string,
+    organisationId: string,
+    name?: string,
+  ) {
+    const [source] = await db.select()
+      .from(automations)
+      .where(and(eq(automations.id, sourceId), isNull(automations.deletedAt)));
+
+    if (!source) throw { statusCode: 404, message: 'Source process not found' };
+
+    if (source.scope !== 'system' && source.organisationId !== organisationId) {
+      throw { statusCode: 403, message: 'Cannot clone automations from another organisation' };
+    }
+
+    const [cloned] = await db.insert(automations).values({
+      organisationId,
+      automationEngineId: null,
+      name: name || `${source.name} (Clone)`,
+      description: source.description,
+      webhookPath: source.webhookPath,
+      inputSchema: source.inputSchema,
+      outputSchema: source.outputSchema,
+      configSchema: source.configSchema,
+      defaultConfig: source.defaultConfig,
+      requiredConnections: source.requiredConnections,
+      scope: 'organisation',
+      isEditable: true,
+      parentAutomationId: source.id,
+      status: 'draft',
+    }).returning();
+
+    return cloned;
   }
 
   private _mapProcess(t: typeof automations.$inferSelect, includeAdmin: boolean) {

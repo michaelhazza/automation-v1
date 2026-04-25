@@ -27,7 +27,7 @@ Every invocation runs in exactly this sequence. Do not reorder, do not merge ste
 
 Every session starts with this list. You can add more items in Step 3 but these must all be present:
 
-1. Load context — `CLAUDE.md`, `architecture.md`, `docs/spec-authoring-checklist.md`, the feature/spec description
+1. Load context — see [Context files](#context-files) below for the canonical list and order. Do not restate the list here; collapse all context loading into this single skeleton item.
 2. Primitives-reuse search — for every candidate new service / table / column, confirm no existing primitive to extend
 3. File inventory — cross-reference the spec's §File inventory (or derive from feature description if no spec)
 4. Contracts — TypeScript interfaces, Zod schemas, DB columns, route shapes, error codes
@@ -48,7 +48,9 @@ Load these in order in Step 2:
 1. `CLAUDE.md` — project principles, task workflow, and conventions
 2. `architecture.md` — backend structure, route conventions, auth model, three-tier agent hierarchy, skill system, service patterns, and all key patterns
 3. `docs/spec-authoring-checklist.md` — pre-authoring checklist for Significant/Major plans. Every plan you produce must satisfy its appendix (primitives search, file inventory, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, testing posture) or document an explicit deviation.
-4. The specific task, bug report, or feature description provided
+4. `DEVELOPMENT_GUIDELINES.md` — read when the task touches tenant data, migrations, schema, RLS, the service/route/lib tier, LLM routing, or gates. Skip when the task is pure frontend, pure docs, or otherwise outside the guidelines' scope.
+5. `KNOWLEDGE.md` — past corrections and recurring patterns. Scan for entries that match the task's domain (e.g. RLS, agent execution, queues) so the plan inherits prior lessons rather than rediscovering them.
+6. The specific task, bug report, or feature description provided
 
 Do not skip context loading. Architecture decisions made without understanding the existing patterns create inconsistency.
 
@@ -132,6 +134,17 @@ These are non-negotiable. Every plan must respect them:
 - Three-tier agent model (System → Org → Subaccount) must be respected — changes that affect one tier may affect the others
 - Idempotency keys on agent runs — any new run creation path must support deduplication
 - Heartbeat changes must account for minute-level offset precision (heartbeatOffsetMinutes)
+
+## Gate-Timing Rule (applies to every multi-chunk plan)
+
+**Bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers. Do NOT schedule them per-chunk.**
+
+Every plan you produce must follow this pattern:
+- **Baseline** (before Chunk 1 begins) — run all relevant gates once to capture the current violation set. Note the count; any violations that already existed are not the implementer's fault.
+- **Per-chunk verification** — `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. No bash gate scripts.
+- **Final gate pass** (after ALL chunks AND spec-conformance have completed) — run the full gate set once to confirm everything is clean.
+
+In the plan's "Verification commands" sections, list only `npm run build:server` and unit-test commands for per-chunk steps. Move the full gate-script list to a single "Programme-end verification" section at the bottom of the plan. Explicitly note in the Executor notes: "Gate scripts run twice: baseline before Chunk 1 and final pass after all chunks. Never between chunks."
 
 ---
 

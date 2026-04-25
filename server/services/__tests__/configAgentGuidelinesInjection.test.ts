@@ -53,6 +53,7 @@ function assert(condition: boolean, label: string) {
 console.log('\n--- configAgentGuidelinesInjection (pure) ---');
 
 const guidelinesBlock: MemoryBlockForPrompt = {
+  id: 'test-guidelines-id',
   name: 'config-agent-guidelines',
   content: 'Three Cs: Context, Clarity, Confirmation.',
   permission: 'read',

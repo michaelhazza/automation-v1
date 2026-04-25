@@ -38,6 +38,40 @@ fi
 
 VIOLATIONS=0
 
+# ── Historical baseline ───────────────────────────────────────────────────────
+# Migrations 0204–0208 and 0212 were authored before FORCE ROW LEVEL SECURITY
+# and the canonical session-var pattern were established. They are immutable;
+# migration 0213 repairs their policies at runtime and migration 0227 applies
+# FORCE RLS. Files in this list are exempt from the FORCE RLS and CREATE POLICY
+# checks when they carry a @rls-baseline: annotation comment.
+HISTORICAL_BASELINE_FILES=(
+  "0204_document_bundles.sql"
+  "0205_document_bundle_members.sql"
+  "0206_document_bundle_attachments.sql"
+  "0207_bundle_resolution_snapshots.sql"
+  "0208_model_tier_budget_policies.sql"
+  "0212_bundle_suggestion_dismissals.sql"
+)
+BASELINE_ANNOTATION="@rls-baseline:"
+
+# Returns 0 (true) when the migration filename is in HISTORICAL_BASELINE_FILES
+# AND the file contains the @rls-baseline: annotation comment.
+is_baselined() {
+  local migration_path="$1"
+  local migration_file
+  migration_file=$(basename "$migration_path")
+  local matched=0
+  for entry in "${HISTORICAL_BASELINE_FILES[@]}"; do
+    if [ "$migration_file" = "$entry" ]; then
+      matched=1
+      break
+    fi
+  done
+  [ "$matched" -eq 0 ] && return 1
+  grep -q "$BASELINE_ANNOTATION" "$migration_path" 2>/dev/null && return 0
+  return 1
+}
+
 # ── Parse the manifest ──────────────────────────────────────────────────────
 # Extract (tableName, policyMigration) tuples via grep over the TS source.
 # This avoids booting a node runtime inside the gate. The manifest entries
@@ -75,6 +109,13 @@ while IFS=$'\t' read -r table migration; do
 
   # The policy must (a) CREATE POLICY ... ON <table> and (b) the same
   # migration must ENABLE ROW LEVEL SECURITY on that table.
+  # Historical baseline migrations are exempt from CREATE POLICY / FORCE RLS checks
+  # when they carry the @rls-baseline: annotation. Their policies are repaired by
+  # migration 0213 (canonical session var) and 0227 (FORCE RLS) at runtime.
+  if is_baselined "$migration_path"; then
+    continue
+  fi
+
   if ! grep -qE "CREATE POLICY[[:space:]]+[a-zA-Z_]+[[:space:]]+ON[[:space:]]+${table}\\b" "$migration_path"; then
     emit_violation "$GUARD_ID" "error" "$migration_path" "0" \
       "Migration $migration does not CREATE POLICY on table '$table' (declared in manifest)." \

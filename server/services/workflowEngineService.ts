@@ -3331,7 +3331,7 @@ export const WorkflowEngineService = {
             executionMode: 'api',
             idempotencyKey,
             triggerContext,
-            WorkflowStepRunId: data.WorkflowStepRunId,
+            workflowStepRunId: data.WorkflowStepRunId,
             // Decision-step constraints: pass through when present so the
             // execution service enforces the envelope + tool restriction.
             ...(data.systemPromptAddendum !== undefined && {

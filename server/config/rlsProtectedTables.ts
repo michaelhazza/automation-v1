@@ -184,39 +184,37 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0108_scraping_engine.sql',
     rationale: 'Per-org scraping cache — cached page content with tenant isolation.',
   },
-  // 0139 — Memory & Briefings Phase 1: HITL review queue
+  // 0227 — Phase 1 RLS hardening: FORCE RLS + canonical policy on 5 tables
+  // that were missing FORCE ROW LEVEL SECURITY in their original migrations.
+  // Original migrations: 0139, 0141, 0142, 0147, 0153.
   {
     tableName: 'memory_review_queue',
     schemaFile: 'memoryReviewQueue.ts',
-    policyMigration: '0139_memory_review_queue.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Per-org HITL review queue — belief conflicts and block proposals contain workspace intelligence that must not leak across tenants.',
   },
-  // 0147 — Memory & Briefings Phase 2: trust calibration
   {
     tableName: 'trust_calibration_state',
     schemaFile: 'trustCalibrationState.ts',
-    policyMigration: '0147_trust_calibration_state.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Per-agent trust counter — auto-thresholds and validation history must stay tenant-isolated to prevent gaming across orgs.',
   },
-  // 0141 — Memory & Briefings Phase 4: drop-zone upload audit
   {
     tableName: 'drop_zone_upload_audit',
     schemaFile: 'dropZoneUploadAudit.ts',
-    policyMigration: '0141_drop_zone_upload_audit.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Append-only upload history with file hashes + destination payloads — must stay tenant-isolated for compliance and trust-state recomputation.',
   },
-  // 0142 — Memory & Briefings Phase 4: onboarding bundle configs
   {
     tableName: 'onboarding_bundle_configs',
     schemaFile: 'onboardingBundleConfigs.ts',
-    policyMigration: '0142_onboarding_bundle_configs.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Per-org onboarding bundle manifest — must stay tenant-isolated to prevent cross-org bundle leak.',
   },
-  // 0153 — Feature 2: test-input fixtures for inline Run-Now test panel
   {
     tableName: 'agent_test_fixtures',
     schemaFile: 'agentTestFixtures.ts',
-    policyMigration: '0153_agent_test_fixtures.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Test-input fixtures contain prompt text and JSON payloads authored by org/subaccount users — must stay tenant-isolated.',
   },
   // 0156 — Orchestrator capability-aware routing: feature requests + routing outcomes
@@ -414,23 +412,24 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0177_clientpulse_integration_fingerprints.sql',
     rationale: 'Novel fingerprint observations awaiting operator triage — leak reveals unclassified third-party activity per sub-account.',
   },
-  // 0192 — Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md)
+  // 0227 — Phase 1 RLS hardening: FORCE RLS + canonical policy on 3 execution-log
+  // tables that were missing FORCE ROW LEVEL SECURITY in their original migration 0192.
   {
     tableName: 'agent_execution_events',
     schemaFile: 'agentExecutionEvents.ts',
-    policyMigration: '0192_agent_execution_log.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Durable per-run agent execution timeline — prompt assembly, memory retrieval, rule evaluation, LLM call start/complete, skill invocation. Payload contains reasoning excerpts, memory excerpts, and tool inputs that can hold PII + operational secrets.',
   },
   {
     tableName: 'agent_run_prompts',
     schemaFile: 'agentRunPrompts.ts',
-    policyMigration: '0192_agent_execution_log.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Fully-assembled system + user prompt per run assembly — contains the client knowledge base, memory-block composition, and task context that the LLM saw. Leak reveals an org\'s entire agent prompt surface.',
   },
   {
     tableName: 'agent_run_llm_payloads',
     schemaFile: 'agentRunLlmPayloads.ts',
-    policyMigration: '0192_agent_execution_log.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Full request + response body per LLM ledger row — post-redaction, but still carries message history, tool inputs, and provider responses. Payload-read is gated tighter than view-log (AGENTS_EDIT), but RLS is still the last-resort tenant boundary.',
   },
   // 0195 — Universal Brief classifier shadow-eval logging.
@@ -461,16 +460,18 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   // Migration 0213 repairs the RLS policies on all eight tables below (wrong
   // session variable + missing FORCE + missing WITH CHECK) to match the
   // canonical 0079/0200 pattern.
+  // 0227 — Phase 1 RLS hardening: FORCE RLS on 2 tables that were missing it
+  // in their original migrations 0202 and 0203.
   {
     tableName: 'reference_documents',
     schemaFile: 'referenceDocuments.ts',
-    policyMigration: '0202_reference_documents.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
     tableName: 'reference_document_versions',
     schemaFile: 'referenceDocumentVersions.ts',
-    policyMigration: '0203_reference_document_versions.sql',
+    policyMigration: '0227_rls_hardening_corrective.sql',
     rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states.',
   },
   {

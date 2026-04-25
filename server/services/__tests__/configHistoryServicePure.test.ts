@@ -6,6 +6,7 @@
  * The retry loop handles Postgres 23505 (unique violation) errors by re-reading
  * maxVersion and retrying the insert. This is a pure simulation — no DB required.
  */
+export {};
 
 let passed = 0;
 let failed = 0;

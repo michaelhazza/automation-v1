@@ -4,7 +4,7 @@ import { eq, and, isNull, desc } from 'drizzle-orm';
 import type { ReferenceDocument, NewReferenceDocument } from '../db/schema/referenceDocuments.js';
 import type { ReferenceDocumentVersion } from '../db/schema/referenceDocumentVersions.js';
 import { hashContent, hashSerialized, serializeDocument, DOC_DELIMITER_END } from './referenceDocumentServicePure.js';
-import { countTokens, SUPPORTED_MODEL_FAMILIES } from './providers/anthropicAdapter.js';
+import { countTokens, SUPPORTED_MODEL_FAMILIES } from './llmRouter.js';
 
 // ---------------------------------------------------------------------------
 // Reference Document Service — stateful I/O

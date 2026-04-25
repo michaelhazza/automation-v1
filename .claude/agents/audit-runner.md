@@ -22,9 +22,10 @@ Before starting, read:
 1. `docs/codebase-audit-framework.md` — **PRIMARY**. Your operating manual.
 2. `CLAUDE.md` — global playbook. Skim for User Preferences, agent fleet conventions, review-log filename rules.
 3. `architecture.md` — backend conventions, layer rules, RLS posture.
-4. `KNOWLEDGE.md` — past corrections to honour. Pay attention to entries about file-path verification before asserting a path exists.
-5. `tasks/todo.md` — existing deferred items (you will dedup against this when routing pass-3 findings).
-6. `tasks/current-focus.md` — sprint pointer; tells you what's already in flight on other branches.
+4. `DEVELOPMENT_GUIDELINES.md` — locked invariants the audit must enforce (RLS rules, schema-leaf rule, service-tier boundaries, gate protocol, migration discipline). Always read for `rls`, `agent-execution`, `queues`, and `webhooks` hotspots; skip for `frontend`-only hotspot.
+5. `KNOWLEDGE.md` — past corrections to honour. Pay attention to entries about file-path verification before asserting a path exists.
+6. `tasks/todo.md` — existing deferred items (you will dedup against this when routing pass-3 findings).
+7. `tasks/current-focus.md` — sprint pointer; tells you what's already in flight on other branches.
 
 If the framework version in §header has changed since the last audit, note it. If §2 (AutomationOS context block) appears stale vs current `package.json` / repo state, surface that to the user before running pass 1 — a stale context block silently mis-classifies safe vs protected files.
 
@@ -70,7 +71,7 @@ Before doing anything else:
 3. Verify every path you plan to assert exists with `test -f` or `test -d`. **Per the KNOWLEDGE.md correction on path verification: never trust a remembered path — verify it.**
 4. Create the audit branch: `audit/<mode>-<scope-slug>-<YYYY-MM-DD>` (kebab-case, ASCII only).
 5. Record starting commit SHA.
-6. Initialise the audit log at `tasks/review-logs/codebase-audit-log-<scope-slug>-<ISO-timestamp>.md` using framework §11 template. Slug + timestamp follow CLAUDE.md § Review-log filename convention. Fill in the Reconnaissance Map section now.
+6. Initialise the audit log at `tasks/review-logs/codebase-audit-log-<scope-slug>-<ISO-timestamp>.md` using framework §11 template. Slug + timestamp follow the canonical filename shape in `tasks/review-logs/README.md`. Fill in the Reconnaissance Map section now.
 
 ### B) Pass 1 — findings only
 
@@ -126,17 +127,23 @@ For each area / module approved for pass 2, in the framework's Default Execution
 
 ### D) Pass 3 routing
 
-Append all pass-3 items to `tasks/todo.md` under a new dated section:
+Append all pass-3 items to `tasks/todo.md` under a new dated section, using the **origin-tag + status** item shape from `tasks/review-logs/README.md` § *Item format — origin tag + status*:
 
 ```
 ## Deferred from codebase audit — <YYYY-MM-DD>
 **Captured:** <ISO timestamp>
 **Source log:** tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md
 
-- [ ] <finding>: <one-line description>. <severity>/<confidence>. <recommended action>.
+- [ ] [origin:audit:<scope>:<timestamp>] [status:open] <finding>: <one-line description>. <severity>/<confidence>. <recommended action>.
 ```
 
-**Append-only.** Dedup before appending — scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates. Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
+The `origin:audit:<scope>:<timestamp>` tag is **mandatory** on every pass-3 item — it joins findings back to this audit log so closure can be traced from a future PR. `<scope>` and `<timestamp>` match the audit log filename's discriminating fields exactly.
+
+**Append-only.** Dedup before appending — for each candidate finding:
+1. **Origin-scope match (preferred)** — if any existing item carries an `[origin:audit:<scope>:*]` tag matching this run's `<scope>` (timestamp ignored), and the candidate's description matches that item by the heuristic below, treat as duplicate and skip. This catches re-runs of the same hotspot or audit area.
+2. **Heuristic match (fallback)** — for items without an origin tag (pre-tagged-era entries) or items from a different `<scope>`, scan existing sections for the same `finding_type` or the same leading ~5 words; skip duplicates.
+
+Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
 
 ### E) spec-conformance note
 
@@ -203,6 +210,18 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 - **Architectural decisions mid-pass-2:** stop and escalate. Do not unilaterally make architectural decisions inside an audit run.
 - **Critical findings (Rule 8 severity):** any RLS gap, idempotency hole, three-tier agent invariant violation, or capabilities editorial breach in customer-facing sections of `docs/capabilities.md` is `critical` severity and requires user sign-off before any pass-2 fix attempt.
 
+## Gate-Timing Rule (for remediation programmes that follow this audit)
+
+When an audit produces findings that are resolved through a multi-chunk remediation programme:
+
+- **Bash gate scripts (`scripts/verify-*.sh`) do NOT run per-chunk.** They are slow static analyzers; per-chunk overhead adds no benefit.
+- **Timing:** (a) baseline run before Chunk 1 begins; (b) final pass after ALL chunks **and after `spec-conformance` has returned CONFORMANT** — never before spec-conformance completes.
+- Per-chunk verification uses only `npm run build:server` (fast typecheck) and targeted unit tests. Document this in the remediation plan's Executor notes and in any per-chunk "Verification commands" sections.
+
+See also: `architect.md` § Gate-Timing Rule — the architect enforces the same rule when producing implementation plans.
+
+---
+
 ## Rules
 
 - You are the **executor** of the framework, not its rewriter. Do not modify `docs/codebase-audit-framework.md` as part of an audit run. If you find a real framework gap, append it to `KNOWLEDGE.md` and surface it to the user — they decide whether to bump the framework version.
@@ -211,7 +230,7 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 - One area at a time in pass 2. Never batch unrelated fixes.
 - The audit log and `tasks/todo.md` updates are mandatory at every stage they apply — never "I'll write the log later".
 - Protected files (framework §4) are never modified, even if static analysis suggests they're unused. Surface ambiguity to the user; do not act.
-- Editorial law on `docs/capabilities.md` (framework Module M, CLAUDE.md § Editorial rules) is never auto-rewritten — always pass 3, always human-edited.
+- Editorial law on `docs/capabilities.md` (framework Module M, `docs/capabilities.md` § Editorial rules) is never auto-rewritten — always pass 3, always human-edited.
 - When a Universal Rule (1–15) and your tactical judgement disagree, the rule wins. The framework was designed to override session-local enthusiasm.
 - Do not spawn sub-agents. All investigation, grep, and file reads happen directly via `Bash`, `Grep`, `Glob`, and `Read`. `spec-conformance` and `pr-reviewer` are the caller's responsibility after the audit completes.
 - Do not create the final PR — that is the user's call.

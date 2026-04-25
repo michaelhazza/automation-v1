@@ -26,7 +26,7 @@ VIOLATIONS=0
 
 emit_header "$GUARD_NAME"
 
-ALLOWLIST_FILE="$ROOT_DIR/server/lib/playbook/actionCallAllowlist.ts"
+ALLOWLIST_FILE="$ROOT_DIR/server/lib/workflow/actionCallAllowlist.ts"
 REGISTRY_FILE="$ROOT_DIR/server/config/actionRegistry.ts"
 EXECUTOR_FILE="$ROOT_DIR/server/services/skillExecutor.ts"
 

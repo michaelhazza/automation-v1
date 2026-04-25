@@ -11,7 +11,7 @@ import type {
   AvailableSystemAgent,
   ParsedCandidate,
   BackupMetadata,
-} from './SkillAnalyzerWizard';
+} from './types';
 import { evaluateApprovalState } from './mergeTypes';
 
 interface Props {

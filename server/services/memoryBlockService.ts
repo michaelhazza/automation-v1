@@ -84,6 +84,7 @@ export async function getBlocksForAgent(
 ): Promise<MemoryBlockForPrompt[]> {
   const rows = await db
     .select({
+      id: memoryBlocks.id,
       name: memoryBlocks.name,
       content: memoryBlocks.content,
       permission: memoryBlockAttachments.permission,
@@ -105,6 +106,7 @@ export async function getBlocksForAgent(
     .orderBy(asc(memoryBlocks.name));
 
   return rows.map((r) => ({
+    id: r.id,
     name: r.name,
     content: r.content,
     permission: r.permission as 'read' | 'read_write',
@@ -293,6 +295,7 @@ export async function getBlocksForInjection(
   );
 
   return ranked.map((c) => ({
+    id: c.id,
     name: c.name,
     content: c.content,
     // Explicit blocks preserve their original permission; relevance blocks

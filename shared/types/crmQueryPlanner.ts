@@ -43,7 +43,7 @@ export interface QueryFilter {
   operator:
     | 'eq' | 'ne' | 'in' | 'nin' | 'gt' | 'gte' | 'lt' | 'lte'
     | 'contains' | 'starts_with' | 'is_null' | 'is_not_null' | 'between';
-  value: unknown;
+  value?: unknown;
   humanLabel: string; // for filtersApplied rendering
 }
 

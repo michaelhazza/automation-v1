@@ -32,11 +32,11 @@ export async function runConnectorPollingSync(
     RETURNING sync_lock_token, sync_phase
   `);
 
-  if (!leaseResult.rows || leaseResult.rows.length === 0) {
+  if (leaseResult.length === 0) {
     return; // Another sync holds the lease
   }
 
-  const leaseRow = leaseResult.rows[0] as { sync_lock_token: string; sync_phase: string };
+  const leaseRow = leaseResult[0] as { sync_lock_token: string; sync_phase: string };
   const acquiredToken = leaseRow.sync_lock_token;
   const currentSyncPhase = leaseRow.sync_phase;
   const syncStartedAt = new Date();

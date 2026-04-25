@@ -1,0 +1,39 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase. This is iteration 2 of the spec-reviewer loop. Iteration 1 applied 24 mechanical fixes — historical-policy-name DROP enumeration, file-path drift normalisation, finding-count reconciliation, Phase 5 PR boundary clarification, testRunRateLimit / public-form-rate-limiter conflation split, and a few wording tightenings.
+
+SPEC: docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md — Codebase Audit Remediation, 5-phase remediation of audit findings (RLS hardening, gate compliance, circular-dep root, system consistency, controlled improvements).
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, commit-and-revert. NO feature flags, NO staged rollout, NO canary.
+- Testing posture: static gates + pure-function unit tests only. NO frontend tests, NO E2E, NO API contract tests, NO performance baselines.
+- Prefer existing primitives (withOrgTx, withAdminConnection, fromOrgId, llmRouter, canonicalDataService, resolveSubaccount, RLS_PROTECTED_TABLES, scripts/verify-*.sh).
+- Migrations are append-only.
+
+Iteration 1 changes that you should now sanity-check rather than re-flag:
+- §4.1 now has a per-table historical-policy-name column AND the SQL skeleton enumerates the DROPs for memory_review_queue and drop_zone_upload_audit explicitly (with a "repeat for the others" note).
+- §4.4 now lists "already-compliant routes" (subaccountAgents, configDocuments, automationConnectionMappings, webLoginConnections) and corrects the resolveSubaccount filename.
+- §4.2 / §12 service names are now singular (singular-noun convention).
+- §5.4 ghlWebhook fix references config.organisationId / dbAccount.subaccountId; connectorPollingService scope is now per-call-site.
+- §5.5 readPath fix is now "enumerate offending entries first" rather than asserting direction.
+- §6.2.1 picks types.ts; §6.2.2 uses skill-analyzer/ (kebab) and enumerates four step files.
+- §2.6 / §8.5 / §13.5 align Phase 5 PR boundaries.
+- §8.1 / §12 use <NNNN> placeholders for Phase 5 migrations (no pre-allocated 0228/0229).
+- §8.1 distinguishes testRunRateLimit (test-run, 4 callers) from public-form rate limiters (formSubmission, pageTracking inline) — both backed by new shared primitive server/lib/rateLimitStore.ts.
+- §2.4 now carves warning-only gates out of the bypass prohibition.
+
+YOUR JOB: Re-review the updated spec. Focus on:
+
+1. CONTRADICTIONS introduced or remaining after iter 1 edits. Did the edits create any new internal inconsistency?
+2. The §4.1 SQL skeleton — does it still cover all 8 tables, with correct historical policy names? memory_review_queue (org_isolation), drop_zone_upload_audit (tenant_isolation), onboarding_bundle_configs (tenant_isolation), trust_calibration_state (tenant_isolation), agent_test_fixtures (org_isolation), agent_execution_events / agent_run_prompts / agent_run_llm_payloads (all org_isolation). The "repeat for the others" hand-wave — is that acceptable for a spec that is otherwise enumerative?
+3. The §8.1 rewrite — does the new shared primitive server/lib/rateLimitStore.ts conflict with any framing rule? Is the file inventory in §12 fully cascaded for it (entries for rateLimitStore.ts itself, the 4 testRunRateLimit callers, the 2 public routes, jobs/index.ts, queueSchedule.ts)?
+4. The §4.4 "already-compliant routes" note vs §4.2's refactor — does the §4.2 refactor risk regressing the existing resolveSubaccount calls in those 4 routes? Is the preservation note explicit enough?
+5. Any LOAD-BEARING CLAIMS introduced by the iter 1 edits without a backing mechanism. The new claim "the IS NOT NULL guards avoid relying on NULL-comparison semantics — both reads and writes are blocked unambiguously when the session var is unset" — is this enough or does it still need a citation?
+6. Any FILE-INVENTORY DRIFT introduced by the iter 1 edits. The new files added in iter 1 (rateLimitStore.ts, the 4 step components, jobs/index.ts as a touch site, queueSchedule.ts as a touch site) — are they all in §12?
+7. SEQUENCING — the iter 1 edits clarified that Phase 5 PRs use <NNNN> placeholders and pick the next available number at PR-open time. Does this create a sequencing risk we missed? E.g. could a Phase 1 vs Phase 5 race cause migration numbers to collide?
+8. SCOPE — the §8.1 rewrite expanded Phase 5 from 2 caller updates to 6 (4 testRun + 2 public). Is that scope expansion acknowledged elsewhere (e.g. §3.1 phase summary table's "Findings count" cell for Phase 5)?
+9. ANY STALE language remaining from before iter 1 — e.g. references to old plural service names, old skillAnalyzer (camelCase), old subaccountResolution path, old hardcoded migration numbers (0228/0229).
+10. NEW directional findings the original iter 1 reviewer might have missed — testing posture deviations, primitive-introduction concerns, scope-creep, framing-assumption violations.
+
+If the spec is now mechanically tight, output a single line: "No findings — spec is mechanically tight." Otherwise output a bulleted list of distinct findings (cite §N.N, one-sentence description, one-sentence fix). No preamble.
+
+Here is the spec to review:
+

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
-import type { AnalysisJob, AnalysisResult } from './SkillAnalyzerWizard';
+import type { AnalysisJob, AnalysisResult } from './types';
 import { isTerminalAnalyzerStatus } from './analyzerStatus';
 
 interface Props {

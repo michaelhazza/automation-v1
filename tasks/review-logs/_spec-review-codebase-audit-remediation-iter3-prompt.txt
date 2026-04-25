@@ -1,0 +1,36 @@
+You are reviewing an implementation-ready specification document for Automation OS, a pre-production codebase. This is iteration 3 — final convergence check.
+
+Iteration 1 applied 24 mechanical fixes covering historical-policy DROP enumeration, file-path drift, finding-count reconciliation, Phase 5 PR boundary clarification, and testRunRateLimit / public-form rate-limiter conflation.
+
+Iteration 2 applied 7 cascade fixes from iter1 — full SQL enumeration of all 8 tables, ghlWebhook full cascade, §9.2 contract update, §10.1 test plan update, §3.1 math correction, §1 / §15.3 "no new primitives" softening with explicit "why not reuse" for rateLimitStore.ts, and concurrent-PR migration-number assignment rule.
+
+SPEC: docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md
+
+FRAMING ASSUMPTIONS — ground truth, do NOT suggest changes against them:
+- Pre-production, no live users, commit-and-revert.
+- Static gates + pure-function tests only.
+- Prefer existing primitives.
+- Migrations are append-only.
+
+Iteration 2 changes that you should now sanity-check rather than re-flag:
+- §4.1 SQL skeleton fully enumerates 8 table blocks.
+- §3.1 math: 47 + 8 + 2 + 6 - 2 = 61, plus +2 gate-baseline deliverables = 63. 0202/0203 explicitly carved out.
+- §5.4 + §12.2 ghlWebhook: every reference now describes unauthenticated lookup pattern; no `req.orgId`.
+- §9.2 contract producer is rateLimitStore.ts; testRunRateLimit + public routes are callers.
+- §10.1 has 5 tests now (rateLimitStore + testRunRateLimit + agentRunHandoffService.handoffDepth + runCostBreaker.testRunExclusion).
+- §13.5 says "five pure-function tests".
+- §1 / §15.3 softened to "every new primitive has a why-not-reuse paragraph"; §8.1 has the rateLimitStore why-not-reuse paragraph.
+- §2.5 has concurrent-PR migration-number assignment rule.
+
+YOUR JOB: Final mechanical-tightness check. Look ONLY for:
+
+1. Lingering inconsistencies the iter2 edits may have introduced.
+2. Any remaining stale references (old plural service names, old skillAnalyzer, old subaccountResolution, old hardcoded migration numbers, "all four pure-function tests" instead of five).
+3. Any contract sections that still don't match their producer/consumer files.
+4. Any prose claim without a backing mechanism that we missed.
+5. Any directional finding (testing posture, primitive introduction, framing assumption violation) — these should be ZERO at this stage.
+
+If the spec is now mechanically tight, output a single line: "No findings — spec is mechanically tight." Otherwise output a bulleted list of distinct findings.
+
+Here is the spec to review:
+

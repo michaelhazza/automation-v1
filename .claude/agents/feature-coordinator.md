@@ -38,7 +38,7 @@ tasks/builds/{slug}/
   plan.md            — implementation plan (architect produces)
 ```
 
-Review logs for each chunk live in `tasks/review-logs/` — pr-review logs as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` and spec-conformance logs as `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` — not nested under the build. All follow the canonical filename shape in `CLAUDE.md` § *Review-log filename convention — canonical definition*. Keeping every review log in a single directory keeps them discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
+Review logs for each chunk live in `tasks/review-logs/` — pr-review logs as `tasks/review-logs/pr-review-log-<slug>-<chunk-slug>-<timestamp>.md` and spec-conformance logs as `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` — not nested under the build. All follow the canonical filename shape in `tasks/review-logs/README.md`. Keeping every review log in a single directory keeps them discoverable by a single glob for pattern analysis. Reference the log paths from `progress.md` so reviewers can find them.
 
 The feature description or card lives wherever the user keeps it — reference it in place, don't copy it.
 
@@ -102,12 +102,14 @@ Process chunks from the plan **one at a time**. For each chunk:
 
 `spec-conformance` self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>-<chunk-slug>-<timestamp>.md` and returns the path. Chunk-slug, slug, and timestamp all follow the canonical shape in `CLAUDE.md` § *Review-log filename convention — canonical definition* — same convention as C2's pr-review-log. Record the path in `progress.md` under the chunk's Notes column.
 
+**Hard gate: do not proceed to C2 (`pr-reviewer`) until the verdict is `CONFORMANT` or `CONFORMANT_AFTER_FIXES`.** A `NON_CONFORMANT` verdict means the chunk is not done — pr-reviewer would only review against an incomplete state.
+
 Process the log's Next-step verdict:
 - **CONFORMANT** — proceed to C2 (`pr-reviewer`).
 - **CONFORMANT_AFTER_FIXES** — `spec-conformance` applied mechanical fixes in-session. Proceed to C2 (`pr-reviewer`) on the **expanded** changed-code set; the reviewer needs to see the fixed state.
-- **NON_CONFORMANT** — directional and/or ambiguous gaps were routed by `spec-conformance` to `tasks/todo.md` under its own section (`## Deferred from spec-conformance review — <spec-slug>`). Triage the section the agent just appended: for each gap, decide whether it is non-architectural (resolvable in-session by the main session — same contract as C3 fix-review rounds) or architectural (significant redesign, contract change, multi-service impact — stays deferred per `CLAUDE.md` § *Review logs must be persisted*, do not force into the execution loop). After triage:
-    - If any non-architectural gaps were resolved in-session, re-invoke `spec-conformance` to confirm closure. **Max 2 spec-conformance rounds.** On the third, stop and escalate.
-    - If the gap set is architectural-only (nothing to resolve in-session) or contains only ambiguous items that need human judgment, do not re-invoke `spec-conformance` — that would only churn. Stop and escalate to the user with the deferred items still open.
+- **NON_CONFORMANT** — directional and/or ambiguous gaps were routed by `spec-conformance` to `tasks/todo.md` under its own section (`## Deferred from spec-conformance review — <spec-slug>`). Triage the section the agent just appended: for each gap, decide whether it is non-architectural (resolvable in-session by the main session — same contract as C3 fix-review rounds) or architectural (significant redesign, contract change, multi-service impact — stays deferred per `tasks/review-logs/README.md` § *Caller contracts per agent / `spec-conformance`*, do not force into the execution loop). After triage:
+    - If any non-architectural gaps were resolved in-session, re-invoke `spec-conformance` to confirm closure. **Max 2 spec-conformance rounds.** On the third, stop and escalate. Only proceed to C2 after a CONFORMANT or CONFORMANT_AFTER_FIXES verdict — never on the back of a still-NON_CONFORMANT verdict.
+    - If the gap set is architectural-only (nothing to resolve in-session) or contains only ambiguous items that need human judgment, do not re-invoke `spec-conformance` — that would only churn. Stop and escalate to the user with the deferred items still open. **Do not proceed to C2** without explicit user direction.
 
 **C2. Review** — Delegate to `pr-reviewer`:
 > "Review the changes just implemented for chunk '{chunk name}'. Read the plan at `tasks/builds/{slug}/plan.md` for context. Review the following files: [list changed files]."

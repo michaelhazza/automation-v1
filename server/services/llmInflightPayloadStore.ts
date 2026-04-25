@@ -46,7 +46,7 @@ export interface PayloadSnapshot {
 const store = new Map<string, PayloadSnapshot>();
 
 /** Capture a payload snapshot keyed by runtimeKey. Safe under memory pressure. */
-export function set(runtimeKey: string, snapshot: Omit<PayloadSnapshot, 'capturedAt' | 'truncated'>): void {
+export function set(runtimeKey: string, snapshot: Omit<PayloadSnapshot, 'capturedAt' | 'truncated' | 'originalSizeBytes'>): void {
   try {
     let body: PayloadSnapshot;
     let truncated = false;

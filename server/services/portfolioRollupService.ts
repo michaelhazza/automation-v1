@@ -32,6 +32,85 @@ import { logger } from '../lib/logger.js';
 
 export const PORTFOLIO_AUTO_ENABLE_THRESHOLD = 3;
 
+// ── Settings CRUD (for portfolioRollup.ts route) ──────────────────────────────
+
+export interface PortfolioRollupSettingsResult {
+  orgSubaccountId: string;
+  optIn: boolean;
+  deliveryChannels: Record<string, unknown>;
+}
+
+export async function getPortfolioRollupSettings(
+  organisationId: string,
+): Promise<PortfolioRollupSettingsResult | null> {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.organisationId, organisationId),
+        eq(subaccounts.isOrgSubaccount, true),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!orgSub) return null;
+
+  const settings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const portfolioConfig =
+    (settings.portfolioRollup as { optIn?: boolean; deliveryChannels?: unknown } | undefined) ?? {};
+
+  return {
+    orgSubaccountId: orgSub.id,
+    optIn: portfolioConfig.optIn ?? true,
+    deliveryChannels: (portfolioConfig.deliveryChannels as Record<string, unknown> | undefined) ?? {
+      email: true,
+      portal: false,
+      slack: false,
+    },
+  };
+}
+
+export async function updatePortfolioRollupSettings(
+  organisationId: string,
+  updates: { optIn?: boolean; deliveryChannels?: unknown },
+): Promise<PortfolioRollupSettingsResult | null> {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.organisationId, organisationId),
+        eq(subaccounts.isOrgSubaccount, true),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!orgSub) return null;
+
+  const existingSettings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const nextSettings = {
+    ...existingSettings,
+    portfolioRollup: {
+      optIn: updates.optIn === undefined ? true : Boolean(updates.optIn),
+      deliveryChannels: updates.deliveryChannels ?? { email: true, portal: false, slack: false },
+    },
+  };
+
+  await db
+    .update(subaccounts)
+    .set({ settings: nextSettings, updatedAt: new Date() })
+    .where(and(eq(subaccounts.id, orgSub.id), eq(subaccounts.organisationId, organisationId)));
+
+  return {
+    orgSubaccountId: orgSub.id,
+    optIn: nextSettings.portfolioRollup.optIn,
+    deliveryChannels: nextSettings.portfolioRollup.deliveryChannels as Record<string, unknown>,
+  };
+}
+
 export type RollupKind = 'briefing' | 'digest';
 
 export interface RunRollupInput {

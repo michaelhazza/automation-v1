@@ -1561,7 +1561,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     const { executeAskClarifyingQuestions } = await import('../tools/capabilities/askClarifyingQuestionsHandler.js');
     return executeAskClarifyingQuestions(
       context,
-      input as Parameters<typeof executeAskClarifyingQuestions>[1],
+      input as unknown as Parameters<typeof executeAskClarifyingQuestions>[1],
     );
   },
 
@@ -1569,7 +1569,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     const { executeChallengeAssumptions } = await import('../tools/capabilities/challengeAssumptionsHandler.js');
     return executeChallengeAssumptions(
       context,
-      input as Parameters<typeof executeChallengeAssumptions>[1],
+      input as unknown as Parameters<typeof executeChallengeAssumptions>[1],
     );
   },
 
@@ -2260,7 +2260,9 @@ async function executeReadWorkspace(
         items: subtasks.map(serializeTask),
         total: subtasks.length,
         allDone: subtasks.length > 0 && subtasks.every(t => t.status === 'done'),
-        anyBlocked: subtasks.some(t => t.status === 'blocked'),
+        // Task status enum (server/db/schema/tasks.ts) has no 'blocked' value today;
+        // field reserved for a future status. Always false at runtime under the current schema.
+        anyBlocked: false,
       };
     }
 
@@ -3236,7 +3238,7 @@ async function executeMoveTask(
   try {
     // Get current item to find subaccount
     const item = await taskService.getTask(taskId, context.organisationId);
-    const position = await taskService._nextPosition(item.subaccountId!, status);
+    const position = await taskService._nextPosition(item.subaccountId!, status as Parameters<typeof taskService._nextPosition>[1]);
 
     const updated = await taskService.moveTask(
       taskId,

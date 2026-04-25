@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm';
+import { sql, and, gte, lte, eq, desc } from 'drizzle-orm';
+import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import type { OrgScopedTx } from '../db/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import type {
@@ -699,7 +700,7 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
         AND status IN ('success', 'partial')
     `);
 
-    const r = rows.rows?.[0] ?? (rows as unknown as { rows: unknown[] }).rows?.[0] ?? rows[0];
+    const r = rows[0];
     const totalCalls     = r ? Number((r as Record<string, unknown>).total_calls)      || 0 : 0;
     const escalatedCalls = r ? Number((r as Record<string, unknown>).escalated_calls)  || 0 : 0;
     const avgCostCents   = r ? (Number((r as Record<string, unknown>).avg_cost_cents)  || null) : null;
@@ -720,6 +721,32 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
   });
 }
 
+const INFLIGHT_HISTORY_HARD_CAP = 1_000;
+
+export async function listInflightHistory(filters: {
+  from?: Date | null;
+  to?: Date | null;
+  runtimeKey?: string;
+  idempotencyKey?: string;
+  limit?: number;
+}) {
+  return adminRead('listInflightHistory', async (tx) => {
+    const conditions = [];
+    if (filters.from) conditions.push(gte(llmInflightHistory.createdAt, filters.from));
+    if (filters.to) conditions.push(lte(llmInflightHistory.createdAt, filters.to));
+    if (filters.runtimeKey) conditions.push(eq(llmInflightHistory.runtimeKey, filters.runtimeKey));
+    if (filters.idempotencyKey) conditions.push(eq(llmInflightHistory.idempotencyKey, filters.idempotencyKey));
+
+    const limit = filters.limit ?? 200;
+    return tx
+      .select()
+      .from(llmInflightHistory)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(llmInflightHistory.createdAt))
+      .limit(Math.min(limit, INFLIGHT_HISTORY_HARD_CAP));
+  });
+}
+
 export const systemPnlService = {
   getPnlSummary,
   getByOrganisation,
@@ -730,4 +757,5 @@ export const systemPnlService = {
   getTopCalls,
   getCallDetail,
   getPlannerMetrics,
+  listInflightHistory,
 };

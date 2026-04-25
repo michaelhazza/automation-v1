@@ -47,6 +47,7 @@ ALTER TABLE model_tier_budget_policies
 
 ALTER TABLE model_tier_budget_policies ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY model_tier_budget_policies_read ON model_tier_budget_policies
   FOR SELECT
   USING (

@@ -18,6 +18,7 @@ import type { BriefApprovalCard } from '../../../shared/types/briefResultContrac
 
 const BASE_CARD: BriefApprovalCard = {
   kind: 'approval',
+  artefactId: 'test-artefact-id',
   summary: 'Send follow-up email to 14 contacts',
   actionSlug: 'send_email',
   actionArgs: {},
