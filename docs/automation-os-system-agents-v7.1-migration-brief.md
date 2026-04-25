@@ -108,16 +108,17 @@ Plus Playbook Author = 23 system agents total in the DB.
 
 Subtle ordering bugs surface when these steps interleave. Execute in this order:
 
-1. **Skill files** — create the 14 new `.md` files in `server/skills/` (§4.4). Stub frontmatter is sufficient at first.
-2. **Skill classification** — add `list_my_subordinates` to `APP_FOUNDATIONAL_SKILLS` in `scripts/lib/skillClassification.ts`, then run `npx tsx scripts/apply-skill-visibility.ts` to fix every new skill's `visibility:` field.
-3. **Action registry + handlers** — add registry entries (`server/config/actionRegistry.ts`) and handler implementations (`server/services/skillExecutor.ts` + `server/skills/handlers/`). External-side-effect handlers must enforce §4.11.3 + §4.11.4.
-4. **Env vars** — add `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY` to `server/lib/env.ts` and `.env.example` (§4.8).
-5. **Agent files** — create the 7 new agent folders (§4.1) and reparent the 13 existing agents (§4.2). Drop `update_financial_record` from finance-agent (§4.6).
-6. **Retire `client-reporting-agent`** — delete the folder (§4.3). Skill files stay (re-wired into retention-success-agent).
-7. **Manifest + docs** — regenerate `automation-os-manifest.json` to v7.1 with all 22 agents (§4.9 — required, not optional).
-8. **Local DB reset** — Path A in §6 (psql wipe + `npm run seed`).
+1. **Schema migration** — partial-unique-index swap on `system_agents.slug` and `agents.(organisation_id, slug)` per §4.11.6. Plus the `skill_idempotency_keys` table per §4.11.4. Run via `npm run migrate`. **Path A in §6 fails without this.**
+2. **Skill files** — create the 14 new `.md` files in `server/skills/` (§4.4). Stub frontmatter is sufficient at first.
+3. **Skill classification** — add `list_my_subordinates` to `APP_FOUNDATIONAL_SKILLS` in `scripts/lib/skillClassification.ts`, then run `npx tsx scripts/apply-skill-visibility.ts` to fix every new skill's `visibility:` field.
+4. **Action registry + handlers** — add registry entries (`server/config/actionRegistry.ts`) and handler implementations (`server/services/skillExecutor.ts` + `server/skills/handlers/`). External-side-effect handlers must enforce §4.11.3 + §4.11.4.
+5. **Env vars** — add `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY` to `server/lib/env.ts` and `.env.example` (§4.8).
+6. **Agent files** — create the 7 new agent folders (§4.1) and reparent the 13 existing agents (§4.2). Drop `update_financial_record` from finance-agent (§4.6).
+7. **Retire `client-reporting-agent`** — delete the folder (§4.3). Skill files stay (re-wired into retention-success-agent).
+8. **Manifest + docs** — regenerate `automation-os-manifest.json` to v7.1 with all 22 agents (§4.9 — required, not optional).
+9. **Local DB reset** — Path A in §6 (soft-delete UPDATE + `npm run seed`).
 
-Skipping or inverting steps causes the seed pre-flight (`preflightVerifySkillVisibility`) to abort, or leaves agents wired to skills with no handler — silent runtime failures at first invocation.
+Skipping or inverting steps causes the seed pre-flight (`preflightVerifySkillVisibility`) to abort, or — most commonly — Path A fails on the second attempt with a unique-constraint violation because step 1 wasn't run.
 
 ### 4.1 New agent folders (7)
 
@@ -363,6 +364,21 @@ CREATE TABLE skill_idempotency_keys (
 - **Cleanup** — a daily pg-boss job deletes rows where `expires_at < NOW()`. `permanent` rows never match.
 - **Request-hash mismatch** — if the same `key_hash` is invoked with a different `request_hash`, that is a contract violation. Log `skill.error` and return `{ status: 'idempotency_collision' }` rather than overwrite. Almost always a caller bug.
 
+**Concurrency-safe write pattern (mandatory):** without this, two simultaneous identical requests both pass the existence check and both execute the side effect — idempotency fails silently. The handler wrapper must use a single atomic SQL statement to acquire the key, not check-then-write:
+
+```sql
+INSERT INTO skill_idempotency_keys
+  (subaccount_id, skill_slug, key_hash, request_hash, response_payload, expires_at)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
+RETURNING xmax = 0 AS is_first_writer;
+```
+
+- **`is_first_writer = true`** — this caller wins. Execute the side effect, then `UPDATE skill_idempotency_keys SET response_payload = $1 WHERE ...`.
+- **`is_first_writer = false`** — another caller is in flight or already done. Read the row; if `response_payload <> '{}'`, return it verbatim. If still `'{}'`, poll briefly (up to a small bounded window) or return `{ status: 'in_flight' }` to let the caller retry.
+
+This is the `INSERT ... ON CONFLICT DO NOTHING` first-writer-wins pattern. Without it, `send_invoice` and `book_meeting` will silently double-fire under realistic concurrency.
+
 #### 4.11.5 Manager behaviour contract
 
 Manager agents (the four department heads) must not execute worker-only skills. The hierarchy collapses if a manager directly does the work it should be delegating.
@@ -383,7 +399,39 @@ Encode at three layers:
 
    Allowlist semantics close two edge cases the original "reject worker-only skills" wording missed: (a) a manager invoking another manager's read skill, and (b) a manager invoking a read skill whose handler indirectly triggers a side effect. If it isn't on the list, it doesn't run.
 
+4. **No direct external side effects from a manager.** Manager-permitted skills must not directly trigger external side effects; any downstream execution that touches an external system (CRM write, email send, payment, ad change, code commit) must occur via a delegated agent. This includes the indirect path: a manager calling `create_task` whose downstream automation triggers worker logic is acceptable (the work is still routed through a worker and its review gates), but a manager handler that itself calls Stripe / Gmail / Anthropic / GitHub is a contract violation. Encode by tagging each skill in the action registry with `directExternalSideEffect: bool`; the manager guard rejects any skill where that flag is `true`.
+
 This makes the violation a hard error rather than a slow drift into "super-managers" that bypass the workers.
+
+#### 4.11.6 Active-row uniqueness (mandatory schema migration)
+
+**This is required, not nice-to-have.** Today's schema has a *full* unique index on `system_agents.slug` and a full unique on `agents.(organisation_id, slug)`. Combined with the soft-delete reset in §6 Path A, that creates a deterministic failure: soft-deleted rows still occupy the slug, so the seed's `INSERT` then violates the unique constraint and rolls back. Path A is unusable until this is fixed.
+
+**The invariant — only one active row per slug:**
+
+```sql
+-- system_agents: globally unique slug (incl. workflow-author)
+DROP INDEX IF EXISTS system_agents_slug_idx;
+CREATE UNIQUE INDEX system_agents_slug_active_idx
+  ON system_agents (slug)
+  WHERE deleted_at IS NULL;
+
+-- agents: unique slug per org
+DROP INDEX IF EXISTS agents_org_slug_uniq;
+CREATE UNIQUE INDEX agents_org_slug_active_uniq
+  ON agents (organisation_id, slug)
+  WHERE deleted_at IS NULL;
+```
+
+Land as a Drizzle migration (`server/db/migrations/<n>_partial_unique_active_slug.sql`) plus a matching schema update in `server/db/schema/systemAgents.ts` and `server/db/schema/agents.ts` swapping `uniqueIndex(...).on(...)` for the equivalent partial unique. The `subaccount_agents` table is keyed on `(subaccount_id, agent_id)` UUIDs, not slugs — no change needed there.
+
+**Why this matters beyond Path A:**
+- Re-running the soft-delete reset multiple times (during iterative dev) cannot accumulate duplicates.
+- Backwards-compatible — the partial index permits one active + many soft-deleted rows per slug.
+- Lookups stay fast — the `isNull(deletedAt)` filter the seed already uses can hit the partial index directly.
+- Manual data-inspection in psql gives a clean view: `SELECT * FROM system_agents WHERE deleted_at IS NULL` is the unambiguous "current state".
+
+**Order of operations** — run the migration **before** the §6 Path A wipe. The §4.0 migration order is updated accordingly.
 
 ## 5. SDR Lead-Discovery dev brief — incorporation
 
@@ -407,10 +455,15 @@ Fastest, cleanest, FK-safe. No seed-script changes required.
 
 **All reset operations must respect FK constraints and use soft-delete semantics consistent with system tables.** A hard `DELETE FROM agents` violates `agent_runs.agent_id` FK on any DB that has been used. Soft-delete leaves the rows in place; the seed already filters lookups by `isNull(deletedAt)` so soft-deleted rows are correctly treated as not-existing during re-seed.
 
+> **Prerequisite:** Run the partial-unique-index migration from §4.11.6 first (or `npm run migrate` if it's already in the migration set). Without it, the soft-deleted rows still occupy the slug under the existing full-unique index, and the subsequent re-seed `INSERT` will fail with a unique-constraint violation.
+
 ```bash
 # 1. Make all the file-on-disk changes (§4.1 – §4.9)
 
-# 2. From a psql session, soft-delete the system-agent surface in the dev DB:
+# 2. Run the schema migration (partial-unique indexes + skill_idempotency_keys):
+npm run migrate
+
+# 3. From a psql session, soft-delete the system-agent surface in the dev DB:
 psql $DATABASE_URL <<'SQL'
 BEGIN;
 
@@ -435,7 +488,7 @@ UPDATE system_agents
 COMMIT;
 SQL
 
-# 3. Re-seed
+# 4. Re-seed
 npm run seed
 ```
 
@@ -487,11 +540,12 @@ Every new skill handler must emit structured logs at the standard tag points (th
 | Skill invoked | `skill.invoke` | `slug`, `agent_slug`, `subaccount_id`, `idempotency_key` (where applicable) |
 | External call started | `skill.external.start` | `slug`, `provider` (e.g. `google_places`, `hunter`, `stripe`), `endpoint` |
 | External call succeeded | `skill.external.success` | `slug`, `provider`, `latency_ms`, `result_count` (where applicable) |
-| Fail-soft (config missing or transient) | `skill.warn` | `slug`, `reason`, `provider`, `retryable: bool` — **WARN level**, not ERROR |
-| Hard failure (write skill that should have blocked but didn't) | `skill.error` | `slug`, `reason`, full context — **ERROR level**, paged |
+| Fail-soft on a read (transient error or no data) | `skill.warn` | `slug`, `reason`, `provider`, `retryable: bool` — **WARN level**, not ERROR |
+| Expected blocked write (config missing, validation failed) | `skill.blocked` | `slug`, `reason`, `provider`, `requires` (what the operator must configure) — **INFO level**, never paged |
+| Hard failure (write skill that should have blocked but didn't, or any contract violation) | `skill.error` | `slug`, `reason`, full context — **ERROR level**, paged |
 | Idempotency hit (replay returned cached result) | `skill.idempotency.hit` | `slug`, `key_hash` |
 
-Fail-soft on a **read** skill emits `skill.warn`. Fail-soft on a **write** skill is a contract violation (§4.11.3) — emit `skill.error`.
+Fail-soft on a **read** skill emits `skill.warn`. An *expected* blocked write (the §4.11.3 must-block path — config missing, no auth, validation rejected) emits `skill.blocked` at INFO level. Only contract violations and unexpected failures emit `skill.error`. The split prevents the alerting layer from paging on every "Stripe API key not configured" event during local dev.
 
 ## 7. Acceptance criteria
 
@@ -516,6 +570,8 @@ The migration is complete when:
 17. **Manifest JSON** (§4.9) is at `version: "7.1.0"` with all 22 agents listed and `reportsTo` matching frontmatter.
 18. **Foundational-skill assertion** (§4.4) — every skill in `APP_FOUNDATIONAL_SKILLS` declares no external integration in its registry entry.
 19. **No orphan skills** — every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list, **OR** is explicitly tagged `reusable: true` in its own frontmatter (Reporting Agent skills like `fetch_paywalled_content`, `analyse_42macro_transcript`; Playbook Studio skills like `playbook_validate`). Verified by `scripts/verify-agent-skill-contracts.ts` (extending the §4.11.1 check). Stale skills rot the registry and confuse delegation routing — every file must justify its existence.
+20. **No orphan agents** — every active `system_agents` row except `orchestrator`, `portfolio-health-agent`, and `workflow-author` has a non-null `parent_system_agent_id` referencing another active row. Verified by the §4.11.2 hierarchy assertion as part of the post-seed check.
+21. **Active-row uniqueness** (§4.11.6) — `system_agents` and `agents` carry partial unique indexes on slug `WHERE deleted_at IS NULL`; `\d+ system_agents` in psql shows `system_agents_slug_active_idx` and `agents_org_slug_active_uniq` as `WHERE (deleted_at IS NULL)` partial uniques.
 
 ## 8. Out of scope for this brief
 
