@@ -1,6 +1,6 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
@@ -475,5 +475,48 @@ export const subaccountAgentService = {
     if (!source) throw { statusCode: 404, message: 'Data source not found' };
 
     await db.delete(agentDataSources).where(eq(agentDataSources.id, id));
+  },
+
+  /**
+   * Returns the systemAgent slug for the given agent, or null if the agent
+   * is not system-managed. Used to enforce per-slug linking restrictions.
+   */
+  async getAgentSystemSlug(agentId: string, organisationId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ systemAgentSlug: systemAgents.slug })
+      .from(agents)
+      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
+    return row?.systemAgentSlug ?? null;
+  },
+
+  /**
+   * Returns true if the given subaccount is the org subaccount (isOrgSubaccount=true).
+   * Used to enforce that certain agents (e.g. configuration-assistant) can only
+   * be linked to the org subaccount.
+   */
+  async isOrgSubaccount(subaccountId: string, organisationId: string): Promise<boolean> {
+    const [sa] = await db
+      .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
+    return sa?.isOrgSubaccount ?? false;
+  },
+
+  async findLink(
+    linkId: string,
+    subaccountId: string,
+    agentId: string,
+  ): Promise<{ id: string; agentId: string; subaccountId: string } | undefined> {
+    const [row] = await db
+      .select({ id: subaccountAgents.id, agentId: subaccountAgents.agentId, subaccountId: subaccountAgents.subaccountId })
+      .from(subaccountAgents)
+      .where(and(
+        eq(subaccountAgents.id, linkId),
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.agentId, agentId),
+      ))
+      .limit(1);
+    return row;
   },
 };

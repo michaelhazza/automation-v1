@@ -135,6 +135,17 @@ These are non-negotiable. Every plan must respect them:
 - Idempotency keys on agent runs — any new run creation path must support deduplication
 - Heartbeat changes must account for minute-level offset precision (heartbeatOffsetMinutes)
 
+## Gate-Timing Rule (applies to every multi-chunk plan)
+
+**Bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers. Do NOT schedule them per-chunk.**
+
+Every plan you produce must follow this pattern:
+- **Baseline** (before Chunk 1 begins) — run all relevant gates once to capture the current violation set. Note the count; any violations that already existed are not the implementer's fault.
+- **Per-chunk verification** — `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. No bash gate scripts.
+- **Final gate pass** (after ALL chunks AND spec-conformance have completed) — run the full gate set once to confirm everything is clean.
+
+In the plan's "Verification commands" sections, list only `npm run build:server` and unit-test commands for per-chunk steps. Move the full gate-script list to a single "Programme-end verification" section at the bottom of the plan. Explicitly note in the Executor notes: "Gate scripts run twice: baseline before Chunk 1 and final pass after all chunks. Never between chunks."
+
 ---
 
 ## Scope

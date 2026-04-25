@@ -46,6 +46,7 @@ CREATE INDEX bundle_resolution_snapshots_org_idx
 
 ALTER TABLE bundle_resolution_snapshots ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY bundle_resolution_snapshots_org_isolation ON bundle_resolution_snapshots
   USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);
 

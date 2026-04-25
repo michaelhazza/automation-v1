@@ -125,19 +125,7 @@ These edits land inside the same 1B service-extraction commits.
 
    For each match, confirm the query runs inside `withOrgTx(organisationId, …)` OR `withAdminConnection()`. Any match that does neither is a defect. Fix it in 1B/1C BEFORE the migration is applied.
 
-2. **Re-run the captured-state gate set (spec §3.5)** to confirm violation set has not drifted:
-
-   ```bash
-   bash scripts/verify-rls-coverage.sh
-   bash scripts/verify-rls-contract-compliance.sh
-   bash scripts/verify-rls-session-var-canon.sh
-   bash scripts/verify-org-scoped-writes.sh
-   bash scripts/verify-subaccount-resolution.sh
-   ```
-
-   If new violations have appeared since 2026-04-25, append them to the PR's scope. If existing violations have been resolved by parallel work, drop them from this chunk's scope.
-
-3. **Draft `migrations/0227_rls_hardening_corrective.sql`.** Use the per-table block skeleton below. The full text for all eight tables lives in spec §4.1 — copy verbatim. The canonical block shape (mirror across all eight tables) is:
+2. **Draft `migrations/0227_rls_hardening_corrective.sql`.** Use the per-table block skeleton below. The full text for all eight tables lives in spec §4.1 — copy verbatim. The canonical block shape (mirror across all eight tables) is:
 
    ```sql
    ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
@@ -202,27 +190,25 @@ These edits land inside the same 1B service-extraction commits.
 
    None of the three are negotiable.
 
-10. **Re-run all five RLS gates + adjacent typecheck/test gates** (verification commands below). All five must return clean exit. **CI enforcement (spec §2.4):** every gate must run in CI and block merge on failure — local-only validation is insufficient.
+9. **Run `npm run build:server` to confirm typecheck still passes.** Gate scripts are deferred to the final programme-level gate run (after all chunks complete) per Executor note 11.
 
 ### d) Verification commands
 
-Copy verbatim from spec §4.6:
+Per Executor note 11, gate scripts run only at programme start (baseline) and programme end (final pass). Per-chunk verification:
 
+```bash
+npm run build:server                                         # typecheck passes
+npx tsx server/services/__tests__/<relocated-test>.test.ts   # any service-relocated test still green
+npx tsx scripts/migrate.ts                                   # 0227 applies cleanly against a fresh DB (if DB available)
+```
+
+**Full gate set runs at programme end** (after all chunks):
 ```bash
 bash scripts/verify-rls-coverage.sh
 bash scripts/verify-rls-contract-compliance.sh
 bash scripts/verify-rls-session-var-canon.sh
 bash scripts/verify-org-scoped-writes.sh
 bash scripts/verify-subaccount-resolution.sh
-```
-
-Plus:
-
-```bash
-npm run build:server                                         # typecheck still passes
-npm run test:gates                                           # wraps the gates above + adjacent gates
-npx tsx server/services/__tests__/<relocated-test>.test.ts   # any service-relocated test still green (per repo convention; scripts/run-all-unit-tests.sh ignores `--` filters)
-npx tsx scripts/migrate.ts                                   # 0227 applies cleanly against a fresh DB
 ```
 
 ### e) Definition of done (verbatim from spec §13.1)
@@ -329,26 +315,17 @@ None. Phase 2 is line-edits and additions to existing files.
 
    **Phase 2 ship gate does NOT require these warnings to clear** — best-effort triage. New regressions introduced during Phase 2 work itself MUST be resolved before merge.
 
-8. **Run all six core gates plus typecheck/test:**
-
-   ```bash
-   bash scripts/verify-action-call-allowlist.sh
-   bash scripts/verify-canonical-read-interface.sh
-   bash scripts/verify-no-direct-adapter-calls.sh
-   bash scripts/verify-principal-context-propagation.sh
-   bash scripts/verify-skill-read-paths.sh
-   bash scripts/verify-canonical-dictionary.sh
-
-   npm run build:server
-   npm run test:gates
-   ```
-
-   All six core gates must return 0 violations. Manual verification: call the `referenceDocumentService` token-counting path once and check `llm_requests` has new rows under the chosen `featureTag`.
+8. **Run `npm run build:server` to confirm typecheck still passes.** Gate scripts are deferred to the final programme-level gate run per Executor note 11. Manual verification: call the `referenceDocumentService` token-counting path once and check `llm_requests` has new rows under the chosen `featureTag`.
 
 ### d) Verification commands
 
-Verbatim from spec §5.8:
+Per Executor note 11, gate scripts run only at programme end. Per-chunk verification:
 
+```bash
+npm run build:server               # typecheck passes
+```
+
+**Full gate set (runs at programme end):**
 ```bash
 bash scripts/verify-action-call-allowlist.sh
 bash scripts/verify-canonical-read-interface.sh
@@ -356,13 +333,6 @@ bash scripts/verify-no-direct-adapter-calls.sh
 bash scripts/verify-principal-context-propagation.sh
 bash scripts/verify-skill-read-paths.sh
 bash scripts/verify-canonical-dictionary.sh
-```
-
-Plus:
-
-```bash
-npm run build:server               # typecheck still passes
-npm run test:gates                 # static gates regression-check
 ```
 
 ### e) Definition of done (verbatim from spec §13.2)
@@ -478,14 +448,14 @@ From spec §14:
 
 ### d) Verification commands
 
-Verbatim from spec §6.3:
+`madge` is a fast local analysis — run it inline as part of this chunk to confirm the cycle count target is met:
 
 ```bash
 npx madge --circular --extensions ts server/ | wc -l                                # ≤ 5
 npx madge --circular --extensions ts,tsx client/src/ | wc -l                        # ≤ 1
 npm run build:server                                                                # typecheck passes
 npm run build:client                                                                # build passes
-npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts      # named test passes (run by direct path; scripts/run-all-unit-tests.sh ignores `--` filters)
+npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts      # named test passes
 ```
 
 ### e) Definition of done (verbatim from spec §13.3)
@@ -645,11 +615,9 @@ None.
 
 ### d) Verification commands
 
-Verbatim from spec §7.4:
-
 ```bash
-npm run skills:verify-visibility               # 0 violations
-node scripts/verify-integration-reference.mjs  # runs cleanly
+npm run skills:verify-visibility               # 0 violations (fast script — run inline)
+node scripts/verify-integration-reference.mjs  # runs cleanly (fast script — run inline)
 npm install                                    # no missing-dep warnings
 npm run build:server && npm run build:client   # both pass
 ```
@@ -1130,6 +1098,8 @@ Read these BEFORE touching any file in this build. They are non-negotiable invar
 9. **`canonicalDataService` is read-only — no side effects (spec §15.2):** never writes, never triggers background work, never mutates cache. Phase 2 §5.2's new method (if added) is a read-only check. Writes to canonical tables go through the table's owning service, not `canonicalDataService`.
 
 10. **`docs/capabilities.md` is governed by editorial law (Chunk 4 §7.3):** customer-facing sections never name a specific LLM/AI provider or product. Editorial fixes are operator-led — never auto-rewritten by an agent. Per spec §2.7.
+
+11. **Gate scripts run TWICE only — never per-chunk.** The bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers; running them after each chunk adds significant overhead with no benefit. The timing is: (a) **Before Chunk 1 begins** — run all relevant gates once to capture the baseline violation set; (b) **After all chunks complete** — run the full gate set to confirm everything is clean. Between these two moments, per-chunk verification uses only `npm run build:server` (fast typecheck) and any targeted unit tests added in that chunk. Do not run bash gate scripts between chunks.
 
 ### Existing primitives — use these, do not reinvent
 

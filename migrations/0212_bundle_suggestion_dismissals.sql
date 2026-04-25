@@ -26,6 +26,7 @@ CREATE INDEX bundle_suggestion_dismissals_org_idx
 -- RLS
 ALTER TABLE bundle_suggestion_dismissals ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql
 CREATE POLICY bundle_suggestion_dismissals_org_isolation
   ON bundle_suggestion_dismissals
   USING (organisation_id = current_setting('app.current_organisation_id', true)::uuid);

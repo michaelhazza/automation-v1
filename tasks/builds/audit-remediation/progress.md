@@ -28,6 +28,16 @@
 
 (Append a dated entry per session; record what was done, what's next, any decisions made.)
 
+### 2026-04-25 (session 2) — Implementation session started, paused for operator login change
+
+- Branch: `feat/codebase-audit-remediation-spec` (all implementation happens here)
+- Pulled `main` to get 227 commits of upstream work before starting
+- Ran Phase 1 gates to capture current baseline (pre-implementation):
+  - `verify-rls-session-var-canon.sh` — 8 violations in historical migrations 0204–0208, 0212 (expected; will be baselined in 1E)
+  - `verify-rls-coverage.sh`, `verify-rls-contract-compliance.sh`, `verify-org-scoped-writes.sh`, `verify-subaccount-resolution.sh` — outputs captured in background tasks (not yet read)
+- **Next when resuming:** Start Chunk 1 implementation — dispatch implementer subagent (or inline) with the full 1A–1E steps. Gate baseline is pre-captured.
+- **No code has been written yet.** All chunks still at `not_started`.
+
 ### 2026-04-25 — Plan authored
 
 - Loaded context: CLAUDE.md, architecture.md, docs/spec-context.md, tasks/current-focus.md, the audit remediation spec in full, and confirmed gate-script paths.

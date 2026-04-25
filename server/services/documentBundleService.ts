@@ -676,19 +676,19 @@ async function verifySubjectExists(
     row = await db
       .select({ organisationId: agents.organisationId })
       .from(agents)
-      .where(eq(agents.id, subjectId))
+      .where(and(eq(agents.id, subjectId), eq(agents.organisationId, organisationId)))
       .limit(1);
   } else if (subjectType === 'task') {
     row = await db
       .select({ organisationId: tasks.organisationId })
       .from(tasks)
-      .where(eq(tasks.id, subjectId))
+      .where(and(eq(tasks.id, subjectId), eq(tasks.organisationId, organisationId)))
       .limit(1);
   } else if (subjectType === 'scheduled_task') {
     row = await db
       .select({ organisationId: scheduledTasks.organisationId })
       .from(scheduledTasks)
-      .where(eq(scheduledTasks.id, subjectId))
+      .where(and(eq(scheduledTasks.id, subjectId), eq(scheduledTasks.organisationId, organisationId)))
       .limit(1);
   }
 

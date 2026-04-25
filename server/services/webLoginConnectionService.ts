@@ -20,7 +20,8 @@
 
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { integrationConnections } from '../db/schema/index.js';
+import { integrationConnections, subaccountAgents } from '../db/schema/index.js';
+import { agents } from '../db/schema/agents.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
@@ -336,6 +337,29 @@ export const webLoginConnectionService = {
    * should NEVER need this — they hand the connection ID to the worker via
    * the pg-boss payload.
    */
+  /**
+   * Returns the active subaccount-agent links for a given subaccount,
+   * projecting only the fields the test-eligible-agents endpoint needs.
+   */
+  async listTestEligibleAgents(organisationId: string, subaccountId: string) {
+    return db
+      .select({
+        id: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        isActive: subaccountAgents.isActive,
+        name: agents.name,
+      })
+      .from(subaccountAgents)
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
+  },
+
   resolveCredentials(row: IntegrationConnection): WebLoginCredentials {
     const config = (row.configJson as WebLoginConfigStored | null) ?? null;
     if (!config || !config.loginUrl || !config.username) {

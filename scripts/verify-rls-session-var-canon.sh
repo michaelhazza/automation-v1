@@ -43,6 +43,38 @@ emit_header "$GUARD_NAME"
 
 VIOLATIONS=0
 
+# ── Historical baseline ───────────────────────────────────────────────────────
+# Migrations 0204–0208 and 0212 were authored with the phantom session variable
+# before migration 0213 established the canonical name. They are immutable
+# (migrations are append-only); migration 0213 repairs the policies at runtime.
+# Files in this list are skipped when they also carry a @rls-baseline: comment.
+HISTORICAL_BASELINE_FILES=(
+  "migrations/0204_document_bundles.sql"
+  "migrations/0205_document_bundle_members.sql"
+  "migrations/0206_document_bundle_attachments.sql"
+  "migrations/0207_bundle_resolution_snapshots.sql"
+  "migrations/0208_model_tier_budget_policies.sql"
+  "migrations/0212_bundle_suggestion_dismissals.sql"
+)
+BASELINE_ANNOTATION="@rls-baseline:"
+
+# Returns 0 (true) when the file basename is in HISTORICAL_BASELINE_FILES AND
+# the file contains the @rls-baseline: annotation comment.
+is_baselined() {
+  local file="$1"
+  local rel="${file#$ROOT_DIR/}"
+  local matched=0
+  for entry in "${HISTORICAL_BASELINE_FILES[@]}"; do
+    if [ "$rel" = "$entry" ]; then
+      matched=1
+      break
+    fi
+  done
+  [ "$matched" -eq 0 ] && return 1
+  grep -q "$BASELINE_ANNOTATION" "$file" 2>/dev/null && return 0
+  return 1
+}
+
 # Rule: no reference to current_setting('app.current_organisation_id', ...)
 # in any migration .sql file or server-side .ts file.
 while IFS= read -r line; do
@@ -52,6 +84,9 @@ while IFS= read -r line; do
   content=$(echo "$line" | cut -d: -f3-)
 
   rel="${file#$ROOT_DIR/}"
+
+  # Skip baselined historical migrations that carry the @rls-baseline: annotation.
+  is_baselined "$file" && continue
 
   is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 

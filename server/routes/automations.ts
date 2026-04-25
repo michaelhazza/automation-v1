@@ -1,7 +1,4 @@
 import { Router } from 'express';
-import { eq, and, isNull, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { automations } from '../db/schema/index.js';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { automationService } from '../services/automationService.js';
 import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
@@ -90,10 +87,7 @@ function sanitizeSystemProcess(p: Record<string, unknown>): Record<string, unkno
 
 // List system automations available to this org (internal config hidden from org admins)
 router.get('/api/automations/system', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_VIEW), asyncHandler(async (req, res) => {
-  const rows = await db.select()
-    .from(automations)
-    .where(and(eq(automations.scope, 'system'), eq(automations.status, 'active'), isNull(automations.deletedAt)))
-    .orderBy(desc(automations.createdAt));
+  const rows = await automationService.listSystemAutomations();
 
   // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin sees raw fields, org_admin gets sanitized view"
   const isSystemAdmin = req.user!.role === 'system_admin';
@@ -104,47 +98,8 @@ router.get('/api/automations/system', authenticate, requireOrgPermission(ORG_PER
 // Creates a thin org-scoped wrapper that references the system process.
 // Org admins see name/description/config — execution internals remain hidden.
 router.post('/api/automations/link-system/:systemAutomationId', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_CREATE), asyncHandler(async (req, res) => {
-  const [systemProcess] = await db.select()
-    .from(automations)
-    .where(and(
-      eq(automations.id, req.params.systemAutomationId),
-      eq(automations.scope, 'system'),
-      isNull(automations.deletedAt)
-    ));
-
-  if (!systemProcess) throw { statusCode: 404, message: 'System process not found' };
-  if (systemProcess.status !== 'active') {
-    throw { statusCode: 400, message: 'Cannot link an inactive system process' };
-  }
-
-  // Prevent duplicate links for the same system process in the same org
-  const [existing] = await db.select()
-    .from(automations)
-    .where(and(
-      eq(automations.organisationId, req.orgId!),
-      eq(automations.systemAutomationId, systemProcess.id),
-      isNull(automations.deletedAt)
-    ));
-  if (existing) {
-    throw { statusCode: 409, message: 'This system process is already linked to your organisation' };
-  }
-
   const { name, description, defaultConfig } = req.body;
-
-  const [linked] = await db.insert(automations).values({
-    organisationId: req.orgId!,
-    automationEngineId: null,
-    name: name || systemProcess.name,
-    description: description ?? systemProcess.description,
-    // Internal execution fields are intentionally omitted — resolved from systemProcess at runtime
-    webhookPath: '', // placeholder; unused for system-managed automations
-    scope: 'organisation',
-    isEditable: true,
-    isSystemManaged: true,
-    systemAutomationId: systemProcess.id,
-    defaultConfig: defaultConfig ?? null,
-    status: 'active', // auto-active since the system process is already active
-  }).returning();
+  const linked = await automationService.linkSystemAutomation(req.orgId!, req.params.systemAutomationId, { name, description, defaultConfig });
 
   // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin sees raw linked fields, org_admin gets sanitized response"
   const isSystemAdmin = req.user!.role === 'system_admin';
@@ -158,36 +113,7 @@ router.post('/api/automations/link-system/:systemAutomationId', authenticate, re
 
 // Clone a process into this org (from system or same org)
 router.post('/api/automations/:id/clone', authenticate, requireOrgPermission(ORG_PERMISSIONS.AUTOMATIONS_CREATE), asyncHandler(async (req, res) => {
-  const [source] = await db.select()
-    .from(automations)
-    .where(and(eq(automations.id, req.params.id), isNull(automations.deletedAt)));
-
-  if (!source) throw { statusCode: 404, message: 'Source process not found' };
-
-  // Can only clone system automations or automations from the same org
-  if (source.scope !== 'system' && source.organisationId !== req.orgId!) {
-    throw { statusCode: 403, message: 'Cannot clone automations from another organisation' };
-  }
-
-  const { name } = req.body;
-
-  const [cloned] = await db.insert(automations).values({
-    organisationId: req.orgId!,
-    automationEngineId: null, // engine resolved at runtime
-    name: name || `${source.name} (Clone)`,
-    description: source.description,
-    webhookPath: source.webhookPath,
-    inputSchema: source.inputSchema,
-    outputSchema: source.outputSchema,
-    configSchema: source.configSchema,
-    defaultConfig: source.defaultConfig,
-    requiredConnections: source.requiredConnections,
-    scope: 'organisation',
-    isEditable: true,
-    parentAutomationId: source.id,
-    status: 'draft',
-  }).returning();
-
+  const cloned = await automationService.cloneProcess(req.params.id, req.orgId!, req.body?.name);
   res.status(201).json(cloned);
 }));
 
