@@ -61,7 +61,7 @@
 
 The 2026-04-25 full-codebase audit identified 47 findings spanning RLS multi-tenancy, architectural boundaries, schema layering, gate compliance, skill registry coherence, and editorial law. All 47 were routed to pass-3 — none could be auto-applied because every fix either (a) required a new corrective migration (append-only constraint), (b) touched RLS-protected files (auto-downgraded confidence per audit framework Universal Rule 8), (c) touched architectural boundaries (cross-cutting impact), or (d) was governed by editorial law on `docs/capabilities.md` (never auto-rewritten).
 
-This spec is the consolidated remediation contract for **all 47 findings**, plus **eight additional direct-DB-import violations and two additional `verify-rls-coverage` migration gaps** that the audit undercounted (see §3.5 ground-truth gate state). It exists for one reason: to lock the system invariants — multi-tenancy, RLS, routing, orchestration — before the codebase ships its first agency client. Once these invariants are locked, future feature development inherits the protections without re-litigating them per PR.
+This spec is the consolidated remediation contract for the audit's 47 findings plus 18 additional items surfaced by the ground-truth gate run, minus 2 items the audit double-counted — **63 total** in scope (`47 + 8 routes + 2 migration gaps + 8 historical-noise entries − 2 dedupe`). The full reconciliation lives in §3.1 ("Total findings addressed") and the per-gate breakdown in §3.5. The spec exists for one reason: to lock the system invariants — multi-tenancy, RLS, routing, orchestration — before the codebase ships its first agency client. Once these invariants are locked, future feature development inherits the protections without re-litigating them per PR.
 
 **In scope:**
 - New corrective migration restoring `FORCE ROW LEVEL SECURITY`, `CREATE POLICY`, and the canonical `app.organisation_id` session var on every protected table currently missing them
@@ -87,6 +87,7 @@ This spec is the consolidated remediation contract for **all 47 findings**, plus
 - Architecture canon: `architecture.md` "Row-Level Security — Three-Layer Fail-Closed Data Isolation" subsection and "Canonical RLS session variables (hard rule)" subsection
 - Framing canon: `docs/spec-context.md` (testing posture, accepted primitives, convention rejections)
 - Editorial law: `CLAUDE.md` Editorial rules for `docs/capabilities.md` (rules 1–5)
+- Canonical RLS-repair migration reference: `migrations/0213_fix_cached_context_rls.sql` is the most-cited precedent in this spec (it both repairs broken RLS at runtime and demonstrates the per-table historical-policy-DROP discipline). `migrations/0200_fix_universal_brief_rls.sql` is the original canonical-pattern source for the policy text (verbatim shape used in §4.1 / §9.1). The two migrations use the same canonical pattern; 0213 is the operationally relevant precedent.
 
 ---
 
@@ -117,7 +118,7 @@ These rules govern *how* the work in this spec is shipped. They override session
 
 ### §2.1 Strict phase ordering
 
-Phases 1 → 2 → 3 → 4 → 5 ship in order. **Phase N+1 does not begin until Phase N's ship gate is green** (see §13). Within Phase 1, sub-phases 1A → 1B → 1C → 1D → 1E ship in order — the corrective migration must be in `main` before route refactors begin (the refactors will exercise the policies). Reasons for the strictness:
+Phases 1 → 2 → 3 → 4 → 5 ship in order. **Phase N+1 does not begin until Phase N's ship gate is green** (see §13). Within Phase 1, sub-phases 1A → 1B → 1C → 1D → 1E ship in the same PR with the corrective migration applied locally and in CI ahead of the route-refactor commits inside that PR — the refactors must exercise the corrected policies (see §4 header for the in-PR ordering rule). Reasons for the strictness:
 
 - Phase 1 closes the largest blast-radius bugs (cross-tenant data leakage). Until those are closed, no other work is safer than this.
 - Phase 1A's migration is a prerequisite for Phase 1B/C — refactoring routes to call services that hit RLS-protected tables requires the policies to exist.
@@ -133,7 +134,9 @@ From the moment Phase 1 starts until Phase 4 ship gate is green, no new product 
 
 ### §2.4 Gates are the source of truth
 
-Every category's "definition of done" is `<gate-name> returns clean exit`. We do not bypass gates with `# baseline-allow` comments, `--ignore` flags, or by deleting the gate. If a gate cannot pass for a legitimate architectural reason (e.g. the `verify-rls-session-var-canon` historical-baseline noise in §4.5), the spec documents the reason inline and updates the gate's baseline mechanism — not the gate's hard rule.
+Every category's "definition of done" is `<gate-name> returns clean exit`. **Blocking gates** are not bypassed: we do not add `# baseline-allow` comments, `--ignore` flags, or delete the gate. If a blocking gate cannot pass for a legitimate architectural reason (e.g. the `verify-rls-session-var-canon` historical-baseline noise in §4.5), the spec documents the reason inline and updates the gate's baseline mechanism — not the gate's hard rule.
+
+**Warning-level gates** (those whose intent is "look at this, decide if it's OK" rather than "this is forbidden") are different: a `# baseline-allow` directive at a specific match point with an explanatory comment is the canonical way to acknowledge a reviewed, intentionally-permitted pattern. The Phase 2 §5.7 (`verify-input-validation`, `verify-permission-scope`) and Phase 5 §8.2 (`verify-no-silent-failures`) approaches use this pattern for reviewed false-positives or genuinely intentional patterns. The carve-out is narrow: warning-level gates only, with one-line rationale per directive — never a blanket suppression and never on a blocking gate.
 
 ### §2.5 Migration discipline
 
@@ -141,7 +144,7 @@ Every schema-state correction ships as a NEW migration with the next available n
 
 ### §2.6 Smallest viable PR per phase
 
-Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR. Phase 5 is one PR per category in §8.4 (the tail items are independent of each other and benefit from individual review). This gives five-or-six PRs total; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
+Phase 1 is one PR. Phase 2 is one PR. Phase 3 is one PR. Phase 4 is one PR (with §7.3's `docs/capabilities.md` editorial fix optionally split out as a separate small operator-led PR). Phase 5 is **multiple PRs** — one per top-level subsection (§8.1, §8.2, §8.3) plus one PR per independent §8.4 tail item, since each subsection and each tail item is a self-contained category. This gives roughly four canonical PRs (Phases 1–4) plus a stream of small Phase 5 PRs; each is reviewable in one sitting; each is revertible without losing work in adjacent phases.
 
 ### §2.7 Auto-rewrite prohibition on `docs/capabilities.md`
 
@@ -233,7 +236,7 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 
 | Gate | Captured violations | Spec section |
 |---|---|---|
-| `verify-rls-coverage` | 19 (across 11 migrations: 0139, 0141, 0142, 0147, 0153, 0192, 0202, 0203, 0204, 0205, 0206, 0207, 0208, 0212) | §4.1, §4.5 |
+| `verify-rls-coverage` | 19 (across 14 migrations: 0139, 0141, 0142, 0147, 0153, 0192, 0202, 0203, 0204, 0205, 0206, 0207, 0208, 0212) | §4.1, §4.5 |
 | `verify-rls-contract-compliance` | 13 (2 lib, 11 route) | §4.2 |
 | `verify-rls-session-var-canon` | 8 (all in 0204, 0205, 0206, 0207, 0208, 0212) | §4.5 |
 | `verify-org-scoped-writes` | 4 (`documentBundleService` 2, `skillStudioService` 2) | §4.3 |
@@ -270,25 +273,32 @@ Every reference to "the gate reports X" in this spec corresponds to the gate sta
 
 **Tables in scope and required actions:**
 
-| Table | Origin migration | Action in 0227 | Why |
-|---|---|---|---|
-| `memory_review_queue` | 0139 | DROP existing policy; ADD `FORCE ROW LEVEL SECURITY`; CREATE canonical-pattern policy (USING + WITH CHECK + IS-NOT-NULL/non-empty guards) | Existing policy lacks `WITH CHECK` and `IS NOT NULL` guards; without `FORCE`, table owner bypasses RLS. |
-| `drop_zone_upload_audit` | 0141 | ADD `FORCE ROW LEVEL SECURITY`; DROP existing policy; CREATE canonical-pattern policy | Existing policy is `USING`-only (no `WITH CHECK`); FORCE missing. |
-| `onboarding_bundle_configs` | 0142 | ADD `FORCE ROW LEVEL SECURITY`; DROP existing policy; CREATE canonical-pattern policy | Same as above. |
-| `trust_calibration_state` | 0147 | ADD `FORCE ROW LEVEL SECURITY`; DROP existing policy; CREATE canonical-pattern policy | Same as above. |
-| `agent_test_fixtures` | 0153 | ADD `FORCE ROW LEVEL SECURITY`; DROP existing policy; CREATE canonical-pattern policy | FORCE missing; existing policy uses uuid cast pattern but lacks `WITH CHECK`. |
-| `agent_execution_events` | 0192 | RE-ASSERT `FORCE ROW LEVEL SECURITY` (single-space syntax) | Source file uses `FORCE  ROW LEVEL SECURITY` (double space) which `verify-rls-coverage`'s regex misses. Re-asserting in 0227 with single-space syntax satisfies the static check; the runtime ALTER is idempotent. |
-| `agent_run_prompts` | 0192 | Same as above | Same |
-| `agent_run_llm_payloads` | 0192 | Same as above | Same |
+| Table | Origin migration | Historical policy names to DROP in 0227 | Action in 0227 | Why |
+|---|---|---|---|---|
+| `memory_review_queue` | 0139 | `memory_review_queue_org_isolation` | DROP listed policies; ADD `FORCE ROW LEVEL SECURITY`; CREATE canonical-pattern policy (USING + WITH CHECK + IS-NOT-NULL/non-empty guards) | Existing policy lacks `WITH CHECK` and `IS NOT NULL` guards; without `FORCE`, table owner bypasses RLS. |
+| `drop_zone_upload_audit` | 0141 | `drop_zone_upload_audit_tenant_isolation` | ADD `FORCE ROW LEVEL SECURITY`; DROP listed policies; CREATE canonical-pattern policy | Existing policy is `USING`-only (no `WITH CHECK`); FORCE missing. The historical policy is named `*_tenant_isolation`, not `*_org_isolation` — DROP must use the actual name or both policies coexist as a conjunction. |
+| `onboarding_bundle_configs` | 0142 | `onboarding_bundle_configs_tenant_isolation` | ADD `FORCE ROW LEVEL SECURITY`; DROP listed policies; CREATE canonical-pattern policy | Same as above. |
+| `trust_calibration_state` | 0147 | `trust_calibration_state_tenant_isolation` | ADD `FORCE ROW LEVEL SECURITY`; DROP listed policies; CREATE canonical-pattern policy | Same as above. |
+| `agent_test_fixtures` | 0153 | `agent_test_fixtures_org_isolation` | ADD `FORCE ROW LEVEL SECURITY`; DROP listed policies; CREATE canonical-pattern policy | FORCE missing; existing policy uses uuid cast pattern but lacks `WITH CHECK`. |
+| `agent_execution_events` | 0192 | `agent_execution_events_org_isolation` | RE-ASSERT `FORCE ROW LEVEL SECURITY` (single-space syntax); DROP + CREATE the canonical policy (idempotent against the existing canonical-named policy) | Source file uses `FORCE  ROW LEVEL SECURITY` (double space) which `verify-rls-coverage`'s regex misses. Re-asserting in 0227 with single-space syntax satisfies the static check; the runtime ALTER is idempotent. |
+| `agent_run_prompts` | 0192 | `agent_run_prompts_org_isolation` | Same as above | Same |
+| `agent_run_llm_payloads` | 0192 | `agent_run_llm_payloads_org_isolation` | Same as above | Same |
 
-**Canonical policy pattern (verbatim from `migrations/0200_fix_universal_brief_rls.sql`):**
+**Policy-name discipline.** The "Historical policy names to DROP in 0227" column is exhaustive — verified by `grep -nE "CREATE POLICY" migrations/<NNNN>_*.sql` against each origin migration during spec authoring. If the actual migration text introduces policies under additional names (e.g. a future repair migration creating a `*_subaccount_isolation` policy on one of these tables), 0227 must be updated to drop those names too before merge. Mirroring 0213's precedent — which explicitly drops `*_subaccount_isolation`, `*_read`, and `*_write` policies per affected table — is the canonical posture: enumerate every historical name; never assume the canonical-shape policy is the only one present.
+
+**Canonical policy pattern (verbatim from `migrations/0200_fix_universal_brief_rls.sql`; same shape used by `migrations/0213_fix_cached_context_rls.sql` — see §0 for the canonical-reference convention):**
 
 ```sql
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
 ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS <existing_policy_name> ON <table>;
-DROP POLICY IF EXISTS <table>_org_isolation ON <table>;
+-- Drop EVERY historical policy name on the table — see the per-table inventory above.
+-- Failing to drop a historical policy leaves it coexisting with the canonical one;
+-- Postgres applies them as a conjunction, which fails closed when any guard returns
+-- NULL but obscures the intended-vs-coexisting semantics. Mirror 0213's precedent.
+DROP POLICY IF EXISTS <historical_policy_name_1> ON <table>;
+DROP POLICY IF EXISTS <historical_policy_name_2> ON <table>;     -- if applicable
+DROP POLICY IF EXISTS <table>_org_isolation ON <table>;          -- canonical name (idempotent)
 
 CREATE POLICY <table>_org_isolation ON <table>
   USING (
@@ -303,7 +313,7 @@ CREATE POLICY <table>_org_isolation ON <table>
   );
 ```
 
-The `IS NOT NULL` and non-empty guards matter: when the session var is unset, `current_setting('app.organisation_id', true)` returns `NULL`. Casting `NULL::uuid` returns `NULL`, and `organisation_id = NULL` is `NULL` (not `false`), which Postgres treats as fail-closed for `USING` but **not necessarily** for `WITH CHECK` depending on the planner path. The explicit guards make fail-closed unambiguous regardless of planner.
+The `IS NOT NULL` and non-empty guards matter: when the session var is unset, `current_setting('app.organisation_id', true)` returns `NULL`. Casting `NULL::uuid` returns `NULL`, and `organisation_id = NULL` is `NULL` (not `false`), which Postgres treats as fail-closed for `USING` and `WITH CHECK` (rows whose policy expression evaluates to anything other than `true` are excluded). The explicit guards avoid relying on `NULL`-comparison semantics — both reads and writes are blocked unambiguously when the session var is unset.
 
 **Subaccount scoping clarification.** Migration 0213 (the precedent) explicitly drops the original `*_subaccount_isolation` policies because the canonical request paths (`server/middleware/auth.ts`, `server/lib/createWorker.ts`) do not set `app.current_subaccount_id` — only `withPrincipalContext` does. Forcing a subaccount policy without setting the var would block every read of subaccount-scoped rows. Migration 0227 follows the same posture: **no subaccount-isolation policies are created** for these tables. Subaccount filtering remains at the service layer (e.g. `documentBundleService.listByOrg`-style explicit `subaccount_id` filter, which is the same posture used by `memory_blocks`, `workspace_memories`, and the cached-context tables after 0213).
 
@@ -330,7 +340,8 @@ The `IS NOT NULL` and non-empty guards matter: when the session var is unset, `c
 -- policies with the canonical-guard form.
 
 -- ---------------------------------------------------------------------------
--- memory_review_queue
+-- memory_review_queue (origin: 0139)
+-- Historical policies: memory_review_queue_org_isolation
 -- ---------------------------------------------------------------------------
 ALTER TABLE memory_review_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_review_queue FORCE ROW LEVEL SECURITY;
@@ -347,7 +358,34 @@ CREATE POLICY memory_review_queue_org_isolation ON memory_review_queue
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- (repeat for the other seven tables)
+-- ---------------------------------------------------------------------------
+-- drop_zone_upload_audit (origin: 0141)
+-- Historical policies: drop_zone_upload_audit_tenant_isolation
+-- ---------------------------------------------------------------------------
+ALTER TABLE drop_zone_upload_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drop_zone_upload_audit FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS drop_zone_upload_audit_tenant_isolation ON drop_zone_upload_audit;
+DROP POLICY IF EXISTS drop_zone_upload_audit_org_isolation ON drop_zone_upload_audit;
+CREATE POLICY drop_zone_upload_audit_org_isolation ON drop_zone_upload_audit
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+-- (repeat for onboarding_bundle_configs / trust_calibration_state — both
+--  use *_tenant_isolation as the historical policy name; mirror the block above
+--  with the table name substituted.)
+
+-- (repeat for agent_test_fixtures with historical policy
+--  agent_test_fixtures_org_isolation; for agent_execution_events,
+--  agent_run_prompts, agent_run_llm_payloads each with their own
+--  *_org_isolation historical policy — DROP-then-CREATE is idempotent.)
 ```
 
 **Drizzle schema changes:** None. The migration only touches policies; no column additions, removals, or type changes. No corresponding `server/db/schema/**` edits are required.
@@ -362,7 +400,7 @@ bash scripts/verify-rls-coverage.sh
 # (Historical 0202–0208/0212 noise still present — see §4.5.)
 ```
 
-**Risk note.** `WITH CHECK` enforcement on `memory_review_queue`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `trust_calibration_state`, and `agent_test_fixtures` is *new* — these tables previously had `USING`-only policies. After 0227 ships, any caller that writes to these tables without a valid `app.organisation_id` session var will fail. This is the correct behaviour, but it surfaces latent bugs where a write path is missing the `withOrgTx` wrapper. The Phase 1B refactor (next subsection) is the systematic answer to that risk. If a write path is uncovered between Phase 1A landing and Phase 1B's refactor reaching that file, the failure mode is a runtime error (write rejected) rather than silent cross-tenant leakage — failing-closed is the desired default.
+**Risk note.** `WITH CHECK` enforcement on `memory_review_queue`, `drop_zone_upload_audit`, `onboarding_bundle_configs`, `trust_calibration_state`, and `agent_test_fixtures` is *new* — these tables previously had `USING`-only policies. After 0227 ships, any caller that writes to these tables without a valid `app.organisation_id` session var will fail. This RLS-rejection is a *temporary fail-closed backstop* during the in-PR window between the migration applying and the route refactors landing; it is **not** the long-term posture. The §15.1 invariant (`never rely on RLS alone`) still applies — Phase 1B must complete its application-level org-scoping pass on every write site before the Phase 1 PR merges, and the §15.1 multi-tenant safety checklist applies to all future write paths regardless. If a write path is uncovered during the in-PR window, the failure mode is a runtime error (write rejected) rather than silent cross-tenant leakage — failing-closed is the desired default for that brief window only.
 
 ### §4.2 Phase 1B — Direct-DB-access removal
 
@@ -372,17 +410,19 @@ bash scripts/verify-rls-coverage.sh
 |---|---|---|---|---|
 | 1 | `server/lib/briefVisibility.ts` | 1 | lib | Promote to `server/services/briefVisibilityService.ts` (new) |
 | 2 | `server/lib/workflow/onboardingStateHelpers.ts` | 12 | lib | Move queries into `server/services/onboardingStateService.ts` (new); helpers retain pure-function role |
-| 3 | `server/routes/memoryReviewQueue.ts` | 16 | route | `server/services/memoryReviewQueueService.ts` (new) |
+| 3 | `server/routes/memoryReviewQueue.ts` | 16 | route | Existing `server/services/memoryReviewQueueService.ts` (extend) |
 | 4 | `server/routes/systemAutomations.ts` | 9 | route (admin) | `server/services/systemAutomationsService.ts` (new) — uses `withAdminConnection()` because system routes operate without an org context |
-| 5 | `server/routes/subaccountAgents.ts` | 14 | route | Existing `server/services/subaccountAgentsService.ts` (extend) |
-| 6 | `server/routes/configDocuments.ts` | 21 | route | `server/services/configDocumentsService.ts` (new) |
+| 5 | `server/routes/subaccountAgents.ts` | 14 | route | Existing `server/services/subaccountAgentService.ts` (extend) |
+| 6 | `server/routes/configDocuments.ts` | 21 | route | `server/services/configDocumentService.ts` (new) |
 | 7 | `server/routes/portfolioRollup.ts` | 16 | route | `server/services/portfolioRollupService.ts` (new) |
-| 8 | `server/routes/clarifications.ts` | 17 | route | Existing `server/services/clarificationsService.ts` (extend); also addressed in §4.4 for subaccount resolution |
-| 9 | `server/routes/conversations.ts` | 11 | route | Existing `server/services/conversationsService.ts` (extend) |
-| 10 | `server/routes/automationConnectionMappings.ts` | 8 | route | `server/services/automationConnectionMappingsService.ts` (new) |
-| 11 | `server/routes/webLoginConnections.ts` | 32 | route | `server/services/webLoginConnectionsService.ts` (new) |
+| 8 | `server/routes/clarifications.ts` | 17 | route | Existing `server/services/clarificationService.ts` (extend); also addressed in §4.4 for subaccount resolution |
+| 9 | `server/routes/conversations.ts` | 11 | route | Existing `server/services/conversationService.ts` (extend) |
+| 10 | `server/routes/automationConnectionMappings.ts` | 8 | route | `server/services/automationConnectionMappingService.ts` (new) |
+| 11 | `server/routes/webLoginConnections.ts` | 32 | route | Existing `server/services/webLoginConnectionService.ts` (extend) |
 | 12 | `server/routes/systemPnl.ts` | 9 | route (admin) | Existing `server/services/systemPnlService.ts` (extend) — uses `withAdminConnection()` |
-| 13 | `server/routes/automations.ts` | 3 | route | Existing `server/services/automationsService.ts` (extend) |
+| 13 | `server/routes/automations.ts` | 3 | route | Existing `server/services/automationService.ts` (extend) |
+
+**Naming convention.** New service filenames mirror the existing repo convention — singular-noun service suffix (e.g. `automationService.ts`, not `automationsService.ts`). The §12 file inventory uses these exact names; deviation between prose and inventory is treated as inventory drift (§docs/spec-authoring-checklist.md §2).
 
 Where a service file already exists for the route, **extend it** rather than create a parallel service. Where a service does not exist, create one whose name matches the route file. Keep service files thin — accept the parameters the route currently passes, return what the route currently returns, no new abstractions. The goal is mechanical relocation, not redesign.
 
@@ -466,13 +506,15 @@ The `organisationId` parameter is already in scope at each call-site (verified d
 
 **Finding origin:** P3-C9 plus the related half of P3-C6.
 
-**Rule.** Every route with a `:subaccountId` URL parameter must call `resolveSubaccount(req.params.subaccountId, req.orgId!)` *before* using the subaccount ID downstream. `resolveSubaccount` (in `server/lib/subaccountResolution.ts`) verifies that the subaccount belongs to the requesting org and returns the canonical row; failing to call it allows a request scoped to org A to reference subaccount IDs belonging to org B (a horizontal-privilege-escalation primitive even with RLS in place, because a query that joins on subaccount-keyed rows would silently traverse).
+**Rule.** Every route with a `:subaccountId` URL parameter must call `resolveSubaccount(req.params.subaccountId, req.orgId!)` *before* using the subaccount ID downstream. `resolveSubaccount` (in `server/lib/resolveSubaccount.ts`) verifies that the subaccount belongs to the requesting org and returns the canonical row; failing to call it allows a request scoped to org A to reference subaccount IDs belonging to org B (a horizontal-privilege-escalation primitive even with RLS in place, because a query that joins on subaccount-keyed rows would silently traverse).
 
-**Files and required edits:**
+**Already-compliant Phase 1B routes (no edit required for §4.4 — verified at spec authoring time).** Several Phase 1B routes carry `:subaccountId` and already call `resolveSubaccount(...)` correctly; they appear in §4.2 only for the direct-DB-import refactor, not for subaccount-resolution. Those routes are: `subaccountAgents.ts`, `configDocuments.ts`, `automationConnectionMappings.ts`, `webLoginConnections.ts`. The §4.2 refactor must preserve their existing `resolveSubaccount` calls verbatim — do not regress compliant routes while extracting handlers into services.
+
+**Files and required edits (the two routes that fail `verify-subaccount-resolution`):**
 
 | File | Current | Required |
 |---|---|---|
-| `server/routes/memoryReviewQueue.ts` | Has `:subaccountId` parameter; no `resolveSubaccount` call | Add `const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);` at the top of every handler that consumes `req.params.subaccountId`; pass `subaccount.id` (not the raw param) to service calls |
+| `server/routes/memoryReviewQueue.ts` | Has `:subaccountId` parameter; performs an inline `eq(subaccounts.id, ...)` check but does not call the canonical `resolveSubaccount` helper | Add `const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);` at the top of every handler that consumes `req.params.subaccountId`; pass `subaccount.id` (not the raw param) to service calls; remove the inline check |
 | `server/routes/clarifications.ts` | Same | Same |
 
 The fix lands inside the §4.2 service-extraction PR for these two files (handler logic is being touched anyway). Co-locate the change.
@@ -527,7 +569,7 @@ fi
 emit_violation ...
 ```
 
-**`verify-rls-coverage.sh` parallel baseline.** The same gate-noise problem affects `verify-rls-coverage.sh` for the same eight historical files (they are `CREATE POLICY`-less or `FORCE`-less in their source `.sql` files even though 0213 wrote canonical policies for the live DB). Apply the same hard-coded-allowlist fix to `verify-rls-coverage.sh` for the same six files. The four files genuinely missing FORCE/POLICY at runtime (`0139`, `0141`, `0142`, `0147`) and the two re-assertion candidates (`0153`, `0192`) are addressed by the §4.1 migration and are NOT baselined.
+**`verify-rls-coverage.sh` parallel baseline.** The same gate-noise problem affects `verify-rls-coverage.sh` for the same six historical files (`0204`, `0205`, `0206`, `0207`, `0208`, `0212` — the files that 0213 repaired at runtime but whose source `.sql` text remains as originally written). Apply the same hard-coded-allowlist fix to `verify-rls-coverage.sh` for those six files. The four files genuinely missing FORCE/POLICY at runtime (`0139`, `0141`, `0142`, `0147`) and the two re-assertion candidates (`0153`, `0192`) are addressed by the §4.1 migration and are NOT baselined. (Migrations `0202` and `0203` introduce the `reference_documents` and `reference_document_versions` tables; their original RLS text is correct and does not need a baseline entry — they are not part of this set.)
 
 **Verification (after both gate updates):**
 
@@ -700,9 +742,9 @@ Update the call-site to pass the `context` object (orgId, sourceType, etc.) that
 |---|---|
 | `server/config/actionRegistry.ts` | Add `import { fromOrgId } from '../services/principal/fromOrgId.js';` at the top. The action-registry dispatch already has `organisationId` (and sometimes `subaccountId`) in scope at call-sites; wrap with `fromOrgId(organisationId, subaccountId)` when invoking `canonicalDataService` methods. |
 | `server/services/intelligenceSkillExecutor.ts` | Threads `PrincipalContext` through from agent-run context. The executor receives the run's principal already; pass it through. Add `import type { PrincipalContext } from './principal/types.js';` to satisfy the gate's import-presence check. |
-| `server/services/connectorPollingService.ts` | The worker has `organisationId` and a known `subaccount_id`. Use `fromOrgId(organisationId, subaccountId)` until the worker is fully migrated to native `PrincipalContext`. |
+| `server/services/connectorPollingService.ts` | The worker iterates over connectors and resolves a per-record `dbAccount` lookup; `organisationId` is in scope at every call site, and `dbAccount.subaccountId` is available only at the canonical-record-level call sites (not at the broader connector-iteration scope). Use `fromOrgId(organisationId)` at org-level call sites and `fromOrgId(organisationId, dbAccount.subaccountId ?? undefined)` at the per-record sites — call out which calls fall into each bucket in the PR description. |
 | `server/services/crmQueryPlanner/executors/canonicalQueryRegistry.ts` | The planner already receives a `PrincipalContext` at the entry point; thread it down to the canonical-service calls. Update the import to include `PrincipalContext` type for clarity. |
-| `server/routes/webhooks/ghlWebhook.ts` | Use `fromOrgId(req.orgId!, /* subaccountId from webhook payload */)` at the call-site. |
+| `server/routes/webhooks/ghlWebhook.ts` | The handler is unauthenticated (HMAC signature only — no JWT, no `req.orgId`); the org and subaccount are resolved by looking up `connectorConfigs` + `canonicalAccounts` via `locationId`. Construct the principal context AFTER that lookup with `fromOrgId(config.organisationId, dbAccount.subaccountId ?? undefined)` and pass it to every `canonicalDataService` call downstream. |
 
 **Why `fromOrgId` is acceptable.** The shim is explicitly documented as a migration step. Its existence acknowledges that not every call-site has the principal threaded through yet. Using it now bounds the scope of Phase 2 — full principal threading in five callsites is a separate refactor the codebase has not yet finished. Per `convention_rejections` in `docs/spec-context.md`, "do not introduce new service layers when existing primitives fit" — and `fromOrgId` is the existing primitive for this case.
 
@@ -712,17 +754,22 @@ Update the call-site to pass the `context` object (orgId, sourceType, etc.) that
 
 **Finding origin:** P3-H8.
 
-**The violation.** `verify-skill-read-paths.sh` reports `Literal action entries: 94, with readPath: 99` — a mismatch of -5. Five action entries in `server/config/actionRegistry.ts` lack the required `readPath` field. The `readPath` field tells the skill registry which read-side surface (skill markdown file or action handler) the action belongs to; entries without it cannot be resolved by the skill discovery surface.
+**The violation.** `verify-skill-read-paths.sh` reports `Literal action entries: 94, with readPath: 99` — a count mismatch of 5. The direction of the mismatch (`readPath` count exceeds literal-action count) is ambiguous from the summary line alone — it could indicate (a) duplicate `readPath` entries, (b) `readPath` pointing at handler references that don't have a corresponding literal-action row, (c) an off-by-five in the gate's own counting logic, or (d) the inverse situation (literal-actions missing `readPath` — but that would produce the opposite direction). Do not act on the summary's surface-level diagnosis.
 
-**Investigation step.** The gate names the count but not the offending entries. Before the fix, run:
+**Investigation step (required before the fix).** Enumerate the offending entries first:
 
 ```bash
-bash scripts/verify-skill-read-paths.sh --verbose 2>&1 | tail -20
+bash scripts/verify-skill-read-paths.sh --verbose 2>&1 | tail -40
 ```
 
-If `--verbose` is not supported, modify the gate temporarily (revert before merge) to print the offending slugs, or run the gate's underlying `grep`/`awk` extraction manually to enumerate the five.
+If `--verbose` is not supported, modify the gate temporarily (revert before merge) to print BOTH the literal-action slugs and the `readPath` slugs, then diff the two lists to enumerate the actual five entries on each side. Write the enumerated list inline into the PR description.
 
-**Fix.** For each of the five named entries in `actionRegistry.ts`, add the `readPath` field. The valid values are documented in the registry header comment (typically a path like `internal:skills/<category>/<slug>.md` or a registered handler reference). If the action genuinely has no read surface, the action itself is misclassified — escalate to the operator before adding a placeholder value.
+**Fix (after enumeration).** Once the five entries are named, classify each:
+- If the action genuinely lacks a `readPath`: add it. Valid values are documented in the registry header comment (typically a path like `internal:skills/<category>/<slug>.md` or a registered handler reference).
+- If the action has a duplicate or stale `readPath`: remove the duplicate; ensure each `readPath` resolves to exactly one literal-action.
+- If the action has no read surface and is misclassified: escalate to the operator before adding a placeholder value.
+
+The Phase 2 ship gate is "the gate returns clean exit" — whatever the actual five entries turn out to be, the action is to reconcile the counts via direct edits to `actionRegistry.ts`. The `readPath` count direction is a diagnostic tool, not the diagnosis itself.
 
 **Verification:** `bash scripts/verify-skill-read-paths.sh` returns clean exit with `Literal action entries: N, with readPath: N` (matched counts).
 
@@ -869,7 +916,7 @@ Each sub-editor re-exports props or interface types that the parent modal needs.
 
 **Fix.** Extract the shared interfaces to a sibling `types.ts` file:
 
-- New file: `client/src/components/clientpulse/types.ts` (or `client/src/components/clientpulse/InterventionEditorTypes.ts` — pick the shorter form unless the directory already uses a verbose convention).
+- New file: `client/src/components/clientpulse/types.ts` (canonical name — referenced by §12.1).
 - Move every interface that *both* the parent modal and the sub-editors import to this file.
 - Update both sides to import from the new file.
 
@@ -877,9 +924,9 @@ The component implementations stay in their current files; only the type definit
 
 #### §6.2.2 `SkillAnalyzerWizard` cluster (4 cycles)
 
-**The cluster.** `client/src/components/skillAnalyzer/SkillAnalyzerWizard.tsx` ↔ step components in the same directory. Same pattern as §6.2.1.
+**The cluster.** `client/src/components/skill-analyzer/SkillAnalyzerWizard.tsx` ↔ four step components in the same directory: `SkillAnalyzerImportStep.tsx`, `SkillAnalyzerExecuteStep.tsx`, `SkillAnalyzerProcessingStep.tsx`, `SkillAnalyzerResultsStep.tsx`. Same pattern as §6.2.1. (Directory name is `skill-analyzer`, kebab-case — verified at spec authoring time.)
 
-**Fix.** Extract step-level interfaces (`StepProps`, `WizardState`, etc.) to `client/src/components/skillAnalyzer/types.ts` (or equivalent). Update both wizard and step components to import from the new file.
+**Fix.** Extract step-level interfaces (`StepProps`, `WizardState`, etc.) to `client/src/components/skill-analyzer/types.ts`. Update both `SkillAnalyzerWizard.tsx` and the four step components to import from the new file.
 
 #### §6.2.3 Remaining client cycles
 
@@ -1063,19 +1110,24 @@ For §7.3 (capabilities edit), verification is operator-led — the operator con
 
 **Finding origin:** P3-M1.
 
-**The violation.** `server/lib/testRunRateLimit.ts` is an in-memory rate limiter with an explicit `TODO(PROD-RATE-LIMIT)` comment: *"Replace with Redis or DB-backed sliding window before production."* It is currently relied on by `server/routes/public/formSubmission.ts` and `server/routes/public/pageTracking.ts`. Under multiple Node workers, the in-memory state is per-process — each worker has its own counter, so the effective rate limit is N-worker-multiplied. Under restarts, the counter resets to zero, defeating the limit during the boot window of a deploy.
+**The violation — two distinct in-memory rate limiters.** Verified at spec authoring time: there are TWO independent in-memory rate-limit implementations in the codebase, not one:
 
-**Why this matters now.** Pre-production, the impact is a stress-test gap. As the first agency clients arrive (the trigger that flips `pre_production: yes` → `no` in `docs/spec-context.md`), the rate limiter is on a hot path for public form submissions and webhook-adjacent traffic. Fixing this *before* the flip means we don't carry the bug into a customer-facing incident.
+1. **`server/lib/testRunRateLimit.ts`** — guards user-initiated *test* agent runs (`is_test_run = true`). Used by `server/routes/agents.ts`, `server/routes/skills.ts`, `server/routes/subaccountAgents.ts`, `server/routes/subaccountSkills.ts` (4 callers). Carries an explicit `TODO(PROD-RATE-LIMIT)` comment.
+2. **Inline `Map<string, number[]>` rate limiters** in `server/routes/public/formSubmission.ts` (functions `checkRateLimit` + `rateLimitMiddleware`) and `server/routes/public/pageTracking.ts` (function `checkTrackRateLimit`). These limit public form submissions and tracking pixel hits per-IP and per-page; they are not test-run-scoped. They have no shared store and no TODO comment.
 
-**Fix.** Replace the in-memory implementation with a DB-backed sliding window. We use Postgres rather than Redis because:
+Both share the same multi-process bug: in-memory state is per-process, so under N Node workers the effective limit is N-multiplied; under restarts the counter resets to zero. P3-M1 originally referenced the test-run limiter (the one with the TODO), but the same defect applies to the public-route limiters with the same operator-led pre-production-flip risk.
+
+**Phase 5 §8.1 scope (decision).** Rewrite **both** limiters in the same Phase 5 PR — they share the same table, the same sliding-window algorithm, the same cleanup job, and the same multi-process correctness argument. Splitting them would force two migrations and two reviews of the same conceptual change. The new shared primitive is `server/lib/rateLimitStore.ts` (new file — see step 2 below); `testRunRateLimit.ts` and the public-route inline limiters both delegate to it.
+
+**Why Postgres rather than Redis:**
 
 1. The codebase has no Redis primitive today; introducing one is a new infrastructure dependency.
 2. The DB-backed pattern already exists in `server/lib/webhookDedupe.ts` and `server/services/testRunIdempotency.ts` — both use Postgres tables with unique-constraint-driven upserts.
-3. The rate-limit budget (a few hundred requests per minute per public form) is well within Postgres's comfort zone.
+3. The rate-limit budget (a few hundred requests per minute per public form / per user-test-run) is well within Postgres's comfort zone.
 
 **Implementation outline:**
 
-1. **New table.** `migrations/0228_rate_limit_buckets.sql` (or the next available migration number after 0227 ships):
+1. **New table.** `migrations/<NNNN>_rate_limit_buckets.sql` — pick the next available migration number at implementation time. Phase 5 PRs land in any order (§2.6, §8.5); the rate-limit-buckets PR claims whichever number is next available when it is opened. Other Phase 5 migrations (e.g. §8.4 P3-M6's `<NNNN>_drop_tool_calls_log.sql`) follow the same rule. **Do not pre-allocate migration numbers across Phase 5 PRs** — every PR resolves the next number against the live state of `migrations/` at the moment it opens.
    ```sql
    CREATE TABLE rate_limit_buckets (
      bucket_key text NOT NULL,
@@ -1085,14 +1137,17 @@ For §7.3 (capabilities edit), verification is operator-led — the operator con
    );
    CREATE INDEX rate_limit_buckets_window_idx ON rate_limit_buckets (window_start);
    ```
-   System-scoped table (no `organisation_id`) — rate limits are per-public-key, not per-tenant. Add to `RLS_PROTECTED_TABLES` only if it ever takes an `organisation_id` column; until then, document inline as "intentionally not tenant-scoped — system rate-limit infrastructure".
-2. **Rewrite `server/lib/testRunRateLimit.ts`** to use the table. The sliding-window algorithm is standard: bucket the current minute, atomically increment with `INSERT … ON CONFLICT DO UPDATE`, sum the last N minutes' rows for the limit check.
-3. **Update both callers** (`formSubmission.ts`, `pageTracking.ts`) — no signature change beyond adding `await`; they already call asynchronously.
-4. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap.
+   System-scoped table (no `organisation_id`) — rate limits are per-public-key / per-user, not per-tenant. Add to `RLS_PROTECTED_TABLES` only if it ever takes an `organisation_id` column; until then, document inline as "intentionally not tenant-scoped — system rate-limit infrastructure".
+2. **New shared primitive.** `server/lib/rateLimitStore.ts` (new file). Exports `incrementBucket(key, windowStart)` and `sumWindow(keyPrefix, since)` (or equivalent) implementing the sliding-window algorithm: bucket the current minute, atomically increment with `INSERT … ON CONFLICT DO UPDATE`, sum the last N minutes' rows for the limit check. Pure-function-friendly contract — accepts an injectable DB handle for testing.
+3. **Rewrite `server/lib/testRunRateLimit.ts`** to delegate to `rateLimitStore.ts`. Preserve the existing exported function signatures (`checkTestRunRateLimit(userId)` and the helper) so the four callers (`agents.ts`, `skills.ts`, `subaccountAgents.ts`, `subaccountSkills.ts`) need only an `await` change.
+4. **Refactor the public-route inline limiters.** `formSubmission.ts:31` (`checkRateLimit`) and `pageTracking.ts:29` (`checkTrackRateLimit`) — replace each with a call into `rateLimitStore.ts`. Bucket-key prefixes distinguish the two surfaces (e.g. `form-ip:`, `form-page:`, `track-ip:`); the existing limit thresholds (`IP_LIMIT`, `PAGE_LIMIT`, etc.) move from inline constants to the call site. The new code paths are async — update the surrounding handlers to `await` accordingly.
+5. **Add a cleanup job.** `server/jobs/rateLimitBucketCleanupJob.ts` — pg-boss cron that deletes rows where `window_start < now() - interval '1 hour'`. Hourly cadence; cheap. Register the job in `server/jobs/index.ts` (the canonical job-export aggregator) and add the schedule entry to `server/lib/queueSchedule.ts` (or whichever module holds the cron definitions — confirm at implementation time).
 
-**Why not split into multiple smaller fixes.** The whole change is ~200 LOC; splitting it would force two migrations and two code reviews of the same conceptual change. One PR.
+**Verification.** Add unit tests (pure-function-only per `runtime_tests: pure_function_only`):
+- `server/lib/__tests__/rateLimitStore.test.ts` — sliding-window math (bucket increment, window-sum read, expiry cutoff). Inject an in-memory mock for the DB handle.
+- `server/lib/__tests__/testRunRateLimit.test.ts` — preserves existing test-run rate-limit semantics on top of the shared store.
 
-**Verification.** Add a unit test (under `server/lib/__tests__/testRunRateLimit.test.ts` if one does not exist; pure-function-only per `runtime_tests: pure_function_only`) that exercises the sliding-window math. Run the existing form-submission integration test (if present) to confirm callers still work. Manual verification: spin up two processes locally, hammer the public form, observe the per-process behaviour matches a single shared bucket.
+Manual verification: spin up two processes locally, hammer (a) a public form and (b) the test-run path, observe the per-process behaviour matches a single shared bucket in both cases.
 
 ### §8.2 Silent-failure path closure
 
@@ -1140,7 +1195,7 @@ Each of the items below is small enough to ship as its own one-or-two-file PR. T
 
 **P3-M6 — Remove deprecated `toolCallsLog` column.** `server/db/schema/agentRunSnapshots.ts:52` declares `toolCallsLog` as DEPRECATED with a Sprint 3B removal note. Sprint 3B has not yet shipped. This finding requires:
 - Confirm Sprint 3B's status with the operator (check `tasks/current-focus.md` and `tasks/todo.md`).
-- If 3B is no-longer-in-flight or is rolled into a separate workstream, write `migrations/0229_drop_tool_calls_log.sql` (or next-available number) that drops the column.
+- If 3B is no-longer-in-flight or is rolled into a separate workstream, write `migrations/<NNNN>_drop_tool_calls_log.sql` (next-available number at PR-open time — do not pre-allocate; see §8.1 step 1) that drops the column.
 - Update the schema file to remove the column declaration.
 - Remove any code that reads from or writes to `toolCallsLog` — should be none after 3B's `toolCallsLogProjectionService` deprecation, but verify.
 
@@ -1164,7 +1219,7 @@ If Sprint 3B is still active and owns the removal, this item moves to §14 Defer
 
 **P3-L6 — `client/src/components/ScheduleCalendar.tsx` exports `ScheduleCalendarResponse`.** Same pattern as P3-L5.
 
-**P3-L8 follow-on — Extract remaining `skillAnalyzer/` interfaces.** §6.2.2 covers the `SkillAnalyzerWizard` cluster. Same residual-cycle scan as P3-M7 follow-on.
+**P3-L8 follow-on — Extract remaining `skill-analyzer/` interfaces.** §6.2.2 covers the `SkillAnalyzerWizard` cluster. Same residual-cycle scan as P3-M7 follow-on.
 
 **P3-L9 — Add named test asserting `is_test_run=true` runs are excluded from cost ledger.** Pure-function test in `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts`.
 
@@ -1213,7 +1268,8 @@ CREATE POLICY <table>_org_isolation ON <table>
 
 **Rules:**
 - Policy name pattern is `<table>_org_isolation`. The gate's reverse check (manifest ↔ policy) matches on the table name part of the `ON <table>` clause; the policy name is conventional.
-- `IS NOT NULL` and non-empty guards are present in *both* `USING` and `WITH CHECK`. Omitting them changes fail-closed semantics under specific Postgres planner paths.
+- `IS NOT NULL` and non-empty guards are present in *both* `USING` and `WITH CHECK`. Omitting them forces the policy expression to rely on `NULL`-comparison semantics — Postgres treats a `NULL` policy result as fail-closed, but the explicit guards avoid that dependency entirely so the policy reads "true OR exclude" rather than "true OR NULL or false".
+- Every historical policy name on the table must be DROPped before the canonical `CREATE POLICY` — see the per-table inventory in §4.1. Failing to drop a historical policy leaves it coexisting with the canonical one as a conjunction; the conjunction fails closed when any guard returns NULL but obscures intent.
 - Existing-policy `DROP IF EXISTS` precedes `CREATE POLICY` so the migration is idempotent against partially-repaired tables.
 - No subaccount-isolation policy is added. Subaccount filtering is a service-layer concern (see §4.1 risk note).
 - The migration body has one block per affected table. Blocks are self-contained — no implicit ordering between blocks.
@@ -1243,7 +1299,7 @@ CREATE POLICY memory_review_queue_org_isolation ON memory_review_queue
   );
 ```
 
-### §9.2 `rate_limit_buckets` table (`migrations/0228`)
+### §9.2 `rate_limit_buckets` table (Phase 5 §8.1 migration)
 
 **Name:** `rate_limit_buckets`
 **Type:** Postgres table; system-scoped (no `organisation_id`)
@@ -1344,7 +1400,7 @@ Any code touched by this spec re-runs its co-located test file. The minimum set:
 ```bash
 npm test -- agentExecutionServicePure.checkpoint        # §6.1 — type extraction
 npm test -- rls.context-propagation                     # §4 — RLS isolation
-npm test -- agentRunVisibility                          # §4.2 — service-layer relocation must not break visibility tests
+npm test -- agentRunVisibility                          # §4.2 — any test colocated with the agentRunVisibility / agentRunEditPermissionMask logic must continue to pass (confirm exact filename(s) at implementation time via `find server/ -name "agentRunVisibility*.test.ts"`)
 ```
 
 Any failure in the above set blocks the corresponding phase's PR. There is no "test was already flaky" defence — flakiness is a separate finding that should already be in the backlog or surfaced as one.
@@ -1387,10 +1443,10 @@ No new alerts, dashboards, or metrics are introduced. The framing is `static_gat
 
 ### §11.3 Rollback
 
-Per `rollout_model: commit_and_revert`, every PR is independently revertible. If a phase ships and produces a runtime regression that cannot be hot-fixed inside an hour, revert the merge commit. Migrations 0227 / 0228 are the only changes that need extra care:
+Per `rollout_model: commit_and_revert`, every PR is independently revertible. If a phase ships and produces a runtime regression that cannot be hot-fixed inside an hour, revert the merge commit. Migration `0227` (Phase 1) and the Phase 5 §8.1 rate-limit-buckets migration are the only changes that need extra care:
 
-- **Reverting 0227** requires either (a) a new migration that re-adds the broken state (defeats the purpose), or (b) a manual `psql` session that re-`DROP` the canonical policies and re-`CREATE` the original ones from the source files. Option (b) is what the operator should do if 0227 needs to be rolled back; document the steps in the rollback runbook before merging Phase 1.
-- **Reverting 0228** is straightforward: drop the new table; revert the file changes that consumed it. The rate-limit data is best-effort by nature, so loss of the table's contents has no durable impact.
+- **Reverting `0227`** requires either (a) a new migration that re-adds the broken state (defeats the purpose), or (b) a manual `psql` session that re-`DROP` the canonical policies and re-`CREATE` the original ones from the source files. Option (b) is what the operator should do if `0227` needs to be rolled back; document the steps in the rollback runbook before merging Phase 1.
+- **Reverting the Phase 5 rate-limit-buckets migration** is straightforward: drop the new table; revert the file changes that consumed it. The rate-limit data is best-effort by nature, so loss of the table's contents has no durable impact.
 
 ---
 
@@ -1402,23 +1458,23 @@ This is the single source of truth for every file the spec touches. Any file ref
 
 | File | Phase | Purpose |
 |---|---|---|
-| `migrations/0227_rls_hardening_corrective.sql` | 1A | FORCE RLS + canonical policy on 8 tables across 6 historical migrations |
-| `migrations/0228_rate_limit_buckets.sql` | 5 (§8.1) | New `rate_limit_buckets` table for multi-process-safe sliding window |
-| `migrations/0229_drop_tool_calls_log.sql` (conditional) | 5 (§8.4 — P3-M6) | Drop deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. |
+| `migrations/0227_rls_hardening_corrective.sql` | 1A | FORCE RLS + canonical policy on 8 tables across 6 historical migrations. Phase 1 ships first, so `0227` is the only pre-allocated migration number in this spec. |
+| `migrations/<NNNN>_rate_limit_buckets.sql` | 5 (§8.1) | New `rate_limit_buckets` table for multi-process-safe sliding window. Use the next available number at PR-open time. |
+| `migrations/<NNNN>_drop_tool_calls_log.sql` (conditional) | 5 (§8.4 — P3-M6) | Drop deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. Use the next available number at PR-open time. |
 | `server/lib/playbook/actionCallAllowlist.ts` | 2 (§5.1) | Empty-by-default allowlist; satisfies `verify-action-call-allowlist` gate |
 | `server/services/briefVisibilityService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/briefVisibility.ts` |
 | `server/services/onboardingStateService.ts` | 1B (§4.2) | Service-tier home for DB-touching logic moved out of `server/lib/workflow/onboardingStateHelpers.ts` |
-| `server/services/memoryReviewQueueService.ts` | 1B (§4.2) | Service for `memoryReviewQueue` route handlers |
 | `server/services/systemAutomationsService.ts` | 1B (§4.2) | Service for `systemAutomations` route (admin tier — uses `withAdminConnection`) |
-| `server/services/configDocumentsService.ts` | 1B (§4.2) | Service for `configDocuments` route handlers |
+| `server/services/configDocumentService.ts` | 1B (§4.2) | Service for `configDocuments` route handlers (singular-noun naming per repo convention) |
 | `server/services/portfolioRollupService.ts` | 1B (§4.2) | Service for `portfolioRollup` route handlers |
-| `server/services/automationConnectionMappingsService.ts` | 1B (§4.2) | Service for `automationConnectionMappings` route handlers |
-| `server/services/webLoginConnectionsService.ts` | 1B (§4.2) | Service for `webLoginConnections` route handlers |
+| `server/services/automationConnectionMappingService.ts` | 1B (§4.2) | Service for `automationConnectionMappings` route handlers (singular-noun naming) |
 | `shared/types/agentExecutionCheckpoint.ts` | 3 (§6.1) | New home for `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision` |
-| `client/src/components/clientpulse/types.ts` | 3 (§6.2.1) | Extracted shared interfaces for `ProposeInterventionModal` ↔ sub-editors. (Or `InterventionEditorTypes.ts` — implementer's call; pick the shorter form.) |
-| `client/src/components/skillAnalyzer/types.ts` | 3 (§6.2.2) | Extracted shared interfaces for `SkillAnalyzerWizard` ↔ steps |
+| `client/src/components/clientpulse/types.ts` | 3 (§6.2.1) | Extracted shared interfaces for `ProposeInterventionModal` ↔ sub-editors |
+| `client/src/components/skill-analyzer/types.ts` | 3 (§6.2.2) | Extracted shared interfaces for `SkillAnalyzerWizard` ↔ four step components (kebab-case directory matches the repo) |
+| `server/lib/rateLimitStore.ts` | 5 (§8.1) | New shared sliding-window primitive backing both `testRunRateLimit.ts` and the public-route limiters |
 | `server/jobs/rateLimitBucketCleanupJob.ts` | 5 (§8.1) | Hourly cleanup of expired rate-limit-bucket rows |
-| `server/lib/__tests__/testRunRateLimit.test.ts` | 5 (§8.1) | Pure-function tests for sliding-window math |
+| `server/lib/__tests__/rateLimitStore.test.ts` | 5 (§8.1) | Pure-function tests for sliding-window math (mock DB handle) |
+| `server/lib/__tests__/testRunRateLimit.test.ts` | 5 (§8.1) | Pure-function tests preserving test-run rate-limit semantics on top of the shared store |
 | `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts` | 5 (§8.4) | Pure-function tests for depth ≤ 5 invariant + degraded-fallback |
 | `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts` | 5 (§8.4) | Pure-function test for `is_test_run = true` cost-ledger exclusion |
 
@@ -1430,17 +1486,17 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `server/db/schema/agentRunSnapshots.ts` | 3 (§6.1) | Update import on line 3 from `../../services/middleware/types.js` to `../../../shared/types/agentExecutionCheckpoint.js`. (Phase 5 §8.4 P3-M6 also drops the `toolCallsLog` column declaration here — conditional on Sprint 3B status.) |
 | `server/lib/briefVisibility.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
 | `server/lib/workflow/onboardingStateHelpers.ts` | 1B (§4.2) | Strip DB-touching code; retain pure helpers only. |
-| `server/routes/memoryReviewQueue.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; call new service. Add `resolveSubaccount(req.params.subaccountId, req.orgId!)` at every handler with the `:subaccountId` param. |
-| `server/routes/systemAutomations.ts` | 1B (§4.2) | Remove direct `db` import; call new service. |
-| `server/routes/subaccountAgents.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `subaccountAgentsService`. |
-| `server/routes/configDocuments.ts` | 1B (§4.2) | Remove direct `db` import; call new service. |
-| `server/routes/portfolioRollup.ts` | 1B (§4.2) | Remove direct `db` import; call new service. |
-| `server/routes/clarifications.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; extend existing `clarificationsService`. Add `resolveSubaccount(...)` at every handler with the `:subaccountId` param. |
-| `server/routes/conversations.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `conversationsService`. |
-| `server/routes/automationConnectionMappings.ts` | 1B (§4.2) | Remove direct `db` import; call new service. |
-| `server/routes/webLoginConnections.ts` | 1B (§4.2) | Remove direct `db` import; call new service. |
+| `server/routes/memoryReviewQueue.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; extend existing `memoryReviewQueueService`. Add `resolveSubaccount(req.params.subaccountId, req.orgId!)` at every handler with the `:subaccountId` param (replaces the inline subaccount check). |
+| `server/routes/systemAutomations.ts` | 1B (§4.2) | Remove direct `db` import; call new `systemAutomationsService`. |
+| `server/routes/subaccountAgents.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `subaccountAgentService` (singular). The existing `resolveSubaccount(...)` calls must be preserved verbatim during the extraction. |
+| `server/routes/configDocuments.ts` | 1B (§4.2) | Remove direct `db` import; call new `configDocumentService` (singular). The existing `resolveSubaccount(...)` calls must be preserved. |
+| `server/routes/portfolioRollup.ts` | 1B (§4.2) | Remove direct `db` import; call new `portfolioRollupService`. |
+| `server/routes/clarifications.ts` | 1B + 1D (§4.2 + §4.4) | Remove direct `db` import; extend existing `clarificationService` (singular). Add `resolveSubaccount(...)` at every handler with the `:subaccountId` param (replaces the inline subaccount check). |
+| `server/routes/conversations.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `conversationService` (singular). |
+| `server/routes/automationConnectionMappings.ts` | 1B (§4.2) | Remove direct `db` import; call new `automationConnectionMappingService` (singular). The existing `resolveSubaccount(...)` calls must be preserved. |
+| `server/routes/webLoginConnections.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `webLoginConnectionService` (singular). The existing `resolveSubaccount(...)` calls must be preserved. |
 | `server/routes/systemPnl.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `systemPnlService` (admin tier — uses `withAdminConnection`). |
-| `server/routes/automations.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `automationsService`. |
+| `server/routes/automations.ts` | 1B (§4.2) | Remove direct `db` import; extend existing `automationService` (singular). |
 | `server/services/documentBundleService.ts` | 1C (§4.3) | Add `eq(table.organisationId, organisationId)` to WHERE clauses on lines 679 and 685 (and the `scheduledTasks` branch immediately after). |
 | `server/services/skillStudioService.ts` | 1C (§4.3) | Add `eq(skills.organisationId, organisationId)` to WHERE clauses on lines 168 and 309. |
 | `scripts/verify-rls-session-var-canon.sh` | 1E (§4.5) | Implement hard-coded historical-baseline allowlist for 0204–0208 + 0212. |
@@ -1460,8 +1516,11 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `client/src/components/clientpulse/FireAutomationEditor.tsx` | 3 (§6.2.1) | Same. |
 | `client/src/components/clientpulse/OperatorAlertEditor.tsx` | 3 (§6.2.1) | Same. |
 | `client/src/components/clientpulse/SendSmsEditor.tsx` | 3 (§6.2.1) | Same. |
-| `client/src/components/skillAnalyzer/SkillAnalyzerWizard.tsx` | 3 (§6.2.2) | Update interface imports to point at new `types.ts`. |
-| `client/src/components/skillAnalyzer/<step components>` | 3 (§6.2.2) | Same. (Concrete file list confirmed during execution — `madge` output enumerates them.) |
+| `client/src/components/skill-analyzer/SkillAnalyzerWizard.tsx` | 3 (§6.2.2) | Update interface imports to point at new `types.ts`. |
+| `client/src/components/skill-analyzer/SkillAnalyzerImportStep.tsx` | 3 (§6.2.2) | Same. |
+| `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx` | 3 (§6.2.2) | Same. |
+| `client/src/components/skill-analyzer/SkillAnalyzerProcessingStep.tsx` | 3 (§6.2.2) | Same. |
+| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | 3 (§6.2.2) | Same. |
 | `server/skills/smart_skip_from_website.md` | 4 (§7.1.1) | Visibility flip from `internal` to `basic` (via `apply-skill-visibility.ts`). |
 | `server/skills/weekly_digest_gather.md` | 4 (§7.1.1) | Same. |
 | `server/skills/workflow_estimate_cost.md` | 4 (§7.1.2) | Add YAML frontmatter block. |
@@ -1472,9 +1531,15 @@ This is the single source of truth for every file the spec touches. Any file ref
 | `package.json` | 4 (§7.2.1, §7.2.2) | Add `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` as direct deps; add `yaml` as dev dep. |
 | `package-lock.json` | 4 (§7.2) | Updated by `npm install`; committed alongside `package.json`. |
 | `docs/capabilities.md` | 4 (§7.3) | Edit line 1001 — replace "Anthropic-scale distribution" with operator-chosen replacement. **Operator-led only.** |
-| `server/lib/testRunRateLimit.ts` | 5 (§8.1) | Rewrite from in-memory to DB-backed sliding window. |
-| `server/routes/public/formSubmission.ts` | 5 (§8.1) | Update caller to await async rate-limit check. |
-| `server/routes/public/pageTracking.ts` | 5 (§8.1) | Same. |
+| `server/lib/testRunRateLimit.ts` | 5 (§8.1) | Rewrite from in-memory to delegate to `rateLimitStore.ts`. Preserve exported function signatures. |
+| `server/routes/agents.ts` | 5 (§8.1) | `await` the now-async `checkTestRunRateLimit` call. |
+| `server/routes/skills.ts` | 5 (§8.1) | Same. |
+| `server/routes/subaccountAgents.ts` | 5 (§8.1) | Same. |
+| `server/routes/subaccountSkills.ts` | 5 (§8.1) | Same. |
+| `server/routes/public/formSubmission.ts` | 5 (§8.1) | Replace inline `checkRateLimit` + `rateLimitMiddleware` (lines 31, 54) with calls into `rateLimitStore.ts`; await the async path. |
+| `server/routes/public/pageTracking.ts` | 5 (§8.1) | Replace inline `checkTrackRateLimit` (line 29) with calls into `rateLimitStore.ts`; await the async path. |
+| `server/jobs/index.ts` | 5 (§8.1) | Register `rateLimitBucketCleanupJob` in the canonical job-export aggregator. |
+| `server/lib/queueSchedule.ts` (or equivalent cron-schedule module — confirm at implementation time) | 5 (§8.1) | Add the hourly cron schedule entry for `rateLimitBucketCleanupJob`. |
 | `server/services/executionBudgetResolver.ts` | 5 (§8.3) | Replace `as any` on lines 71–72 with `InferSelectModel<...>` types. |
 | `server/services/dlqMonitorService.ts` | 5 (§8.3) | Replace `(boss as any).work(` on line 28 with typed wrapper. |
 | `server/jobs/bundleUtilizationJob.ts` | 5 (§8.3) | Replace `as any` on line 125 with derived correct type. |
@@ -1545,7 +1610,7 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 ### §13.4 Phase 4 DoD
 
 - [ ] `npm run skills:verify-visibility` returns 0 violations.
-- [ ] `node scripts/verify-integration-reference.mjs` runs without crashing (clean exit; any genuine findings are triaged separately).
+- [ ] `node scripts/verify-integration-reference.mjs` runs without crashing — the dependency fix unblocks the gate's execution. Any genuine findings the gate then surfaces (i.e. real violations that were hidden by the pre-fix crash) are out of scope for the dependency fix and are triaged in a separate PR per §7.2.2.
 - [ ] `npm install` runs cleanly (no missing-dep warnings; no peer-dep warnings introduced by this phase).
 - [ ] `package.json` lists `express-rate-limit`, `zod-to-json-schema`, `docx`, `mammoth` under `dependencies` and `yaml` under `devDependencies`.
 - [ ] All five `workflow_*` skill files have YAML frontmatter blocks.
@@ -1555,13 +1620,13 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 ### §13.5 Phase 5 DoD
 
 - [ ] `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line).
-- [ ] `migrations/0228_rate_limit_buckets.sql` exists and applies cleanly.
+- [ ] The Phase 5 §8.1 `rate_limit_buckets` migration (`migrations/<NNNN>_rate_limit_buckets.sql` — number assigned at PR-open time) exists and applies cleanly.
 - [ ] `server/lib/testRunRateLimit.ts` is DB-backed; `server/jobs/rateLimitBucketCleanupJob.ts` exists and is registered in pg-boss schedule.
 - [ ] All four pure-function tests in §10.1 exist and pass.
 - [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites.
 - [ ] `npm run build:server` passes.
 - [ ] Tail items (§8.4) are either resolved or appear in §14 Deferred Items with operator sign-off.
-- [ ] `npx madge --circular --extensions ts server/` reports 0 cycles (or the residual is triaged in §14).
+- [ ] `npx madge --circular --extensions ts server/` cycle count remains at the Phase 3 target (≤ 5) or lower; any residual cycles unchanged from Phase 3 are triaged in §14. Phase 5 does NOT introduce a server-cycle reduction work item — the Phase 3 root fix is the canonical reduction; cycle eradication beyond ≤ 5 is operator-led tail work.
 
 ### §13.6 Programme DoD
 
