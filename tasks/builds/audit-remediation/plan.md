@@ -776,10 +776,433 @@ None — Chunk 6 is the natural follow-on (authoritative flip). Chunk 7 (silent-
 
 ## Chunk 6 — Phase 5A PR 2: Rate limiter authoritative flip
 
+**Objective.** Remove the shadow-mode dual-evaluate scaffolding from Chunk 5; make the DB-backed `rateLimitStoreService` authoritative; remove the legacy in-memory limiter (or retain it strictly behind the `USE_DB_RATE_LIMITER=false` env-flag shim as the rollback path, never the default).
+
+**Pre-condition: Chunk 5 (PR 1) has been on `main` for at least one full operator-observed window**, with the operator confirming divergence-log volume is zero (or every observed divergence has been triaged and explained). Without this, Chunk 6 does NOT open.
+
+### a) Files to create
+
+None.
+
+### b) Files to modify
+
+- `server/lib/testRunRateLimit.ts` — remove dual-evaluate scaffolding. Body now delegates exclusively to `rateLimitStoreService` (modulo the env-flag shim). Preserve exported function signatures so the four callers need no further change.
+- `server/routes/public/formSubmission.ts` — remove dual-evaluate; replace inline `checkRateLimit` and `rateLimitMiddleware` (lines 31, 54) with calls into `rateLimitStoreService` exclusively.
+- `server/routes/public/pageTracking.ts` — remove dual-evaluate; replace inline `checkTrackRateLimit` (line 29) with calls into `rateLimitStoreService` exclusively.
+- `server/services/rateLimitStoreService.ts` — verify the `USE_DB_RATE_LIMITER=false` shim still works (the rollback path). The flag default in production is `true` (or unset → in-process Map fallback only if the env explicitly sets `false`).
+
+(Caller routes — `server/routes/agents.ts`, `server/routes/skills.ts`, `server/routes/subaccountAgents.ts`, `server/routes/subaccountSkills.ts` — already `await` from Chunk 5; no further change.)
+
+### c) Implementation steps
+
+1. **Confirm gate state.** Re-read the divergence-log evidence from the Chunk-5 window. PR description must reference it explicitly (count zero, or every observed divergence triaged with link). **If divergence count is non-zero AND not all divergences are explained, do NOT open Chunk 6** — fix the divergence cause in PR 1 (or a follow-up PR 1b) before flipping.
+
+2. **Remove dual-evaluate from `testRunRateLimit.ts`.** The function body now calls `rateLimitStoreService` only. The legacy in-memory map is removed (or kept only as the env-flag-shim fallback — never the default code path).
+
+3. **Remove dual-evaluate from `formSubmission.ts` and `pageTracking.ts`.** The inline `Map<string, number[]>` rate-limit code is deleted; calls into `rateLimitStoreService` are now the only path. Preserve threshold constants but move them to call-site arguments rather than inline globals.
+
+4. **Verify env-flag shim works in BOTH directions.** Locally:
+   - Default / `USE_DB_RATE_LIMITER=true` → DB-backed path; rate-limit-bucket rows accumulate.
+   - `USE_DB_RATE_LIMITER=false` → in-memory shim path; no DB writes; no exception thrown.
+
+5. **Manual smoke check.** Spin up the server with `USE_DB_RATE_LIMITER=true`. Hit a public form path enough times to trigger throttling. Confirm:
+   - DB rows accumulate in `rate_limit_buckets`.
+   - The route returns `429` (or whatever the existing threshold response is) at the same call count the in-memory limiter would have.
+   - The cleanup job runs hourly (or invoke once manually via pg-boss admin to confirm the DELETE works).
+
+6. **Run targeted tests:**
+
+   ```bash
+   npx tsx server/services/__tests__/rateLimitStoreService.test.ts
+   npx tsx server/lib/__tests__/testRunRateLimit.test.ts
+   npm run build:server
+   ```
+
+7. **PR description (mandatory).** Reference the Chunk-5 divergence-log evidence (the operator-observed window summary). Explicitly note: "Divergence count = 0 (or N triaged divergences listed below). Authoritative flip approved by operator on <date>."
+
+### d) Verification commands
+
+```bash
+npx tsx server/services/__tests__/rateLimitStoreService.test.ts
+npx tsx server/lib/__tests__/testRunRateLimit.test.ts
+npm run build:server
+```
+
+Plus the rollback drill — set `USE_DB_RATE_LIMITER=false`, restart the server, hit the rate-limited path, confirm in-memory shim takes over without exceptions and without loss of throttling.
+
+### e) Definition of done (the §8.1-PR-2-specific items from spec §13.5A)
+
+- [ ] Dual-evaluate scaffolding removed from `testRunRateLimit.ts`, `formSubmission.ts`, `pageTracking.ts`.
+- [ ] DB-backed store is authoritative; in-memory limiter is retained ONLY behind the `USE_DB_RATE_LIMITER=false` env-flag shim as the rollback path.
+- [ ] PR description references PR-1 divergence-log evidence (divergence count zero or every divergence triaged and explained).
+- [ ] `rateLimitBucketCleanupJob` registered (already done in Chunk 5; verify still wired).
+- [ ] Both pure-function test files pass.
+- [ ] `npm run build:server` passes.
+- [ ] Manual rollback drill confirms `USE_DB_RATE_LIMITER=false` cleanly returns control to the in-memory shim without exceptions.
+
+### f) Rollback runbook (from spec §11.2)
+
+If the DB-backed limiter causes a regression after Chunk 6 lands:
+
+1. Set `USE_DB_RATE_LIMITER=false` in the affected environment.
+2. Restart workers — the in-memory shim resumes immediately; `rate_limit_buckets` accumulates no new rows but is NOT dropped (flip the flag back to re-enable without a migration).
+3. Document the toggle in the migration header so operators can find it under incident pressure.
+
+**Trigger conditions** (from spec §11.2 — operator judgement; bias is "flip first, diagnose after"):
+
+- DB error from rate-limit-bucket writes observed for > 5 minutes during smoke testing.
+- Form-submission latency regression observed during smoke or first-customer rollout.
+- Allow/deny anomaly (legitimate traffic blocked or obvious abuse pattern admitted) post-flip.
+- DB connection-pool saturation events tracing back to `rate_limit_buckets` writes.
+
+### g) Deferred items (related to this chunk)
+
+None.
+
+---
+
 ## Chunk 7 — Phase 5A §8.2: Silent-failure path closure
+
+**Objective.** `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line). Every silent-error path is either fixed (logs or rethrows) or explicitly baselined as an intentional fire-and-forget pattern with a one-line rationale.
+
+**Independence.** This chunk is independent of Chunks 5/6 — open it in any order after Chunk 4 ships.
+
+### a) Files to create
+
+None.
+
+### b) Files to modify
+
+The exact file list is enumerated by re-running the gate at the start of this chunk (the captured-state output from spec authoring time names no specific files). Expect:
+- A small number of `try { … } catch { /* nothing */ }` or `.catch(() => undefined)` sites that need a log line or rethrow.
+- A small number of intentional fire-and-forget patterns that need a `# baseline-allow` directive at the line with a one-line rationale.
+
+### c) Implementation steps
+
+1. **Re-run the gate with verbose output:**
+
+   ```bash
+   bash scripts/verify-no-silent-failures.sh --verbose 2>&1 | tee /tmp/silent-failures.log
+   ```
+
+   If `--verbose` is not supported, modify the gate script in-place to print each match (revert before merge OR land the verbose flag as a tiny separate PR ahead of this chunk).
+
+2. **For each named site, classify and act:**
+
+   - **Genuinely silent** (no log, no rethrow, no metric):
+     - Add `console.warn(JSON.stringify({event: 'silent_failure_caught', file: __filename, error: err.message}))` OR rethrow as `FailureError` per `shared/iee/failure.ts` (the canonical primitive).
+   - **Intentional fire-and-forget** (e.g. soft-breaker, telemetry pings):
+     - Add a `# baseline-allow` directive at the line with a comment explaining why dropping the error is correct. Per spec §2.4, this carve-out is permitted on warning-level gates only.
+   - **False positive** (gate regex misclassifies a non-empty catch):
+     - Add the `# baseline-allow` directive with a comment.
+
+3. **Land in one PR.** The number of sites is bounded (gate runs in O(seconds)); enumerate every match, classify each, fix mechanically.
+
+4. **Re-run the gate:**
+
+   ```bash
+   bash scripts/verify-no-silent-failures.sh
+   ```
+
+   Expect: clean (no `WARNING` line). If the gate's exit code is the source of truth, prefer that. If the WARNING text is informational only, agree with the operator on a clean-pass criterion before merge.
+
+5. **Build:**
+
+   ```bash
+   npm run build:server
+   ```
+
+### d) Verification commands
+
+```bash
+bash scripts/verify-no-silent-failures.sh
+npm run build:server
+```
+
+### e) Definition of done (subset of spec §13.5A)
+
+- [ ] `bash scripts/verify-no-silent-failures.sh` returns clean (no `WARNING` line).
+- [ ] Every classified site is either fixed (log or rethrow) or has a `# baseline-allow` directive with a one-line rationale.
+- [ ] `npm run build:server` passes.
+
+### f) Deferred items (related to this chunk)
+
+None — closure is the goal.
+
+---
 
 ## Chunk 8 — Phase 5B: Optional backlog
 
+**Objective.** Targeted type strengthening (§8.3) and tail items (§8.4). **NOT a programme blocker.** Each item ships as its own small PR in any order, any sprint. An item is "done" when it has either landed on `main` with passing typecheck OR appears in `§14 Deferred Items` with operator sign-off.
+
+**Independence.** Phase 5B may begin once Phase 4 (Chunk 4) ships, independent of Phase 5A. PRs are individually small and revertible.
+
+### a) Files to create
+
+| File | Purpose |
+|---|---|
+| `shared/types/agentRunHandoff.ts` | New home for `AgentRunHandoffV1`. Schema-leaf tail item. (§8.4) |
+| `shared/types/skillAnalyzerJob.ts` | New home for `SkillAnalyzerJobStatus`. Schema-leaf tail item. (§8.4) |
+| `migrations/<NNNN>_drop_tool_calls_log.sql` (CONDITIONAL) | Drops deprecated `agent_run_snapshots.toolCallsLog` column. Skipped if Sprint 3B owns the removal. Number assigned at merge time per spec §2.5. (§8.4 P3-M6) |
+| `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts` | Pure-function tests for depth ≤ 5 invariant + degraded-fallback. (§8.4 P3-M8 + P3-M9) |
+| `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts` | Pure-function test for `is_test_run = true` cost-ledger exclusion. (§8.4 P3-L9) |
+
+### b) Files to modify
+
+**§8.3 — Targeted type strengthening (each its own small PR):**
+
+- `server/services/executionBudgetResolver.ts` (lines 71–72) — replace `platformRow as any`, `orgRow as any` with `InferSelectModel<typeof platformBudgets>` / `InferSelectModel<typeof orgBudgets>` (or actual table names — confirm with the file). (P3-M4)
+- `server/services/dlqMonitorService.ts` (line 28) — replace `(boss as any).work(` with a typed wrapper. If `boss.work` is missing from `pg-boss` type stubs, file an upstream issue and add a one-line type assertion via a narrowly-scoped helper (`typedBossWork(boss, …)`) with a comment naming the upstream issue. (P3-M5)
+- `server/jobs/bundleUtilizationJob.ts` (line 125) — derive correct type for `utilizationByModelFamily`. Likely `Record<SupportedModelFamily, UtilizationStat>` — confirm against producer site. Remove `as any`. (P3-L7)
+
+**§8.3 deferred (conditional):**
+
+- `server/services/cachedContextOrchestrator.ts` (7 sites) — DEFERRED to §14 unless operator pre-commits. Strengthening requires understanding the full discriminated-union shape from PR #183; ship only when next touching this file for an unrelated reason. (P3-M3)
+
+**§8.4 — Tail items (each its own small PR; SOME are conditional):**
+
+- `server/db/schema/agentRuns.ts` (line 3) — change import from `'../../services/agentRunHandoffServicePure'` to `'../../../shared/types/agentRunHandoff.js'`. Schema-leaf tail item.
+- `server/db/schema/skillAnalyzerJobs.ts` (line 15) — change import from `'../../services/skillAnalyzerServicePure.js'` to `'../../../shared/types/skillAnalyzerJob.js'`. Schema-leaf tail item.
+- `server/services/agentRunHandoffServicePure.ts` — replace `AgentRunHandoffV1` definition with `export type { AgentRunHandoffV1 } from '../../shared/types/agentRunHandoff.js'` re-export.
+- `server/services/skillAnalyzerServicePure.ts` — replace `SkillAnalyzerJobStatus` definition with `export type { SkillAnalyzerJobStatus } from '../../shared/types/skillAnalyzerJob.js'` re-export.
+- `server/db/schema/agentRunSnapshots.ts` (CONDITIONAL — P3-M6) — drop the `toolCallsLog` column declaration if Sprint 3B is no-longer-in-flight. Confirm with operator; check `tasks/current-focus.md` and `tasks/todo.md`. **If 3B is still active, skip this edit.**
+- `server/services/staleRunCleanupService.ts` (CONDITIONAL — P3-L3) — remove `LEGACY_STALE_THRESHOLD_MS` legacy branch IF a one-off prod query confirms zero `agent_runs` rows have `lastActivityAt IS NULL`. If prod access is unavailable, defer to §14.
+- `server/config/actionRegistry.ts` (lines 1342, 1428, 1577) — convert/remove three "auto-gated stubs" comments per P3-L4. Either:
+  - Convert each comment block into a `tasks/todo.md` entry under "agent stub implementation" and remove the inline comment; OR
+  - Verify the actions in question have correct gating and remove the "stub" label without changing behaviour.
+- `client/src/components/agentRunLog/EventRow.tsx` (P3-L5) — trace consumers of the `SetupConnectionRequest` export. If used outside the component, move to `shared/types/`. If unused, delete.
+- `client/src/components/ScheduleCalendar.tsx` (P3-L6) — same disposition for `ScheduleCalendarResponse`.
+
+### c) Implementation steps
+
+Each item is its own small PR. Choose an order based on whichever is most convenient.
+
+**For §8.3 — targeted type strengthening (3 in-scope items + 1 deferred):**
+
+1. **P3-M4 — `executionBudgetResolver.ts:71-72`.** Read the file; identify the actual table names; replace `as any` with `InferSelectModel<typeof <table>>` from `drizzle-orm`. Standard Drizzle narrowing. Confirm `npm run build:server` passes.
+
+2. **P3-M5 — `dlqMonitorService.ts:28`.** Read the `pg-boss` type stubs to confirm whether `boss.work` is missing. If yes: write a narrow helper `typedBossWork(boss, …)` with the type assertion + an inline comment naming the upstream issue. Otherwise: replace with the typed signature directly.
+
+3. **P3-L7 — `bundleUtilizationJob.ts:125`.** Read the producer site to confirm the exact type. Likely `Record<SupportedModelFamily, UtilizationStat>`. Remove `as any`.
+
+4. **P3-M3 — DEFERRED.** Land in `tasks/todo.md` under `## PR Review deferred items` if not already there, or confirm it is in §14 of the spec.
+
+**For §8.4 — tail items (each its own small PR):**
+
+5. **Schema-leaf tail items — `agentRuns.ts:3` and `skillAnalyzerJobs.ts:15`.** Mirror the §6.1 pattern from Chunk 3:
+   - Create `shared/types/agentRunHandoff.ts`. Move `AgentRunHandoffV1` verbatim (preserving JSDoc).
+   - Update `server/services/agentRunHandoffServicePure.ts` to re-export.
+   - Update `server/db/schema/agentRuns.ts:3` to import from `shared/types/agentRunHandoff.js`.
+   - Repeat for `SkillAnalyzerJobStatus` → `shared/types/skillAnalyzerJob.ts`.
+   - Run `npx madge --circular --extensions ts server/ | wc -l` after both items land — expect **0**. (Spec §13.5A — Phase 5A DoD requires the server cycle count = 0; the two schema-leaf tail items are the remaining cycles after Chunk 3.)
+
+6. **P3-M6 — `toolCallsLog` column drop (CONDITIONAL).**
+   - Confirm Sprint 3B status with the operator (check `tasks/current-focus.md` and `tasks/todo.md`).
+   - If Sprint 3B is no-longer-in-flight: write `migrations/<NNNN>_drop_tool_calls_log.sql` (number assigned at merge time per spec §2.5). Drop the column. Update `server/db/schema/agentRunSnapshots.ts` to remove the declaration. Remove any code that reads from or writes to `toolCallsLog` — should be none after 3B's `toolCallsLogProjectionService` deprecation; verify.
+   - If Sprint 3B is still active: defer to §14 as "owned by Sprint 3B".
+
+7. **P3-M7 follow-on — Remaining `clientpulse/` cycles.** After Chunk 3 ships, run `npx madge --circular --extensions ts,tsx client/src/components/clientpulse/` to find any tail cycles. Ship in this Phase 5B PR if any remain.
+
+8. **P3-M8 — Agent handoff depth ≤ 5 invariant test.** Add `server/services/__tests__/agentRunHandoffService.handoffDepth.test.ts`. Pure-function exercise the depth check directly without DB. Asserts depth > 5 rejects; ≤ 5 accepts; correct error shape.
+
+9. **P3-M9 — Degraded fallback path test.** Add to the same file or a sibling — pure-function exercise: feed the resolver a "no active lead" state, assert the fallback is taken.
+
+10. **P3-L2 — `server/routes/ghl.ts` Module C OAuth stubs.** DEFERRED to §14 unless operator wants to track them as a near-term feature item. These are missing implementation, not cleanup.
+
+11. **P3-L3 — `staleRunCleanupService` legacy threshold (CONDITIONAL).** Run a one-off DB count query against production: `SELECT count(*) FROM agent_runs WHERE last_activity_at IS NULL;`. If zero, remove the `LEGACY_STALE_THRESHOLD_MS` branch and the constant. If non-zero or prod access unavailable, defer to §14.
+
+12. **P3-L4 — `actionRegistry.ts` "stub" comments at lines 1342, 1428, 1577.** Per the file-modify entry. Convert to backlog OR remove labels. The underlying agents (Support, Ads Management, Email Outreach) are tracked as feature work in `tasks/todo.md` and are NOT shipped here.
+
+13. **P3-L5 — `EventRow.tsx` `SetupConnectionRequest`.** Trace consumers. Move to `shared/types/` if used externally; delete if unused.
+
+14. **P3-L6 — `ScheduleCalendar.tsx` `ScheduleCalendarResponse`.** Same disposition.
+
+15. **P3-L9 — Test-run cost-ledger exclusion test.** Add `server/lib/__tests__/runCostBreaker.testRunExclusion.test.ts`. Pure-function test asserts `is_test_run = true` rows are excluded from the cost-ledger sum.
+
+16. **P3-L10 — Prompt prefix caching coverage.** DEFERRED to §14. Requires a live Langfuse trace; out of scope for static-gates posture.
+
+### d) Verification commands
+
+For each landed Phase 5B PR:
+
+```bash
+npm run build:server
+npx tsx <path-to-the-new-test-file>   # if the PR adds a test
+```
+
+After both schema-leaf tail items land:
+
+```bash
+npx madge --circular --extensions ts server/ | wc -l   # expect 0 (Phase 5A DoD)
+```
+
+### e) Definition of done (verbatim from spec §13.5B)
+
+- [ ] All §8.3 type-strengthening edits (M4, M5, L7) have landed — `as any` removed from the named call-sites; OR each appears in §14 Deferred Items with operator sign-off.
+- [ ] All §8.4 tail items are either resolved or appear in §14 Deferred Items with operator sign-off.
+- [ ] Three remaining pure-function tests from §10.1 exist and pass (`agentRunHandoffService.handoffDepth` — depth-check + degraded-fallback in the same file, `runCostBreaker.testRunExclusion`); OR deferred with operator sign-off.
+- [ ] `npm run build:server` passes for any Phase 5B PRs that land.
+- [ ] (From spec §13.5A — programme cycle target) `npx madge --circular --extensions ts server/` cycle count = **0**. The two schema-leaf tail items must either have landed in Phase 5A/5B PRs or appear in §14 Deferred Items with the residual cycle count documented.
+
+### f) Deferred items (related to this chunk — from spec §14)
+
+- **P3-M3** (`cachedContextOrchestrator.ts`) — defer until next touched for unrelated reason.
+- **P3-L2** (`ghl.ts` Module C OAuth stubs) — feature work, not cleanup; tracked in `tasks/todo.md`.
+- **P3-L3** (`staleRunCleanupService` legacy threshold) — conditional on prod-data access.
+- **P3-L10** (prompt prefix caching coverage) — observability backlog.
+- **P3-L4 (partial)** (auto-gated-stubs underlying agents) — feature work; comment cleanup is in scope.
+- **Sprint 3B `toolCallsLog` removal (CONDITIONAL)** — defers to Sprint 3B if active.
+
+The audit-remediation programme as a whole is "complete" when Phase 5A is satisfied and every §8.3/§8.4 item is either landed or formally deferred (per spec §8.5B and §13.6).
+
+---
+
 ## Cross-chunk dependencies
 
+The dependency graph mirrors spec §3.2:
+
+```
+Chunk 1 (Phase 1 — RLS hardening)
+   │  ship gate: 5 RLS gates green on `main`
+   ▼
+Chunk 2 (Phase 2 — Gate compliance)
+   │  ship gate: 6 architectural-contract gates green on `main`
+   ▼
+Chunk 3 (Phase 3 — Architectural integrity)
+   │  ship gate: server cycles ≤ 5; client cycles ≤ 1
+   ▼
+Chunk 4 (Phase 4 — System consistency)
+   │  ship gate: skills-visibility green; integration-reference clean; npm install clean; capabilities edit applied
+   │
+   ├──> Chunk 5 (Phase 5A PR 1 — Rate limiter shadow mode)
+   │      │  ship gate: shadow-mode dual-evaluate live; in-memory authoritative; divergence-log emission verified
+   │      │  pre-condition: at least one full operator-observed window on `main`
+   │      ▼
+   │   Chunk 6 (Phase 5A PR 2 — Rate limiter authoritative flip)
+   │      │  ship gate: DB-backed authoritative; PR-1 divergence-log evidence cited; rollback drill confirmed
+   │      ▼
+   │
+   ├──> Chunk 7 (Phase 5A — Silent-failure path closure) — INDEPENDENT of Chunks 5/6
+   │      │  ship gate: verify-no-silent-failures clean
+   │
+   └──> Chunk 8 (Phase 5B — Optional backlog) — INDEPENDENT, multiple PRs in any order
+          │  no single ship gate; per-item DoD; programme completes when all items landed or deferred
+```
+
+**Strict rules (from spec §2.1, §13.6):**
+
+- Chunk N+1 may NOT begin (branch open) until Chunk N has merged AND its ship gate is green on `main`.
+- Chunks 5 → 6 are sequenced: Chunk 6 cannot open until Chunk 5 has been on `main` for at least one full operator-observed window with divergence count zero (or every observed divergence triaged).
+- Chunks 5/6 (rate limiter) and Chunk 7 (silent-failure) and Chunk 8 (Phase 5B) are mutually independent — they may overlap in calendar time once their respective predecessors have shipped.
+- The programme is COMPLETE when Phase 5A (Chunks 5, 6, 7) is satisfied AND every §8.3/§8.4 Phase 5B item is either landed or appears in spec §14 Deferred Items with operator sign-off.
+
+**Phase ordering rationale (from spec §2.1):**
+
+- Phase 1 closes the largest blast-radius bugs (cross-tenant leakage). Until those are closed, no other work is safer.
+- Phase 1A migration is a prerequisite for Phase 1B/C — refactoring routes to call services that hit RLS-protected tables requires the policies to exist.
+- Phase 3's circular-dep fix touches `server/db/schema/**` files which Phase 1B/C will already have refactored against. Inverting the order would force re-touch.
+- Phase 2 →  Phase 3 because §5.4's principal-context propagation touches the same canonical-data-service-importing files; doing the cycle fix first would force re-touch of the type extraction.
+
+---
+
 ## Executor notes
+
+Read these BEFORE touching any file in this build. They are non-negotiable invariants for the entire programme.
+
+### Hard rules
+
+1. **`app.organisation_id` is the ONLY canonical org session var.** It is set by `server/middleware/auth.ts` (HTTP path) and `server/lib/createWorker.ts` (worker path). The phantom var `app.current_organisation_id` is **never set anywhere**; using it in policy text causes `current_setting(..., true)` to return `NULL`, which fails open in some contexts. Every policy in `migrations/0227` uses `app.organisation_id` only. Enforced by `scripts/verify-rls-session-var-canon.sh`.
+
+2. **Migrations are append-only.** Never edit a historical migration's policy text or schema (apart from the surgical `@rls-baseline:` annotation comment in Chunk 1 1E, which is documentation only — it does not modify any schema state). Every schema-state correction ships as a NEW migration. Filename pattern: `migrations/<NNNN>_<descriptive_name>.sql`.
+
+3. **Migration-number assignment rule (concurrent-PR safety — spec §2.5):** when a PR introduces a migration with a placeholder filename (e.g. `migrations/<NNNN>_rate_limit_buckets.sql`), the actual number is **assigned at merge time, not at PR-open time**. The implementer rebases against the latest `main` immediately before merge and renames the migration file to claim the next available number. **Do NOT pre-allocate migration numbers across Phase 5 PRs.** Chunk 1's `0227` is the ONLY pre-allocated migration number in this programme, because Phase 1 is the first PR to merge.
+
+4. **`server/db/schema/**` is a leaf.** Schema files import only from `drizzle-orm`, `drizzle-orm/pg-core`, sibling schema files, or `shared/**`. They do NOT import from `server/services/**`, `server/lib/**`, `server/middleware/**`, `server/routes/**`, or `server/jobs/**`. This is what Chunk 3's type extraction is fixing for `agentRunSnapshots.ts`; the other two violators (`agentRuns.ts:3`, `skillAnalyzerJobs.ts:15`) close in Chunk 8.
+
+5. **Phase ordering is strict.** Do NOT begin Phase N+1 until Phase N's ship gate is green on `main`. Per spec §2.1 and §2.4 — gates are the source of truth. CI enforcement is non-bypassable: gates must run in CI and block merge.
+
+6. **Phase 5A is a programme blocker. Phase 5B is optional.** Chunks 5, 6, 7 must all land for the programme to be declared complete. Chunk 8 items may individually land OR be formally deferred to spec §14 with operator sign-off.
+
+7. **Routes never own DB access.** `server/routes/**` calls `server/services/**`. `server/lib/**` either calls services or wraps `withAdminConnection()` — it does NOT import `db` directly. Enforced by `scripts/verify-rls-contract-compliance.sh`.
+
+8. **Service-layer expansion constraint (spec §2.8 — applies in Chunk 1 1B):** new service files are mechanical relocations only. A new service is justified ONLY when (a) the route has > 1 DB interaction OR (b) the service logic is reused by > 1 route. Otherwise the handler's single DB call stays inline in the route with `withOrgTx(req.orgId, …)` directly. **Max 1 service per domain.**
+
+9. **`canonicalDataService` is read-only — no side effects (spec §15.2):** never writes, never triggers background work, never mutates cache. Phase 2 §5.2's new method (if added) is a read-only check. Writes to canonical tables go through the table's owning service, not `canonicalDataService`.
+
+10. **`docs/capabilities.md` is governed by editorial law (Chunk 4 §7.3):** customer-facing sections never name a specific LLM/AI provider or product. Editorial fixes are operator-led — never auto-rewritten by an agent. Per spec §2.7.
+
+### Existing primitives — use these, do not reinvent
+
+Per `prefer_existing_primitives_over_new_ones: yes` in `docs/spec-context.md`:
+
+- **`withOrgTx(organisationId, fn)`** — `server/instrumentation.ts`. Org-scoped query path; sets `app.organisation_id` for RLS.
+- **`getOrgScopedDb()`** — `server/lib/orgScopedDb.ts`. Org-scoped DB handle.
+- **`withAdminConnection(fn)`** — `server/lib/adminDbConnection.ts`. Admin / system path; bypasses RLS by design.
+- **`withPrincipalContext(principal, fn)`** — sets `app.organisation_id` + `app.current_subaccount_id` from a `PrincipalContext`.
+- **`fromOrgId(orgId, subaccountId?)`** — `server/services/principal/fromOrgId.ts`. Migration shim that synthesises a basic `PrincipalContext` from a legacy org-scoped call signature. Acceptable during the P3A→P3B migration window. Used in Chunk 2 §5.4.
+- **`resolveSubaccount(subaccountId, orgId)`** — `server/lib/resolveSubaccount.ts`. Validates subaccount belongs to the org; throws 404 if not. Use in every route that takes `:subaccountId`. Used in Chunk 1 1D.
+- **`asyncHandler(fn)`** — `server/lib/asyncHandler.ts`. Wraps async route handlers; catches service errors. Routes never write manual try/catch.
+- **`canonicalDataService`** — `server/services/canonicalDataService.ts`. Read-only abstraction over `canonical_*` tables. Used in Chunk 2 §5.2.
+- **`llmRouter.routeCall()`** — `server/services/llmRouter.ts`. All LLM calls route through here; cost attribution depends on it. Chunk 2 §5.3 adds a `countTokens` method.
+- **`RLS_PROTECTED_TABLES` manifest** — `server/config/rlsProtectedTables.ts`. Single source of truth for tenant-isolated tables. New tenant tables MUST be added in the same migration that creates them. The `rate_limit_buckets` table in Chunk 5 is intentionally NOT in this manifest (system-scoped, no `organisation_id`).
+- **`RLS canonical policy shape`** — see spec §9.1. Verbatim-required form for every `CREATE POLICY` in `migrations/0227`.
+
+### Test-runner convention
+
+Per the repo's pure-function-test posture, individual tests are run directly with `npx tsx <test-file-path>` — `scripts/run-all-unit-tests.sh` ignores `--` filter arguments and runs every discovered test. Use direct paths in spec verification steps so the documented commands are executable as written.
+
+No new vitest / jest / playwright / supertest tests. New runtime tests are pure-function-only (Chunks 5 and 8).
+
+### Branch and PR hygiene
+
+- Each chunk gets its own branch off `main`. Branch naming: `audit-remediation/chunk-<N>-<slug>`.
+- PR titles are descriptive (e.g. "Phase 1 — RLS hardening (audit remediation)"), and PR descriptions reference the corresponding spec section(s).
+- Per-PR: `pr-reviewer` runs before merge; `spec-conformance` runs first since this is spec-driven work; deferred items route to `tasks/todo.md`.
+- Commits within a chunk should be small and reviewable. The corrective migration in Chunk 1 lands in the same commit set as the route refactors that exercise it (per spec §4 header — in-PR ordering rule).
+- Update `tasks/builds/audit-remediation/progress.md` as each chunk lands. Update `tasks/current-focus.md` when transitioning between chunks.
+
+### Per-chunk reviewer command sequence
+
+For each chunk, after implementation completes locally:
+
+```bash
+# 1) Spec conformance (auto-detects spec, auto-fixes mechanical gaps)
+"spec-conformance: verify the current branch against its spec"
+
+# 2) PR review (after spec-conformance is CONFORMANT or after applying any mechanical fixes it routed)
+"pr-reviewer: review the changes I just made"
+
+# 3) (Optional, only if user explicitly asks) Codex pass — local-dev only
+"dual-reviewer: [brief description]"
+```
+
+Persist `pr-reviewer` output to `tasks/review-logs/pr-review-log-audit-remediation-chunk-<N>-<timestamp>.md` BEFORE fixing any findings (per CLAUDE.md).
+
+### Common-failure runbook
+
+Per spec §11.2, if a phase's ship gate stays red:
+
+- **Phase 1 — `verify-rls-coverage` red:** confirm `0227` actually ran (check `_migrations` table). Re-run the migration locally and re-check.
+- **Phase 1 — `verify-rls-contract-compliance` red:** a `db` import was missed by the grep. Run `grep -rn "from.*db/index" server/routes/ server/lib/` to enumerate any remaining direct imports.
+- **Phase 1 — `verify-rls-session-var-canon` red after baseline update:** the baseline file allowlist is missing an entry; compare violation set to allowlist and add any missing files.
+- **Phase 2 — new `verify-no-direct-adapter-calls` violation:** drift from parallel work. Fix in the same PR.
+- **Phase 2 — `verify-skill-read-paths` count moved but still off:** the count diff names missing entries; mirror the suggested fix per entry.
+- **Phase 3 — `madge --circular` count rises after extraction:** check that `middleware/types.ts` re-exports the four types, and that no service file imports BOTH from `shared/types/` AND from `middleware/types` (would create a phantom re-import).
+- **Phase 4 — `npm install` peer-dep warning:** run `npm ls <dep>` for each new dep. The pre-existing `@tiptap/pm` situation is unrelated — do not touch.
+- **Phase 5A — `verify-no-silent-failures` stays WARNING after fix pass:** a `catch` block added during the fix swallows. Rethrow or add a log line.
+- **Phase 5A — Rate limiter regression after Chunk 6 flip:** set `USE_DB_RATE_LIMITER=false`, restart workers, the in-memory shim resumes immediately. See spec §11.2 for trigger conditions.
+
+### Documentation hygiene
+
+Per CLAUDE.md §11 (Docs Stay In Sync With Code): if any chunk changes behaviour or structure described in `architecture.md`, `KNOWLEDGE.md`, or skill references, update those files in the same commit as the code change. Specifically:
+
+- Chunk 1: confirm `architecture.md` "Row-Level Security — Three-Layer Fail-Closed Data Isolation" + "Canonical RLS session variables (hard rule)" subsections still match the gate behaviour after the §4.5 baseline mechanism update.
+- Chunk 3: no architecture-doc edits expected — schema-leaf rule is already documented.
+- Chunk 4: capabilities.md edit is the only doc change.
+- Chunk 5/6: document the `USE_DB_RATE_LIMITER` env flag in the migration header (spec §11.2) and in any operator runbook the codebase carries.
+- Programme completion: per spec §13.6, add a retro entry to `KNOWLEDGE.md` summarising what shipped, what deferred, and what changed in the gate baselines.
+
+---
+
+## End of plan
+
