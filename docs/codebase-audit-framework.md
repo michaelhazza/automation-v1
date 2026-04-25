@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 — AutomationOS calibration of generic v5.0 |
+| Version | 1.1 — Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary clause, invariant-in-code clause (1.0: 2026-04-25 initial calibration from generic v5.0) |
 | Status | Active. Reusable across audits. |
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
@@ -17,6 +17,27 @@
 ## How to use this document
 
 This is a runnable framework. Treat each section as the source of truth for that step of an audit. The audit itself is run from the main Claude Code session (this very session, in a future invocation), delegating reconnaissance to `Explore`, individual cleanup areas to focused subagents, and final review to the existing `pr-reviewer` / `spec-conformance` / `dual-reviewer` pipeline. Layer 1 is structural cleanup. Layer 2 is release-gate quality. Every audit run produces a durable log under `tasks/review-logs/` and updates `KNOWLEDGE.md` with patterns learnt.
+
+---
+
+## Scope Guard
+
+**This framework is intentionally constrained. Resist expansion.**
+
+Do not add new rules, modules, areas, or scoring systems to this document unless **both** of the following are true:
+
+1. A real audit run exposed a concrete gap that this framework's existing rules and modules failed to catch.
+2. That gap cannot be addressed by tightening existing rules, modules, or the AutomationOS context block in §2.
+
+**Default action when in doubt: reuse an existing rule. Do not introduce a new one.**
+
+Why this matters: every additional rule increases noise, dilutes attention on the rules that catch real failures, and pushes future agents toward checklist-following instead of judgement. The framework is at its useful equilibrium at v1.x. A future v2 should require evidence — not aspiration.
+
+**Do not add:** more numbered rules, more scoring axes, more modules in either layer, more report-template fields, more "AI-specific enhancements". The three layers of control (this framework + CI gates in `scripts/gates/*.sh` + review agents in `.claude/agents/`) already cover the codebase. Additions go into the existing layers, not into a new fourth one.
+
+**Do add:** sharper triggers inside an existing rule, new entries to the §4 Protected Files list as the codebase evolves, refreshed §2 context-block facts when the stack changes, and `KNOWLEDGE.md` entries linked from §10 when an audit catches a recurring pattern.
+
+When tempted to expand, write a `KNOWLEDGE.md` entry instead.
 
 ---
 
@@ -194,6 +215,8 @@ After each area in pass 2, run all of the following and record exact commands an
 | QA tests | `npm run test:qa` | Run before release-gate audits or if QA-covered paths changed |
 | Skill visibility | `npm run skills:verify-visibility` | Run if `server/skills/`, `server/config/actionRegistry.ts`, or visibility rules changed |
 | Playbooks | `npm run playbooks:validate` | Run if `server/lib/workflow/` or playbook configs changed |
+
+**No silent skips.** No validation step may be skipped. If a command is genuinely not applicable to the changes in this area, mark it `N/A` in the report with a one-line reason (e.g. "N/A — no client/ files changed" for `npm run build:client`). An unmarked omission is treated as a failure. The point of the validation table is to make every check decision explicit and auditable.
 
 Lint is **not** a separate step — there is no `lint` script. Style and naming are enforced by gate scripts and review.
 
@@ -1001,6 +1024,8 @@ These modules cover the highest-blast-radius concerns specific to AutomationOS. 
 - Test runs (`is_test_run = true`) excluded from usage aggregates and cost ceilings.
 - Three-tier agent runs honour exactly-one-active-lead-per-subaccount via atomic swap, not last-writer-wins.
 
+**Idempotency must be proven against real storage boundaries — never inferred from in-memory logic.** "This function looks idempotent" is not evidence. Acceptable evidence: the database has a unique constraint on the dedup key; the pg-boss job table records the idempotency key and rejects duplicates at insert time; the webhook dedup table writes-then-checks; an integration test exercises the retry path against a real DB and asserts no duplicate side effect. If the only argument for idempotency is "it reads correctly", route to pass 3.
+
 **Output.** Any idempotency or dedup gap is `critical` severity. Per Rule 14, never `confidence: high` for changes that touch this surface.
 
 ---
@@ -1027,6 +1052,8 @@ These modules cover the highest-blast-radius concerns specific to AutomationOS. 
 - Read `architecture.md` § AI Agent System and `docs/capabilities.md` § AI Agent System. Pick 5 invariants and trace them through the code.
 - Inspect `server/services/agentExecutionService*.ts`, `server/lib/agentRunVisibility.ts`, `server/lib/agentRunPermissionContext.ts`, `server/db/schema/agents.ts`, `server/db/schema/subaccountAgents.ts`.
 - For each invariant, confirm at least one path-specific test (or trajectory test) exists. If none, route to `tasks/todo.md` for test addition.
+
+**No invariant may be enforced purely by convention. Every invariant must be enforced in code or schema.** "We always do X" is convention. "The schema rejects rows where X is violated" is enforcement. "Every code path that could break X calls a single validator that throws" is enforcement. If an invariant relies on developers remembering to do the right thing, it is already broken — flag it, route to pass 3, and recommend either a schema constraint, a single chokepoint validator, or a CI gate in `scripts/gates/`.
 
 **Output.** Invariant violations are `critical`. Refactors that touch agent execution are never `confidence: high` (Rule 13).
 
@@ -1379,6 +1406,22 @@ This is the canonical tool list for audit work in this repo. Tools that are not 
 
 ## 13. Running an audit — operational guide
 
+### Audit Modes
+
+Most audits in practice will not be full-codebase sweeps. Pick the smallest mode that covers the concern.
+
+| Mode | Scope | When to use | Layers / modules |
+|---|---|---|---|
+| **Full Audit** | Whole codebase | Quarterly, pre-major-release, post-incident health check | All Layer 1 areas + selected Layer 2 modules (always Modules I, J, K) |
+| **Targeted Audit** | A named set of areas or modules | A specific concern is on the table (e.g. "I want a type-strengthening pass" or "verify webhook signing") | One or more Layer 1 areas, or one or more Layer 2 modules |
+| **Hotspot Audit** | A single subsystem | A specific subsystem feels gnarly or recently shipped a defect (e.g. agent execution, RLS, skills, webhooks, jobs) | The relevant Layer 2 module(s) plus only the Layer 1 areas needed to clean that subsystem |
+
+**All modes still follow Universal Rules 1–15.** Scope is constrained, not the rules. Pass 1 / pass 2 / pass 3 still apply. `pr-reviewer` is still mandatory before declaring complete. Validation (Rule 6) still runs on the changed surface — but checks not relevant to that surface are explicitly marked `N/A` per the no-silent-skips clause.
+
+**Default to Hotspot Audit unless you have a reason to go wider.** Most production failures are subsystem-shaped, not codebase-shaped. A weekly Hotspot pass on whichever subsystem feels riskiest is more useful than a quarterly Full Audit that nobody finishes.
+
+Record the chosen mode in the audit report header (`Layers run` field of §11 template).
+
 ### When to run
 
 - **Periodic** — quarterly, or after a major feature phase ships.
@@ -1434,5 +1477,5 @@ The audit is a tool for protecting the codebase. Better to escalate than to ship
 
 ---
 
-*AutomationOS Codebase Audit Framework v1.0 — calibrated 2026-04-25 from generic v5.0. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
+*AutomationOS Codebase Audit Framework v1.1 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code) added 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
 
