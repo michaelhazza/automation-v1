@@ -9,6 +9,7 @@
 **Timestamp:** 2026-04-25T13:10:00Z
 **Codex CLI:** `codex review` v0.118.0, model `gpt-5.4`, sandbox read-only
 **Adjudication inputs:** `CLAUDE.md`, `architecture.md`, prior `pr-reviewer-log-audit-remediation-2026-04-25T12-21-49Z.md`, the spec.
+**Commit at finish:** `0fe5f9c3`
 
 ---
 
