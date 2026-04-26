@@ -159,11 +159,22 @@ External review surfaced 8 execution-safety gaps post-consistency-sweep. All res
 
 ### System-coherence final pass (2026-04-26 amendment v3)
 
-Third external review surfaced 9 cross-flow coherence gaps. Resolved by promoting 4 to cross-spec invariants (§ 7 of the invariants doc, re-pinned to SHA `e485807b`) and 5 to per-flow contracts:
+Third external review surfaced 9 cross-flow coherence gaps. Resolved by promoting 4 to cross-spec invariants (§ 7 of the invariants doc) and 5 to per-flow contracts:
 
 - **Invariants § 7 (new):** 7.1 Idempotency posture classified per write; 7.2 Source-of-truth precedence; 7.3 Correlation key (`executionId`/`runId`/`jobRunId`); 7.4 Status enum on every flow.
 - **Chunk 3 amendments:** stale-decision guard (HTTP 410); artefact-ID uniqueness check; orchestrator concurrency cap (1 active per conversation); status enum on response shapes; correlation key on every event.
 - **Chunk 4 amendments:** sequential per-org processing REQUIRED; status enum on every job event.
 - **Chunk 5 amendments:** idempotency posture classified per execution flow; status enum mapping; correlation key.
 
-See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment 2026-04-26 (third pass)` for the full audit.
+### Edge-condition tightening pass (2026-04-26 amendment v4)
+
+Fourth external review surfaced 7 edge-condition gaps. Resolved by promoting 3 to cross-spec invariants (§ 7.5–7.7, re-pinned to SHA `335e86cb`) and 4 to per-flow contracts:
+
+- **Invariants § 7.5–7.7 (new):** 7.5 Retry classification (`safe | guarded | unsafe`) declared per operation; 7.6 `status` vs `executionStatus` distinct semantics; 7.7 Terminal event guarantee per chain.
+- **Chunk 3 § 4.5.1 (DR3):** first-commit-wins rule for concurrent different decisions (no deterministic preference between approve/reject).
+- **Chunk 3 § 4.5.3 (DR2):** suppressed-follow-up ordering LOCKED to Option A (NOT re-queued); Option B deferred.
+- **Chunk 3 § 4.5.5 + 4.5.7 (C4a):** HTTP-disconnect / gateway-timeout behaviour pinned (execution continues; result persisted; events fire; client recovers via WS).
+- **Chunk 3 § 4.5.7 (DR1):** `rule.draft_candidates.collision_detected` event for JSONB multi-match data-integrity flag.
+- **Chunks 3, 4, 5:** terminal events declared per chain to satisfy invariant 7.7.
+
+See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment 2026-04-26 (third pass)` and § Amendment 2026-04-26 (fourth pass) for the full audit.

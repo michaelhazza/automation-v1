@@ -1,7 +1,7 @@
 # Pre-Launch Execution-Path Correctness — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 5
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `335e86cb3e3bf490eb72a63f4d4f38cf419b65cf`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 5 lands after Chunk 2 — depends on the schema decision for C4a-6-RETSHAPE)
 **Status:** draft, ready for user review
 
@@ -255,11 +255,11 @@ Folded in 2026-04-26 from external review feedback.
 
 Per invariant 7.4, every flow surfaces an explicit terminal `status: 'success' | 'partial' | 'failed'`.
 
-- **C4b-INVAL-RACE (`withInvalidationGuard`):** **Idempotency posture (per invariant 7.1):** `state-based` (the `status === 'invalidated'` re-read IS the guard). Late writer that finds `status === 'invalidated'` returns `{ discarded: true, reason: 'invalidated' }` — explicit signal, NOT silent. The caller logs the discard via `step.dispatch.invalidation_discarded` (see § 6.5.2) and the run's outcome reflects the invalidation per `runStatus.ts`. Source of truth (invariant 7.2): the `workflow_step_runs.status` row is authoritative; the late writer never overwrites a terminal state.
-- **W1-43 (`assertSingleWebhook`):** **Idempotency posture:** `state-based` (the assertion is pure; no retry semantics — pre-dispatch fails fast). Multi-webhook input emits `automation_composition_invalid` with the count in the message. Step transitions to `error` — never silent. Status enum: `failed`.
-- **HERMES-S1 (errorMessage threading):** **Idempotency posture:** `non-idempotent (intentional)` — extraction fires once per terminal-state transition; idempotent at the row-write level (terminal state is one-way). Failed-without-throw runs receive the threaded `errorMessage` from `preFinalizeMetadata`; memory extraction sees a non-null value. The "silent" path the bug created (extraction skipped because errorMessage was null) is explicitly closed.
-- **H3-PARTIAL-COUPLING:** **Idempotency posture:** `state-based` (computed from per-step aggregation; no retry surface). `runResultStatus` reflects the per-step aggregation rule from invariant 6.3 ONLY. Summary absence is surfaced via the orthogonal `summaryMissing` side-channel field, never via `runResultStatus = 'partial'`. Both signals visible to the consumer; user-facing surface chooses which to display. Status enum mapping: `runResultStatus = 'success'` → status: 'success'; `'partial'` → 'partial'; `'failed'` → 'failed'.
-- **C4a-6-RETSHAPE (Branch A):** **Idempotency posture:** `non-idempotent (intentional)` — skill handlers are invoked per dispatch; re-dispatch is governed upstream (Chunk 3 § 4.5.2). Every skill handler error matches the legacy flat-string shape `{ success: false, error: '<code-string>', context }`. No partial envelopes. Branch B (if user picks at review) requires every handler to match the nested shape `{ success: false, error: { code, message, context } }` — fixture test asserts.
+- **C4b-INVAL-RACE (`withInvalidationGuard`):** **Idempotency posture (per invariant 7.1):** `state-based`. **Retry classification (per invariant 7.5):** `guarded`. Late writer that finds `status === 'invalidated'` returns `{ discarded: true, reason: 'invalidated' }` — explicit signal, NOT silent. The caller logs the discard via `step.dispatch.invalidation_discarded` (see § 6.5.2) and the run's outcome reflects the invalidation per `runStatus.ts`. Source of truth (invariant 7.2): the `workflow_step_runs.status` row is authoritative; the late writer never overwrites a terminal state.
+- **W1-43 (`assertSingleWebhook`):** **Idempotency posture:** `state-based`. **Retry classification (per invariant 7.5):** `safe` (the assertion is pure; no side effects). Multi-webhook input emits `automation_composition_invalid` with the count in the message. Step transitions to `error` — never silent. Status enum: `failed`.
+- **HERMES-S1 (errorMessage threading):** **Idempotency posture:** `non-idempotent (intentional)`. **Retry classification (per invariant 7.5):** `unsafe` (memory extraction has side effects in `memory_blocks`; guarded upstream by terminal-state idempotency — terminal-state transition is one-way, so the extraction fires at most once per run). Failed-without-throw runs receive the threaded `errorMessage` from `preFinalizeMetadata`; memory extraction sees a non-null value. The "silent" path the bug created (extraction skipped because errorMessage was null) is explicitly closed.
+- **H3-PARTIAL-COUPLING:** **Idempotency posture:** `state-based`. **Retry classification (per invariant 7.5):** `safe` (pure computation; no side effects). `runResultStatus` reflects the per-step aggregation rule from invariant 6.3 ONLY. Summary absence is surfaced via the orthogonal `summaryMissing` side-channel field, never via `runResultStatus = 'partial'`. Both signals visible to the consumer; user-facing surface chooses which to display. Status enum mapping: `runResultStatus = 'success'` → status: 'success'; `'partial'` → 'partial'; `'failed'` → 'failed'.
+- **C4a-6-RETSHAPE (Branch A):** **Idempotency posture:** `non-idempotent (intentional)`. **Retry classification (per invariant 7.5):** `unsafe` (skill handlers may have side effects; re-dispatch is governed upstream by Chunk 3 § 4.5.2 optimistic guard). Every skill handler error matches the legacy flat-string shape `{ success: false, error: '<code-string>', context }`. No partial envelopes. Branch B (if user picks at review) requires every handler to match the nested shape `{ success: false, error: { code, message, context } }` — fixture test asserts.
 
 ### 6.5.2 Observability hooks
 
@@ -267,12 +267,13 @@ The `agentExecutionEventService` is the canonical primitive (per invariant 6.5 /
 
 Required emissions for the 5 closed items:
 
-- **C4b-INVAL-RACE:**
+- **C4b-INVAL-RACE:** terminal event (per invariant 7.7) is `step.dispatch.completed | step.dispatch.invalidation_discarded | step.dispatch.failed`:
   - `step.dispatch.started` (runId, stepRunId, stepType)
-  - `step.dispatch.completed` (runId, stepRunId, durationMs, outputBytes, status: 'success')
-  - `step.dispatch.invalidation_discarded` (runId, stepRunId, status: 'discarded') — when guard fires after I/O
+  - `step.dispatch.completed` (runId, stepRunId, durationMs, outputBytes, status: 'success') — TERMINAL on dispatch success
+  - `step.dispatch.invalidation_discarded` (runId, stepRunId, status: 'success', discarded: true) — TERMINAL when guard fires after I/O
+  - `step.dispatch.failed` (runId, stepRunId, error, status: 'failed') — TERMINAL on dispatch failure
 - **W1-43:**
-  - `step.dispatch.composition_invalid` (runId, stepRunId, automationId, webhookCount, status: 'failed') — when `assertSingleWebhook` returns error
+  - `step.dispatch.composition_invalid` (runId, stepRunId, automationId, webhookCount, status: 'failed') — TERMINAL when `assertSingleWebhook` returns error (folds into the `step.dispatch.failed` family)
 - **HERMES-S1:**
   - `run.terminal.extracted_with_errorMessage` (runId, errorMessageLength) — emitted ONLY when threading occurs (failed run + non-null errorMessage)
 - **H3:**

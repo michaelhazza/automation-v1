@@ -1,7 +1,7 @@
 # Pre-Launch Dead-Path Completion — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 3
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `335e86cb3e3bf490eb72a63f4d4f38cf419b65cf`)
 **Architect input:** `tasks/builds/pre-launch-hardening-specs/architect-output/dead-path-completion.md` (commit SHA: `6bbbd737d48b9393146cd35f4930c0efdbb1be54`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 3 lands LAST — depends on RLS + schema + execution-correctness foundations)
 **Status:** draft, ready for user review
@@ -130,7 +130,11 @@ This section pins execution-safety contracts that the architect output left impl
 
 **Idempotency posture (per invariant 7.1):** `key-based`.
 
+**Retry classification (per invariant 7.5):** `safe` (idempotent against the partial unique index).
+
 **Retry semantics (per invariant 7.1):** retry of identical decision → HTTP 200 idempotent return (same response shape). Different decision for same artefact → HTTP 409.
+
+**First-commit-wins rule (concurrent different decisions).** When two simultaneous requests carry different decisions for the same `artefactId` (e.g. Request A: approve, Request B: reject hitting the partial unique index in the same instant), the **first commit wins** (FIFO at the database level, decided by the partial unique index's serialisation). The losing request returns HTTP 409 with the winning decision attached. There is **no deterministic preference** between approve and reject — neither outcome is privileged. This rule prevents future "business logic override" attempts (e.g. "if approve and reject race, approve wins") from being added without a deliberate spec amendment.
 
 **Stale-decision guard (per invariant 7.2 source-of-truth precedence).** Before invoking `actionService.proposeAction`, the service re-validates the artefact against the current execution-record state. If the parent brief's `tasks.status` is `'cancelled'` OR the underlying action's `actionPolicy` has been disabled since the artefact was emitted, the decision is rejected with HTTP 410 `{ error: 'artefact_stale', reason: '<cancelled_brief|disabled_policy|...>' }`. Pre-launch staleness is rare (rapid testing, no live data) but the rule is in place; spec author confirms the validation surface during implementation.
 
@@ -149,7 +153,18 @@ This section pins execution-safety contracts that the architect output left impl
 
 **Idempotency posture (per invariant 7.1):** `state-based` (the `WHERE status = 'review_required'` predicate is the lock).
 
+**Retry classification (per invariant 7.5):** `guarded`.
+
 **Retry semantics (per invariant 7.1):** retry → no-op via guard (returns `alreadyResumed: true`).
+
+**HTTP-disconnect / gateway-timeout behaviour.** The resume path runs synchronously inside the `decideApproval` HTTP handler; the webhook fetch can take up to 30s (per § 4.5.5). If the client disconnects mid-call OR the gateway times out before the webhook completes:
+
+- **Server-side execution continues to completion.** Node's request lifecycle is decoupled from the in-flight webhook fetch; the server does not abort the fetch when the response socket closes. The fetch completes (or times out per § 4.5.5).
+- **Result is still persisted.** `completeStepRunInternal` writes the terminal `workflow_step_runs` row regardless of whether the HTTP response was delivered to the client. The decision artefact's `executionStatus` updates atomically.
+- **Result is still emitted via observability events.** All events in § 4.5.7 fire regardless of HTTP-response delivery — the trace remains intact.
+- **Client recovery path.** On reconnect, the client polls (or receives via WS event `brief.artefact.updated`) the latest artefact state for the conversation. The client UI sees the executed outcome even though the original HTTP response was lost.
+
+This isolation between HTTP transport and execution lifecycle is binding for v1; testing-round operators will see consistent state regardless of network instability.
 
 **Source of truth (per invariant 7.2):** the `workflow_step_runs` row is ground truth for the step's outcome. If the artefact's `executionStatus` field disagrees with the step row's terminal status (rare; only via partial write failure), the step row wins and the artefact is corrected on next read.
 
@@ -166,7 +181,13 @@ This section pins execution-safety contracts that the architect output left impl
 
 **Idempotency posture (per invariant 7.1):** `state-based` (frequency cap + active-run check are stateful gates; not key-based, since each follow-up message is intentionally distinct).
 
+**Retry classification (per invariant 7.5):** `guarded`.
+
 **Retry semantics (per invariant 7.1):** retry → reclassify allowed (each follow-up classification is independent; the user message is the input). Idempotency for retries of the SAME `conversationMessageId` is provided by the underlying `conversation_messages` UNIQUE on `(conversation_id, message_id)`.
+
+**Suppressed follow-up ordering (Option A — current behaviour, locked in v1).** When a follow-up message arrives during an active orchestrator run AND is suppressed by the concurrency cap, the message is **NOT re-queued** for orchestration after the active run completes. The message persists in `conversation_messages` (the user input is preserved as a record) and the `simple_reply` sentinel artefact is emitted, but no orchestrator job is enqueued at any future point for that suppressed message. The user must send another follow-up after the active run completes to trigger orchestration.
+
+  Rationale: pre-launch posture; replay-on-completion (Option B) requires storing suppressed-message state and re-classifying after the active run, which is feature work beyond dead-path completion. Option B is documented in § 10 Deferred Items as a post-launch enhancement triggered by operator UX feedback.
 
 **Contract.**
 
@@ -232,25 +253,32 @@ This section pins execution-safety contracts that the architect output left impl
 
 **Required emissions** (use existing `agentExecutionEventService` where applicable; otherwise structured `logger.info` with the named event):
 
-- **DR3:**
-  - `brief.approval.received` (artefactId, decision, userId, orgId, conversationId)
+- **DR3:** terminal event (per invariant 7.7) is exactly one of `brief.approval.completed | brief.approval.failed | brief.approval.idempotent_hit`:
+  - `brief.approval.received` (artefactId, decision, userId, orgId, conversationId, executionId)
   - `brief.approval.dispatched` (artefactId, executionId, latencyMs)
-  - `brief.approval.idempotent_hit` (artefactId — when 4.5.1 idempotency short-circuit fires)
-  - `brief.approval.conflict` (artefactId, priorDecision, attemptedDecision — when 409 fires)
-- **DR2:**
-  - `brief.followup.classified` (conversationId, intentKind, latencyMs)
-  - `brief.followup.orchestrator_enqueued` (conversationId, jobId, runId)
-  - `brief.followup.simple_reply_emitted` (conversationId, artefactId)
-  - `brief.followup.cap_hit` (conversationId, count, windowStart) — frequency cap from 4.5.3
-  - `brief.followup.concurrency_blocked` (conversationId, activeRunId) — concurrency cap from 4.5.3
+  - `brief.approval.idempotent_hit` (artefactId, executionId, status: 'success') — TERMINAL when 4.5.1 idempotency short-circuit fires
+  - `brief.approval.completed` (artefactId, executionId, latencyMs, status: 'success', executionStatus: 'queued' | 'completed') — TERMINAL on first-decision success
+  - `brief.approval.conflict` (artefactId, priorDecision, attemptedDecision, status: 'failed') — TERMINAL when 409 fires (concurrent different decisions; per § 4.5.1 first-commit-wins rule)
+  - `brief.approval.stale` (artefactId, reason, status: 'failed') — TERMINAL when 410 fires (per § 4.5.1 stale-decision guard)
+  - `brief.approval.failed` (artefactId, executionId, error, status: 'failed') — TERMINAL on uncaught failure
+- **DR2:** terminal event (per invariant 7.7) is exactly one of `brief.followup.orchestrator_enqueued | brief.followup.simple_reply_emitted | brief.followup.cap_hit | brief.followup.concurrency_blocked | brief.followup.failed`:
+  - `brief.followup.classified` (conversationId, intentKind, latencyMs, runId)
+  - `brief.followup.orchestrator_enqueued` (conversationId, jobId, runId, status: 'success') — TERMINAL for orchestration path
+  - `brief.followup.simple_reply_emitted` (conversationId, artefactId, runId, status: 'success') — TERMINAL for simple-reply path
+  - `brief.followup.cap_hit` (conversationId, count, windowStart, status: 'partial') — frequency cap TERMINAL from 4.5.3
+  - `brief.followup.concurrency_blocked` (conversationId, activeRunId, status: 'partial') — concurrency cap TERMINAL from 4.5.3
+  - `brief.followup.failed` (conversationId, error, status: 'failed') — TERMINAL on classifier or enqueue failure
 - **DR1:**
   - `rule.draft_candidates.requested` (artefactId, orgId)
-  - `rule.draft_candidates.returned` (artefactId, candidateCount, latencyMs)
-- **C4a-REVIEWED-DISP:**
+  - `rule.draft_candidates.returned` (artefactId, candidateCount, latencyMs, status: 'success')
+  - `rule.draft_candidates.collision_detected` (artefactId, orgId, matchCount) — emitted when the JSONB scan returns more than one row for an artefactId (per § 4.5.1 uniqueness rule); data-integrity red flag, surfaces to operator dashboards
+  - `rule.draft_candidates.failed` (artefactId, orgId, error, status: 'failed') — terminal event per invariant 7.7
+- **C4a-REVIEWED-DISP:** terminal event (per invariant 7.7) is exactly one of `step.resume.completed | step.resume.failed | step.resume.guard_blocked`:
   - `step.resume.started` (stepRunId, runId, automationId)
-  - `step.resume.guard_blocked` (stepRunId — when optimistic predicate returns zero rows)
-  - `step.resume.completed` (stepRunId, executionStatus, latencyMs)
-  - `step.resume.webhook_timeout` (stepRunId, automationId, timeoutMs) — from 4.5.5
+  - `step.resume.guard_blocked` (stepRunId, runId, status: 'success', alreadyResumed: true) — TERMINAL when optimistic predicate returns zero rows (concurrent winner)
+  - `step.resume.completed` (stepRunId, runId, executionStatus, latencyMs, status: 'success' | 'partial') — TERMINAL on dispatch outcome
+  - `step.resume.webhook_timeout` (stepRunId, runId, automationId, timeoutMs, status: 'failed') — from 4.5.5; followed by `step.resume.failed`
+  - `step.resume.failed` (stepRunId, runId, error, status: 'failed') — TERMINAL on dispatch failure
 
 Each event is best-effort (graded-failure tier per `accepted_primitives` / `agentExecutionEventService`); emission failure does not block the user-facing path.
 

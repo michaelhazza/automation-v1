@@ -1,7 +1,7 @@
 # Pre-Launch Maintenance-Job RLS Contract — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 4
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `335e86cb3e3bf490eb72a63f4d4f38cf419b65cf`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 4 lands alongside Chunks 2 and 6 after Chunk 1)
 **Status:** draft, ready for user review
 
@@ -160,6 +160,8 @@ Folded in 2026-04-26 from external review feedback. Each item is a hard requirem
 
 **Idempotency posture (per invariant 7.1):** `state-based` (each per-org operation is idempotent against the org's data; re-running the job recomputes from current state without producing duplicates).
 
+**Retry classification (per invariant 7.5):** `safe` (operations are idempotent against current data; pg-boss retry on failure is acceptable).
+
 **Retry semantics (per invariant 7.1):** retry → safe; the per-org operation is idempotent. If the job runner retries the entire job, all orgs are re-processed; outcomes are deterministic from the current data.
 
 **Contract.**
@@ -186,11 +188,13 @@ Source of truth (per invariant 7.2): the `<job-source>.completed` event with its
 
 For each of the 3 jobs (`<job-source>` is the kebab-case name from § 4). Per invariant 7.3, the `jobRunId` is the correlation key; every event in a single job run carries the same `jobRunId`.
 
+Terminal event (per invariant 7.7) is `<job-source>.completed` with the discriminated `status` field. Every job run emits exactly one terminal event regardless of mixed per-org outcomes.
+
 - `<job-source>.started` (jobRunId, scheduledAt)
 - `<job-source>.org_started` (jobRunId, orgId)
 - `<job-source>.org_completed` (jobRunId, orgId, rowsAffected, durationMs, status: 'success')
 - `<job-source>.org_failed` (jobRunId, orgId, error, errorClass, status: 'failed')
-- `<job-source>.completed` (jobRunId, orgsAttempted, orgsSucceeded, orgsFailed, durationMs, status: 'success' | 'partial' | 'failed')
+- `<job-source>.completed` (jobRunId, orgsAttempted, orgsSucceeded, orgsFailed, durationMs, status: 'success' | 'partial' | 'failed') — TERMINAL
 
 Best-effort emission (graded-failure tier); never blocks the job.
 

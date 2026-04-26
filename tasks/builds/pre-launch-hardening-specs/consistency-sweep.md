@@ -135,3 +135,35 @@ All 6 spec front-matters re-pinned to invariants SHA `e485807b`.
 **Re-stamped at:** 2026-04-26 (same day as v2)
 **Findings since v2 stamp:** 9 system-coherence gaps. 0 mechanical · 9 directional resolved inline (4 promoted to cross-spec invariants; 5 to per-flow contracts) · 0 false alarms.
 **Cross-spec coherence verified:** all 6 specs re-pinned to invariants `e485807b`; per-flow contracts cite the corresponding § 7 invariant by number.
+
+---
+
+## Amendment 2026-04-26 (fourth pass) — edge-condition tightening
+
+External review's fourth pass surfaced 7 edge-condition gaps. 3 promoted to invariants § 7.5–7.7 (commit `335e86cb`); 4 folded as per-flow contracts.
+
+### Resolution
+
+**Cross-spec invariants (3 of 7) folded into invariants § 7:**
+
+- 7.5 Retry classification declared per operation (`safe | guarded | unsafe`)
+- 7.6 `status` and `executionStatus` are distinct fields with non-overlapping semantics
+- 7.7 Terminal event guarantee — every chain emits exactly one terminal event
+
+All 6 specs re-pinned to invariants SHA `335e86cb`.
+
+**Per-flow contracts (4 of 7) folded into Chunk 3:**
+
+- **§ 4.5.1 (DR3) — first-commit-wins rule** for concurrent different decisions; no deterministic preference between approve/reject; HTTP 409 with winning decision attached.
+- **§ 4.5.3 (DR2) — suppressed-follow-up ordering** explicitly LOCKED to Option A (NOT re-queued; user must send another message). Option B documented as deferred.
+- **§ 4.5.7 (DR1)** — `rule.draft_candidates.collision_detected` event added when JSONB scan returns >1 match (data-integrity red flag).
+- **§ 4.5.5 + 4.5.7 (C4a)** — HTTP-disconnect / gateway-timeout behaviour pinned: server-side execution continues; result persisted; events fire; client recovers via WS or poll.
+
+Plus terminal-event additions across all chains in Chunks 3, 4, 5 to satisfy invariant 7.7.
+
+### Sweep stamp v4
+
+**Re-stamped at:** 2026-04-26 (same day as v3)
+**Findings since v3 stamp:** 7 edge-condition gaps. 0 mechanical · 7 directional resolved inline (3 promoted to cross-spec invariants 7.5–7.7; 4 to per-flow contracts) · 0 false alarms.
+**Retry classification declared everywhere:** every operation now carries an explicit `safe | guarded | unsafe` label; per-spec grep verifies.
+**Terminal events declared everywhere:** every chain in Chunks 3, 4, 5 has at least one event marked TERMINAL with the discriminated `status` field.
