@@ -1,7 +1,7 @@
 # Pre-Launch Dead-Path Completion — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 3
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `cf2ecbd06fa8b61a4ed092b931dd0c54a9a66ad2`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
 **Architect input:** `tasks/builds/pre-launch-hardening-specs/architect-output/dead-path-completion.md` (commit SHA: `6bbbd737d48b9393146cd35f4930c0efdbb1be54`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 3 lands LAST — depends on RLS + schema + execution-correctness foundations)
 **Status:** draft, ready for user review
@@ -128,16 +128,30 @@ This section pins execution-safety contracts that the architect output left impl
 
 **Problem.** Architect § 1 doesn't pin idempotency behaviour. Failure modes: double-click approve → duplicate `proposeAction` calls; network retry → duplicate dispatch; concurrent approvals → race.
 
+**Idempotency posture (per invariant 7.1):** `key-based`.
+
+**Retry semantics (per invariant 7.1):** retry of identical decision → HTTP 200 idempotent return (same response shape). Different decision for same artefact → HTTP 409.
+
+**Stale-decision guard (per invariant 7.2 source-of-truth precedence).** Before invoking `actionService.proposeAction`, the service re-validates the artefact against the current execution-record state. If the parent brief's `tasks.status` is `'cancelled'` OR the underlying action's `actionPolicy` has been disabled since the artefact was emitted, the decision is rejected with HTTP 410 `{ error: 'artefact_stale', reason: '<cancelled_brief|disabled_policy|...>' }`. Pre-launch staleness is rare (rapid testing, no live data) but the rule is in place; spec author confirms the validation surface during implementation.
+
+**Artefact ID uniqueness (per invariant 6.5 + new requirement).** Artefact IDs are generated via the existing UUIDv7 generator in `shared/ids.ts` (or equivalent) and are **globally unique within an organisation** by construction. The org-scoped JSONB scan from § 4.5.4 returns at most one match per artefactId. If two matches are returned, the lookup throws `artefact_id_collision` — fail-loud, not silent.
+
 **Contract.**
 
 - **Idempotency key:** `(artefactId, decision)`. The first decision recorded for an `artefactId` is canonical; subsequent decisions for the same `artefactId` return the existing superseding artefact unchanged (HTTP 200, same response body).
 - **Enforcement mechanism:** pre-check in `briefApprovalService.decideBriefApproval()` reads the `conversation_messages` JSONB chain for any artefact whose `parentArtefactId === artefactId AND kind === 'approval_decision'`. If found, return that artefact directly; do NOT call `actionService.proposeAction`. If not found, transactional INSERT of the decision artefact with a unique partial index on `(parent_artefact_id) WHERE kind = 'approval_decision'` to catch race conditions.
 - **HTTP semantics:** second-and-subsequent identical requests return HTTP 200 with `idempotent: true` field on the response. Different decisions for the same `artefactId` (approve then reject) return HTTP 409 `{ error: 'approval_already_decided' }` with the prior decision attached.
-- **Test:** spec-named pure test `briefApprovalServicePure.test.ts` extension — three cases: first decision succeeds; identical retry returns existing artefact + `idempotent: true`; conflicting second decision returns 409.
+- **Test:** spec-named pure test `briefApprovalServicePure.test.ts` extension — five cases: first decision succeeds; identical retry returns existing artefact + `idempotent: true`; conflicting second decision returns 409; stale artefact (cancelled brief) returns 410; collision (two matches) throws `artefact_id_collision`.
 
 ### 4.5.2 C4a-REVIEWED-DISP execution guard (CRITICAL)
 
 **Problem.** Architect § 4 describes the resume path but doesn't pin a transition guard. Failure modes: concurrent approvals processed in parallel; approval-request retry; tick-loop overlap → duplicate webhook dispatch.
+
+**Idempotency posture (per invariant 7.1):** `state-based` (the `WHERE status = 'review_required'` predicate is the lock).
+
+**Retry semantics (per invariant 7.1):** retry → no-op via guard (returns `alreadyResumed: true`).
+
+**Source of truth (per invariant 7.2):** the `workflow_step_runs` row is ground truth for the step's outcome. If the artefact's `executionStatus` field disagrees with the step row's terminal status (rare; only via partial write failure), the step row wins and the artefact is corrected on next read.
 
 **Contract.**
 
@@ -146,16 +160,21 @@ This section pins execution-safety contracts that the architect output left impl
 - **Idempotency on retry.** If `decideApproval` HTTP request retries (network failure mid-call), the second call sees `status === 'running'` (set by the first call's UPDATE) and short-circuits before re-invoking the webhook. The decision row is the source of truth; the webhook is invoked exactly once per decision artefact.
 - **Test:** pure test `resumeInvokeAutomationStepPure.test.ts` extension — concurrent-resume case: two threads call resume on the same `stepRunId`; UPDATE returns zero rows for the loser; loser exits without invoking; one webhook dispatch total.
 
-### 4.5.3 DR2 loop protection (lightweight)
+### 4.5.3 DR2 loop protection + concurrency cap (lightweight)
 
-**Problem.** Architect § 2 flagged "Conversation-level rate limiting" as an Open Decision but didn't pin a default. Failure mode: classifier misfire on a sequence of passive-ack-shaped messages → repeated orchestrator runs.
+**Problem.** Architect § 2 flagged "Conversation-level rate limiting" as an Open Decision but didn't pin a default. Failure mode 1 (frequency): classifier misfire on a sequence of passive-ack-shaped messages → repeated orchestrator runs. Failure mode 2 (concurrency): two follow-ups arrive in quick succession, both pass the cap check, both enqueue an orchestrator → duplicated runs.
+
+**Idempotency posture (per invariant 7.1):** `state-based` (frequency cap + active-run check are stateful gates; not key-based, since each follow-up message is intentionally distinct).
+
+**Retry semantics (per invariant 7.1):** retry → reclassify allowed (each follow-up classification is independent; the user message is the input). Idempotency for retries of the SAME `conversationMessageId` is provided by the underlying `conversation_messages` UNIQUE on `(conversation_id, message_id)`.
 
 **Contract.**
 
-- **Per-conversation orchestration cap.** Maximum **5 orchestrator invocations per conversation per 10-minute sliding window.** Tracked by counting `agent_runs` rows with `triggerType = 'brief_followup'` and `conversationId = $1` and `createdAt > now() - interval '10 minutes'`.
-- **When cap reached.** The `handleBriefMessage` helper short-circuits to `simple_reply` path (sentinel artefact: "You're sending follow-ups faster than I can run analyses; the most recent run is still active."). No orchestrator job enqueued.
-- **Cap is informational, not enforced via DB constraint.** Pure-function check at request time. If cap is hit, log `brief.followup.cap_hit` with `{ conversationId, count, windowStart, windowEnd }`.
-- **Test:** pure test `briefMessageHandlerPure.test.ts` extension — 6th orchestration in the same window short-circuits; window-resets after 10 minutes; cap is per-conversation (different conversations in same org reset independently).
+- **Frequency cap (loop protection).** Maximum **5 orchestrator invocations per conversation per 10-minute sliding window.** Tracked by counting `agent_runs` rows with `triggerType = 'brief_followup'` and `conversationId = $1` and `createdAt > now() - interval '10 minutes'`.
+- **Concurrency cap (overlap protection).** Maximum **1 active orchestrator run per conversation at any time.** Before enqueue, check for any `agent_runs` row with `conversationId = $1` and `status IN (IN_FLIGHT_RUN_STATUSES from runStatus.ts)`. If one exists, short-circuit to `simple_reply` with sentinel artefact: "An analysis is still running — your follow-up will be processed once it completes." No orchestrator job enqueued.
+- **When either cap reached.** The `handleBriefMessage` helper short-circuits to `simple_reply` path. No orchestrator job enqueued. Frequency-cap and concurrency-cap have distinct sentinel messages and distinct log events.
+- **Caps are informational, not enforced via DB constraint.** Pure-function check at request time. If frequency cap hit, log `brief.followup.cap_hit`. If concurrency cap hit, log `brief.followup.concurrency_blocked`.
+- **Test:** pure test `briefMessageHandlerPure.test.ts` extension — six cases: 6th orchestration in 10-min window short-circuits (frequency); follow-up arriving while prior run in-flight short-circuits (concurrency); window-resets after 10 minutes; cap is per-conversation (different conversations reset independently); two simultaneous follow-ups → first wins, second sees in-flight and short-circuits; frequency check happens BEFORE concurrency check (both events emit on the appropriate trigger).
 
 ### 4.5.4 DR1 JSONB index assumption
 
@@ -222,7 +241,8 @@ This section pins execution-safety contracts that the architect output left impl
   - `brief.followup.classified` (conversationId, intentKind, latencyMs)
   - `brief.followup.orchestrator_enqueued` (conversationId, jobId, runId)
   - `brief.followup.simple_reply_emitted` (conversationId, artefactId)
-  - `brief.followup.cap_hit` (conversationId, count, windowStart) — from 4.5.3
+  - `brief.followup.cap_hit` (conversationId, count, windowStart) — frequency cap from 4.5.3
+  - `brief.followup.concurrency_blocked` (conversationId, activeRunId) — concurrency cap from 4.5.3
 - **DR1:**
   - `rule.draft_candidates.requested` (artefactId, orgId)
   - `rule.draft_candidates.returned` (artefactId, candidateCount, latencyMs)
@@ -234,29 +254,42 @@ This section pins execution-safety contracts that the architect output left impl
 
 Each event is best-effort (graded-failure tier per `accepted_primitives` / `agentExecutionEventService`); emission failure does not block the user-facing path.
 
+**Correlation key (per invariant 7.3).** Every event in the chain `brief.approval.received → brief.approval.dispatched → step.resume.started → step.resume.completed → brief.artefact.updated` carries the same `executionId` field at top level. For DR2 the chain `brief.followup.classified → brief.followup.orchestrator_enqueued → run.terminal.*` carries `runId`. Trace reconstruction is via single-key filter on `executionId` or `runId`.
+
 ### 4.5.8 DR3 response shape (explicit contract)
+
+Per invariant 7.4, every response carries a discriminated `status` field at top level.
 
 ```json
 // HTTP 200 (first decision OR idempotent retry)
 {
+  "status": "success" | "partial" | "failed",   // discriminated terminal state per invariant 7.4
   "artefact": { /* superseding decision artefact, full shape */ },
-  "executionId": "exec_01h...",
+  "executionId": "exec_01h...",                  // correlation key per invariant 7.3
   "executionStatus": "queued" | "completed" | "failed",
-  "idempotent": false  // true on retry of identical decision
+  "idempotent": false                            // true on retry of identical decision
 }
 
 // HTTP 409 (conflicting decision)
 {
+  "status": "failed",
   "error": "approval_already_decided",
   "priorDecision": "approve" | "reject",
   "priorArtefact": { /* the existing decision artefact */ }
 }
 
+// HTTP 410 (stale artefact — per § 4.5.1 stale-decision guard)
+{
+  "status": "failed",
+  "error": "artefact_stale",
+  "reason": "cancelled_brief" | "disabled_policy" | "other"
+}
+
 // HTTP 404 (artefact not found)
-{ "error": "artefact_not_found" }
+{ "status": "failed", "error": "artefact_not_found" }
 
 // HTTP 422 (artefact exists but wrong kind)
-{ "error": "artefact_not_approval" }
+{ "status": "failed", "error": "artefact_not_approval" }
 ```
 
 ---

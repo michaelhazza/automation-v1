@@ -106,3 +106,32 @@ These amendments do NOT trigger the post-freeze amendment protocol because the s
 **Re-stamped at:** 2026-04-26 (same day as initial sweep)
 **Findings since v1 stamp:** 8 execution-safety gaps from external feedback, all resolved in spec form. 0 mechanical resolved · 8 directional resolved inline · 0 false alarms.
 **Cross-spec coherence verified:** Chunk 5 webhook-timeout contract cross-references Chunk 3's authoritative pin (one implementation in `invokeAutomationStep`); both chunks cite the same 30s value, no-retry posture, and failure-classification rules. No new cross-domain conflicts introduced.
+
+---
+
+## Amendment 2026-04-26 (third pass) — system-coherence final pass
+
+External review's third pass surfaced 9 system-coherence gaps that crossed every flow. These are not architectural; they tighten cross-flow operational rules.
+
+### Resolution
+
+**Cross-spec rules (4 of 9) folded into invariants doc § 7 (commit `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`):**
+
+- 7.1 Idempotency posture explicitly classified per write (key-based / state-based / non-idempotent intentional)
+- 7.2 Source-of-truth precedence fixed (execution records > step/run state > artefacts > logs)
+- 7.3 Correlation key is `executionId` (or `runId`) across every cross-flow chain
+- 7.4 Every flow emits explicit `success | partial | failed` status; no silent success-by-absence
+
+All 6 spec front-matters re-pinned to invariants SHA `e485807b`.
+
+**Per-flow contracts (5 of 9) folded into the affected specs:**
+
+- **Chunk 3 § 4.5.1 + 4.5.3 + 4.5.7 + 4.5.8:** stale-decision guard (HTTP 410); artefact-ID uniqueness check; concurrency cap (1 active orchestrator per conversation); status enum on every response shape; `executionId` correlation key on every event.
+- **Chunk 4 § 6.5.1 + 6.5.3:** sequential per-org processing REQUIRED (no parallelisation in v1); status enum on every job event; `jobRunId` correlation key.
+- **Chunk 5 § 6.5.1 + 6.5.2:** idempotency posture classified per execution flow; status enum mapping for `runResultStatus`; `runId` / `stepRunId` correlation key.
+
+### Sweep stamp v3
+
+**Re-stamped at:** 2026-04-26 (same day as v2)
+**Findings since v2 stamp:** 9 system-coherence gaps. 0 mechanical · 9 directional resolved inline (4 promoted to cross-spec invariants; 5 to per-flow contracts) · 0 false alarms.
+**Cross-spec coherence verified:** all 6 specs re-pinned to invariants `e485807b`; per-flow contracts cite the corresponding § 7 invariant by number.

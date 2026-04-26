@@ -1,7 +1,7 @@
 # Pre-Launch RLS Hardening — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 1
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `cf2ecbd06fa8b61a4ed092b931dd0c54a9a66ad2`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
 **Verification log:** `tasks/builds/pre-launch-hardening-specs/chunk-1-verification-log.md`
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (this is Chunk 1, foundation; lands first)
 **Status:** draft, ready for user review

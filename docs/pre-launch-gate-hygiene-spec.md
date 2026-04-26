@@ -1,7 +1,7 @@
 # Pre-Launch Gate Hygiene Cleanup — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 6
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `cf2ecbd06fa8b61a4ed092b931dd0c54a9a66ad2`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 6 lands alongside Chunks 2 and 4 after Chunk 1)
 **Status:** draft, ready for user review
 

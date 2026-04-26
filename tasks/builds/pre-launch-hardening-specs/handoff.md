@@ -149,7 +149,7 @@ If any spec needs amendment post-freeze, the protocol in `tasks/builds/pre-launc
 
 Spec authoring complete. PR #210 open (consolidated; the 6 per-chunk PRs were closed). Preliminary freeze stamped. Consistency sweep clean (1 finding resolved at v1; 8 execution-safety gaps resolved at v2 amendment). Implementation cleared to begin AFTER PR #210 merges + final freeze re-stamp + Open Decisions resolution.
 
-### Pre-implementation hardening pass (2026-04-26 amendment)
+### Pre-implementation hardening pass (2026-04-26 amendment v2)
 
 External review surfaced 8 execution-safety gaps post-consistency-sweep. All resolved inline in the affected specs:
 
@@ -157,4 +157,13 @@ External review surfaced 8 execution-safety gaps post-consistency-sweep. All res
 - Chunk 4 § 6.5 — Per-org error isolation (REQUIRED), no-silent-partial-success per job, observability hooks.
 - Chunk 5 § 6.5 — No-silent-partial-success per execution flow, observability hooks, webhook-timeout cross-reference to Chunk 3.
 
-See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment` for the full audit.
+### System-coherence final pass (2026-04-26 amendment v3)
+
+Third external review surfaced 9 cross-flow coherence gaps. Resolved by promoting 4 to cross-spec invariants (§ 7 of the invariants doc, re-pinned to SHA `e485807b`) and 5 to per-flow contracts:
+
+- **Invariants § 7 (new):** 7.1 Idempotency posture classified per write; 7.2 Source-of-truth precedence; 7.3 Correlation key (`executionId`/`runId`/`jobRunId`); 7.4 Status enum on every flow.
+- **Chunk 3 amendments:** stale-decision guard (HTTP 410); artefact-ID uniqueness check; orchestrator concurrency cap (1 active per conversation); status enum on response shapes; correlation key on every event.
+- **Chunk 4 amendments:** sequential per-org processing REQUIRED; status enum on every job event.
+- **Chunk 5 amendments:** idempotency posture classified per execution flow; status enum mapping; correlation key.
+
+See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment 2026-04-26 (third pass)` for the full audit.

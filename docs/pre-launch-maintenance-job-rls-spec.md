@@ -1,7 +1,7 @@
 # Pre-Launch Maintenance-Job RLS Contract — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 4
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `cf2ecbd06fa8b61a4ed092b931dd0c54a9a66ad2`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `e485807b3e72c1303ffeb121d299e7ec53d4c9d0`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 4 lands alongside Chunks 2 and 6 after Chunk 1)
 **Status:** draft, ready for user review
 
@@ -152,36 +152,45 @@ From `docs/spec-context.md § accepted_primitives`:
 
 Folded in 2026-04-26 from external review feedback. Each item is a hard requirement for the implementation PR.
 
-### 6.5.1 Per-org error isolation (REQUIRED)
+### 6.5.1 Per-org error isolation (REQUIRED) + sequential processing (REQUIRED)
 
-**Problem.** "Mirror `memoryDedupJob`" leaves error-isolation behaviour implicit. Failure mode: one org's per-org callback throws → entire job aborts → other orgs not processed.
+**Problem 1 (error isolation).** "Mirror `memoryDedupJob`" leaves error-isolation behaviour implicit. Failure mode: one org's per-org callback throws → entire job aborts → other orgs not processed.
+
+**Problem 2 (backpressure).** Without an ordering rule, a future "optimisation" might run orgs in parallel, where one large org dominates connection-pool capacity or a slow org delays the rest unevenly.
+
+**Idempotency posture (per invariant 7.1):** `state-based` (each per-org operation is idempotent against the org's data; re-running the job recomputes from current state without producing duplicates).
+
+**Retry semantics (per invariant 7.1):** retry → safe; the per-org operation is idempotent. If the job runner retries the entire job, all orgs are re-processed; outcomes are deterministic from the current data.
 
 **Contract.**
 
+- **Sequential per-org processing REQUIRED.** Jobs MUST iterate orgs serially in v1. No `Promise.all` over the org list; no worker-fan-out. Justification: predictable connection-pool usage; no large-org-blocks-others starvation; easier to reason about per-org error isolation. If post-launch traffic shows the sequential approach is too slow, parallelisation is a separate spec amendment with explicit per-org concurrency limit.
 - **Per-org try/catch boundary REQUIRED.** Each `withOrgTx` invocation is wrapped in a try/catch. A throw inside org A's callback is caught, logged, and the loop continues to org B.
 - **Failure logging REQUIRED.** On per-org failure, emit structured log: `{ event: '<job-source>.org_failed', orgId, error, errorClass }` (where `errorClass` is one of `tx_failure | logic_failure | unknown`).
 - **Continue iteration REQUIRED.** Per-org throw never aborts the job. The job's overall completion status is `partial_with_errors` if any org failed; `success` if all orgs succeeded; `failed` only if the admin-connection acquire itself failed (precedes any org iteration).
 - **Outcome counters REQUIRED.** Job emits `{ event: '<job-source>.completed', orgsAttempted, orgsSucceeded, orgsFailed, durationMs }` at end of run regardless of mixed outcomes.
 
-**Reference contract in `memoryDedupJob.ts`** — confirm at implementation time that `memoryDedupJob` follows this pattern; if it does not, this spec's behaviour is the new reference and `memoryDedupJob` should be updated to match in a follow-up.
+**Reference contract in `memoryDedupJob.ts`** — confirm at implementation time that `memoryDedupJob` follows the sequential + per-org-isolation pattern; if it does not, this spec's behaviour is the new reference and `memoryDedupJob` should be updated to match in a follow-up.
 
 ### 6.5.2 No-silent-partial-success per job
 
-- **Success:** all orgs processed; emitted rows match expected shape.
-- **Partial:** ≥1 org throws, ≥1 org succeeds → job status `partial_with_errors`; per-failed-org log emitted; outcome counters reflect mix.
-- **Failure:** admin-connection acquire fails OR org enumeration query fails → job status `failed`; nothing processed; reset hook does not fire on next tick.
+Per invariant 7.4, every job emits an explicit terminal `status: 'success' | 'partial' | 'failed'` field in its final observability event AND in the pg-boss completion result. No implicit success-by-absence.
 
-The job's caller (pg-boss worker) reads the outcome shape to decide the run's status field. Partial outcomes are NOT silent — they emit per-org failure logs AND the counter tuple.
+- **`status: 'success'`:** all orgs processed without throw; emitted rows match expected shape.
+- **`status: 'partial'`:** ≥1 org threw, ≥1 org succeeded → per-failed-org log emitted; outcome counters reflect mix; pg-boss job marked complete (NOT failed) with the partial result body.
+- **`status: 'failed'`:** admin-connection acquire fails OR org enumeration query fails → nothing processed; pg-boss job marked failed; standard pg-boss retry policy applies.
+
+Source of truth (per invariant 7.2): the `<job-source>.completed` event with its outcome counters is authoritative for the job's outcome. The pg-boss `state` column is derived; if pg-boss says complete but the event says `failed`, the event wins for human triage.
 
 ### 6.5.3 Observability hooks
 
-For each of the 3 jobs (`<job-source>` is the kebab-case name from § 4):
+For each of the 3 jobs (`<job-source>` is the kebab-case name from § 4). Per invariant 7.3, the `jobRunId` is the correlation key; every event in a single job run carries the same `jobRunId`.
 
 - `<job-source>.started` (jobRunId, scheduledAt)
 - `<job-source>.org_started` (jobRunId, orgId)
-- `<job-source>.org_completed` (jobRunId, orgId, rowsAffected, durationMs)
-- `<job-source>.org_failed` (jobRunId, orgId, error, errorClass)
-- `<job-source>.completed` (jobRunId, orgsAttempted, orgsSucceeded, orgsFailed, durationMs)
+- `<job-source>.org_completed` (jobRunId, orgId, rowsAffected, durationMs, status: 'success')
+- `<job-source>.org_failed` (jobRunId, orgId, error, errorClass, status: 'failed')
+- `<job-source>.completed` (jobRunId, orgsAttempted, orgsSucceeded, orgsFailed, durationMs, status: 'success' | 'partial' | 'failed')
 
 Best-effort emission (graded-failure tier); never blocks the job.
 
