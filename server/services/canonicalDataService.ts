@@ -28,6 +28,18 @@ export const canonicalDataService = {
       .where(eq(canonicalAccounts.organisationId, organisationId));
   },
 
+  async findAccountBySubaccountId(orgId: string, subaccountId: string) {
+    const result = await db
+      .select()
+      .from(canonicalAccounts)
+      .where(and(
+        eq(canonicalAccounts.organisationId, orgId),
+        eq(canonicalAccounts.subaccountId, subaccountId),
+      ))
+      .limit(1);
+    return result[0] ?? null;
+  },
+
   async getAccountById(accountId: string, organisationId: string) {
     const [account] = await db
       .select()

@@ -210,9 +210,7 @@ async function resolveAccountIdForSubaccount(
   subaccountId: string | null,
 ): Promise<string | null> {
   if (!subaccountId) return null;
-  // Delegate to canonicalDataService so reads stay behind the canonical interface.
-  // getAccountsByOrg returns all accounts for the org; filter client-side by subaccountId.
-  const accounts = await canonicalDataService.getAccountsByOrg(organisationId);
-  const account = accounts.find(a => a.subaccountId === subaccountId);
+  // Targeted single-row SELECT scoped to both organisationId and subaccountId.
+  const account = await canonicalDataService.findAccountBySubaccountId(organisationId, subaccountId);
   return account?.id ?? null;
 }
