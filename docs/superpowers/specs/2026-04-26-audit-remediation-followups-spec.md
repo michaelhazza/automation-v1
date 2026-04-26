@@ -1538,7 +1538,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
 | F1 | findAccountBySubaccountId targeted method | ☐ todo | — | independent |
 | F2 | configDocuments parsedCache durability | ☐ todo | — | strictly depends on Phase-5A `rateLimitStoreService`; defer or migrate to deferred if surface doesn't fit |
-| G1 | Migration sequencing verification (re-runnable) | ☐ todo | — | superseded as pre-merge; run as post-deploy |
+| G1 | Migration sequencing verification (re-runnable) | ⧖ script authored; first-run against local DB pending | tasks/builds/audit-remediation-followups/g1-migration-sequencing/ | superseded as pre-merge; run as post-deploy |
 | G2 | Post-merge smoke test runbook | ⧖ runbook authored; live execution pending operator | tasks/builds/audit-remediation-followups/g2-post-merge-smoke/ | runbook at tasks/runbooks/audit-remediation-post-merge-smoke.md; flip to ✓ after operator completes all 7 steps |
 | H1 | Cross-service null-safety contract | ☐ todo | — | depends on C1; ships BEFORE B2 (per §2 re-sequencing); gate ships advisory on first release |
 
