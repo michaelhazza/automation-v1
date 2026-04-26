@@ -6,7 +6,7 @@
  * services layer per the RLS architecture contract.
  */
 
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, conversations } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -27,6 +27,7 @@ export async function resolveBriefVisibility(
   principal: BriefPrincipal,
   briefId: string,
 ): Promise<BriefVisibility> {
+  const db = getOrgScopedDb('briefVisibilityService');
   const [task] = await db
     .select({ id: tasks.id, organisationId: tasks.organisationId })
     .from(tasks)
@@ -46,6 +47,7 @@ export async function resolveConversationVisibility(
   principal: BriefPrincipal,
   conversationId: string,
 ): Promise<BriefVisibility> {
+  const db = getOrgScopedDb('briefVisibilityService');
   const [conv] = await db
     .select({ id: conversations.id, organisationId: conversations.organisationId })
     .from(conversations)

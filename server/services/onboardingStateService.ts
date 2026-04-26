@@ -10,7 +10,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountOnboardingState } from '../db/schema/subaccountOnboardingState.js';
 import type { SubaccountOnboardingStatus } from '../db/schema/subaccountOnboardingState.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
@@ -47,6 +47,7 @@ export async function upsertSubaccountOnboardingState(params: {
   const status = mapRunStatusToOnboardingStatus(params.runStatus);
   const now = new Date();
 
+  const db = getOrgScopedDb('onboardingStateService');
   try {
     await db
       .insert(subaccountOnboardingState)
