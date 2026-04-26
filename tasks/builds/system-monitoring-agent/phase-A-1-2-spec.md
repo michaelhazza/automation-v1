@@ -2309,6 +2309,40 @@ The mechanics of handing off between slices are covered in §15.2 (the protocol)
 
 ## 18. Out-of-scope (explicit)
 
+These items are deliberate omissions, not deferred work. Naming them here prevents scope creep during the build and makes review faster — the reviewer does not need to ask "where is X?" if X is on this list.
+
+**Push notification channels.** Phase 0.75 (email / Slack push delivery) is explicitly deferred indefinitely per Q1 §0.2. The operator workflow is page-based monitoring; adding push channels would add ~3-5 days for capability not used by the workflow. The `SystemIncidentFatigueGuard` extracted in Phase 0/0.5 is not invoked by anything in this spec — it sits dormant until and unless Phase 0.75 is reopened.
+
+**Auto-remediation actions.** No skill in the agent's bound set has `destructiveHint: true`. The agent reads, diagnoses, annotates, emits prompts. It does not retry jobs, disable flags, restart connectors, revoke subaccounts, or change any state outside the diagnosis columns of the incident row it owns. This is the architectural hard line that separates Phase 2 from Phase 3. CI gate enforces it (§17.3 deliverable 1).
+
+**Semantic-correctness LLM judge.** No heuristic in this spec asks an LLM "does this output make sense given this input." The cost lever (per-run LLM judge calls) and the prompt-engineering surface for the judge itself are out of scope. Phase 3.
+
+**Multi-agent coordination heuristics.** Handoff failure between agents, state mismatch, duplicate work, conflicting outputs — none of these have heuristics in the day-one or Phase 2.5 sets. The schema preserves correlation-ID space (Phase 0/0.5 inherited) so a future phase can fire heuristics on that data without a schema change. Phase 3 design problem.
+
+**Dev-agent handoff.** The "persistent_defect" classification path that Phase 0/0.5 introduced is preserved but unused. Nothing in this spec consumes it. Phase 4 — and Phase 4 depends on Phase 3 stable, so a meaningful timeline depends on the auto-fix gate signal accumulating from §11.
+
+**Tenant-scoped monitoring.** This spec ships a system-scoped agent only. Per-tenant monitoring agents (an extension of the Portfolio Health Agent precedent that watches a single org's runs and produces tenant-scoped incidents) are not built. The system principal explicitly does not write to tenant tables. Phase 5+ if there is a need; not today.
+
+**Real-time WebSocket push of agent diagnoses.** The Phase 0/0.5 WebSocket fans out incident-open / status-change events. Diagnosis annotations land via the same channel piggybacked on the existing event types — no new WS event type, no new client-side handler for "diagnosis just landed." The drawer re-renders on the existing `system_incident:updated` event when the incident changes; that includes the diagnosis fields.
+
+**No new admin UI page.** All UI changes extend `SystemIncidentsPage`. No new route, no new navigation entry, no new dashboard. Per CLAUDE.md frontend principles, the diagnosis filter pill and the inline drawer blocks are the entire surface.
+
+**No baseline storage in a tenant-partitioned table.** Baselines are global / system-scoped. Per-tenant baselines are Phase 3.
+
+**No prompt versioning at runtime.** The Investigate-Fix Protocol doc is git-versioned. Generated `investigate_prompt` text does not carry a protocol-version stamp — drift is observable from `git log docs/investigate-fix-protocol.md`. If Phase 3 needs a stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
+
+**No analytics view in this spec.** A sysadmin dashboard that visualises feedback rollups (per-heuristic FP rate over time, prompt effectiveness trend, week-over-week incident volume) is not built. The data is captured per §11; the visualisation is a Phase 3 deliverable, designed alongside the auto-fix gate.
+
+**Deferred items inherited from PR #188.** The following items from the Phase 0/0.5 PR were deliberately not re-opened here:
+
+| Item | Why still deferred |
+|---|---|
+| #2 — severity escalation in `recordIncident` (low → medium → high based on occurrence cadence) | The page-based monitoring workflow does not need it yet. Real signal is needed before tuning the cadence threshold. Revisit when feedback data shows operators miss recurring incidents. |
+| #10 — badge cache for the nav badge | Nav badge currently re-queries on every page load. Performance is fine in pre-production. Add cache when query volume warrants it; not now. |
+| #R3.3 — dual-count for `occurrence_count` (separate "raw" and "post-throttle" counters) | The §4.2 throttle metric is sufficient observability for now. A second column is over-instrumentation until tuning data demands it. |
+
+**Items not in any of the above categories.** If something is on neither the "explicit deferred" list nor the "out-of-scope" list and not covered by Phases A/1/2/2.5 in this spec, it is a scope question the user resolves — not the executor.
+
 ## 19. Future phases (summary)
 
 ---
