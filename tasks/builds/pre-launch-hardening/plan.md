@@ -368,3 +368,50 @@ Every write-path the product surfaces actually executes. Today the highest-impac
 - New routes can be commented out / unmounted if they misbehave (no schema dependency).
 - DR2's follow-up trigger is gated by a code path predicate; rollback is a one-line revert.
 - C4a-REVIEWED-DISP fix may modify the step-run state machine; the architect output must include a "rollback shape" sentence so we can revert without leaving zombie step rows.
+
+### §3.4 Chunk 4 — Maintenance Job RLS Contract
+
+- **Spec slug:** `pre-launch-maintenance-job-rls-spec`
+- **Path:** `docs/pre-launch-maintenance-job-rls-spec.md`
+- **Architect needed?** No — the contract already exists in `memoryDedupJob`. Spec is a mechanical lift-and-mirror.
+- **Depends on:** Chunk 1 (RLS posture). The `withAdminConnection` / `withOrgTx` primitives are already in `accepted_primitives` per `docs/spec-context.md`.
+- **Blocks:** none. Tiny; can ride alongside any other implementation chunk.
+
+**Goal (one paragraph for the spec):**
+Background decay/pruning jobs that silently no-op today actually run, so test memory state isn't garbage. Three jobs (`ruleAutoDeprecateJob.ts`, `fastPathDecisionsPruneJob.ts`, `fastPathRecalibrateJob.ts`) currently read/write RLS-protected tables (`memory_blocks`, `fast_path_decisions`) from outside any `withAdminConnection`/`withOrgTx` block — every select returns zero rows under FORCE RLS, and the jobs are silent no-ops. This spec mirrors the `memoryDedupJob.ts` admin/org tx contract across all three.
+
+**Non-goals:**
+- No new jobs.
+- No new pruning *policies* — the existing decay/prune/recalibrate logic is preserved; only the tx wrapping changes.
+- No `JobResult` discriminated union refactor — that's `CHATGPT-PR203-BONUS`, explicitly deferred per the mini-spec.
+- No per-row throughput optimisation — that's `CHATGPT-PR203-R2`, explicitly deferred.
+
+**Items closed (with source IDs):**
+- `B10-MAINT-RLS` (mini-spec coined; canonical: B10 in `tasks/todo.md` L349) — three jobs need to mirror the admin/org tx contract from `memoryDedupJob`.
+
+**Items explicitly NOT closed (and why):**
+- `CHATGPT-PR203-R2` (per-row tx+lock throughput) — explicitly deferred.
+- `CHATGPT-PR203-BONUS` (cross-job `JobResult` union) — explicitly deferred.
+- Other jobs that may need similar treatment — not surveyed in this chunk; the audit can run separately if it surfaces additional candidates.
+
+**Key decisions:** none. The contract is well-defined in `memoryDedupJob`. Spec restates it as a Contracts subsection (per `spec-authoring-checklist.md §3`) so the implementer has a single anchor to copy.
+
+**Files touched (concrete):**
+- `server/jobs/ruleAutoDeprecateJob.ts`
+- `server/jobs/fastPathDecisionsPruneJob.ts`
+- `server/jobs/fastPathRecalibrateJob.ts`
+- Reference (read-only, used as template): `server/jobs/memoryDedupJob.ts`.
+- Pure-function tests (new or extended): `server/jobs/__tests__/ruleAutoDeprecateJobPure.test.ts`, `fastPathDecisionsPruneJobPure.test.ts`, `fastPathRecalibrateJobPure.test.ts` — one each, asserting the per-org iteration shape compiles and the wrapper is invoked.
+
+**Test plan:**
+- Static gates only — `npm run typecheck`, `npm run lint`.
+- Pure-function tests per job covering the per-org iteration shape (the test imports the pure variant and asserts the wrapper composition; no DB).
+- Plus, per the mini-spec done criteria: a test added per job that "verifies a real row is decayed/pruned/recalibrated." This is a runtime test posture call — we run it as a pure-function test where the wrapper is mocked and the inner pure function is called against an in-memory fixture row, asserting the decay/prune/recalibrate shape transformations happen. No DB harness.
+
+**Done criteria:**
+- All three jobs execute their intended writes under the same RLS contract as `memoryDedupJob` — `withAdminConnection` enumerates orgs, each per-org iteration runs in `withOrgTx`.
+- Each job has a pure-function test asserting a representative row is decayed/pruned/recalibrated when the wrapper invokes the inner function.
+- No silent no-op behaviour: each job logs `logger.info('<job>_per_org_complete', { orgId, rowsAffected })` per iteration so the test round can verify the jobs ran.
+
+**Rollback notes:**
+- Pure code change. Revert is a one-commit rollback. No schema; no data implications (pre-prod).
