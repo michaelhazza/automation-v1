@@ -2010,11 +2010,129 @@ Manual, run in staging, gating production deploy. Not CI-automated.
 
 ## 15. Rollout plan
 
+The rollout plan describes how the four implementation sessions sequence into one PR, what each session must hand to the next, and how the executor self-verifies per slice. Slice content is in §17; this section is about the meta-process — order, handoff, verification.
+
 ### 15.1 Order of operations across sessions
+
+**Slice ordering is fixed.** A → B → C → D. Each slice depends on artefacts the previous one produced; reordering would force backtracking.
+
+| Slice | Sequence position | Why this order |
+|---|---|---|
+| **A — Foundations** | 1st | Idempotency, throttle, system-principal context, `assertSystemAdminContext`, schema additions, agent row seed. Phase 2 cannot run without system-principal context (§4.3). Phase 1 benefits from idempotency on the new synthetic-check ingest path. Schema changes land here so every later slice writes to the final shape. |
+| **B — Phase 1 + protocol + registry + baselining** | 2nd | Synthetic checks, the Investigate-Fix Protocol doc + CLAUDE.md hook, the heuristic registry skeleton, the baselining primitive + refresh job. Slice C consumes all four. Synthetic checks are useful on their own (they generate incidents) but the agent that triages them is Slice C. |
+| **C — Phase 2 day-one** | 3rd | Agent definition fully wired, triggers (incident-driven + sweep), day-one heuristic set (14 heuristics), prompt template, validation, rate limiting, UI extensions. Most of the user-visible value lands here. |
+| **D — Phase 2.5 + finalisation** | 4th | Phase 2.5 cross-run/systemic heuristics (9 more), additional baseline metrics they need, rollout-readiness work: staging smoke checklist, architecture.md + capabilities.md updates, final pre-PR pass. |
+
+**Slice deliverables flow into one PR.** No separate PRs per slice. The PR is opened only at the end of Slice D. Each slice is a sequence of commits on the same branch; the branch grows linearly across sessions.
+
+**Why each slice ends in a `progress.md` write.** Sessions resume on different days, possibly with different operators. The handoff document carries the full state forward — what's done, what decisions were made under judgement during the slice, what the next slice is responsible for. Without it, the next session reverse-engineers from git log, which is brittle for any decision that was made-and-not-implemented.
+
+**No `/compact` mid-session.** Per CLAUDE.md §12, context degrades before the hard limit. Each slice is sized to fit comfortably under the compact threshold. If a slice runs longer than expected, the executor pauses, writes `progress.md`, ends the session, and resumes on a fresh context — never attempts to compact.
+
+**No mid-slice user check-ins.** Each slice runs end-to-end with the executor making judgement calls per the spec. The user reviews the result at slice end via the `progress.md` summary. If a hard architectural decision surfaces mid-slice that the spec doesn't anticipate, the executor stops and writes the question to `progress.md` rather than improvising — the same stuck-detection pattern from CLAUDE.md applies.
 
 ### 15.2 Session boundaries and `progress.md` handoff protocol
 
+`progress.md` lives at `tasks/builds/system-monitoring-agent/progress.md`. It is the durable handoff artefact. One file, append-only summary at the top, full history below.
+
+**What each session writes before ending:**
+
+1. **Slice status:** which slice was just finished, what work landed, what remains (if the slice is partial).
+2. **Decisions made under judgement during the slice:** anything where the spec was ambiguous and the executor made a call. Format: short bullet, with the decision + the alternative considered + why this one. Future sessions and the user can audit these.
+3. **Issues surfaced for the user:** anything that would benefit from user input before the next slice. Flagged with a clear "USER ACTION:" prefix.
+4. **State of the codebase:** verification commands run + their results. Lint/typecheck/test status at slice end.
+5. **Next slice's starting point:** which slice is up next, where it picks up, what artefacts from this slice it consumes.
+
+**Format conventions for `progress.md`:**
+
+- The top of the file is a "current state" summary (what most readers want to see). Older slice handoff entries live below in reverse chronological order.
+- No heavy frontmatter — this is a working document, not a publishable artefact.
+- Tables for structured data (slice status, verification results); prose for decisions and rationale.
+- No emojis. No filler. The reader is a future executor or the user — both want signal density.
+
+**Example handoff entry shape (illustrative, not prescribed):**
+
+```markdown
+## Slice B handoff — 2026-MM-DD
+
+**Status:** Slice B complete. Slice C begins next session.
+
+**Landed:**
+- Phase 1 synthetic checks (all 7 day-one checks).
+- Investigate-Fix Protocol doc at docs/investigate-fix-protocol.md.
+- CLAUDE.md §5.3 hook section added.
+- Heuristic registry skeleton (types.ts, index.ts, empty arrays).
+- Baseline refresh job + read API.
+
+**Decisions made under judgement:**
+- Synthetic check log-source: process-local rolling buffer (not durable
+  store). Rationale: spec §2.8 acceptable for Phase 0.5; carried forward.
+- Baseline refresh aggregate: single-query per source table (not per
+  entity) — matches Drizzle batch-fetch pattern.
+
+**Issues for user:**
+- (none)
+
+**Verification:**
+- npm run lint — pass.
+- npm run typecheck — pass.
+- npm test (server/services/systemMonitor/**) — 47 tests, all pass.
+- Smoke: synthetic queue-stall fires correctly in dev DB.
+
+**Slice C starting point:** Heuristic registry has skeleton; populate with
+day-one heuristic modules. Agent definition row already seeded by Slice A
+migration. Trigger handlers (`system-monitor-triage`, `system-monitor-sweep`)
+not yet wired — this is Slice C work.
+```
+
+**Handoff trigger conditions** (executor must write a handoff entry when):
+
+- A slice completes (normal handoff).
+- The session approaches the compact threshold (~50–60% per CLAUDE.md §12) — write a partial-slice handoff and end the session early.
+- The executor hits a stuck state (per CLAUDE.md stuck-detection) — write a "blocker" handoff and ask the user.
+- The user pauses the session (e.g. for environment maintenance) — write a paused-state handoff.
+
+**Reading on resume.** New session starts by reading `progress.md` first. If the entry says "Slice X complete," resume at Slice X+1. If it says "Slice X partial" or "blocked," resume per the entry's instructions. If it says "paused," resume the same slice from the next outstanding item.
+
+**No verbal handoff.** The user is not a state carrier between sessions. Anything the next executor needs to know lives in `progress.md`. The user reviews; they do not relay.
+
 ### 15.3 Verification commands per slice
+
+Each slice has a fixed verification gate. The executor must run these before writing the handoff and marking the slice complete. Failures block the handoff — investigate root cause, do not bypass.
+
+**Universal commands (run on every slice):**
+
+| Command | When | Pass criterion |
+|---|---|---|
+| `npm run lint` | After every meaningful change; final at slice end | Zero errors. |
+| `npm run typecheck` | After every meaningful TypeScript change; final at slice end | Zero errors. |
+| `npm test` (or relevant suite) | After every logic change; final at slice end | All tests pass. |
+
+If any command fails three times in a row with the same error, stop and write a stuck-state handoff. Do not retry-with-rephrasing.
+
+**Slice-specific verification:**
+
+| Slice | Additional commands | What they verify |
+|---|---|---|
+| A | `npm run db:generate` and inspect the generated migration file. Run `npm test -- server/services/__tests__/idempotency.test.ts server/services/__tests__/throttle.test.ts server/services/__tests__/systemPrincipal.test.ts server/services/__tests__/assertSystemAdminContext.test.ts`. | Migration applies cleanly to a fresh DB; all foundation invariants hold. |
+| B | `npm test -- server/services/__tests__/syntheticChecks*.test.ts server/services/__tests__/baseline*.test.ts`. Validate `docs/investigate-fix-protocol.md` exists and renders cleanly. Validate CLAUDE.md §5.3 section parses. | Synthetic checks fire correctly; baseline reader/writer correct; protocol doc lands. |
+| C | `npm test -- server/services/__tests__/heuristics.*.test.ts server/services/__tests__/triageJob*.test.ts server/services/__tests__/sweepJob*.test.ts server/services/__tests__/promptValidation*.test.ts server/services/__tests__/incidentFeedback*.test.ts`. `npm run build` (client) — verifies new components compile. CI gate: assert agent's bound skill set has zero `destructiveHint:true` skills. | Day-one heuristics, triage, sweep, prompt validation, feedback all functioning. UI builds. |
+| D | All Slice C tests pass (regression). New Phase 2.5 heuristic tests pass: `npm test -- server/services/__tests__/heuristics.*2_5*.test.ts` (or matching pattern). Smoke checklist (`tasks/builds/system-monitoring-agent/staging-smoke-checklist.md`) ticked off in staging. `architecture.md` and `docs/capabilities.md` reflect the new state. | Phase 2.5 expansion lands without regression. Docs in sync per CLAUDE.md §11. Staging smoke verifies end-to-end. |
+
+**Pre-PR commands (run after Slice D, before opening the PR):**
+
+| Command | What it verifies |
+|---|---|
+| `npm run lint && npm run typecheck && npm test && npm run build` | Full local pass on the final state. |
+| `git log main..HEAD --oneline` | Review every commit on the branch — readable, properly attributed, scope-aligned. |
+| `git diff main...HEAD --stat` | Review the file-by-file diff size. Sanity check: anything outside the §13 inventory was modified for a reason captured in commit messages. |
+| Architecture / capabilities doc check | `architecture.md` System Monitor section is present and accurate. `docs/capabilities.md` includes the new capability. CLAUDE.md §5.3 section is present. |
+| `verify-idempotency-strategy-declared.sh` (or equivalent CI gate) | All new pg-boss queues have idempotency declared per architecture.md §Event-Driven Architecture. |
+| `pr-reviewer` agent | Independent code review pass. (Caller invokes after the spec-conformance pass; per CLAUDE.md the user runs review tooling, not the executor mid-build.) |
+
+**No CI bypass.** If any check fails, fix the root cause. Do not skip hooks (`--no-verify`), do not silence linter rules, do not mark tests `.skip`. The CLAUDE.md verification protocol applies in full.
+
+**Manual smoke (Slice D):** the 10-step smoke checklist (§14.3) runs in staging before the PR is marked ready. Each step gets a tick or a fail-with-notes; failures block the PR.
 
 ## 16. Risk register
 
