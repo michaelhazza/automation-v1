@@ -310,3 +310,139 @@ All Round 2 edits were precision tightenings inside existing sections — no sec
 Post-integrity sanity (4c): not applicable — zero mechanical fixes applied this round.
 
 ---
+
+## Round 3 — 2026-04-26T02-00-00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+
+This is now at production-grade spec quality. You've closed every meaningful ambiguity from previous rounds, and more importantly, you've done it without bloating the system or introducing new primitives.
+
+At this point, there are no remaining architectural gaps. What's left are final edge-case guards and implementation traps that are easy to miss but high leverage to lock in now.
+
+What's now genuinely strong (this is rare)
+- §0.3 (no cross-item expansion) closes one of the biggest real-world failure modes
+- A1b with explicit AST fallback trigger condition is exactly the right balance of pragmatism and safety
+- A2 admin bypass via explicit flag instead of inference removes an entire class of silent bugs
+- B2 deterministic concurrency harness via `__testHooks` is a major quality upgrade
+- C3 forced decision removes spec limbo
+- D3 auditability constraint prevents "calibration drift hiding real issues"
+- H1 scope lock prevents uncontrolled refactor creep
+
+This is the kind of spec that actually survives contact with implementation.
+
+Final tightenings (true last pass)
+
+1. A1b AST fallback trigger is still slightly ambiguous
+You currently have: fallback if regex FP/FN > 5%
+That's directionally correct, but:
+Problem: "5%" is not measurable unless you define the sample; devs will guess or ignore it.
+Tighten: Add:
+"FP/FN rate is measured against a minimum sample of 50 call sites. If ≥3 confirmed misclassifications are observed, AST fallback is mandatory."
+This makes the trigger concrete and enforceable.
+
+2. A2 guard needs one protection against "flag drift"
+You've added: `allowRlsBypass: true|false`. Good. But:
+Failure mode: someone sets true casually; spreads over time; defeats RLS protection intent.
+Add constraint:
+"Any use of `allowRlsBypass: true` must include an inline comment explaining justification. CI must fail if the flag is present without a comment."
+This is a very cheap but powerful control.
+
+3. B2 "noop" semantics need one more invariant
+You defined: `{ status: 'noop' }` + INFO log. Good, but incomplete.
+Failure mode: partial state changes before noop return; downstream assumes no-op means no side effects.
+Add:
+"A noop outcome must guarantee zero writes and zero side effects. Any pre-write condition must be evaluated before mutation begins."
+This makes idempotency strict, not best-effort.
+
+4. C1 "[GATE] must be last line" needs one exception rule
+Right now it's absolute.
+Failure mode: logging frameworks append trailing logs (timing, cleanup); breaks the invariant unintentionally.
+Add:
+"No application-level logs may follow the [GATE] line. Framework-level logs are exempt."
+Prevents false failures.
+
+5. C3 follow-up tracking needs ownership
+You added: tracked follow-up. But:
+Failure mode: follow-up exists but is never owned; silently ignored.
+Add:
+"Follow-up must include an owner and a trigger condition for re-evaluation (e.g. Phase 5A entry)."
+
+6. H1 needs one rollout safeguard
+Even with scope lock, this can still bite.
+Failure mode: inconsistent shapes across domains; breaks downstream consumers.
+Add:
+"During Phase 1, canonical output shapes must be additive only. No field removals or renames allowed."
+This ensures safe rollout.
+
+7. Missing one global invariant (important)
+You've locked scope, gates, primitives. You're missing "determinism over cleverness".
+Add a short rule:
+"Where multiple implementation approaches exist, preference must be given to the most deterministic and inspectable option over the most concise or abstract."
+This aligns decisions across A1, A2, B2, C3 implicitly.
+
+Optional but high-value (if you want elite-level robustness)
+Add a "Spec Integrity Check" mini-section. Very small, but powerful:
+Before marking any item complete:
+- All DoD conditions pass in CI
+- No TODOs or placeholders remain in changed files
+- All new invariants are observable via logs or tests
+- No silent fallbacks introduced
+This prevents "technically done but actually incomplete".
+
+Final verdict
+Status: Approved for finalisation and execution
+Confidence level: Very high. This is now:
+- Implementation-safe
+- Drift-resistant
+- Scalable across multiple engineers or agents
+- Aligned with your system philosophy (no overengineering, high leverage)
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | A1b AST fallback trigger: define sample (50 call sites) + concrete trigger (≥3 misclassifications) | technical | apply | auto (apply) | high | Internal gate matcher implementation discipline; "5%" was unmeasurable without sample size, this is the deterministic version. Aligns with new §0.4. No user-facing impact. |
+| 2 | A2 flag-drift protection: mandatory inline justification comment + CI grep check on `allowRlsBypass: true` | technical | apply | auto (apply) | high | Internal contract reinforcement; prevents copy-paste spread of a security-defeating flag. Deterministic check (comment present or not). No user-facing impact. |
+| 3 | B2 zero-side-effects invariant: `{ status: 'noop' }` MUST guarantee zero writes; pre-write condition evaluated before mutation begins | technical | apply | auto (apply) | high | Internal idempotency contract; closes "best-effort no-op" failure mode where partial writes contaminate downstream readers. No user-facing impact. |
+| 4 | C1 framework-log exception: `[GATE]` last-line rule applies to application-level logs only; framework logs (shell trace, tsx warnings, Node deprecations) exempt | technical | apply | auto (apply) | medium | Internal CI parser convention; absolute "last line" is brittle against framework noise. CI parser shifts to grep-then-tail form. No user-facing impact. |
+| 5 | C3 follow-up: owner + trigger condition required on the `tasks/todo.md` entry | technical | apply | auto (apply) | medium | Internal backlog hygiene; prevents silent backlog rot on a deferred technical follow-up. No user-facing impact. |
+| 6 | H1 Phase 1 additive-only output shapes constraint (no field removals/renames during rollout window) | technical | apply | auto (apply) | medium | Internal contract on the four in-scope job output domains; prevents silent breakage of downstream consumers during the null-safety rollout. No user-facing impact (consumers are internal services, not customers). |
+| 7 | Add §0.4 "Determinism over cleverness" cross-cutting meta rule | technical | apply | auto (apply) | medium | Internal architectural discipline; codifies the meta-pattern under §0.1/§0.2/§0.3. Aligns A1b/A2/B2/C3/D3 explicitly. No user-facing impact. |
+| 8 | Add §4.1 "Per-item integrity check" mini-section (4 conditions before flipping §5 Tracking row to ✓) | technical | apply | auto (apply) | medium | Internal completion discipline; prevents "technically merged but actually incomplete" failure mode. No user-facing impact. |
+
+### Triage notes
+
+All 8 findings classified as `technical`. None describe user-facing copy, visible workflows, defaults users build muscle memory around, permission policies, public API contracts, or visible feature surface. ChatGPT's Round 3 feedback explicitly framed itself as "final edge-case guards and implementation traps" — every finding tightens an internal-quality call (trigger thresholds, contract precision, CI parser conventions, internal completion discipline). The user has explicitly opted out of approving on quality calls of this shape per the agent's triage rules.
+
+No escalations triggered:
+- No `defer` recommendations (all confident applies).
+- No contract changes with `architecture.md` or `docs/spec-context.md` that propagate cross-spec — A2's architecture.md update line gained one sentence on the `allowRlsBypass: true` justification-comment requirement, which is an extension of the same A2 contract already in flight (introduced Round 2, scoped to A2's three named files / one hook in §0.2). The C1 architecture.md update line gained the framework-log exception clarification, which is a precision tightening of an existing contract, not a new cross-spec rule. Both are internal-discipline updates inside this spec's already-named architecture.md write surface.
+- No `[missing-doc]` rejects — all findings align with existing posture (`prefer_existing_primitives_over_new_ones`, `static_gates_primary`).
+- High confidence on every fix.
+
+Top themes (Round 3): determinism made measurable (concrete sample + threshold for AST fallback; framework-log exception with canonical CI parser shape; owner+trigger on follow-up entries), strict idempotency (zero-side-effects invariant on noop returns), drift prevention (flag-drift comment+CI; additive-only shape contract during H1 rollout), and meta-discipline (§0.4 determinism-over-cleverness, §4.1 per-item integrity check).
+
+### Applied (auto-applied technical)
+
+- [auto] A1b AST fallback trigger tightened — concrete sample (50 call sites minimum) + concrete threshold (≥3 confirmed misclassifications) replaces ambiguous ">5%". Decision logging requirements made explicit (sample list + count in build-slug progress log). Sub-50 sample case handled.
+- [auto] A2 flag-drift protection added — mandatory inline justification comment requirement + CI gate check (extension of `scripts/verify-rls-protected-tables.sh`, NOT a new file; preserves §0.2 budget). A2 Phase-3 DoD updated. architecture.md update wording extended with the comment requirement. §0.2's A2 file-list line clarified that `verify-rls-protected-tables.sh` carries two checks (schema-vs-registry + flag-justification) — single file with two checks, not two files.
+- [auto] B2 zero-side-effects invariant added under no-op return semantics — `{ status: 'noop' }` MUST mean zero writes; pre-write condition evaluated before mutation begins; partial-write rollback contract; regression test now asserts state-unchanged after noop.
+- [auto] C1 framework-log exception added — application-level logs vs framework-level logs distinction; canonical CI parser shape changed to `grep -E '^\[GATE\] ' | tail -n 1`. Acceptance criterion + architecture.md update wording updated to match.
+- [auto] C3 follow-up entry shape now requires owner + trigger condition; failure to include either fails C3 DoD. `tasks/todo.md` entry template provided.
+- [auto] H1 additive-only output shapes constraint added under Approach step 3 — no field removals or renames during Phase 1 rollout window; rename/remove needs surface as a separate follow-up; constraint scope is the four in-scope job output domains.
+- [auto] §0.4 "Determinism over cleverness" cross-cutting meta rule added (sibling of §0.1/§0.2/§0.3). Concrete consequences enumerated; aligns A1b/A2/B2/C3/D3 explicitly.
+- [auto] §4.1 "Per-item integrity check" mini-section added (4 conditions: DoD passes in CI, no TODOs/placeholders, all invariants observable, no silent fallbacks). Gating rule added for §5 Tracking flip.
+
+### Integrity check
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0).
+
+1. A2 flag-drift edit initially mentioned a potentially-new sibling gate file `scripts/verify-admin-bypass-justification.sh` ("either … or sibling") which conflicts with §0.2's "exactly three new files plus one hook" budget for A2. **Mechanical fix applied:** rewrote A2 flag-drift CI-gate paragraph to specify the check is added INSIDE the existing `scripts/verify-rls-protected-tables.sh` (one of the three already-named A2 files), and updated §0.2's A2 line to clarify "single file with two checks, not two files". Both edits keep A2 within its named-file budget per §0.2 — preferred over loosening §0.2 because §0.4's determinism-over-cleverness rule, which was the headline addition this round, would itself have flagged "two files for one concern" as the less-deterministic option.
+
+Cross-references touched in Round 3 (§0.4 referencing §0.1/§0.2/§0.3 + A1b/A2/B2/C3/D3; §4.1 referencing §1 / §5 Tracking; A2 flag-drift referencing §0.2 file budget; A2 Phase-3 DoD referencing the new flag-drift check; H1 additive-only referencing §0.3; C1 framework-log exception referencing canonical parser shape) all resolve correctly. No empty sections, no broken anchors. Section/sub-section numbering: §0 carries §0.1-§0.4 sequential; §4 carries §4.1; both are stable. The TOC does not enumerate §0 sub-headings or §4 sub-headings, so no TOC update is required.
+
+Post-integrity sanity (4c): the one mechanical fix above (A2 flag-drift moved inside existing gate, §0.2's A2 line clarified) was a single coupled edit-pair, not a chain of cascading changes. Verified the A2 Phase-3 DoD line that mentions the new check now matches the updated §0.2 budget — both consistent. No broken links, no left-empty sections.
+
+---
