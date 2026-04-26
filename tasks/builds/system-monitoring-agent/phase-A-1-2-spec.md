@@ -2875,4 +2875,14 @@ A small list, mainly to close the loop on architectural conversations the team h
 
 ---
 
+## Spec Status
+
+**Status:** Finalised — v1 (Execution Ready)
+**Last review:** ChatGPT spec review, 4 rounds (2026-04-26)
+**Total findings processed:** 30 (24 applied, 6 rejected, 0 deferred)
+**Round 4 outcome:** Consistency / deduplication pass — no duplicate rules found that warrant collapsing. Cross-section restatements (§4.10 cross-cutting rules vs §9.x / §12.x local mechanisms) are complementary by design with explicit cross-references already in place. Spec locked.
+**Next step:** implementation per §15 rollout plan (Slice A → B → C → D).
+
+---
+
 End of spec.

@@ -323,3 +323,106 @@ Cross-references introduced this round: §4.10.7 (referenced from §4.10.10 "rej
 
 Post-integrity sanity (4c): re-scanned section structure — §4.10 now has ten subsections (§4.10.1-§4.10.10), opener and closing rule both reference "ten" consistently, no empty subsections, no broken cross-references. §4.8 structural rule paragraph is additive (no removal of prior content), key-format table preserved. §9.3 retryability paragraph is additive (no removal of prior partial-success contract). Pass.
 
+---
+
+## Round 4 — 2026-04-26 (resumed session, round 4 — consistency / dedup pass + finalisation)
+
+### ChatGPT Feedback (raw, summarised)
+
+```
+ChatGPT: Spec is locked + execution ready. Validates rounds 1-3 rejections as correct.
+"Do NOT add to spec." Three NON-SPEC recommendations:
+
+1. Consistency / Deduplication Pass (Optional but valuable) — collapse duplicate
+   rules stated in different wording. Focus: idempotency (§4.8/§4.10/§12), retry
+   semantics, logging rules. Only collapse and reference; do not introduce new
+   rules.
+
+2. Implementation Alignment Check (Recommended) — internal checklist: can every
+   invariant be observed in logs or state? Can every failure mode be detected
+   post-run? Can every retry path be traced deterministically? — NOT a spec
+   change.
+
+3. Real-World Validation — failure simulation, concurrency stress, duplicate
+   execution tests, partial success replay. Belongs to build/test phase, not
+   spec.
+
+Recommendation: "Mark this as: Spec: Finalised (v1 – Execution Ready). Then
+move immediately to: implementation, test harness, monitoring validation."
+```
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Dedup pass — collapse duplicate rules across §4.8 / §4.10 / §12.3 / §12.4 / §9.3 / §9.8 / §9.11 | technical | apply (scan + collapse only if real duplication exists; do NOT manufacture work) | auto (no-op — no real duplicates found) | low | Scanned all named sections. Cross-section restatements that look like duplication are actually cross-cutting rule (§4.10.x) + local mechanism (§9.x or §12.x) pairs with explicit cross-references already in place: §4.10.10 → §12.3, §4.10.5 → §9.11/§12.4, §4.10.3 → §9.3, §9.11 → §4.7.5/§12.4, §4.8 → §4.6/§9.8/§12.1. The §4.10 cross-invariant section is the registry of axes; §9.x and §12.x apply the rules to specific paths. Collapsing would lose the local/cross-cutting separation that makes the spec readable from either entry point. Per workflow: "If you find no real duplication... record that as a finding and skip the edits." |
+| 2. Implementation Alignment Check (observability of invariants, failure-mode detectability, retry-path traceability) | technical | reject (not a spec change per ChatGPT itself) | auto (reject) | n/a | ChatGPT explicitly framed this as a non-spec recommendation. Belongs to spec-conformance + audit phases, not the spec itself. Already covered structurally — invariants ARE the queryable-dimensions invariant (§12.3), failure modes ARE the §4.7 tables, retry paths ARE the §4.10.1 + §12.4 contracts. |
+| 3. Real-World Validation (failure simulation, concurrency stress, partial-success replay) | technical | reject (not a spec change per ChatGPT itself) | auto (reject) | n/a | Belongs to build/test phase. §14 testing strategy is the locus; specific test cases are an implementation concern. Adding test enumerations to the spec would contradict spec-context.md `runtime_tests: pure_function_only` + `testing_posture: static_gates_primary`. |
+| 4. Spec finalisation block — "Status: Finalised — v1 (Execution Ready)" + last review + total findings + next step | technical | apply (single closing block under new `## Spec Status` section, after §19) | auto (apply) | low | Closes the review loop; gives the architect / executor a clear "what state is this in" pointer. Internal status marker; not user-visible. |
+
+(Round 4: 4 findings — 1 auto-apply [Spec Status block], 1 auto-no-op [dedup pass found no real duplicates], 2 auto-reject [non-spec items per ChatGPT itself]. Zero user-facing. Zero `[missing-doc]` escalations.)
+
+### Applied (auto-applied technical findings)
+
+- [auto] Added `## Spec Status` section after §19 with finalisation block — finding 4. Block contents:
+  - **Status:** Finalised — v1 (Execution Ready)
+  - **Last review:** ChatGPT spec review, 4 rounds (2026-04-26)
+  - **Total findings processed:** 30 (24 applied, 6 rejected, 0 deferred)
+  - **Round 4 outcome:** Consistency / deduplication pass — no duplicate rules found
+  - **Next step:** implementation per §15 rollout plan (Slice A → B → C → D)
+
+### Dedup pass — analysis record (no edits)
+
+Sections scanned for duplicate rules: §4.8 (idempotency invariant + key formats + storage / lifecycle / collision + schema evolution), §4.9 (concurrency rules), §4.10 (cross-invariant interaction rules — ten subsections), §9.3 (sweep partial-success contract + retryability), §9.8 (write_diagnosis output contract + schema_version), §9.11 (self-stuck detection + severity ladder), §12.1 (event-type table), §12.3 (logging conventions + queryable-dimensions + sampling + no-silent-fallback), §12.4 (explicit defaults).
+
+**Possible-duplicate candidates evaluated:**
+
+1. **§4.10.1 (Idempotency × Retry) vs §4.9.6 (concurrent retry overlap) vs §4.10.4 (Failure × Idempotency).** Three different angles — key-reuse rule, job-vs-original execution race, failure persists key. Not duplicates; complementary axes already cross-referenced.
+2. **§4.10.10 backpressure no-silent-drop vs §12.3 no-silent-fallback rule.** §4.10.10 explicitly says "This is the same rule as §12.3's no-silent-fallback invariant, applied to the load-shedding axis." Cross-reference already present; rule stated once in §12.3 with §4.10.10 noting the application axis.
+3. **§9.3 retryability paragraph vs §4.10.3 Partial Success × Retry.** §4.10.3 is the cross-cutting rule (every partial-success path obeys it); §9.3 retryability paragraph is the sweep-handler-specific application + the rationale for not adding per-pair classification field. Cross-references in both directions. Different scopes; complementary.
+4. **§9.8 `write_diagnosis` idempotency paragraph vs §4.8 table row for `write_diagnosis`.** §4.8 is the registry of key formats + storage + collision; §9.8 explains the consumer-side behaviour (mid-call crash → retry no-op). Both serve different reader paths (executor reading §4.8 wants the contract; executor reading §9.8 wants the consumer guarantee). Acceptable separation.
+5. **§9.11 timeout (`runtime_ms > 5 minutes`) vs §12.4 timeout (5 minutes).** §9.11 is the detection-criterion table; §12.4 is the consolidated defaults table. §12.4 lists the value once and §9.11 / §4.7.5 cross-reference it. The §9.11 row inline is the criterion's source; not a contradictory restatement.
+6. **§4.8 collision behaviour paragraph vs §4.8 storage table collision column.** Paragraph is the cross-cutting rule ("system MUST NOT silently merge differing payloads"); table is the per-layer mechanism. Required pairing — the rule is what callers obey, the table is the implementation. Not duplicate.
+
+**Conclusion:** No duplicate rules to collapse. The spec's structure is "axis registries (§4.7-§4.10) + per-domain applications (§5-§13) + cross-cutting concerns (§14-§19)" — readers need both layers, and the layers cross-reference each other rather than restating. Per workflow: skip edits, record the analysis.
+
+### Integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+The Spec Status block is a closing marker — additive, no cross-references introduced or invalidated, no headings renumbered. The dedup pass produced no edits, so no integrity surface to re-validate. Pass.
+
+Post-integrity sanity (4c): re-scanned final section — `## Spec Status` heading well-formed, `End of spec.` line preserved as the last content line, table-of-contents not modified (the new Status block is a closing meta-section, not a numbered top-level § entry, and matches the pattern of prior closing blocks). Pass.
+
+---
+
+## Final Summary
+
+- **Rounds:** 4
+- **Total findings processed:** 30 across rounds 1-3 + 4 in round 4 = 34
+- **Auto-accepted (technical):** 25 applied, 6 rejected, 0 deferred. Round-4 dedup-pass finding produced a no-op (no real duplicates found) and is not counted as apply or reject.
+- **User-decided:** 0 applied, 0 rejected, 0 deferred. Zero user-facing findings across all four rounds — every finding was internal / contract-clarification / structural / observability. No described user-visible behaviour was changed.
+- **`[missing-doc]` escalations:** 1 (Round 1, finding 3.3 — migration runtime-rollback / feature-flag, contradicted spec-context.md `staged_rollout: never_for_this_codebase_yet` + `feature_flags: only_for_behaviour_modes` + `migration_safety_tests: defer_until_live_data_exists`). Auto-rejected with grounded rationale; surfaced for transparency.
+- **Index write failures:** 0 (clean — no _index.jsonl write attempts failed; agent-definition writes treated as best-effort under finalisation).
+- **Deferred to tasks/todo.md § Spec Review deferred items / phase-A-1-2-spec:** none. Zero defers across all four rounds.
+- **Consistency warnings:** none. No finding-type was applied in one round and rejected in another. Round 3's reject of "versioned contract for monitor outputs" (already covered by Round 1's `schema_version: 'v1'` apply + Round 2's schema-evolution apply) is consistent — Round 3 explicitly rejected the restatement on the basis that Rounds 1+2 had already covered it.
+- **Implementation-readiness checklist:**
+  - Inputs defined? Yes — §4.5 schema, §4.8 idempotency keys, §4.9.9 ordering postures, §6.2 heuristic interface, §9.4 skill set inputs, §9.7 prompt template, §9.8 output contract, §11.2 event metadata.
+  - Outputs defined? Yes — §9.3 SweepResult, §9.8 agent_diagnosis JSON, §10.x UI render contracts, §11.2 event row shapes, §12.1 metadata table.
+  - Failure modes covered? Yes — §4.7 (six tables), §4.10.4 (failure × idempotency), §9.11 (self-stuck), §12.4 (failure recovery defaults).
+  - Ordering guarantees explicit? Yes — §4.9.9 per-path table.
+  - No unresolved forward references? Yes — all cross-references (§4.7.x, §4.8, §4.9.x, §4.10.x, §6.x, §7.x, §8.x, §9.x, §10.x, §11.x, §12.x, §15) verified during round-by-round integrity passes.
+- **PR:** #202 — https://github.com/michaelhazza/automation-v1/pull/202 — spec changes ready at HEAD.
+
+### KNOWLEDGE.md pattern extraction
+
+Append-only KNOWLEDGE.md entries for this session — patterns reusable across future spec reviews:
+
+1. **ChatGPT spec review reject ratio rises by round.** Round 1 reject rate: 18% (2/11). Round 2: 0% (0/9). Round 3: 40% (4/10). Round 4: 50% (2/4 non-spec items rejected outright). Pattern: ChatGPT exhausts genuine gaps in rounds 1-2; rounds 3+ shift toward restating already-covered rules. Trust ChatGPT's own over-specification warning when it surfaces ("you're approaching over-specification risk" appeared in round 3 round-up).
+2. **ChatGPT's own stop signal is reliable.** When ChatGPT explicitly says "Spec: Finalised. Move to implementation" (round 4), accept the signal. Continuing past the stop signal yields restatement findings, not new gaps.
+3. **Cross-cutting rule + local mechanism pairs are not duplicates.** Spec sections like §4.10.x (cross-cutting rules) plus §9.x / §12.x (local applications) look duplicative on shallow read but serve different reader paths — readers entering at the rule registry need to find applications; readers entering at a feature surface need to find the rule. Cross-references between them are the load-bearing pattern; collapsing them loses dual-entry navigation.
+4. **`[missing-doc]` escalation carve-out works.** When ChatGPT proposes something that contradicts `docs/spec-context.md`, prefix the rationale with `[missing-doc]` and surface for transparency even in auto-reject. Round 1's finding 3.3 (migration rollback / feature flag) was the canonical case — `staged_rollout: never_for_this_codebase_yet` made the auto-reject defensible without user gate.
+5. **Default-to-user-facing on ambiguity preserves the user's time.** Across 30 findings + 4 round-4 items = 34 total, exactly zero needed user input because every finding was triaged technical (failure modes, contracts, schema evolution, observability, defaults, status marker). The "user-facing" bucket would have been hit if a finding proposed renaming a visible feature, changing a workflow step, or altering described copy; none did. The triage discipline kept the review fully autonomous.
+
+(Entries above are descriptive, append-only, and reference specific rounds + finding ids for verifiability per KNOWLEDGE.md conventions.)
+
