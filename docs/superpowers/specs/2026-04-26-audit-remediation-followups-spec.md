@@ -1524,7 +1524,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | A1b | Principal-context propagation: gate hardening + caller enforcement | ☐ todo | — | depends on A1a; removes shims, flips gate to call-site granularity |
 | A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive — ships in three phases (schema-diff gate, migration hook, runtime guard) |
 | A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ☐ todo | — | low-risk refactor |
-| B1 | saveSkillVersion orgId-required throw test | ☐ todo | — | trivial |
+| B1 | saveSkillVersion orgId-required throw test | ✓ done | tasks/builds/audit-remediation-followups/b1-save-skill-version-throw-test/ | 3/3 node:test pass; orgId guard inlined pure; scope=system no-throw confirmed |
 | B2 | Job idempotency audit | ☐ todo | — | may bundle with B2-ext OR ship separately (split DoD allows partial completion) |
 | B2-ext | Job concurrency standard | ☐ todo | — | may bundle with B2 OR ship separately (split DoD allows partial completion) |
 | C1 | Gate baseline count line | ✓ done | tasks/builds/audit-remediation-followups/c1-gate-count-line/ | emit_summary() patched in guard-utils.sh; all 26 standalone scripts patched; discipline test fixture added; architecture.md updated |
