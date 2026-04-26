@@ -18,7 +18,8 @@
 - [§0 Why this spec exists](#0-why-this-spec-exists)
 - [§1 Items](#1-items)
   - [Group A — Defence-in-depth gaps](#group-a--defence-in-depth-gaps-phase-12-follow-on)
-    - [A1 — Principal-context propagation: import-presence to call sites](#a1--principal-context-propagation-import-presence-to-call-sites)
+    - [A1a — Principal-context propagation: service surface change (no gate hardening)](#a1a--principal-context-propagation-service-surface-change-no-gate-hardening)
+    - [A1b — Principal-context propagation: gate hardening + caller enforcement](#a1b--principal-context-propagation-gate-hardening--caller-enforcement)
     - [A2 — RLS write-boundary enforcement guard](#a2--rls-write-boundary-enforcement-guard)
     - [A3 — briefVisibilityService + onboardingStateService → getOrgScopedDb](#a3--briefvisibilityservice--onboardingstateservice--getorgscopeddb)
   - [Group B — Test coverage gaps](#group-b--test-coverage-gaps)
@@ -59,13 +60,38 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Status as of this revision:** PR #196 has merged to `main` at commit `f824a03`. The pre-merge-gated item (G1) is therefore historical context only — it cannot be retroactively run. Post-merge work (G2) and the rest of the backlog (A–F, H) remain actionable.
 
-**Pre-implementation audit (2026-04-25):** every code-claim in this spec was cross-checked against the current codebase. Result: 14/17 code-based items VALID (gap exists exactly as claimed), 3 PARTIAL (gap real, but with nuance — A1, A2, C4), 1 NOT VERIFIABLE (D2 is a decision item, not a code claim). The spec proceeds with all items.
+**Pre-implementation audit (2026-04-25):** every code-claim in this spec was cross-checked against the current codebase. Result: 14/17 code-based items VALID (gap exists exactly as claimed), 3 PARTIAL (gap real, but with nuance — A1 (now split into A1a/A1b per ChatGPT review Round 1), A2, C4), 1 NOT VERIFIABLE (D2 is a decision item, not a code claim). The spec proceeds with all items.
 
 **Sequencing posture:** none of these items are blocking; PR #196 is already shipped. They are post-merge work, sequenced by dependency and risk. See §2.
 
 **Reviewer's contract:** each item below carries the same shape — Source, Files, Goal, Approach, Acceptance criteria, Tests, Dependencies, Risk, Definition of Done. A future implementer should be able to pick up a single item and ship it without rereading the source review logs. **Per-item status is tracked in §5 Tracking** — items do not carry an inline `Status:` field; the §5 table is the single source of truth so a status update only needs to land in one place.
 
-**Testing posture (per `docs/spec-context.md`):** this spec sticks to (a) pure-function unit tests under the `*Pure.ts` + `*.test.ts` convention, (b) new static gates, and (c) the carved-out integration-test envelope already documented for hot-path concerns — RLS, idempotency / concurrency-control, and crash-resume parity. Items that propose runtime tests (A1 RLS-context binding, A2 RLS write-boundary guard, B2 job idempotency / concurrency, H1 derived-data null-safety) sit inside that carve-out. Items that propose anything outside the carve-out (e.g. multi-process integration tests in F2) call it out explicitly and downgrade to a documented manual smoke step where the framing requires it.
+**Testing posture (per `docs/spec-context.md`):** this spec sticks to (a) pure-function unit tests under the `*Pure.ts` + `*.test.ts` convention, (b) new static gates, and (c) the carved-out integration-test envelope already documented for hot-path concerns — RLS, idempotency / concurrency-control, and crash-resume parity. Items that propose runtime tests (A1a RLS-context binding, A2 RLS write-boundary guard, B2 job idempotency / concurrency, H1 derived-data null-safety) sit inside that carve-out. Items that propose anything outside the carve-out (e.g. multi-process integration tests in F2) call it out explicitly and downgrade to a documented manual smoke step where the framing requires it.
+
+### §0.1 Gate quality bar (cross-cutting)
+
+This spec adds several new static gates (C1, C2, C3, D3, E2, H1, plus the A1b gate hardening and A2's schema-diff gate). Individually each is justified; together they risk noisy CI, slow iteration, and engineers learning to ignore failures. Before any gate ships as **blocking**, it MUST meet all three of:
+
+1. **False-positive rate < 5%** on the current `main` corpus. Estimate this by running the gate against `main` and inspecting every reported violation; if more than 1-in-20 are legitimate code that the gate misclassifies, the gate is too coarse to ship blocking.
+2. **Deterministic failure mode** — the gate must always identify the same set of violations on the same input. No environment-dependent matching, no ordering-dependent regex, no time-of-day variance.
+3. **Median time-to-fix < 10 minutes** for a typical hit — the violator can read the gate's output, locate the offender, and resolve it without rerunning the gate more than once.
+
+If any of the three fails: ship the gate as **advisory** (logs the violation, exits 0) and promote to blocking only after the criteria hold over a 2-3 week observation window. Items in this spec that flag a gate as advisory-on-first-ship: H1. Items where the gate is blocking from day 1: A1b, A2 (schema-diff phase), C1 emit-line discipline, C2, C3. Each per-item DoD must state which mode the gate ships in.
+
+This rule applies only to **new** gates introduced by this spec. Existing gates' modes are unchanged.
+
+### §0.2 No new primitives unless named (cross-cutting)
+
+No item in §1 may introduce a new abstraction, primitive, helper module, or system-level pattern unless that primitive is **explicitly named in the item's Files list and Approach section**. This prevents accidental mini-frameworks, helper sprawl, and inconsistency across items.
+
+Concrete consequences:
+- A1a / A1b introduce no new primitive — `withPrincipalContext` and `fromOrgId` already exist.
+- A2 names exactly three new files (`server/lib/rlsBoundaryGuard.ts`, `scripts/verify-rls-protected-tables.sh`, `scripts/rls-not-applicable-allowlist.txt`) plus one hook. No additional helpers may emerge from A2 implementation.
+- B2 introduces no new primitive — uses existing `pg_advisory_xact_lock`, claim+verify, and lease patterns.
+- F2 explicitly does NOT introduce a new generic `kvStoreWithTtl` primitive (already documented in §3 Out of scope and the F2 Approach).
+- H1 names exactly two new files (`scripts/verify-derived-data-null-safety.sh` + the allowlist; `server/lib/derivedDataMissingLog.ts`). Anything else proposed during implementation is out-of-scope drift.
+
+If implementation surfaces a need for a primitive not named in the item's Files list, **stop and write a follow-up spec** rather than expanding scope inline. This rule reinforces `prefer_existing_primitives_over_new_ones: yes` from `docs/spec-context.md`.
 
 ---
 
@@ -73,9 +99,11 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 ### Group A — Defence-in-depth gaps (Phase-1/2 follow-on)
 
-#### A1 — Principal-context propagation: import-presence to call sites
+**Note on splitting (per ChatGPT review Round 1):** The original A1 was a single 3-5-day item. It has been split into A1a (service-surface change, no gate hardening) and A1b (gate hardening + caller enforcement, with old signatures removed). Splitting reduces blast radius — the surface change can land independently and be exercised in dev/test before the gate flips and forces every caller to comply. **Effort estimate (revised):** A1a 2-3 days; A1b 1-2 days. Total ~4-5 days, slightly higher than the original "3-5 days" because the split adds a coordination cost — but each sub-PR is reviewable in isolation.
 
-**Source:** pr-reviewer S-2.
+#### A1a — Principal-context propagation: service surface change (no gate hardening)
+
+**Source:** pr-reviewer S-2 (split per ChatGPT review Round 1).
 
 **Audit verdict (2026-04-25):** PARTIAL — gap is real. All 4 files import `fromOrgId` but `grep -n "fromOrgId(" <file>` returns zero call sites in any of them. `canonicalDataService` method signatures still accept bare `(organisationId, accountId, …)` (e.g. `upsertAccount(organisationId, connectorConfigId, …)` at `server/services/canonicalDataService.ts:261`, `upsertContact(organisationId, accountId, …)` at `:294`). The verify script (`scripts/verify-principal-context-propagation.sh:29`) accepts an import as proof of compliance — it does not check call presence.
 
@@ -86,38 +114,26 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
   - `server/services/crmQueryPlanner/executors/canonicalQueryRegistry.ts`
   - `server/routes/webhooks/ghlWebhook.ts`
 - Service surface to migrate: `server/services/canonicalDataService.ts` (31 exported methods at the time of this writing).
-- Gate to harden: `scripts/verify-principal-context-propagation.sh`.
 - Type/shim: `server/services/principal/fromOrgId.ts`, `server/services/principal/types.ts` (existing).
 
-**Goal:** convert the import-only compliance pattern into actual `PrincipalContext` propagation through every `canonicalDataService` call site, and update the gate so import presence alone no longer satisfies it. Closes the gap that allows the codebase to silently regress to legacy `(orgId, accountId)` calls.
+**Goal:** add `PrincipalContext` as the accepted first-parameter shape on every `canonicalDataService` method, and migrate every non-test caller to pass it. **Do NOT flip the gate yet** — A1a leaves the gate at file-level import enforcement; A1b flips it to call-site granularity.
 
 **Approach (in order):**
 1. **Inventory.** Enumerate every `canonicalDataService.<method>(...)` call site in `server/` (excluding `__tests__`). Group by method signature shape: `(orgId)`-only, `(orgId, accountId)`, `(accountId, orgId?)`, write methods, etc. Capture the inventory in `tasks/builds/<slug>/canonical-call-sites.md` so the migration is auditable.
 2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. The current method surface mixes two shapes — most methods are positional (`getAccountById(accountId, organisationId)` etc.), and a small number take an args-object (`listInactiveContacts(args: { orgId, subaccountId, ... })` at `:493`). Migration shape per category:
    - **Positional methods** become `(principal: PrincipalContext, ...rest)` — `principal` is the new first positional, the original positional args (e.g. `accountId`) follow.
    - **Args-object methods** become `(principal: PrincipalContext, args: { ... })` — `principal` is the first positional, the original args object becomes the second positional. The `orgId` / `subaccountId` fields come OUT of the args object (they live on `principal` now); other fields stay where they were.
-   - The choice between "second positional principal-on-args" (`{ principal, ...args }`) and "split positional" (`(principal, args)`) must be uniform — pick one for the whole service. Recommended: split positional, since most methods are positional today and a single shape is easier to grep against in the gate.
-   
-   Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
-3. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls.
-4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must pass a `PrincipalContext`-shaped first argument (call-site-level enforcement, not file-level). The right approach is a positive allowlist of accepted first-argument shapes rather than a narrow negative matcher:
-   - **Positive allowlist (accepted first-argument shapes):** the gate accepts a `canonicalDataService.<method>(` call only when the first argument matches one of:
-     - `fromOrgId(` / `fromOrgId<` (the explicit constructor)
-     - `withPrincipalContext(` (called inline)
-     - A locally-typed `PrincipalContext` variable — detected via a same-file `: PrincipalContext` annotation in scope (function parameter list or `const principal: PrincipalContext = ...`).
-   - **Bare identifiers, raw object literals (`{ organisationId: ... }` style), and spread expressions in the first-argument position are violations.** Note that under step 2's split-positional shape, the args object — when present — is the SECOND positional argument, not the first; an object literal as the second argument is fine. The gate's matcher inspects only the first argument's shape.
-   - Implementation: a small TypeScript-aware lint rule using the TypeScript compiler API would be ideal, but a regex pass is sufficient for v1 — match `canonicalDataService\.\w+\(\s*([^)]*)` and assert the first argument starts with `fromOrgId(`, `withPrincipalContext(`, or matches a known same-file `: PrincipalContext`-typed identifier.
-   - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 5) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
-   - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if other invocations in the same file are correctly migrated.
-5. **Annotation contract.** Files that legitimately import without calling (e.g. registry files where the import is forward-looking) must carry a top-of-file annotation: `// @principal-context-import-only — reason: <one-sentence rationale>`. The gate scans for this annotation and exempts the file.
-6. **Suppression sweep / baseline.** This gate's violation count is recorded in the centralized baseline store at `scripts/guard-baselines.json` (keyed on `principal-context-propagation`, consistent with every other guard in `scripts/lib/guard-utils.sh`'s `check_baseline()` flow). After migration, the entry must drop to zero. Do NOT introduce a per-guard `tasks/baselines/*.txt` — that pattern is rejected throughout this spec.
+   - The choice between "second positional principal-on-args" (`{ principal, ...args }`) and "split positional" (`(principal, args)`) must be uniform — pick one for the whole service. Recommended: split positional, since most methods are positional today and a single shape is easier to grep against in the gate (this becomes load-bearing in A1b).
+
+   Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row.
+3. **Brief shim allowed during A1a only.** A1a may keep the old positional `(organisationId, ...)` signature as a deprecated overload that internally calls `fromOrgId(organisationId, null)` and forwards to the new `(principal, ...)` body. The shim exists to let A1a land without forcing every caller to migrate in the same PR — it is **temporary**. A1b removes the shim. The shim must carry a `// @deprecated — remove in A1b` JSDoc tag so a grep can find every shim in A1b.
+4. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls. **Do NOT** rely on the shim for new code — every caller migrates in A1a; the shim is only there to permit a multi-PR rollout if A1a itself is split further.
 
 **Acceptance criteria:**
-- Every `canonicalDataService` method accepts `PrincipalContext` as its first parameter.
+- Every `canonicalDataService` method accepts `PrincipalContext` as its first parameter (with deprecated overload retained per step 3).
 - Every non-test caller in `server/` passes `fromOrgId(...)` or an existing `PrincipalContext` value.
-- `scripts/verify-principal-context-propagation.sh` fails when **any** `canonicalDataService.<method>(` invocation in an importing file passes a non-`PrincipalContext` first argument (call-site granularity, not file granularity), AND when the file has no `@principal-context-import-only` annotation.
-- A deliberate test regression — drop a `fromOrgId(...)` call from any caller, leaving a bare-`organisationId` invocation — causes the gate to fail even if other invocations in the same file are correctly migrated.
-- TypeScript compiles cleanly. `npm run build:server` (TypeScript-checks server tree) passes.
+- TypeScript compiles cleanly. `npm run build:server` passes.
+- The existing file-level gate (`scripts/verify-principal-context-propagation.sh`) continues to pass at file granularity (unchanged in A1a).
 
 **Tests required:**
 - New: `server/services/__tests__/canonicalDataService.principalContext.test.ts` — constructs a `PrincipalContext` via `fromOrgId(orgId, subaccountId)`, calls one read method (e.g. `getAccountById`) and one write method (e.g. `upsertAccount`), asserts:
@@ -125,18 +141,64 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
   - The org-scoped session var (`app.organisation_id`) is bound by the upstream `withOrgTx` for the duration of the call.
   - The principal session vars (`app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, `app.current_team_ids`) are bound by `withPrincipalContext` when the principal carries those fields.
   - Calling without `PrincipalContext` (e.g. passing `null as any`) throws a clear error before any DB work is done.
-- Gate self-test: a fixture file under `scripts/__tests__/principal-context-propagation/` that intentionally violates the new rule (one fixture per accepted-shape category — bare identifier, object literal, spread); the gate must report each.
 
-**Dependencies:** none — this item is the gating change for several others in this spec. Items B2 and B2-ext are sequenced after A1 because some jobs read canonical data and benefit from a `PrincipalContext`-aware surface.
+**Dependencies:** none.
 
-**Risk:** medium. Touches the entire `canonicalDataService` surface (31 methods) and every non-test caller. Mitigation: ship behind a single PR with the gate flip in the same commit, so a half-migrated state is impossible.
+**Risk:** medium. Touches the entire `canonicalDataService` surface (31 methods) and every non-test caller. Mitigation: shim retained during A1a so a half-migrated state is reviewable; the gate is NOT flipped until A1b.
 
 **Definition of Done:**
 - All caller files updated; all method signatures migrated; every method body wraps its DB work in `withPrincipalContext(...)`.
-- Gate updated to call-site granularity with the positive-allowlist matcher; baseline entry in `scripts/guard-baselines.json` regenerated; deliberate-regression test passes for each accepted-shape category.
+- Deprecated shim retained on every method with the `// @deprecated — remove in A1b` JSDoc tag.
 - New unit test under `__tests__` locks the contract.
-- `npm run build:server` (TypeScript-checks server tree), `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
-- The spec status field for A1 in `§5 Tracking` is checked.
+- `npm run build:server`, `npm run lint`, and the existing `scripts/verify-principal-context-propagation.sh` all pass.
+- A1a row in `§5 Tracking` is checked.
+
+---
+
+#### A1b — Principal-context propagation: gate hardening + caller enforcement
+
+**Source:** pr-reviewer S-2 (split per ChatGPT review Round 1).
+
+**Goal:** with A1a's surface change shipped, flip the gate from file-level to call-site granularity, remove the deprecated shims, and prove the gate fires on a deliberate regression.
+
+**Files:**
+- Gate to harden: `scripts/verify-principal-context-propagation.sh`.
+- Service surface: `server/services/canonicalDataService.ts` (remove `// @deprecated — remove in A1b` shims from all 31 methods).
+- Existing callers (verify still compliant after shim removal).
+
+**Approach (in order):**
+1. **Remove shims.** Grep for `// @deprecated — remove in A1b`; delete each deprecated overload. After deletion, only the `(principal, ...)` signature remains.
+2. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must pass a `PrincipalContext`-shaped first argument (call-site-level enforcement, not file-level). The right approach is a positive allowlist of accepted first-argument shapes rather than a narrow negative matcher:
+   - **Positive allowlist (accepted first-argument shapes):** the gate accepts a `canonicalDataService.<method>(` call only when the first argument matches one of:
+     - `fromOrgId(` / `fromOrgId<` (the explicit constructor)
+     - `withPrincipalContext(` (called inline)
+     - A locally-typed `PrincipalContext` variable — detected via a same-file `: PrincipalContext` annotation in scope (function parameter list or `const principal: PrincipalContext = ...`).
+   - **Bare identifiers, raw object literals (`{ organisationId: ... }` style), and spread expressions in the first-argument position are violations.** Note that under A1a's split-positional shape, the args object — when present — is the SECOND positional argument, not the first; an object literal as the second argument is fine. The gate's matcher inspects only the first argument's shape.
+   - Implementation: a small TypeScript-aware lint rule using the TypeScript compiler API would be ideal, but a regex pass is sufficient for v1 — match `canonicalDataService\.\w+\(\s*([^)]*)` and assert the first argument starts with `fromOrgId(`, `withPrincipalContext(`, or matches a known same-file `: PrincipalContext`-typed identifier.
+   - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 3) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
+   - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if other invocations in the same file are correctly migrated.
+3. **Annotation contract.** Files that legitimately import without calling (e.g. registry files where the import is forward-looking) must carry a top-of-file annotation: `// @principal-context-import-only — reason: <one-sentence rationale>`. The gate scans for this annotation and exempts the file.
+4. **Suppression sweep / baseline.** This gate's violation count is recorded in the centralized baseline store at `scripts/guard-baselines.json` (keyed on `principal-context-propagation`, consistent with every other guard in `scripts/lib/guard-utils.sh`'s `check_baseline()` flow). After A1a's caller migration, the entry must drop to zero. Do NOT introduce a per-guard `tasks/baselines/*.txt` — that pattern is rejected throughout this spec.
+5. **Gate-quality bar (per §0.1).** The hardened gate ships **blocking** from day 1 — A1a's caller migration drove FP-rate to zero on `main`, the matcher is deterministic (regex pass), and a typical fix is "wrap the offending arg in `fromOrgId(...)`" which takes <1 minute.
+
+**Acceptance criteria:**
+- All `// @deprecated — remove in A1b` overloads deleted from `canonicalDataService.ts`.
+- `scripts/verify-principal-context-propagation.sh` fails when **any** `canonicalDataService.<method>(` invocation in an importing file passes a non-`PrincipalContext` first argument (call-site granularity, not file granularity), AND when the file has no `@principal-context-import-only` annotation.
+- A deliberate test regression — drop a `fromOrgId(...)` call from any caller, leaving a bare-`organisationId` invocation — causes the gate to fail even if other invocations in the same file are correctly migrated.
+- Gate emits the C1 standard count line `[GATE] principal-context-propagation: violations=<count>` (assumes C1 has shipped per §2 sequencing).
+
+**Tests required:**
+- Gate self-test: a fixture file under `scripts/__tests__/principal-context-propagation/` that intentionally violates the new rule (one fixture per accepted-shape category — bare identifier, object literal, spread); the gate must report each.
+
+**Dependencies:** A1a (must ship before A1b — A1b removes the shims A1a introduced). C1 preferred (so the hardened gate emits the standard count line from day 1).
+
+**Risk:** low — A1a already migrated every caller; A1b is mostly mechanical (delete shims, flip the gate's matcher, add fixture tests).
+
+**Definition of Done:**
+- All shims deleted.
+- Gate updated to call-site granularity with the positive-allowlist matcher; baseline entry in `scripts/guard-baselines.json` regenerated; deliberate-regression fixtures pass for each accepted-shape category.
+- `npm run build:server`, `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
+- A1b row in `§5 Tracking` is checked.
 
 ---
 
@@ -158,17 +220,29 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Goal:** make the `rlsProtectedTables` registry self-enforcing on three fronts — (1) schema drift (every tenant table appears), (2) migration-time signal (new tables prompt explicit RLS decisions), (3) write-path enforcement (writes to listed tables refuse non-RLS-aware connections in dev/test).
 
-**Approach (in order):**
+**Phasing (per ChatGPT review Round 1):** A2 ships in three sequential phases, NOT all at once. The three phases are independently mergeable; each one delivers value standalone and de-risks the next.
+
+- **A2-Phase-1 — schema-vs-registry diff gate** (steps 1 + 4 below). Pure static check; no runtime impact. Confidence-builder for the more invasive phases. Gate-quality bar: blocking on day 1 — deterministic SQL parse, FP-rate is zero on current `main`, fix-time is "register the table or add to allowlist" (<5 min).
+- **A2-Phase-2 — migration-time hook** (step 3 below). Advisory-only PostToolUse hook; non-blocking warning. Adds signal at the moment a new table is authored.
+- **A2-Phase-3 — runtime guard** (step 2 below — Proxy-based write interception). Highest blast radius — wraps `getOrgScopedDb` and introduces `withAdminConnectionGuarded`. Ship LAST, only after Phases 1 + 2 have been live for a sprint with no false-positive regressions in dev/test. Gate-quality bar: ships in dev/test only (no production impact); promote to "no override allowed" only after a 2-3 week observation window per §0.1.
+
+**Confidence gate between phases:** before promoting Phase N -> Phase N+1, confirm no false-positive issues filed by developers against the previous phase. If FP rate is non-zero, fix the offending matcher before the next phase ships. This is the discipline that prevents "developers add allowlists everywhere and the system loses integrity" — call out explicitly in the build-slug progress log when each promotion happens.
+
+**Approach (in order — phase boundaries marked):**
+
+**[Phase 1 — schema-diff gate]**
 1. **Schema-vs-registry drift gate (`scripts/verify-rls-protected-tables.sh`).** Parse the SQL migrations under `migrations/*.sql` (the SQL files are the source of truth for what tables exist with what columns) for every `CREATE TABLE` that includes an `organisation_id` column. Diff that set against `rlsProtectedTables`:
    - Tables in migrations but not registry AND not in `scripts/rls-not-applicable-allowlist.txt` → fail with "Add to `rlsProtectedTables` or to `rls-not-applicable-allowlist.txt`".
    - Tables in registry but not in any migration → fail with "Stale registry entry".
    - Tables in `rls-not-applicable-allowlist.txt`: exempt. The allowlist file carries a one-line rationale per entry.
-2. **Runtime guard (`server/lib/rlsBoundaryGuard.ts`).** Export `assertRlsAwareWrite(tableName)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`). The guard does NOT hook into a Drizzle-internal middleware (this codebase has no such seam). Instead, it is invoked at the two places that already mediate every service-layer write:
+**[Phase 3 — runtime guard]**
+2. **Runtime guard (`server/lib/rlsBoundaryGuard.ts`).** Ship LAST per the A2 phasing above. Export `assertRlsAwareWrite(tableName)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`). The guard does NOT hook into a Drizzle-internal middleware (this codebase has no such seam). Instead, it is invoked at the two places that already mediate every service-layer write:
    - **Wrap `getOrgScopedDb`'s returned handle** with a Proxy that intercepts `.insert(table)`, `.update(table)`, `.delete(table)` calls. On each, call `assertRlsAwareWrite(table)`. If the table is in `rlsProtectedTables`, the call is OK (the handle is org-scoped by construction). If the table is not in `rlsProtectedTables` AND not in `rls-not-applicable-allowlist.txt`, throw `RlsBoundaryUnregistered`.
    - **Wrap the `tx` argument that `withAdminConnection(options, fn)` passes into its callback.** `withAdminConnection` is a callback-based API (`withAdminConnection(options, async (tx) => { ... })`), not a handle factory — it does NOT return a handle the caller can wrap externally. The guard introduces a thin shim, e.g. `withAdminConnectionGuarded(options, async (guardedTx) => { ... })`, defined in `rlsBoundaryGuard.ts`, that internally calls `withAdminConnection(options, async (tx) => fn(proxy(tx)))` and applies the Proxy interception to `tx` before user code sees it. Callers migrate to `withAdminConnectionGuarded` over time; the unwrapped `withAdminConnection` is left in place so existing audit-bypass callers don't break. If a write to a registered table happens via the guarded admin tx WITHOUT the caller explicitly switching the session role to `admin_role` (per `withAdminConnection`'s own contract), throw `RlsBoundaryAdminWriteToProtectedTable`. Detection of the role switch is best-effort — the guard scans the same callback for a `SET LOCAL ROLE admin_role` execution and treats its presence as the deliberate-bypass signal.
    - Production behaviour: the guard is no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
    - This is wrapper-level enforcement, not Drizzle middleware — it composes with existing primitives instead of inventing a new one.
-3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** PostToolUse hook that runs on Write/Edit to `migrations/*.sql` (top-level path — confirmed by `ls migrations/` showing migrations 0001..0227+):
+**[Phase 2 — migration hook]**
+3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** Ships AFTER Phase 1 (schema-diff gate) and BEFORE Phase 3 (runtime guard). PostToolUse hook that runs on Write/Edit to `migrations/*.sql` (top-level path — confirmed by `ls migrations/` showing migrations 0001..0227+):
    - Parse the SQL diff. If a new `CREATE TABLE` includes `organisation_id`, look for a matching `CREATE POLICY` in the same file or any sibling file in the same migration set.
    - If absent, emit an advisory warning (not blocking) that points at the registry file and asks the author to register the table or add it to `rls-not-applicable-allowlist.txt`.
 4. **Allowlist contract.** Tables that legitimately have `organisation_id` but no RLS (e.g. system-wide read replicas, audit ledgers) appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. Both the schema-vs-registry gate and the runtime guard read this file. (Earlier drafts proposed an in-source `@rls-not-applicable` annotation, but neither SQL parsing nor live schema introspection sees TS comments, so the file-based allowlist is the only viable source of truth across all enforcement points.)
@@ -193,13 +267,23 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Dependencies:** none. This item is a foundational primitive that should land BEFORE any new tenant-scoped tables. If a new feature is being designed concurrently, sequence A2 first.
 
-**Risk:** medium. New architectural primitive that touches the write path. Mitigation: runtime guard is dev/test-only; production path is unaffected. The schema-diff gate is additive. Roll out one piece at a time — schema-diff gate first, runtime guard second, migration hook third.
+**Risk:** medium. New architectural primitive that touches the write path. Mitigation: phased rollout (see Phasing block above). Phase 1 (schema-diff gate) is additive and zero-runtime-risk; Phase 2 (migration hook) is advisory-only; Phase 3 (runtime guard) is dev/test-only and gated on a clean Phase-1+2 observation window. Production path is never affected by any phase.
 
-**Definition of Done:**
-- All three components shipped (gate, runtime guard, migration hook).
-- Tests pass; the deliberate-gap fixtures fail the relevant gate.
+**Definition of Done — A2-Phase-1 (schema-diff gate):**
+- `scripts/verify-rls-protected-tables.sh` and `scripts/rls-not-applicable-allowlist.txt` shipped; gate exits 0 on current `main`; deliberate-gap fixture fails it.
+- Gate emits the C1 standard count line `[GATE] rls-protected-tables: violations=<count>`.
+
+**Definition of Done — A2-Phase-2 (migration hook):**
+- `.claude/hooks/rls-migration-guard.js` shipped as advisory-only PostToolUse hook.
+- Authoring a migration with `organisation_id` but no `CREATE POLICY` emits the warning.
+- No false-positive issues filed against Phase 1 in the preceding sprint (confidence gate per Phasing block).
+
+**Definition of Done — A2-Phase-3 (runtime guard):**
+- `server/lib/rlsBoundaryGuard.ts` shipped; `withAdminConnectionGuarded` shim available.
+- Tests pass for all five cases listed in Tests required below.
 - `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnection` AND must explicitly `SET LOCAL ROLE admin_role` inside the callback to bypass RLS. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
-- Spec status field for A2 in `§5 Tracking` is checked.
+- No false-positive issues filed against Phases 1+2 in the preceding 2-3 weeks (confidence gate per §0.1).
+- Spec status field for A2 in `§5 Tracking` is checked when all three phases complete. Partial completion is reflected in Tracking via "phase X done" annotations rather than a single binary check.
 
 ---
 
@@ -320,6 +404,15 @@ No double-invocation regression tests exist for any of the four.
 
 **Goal:** every long-running or cron-driven job declares (a) its concurrency control mechanism, (b) its idempotency strategy. Eliminates the "but the job IS idempotent, why is this still broken?" failure mode. B2 covers idempotency (same input → same effect). B2-ext covers concurrency (two runners in parallel cannot both perform work).
 
+**Per-job ordering (per ChatGPT review Round 1):** the four jobs ship in this strict order — do NOT bundle them in one PR. Each job is its own mini-spec; the next does not start until the previous is merged. Lowest-risk-first reduces blast radius and surfaces standardisation issues early.
+
+1. **`connectorPollingSync` first** — already lease-protected; the change is mostly comment-only (formalising the existing model in the standard header). Validates the standard header shape against a real working job before it propagates.
+2. **`bundleUtilizationJob` second** — needs new advisory-lock + upsert work, but is disabled-until-Phase-6 per its file header, so a regression is contained.
+3. **`measureInterventionOutcomeJob` third** — claim+verify pattern; runs hourly in production, so a regression has user-facing schedule impact. Ship after the standard is proven on the previous two.
+4. **`ruleAutoDeprecateJob` last** — global advisory lock + `WHERE deprecated_at IS NULL` predicate; nightly cadence makes it the safest to land last (least frequent invocation).
+
+Treat each job's PR as a mini-spec — one job, one header migration, one regression test, one merged PR. Do not start the next job until the previous one has been live for at least one scheduled cycle without alerts.
+
 **Approach:**
 
 1. **Standardise the header contract.** Every job file carries a header comment in this exact form:
@@ -372,7 +465,7 @@ No double-invocation regression tests exist for any of the four.
 
 **Tests required:** four new test files under `server/jobs/__tests__/`.
 
-**Dependencies:** A1 (Principal-context propagation). `measureInterventionOutcomeJob` and `bundleUtilizationJob` read canonical data via `canonicalDataService` — sequencing B2 after A1 means the new tests can use `PrincipalContext` from the start.
+**Dependencies:** A1a (Principal-context propagation: service surface change). `measureInterventionOutcomeJob` and `bundleUtilizationJob` read canonical data via `canonicalDataService` — sequencing B2 after A1a means the new tests can use `PrincipalContext` from the start. A1b (gate hardening) is not strictly required before B2 — the new tests pass `PrincipalContext` either way.
 
 **Risk:** medium. Concurrency-control bugs are notoriously hard to surface in tests. Mitigations:
 - Land per-job in separate commits so a regression in one is isolated.
@@ -549,9 +642,9 @@ No double-invocation regression tests exist for any of the four.
 
 **Approach:**
 
-The right fix depends on whether A1 has shipped:
+The right fix depends on whether A1b has shipped (A1b is the item that flips the gate to call-site granularity):
 
-- **If A1 has NOT shipped (current main):** the existing import is dead and the comment is misleading. Replace lines 2-3 with:
+- **If A1b has NOT shipped (current main):** the existing import is dead and the comment is misleading. Replace lines 2-3 with:
   ```ts
   // fromOrgId imported here to satisfy verify-principal-context-propagation gate.
   // This registry does not invoke canonicalDataService directly today; future handler
@@ -559,15 +652,15 @@ The right fix depends on whether A1 has shipped:
   ```
   This is a comment-only fix that accurately describes the current state.
 
-- **If A1 HAS shipped:** A1's hardened gate enforces call-site granularity, not file-level import presence, so the dead import is no longer load-bearing. Remove the `import { fromOrgId }` line entirely (and the misleading comment with it). No `@principal-context-import-only` annotation is needed because there are no `canonicalDataService` invocations in this file at all — the file simply drops out of the gate's scope.
+- **If A1b HAS shipped:** A1b's hardened gate enforces call-site granularity, not file-level import presence, so the dead import is no longer load-bearing. Remove the `import { fromOrgId }` line entirely (and the misleading comment with it). No `@principal-context-import-only` annotation is needed because there are no `canonicalDataService` invocations in this file at all — the file simply drops out of the gate's scope.
 
-Pick whichever path matches the A1 status at the moment C4 is implemented. The end state under A1 is "no import, no comment"; the interim state under no-A1 is "import retained, comment corrected".
+Pick whichever path matches the A1b status at the moment C4 is implemented. The end state post-A1b is "no import, no comment"; the interim state pre-A1b is "import retained, comment corrected".
 
 **Acceptance criteria:** the comment accurately describes the file's relationship to `canonicalDataService`.
 
 **Tests required:** none.
 
-**Dependencies:** none. Sequencing note above re: A1.
+**Dependencies:** none. Sequencing note above re: A1b.
 
 **Risk:** zero.
 
@@ -865,8 +958,8 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
      return account?.id ?? null;
    }
    ```
-3. **If A1 has shipped:** sign the new method with `PrincipalContext` directly (per A1's signature standard).
-   **If A1 has not shipped yet:** sign with `(orgId, subaccountId)` and migrate when A1 lands. Either ordering is fine; prefer A1-first.
+3. **If A1a has shipped:** sign the new method with `PrincipalContext` directly (per A1a's signature standard).
+   **If A1a has not shipped yet:** sign with `(orgId, subaccountId)` and migrate when A1a lands. Either ordering is fine; prefer A1a-first.
 4. Search for other call sites of the all-accounts-then-filter pattern: `grep -rn "getAccountsByOrg" server/ | grep -v __tests__`. Any other site doing `.find(a => a.subaccountId === ...)` should also migrate.
 
 **Acceptance criteria:**
@@ -879,7 +972,7 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
 - New test in `server/services/__tests__/`: constructs a fixture, asserts the SELECT shape and result.
 - Existing job tests should continue to pass.
 
-**Dependencies:** A1 preferred but not blocking (see step 3 above).
+**Dependencies:** A1a preferred but not blocking (see step 3 above).
 
 **Risk:** low — additive method + one consumer migration.
 
@@ -941,7 +1034,7 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 **Dependencies:**
 - Phase-5A `rateLimitStoreService` (must ship first; F2 cannot proceed without it).
 - A2 (RLS write-boundary) preferred so the underlying table is registered through the same path other tenant tables use.
-- A1 not strictly required.
+- A1a / A1b not strictly required.
 
 **Risk:** low. Single route surface; behaviour hidden behind a cache-miss → re-parse path so a degraded (slower) experience is the worst case if the primitive misbehaves. F2 will not introduce a new primitive — the higher-risk path is explicitly closed off in step 3 of the Approach.
 
@@ -1079,20 +1172,31 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
    - Replace `if (!data) throw …` with the WARN-and-return pattern above.
    - Add unit tests asserting the "upstream not populated yet" path returns null without throwing.
 
-4. **Audit gate (`scripts/verify-derived-data-null-safety.sh`).** Static-analysis pattern:
+4. **Audit gate (`scripts/verify-derived-data-null-safety.sh`) — ships ADVISORY on first release.** Per ChatGPT review Round 1, static detection of "derived data" is inherently fuzzy and field allowlists drift; shipping the gate as blocking on day 1 risks excessive exemptions and developers learning to ignore failures. Phasing:
+   - **Phase 1 — advisory mode (first ship):** the gate runs in CI and emits violations, but exits 0 regardless. The architecture.md rule (step 1) and the `logDataDependencyMissing` helper (step 5) remain mandatory; the gate is the soft-enforcement layer only.
+   - **Phase 2 — promote to blocking:** once the gate has run for **2-3 weeks** with no false positives flagged by developers AND the violation count has stabilised (no week-over-week drift in the allowlist), promote the gate to blocking. Promotion is a one-line change to the gate's exit logic; record the promotion date in the build-slug progress log.
+   - This phasing matches the §0.1 Gate Quality Bar: a gate with non-zero FP rate ships advisory until FP rate falls below 5%.
+
+   Static-analysis pattern (same in both phases):
    - Maintain a small allowlist file: `scripts/derived-data-null-safety-fields.txt` listing the field names that are async-produced (e.g. `utilizationRatio`, `outcomeMeasuredAt`, `ruleDeprecatedAt`).
-   - Grep for `<field>!` non-null assertions or `if (!<value>) throw` patterns referencing those fields. Fail on hits.
+   - Grep for `<field>!` non-null assertions or `if (!<value>) throw` patterns referencing those fields. Fail (advisory) on hits.
    - Allow exemption via comment annotation `// @null-safety-exempt: <reason>`.
    - Emit `[GATE] derived-data-null-safety: violations=<count>` per C1.
 
 5. **Operator log signal.** Define a single shared helper `logDataDependencyMissing(service, field, orgId)` in `server/lib/derivedDataMissingLog.ts` (sibling of `server/lib/logger.ts`) so every WARN line is shaped identically and parseable for dashboards. Internally the helper delegates to the existing `server/lib/logger.ts` so no new logger framework is introduced.
 
-**Acceptance criteria:**
+**Acceptance criteria (Phase 1 — first ship, gate is advisory):**
 - Rule codified in `architecture.md` § Architecture Rules.
 - All in-scope read sites refactored to return-null-with-warn (no throw, no cascade).
-- Gate exists and passes on current main; deliberately re-introduce a `data!` assertion → gate fails.
+- Gate exists; runs in CI; deliberately re-introduce a `data!` assertion → gate REPORTS the violation but exits 0.
 - Per-service unit tests cover the "upstream not yet populated" path.
 - WARN log helper used uniformly.
+
+**Acceptance criteria (Phase 2 — promote to blocking, ≥2-3 weeks after Phase 1):**
+- No false-positive issues filed against the gate during Phase 1 observation window.
+- Violation count week-over-week is stable (no allowlist drift).
+- Gate exit logic updated to fail on non-zero violations; deliberate re-introduction now causes a hard CI failure.
+- Promotion date recorded in `tasks/builds/<slug>/progress.md`.
 
 **Tests required:**
 - Per-service tests asserting null-input handling (no throw, returns sentinel, emits the WARN line — capture logs in test).
@@ -1100,14 +1204,15 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 
 **Dependencies:**
 - C1 (parseable count line) — preferred so this gate emits the standard line.
-- B2 (job idempotency) — sequencing-friendly because the call-site refactor is easier when the producer side is well-defined.
-- A1 (principal context) — not strictly required, but the new tests should accept `PrincipalContext` if A1 has shipped.
+- B2 (job idempotency) — NOT required. Per the §2 sequencing tweak (ChatGPT review Round 1), H1 now ships BEFORE B2 so the null-safety contract is in place when B2's per-job idempotency work begins. The earlier "B2 sequencing-friendly" note is stale and superseded.
+- A1a (principal context: service surface change) — not strictly required, but the new tests should accept `PrincipalContext` if A1a has shipped.
 
 **Risk:** low (additive defensive code). Highest leverage item in this spec — codifies a rule that prevents a recurring failure class.
 
 **Definition of Done:**
-- Rule documented; all in-scope sites refactored; gate exists; tests pass.
-- Spec status field for H1 in `§5 Tracking` is checked.
+- Phase 1: rule documented; all in-scope sites refactored; gate exists in advisory mode; tests pass.
+- Phase 2: gate promoted to blocking after observation window; promotion date logged.
+- Spec status field for H1 in `§5 Tracking` is checked when Phase 1 ships; promotion to Phase 2 is tracked separately in the build-slug progress log.
 
 ---
 
@@ -1115,30 +1220,33 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 
 ## §2 Sequencing
 
-PR #196 is merged. Re-sequenced relative to the original draft (which assumed pre-merge work for G1).
+PR #196 is merged. Re-sequenced relative to the original draft (which assumed pre-merge work for G1) and again per ChatGPT review Round 1 (front-load signal cleanup before heavy migrations).
+
+**Sequencing principle (per ChatGPT review Round 1):** clean signal first (tests + gates), fix small leaks, codify system rules, then do heavy migrations. Reduces cognitive load during the high-blast-radius items (A1a/A1b/A2/B2).
 
 | Order | Item | Why | Suggested chunk size |
 |---|---|---|---|
 | 1 | **G2** — post-merge smoke test | First; observational validation of merged state. Lowest cost, highest signal. | half-day |
 | 2 | **G1** — migration sequencing verification (re-runnable script) | Convert the never-executed pre-merge gate into a re-runnable script so future migration-heavy PRs benefit. | 1 day |
-| 3 | **E1, E2** — pre-existing test/gate failures | Cleanup pass; unblocks signal in future audit-runner runs. | 1–2 days |
-| 4 | **D1, D2, D3** — pre-merge gate cleanups | Closes the audit-trail items left by Phase 2. D2 is decision-only (no code). | 1 day total |
-| 5 | **B1, C4** — zero-risk additive | Trivial; ship anytime, possibly bundled into other PRs of opportunity. | < 1 hour each |
-| 6 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1 — sequence first within the drift-guards group. | half-day |
-| 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle with C1 in a single "drift-guards" PR. | 1 day |
-| 8 | **A3, F1** — internal refactors | Independent; ship as small PRs. | 1 day each |
+| 3 | **D1, D2, D3** — pre-merge gate cleanups | Closes the audit-trail items left by Phase 2. D2 is decision-only (no code). D3 depends on C1 (sequence after). | 1 day total |
+| 4 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1 — sequence first within the drift-guards / signal-cleanup group. | half-day |
+| 5 | **E1, E2** — pre-existing test/gate failures | Cleanup pass; unblocks signal in future audit-runner runs. E2 depends on C1. | 1–2 days |
+| 6 | **B1, C4** — zero-risk additive | Trivial; ship anytime, possibly bundled into other PRs of opportunity. | < 1 hour each |
+| 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle with C1 in a single "drift-guards" PR. C2 depends on C1. | 1 day |
+| 8 | **A3, F1** — internal refactors | Independent small PRs. | 1 day each |
 | 8b | **F2** — configDocuments cache durability | Blocked behind Phase-5A `rateLimitStoreService` (per source spec §8.1) — F2 cannot start until that primitive ships. Not part of the parallel-shippable batch. | 1 day after Phase-5A |
-| 9 | **H1** — cross-service null-safety contract | High-leverage system rule. Codify before further service expansion; small audit script + architecture.md rule + per-service refactors. | 2–3 days |
-| 10 | **A1** — principal-context propagation | Major migration of `canonicalDataService` + every caller + gate hardening. | 3–5 days |
-| 11 | **A2** — RLS write-boundary guard | New architectural primitive (Proxy-based runtime guard + schema-vs-registry gate + migration hook). Schedule with §13.5A or its own phase. **Independent of A1** — A2's mechanism is table-name + Proxy-based, not principal-flag-based; the earlier A1→A2 dependency claim was stale and has been removed. A1 and A2 may ship in parallel, or A2 first if the runtime-guard scaffolding is desired before more services land. | 3–4 days |
-| 12 | **B2 + B2-ext** — job idempotency + concurrency standard | After A1 (some jobs benefit from `PrincipalContext`-aware data access). Bundle idempotency audit with concurrency-guard standardisation. | 3–4 days |
+| 9 | **H1** — cross-service null-safety contract | High-leverage system rule. Codify before further service expansion. Gate ships ADVISORY on first release per §0.1; promote to blocking after 2-3 weeks of stable signal. | 2-3 days |
+| 10 | **A1a** — principal-context propagation: service surface change | Migrate `canonicalDataService` signatures + callers; deprecated overload kept temporarily. | 2-3 days |
+| 11 | **A1b** — principal-context propagation: gate hardening | Remove A1a's deprecated overloads; flip gate to call-site granularity. Depends on A1a. | 1-2 days |
+| 12 | **B2 + B2-ext** — job idempotency + concurrency standard | After A1a/A1b (some jobs benefit from `PrincipalContext`-aware data access). Per-job ordering: connectorPollingSync -> bundleUtilizationJob -> measureInterventionOutcomeJob -> ruleAutoDeprecateJob (lowest-risk-first). | 3-4 days (each job is its own mini-PR) |
+| 13 | **A2** — RLS write-boundary guard | Phased rollout per §A2 Phasing block: Phase 1 (schema-diff gate) -> Phase 2 (migration hook) -> Phase 3 (runtime guard). New architectural primitive — ship LAST in this spec to maximise observation time on the rest of the changes. **Independent of A1** — A2's mechanism is table-name + Proxy-based, not principal-flag-based. | 3-4 days, spread across phases |
 
 **Critical-path summary:**
-- The first six items (G2, G1, E1/E2, D1/D2/D3, B1/C4, C1) can ship in parallel — they have no inter-dependencies. ~1 week of total work if pipelined.
-- The next three (C2/C3, A3/F1/F2, H1) form a second wave gated only on C1. ~1 week.
-- The final three (A1, A2, B2+B2-ext) are the heavy items, sequenced by dependency. ~2 weeks if done serially, ~1 week if A2 and B2 ship parallel-after-A1.
+- **Wave 1 — signal cleanup (parallel-friendly):** G2, G1, D1/D2/D3, C1, E1/E2, B1/C4 — ~1-1.5 weeks if pipelined. C1 must precede E2 and D3.
+- **Wave 2 — drift guards + small refactors (parallel-friendly):** C2/C3, A3, F1, H1 — ~1 week. C2/H1 depend on C1.
+- **Wave 3 — heavy migrations (sequential):** A1a -> A1b -> B2 (per-job sequence) -> A2 (phased) — ~2-2.5 weeks. F2 floats whenever Phase-5A's primitive becomes available.
 
-**Total estimate:** 4 weeks of focused effort (one engineer), 2.5–3 weeks if multiple chunks ship in parallel. Treat this estimate as planning input only — re-estimate per chunk during build slug planning.
+**Total estimate:** 4-5 weeks of focused effort (one engineer), 3-3.5 weeks if multiple chunks ship in parallel within Waves 1+2. Wave 3 is intentionally serial. Treat this estimate as planning input only — re-estimate per chunk during build slug planning.
 
 ---
 
@@ -1164,8 +1272,9 @@ This spec is complete when every actionable item in §1 has shipped (or, for D2,
 
 | Item | Risk | Class | Test signal | Ships in PR |
 |---|---|---|---|---|
-| A1 | medium | Significant | unit test on `canonicalDataService` + gate hardening | dedicated PR |
-| A2 | medium | Significant | guard unit tests + schema-diff gate self-test | dedicated PR |
+| A1a | medium | Significant | unit test on `canonicalDataService` (PrincipalContext surface) | dedicated PR |
+| A1b | low | Standard | gate self-test (deliberate-regression fixtures) | dedicated PR (after A1a) |
+| A2 | medium | Significant | guard unit tests + schema-diff gate self-test | three sequential PRs (Phase 1, 2, 3) |
 | A3 | low | Standard | existing route tests pass | bundle-friendly |
 | B1 | zero | Trivial | new pure test | bundle-friendly |
 | B2 + B2-ext | medium | Significant | per-job double-invocation tests + concurrency tests | dedicated PR |
@@ -1201,8 +1310,9 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 
 | ID | Item | Status | Build slug / PR | Notes |
 |---|---|---|---|---|
-| A1 | Principal-context propagation | ☐ todo | — | gating change for B2 |
-| A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive |
+| A1a | Principal-context propagation: service surface change | ☐ todo | — | precedes A1b; deprecated shim allowed temporarily |
+| A1b | Principal-context propagation: gate hardening + caller enforcement | ☐ todo | — | depends on A1a; removes shims, flips gate to call-site granularity |
+| A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive — ships in three phases (schema-diff gate, migration hook, runtime guard) |
 | A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ☐ todo | — | low-risk refactor |
 | B1 | saveSkillVersion orgId-required throw test | ☐ todo | — | trivial |
 | B2 | Job idempotency audit | ☐ todo | — | may bundle with B2-ext OR ship separately (split DoD allows partial completion) |
@@ -1220,7 +1330,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | F2 | configDocuments parsedCache durability | ☐ todo | — | strictly depends on Phase-5A `rateLimitStoreService`; defer or migrate to deferred if surface doesn't fit |
 | G1 | Migration sequencing verification (re-runnable) | ☐ todo | — | superseded as pre-merge; run as post-deploy |
 | G2 | Post-merge smoke test runbook | ☐ todo | — | run ASAP |
-| H1 | Cross-service null-safety contract | ☐ todo | — | depends on C1, B2 |
+| H1 | Cross-service null-safety contract | ☐ todo | — | depends on C1; ships BEFORE B2 (per §2 re-sequencing); gate ships advisory on first release |
 
 **Status legend:** ☐ todo · ⧖ in progress · ✓ done · ↗ migrated to other spec · ✗ rejected (move to §3 with rationale).
 
