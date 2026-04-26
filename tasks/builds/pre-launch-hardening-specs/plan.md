@@ -172,6 +172,16 @@ Every spec MUST contain (per `docs/spec-authoring-checklist.md` Appendix, plus p
   - Final assertion: `- [x] No item from mini-spec § Chunk N is implicitly skipped.`
   - The Coverage Check is the spec author's signed statement that internal correctness has been verified against the mini-spec's intent. `spec-reviewer` reads it as authoritative; an unchecked box blocks merge.
 
+### Scope guard (binding — prevents silent expansion mid-draft)
+
+Any item not explicitly listed in the spec's `## Items closed` section:
+
+- MUST NOT be added during spec drafting, even if the author thinks it's "obviously related" or "trivial to bundle."
+- MUST be recorded under `## Deferred Items` with a short rationale, OR captured via `triage-agent` for separate planning.
+- The "while we're here, we may as well" reflex is the highest-ROI place to enforce discipline. If a related item surfaces during drafting, write it down and move on — do not absorb it into scope.
+
+The scope guard applies to architect outputs as well: the architect's output is a resolution of decisions named in the mini-spec, not a place to discover new ones.
+
 ---
 
 ## §4 Task 0 — Branch setup
@@ -423,6 +433,18 @@ git rev-parse HEAD
 Record this SHA in `progress.md` under `Invariants pinned at:`. Every Chunk N spec front-matter cites this SHA.
 
 - [ ] **Step 4: Mark Task 0.6 complete in `progress.md`**
+
+### Done criteria for Task 0.6
+
+The invariants doc is **done** only when all five hold. If any criterion fails, the doc is incomplete; downstream specs cannot pin its SHA.
+
+- [ ] All 5 invariant categories are documented in dedicated sections: RLS contract · Naming and schema · Execution contract · Gate expectations · Spec-vs-implementation translation rules.
+- [ ] Every invariant is **testable or enforceable** — i.e. it can be checked by a script, a code grep, an existing CI gate, a pure-function assertion, or an explicit named convention. Philosophical statements ("we value X") are not invariants and don't belong here.
+- [ ] No invariant overlaps with or contradicts `docs/spec-context.md` § `accepted_primitives` / `convention_rejections`, or any rule in `architecture.md` § "Architecture Rules" or §1155.
+- [ ] Every invariant cites its source: a section in `architecture.md`, a primitive in `docs/spec-context.md`, a mini-spec chunk reference, or an existing CI gate script. No claims that lack a backing reference.
+- [ ] The doc carries an `## Amendments` section (initially empty) — the post-freeze amendment protocol updates this section, not the body.
+
+This blocks Task 1 from starting against an unfinished invariants doc.
 
 ---
 
@@ -1156,6 +1178,34 @@ Ship the PR with the residuals visible. Silent ambiguity is what `Review Residua
 - Implementation order is `1 → {2, 4, 6} → 5 → 3`. PR merge order does not imply dependency order.
 - The order is canonical in `tasks/builds/pre-launch-hardening-specs/progress.md` § "Implementation Order (MANDATORY)".
 - No code branch starts before Task 6.5 (spec freeze) AND Task 6.6 (consistency sweep) both stamp clear.
+
+### Review cadence (sets user expectation; prevents review-pipeline bottleneck)
+
+The user reviews at five fixed checkpoints, not after every task. This is the contract:
+
+| After... | Review type | Estimated time |
+|---|---|---|
+| Task 0.6 (invariants doc) | Quick sanity review | 10–15 min |
+| Task 1 PR (Chunk 1 — RLS) | Full review — foundation | full pass |
+| Tasks 4 + 6 PRs | Batch review (together) | one combined pass |
+| Task 2 PR (Chunk 2 — schema) | Full review — high risk | full pass |
+| Task 5 PR (Chunk 5 — execution) | Targeted review (execution only) | scoped pass |
+| Task 3 PR (Chunk 3 — dead-path) | Full review — final integration | full pass |
+| Tasks 6.5 + 6.6 + 7 | Sign-off | quick pass |
+
+Between checkpoints, the session keeps moving. The session **stops** at each checkpoint and waits for the user — even if the next task is mechanically obvious — so review feedback can be folded back in before downstream work commits to the wrong premise.
+
+### Global stop condition (binding — applies across all tasks)
+
+If any of the following occurs during execution, **STOP** and escalate to the user before the next task begins. Do not push through:
+
+- `spec-reviewer` produces the same directional finding twice (i.e. a finding the agent flagged in iteration N is unresolved and re-flagged in iteration N+1, even after a Claude edit).
+- An architect output conflicts with `architecture.md`, `docs/spec-context.md`, or the cross-chunk invariants doc.
+- A decision requires introducing a new primitive that is not in `docs/spec-context.md § accepted_primitives` and the spec author cannot write a "why not reuse" paragraph defending it.
+- Any task hits its retry limit on a verification check (per `CLAUDE.md § Verification Commands`).
+- A todo.md item ID can't be reconciled (already covered for the four pre-flight orphans; this rule covers anything new found during drafting).
+
+The stop condition is not a soft guideline. Pushing past it compounds errors into later specs and breaks the pipeline's correctness guarantee.
 
 ### When to STOP and escalate
 
