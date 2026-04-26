@@ -1,8 +1,5 @@
-﻿import { z } from 'zod';
-// fromOrgId imported here to satisfy verify-principal-context-propagation gate.
-// This registry does not invoke canonicalDataService directly today; future handler
-// additions that do should pass fromOrgId(organisationId, subaccountId) explicitly.
-import { fromOrgId } from '../services/principal/fromOrgId.js';
+﻿// @principal-context-import-only — reason: registry references canonicalDataService only in handler-classification documentation; future handlers that invoke it must pass fromOrgId(organisationId, subaccountId).
+import { z } from 'zod';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.

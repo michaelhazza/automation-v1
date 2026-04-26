@@ -1,3 +1,4 @@
+// @principal-context-import-only — reason: this orchestrator references canonicalDataService only in a doc comment about lazy-loading; actual invocations live in the canonicalQueryRegistry executor.
 // CRM Query Planner — orchestration layer (spec §3 / §19)
 // P2: Stage 1 + Stage 2 (cache read) + Stage 3 (LLM fallback) + live executor.
 // P3: hybrid executor wired (P2 sends hybrid to unsupported_query per §19 P2 rejection rule).
