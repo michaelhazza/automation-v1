@@ -2,7 +2,7 @@
 name: Config List Agents
 description: List all org agents with current status, model, and default skills.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

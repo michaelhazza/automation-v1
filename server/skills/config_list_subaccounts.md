@@ -2,7 +2,7 @@
 name: Config List Subaccounts
 description: List all subaccounts with name, slug, and status.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

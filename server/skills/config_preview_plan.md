@@ -2,7 +2,7 @@
 name: Config Preview Plan
 description: Emit a structured configuration plan for user review before executing mutations.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters
