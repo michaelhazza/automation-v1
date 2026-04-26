@@ -134,3 +134,14 @@ _(populated as each chunk PR opens; superseded 2026-04-26 by spec consolidation 
 | 6 — Dead-Path Completion | Chunk 3 | § 7 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
 
 The 6 closed PRs (#204–#209) remain as historical record. They were closed pre-consolidation and carry the per-chunk file content at the SHAs they were last pushed to.
+
+## Coverage Baseline
+
+Captured 2026-04-26 from branch `impl/pre-launch-hardening` as Phase 4 (Gate Hygiene Cleanup) commits land. These are **point-in-time baselines** — future PRs touching input-validation or permission-scope routes must cite the baseline + delta in their PR body.
+
+| Gate | Violations | Script |
+|---|---|---|
+| `verify-input-validation.sh` | 44 | `scripts/verify-input-validation.sh` |
+| `verify-permission-scope.sh` | 13 | `scripts/verify-permission-scope.sh` |
+
+Reducing these counts to zero is **explicitly out of scope** for the pre-launch hardening sprint (per Phase 4 § 3). The baseline is captured to prevent regressions, not to trigger a remediation pass.
