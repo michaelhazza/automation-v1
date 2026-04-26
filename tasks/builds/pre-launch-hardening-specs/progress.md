@@ -56,7 +56,7 @@ _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumpt
 - [x] Task 1    Chunk 1 — RLS Hardening Sweep — PR #204 open
 - [ ] Task 2.1  Architect input — Chunk 2
 - [ ] Task 3.1  Architect input — Chunk 3
-- [ ] Task 4    Chunk 4 — Maintenance Job RLS Contract
+- [x] Task 4    Chunk 4 — Maintenance Job RLS Contract — PR #205 open
 - [ ] Task 6    Chunk 6 — Gate Hygiene Cleanup
 - [ ] Architect-output conflict check (pre-Task 2/3 gate)
 - [ ] Task 2    Chunk 2 — Schema Decisions + Renames
@@ -75,6 +75,6 @@ _(populated as each chunk PR opens)_
 | 1 | pre-launch-rls-hardening | spec/pre-launch-rls-hardening | [#204](https://github.com/michaelhazza/automation-v1/pull/204) | open for review |
 | 2 | pre-launch-schema-decisions | spec/pre-launch-schema-decisions | TBD | not started |
 | 3 | pre-launch-dead-path-completion | spec/pre-launch-dead-path-completion | TBD | not started |
-| 4 | pre-launch-maintenance-job-rls | spec/pre-launch-maintenance-job-rls | TBD | not started |
+| 4 | pre-launch-maintenance-job-rls | spec/pre-launch-maintenance-job-rls | [#205](https://github.com/michaelhazza/automation-v1/pull/205) | open for review |
 | 5 | pre-launch-execution-correctness | spec/pre-launch-execution-correctness | TBD | not started |
 | 6 | pre-launch-gate-hygiene | spec/pre-launch-gate-hygiene | TBD | not started |
