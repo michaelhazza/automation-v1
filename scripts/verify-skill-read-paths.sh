@@ -23,6 +23,7 @@ TOTAL_ACTIONS=$((ACTION_COUNT + 1))
 if [ "$ACTION_COUNT" -ne "$ENTRY_READ_PATH" ]; then
   echo "FAIL: $((ACTION_COUNT - ENTRY_READ_PATH)) actions missing readPath tag"
   echo "Literal action entries: $ACTION_COUNT, with readPath: $ENTRY_READ_PATH"
+  echo "[GATE] skill-read-paths: violations=$((ACTION_COUNT - ENTRY_READ_PATH))"
   exit 1
 fi
 
@@ -32,8 +33,10 @@ RATIONALE_COUNT=$(grep -c "liveFetchRationale:" "$FILE" || true)
 
 if [ "$LIVE_FETCH_COUNT" -gt "$RATIONALE_COUNT" ]; then
   echo "FAIL: $((LIVE_FETCH_COUNT - RATIONALE_COUNT)) liveFetch actions missing liveFetchRationale"
+  echo "[GATE] skill-read-paths: violations=$((LIVE_FETCH_COUNT - RATIONALE_COUNT))"
   exit 1
 fi
 
 # +1 for the methodology block (generated, not literal)
 echo "PASS: verify-skill-read-paths ($TOTAL_ACTIONS actions tagged, $LIVE_FETCH_COUNT liveFetch with rationale)"
+echo "[GATE] skill-read-paths: violations=0"

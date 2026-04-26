@@ -360,6 +360,7 @@ async function main() {
 function report() {
   if (errors.length === 0 && warnings.length === 0) {
     console.log(`[OK] Integration reference is consistent.`);
+    console.log(`[GATE] integration-reference: violations=0`);
     process.exit(0);
   }
   if (warnings.length > 0) {
@@ -370,13 +371,16 @@ function report() {
     console.log(`\n[ERRORS]`);
     for (const e of errors) console.log(`  - ${e}`);
     console.log(`\nFound ${errors.length} blocking error(s), ${warnings.length} warning(s).`);
+    console.log(`[GATE] integration-reference: violations=${errors.length}`);
     process.exit(1);
   }
   console.log(`\nFound 0 blocking errors, ${warnings.length} warning(s).`);
+  console.log(`[GATE] integration-reference: violations=0`);
   process.exit(2);
 }
 
 main().catch((e) => {
   console.error('verify-integration-reference.mjs crashed:', e);
+  console.log('[GATE] integration-reference: violations=1');
   process.exit(1);
 });

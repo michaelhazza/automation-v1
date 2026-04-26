@@ -24,7 +24,9 @@ VIOLATIONS=$(grep -rn "$CANONICAL_TABLES" \
 if [ -n "$VIOLATIONS" ]; then
   echo "FAIL: Direct canonical table access outside canonicalDataService:"
   echo "$VIOLATIONS"
+  echo "[GATE] canonical-read-interface: violations=1"
   exit 1
 fi
 
 echo "PASS: verify-canonical-read-interface"
+echo "[GATE] canonical-read-interface: violations=0"

@@ -3045,6 +3045,10 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
 - **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
 
+### Gate scripts (`scripts/verify-*.sh` / `scripts/verify-*.mjs`)
+
+**Gate output standard (`[GATE]` line).** Every `scripts/verify-*.sh` and `scripts/verify-*.mjs` gate must emit `[GATE] <guard_id>: violations=<count>` as the final application-level stdout line. The canonical parser is `grep -E '^\[GATE\] [a-z0-9-]+: violations=[0-9]+$' | tail -n 1`. Framework-level output (diagnostic echoes, framework logs) may appear after the `[GATE]` line; application-level output (violation reports, summaries) must not. Scripts sourcing `scripts/lib/guard-utils.sh` get this line automatically via `emit_summary()`; standalone scripts must emit it explicitly before each exit path.
+
 ---
 
 ## Hierarchical Agent Delegation

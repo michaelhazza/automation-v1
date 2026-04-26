@@ -8,6 +8,7 @@ REGISTRY_FILE="server/services/canonicalDictionary/canonicalDictionaryRegistry.t
 
 if [ ! -f "$REGISTRY_FILE" ]; then
   echo "FAIL: Dictionary registry file not found: $REGISTRY_FILE"
+  echo "[GATE] canonical-dictionary: violations=1"
   exit 1
 fi
 
@@ -26,7 +27,9 @@ for TABLE in $SCHEMA_TABLES; do
 done
 
 if [ "$FAIL" -eq 1 ]; then
+  echo "[GATE] canonical-dictionary: violations=1"
   exit 1
 fi
 
 echo "PASS: verify-canonical-dictionary (all canonical tables covered)"
+echo "[GATE] canonical-dictionary: violations=0"

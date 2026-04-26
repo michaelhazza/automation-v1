@@ -1527,7 +1527,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | B1 | saveSkillVersion orgId-required throw test | ☐ todo | — | trivial |
 | B2 | Job idempotency audit | ☐ todo | — | may bundle with B2-ext OR ship separately (split DoD allows partial completion) |
 | B2-ext | Job concurrency standard | ☐ todo | — | may bundle with B2 OR ship separately (split DoD allows partial completion) |
-| C1 | Gate baseline count line | ☐ todo | — | foundational for C2/D3/E2/H1 gates |
+| C1 | Gate baseline count line | ✓ done | tasks/builds/audit-remediation-followups/c1-gate-count-line/ | emit_summary() patched in guard-utils.sh; all 26 standalone scripts patched; discipline test fixture added; architecture.md updated |
 | C2 | architect.md context-section drift guard | ☐ todo | — | depends on C1 |
 | C3 | Canonical registry drift test | ☐ todo | — | independent |
 | C4 | actionRegistry.ts comment cleanup | ☐ todo | — | trivial |
