@@ -4,7 +4,13 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { saveRule } from '../services/ruleCaptureService.js';
 import { listRules, patchRule, deprecateRule } from '../services/ruleLibraryService.js';
+import { draftCandidates } from '../services/ruleCandidateDrafter.js';
+import { db } from '../db/index.js';
+import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
+import { eq, and, sql } from 'drizzle-orm';
+import { logger } from '../lib/logger.js';
 import type { RuleCaptureRequest, RuleListFilter, RulePatch } from '../../shared/types/briefRules.js';
+import type { BriefApprovalCard } from '../../shared/types/briefResultContract.js';
 
 const router = Router();
 
@@ -99,6 +105,119 @@ router.delete(
     }
 
     res.status(204).end();
+  }),
+);
+
+// POST /api/rules/draft-candidates — generate candidate rules from an approval card decision
+router.post(
+  '/draft-candidates',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
+  asyncHandler(async (req, res) => {
+    const { artefactId, wasApproved } = req.body as { artefactId?: string; wasApproved?: boolean };
+
+    if (!artefactId) {
+      res.status(400).json({ error: 'artefactId is required' });
+      return;
+    }
+    if (typeof wasApproved !== 'boolean') {
+      res.status(400).json({ error: 'wasApproved is required and must be a boolean' });
+      return;
+    }
+
+    logger.info('rule.draft_candidates.requested', { event: 'rule.draft_candidates.requested', artefactId, orgId: req.orgId! });
+
+    // Org-scoped JSONB scan for the approval card — GIN index (migration 0232) covers this
+    const rows = await db
+      .select({ artefacts: conversationMessages.artefacts, briefId: conversations.scopeId })
+      .from(conversationMessages)
+      .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+      .where(and(
+        eq(conversations.organisationId, req.orgId!),
+        eq(conversations.scopeType, 'brief'),
+        sql`${conversationMessages.artefacts} @> ${JSON.stringify([{ artefactId }])}::jsonb`,
+      ));
+
+    let approvalCard: BriefApprovalCard | null = null;
+    let briefId: string | null = null;
+    let matchCount = 0;
+
+    for (const row of rows) {
+      if (!Array.isArray(row.artefacts)) continue;
+      for (const a of row.artefacts as Array<Record<string, unknown>>) {
+        if (a['artefactId'] !== artefactId) continue;
+        matchCount++;
+        if (matchCount > 1) {
+          logger.error('rule.draft_candidates.collision_detected', {
+            event: 'rule.draft_candidates.collision_detected',
+            artefactId,
+            orgId: req.orgId!,
+            matchCount,
+          });
+          res.status(500).json({ error: 'artefact_id_collision' });
+          return;
+        }
+        if (a['kind'] !== 'approval') {
+          res.status(422).json({ error: 'artefact_not_approval' });
+          return;
+        }
+        approvalCard = a as unknown as BriefApprovalCard;
+        briefId = row.briefId;
+      }
+    }
+
+    if (!approvalCard || !briefId) {
+      res.status(404).json({ error: 'artefact_not_found' });
+      return;
+    }
+
+    // Load brief context from task description
+    const [task] = await db
+      .select({ description: tasks.description })
+      .from(tasks)
+      .where(eq(tasks.id, briefId))
+      .limit(1);
+
+    const briefContext = task?.description ?? '';
+
+    // Load top 20 existing rules for deduplication hint in the prompt
+    const { rules: existingRelatedRules } = await listRules({ limit: 20 }, req.orgId!);
+
+    const startMs = Date.now();
+    let result: Awaited<ReturnType<typeof draftCandidates>>;
+    try {
+      result = await draftCandidates({
+        approvalCard,
+        wasApproved,
+        briefContext,
+        existingRelatedRules: existingRelatedRules.map((r) => ({
+          id: r.id,
+          text: r.text,
+          category: r.scope.kind,
+        })),
+        organisationId: req.orgId!,
+      });
+    } catch (err: unknown) {
+      logger.error('rule.draft_candidates.failed', {
+        event: 'rule.draft_candidates.failed',
+        artefactId,
+        orgId: req.orgId!,
+        error: err instanceof Error ? err.message : String(err),
+        status: 'failed',
+      });
+      res.status(500).json({ error: 'draft_candidates_failed' });
+      return;
+    }
+
+    logger.info('rule.draft_candidates.returned', {
+      event: 'rule.draft_candidates.returned',
+      artefactId,
+      candidateCount: result.candidates.length,
+      latencyMs: Date.now() - startMs,
+      status: 'success',
+    });
+
+    res.json(result);
   }),
 );
 

@@ -314,6 +314,20 @@ export interface BriefCostPreview {
 }
 
 // ---------------------------------------------------------------------------
+// Approval decision — supersedes a BriefApprovalCard after user acts on it
+// ---------------------------------------------------------------------------
+
+export interface BriefApprovalDecision extends BriefArtefactBase {
+  kind: 'approval_decision';
+  /** The user's decision on the parent approval card. */
+  decision: 'approve' | 'reject';
+  reason?: string;
+  /** Correlation key linking this decision to its action record. */
+  executionId?: string;
+  executionStatus?: BriefExecutionStatus;
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated union — the top-level artefact type
 // ---------------------------------------------------------------------------
 
@@ -324,6 +338,7 @@ export interface BriefCostPreview {
 export type BriefChatArtefact =
   | BriefStructuredResult
   | BriefApprovalCard
+  | BriefApprovalDecision
   | BriefErrorResult;
 
 // ---------------------------------------------------------------------------
@@ -336,6 +351,10 @@ export function isBriefStructuredResult(a: BriefChatArtefact): a is BriefStructu
 
 export function isBriefApprovalCard(a: BriefChatArtefact): a is BriefApprovalCard {
   return a.kind === 'approval';
+}
+
+export function isBriefApprovalDecision(a: BriefChatArtefact): a is BriefApprovalDecision {
+  return a.kind === 'approval_decision';
 }
 
 export function isBriefErrorResult(a: BriefChatArtefact): a is BriefErrorResult {

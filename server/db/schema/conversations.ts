@@ -43,6 +43,7 @@ export const conversationMessages = pgTable('conversation_messages', {
   conversationIdx: index('conv_msgs_conversation_idx').on(table.conversationId),
   orgIdx: index('conv_msgs_org_idx').on(table.organisationId),
   subaccountIdx: index('conv_msgs_subaccount_idx').on(table.subaccountId),
+  artefactsGinIdx: index('conv_msgs_artefacts_gin_idx').using('gin', table.artefacts),
 }));
 
 export type Conversation = typeof conversations.$inferSelect;

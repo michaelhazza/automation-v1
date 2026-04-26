@@ -3,7 +3,8 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { createBrief, getBriefArtefacts, getBriefMeta } from '../services/briefCreationService.js';
-import { writeConversationMessage } from '../services/briefConversationWriter.js';
+import { handleConversationFollowUp } from '../services/briefConversationService.js';
+import { decideBriefApproval } from '../services/briefApprovalService.js';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
@@ -80,14 +81,19 @@ router.get(
   }),
 );
 
-// POST /api/briefs/:briefId/messages — add a user message to a Brief
+// POST /api/briefs/:briefId/messages — add a follow-up user message to a Brief
 router.post(
   '/api/briefs/:briefId/messages',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
     const { briefId } = req.params;
-    const { content, conversationId } = req.body as { content?: string; conversationId?: string };
+    const { content, conversationId, uiContext, subaccountId } = req.body as {
+      content?: string;
+      conversationId?: string;
+      uiContext?: Partial<BriefUiContext>;
+      subaccountId?: string;
+    };
 
     if (!content?.trim()) {
       res.status(400).json({ message: 'content is required' });
@@ -98,16 +104,69 @@ router.post(
       return;
     }
 
-    const result = await writeConversationMessage({
+    const context: BriefUiContext = {
+      surface: uiContext?.surface ?? 'brief_chat',
+      currentOrgId: req.orgId!,
+      currentSubaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      userPermissions: new Set<string>(),
+    };
+
+    const result = await handleConversationFollowUp({
       conversationId,
       briefId,
       organisationId: req.orgId!,
-      role: 'user',
-      content: content.trim(),
+      subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      text: content.trim(),
+      uiContext: context,
       senderUserId: req.user!.id,
     });
 
     res.status(201).json(result);
+  }),
+);
+
+// POST /api/briefs/:briefId/approvals/:artefactId/decision — approve or reject an approval card
+router.post(
+  '/api/briefs/:briefId/approvals/:artefactId/decision',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
+  asyncHandler(async (req, res) => {
+    const { briefId, artefactId } = req.params;
+    const { decision, reason, conversationId, subaccountId } = req.body as {
+      decision?: 'approve' | 'reject';
+      reason?: string;
+      conversationId?: string;
+      subaccountId?: string;
+    };
+
+    if (decision !== 'approve' && decision !== 'reject') {
+      res.status(400).json({ status: 'failed', error: 'decision must be approve or reject' });
+      return;
+    }
+    if (!conversationId) {
+      res.status(400).json({ status: 'failed', error: 'conversationId is required' });
+      return;
+    }
+
+    const result = await decideBriefApproval({
+      artefactId,
+      decision,
+      reason,
+      conversationId,
+      briefId,
+      organisationId: req.orgId!,
+      subaccountId,
+      userId: req.user!.id,
+    });
+
+    if (result.status === 'failed') {
+      if (result.error === 'artefact_not_found') { res.status(404).json(result); return; }
+      if (result.error === 'artefact_not_approval') { res.status(422).json(result); return; }
+      if (result.error === 'artefact_stale') { res.status(410).json(result); return; }
+      if (result.error === 'approval_already_decided') { res.status(409).json(result); return; }
+    }
+
+    res.status(200).json(result);
   }),
 );
 

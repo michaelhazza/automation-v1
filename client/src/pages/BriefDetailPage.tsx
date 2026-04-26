@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api.js';
 import { useSocketRoom } from '../hooks/useSocket.js';
 import { resolveLifecyclePure } from '../lib/briefArtefactLifecycle.js';
-import type { BriefChatArtefact, BriefStructuredResult, BriefApprovalCard, BriefErrorResult } from '../../../shared/types/briefResultContract.js';
+import type { BriefChatArtefact, BriefStructuredResult, BriefApprovalCard, BriefApprovalDecision, BriefErrorResult } from '../../../shared/types/briefResultContract.js';
 import type { ArtefactChainState } from '../lib/briefArtefactLifecyclePure.js';
 import { StructuredResultCard } from '../components/brief-artefacts/StructuredResultCard.js';
 import { ApprovalCard } from '../components/brief-artefacts/ApprovalCard.js';
@@ -34,16 +34,18 @@ interface BriefDetailPageProps {
   user: User;
 }
 
-function ArtefactItem({ artefact, isSuperseded, onSuggestionClick }: {
+function ArtefactItem({ artefact, isSuperseded, onSuggestionClick, onApprove, onReject }: {
   artefact: BriefChatArtefact;
   isSuperseded: boolean;
   onSuggestionClick: (intent: string) => void;
+  onApprove?: (artefactId: string) => void;
+  onReject?: (artefactId: string) => void;
 }) {
   if (artefact.kind === 'structured') {
     return <StructuredResultCard artefact={artefact as BriefStructuredResult} isSuperseded={isSuperseded} onSuggestionClick={onSuggestionClick} />;
   }
   if (artefact.kind === 'approval') {
-    return <ApprovalCard artefact={artefact as BriefApprovalCard} isSuperseded={isSuperseded} />;
+    return <ApprovalCard artefact={artefact as BriefApprovalCard} isSuperseded={isSuperseded} onApprove={onApprove} onReject={onReject} />;
   }
   if (artefact.kind === 'error') {
     return <ErrorArtefactCard artefact={artefact as BriefErrorResult} />;
@@ -136,9 +138,10 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
     if (!reply.trim() || isSending || !brief?.conversationId) return;
     setIsSending(true);
     try {
-      await api.post(`/api/conversations/${brief.conversationId}/messages`, {
+      await api.post(`/api/briefs/${briefId}/messages`, {
         content: reply.trim(),
-        briefId,
+        conversationId: brief.conversationId,
+        uiContext: { surface: 'brief_chat' },
       });
       setReply('');
       await load();
@@ -146,6 +149,29 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
       setIsSending(false);
     }
   };
+
+  const handleApprovalDecision = async (artefactId: string, decision: 'approve' | 'reject'): Promise<void> => {
+    if (!brief?.conversationId) return;
+    try {
+      const res = await api.post<{ status: string; artefact?: BriefApprovalDecision }>(
+        `/api/briefs/${briefId}/approvals/${artefactId}/decision`,
+        { decision, conversationId: brief.conversationId },
+      );
+      const decisionArtefact = res.data?.artefact;
+      if (decisionArtefact) {
+        setArtefacts((prev) => {
+          const next = [...prev, decisionArtefact];
+          setChainState({ artefacts: next });
+          return next;
+        });
+      }
+    } catch {
+      // Non-200 responses (409, 410, etc.) surface via WS brief-artefact:updated events
+    }
+  };
+
+  const handleApprove = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'approve'); };
+  const handleReject = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'reject'); };
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading…</div>;
@@ -183,6 +209,8 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
                 artefact={a}
                 isSuperseded={supersededIds.has(a.artefactId)}
                 onSuggestionClick={handleSuggestionClick}
+                onApprove={handleApprove}
+                onReject={handleReject}
               />
             ))}
           </div>

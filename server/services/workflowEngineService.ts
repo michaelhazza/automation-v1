@@ -1695,6 +1695,126 @@ export const WorkflowEngineService = {
     return { attempt: row.attempt, output: row.outputJson, outputHash: row.outputHash };
   },
 
+  // ─── C4a-REVIEWED-DISP: resume an invoke_automation step after user approval ─
+
+  /**
+   * Resumes an `invoke_automation` step that was held at `review_required`.
+   * Guard: `UPDATE WHERE status = 'review_required' RETURNING *` — if zero
+   * rows returned, a concurrent approval already won; return `alreadyResumed: true`.
+   * Per pre-launch-hardening-spec §4.4 (Option A) and §4.5.2.
+   */
+  async resumeInvokeAutomationStep(
+    stepRunId: string,
+  ): Promise<{ alreadyResumed: boolean }> {
+    // Optimistic transition: awaiting_approval → running (the guard IS the lock)
+    const [updated] = await db
+      .update(workflowStepRuns)
+      .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(workflowStepRuns.id, stepRunId),
+        eq(workflowStepRuns.status, 'awaiting_approval'),
+      ))
+      .returning();
+
+    if (!updated) {
+      logger.info('step.resume.guard_blocked', {
+        event: 'step.resume.guard_blocked',
+        stepRunId,
+        status: 'success',
+        alreadyResumed: true,
+      });
+      return { alreadyResumed: true };
+    }
+
+    const sr = updated;
+    logger.info('step.resume.started', {
+      event: 'step.resume.started',
+      stepRunId,
+      runId: sr.runId,
+      automationId: sr.stepId,
+    });
+
+    // Load the workflow run and its definition
+    const [run] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, sr.runId))
+      .limit(1);
+    if (!run) {
+      await this.failStepRunInternal(sr, 'resume_run_not_found');
+      return { alreadyResumed: false };
+    }
+
+    const definition = await loadDefinitionForRun(run);
+    if (!definition) {
+      await this.failStepRunInternal(sr, 'resume_definition_not_found');
+      return { alreadyResumed: false };
+    }
+
+    const step = findStepInDefinition(definition, sr.stepId) as InvokeAutomationStep | undefined;
+    if (!step || step.type !== 'invoke_automation') {
+      await this.failStepRunInternal(sr, 'resume_step_not_invoke_automation');
+      return { alreadyResumed: false };
+    }
+
+    const startMs = Date.now();
+    const ctx = run.contextJson as unknown as RunContext;
+
+    const invokeGuardResult = await withInvalidationGuard(sr.id, () =>
+      invokeAutomationStep({
+        step,
+        runId: run.id,
+        stepRunId: sr.id,
+        run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
+        templateCtx: ctx as unknown as Record<string, unknown>,
+      }),
+    );
+
+    if ('discarded' in invokeGuardResult) {
+      logger.info('step.resume.invalidation_discarded', {
+        event: 'step.resume.invalidation_discarded',
+        stepRunId,
+        runId: run.id,
+        status: 'success',
+      });
+      return { alreadyResumed: false };
+    }
+
+    const result = invokeGuardResult;
+    const latencyMs = Date.now() - startMs;
+
+    if (result.status === 'ok') {
+      const output = result.output ?? {};
+      await this.completeStepRunInternal(sr, output, hashValue(output), 'invoke_automation');
+      logger.info('step.resume.completed', {
+        event: 'step.resume.completed',
+        stepRunId,
+        runId: run.id,
+        executionStatus: 'completed',
+        latencyMs,
+        status: 'success',
+      });
+      return { alreadyResumed: false };
+    }
+
+    // error — respect failurePolicy: 'continue' as in the primary dispatch path
+    const errorReason = `invoke_automation_error: ${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`;
+    if (step.failurePolicy === 'continue') {
+      await this.completeStepRunInternal(sr, { error: result.error }, hashValue(result.error), 'invoke_automation_continue');
+    } else {
+      await this.failStepRunInternal(sr, errorReason);
+    }
+    logger.error('step.resume.failed', {
+      event: 'step.resume.failed',
+      stepRunId,
+      runId: run.id,
+      error: errorReason,
+      latencyMs,
+      status: 'failed',
+    });
+    return { alreadyResumed: false };
+  },
+
   async failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
     await db
       .update(workflowStepRuns)

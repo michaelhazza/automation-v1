@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-25 (derived from full-codebase audit + remediation spec)
+**Last updated:** 2026-04-27 (gate authoring rules, manifest-migration consistency, logger test pattern)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -208,6 +208,13 @@ Gate state drifts in pre-production codebases. Before starting a new phase of wo
 
 Gates that emit `WARNING` (not `BLOCKING FAIL`) are observability signals. A `# baseline-allow` directive at a specific match point with an explanatory comment is the correct way to acknowledge a reviewed, intentionally-permitted pattern. Never use blanket suppression.
 
+### 5.5 Gate authoring rules
+
+- **Self-test fixtures must not carry gate-recognised suppression annotations.** A fixture with `@null-safety-exempt` or `guard-ignore-next-line` proves only that the gate respects suppression — not that detection works. Remove all suppression annotations from deliberate-violation fixture files.
+- **Scan-path override env vars must disable the matching path exclusions.** An override env var (e.g. `DERIVED_DATA_NULL_SAFETY_SCAN_DIR`) that points at a fixture directory is useless if the gate still applies `! -path "*/__tests__/*"`. Remove that exclusion when the override is set.
+- **Grep-based gates must skip `import type` lines.** Type-only imports are erased at compile time and should not trigger import-presence gates. Pipe through `grep -v "import type"` before the pattern match, or document the limitation and require `guard-ignore-next-line` at affected call sites.
+- **Advisory gate runners must use `|| true`.** Any script that captures advisory gate output via `OUTPUT="$(bash gate.sh 2>&1)"` under `set -euo pipefail` must append `|| true`: `OUTPUT="$(bash gate.sh 2>&1 || true)"`. Without it, promoting the gate from advisory to blocking will kill the runner before the count line is parsed.
+
 ## 6. Migration discipline
 
 1. **Migrations are append-only.** Never edit a historical migration file after it has run.
@@ -215,6 +222,7 @@ Gates that emit `WARNING` (not `BLOCKING FAIL`) are observability signals. A `# 
 3. **System-scoped tables** (no `organisation_id`) must document in the migration header why they are not added to `RLS_PROTECTED_TABLES`. Every migration that creates a table must either add it to the registry with a full policy **or** include a `-- system-scoped: <reason>` header comment. Neither = gate failure, not just a review comment.
 4. **Drizzle schema changes** that accompany a migration land in the same PR. The schema file and the migration are a unit.
 5. **Corrective migrations** follow the §1.5 precedent: enumerate all historical policy names, DROP them, then CREATE with the canonical policy shape.
+6. **`policyMigration` in `rlsProtectedTables.ts` must point at the migration that physically runs `CREATE POLICY ... ON <table>`.** If a corrective migration's header NOTE explicitly excludes a table, the manifest entry for that table must still reference the original policy migration, not the corrective one. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm the authoritative file when in doubt.
 
 ---
 
@@ -226,6 +234,7 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
 - **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
 - **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
+- **Spy on the logger object directly, not on `process.env` or `console.*`.** `server/lib/logger.ts` captures `LOG_LEVEL` into a `const` at import time. Patching `process.env.LOG_LEVEL` in `beforeEach` is a no-op — the constant is already resolved. Use `mock.method(logger, 'warn', () => {})` / `mock.method(logger, 'debug', () => {})` to intercept at the object level. Without this, DEBUG-path tests silently false-PASS because the level filter drops the call before any spy can see it.
 
 When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
 
@@ -257,6 +266,41 @@ The DB-backed rate limiter ships with an env-flag rollback shim:
 - `USE_DB_RATE_LIMITER=false` → reverts to in-memory behaviour without a code revert
 - The shim has identical function signatures — no caller changes needed
 - Flip the flag, restart workers, observe
+
+### 8.7 State/Lifecycle invariants are mandatory for specs that touch state machines
+
+Any spec that introduces or modifies a state machine (step transitions, run aggregation, approval boundaries, resume paths, job status) MUST include a dedicated State/Lifecycle section that pins:
+
+1. **Valid transitions** — which transitions are legal, which are forbidden.
+2. **Execution record requirement** — what DB record must exist before a terminal state is written.
+3. **Concurrency guard on terminal-state writes** — the predicate that prevents two callers from simultaneously writing the same terminal state (e.g. `UPDATE ... WHERE status = 'review_required'`).
+4. **Status set closure** — whether adding a new status value requires a spec amendment. Closed status sets prevent silent drift between spec and implementation.
+
+This section is not optional even when "the state machine is simple." Simple state machines grow. A spec that doesn't pin the invariants before code ships produces correctness bugs that are invisible until concurrent load hits the seam.
+
+Detection: if a spec contains words like "state", "transition", "status", "approved", "completed", "failed", "resume", or "cancel" without a dedicated State/Lifecycle section, add one before sending to review.
+
+### 8.8 Cross-spec consistency sweep is mandatory before freeze for multi-chunk work
+
+Any implementation that ships as multiple chunks, phases, or parallel PRs requires a cross-spec consistency pass before the freeze gate. Individual per-spec review cannot catch cross-chunk drift — the consistency sweep must read all specs simultaneously and check:
+
+- (a) Identifier naming is consistent across all specs (SQL snake_case ↔ TS camelCase is a convention, not drift; everything else must match exactly).
+- (b) Shared contracts are identical across every consumer — if two specs both reference the same primitive, they must describe it the same way.
+- (c) No primitive is introduced in two places — single-owner rule for each new helper, service, or method.
+- (d) No assumption in one spec contradicts an assumption in another — especially around ownership of cross-cutting decisions.
+
+For the pre-launch hardening sprint, the consistency sweep caught C4a-6-RETSHAPE unowned-decision drift that five individual per-spec reviews had missed. The sweep catches what individual review cannot.
+
+### 8.9 One PR per feature branch; one PR per sprint
+
+For multi-chunk or multi-phase work, the correct PR topology is:
+
+- One integration branch for all chunks/phases.
+- One PR from the integration branch to main.
+- Per-chunk branches are valid as authoring vehicles but PR into the integration branch, not directly to main.
+- Or (preferred for spec-only work): author everything on the integration branch directly and open one PR.
+
+Six-PR / one-PR-per-chunk approaches introduce unnecessary integration points, produce redundant closed-PR artefacts as "historical record", and force a consolidation step that pure integration-branch discipline avoids entirely.
 
 ---
 
