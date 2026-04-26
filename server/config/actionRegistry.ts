@@ -1,6 +1,7 @@
 ﻿import { z } from 'zod';
-// fromOrgId imported here to satisfy verify-principal-context-propagation gate; callers of
-// canonicalDataService within this file should use fromOrgId() when the service migrates to PrincipalContext.
+// fromOrgId imported here to satisfy verify-principal-context-propagation gate.
+// This registry does not invoke canonicalDataService directly today; future handler
+// additions that do should pass fromOrgId(organisationId, subaccountId) explicitly.
 import { fromOrgId } from '../services/principal/fromOrgId.js';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
