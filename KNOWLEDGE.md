@@ -808,3 +808,25 @@ The audit-remediation-followups spec accreted seven cross-cutting meta rules acr
 **Where NOT to use this pattern.** Item-specific contracts (e.g. "A2 requires `allowRlsBypass` be declared explicitly", "C1 [GATE] line is the last application-level line") stay inside the item. The §0.X slot is for posture that applies across items, not for any constraint that happens to be cross-cutting in surface area.
 
 **Applied to:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` §0.1 through §0.7. Pattern generalises to any backlog spec with ≥6 items where cross-cutting architectural posture emerges across rounds of review.
+
+## Post-merge observations: PR #196
+
+Template entry — operator must fill in actual outcomes after running the runbook at
+`tasks/runbooks/audit-remediation-post-merge-smoke.md`. This section records the live
+results once the 7-step smoke test is executed against a deployed environment.
+
+| Step | Outcome | Notes |
+|---|---|---|
+| 1 — Agent creation | (pending) | |
+| 2 — Automation trigger | (pending) | |
+| 3 — GHL webhook receipt | (pending) | |
+| 4a — bundleUtilizationJob | (pending) | |
+| 4b — measureInterventionOutcomeJob | (pending) | |
+| 4c — ruleAutoDeprecateJob | (pending) | |
+| 4d — connectorPollingSync | (pending) | |
+| 5 — Log tail (10 min) | (pending) | |
+| 6 — LLM router metrics | (pending) | |
+| 7 — Final verdict | (pending) | |
+
+Update this section and flip the §5 Tracking row to `✓ done` after the operator completes
+all 7 steps cleanly. Any blocker from step 7 goes to `tasks/todo.md § Blockers`.
