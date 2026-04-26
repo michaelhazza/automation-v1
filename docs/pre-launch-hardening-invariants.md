@@ -308,9 +308,12 @@ These invariants govern how flows behave under stress — retry, conflict, concu
 
 **7.3 Correlation key is `executionId` (or `runId` when no execution exists).** Every observability event in any cross-flow chain MUST carry the same `executionId` (or `runId` for orchestration paths) so a trace can be reconstructed by filtering on a single key. The chain crosses HTTP route → service → step run → webhook → completion event → artefact.
 
+**Correlation keys are globally unique per lifecycle. They MUST NOT be reused across independent executions.** Reuse breaks trace reconstruction, can produce false "multiple terminal events" violations against invariant 7.7, and merges independent chains in monitoring. Generators (UUIDv7 for IDs; pg-boss `id` for jobs) MUST be the source. Tests MUST NOT recycle a fixture-generated key across cases.
+
   *Enforcement:*
   - **Static:** every `observabilityEvent` payload schema in spec § 4.5.7 / § 6.5.2 / § 6.5.3 must include `executionId` (or `runId`) at the top level.
-  - **Manual** (owner: `pr-reviewer` agent): trace correlation is verified at first incident; missing key fails review.
+  - **Static:** ID generation flows through the canonical generators; grep for hard-coded UUIDs / static IDs in production code paths returns zero matches outside test fixtures.
+  - **Manual** (owner: `pr-reviewer` agent): trace correlation is verified at first incident; missing key OR observed reuse fails review.
 
 **7.4 Every flow emits an explicit terminal-state status.** No flow returns silently. Every externally-triggered write path MUST emit a discriminated `status: 'success' | 'partial' | 'failed'` field in its terminal observability event AND in any user-facing response. Implicit success-by-absence is forbidden; an HTTP 200 without an explicit `status` field is a violation.
 
