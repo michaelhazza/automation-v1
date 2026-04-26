@@ -1531,8 +1531,8 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | C2 | architect.md context-section drift guard | ☐ todo | — | depends on C1 |
 | C3 | Canonical registry drift test | ☐ todo | — | independent |
 | C4 | actionRegistry.ts comment cleanup | ☐ todo | — | trivial |
-| D1 | verify-input-validation + verify-permission-scope baselines | ☐ todo | — | investigative |
-| D2 | Cycle count framing decision | ☐ todo | — | decision-only |
+| D1 | verify-input-validation + verify-permission-scope baselines | ✓ done | Post-PR-196 baselines: input-validation=44, permission-scope=13. Recorded in tasks/builds/audit-remediation/progress.md. | investigative |
+| D2 | Cycle count framing decision | ✓ done | Option (c) chosen: 43-cycle residual accepted to Phase 5A with 3-cluster breakdown. Recorded in source spec §6.3 + §13.3. | decision-only |
 | D3 | verify-skill-read-paths.sh cleanup | ☐ todo | — | depends on C1 |
 | E1 | 4 pre-existing unit test failures | ☐ todo | — | triage |
 | E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
