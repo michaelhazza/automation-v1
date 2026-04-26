@@ -212,4 +212,36 @@ None — both findings are technical with `implement` recommendation, no escalat
 
 ### Commit hash
 
-Round 2 commit: pending — appended below after commit lands.
+Round 2 commit: `dc6a41b7` (single commit — F1 fix + F2 test update + Round 2 log entry).
+
+---
+
+## Consistency Warnings
+
+None. Round 2 did not contradict any Round 1 decision. F1 is a regression fix on a service that was modified earlier in the same PR (commit `86548956`, A3 refactor) but was not surfaced by any Round 1 ChatGPT finding — the regression was caught by the Codex pass after Round 1 landed and propagated to ChatGPT for Round 2. The two rounds therefore touch disjoint surfaces (Round 1: RLS proxy in `rlsBoundaryGuard.ts`; Round 2: error boundary in `onboardingStateService.ts`).
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 3 implemented (Y5, F1, F2) | 4 rejected (R1, R3, Y4, Y6) | 0 deferred
+- User-decided:              0 implemented | 0 rejected | 2 deferred (R2, Bonus)
+- Index write failures: 0
+- Deferred to `tasks/todo.md` § "Deferred from PR #203 (ChatGPT review) — candidates for next spec":
+  - [user] CHATGPT-PR203-R2 — per-row tx + advisory-lock throughput in `measureInterventionOutcomeJob` (architectural; needs schema decision + concurrency-model decision)
+  - [user] CHATGPT-PR203-BONUS — standardise cross-job `JobResult` discriminated union (architectural; cross-cutting refactor across all jobs)
+- Architectural items surfaced to user (Round 1): R2 (defer), Bonus (defer). Both confirmed defer by user — written to `tasks/todo.md` and indexed.
+- KNOWLEDGE.md updated: yes (1 new entry — "2026-04-26 Gotcha — Adding `getOrgScopedDb()` to a log-and-swallow service must keep the resolution INSIDE the existing try/catch")
+- architecture.md updated: no — the failure mode is a service-implementation pattern (covered by the new KNOWLEDGE.md entry), not a new architectural rule.
+- PR: #203 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/203
+
+### Round-by-round commits
+
+- Round 1: `a01c2ceb` — Y5 implementation (RLS proxy hardening) + R2/Bonus deferred-items routing + session log creation.
+- Round 1 follow-on: `432b36d9` — recorded round 1 commit hash inside session log.
+- Round 2: `dc6a41b7` — F1 (onboardingStateService error boundary fix) + F2 (test expectation flip) + round 2 log entry.
+- Finalisation: appended below.
+
+### Pattern extraction notes
+
+- New entry added to `KNOWLEDGE.md` under section "2026-04-26 Gotcha — Adding `getOrgScopedDb()` to a log-and-swallow service must keep the resolution INSIDE the existing try/catch". Detection heuristic included: when reviewing service refactors that add `getOrgScopedDb`, grep for `getOrgScopedDb(` and confirm every hit is inside a `try {` block. The same heuristic catches the inverse mistake (wrapping `getOrgScopedDb` where the contract demands loud failure).
+- No CLAUDE.md or architecture.md edits triggered — no `[missing-doc]` rationale was used in this session, and the rule is service-pattern-level, not architectural-contract-level.
