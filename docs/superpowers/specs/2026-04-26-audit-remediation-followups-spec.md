@@ -93,6 +93,17 @@ Concrete consequences:
 
 If implementation surfaces a need for a primitive not named in the item's Files list, **stop and write a follow-up spec** rather than expanding scope inline. This rule reinforces `prefer_existing_primitives_over_new_ones: yes` from `docs/spec-context.md`.
 
+### §0.3 No cross-item scope expansion (cross-cutting)
+
+An item in §1 may not expand its scope to fix adjacent issues discovered during implementation. If an implementer working on item X finds a problem in item Y's territory, or finds a problem outside any current item's territory, they MUST:
+
+1. Stop, log the finding in `tasks/todo.md` (or as a new backlog item with the same shape as §1's items), and
+2. Continue X's implementation against X's stated scope only.
+
+The cost of allowing in-flight scope expansion is exactly the failure mode this spec was created to avoid: PR #196's 136-file blast radius landed because adjacent issues kept getting absorbed into the active branch. The ChatGPT review of this spec called this out explicitly for A1, A2, and B2; the rule generalises to every item.
+
+This rule does NOT prevent integrity-fix mechanical edits inside the item's named files (e.g. fixing a forward reference within `canonicalDataService.ts` while migrating its surface in A1a). It DOES prevent "while I'm in here, let me also rename this unrelated helper" or "this caller is broken in a way the spec doesn't name, let me fix it as part of A3".
+
 ---
 
 ## §1 Items
@@ -128,6 +139,13 @@ If implementation surfaces a need for a primitive not named in the item's Files 
    Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row.
 3. **Brief shim allowed during A1a only.** A1a may keep the old positional `(organisationId, ...)` signature as a deprecated overload that internally calls `fromOrgId(organisationId, null)` and forwards to the new `(principal, ...)` body. The shim exists to let A1a land without forcing every caller to migrate in the same PR — it is **temporary**. A1b removes the shim. The shim must carry a `// @deprecated — remove in A1b` JSDoc tag so a grep can find every shim in A1b.
 4. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls. **Do NOT** rely on the shim for new code — every caller migrates in A1a; the shim is only there to permit a multi-PR rollout if A1a itself is split further.
+5. **PrincipalContext-construction discipline.** A `PrincipalContext` value MUST be obtained via one of:
+   - The `fromOrgId(organisationId, subaccountId)` constructor in `server/services/principal/fromOrgId.ts`, OR
+   - Propagation of an existing `PrincipalContext` value already in scope (e.g. a function parameter typed `principal: PrincipalContext`, or a value pulled out of `withPrincipalContext`'s callback signature).
+
+   Inline object literals (`{ organisationId: '…', subaccountId: '…', … } as PrincipalContext`), bare `as PrincipalContext` casts on a partial object, and ad-hoc helpers that return a `PrincipalContext`-shaped object are NOT acceptable in non-test code. This is a contract reinforcement — A1b's gate matcher (per its positive-allowlist) already enforces this at the `canonicalDataService.<method>(` call boundary; this rule extends the discipline to every site where a `PrincipalContext` is materialised.
+
+   Tests are exempt: test fixtures may construct `PrincipalContext` values inline so test setup stays terse. Production code must use `fromOrgId` or propagation.
 
 **Acceptance criteria:**
 - Every `canonicalDataService` method accepts `PrincipalContext` as its first parameter (with deprecated overload retained per step 3).
@@ -175,6 +193,7 @@ If implementation surfaces a need for a primitive not named in the item's Files 
      - A locally-typed `PrincipalContext` variable — detected via a same-file `: PrincipalContext` annotation in scope (function parameter list or `const principal: PrincipalContext = ...`).
    - **Bare identifiers, raw object literals (`{ organisationId: ... }` style), and spread expressions in the first-argument position are violations.** Note that under A1a's split-positional shape, the args object — when present — is the SECOND positional argument, not the first; an object literal as the second argument is fine. The gate's matcher inspects only the first argument's shape.
    - Implementation: a small TypeScript-aware lint rule using the TypeScript compiler API would be ideal, but a regex pass is sufficient for v1 — match `canonicalDataService\.\w+\(\s*([^)]*)` and assert the first argument starts with `fromOrgId(`, `withPrincipalContext(`, or matches a known same-file `: PrincipalContext`-typed identifier.
+   - **Regex-fallback contract.** The regex matcher's known weak spots (per ChatGPT review Round 2): imported typed variables (e.g. `import { defaultPrincipal } from '../fixtures'` then `canonicalDataService.upsertAccount(defaultPrincipal, …)`), destructured parameters, helper-function wrappers that return a `PrincipalContext`. These categories produce false negatives (unsafe call slips through) or false positives (legitimate call flagged) under the regex approach. **Constraint:** if more than 5% of gate hits during the first dogfooding pass on `main` are false positives or false negatives caused by these categories, the implementer MUST upgrade the matcher to a minimal TypeScript AST check scoped ONLY to `canonicalDataService.<method>(` call expressions — the AST check inspects the type of the first argument's identifier and asserts it resolves to `PrincipalContext`. The AST upgrade is implemented inside the gate script (or a sibling `.mjs` co-located with it), NOT as a new general-purpose AST primitive. This decision must be made at implementation time based on observed FP/FN rate; do not leave it to "we'll see" — log the rate in the build-slug progress log and either ship the regex with evidence the rate is <5% or ship the AST upgrade with the same evidence.
    - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 3) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
    - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if other invocations in the same file are correctly migrated.
 3. **Annotation contract.** Files that legitimately import without calling (e.g. registry files where the import is forward-looking) must carry a top-of-file annotation: `// @principal-context-import-only — reason: <one-sentence rationale>`. The gate scans for this annotation and exempts the file.
@@ -238,7 +257,12 @@ If implementation surfaces a need for a primitive not named in the item's Files 
 **[Phase 3 — runtime guard]**
 2. **Runtime guard (`server/lib/rlsBoundaryGuard.ts`).** Ship LAST per the A2 phasing above. Export `assertRlsAwareWrite(tableName)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`). The guard does NOT hook into a Drizzle-internal middleware (this codebase has no such seam). Instead, it is invoked at the two places that already mediate every service-layer write:
    - **Wrap `getOrgScopedDb`'s returned handle** with a Proxy that intercepts `.insert(table)`, `.update(table)`, `.delete(table)` calls. On each, call `assertRlsAwareWrite(table)`. If the table is in `rlsProtectedTables`, the call is OK (the handle is org-scoped by construction). If the table is not in `rlsProtectedTables` AND not in `rls-not-applicable-allowlist.txt`, throw `RlsBoundaryUnregistered`.
-   - **Wrap the `tx` argument that `withAdminConnection(options, fn)` passes into its callback.** `withAdminConnection` is a callback-based API (`withAdminConnection(options, async (tx) => { ... })`), not a handle factory — it does NOT return a handle the caller can wrap externally. The guard introduces a thin shim, e.g. `withAdminConnectionGuarded(options, async (guardedTx) => { ... })`, defined in `rlsBoundaryGuard.ts`, that internally calls `withAdminConnection(options, async (tx) => fn(proxy(tx)))` and applies the Proxy interception to `tx` before user code sees it. Callers migrate to `withAdminConnectionGuarded` over time; the unwrapped `withAdminConnection` is left in place so existing audit-bypass callers don't break. If a write to a registered table happens via the guarded admin tx WITHOUT the caller explicitly switching the session role to `admin_role` (per `withAdminConnection`'s own contract), throw `RlsBoundaryAdminWriteToProtectedTable`. Detection of the role switch is best-effort — the guard scans the same callback for a `SET LOCAL ROLE admin_role` execution and treats its presence as the deliberate-bypass signal.
+   - **Wrap the `tx` argument that `withAdminConnection(options, fn)` passes into its callback.** `withAdminConnection` is a callback-based API (`withAdminConnection(options, async (tx) => { ... })`), not a handle factory — it does NOT return a handle the caller can wrap externally. The guard introduces a thin shim, e.g. `withAdminConnectionGuarded(options, async (guardedTx) => { ... })`, defined in `rlsBoundaryGuard.ts`, that internally calls `withAdminConnection(options, async (tx) => fn(proxy(tx)))` and applies the Proxy interception to `tx` before user code sees it. Callers migrate to `withAdminConnectionGuarded` over time; the unwrapped `withAdminConnection` is left in place so existing audit-bypass callers don't break.
+   - **Admin-bypass declaration is explicit, not inferred.** Earlier drafts of this spec proposed scanning the admin callback for a `SET LOCAL ROLE admin_role` SQL execution and treating its presence as the deliberate-bypass signal. Per ChatGPT review Round 2, this approach is unsafe — string-based SQL detection is non-deterministic (the SQL may be parameterised, dynamically built, or executed conditionally relative to a write), and "scan the callback" is not guaranteed to run before the write fires. Replace SQL inspection with an **explicit declaration** on the wrapper signature:
+     - `withAdminConnectionGuarded({ allowRlsBypass: true }, async (guardedTx) => { ... })` — caller has affirmatively declared they intend to bypass RLS. Writes to registered tables succeed.
+     - `withAdminConnectionGuarded({ allowRlsBypass: false }, async (guardedTx) => { ... })` — default. Writes to registered tables throw `RlsBoundaryAdminWriteToProtectedTable`.
+     - `allowRlsBypass: true` callers are still responsible for the actual `SET LOCAL ROLE admin_role` SQL inside the callback per `withAdminConnection`'s existing contract; the flag is the *intent declaration*, not the *mechanism*. The guard only checks the flag — it does NOT inspect SQL.
+   - **Proxy must not change method signatures.** The Proxy applied to the org-scoped handle and to the admin `tx` argument intercepts `.insert(table)`, `.update(table)`, and `.delete(table)` for the boundary check, but it MUST forward all arguments unchanged and return whatever the underlying method returns. The guard does NOT add parameters, change return types, alter the chained-builder semantics (`.insert(...).values(...).returning(...)`), or wrap return values. A caller that switches from a raw handle to a guarded handle must observe identical behaviour at the call site — the only visible change is that protected-boundary writes throw in dev/test instead of silently proceeding.
    - Production behaviour: the guard is no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
    - This is wrapper-level enforcement, not Drizzle middleware — it composes with existing primitives instead of inventing a new one.
 **[Phase 2 — migration hook]**
@@ -252,7 +276,7 @@ If implementation surfaces a need for a primitive not named in the item's Files 
 - Adding a new tenant table without registering it (and without an entry in `rls-not-applicable-allowlist.txt`) → gate fails.
 - Adding a new entry to `rlsProtectedTables` for a non-existent table → gate fails.
 - A unit test in `rlsBoundaryGuard.test.ts` writes to an unregistered table via a `getOrgScopedDb` handle in dev mode → throws `RlsBoundaryUnregistered`.
-- A unit test writes to a registered table via `withAdminConnection` in dev mode → throws `RlsBoundaryAdminWriteToProtectedTable`.
+- A unit test writes to a registered table via `withAdminConnectionGuarded({ allowRlsBypass: false }, …)` in dev mode → throws `RlsBoundaryAdminWriteToProtectedTable`. The same write under `withAdminConnectionGuarded({ allowRlsBypass: true }, …)` succeeds.
 - Same writes under `NODE_ENV=production` → no throw (production path delegates to the policy).
 - The migration guard emits a warning when a deliberately-uncovered migration is staged.
 
@@ -261,8 +285,9 @@ If implementation surfaces a need for a primitive not named in the item's Files 
   1. `getOrgScopedDb` handle writes to a registered table → succeeds.
   2. `getOrgScopedDb` handle writes to an unregistered, non-allowlisted table in dev → throws `RlsBoundaryUnregistered`.
   3. `getOrgScopedDb` handle writes to a table listed in `rls-not-applicable-allowlist.txt` → succeeds.
-  4. `withAdminConnectionGuarded` callback writes to a registered table WITHOUT a `SET LOCAL ROLE admin_role` in the same callback in dev → throws `RlsBoundaryAdminWriteToProtectedTable`.
-  5. `withAdminConnectionGuarded` callback writes to a registered table WITH a `SET LOCAL ROLE admin_role` in the same callback in dev → succeeds (deliberate admin bypass is permitted).
+  4. `withAdminConnectionGuarded({ allowRlsBypass: false }, …)` callback writes to a registered table in dev → throws `RlsBoundaryAdminWriteToProtectedTable`.
+  5. `withAdminConnectionGuarded({ allowRlsBypass: true }, …)` callback writes to a registered table in dev → succeeds (deliberate admin bypass is declared via flag).
+  6. Proxy-transparency check: a chained call (`tx.insert(table).values(row).returning()`) executed via a guarded handle returns the same shape as the same chain on a raw handle — exercises the "Proxy must not change signatures" contract.
 - Gate self-test: fixture migration under `scripts/__tests__/rls-protected-tables/` introducing a deliberate gap; gate must fail.
 
 **Dependencies:** none. This item is a foundational primitive that should land BEFORE any new tenant-scoped tables. If a new feature is being designed concurrently, sequence A2 first.
@@ -281,7 +306,7 @@ If implementation surfaces a need for a primitive not named in the item's Files 
 **Definition of Done — A2-Phase-3 (runtime guard):**
 - `server/lib/rlsBoundaryGuard.ts` shipped; `withAdminConnectionGuarded` shim available.
 - Tests pass for all five cases listed in Tests required below.
-- `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnection` AND must explicitly `SET LOCAL ROLE admin_role` inside the callback to bypass RLS. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
+- `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnectionGuarded({ allowRlsBypass: true }, fn)` and must `SET LOCAL ROLE admin_role` inside the callback per the existing `withAdminConnection` contract. Bypass intent is declared via the `allowRlsBypass` flag, not inferred from SQL inspection. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
 - No false-positive issues filed against Phases 1+2 in the preceding 2-3 weeks (confidence gate per §0.1).
 - Spec status field for A2 in `§5 Tracking` is checked when all three phases complete. Partial completion is reflected in Tracking via "phase X done" annotations rather than a single binary check.
 
@@ -453,14 +478,27 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
 
 3. **Per-job double-invocation regression test.** Each job gets `server/jobs/__tests__/<job>.idempotency.test.ts` exercising:
    - **Sequential double-invocation:** call the job twice in a row; assert state matches single-invocation, no duplicate side effects.
-   - **Parallel double-invocation:** start two invocations concurrently via `Promise.all([job(), job()])`; assert exactly one performs work (the other returns no-op or yields the same final state). Use `pg_sleep(0.1)` or test-controlled latency to widen the race window deterministically.
+   - **Parallel double-invocation:** start two invocations concurrently via `Promise.all([job(), job()])`; assert exactly one performs work (the other returns no-op or yields the same final state).
    - **Mid-execution failure:** simulate a transient throw inside the work block; on retry, assert no partial state is left behind.
+
+   **Race-window control — deterministic harness contract (per ChatGPT review Round 2).** The parallel double-invocation test MUST control the race window via an **injected test hook**, NOT solely via `pg_sleep` or wall-clock timing. Each job exposes a test-only seam (e.g. an exported `__testHooks` object with a `pauseBetweenClaimAndCommit?: () => Promise<void>` callback that defaults to a no-op in production and is awaited at the critical race point — between the lock/claim acquisition and the work commit). The test sets the hook to a controlled awaitable (e.g. a deferred promise), starts both invocations, observes that one is parked at the hook while the other is blocked on the lock/claim, then resolves the deferred. This produces a deterministic race outcome regardless of host load, CI scheduling jitter, or `pg_sleep` precision.
+   - `pg_sleep(0.1)` is acceptable as an *additional* widening tool, NOT as the primary mechanism — flaky tests that depend on timing alone fail intermittently in CI and create false confidence in the underlying concurrency model.
+   - The test hook is a named primitive per §0.2 — it lives on the existing job module's exports as a `__testHooks` object (one per job), not as a new shared helper.
+   - The hook MUST be a no-op in production (`if (process.env.NODE_ENV === 'production') return;` at the call site, OR the hook defaults to `async () => {}` and is overridden only inside tests). Production behaviour is unchanged.
 4. **Optional gate (`scripts/verify-job-concurrency-headers.sh`).** Lints every `server/jobs/*.ts` for the presence of `Concurrency model:` and `Idempotency model:` lines in the header. Fail otherwise. Cheap to write, prevents future drift.
+
+5. **No-op return semantics (per ChatGPT review Round 2).** When a job invocation does not perform work (because a sibling invocation already holds the lock / already claimed the row / the predicate filtered out everything), the job MUST return a structured result, not throw and not silently exit. The contract:
+   - **Return shape:** `{ status: 'noop', reason: <one-of: "lock_held" | "no_rows_to_claim" | "predicate_filtered" | "already_processed">, jobName: <string> }`.
+   - **Logging:** emit one INFO line `job_noop: <jobName> reason=<reason>` per invocation that returns no-op. INFO, NOT WARN — a no-op due to a peer invocation is expected, not a degradation.
+   - **NOT silent.** A job that returns without logging makes "did the second invocation no-op or fail silently?" undebuggable in production. Every no-op return MUST emit the line.
+   - **NOT a throw.** A no-op throw bubbles up through the queue runner as a job failure, triggering retry and metrics noise. No-op is success-with-no-work, not failure.
+   - The parallel double-invocation regression test (step 3 above) asserts that exactly one invocation returns `{ status: 'noop', reason: '<expected reason for that job> }` and the other returns the work-performed shape.
 
 **Acceptance criteria:**
 - All four jobs carry the standard header.
 - Each job has a non-trivial guard (advisory lock, claim+verify, lease) — `bundleUtilizationJob` and `ruleAutoDeprecateJob` get advisory locks; `measureInterventionOutcomeJob` gets a claim+verify; `connectorPollingSync` keeps its lease.
-- Each job has a passing double-invocation regression test.
+- Each job has a passing double-invocation regression test. The parallel-invocation test uses the injected `__testHooks` seam, NOT solely `pg_sleep` / wall-clock timing.
+- A no-op invocation returns the structured `{ status: 'noop', reason, jobName }` shape and emits the `job_noop:` INFO log line. The test asserts both.
 - (If gate added) `bash scripts/verify-job-concurrency-headers.sh` exits 0; deliberately removing the header from one job → fails.
 
 **Tests required:** four new test files under `server/jobs/__tests__/`.
@@ -505,20 +543,21 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
 **Goal:** every gate emits a machine-grep-able `[GATE] <guard_id>: violations=<count>` line on every run, in addition to its current human-readable output. CI captures the count; baseline movement becomes measurable rather than binary.
 
 **Approach:**
-1. **Edit `scripts/lib/guard-utils.sh`.** Modify `emit_summary` to emit two lines:
+1. **Edit `scripts/lib/guard-utils.sh`.** Modify `emit_summary` so that the `[GATE]` line is emitted as the **last line of the script's output**, with the human-readable `Summary:` line emitted before it (per ChatGPT review Round 2 — the `[GATE]` line MUST be the last emitted line so CI parsers can `tail -n 1` deterministically). Shape:
    ```bash
    echo ""
-   echo "[GATE] $GUARD_ID: violations=$violations"
    echo "Summary: $files_scanned files scanned, $violations violations found"
+   echo "[GATE] $GUARD_ID: violations=$violations"
    ```
-   Pulls `$GUARD_ID` from the env var each script already sets (e.g. `GUARD_ID="principal-context-propagation"`).
-2. **Audit non-sharing scripts.** Run `grep -L "guard-utils.sh" scripts/verify-*.sh scripts/verify-*.mjs` to identify scripts that don't use the shared helper. For each, append a dedicated `echo "[GATE] <id>: violations=<count>"` line at the end. The `.mjs` scripts (`verify-help-hint-length.mjs`, `verify-integration-reference.mjs`) need an analogous `console.log` line.
+   Pulls `$GUARD_ID` from the env var each script already sets (e.g. `GUARD_ID="principal-context-propagation"`). Any script-specific output that follows `emit_summary` (e.g. extra debug context) MUST be moved to before the `Summary:` line so the `[GATE]` line stays terminal.
+2. **Audit non-sharing scripts.** Run `grep -L "guard-utils.sh" scripts/verify-*.sh scripts/verify-*.mjs` to identify scripts that don't use the shared helper. For each, append a dedicated `echo "[GATE] <id>: violations=<count>"` line as the **last** line. The `.mjs` scripts (`verify-help-hint-length.mjs`, `verify-integration-reference.mjs`) need an analogous `console.log` line emitted last (after any other output).
 3. **CI capture (optional, ship in same PR if cheap).** `.github/workflows/<gates>.yml` (or wherever gates run) — pipe gate output to a file and parse out `[GATE]` lines into a JSON artefact. This is nice-to-have; the line itself is the deliverable.
-4. **Documentation.** Add one paragraph to `architecture.md` § Architecture Rules: "Every gate script emits `[GATE] <id>: violations=<n>` on the last line of its run. Adding new gates: emit this line."
+4. **Documentation.** Add one paragraph to `architecture.md` § Architecture Rules: "Every gate script emits `[GATE] <id>: violations=<n>` as the LAST line of its output. CI parsers `tail -n 1` to extract the count; a gate that emits any line after the `[GATE]` line is in violation of this contract. Adding new gates: emit this line last."
 
 **Acceptance criteria:**
 - Every `scripts/verify-*` script (sh + mjs) emits one `[GATE] <guard_id>: violations=<count>` line.
 - The line is the same shape across all scripts (parseable with one regex).
+- The `[GATE]` line is the **last** line of the script's output. `bash scripts/verify-<any>.sh 2>&1 | tail -n 1` matches `^\[GATE\] [a-z0-9-]+: violations=[0-9]+$`.
 - A test invocation captures the line: `bash scripts/verify-principal-context-propagation.sh 2>&1 | grep -E '^\[GATE\] [a-z0-9-]+: violations=[0-9]+$'` returns one match.
 - No existing CI behaviour changes (additive).
 
@@ -602,9 +641,12 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
 2. Build two sets initially (the third set requires inspection of the planner registry's actual structure):
    - `schemaTables`: every Drizzle table whose name starts with `canonical_`.
    - `dictionaryTables`: keys exported from `canonicalDictionaryRegistry`.
-3. **Inspect `canonicalQueryRegistry` first.** Its keys are semantic action identifiers like `contacts.inactive_over_days` — NOT canonical table names directly. To derive a `queryPlannerTables` set, the test needs metadata that maps each planner action to the canonical table it queries. Two options, in priority order:
-   - **Preferred:** if `canonicalQueryRegistry`'s entries already carry an explicit `canonicalTable` metadata field, extract it. Document the field name in the test.
-   - **Fallback:** if no such metadata exists, narrow C3's scope to the two-set comparison (`schemaTables` vs `dictionaryTables`) and create a follow-up todo to add the metadata so the third comparison can land later. Do NOT regex over the planner-action strings — `contacts.inactive_over_days` is not a reliable signal of "table = `canonical_contacts`".
+3. **Inspect `canonicalQueryRegistry` first — forced decision (per ChatGPT review Round 2).** Its keys are semantic action identifiers like `contacts.inactive_over_days` — NOT canonical table names directly. To derive a `queryPlannerTables` set, the test needs metadata that maps each planner action to the canonical table it queries. The original draft left this as an "either path is fine" branch; ChatGPT review Round 2 flagged this as a spec hole that risks C3 shipping half-complete and never being upgraded. **Force the decision now:**
+   - **At C3 implementation time, if `canonicalQueryRegistry`'s entries carry an explicit `canonicalTable` metadata field**, extract it and ship the three-set comparison (schema ⊆ dictionary, dictionary ⊆ schema, queryPlannerTables ⊆ dictionary). Document the field name in the test.
+   - **If the metadata field does NOT exist on current `main`**, C3 ships as the two-set comparison (`schemaTables` vs `dictionaryTables`) AND the implementer MUST create a tracked follow-up backlog item that adds the `canonicalTable` metadata field and lands the third comparison **before Phase 5A** (the next major canonical-data-related work in this codebase). The follow-up entry goes into `tasks/todo.md` under "C3 follow-up: add canonicalTable metadata to canonicalQueryRegistry; upgrade C3 drift test to three-set comparison" with a back-link to this section. Do NOT defer indefinitely — the upgrade has a named deadline.
+   - Do NOT regex over the planner-action strings — `contacts.inactive_over_days` is not a reliable signal of "table = `canonical_contacts`".
+
+   The point of forcing this decision: the original branch ("if no metadata, narrow scope") provided no commitment to ever closing the gap. The Phase-5A deadline ties the upgrade to a real milestone in this codebase rather than letting it sit as an open optional.
 4. Assert set containment (with a small allowlist within the test for deliberate exemptions):
    - `schemaTables ⊆ dictionaryTables` — every schema canonical table is registered in the dictionary.
    - `dictionaryTables ⊆ schemaTables` — no stale registry entries.
@@ -800,7 +842,19 @@ The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter
    ```
    List both grep outputs side-by-side. The 5 `readPath:` lines that are NOT immediately preceded by an `actionType:` line in the same object literal are the surplus. Common explanations: a recently-added "default options" template, a forward-declared interface, a `readPath` parameter on a generator function, or duplicate `readPath` fields inside one entry.
 2. **Step 2 — patch shape depends on what Step 1 found:**
-   - If the surplus are non-entry uses (templates / generator params / type defs): update the gate's subtraction constant from 2 to 7, with a comment explaining the new constant and listing each subtracted occurrence.
+   - If the surplus are non-entry uses (templates / generator params / type defs): update the gate's subtraction constant from 2 to 7. **Calibration-constant change discipline (per ChatGPT review Round 2):** changing the subtraction constant is dangerous because a wrong constant masks real mismatches silently. Therefore: any change to the constant MUST list **every excluded occurrence explicitly in a comment with line references** (file path + line number) immediately above the constant declaration in `scripts/verify-skill-read-paths.sh`. Shape:
+     ```bash
+     # readPath: occurrences excluded from the count (subtraction = 7):
+     #   server/config/actionRegistry.ts:14 — interface ActionDefinition definition
+     #   server/config/actionRegistry.ts:21 — methodology template default
+     #   server/config/actionRegistry.ts:NN — <one-line reason>
+     #   ...
+     # If you change this constant, update the list above. A constant without an
+     # explicit listing of every excluded occurrence is a regression — silent drift
+     # masks real mismatches.
+     READPATH_NON_ENTRY_OCCURRENCES=7
+     ```
+     This is non-optional. A constant change without the line-by-line listing fails review.
    - If the surplus are duplicate `readPath:` fields inside an entry: remove the duplicates (only one `readPath` per entry).
    - If the surplus are entries with `readPath` but missing `actionType`: add the missing `actionType` fields, OR remove the orphan entries if they're dead code.
 3. **Step 3 — fallback if a per-entry parser is needed:** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). Treat this as a separate, bigger task — do not bundle into D3.
@@ -1160,12 +1214,19 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 1. **Codify the rule in `architecture.md` § Architecture Rules.** Exact wording:
    > **Derived-data null-safety.** No service may assume the existence of data produced by a job, rollup, or async pipeline unless that existence is enforced by a DB constraint OR is synchronously produced inside the same transaction. For derived reads (rollups, bundle outputs, intervention-outcome state, pulse-derived metrics, async canonical enrichment): treat the value as nullable. On null, return `null` / empty list / sentinel — never throw. Emit one WARN log line `data_dependency_missing: <service>.<field> for <orgId>` so operators can detect ramp-up gaps without a hard failure.
 
-2. **Identify the in-scope read sites.** Build a list (in `tasks/builds/<slug>/null-safety-call-sites.md`):
+   The architecture.md rule is the durable policy and applies to all derived reads named above. **H1 Phase 1's enforcement sweep is narrower** — it touches only the four job-output domains named in step 2 below. Broader enforcement (pulse-derived metrics, agent-run-snapshot enrichment, etc.) requires a separate follow-up backlog item; the rule itself stays broad.
+
+2. **Identify the in-scope read sites — H1 Phase 1 scope lock (per ChatGPT review Round 2).** H1 Phase 1 applies ONLY to consumers of the four job output domains listed below. ANY additional domain — pulse-derived metrics, agent-run-snapshot enrichment, generic rollup tables, third-party-derived data, etc. — is OUT of Phase 1 scope. Adding those domains requires a separate backlog item with its own scope and dependency analysis; do NOT absorb them into H1 Phase 1 mid-implementation (this is the §0.3 no-cross-item-expansion rule applied specifically to H1).
+
+   **Phase 1 in-scope domains (exhaustive):**
    - All consumers of `bundleUtilizationJob` outputs.
    - All consumers of `measureInterventionOutcomeJob` outputs.
    - All consumers of `ruleAutoDeprecateJob` outputs.
-   - All consumers of `connectorPollingSync` outputs (canonical-row enrichment fields).
-   - Any consumer of pulse-derived metrics, agent-run-snapshot enrichment, or rollup tables.
+   - All consumers of `connectorPollingSync` outputs (canonical-row enrichment fields produced by this job).
+
+   Build the list of read sites in `tasks/builds/<slug>/null-safety-call-sites.md`. Any consumer that crosses the four-domain boundary (e.g. a service that reads both `bundleUtilizationJob` outputs AND a pulse-derived metric) handles ONLY the four-domain reads in Phase 1; the pulse-derived read stays as-is and is logged for the future broader-scope item.
+
+   **Why scope-lock matters here:** H1 is high-leverage but the "what counts as derived data" question is fuzzy. Without a scope lock, the gate's allowlist drifts (per ChatGPT review Round 1's H1 risk-pattern note: "excessive exemptions, dev friction, gate becomes meaningless"). Locking Phase 1 to the four named domains keeps the gate's signal strong and the work surgical.
 
 3. **Refactor each in-scope site:**
    - Replace `data!` non-null assertions with `if (!data) { warn(...); return null; }` (or empty list / sentinel).
@@ -1187,7 +1248,9 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 
 **Acceptance criteria (Phase 1 — first ship, gate is advisory):**
 - Rule codified in `architecture.md` § Architecture Rules.
-- All in-scope read sites refactored to return-null-with-warn (no throw, no cascade).
+- All in-scope read sites — strictly the four job-output domains named in step 2 above — refactored to return-null-with-warn (no throw, no cascade). Sites outside the four-domain scope are NOT touched in Phase 1.
+- `tasks/builds/<slug>/null-safety-call-sites.md` documents every site that was touched AND every adjacent site that was deliberately NOT touched (with a one-line reason — "pulse-derived metric, out of Phase 1 scope") so future broader-scope work has the inventory.
+- Gate's allowlist (`scripts/derived-data-null-safety-fields.txt`) lists ONLY field names produced by the four in-scope jobs. Adding a field outside the four-domain scope to the allowlist is itself out-of-scope drift.
 - Gate exists; runs in CI; deliberately re-introduce a `data!` assertion → gate REPORTS the violation but exits 0.
 - Per-service unit tests cover the "upstream not yet populated" path.
 - WARN log helper used uniformly.
