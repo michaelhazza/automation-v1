@@ -48,6 +48,17 @@ _(stamped in Task 6.5 once all 6 specs are merged + Open Decisions resolved + Re
 
 _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumptions all align)_
 
+## Coverage Baseline (SC-COVERAGE-BASELINE — captured 2026-04-26)
+
+Per Chunk 6 spec § 2.2 SC-COVERAGE-BASELINE. Live counts captured before any pre-launch chunk PRs land. Future PRs touching input-validation or permission-scope must cite the baseline + delta in their PR body.
+
+| Gate | Baseline (2026-04-26) |
+|---|---|
+| `verify-input-validation.sh` | **44 violations** (warning) |
+| `verify-permission-scope.sh` | **13 violations** (warning) |
+
+Source: live runs of `bash scripts/verify-input-validation.sh` and `bash scripts/verify-permission-scope.sh` against `spec/pre-launch-hardening` HEAD prior to Chunk 6 PR open.
+
 ## Status
 
 - [x] Task 0    Branch setup
@@ -57,7 +68,7 @@ _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumpt
 - [ ] Task 2.1  Architect input — Chunk 2
 - [ ] Task 3.1  Architect input — Chunk 3
 - [x] Task 4    Chunk 4 — Maintenance Job RLS Contract — PR #205 open
-- [ ] Task 6    Chunk 6 — Gate Hygiene Cleanup
+- [x] Task 6    Chunk 6 — Gate Hygiene Cleanup — PR #206 open
 - [ ] Architect-output conflict check (pre-Task 2/3 gate)
 - [ ] Task 2    Chunk 2 — Schema Decisions + Renames
 - [ ] Task 5    Chunk 5 — Execution-Path Correctness
@@ -77,4 +88,4 @@ _(populated as each chunk PR opens)_
 | 3 | pre-launch-dead-path-completion | spec/pre-launch-dead-path-completion | TBD | not started |
 | 4 | pre-launch-maintenance-job-rls | spec/pre-launch-maintenance-job-rls | [#205](https://github.com/michaelhazza/automation-v1/pull/205) | open for review |
 | 5 | pre-launch-execution-correctness | spec/pre-launch-execution-correctness | TBD | not started |
-| 6 | pre-launch-gate-hygiene | spec/pre-launch-gate-hygiene | TBD | not started |
+| 6 | pre-launch-gate-hygiene | spec/pre-launch-gate-hygiene | [#206](https://github.com/michaelhazza/automation-v1/pull/206) | open for review |
