@@ -952,3 +952,23 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] **N-4 — Migration 0227 header says "8 tables".** Now correct after B-3 fix removed the 2 over-scope blocks. Verify on next pass.
 - [ ] **N-5 — `configDocuments` route's in-memory `parsedCache` is per-process (multi-process bug class).** Pre-existing; flagged for Phase 5A `rateLimitStoreService` runbook to clean up alongside §8.1's rate-limiter durability work — same defect class (key-value with TTL, per-process state).
 
+---
+
+## C3 follow-up: add canonicalTable metadata to canonicalQueryRegistry; upgrade C3 drift test to three-set comparison
+
+**Captured:** 2026-04-26
+**Source:** C3 implementation — `canonicalQueryRegistry.ts` lacks a `canonicalTable` field on its entries (keys are semantic action identifiers like `contacts.inactive_over_days`, not table names). Per spec §C3 forced-decision rule, the test ships as a two-set comparison until the metadata field is added.
+
+**Owner:** next developer adding a new `canonical_*` table OR authoring Phase-5A spec (whichever fires first).
+**Trigger:** Phase-5A spec authoring OR any new `canonical_*` table addition.
+**Back-link:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` §C3
+
+**Work required:**
+- [ ] Add a `canonicalTable: string` metadata field to each entry in `server/services/crmQueryPlanner/executors/canonicalQueryRegistryMeta.ts` (or wherever the meta is defined).
+- [ ] Upgrade `server/services/__tests__/canonicalRegistryDriftPure.test.ts` to extract the `queryPlannerTables` set from the registry metadata and assert `queryPlannerTables ⊆ dictionaryTables`.
+- [ ] Update the test's header comment to reflect three-set comparison.
+
+**Phase-5A spec coupling (per spec §C3):** The Phase-5A spec, when authored, MUST include a checklist item in its own §1 (or equivalent scope section) reading exactly:
+- [ ] C3 follow-up: upgrade canonicalRegistryDrift test from 2-set to 3-set comparison
+  - Source: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §C3
+
