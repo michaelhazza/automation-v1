@@ -2165,15 +2165,147 @@ The risks below are the ones the build is most likely to mishandle if the execut
 
 ## 17. Implementation slicing & session pacing
 
+This section is the **content** of each slice — what concretely lands in each session. §15 covered the meta-process (ordering, handoff protocol, verification gates); this section is the build manifest.
+
 ### 17.1 Slice A — Foundations
+
+**Goal.** Land the substrate Phases 1 and 2 depend on. No user-visible change. All artefacts are dead-code-by-design until later slices wire them up.
+
+**Estimated effort.** ~1 day of focused work.
+
+**Deliverables in landing order:**
+
+1. **Schema migration.** One file (`migrations/<NNNN>_phase_a_foundations.sql`) covering all of §4.5: new columns on `system_incidents`, the two new tables (`system_monitor_baselines`, `system_monitor_heuristic_fires`), the system-principal user seed, the `system_monitor` agent row seed, the new event-type enum values per §12.1, and RLS policies for the two new tables. Forward-only with a `.down.sql` mate per `phase-0-spec.md §6.3`.
+2. **System principal module.** `getSystemPrincipal`, `withSystemPrincipal`, the AsyncLocalStorage wiring, the session-variable RLS interaction. Plus the integration test that confirms tenant-write access is denied even for system principal.
+3. **`assertSystemAdminContext` guard.** Helper module + the typed error. Wired into every `system_incidents` mutation method as the first line — including the new `recordPromptFeedback` mutation (will be added in Slice C; placeholder only here).
+4. **Idempotency layer.** LRU + TTL helper, with `IncidentInput.idempotencyKey?` field added to the existing `recordIncident` callable. Wraps the existing ingest path; no fingerprint algorithm change.
+5. **Per-fingerprint throttle.** Process-local map + eviction policy + the metric. Same wrapper site as idempotency; throttle runs first, then idempotency, then existing ingest.
+
+**Tests landed in this slice:**
+
+- Pure unit tests for idempotency and throttle (per §14.1).
+- System-principal singleton test, session-variable RLS test (per §14.1, §14.2).
+- `assertSystemAdminContext` matrix (per §14.1).
+
+**What is NOT in this slice.** No synthetic checks, no agent triggers, no UI changes, no protocol doc, no heuristic registry. All of those are Slices B and C.
+
+**Verification gate.** Per §15.3 row "A". Must pass before handoff.
+
+**Handoff.** `progress.md` entry includes: confirmed migration number; confirmed agent row landed; confirmed system principal can read system tables and is denied tenant writes. Outstanding for Slice B: synthetic checks, protocol doc, registry skeleton, baseline service.
 
 ### 17.2 Slice B — Phase 1 + Protocol + Registry + Baselining
 
+**Goal.** Stand up the proactive sink (Phase 1) plus the substrate that Slice C consumes — the protocol contract, the heuristic registry skeleton, the baselining read+write API. Slice B is the largest non-Phase-2 slice because it covers four discrete subsystems.
+
+**Estimated effort.** ~3 days of focused work, possibly split across two sessions if context pressure rises.
+
+**Deliverables in landing order:**
+
+1. **Investigate-Fix Protocol doc.** `docs/investigate-fix-protocol.md` per §5.1, §5.2. Full prompt-structure contract, required sections, forbidden content, worked example, iteration-loop note. Plus the §5.3 hook section appended to `CLAUDE.md`.
+2. **Heuristic registry skeleton.** `server/services/systemMonitor/heuristics/types.ts` (full TypeScript interface per §6.2). `server/services/systemMonitor/heuristics/index.ts` exports `HEURISTICS: Heuristic[]` — empty array on land. Phase-filter helper (`SYSTEM_MONITOR_HEURISTIC_PHASES`) lands here so Slice C and D add heuristic modules without touching infrastructure code.
+3. **Baselining primitive.** `system_monitor_baselines` table writes via the refresh job; reads via `BaselineReader` (§7.5). Refresh job tick at `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` (default 15). Compute helpers tested at the pure-function layer; UPSERT verified at the integration layer.
+4. **Synthetic checks.** Seven day-one checks per §8.2, each as its own module under `server/services/systemMonitor/synthetic/`. The `system-monitor-synthetic-checks` job tick at `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` (default 60). Each check ships with positive + negative + cold-start unit tests. The handler wraps in `withSystemPrincipal` per §4.3.
+5. **Audit table writes.** `system_monitor_heuristic_fires` table is populated by Slice C (heuristics fire), but the schema lands in Slice A. This slice does not write to it — flagged here so the table existence is not mistaken for unused.
+
+**Tests landed in this slice:**
+
+- Pure unit tests per heuristic module (none yet, registry is empty), per synthetic check module (all 7), and per baseline aggregate helper.
+- Integration tests: synthetic queue-stall, synthetic cold-start, synthetic heartbeat, baseline refresh end-to-end (per §14.2).
+- Cold-start smoke validation: 60 minutes against a fresh dev DB → zero false positives (per success criterion S6).
+
+**What is NOT in this slice.** No agent triggers, no agent skills, no day-one heuristics (registry is empty), no UI changes (Phase 1 incidents render via existing Phase 0/0.5 page, no new components). All of those are Slice C.
+
+**Verification gate.** Per §15.3 row "B". Must pass before handoff.
+
+**Handoff.** `progress.md` entry includes: confirmed protocol doc and CLAUDE.md hook landed; confirmed registry types compile; confirmed baseline refresh ran successfully against dev data; confirmed synthetic checks fire correctly in dev. Outstanding for Slice C: the actual agent.
+
 ### 17.3 Slice C — Phase 2 day-one
+
+**Goal.** The actual deliverable. The agent runs end-to-end: triggers, sweep, day-one heuristics, prompt template, validation, rate limiting, UI. Operator can resolve incidents and submit feedback. This is where the project's value materialises.
+
+**Estimated effort.** ~5 days of focused work, almost certainly split across two sessions.
+
+**Deliverables in landing order:**
+
+1. **Agent skill set.** All 11 read+write skills per §9.4. Each skill is a small module with explicit `destructiveHint: false`. CI gate verifies the agent's bound skill set has zero destructive skills.
+2. **Day-one heuristic modules.** All 14 heuristics per §9.5, each in its own module with metadata + `evaluate` + `describe` + suppressions. Added to `HEURISTICS` array. Each ships with positive + negative + (where applicable) `requiresBaseline` test.
+3. **Triage handler.** `system-monitor-triage` job handler per §9.2 (incident-driven). Includes the conditional-enqueue logic (severity ≥ medium, not self-check, not rate-limited, not disabled), the agent-run dispatch, the prompt validation per §9.8 with retry-up-to-2 logic, the failure-mode events (`agent_triage_failed`, `agent_triage_skipped`), and the `agent_diagnosis_added` + `prompt_generated` events on success.
+4. **Sweep handler.** `system-monitor-sweep` job handler per §9.3. Two-pass design (cheap pre-pass + deep-read on fire), 50-candidate / 200-KB caps, clustering, `sweep_capped` event on overflow. Idempotency keys per `sweep:<candidateKind>:<candidateId>:<bucketKey>`.
+5. **Rate-limit logic.** Per §9.9 — per-fingerprint counter on the incident row, 24h rolling window, auto-escalation past the rate limit for high/critical incidents respecting Phase 0/0.5 escalation guardrails.
+6. **UI extensions.** All four new components per §10: `DiagnosisAnnotation`, `InvestigatePromptBlock`, `FeedbackWidget`, `DiagnosisFilterPill`. Wired into `SystemIncidentsPage`. The `recordPromptFeedback` mutation route lands here (server-side per §10.4) plus the `?diagnosis=...` query param on the list endpoint per §10.5.
+7. **`investigate_prompt_outcome` event.** Lands as part of the feedback mutation flow.
+
+**Tests landed in this slice:**
+
+- All Slice C tests in §14.1 and §14.2: heuristic positive/negative, triage incident-driven, triage sweep-driven, rate limiting, auto-escalation, kill switch, sweep cap, prompt validation, feedback mutation, RLS.
+- Manual smoke step 4 (Phase 2 incident-driven), step 5 (Phase 2 sweep), step 6 (prompt copy-paste — load-bearing), step 7 (feedback widget), step 8 (rate-limit), step 9 (kill switch).
+
+**What is NOT in this slice.** No Phase 2.5 heuristics (Slice D). No staging smoke checklist file (Slice D). No architecture.md or capabilities.md updates (Slice D, finalisation).
+
+**Verification gate.** Per §15.3 row "C". Must pass before handoff. Includes the `npm run build` check on the client.
+
+**Handoff.** `progress.md` entry includes: confirmed each of the 14 heuristics fires correctly in dev; confirmed end-to-end triage from incident-open to UI render; confirmed feedback mutation writes both schema and event; confirmed kill switch disables cleanly; the manual smoke steps that ran in dev with their results.
 
 ### 17.4 Slice D — Phase 2.5 expansion
 
+**Goal.** Layer Phase 2.5 cross-run / systemic heuristics onto the registry. Add the additional baseline metrics they need. Land the rollout-readiness work — staging smoke checklist file, doc updates, pre-PR pass.
+
+**Estimated effort.** ~2-3 days of focused work, typically one session.
+
+**Deliverables in landing order:**
+
+1. **Phase 2.5 heuristic modules.** All 9 heuristics per §9.6, each in its own module with metadata + `evaluate` + `describe` + suppressions. Added to `HEURISTICS` array. Each ships with positive + negative + `requiresBaseline` test.
+2. **Additional baseline metrics.** Any metrics Phase 2.5 heuristics need that Slice B did not produce — for example, `cache_hit_rate` for `cache-hit-rate-degradation`, `success_rate` for `success-rate-degradation-trend`. Refresh-job code is extended; new metric modules lift into the existing computation pipeline.
+3. **Staging smoke checklist file.** `tasks/builds/system-monitoring-agent/staging-smoke-checklist.md` per §14.3 — 10 steps with pass/fail tickboxes and notes columns.
+4. **Architecture and capabilities doc updates.** `architecture.md` System Monitor Active Layer section per CLAUDE.md §11 doc-sync rule. `docs/capabilities.md` updated entry. Both land in this slice so the merged PR includes the docs in the same commit window as the code.
+5. **Final pre-PR pass.** Run the §15.3 pre-PR command set. Open the PR.
+
+**Tests landed in this slice:**
+
+- All Phase 2.5 heuristic tests.
+- Staging smoke checklist runs end-to-end against staging.
+- Regression: all Slice C tests still pass.
+
+**What is NOT in this slice.** No new code-paths beyond heuristics + their baseline metrics. No agent skill additions. No UI additions. The registry pattern means Phase 2.5 is mostly more `Heuristic` modules in more files; no infrastructure churn.
+
+**Verification gate.** Per §15.3 row "D" plus the pre-PR command set. Must pass before opening the PR.
+
+**Handoff.** `progress.md` entry switches from "slice handoff" to "spec complete, awaiting user review of PR." Final commit includes the doc updates and the `progress.md` close-out per the user's instructions.
+
 ### 17.5 Session handoff between slices
+
+The mechanics of handing off between slices are covered in §15.2 (the protocol). This subsection captures the **content** the next session needs to pick up cleanly — what the previous session must have decided and recorded.
+
+**Slice A → Slice B handoff.** The next executor needs to know:
+
+- The migration number that landed (so Slice B doesn't pick the same one for any follow-on file).
+- Confirmation that the system-principal user row + `system_monitor` agent row both exist in the dev DB (the executor reads `users WHERE is_system = true` and `agents WHERE slug = 'system_monitor'`).
+- Confirmation that the new tables exist with their columns and RLS policies in place.
+- Any architect-resolved file paths (Slice A may surface paths the spec deferred to architect; Slice B inherits them).
+
+**Slice B → Slice C handoff.** The next executor needs to know:
+
+- The protocol doc is on disk, CLAUDE.md hook is in place — the agent's prompt template (Slice C) imports the protocol structure directly from the doc's contract section.
+- The registry types are stable — Slice C adds heuristic modules without changing the `Heuristic` interface.
+- The baseline reader has API surface; Slice C heuristics call `getOrNull(entityKind, entityId, metric, minSampleCount)` and assume the reader returns null on insufficient samples.
+- Any synthetic-check fingerprint patterns observed during Slice B that need to be honoured (e.g. if the queue-stalled check fingerprint is `synthetic:pg-boss-queue-stalled:queue:<name>`, Slice C heuristics that touch the same queue should not collide).
+
+**Slice C → Slice D handoff.** The next executor needs to know:
+
+- Which day-one heuristics in Slice C took longer than expected (signal for which Phase 2.5 heuristics may need extra calibration time).
+- Any prompt-validation patterns observed during Slice C dev smoke that should land in the `forbidden patterns` list in Slice D (the prompt validation regex is extensible per §9.8).
+- The agent's run loop behaviour under the rate-limit retry-up-to-2 logic — confirmed working in Slice C.
+- Whether any Slice C tests are flaky or skipped, with their reason — Slice D inherits and either fixes or documents.
+
+**Slice D → user (post-build).** The handoff at PR-open time is the final `progress.md` entry plus the PR description. Both should describe:
+
+- The full set of slices that landed, with commit ranges.
+- The verification commands that passed (output captured in the PR description so the reviewer doesn't have to re-run them).
+- Any decisions made under judgement during the build (so the reviewer sees them inline).
+- The smoke checklist results, attached or linked.
+- Any Phase 3 follow-ups the build surfaced — captured to `tasks/todo.md` per the existing review-pipeline conventions.
+
+**No `dual-reviewer` invocation by the executor.** Per CLAUDE.md, `dual-reviewer` runs only when the user explicitly asks. The executor's responsibility ends at "PR opened, smoke checklist passed, all verification green." The user runs `pr-reviewer` and (optionally) `dual-reviewer` as separate steps.
 
 ## 18. Out-of-scope (explicit)
 
