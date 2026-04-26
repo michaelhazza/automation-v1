@@ -1533,7 +1533,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | C4 | actionRegistry.ts comment cleanup | ☐ todo | — | trivial |
 | D1 | verify-input-validation + verify-permission-scope baselines | ✓ done | Post-PR-196 baselines: input-validation=44, permission-scope=13. Recorded in tasks/builds/audit-remediation/progress.md. | investigative |
 | D2 | Cycle count framing decision | ✓ done | Option (c) chosen: 43-cycle residual accepted to Phase 5A with 3-cluster breakdown. Recorded in source spec §6.3 + §13.3. | decision-only |
-| D3 | verify-skill-read-paths.sh cleanup | ☐ todo | — | depends on C1 |
+| D3 | verify-skill-read-paths.sh cleanup | ✓ done | Calibration constant updated from 2 to 7; 5 surplus from crm.* dot-namespaced entries (not matched by ACTION_COUNT pattern); gate exits 0. | depends on C1 |
 | E1 | 4 pre-existing unit test failures | ☐ todo | — | triage |
 | E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
 | F1 | findAccountBySubaccountId targeted method | ☐ todo | — | independent |
