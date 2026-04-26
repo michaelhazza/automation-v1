@@ -116,6 +116,23 @@ function requireSubaccountId(run: WorkflowRun): string {
   return run.subaccountId;
 }
 
+// C4b-INVAL-RACE: re-read step run after external I/O to discard late writes
+// to invalidated steps. Returns the work result unchanged if the step is still
+// live; returns { discarded: true, reason: 'invalidated' } if a concurrent
+// edit invalidated the step while external I/O was in flight.
+async function withInvalidationGuard<T>(
+  stepRunId: string,
+  externalWork: () => Promise<T>,
+): Promise<T | { discarded: true; reason: 'invalidated' }> {
+  const result = await externalWork();
+  const [sr] = await db.select({ status: workflowStepRuns.status })
+    .from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId)).limit(1);
+  if (sr?.status === 'invalidated') {
+    return { discarded: true, reason: 'invalidated' };
+  }
+  return result;
+}
+
 function rehydrateDefinition(stored: Record<string, unknown>): WorkflowDefinition {
   return stored as unknown as WorkflowDefinition;
 }
@@ -1323,7 +1340,7 @@ export const WorkflowEngineService = {
 
         // Execute synchronously via the action pipeline.
         try {
-          const result = await executeActionCall({
+          const guardedResult = await withInvalidationGuard(sr.id, () => executeActionCall({
             organisationId: run.organisationId,
             subaccountId: requireSubaccountId(run),
             agentId: configAgentId,
@@ -1333,7 +1350,16 @@ export const WorkflowEngineService = {
             actionInputs: dispatchedActionInputs,
             idempotencyKey,
             timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
-          });
+          }));
+          if ('discarded' in guardedResult) {
+            logger.info('workflow_step_action_call_invalidation_discarded', {
+              event: 'step.dispatch.invalidation_discarded',
+              runId: run.id, stepRunId: sr.id, stepId: step.id,
+              status: 'success', discarded: true,
+            });
+            return;
+          }
+          const result = guardedResult;
 
           if (result.status === 'blocked') {
             await this.failStepRunInternal(
@@ -1483,7 +1509,7 @@ export const WorkflowEngineService = {
             options?: Record<string, unknown>
           ) => Promise<string | null>;
         };
-        await pgboss.send(
+        const agentSendResult = await withInvalidationGuard(sr.id, () => pgboss.send(
           AGENT_STEP_QUEUE,
           {
             WorkflowStepRunId: sr.id,
@@ -1502,7 +1528,15 @@ export const WorkflowEngineService = {
             singletonKey: `Workflow-step:${sr.id}:${sr.attempt}`,
             useSingletonQueue: true,
           }
-        );
+        ));
+        if (typeof agentSendResult === 'object' && agentSendResult !== null && 'discarded' in agentSendResult) {
+          logger.info('workflow_step_agent_dispatch_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
 
         logger.info('workflow_agent_step_dispatched', {
           event: 'step.dispatched',
@@ -1529,13 +1563,22 @@ export const WorkflowEngineService = {
           .set({ status: 'running', startedAt: new Date(), version: sr.version + 1, updatedAt: new Date() })
           .where(eq(workflowStepRuns.id, sr.id));
 
-        const result = await invokeAutomationStep({
+        const invokeGuardResult = await withInvalidationGuard(sr.id, () => invokeAutomationStep({
           step: autoStep,
           runId: run.id,
           stepRunId: sr.id,
           run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
           templateCtx: ctx as unknown as Record<string, unknown>,
-        });
+        }));
+        if ('discarded' in invokeGuardResult) {
+          logger.info('workflow_step_invoke_automation_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
+        const result = invokeGuardResult;
 
         if (result.status === 'ok') {
           const output = result.output ?? {};

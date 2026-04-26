@@ -276,7 +276,6 @@ export async function finaliseAgentRunFromIeeRun(
         terminalStatus,
         /* hasError */ isFailureStatus,
         /* hadUncertainty */ false,
-        /* hasSummary */ !!(summary && summary.trim().length > 0),
       );
 
       // Defence-in-depth: gate the terminal transition on the parent's

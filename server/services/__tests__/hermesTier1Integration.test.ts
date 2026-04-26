@@ -66,7 +66,7 @@ console.log('Hermes Tier 1 — cross-phase interactions (§9.3.1):');
 //      run. `preference` → 'observation'.
 
 test('scenario #1: breaker trip mid-run — budget_exceeded maps to failed', () => {
-  const status = computeRunResultStatus('budget_exceeded', true, false, true);
+  const status = computeRunResultStatus('budget_exceeded', true, false);
   assert.equal(status, 'failed', 'budget_exceeded → failed');
 });
 
@@ -115,7 +115,7 @@ test('scenario #1: non-issue scores dampened by 0.10 on failed outcome', () => {
 
 test('scenario #4: completed_with_uncertainty → partial', () => {
   assert.equal(
-    computeRunResultStatus('completed_with_uncertainty', false, true, true),
+    computeRunResultStatus('completed_with_uncertainty', false, true),
     'partial',
   );
 });
@@ -171,8 +171,8 @@ test('scenario #6: legacy runs (runResultStatus=NULL) tolerated', () => {
 // anyway.
 
 test('pure determinism: same inputs → same runResultStatus (write-once safe)', () => {
-  const a = computeRunResultStatus('failed', true, false, false);
-  const b = computeRunResultStatus('failed', true, false, false);
+  const a = computeRunResultStatus('failed', true, false);
+  const b = computeRunResultStatus('failed', true, false);
   assert.equal(a, b, 'deterministic');
 });
 

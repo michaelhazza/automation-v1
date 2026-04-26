@@ -1365,7 +1365,7 @@ export const agentExecutionService = {
       // `hadUncertainty` from runMetadata, where the clarification-timeout
       // job writes it).
       const [preFinalizeRow] = await db
-        .select({ runMetadata: agentRuns.runMetadata })
+        .select({ runMetadata: agentRuns.runMetadata, errorMessage: agentRuns.errorMessage })
         .from(agentRuns)
         .where(eq(agentRuns.id, run.id))
         .limit(1);
@@ -1407,8 +1407,9 @@ export const agentExecutionService = {
         /* hasError — only affects the 'completed' branch of computeRunResultStatus;
            ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
         hadUncertainty,
-        hasSummary,
       );
+      // H3: hasSummary is no longer passed to computeRunResultStatus. Summary absence
+      // is surfaced via the summaryMissing side-channel below, not via 'partial' status.
 
       // Write-once guard (§6.3.1): add `AND run_result_status IS NULL` so
       // a second attempt at the same terminal write becomes a zero-row
@@ -1475,6 +1476,22 @@ export const agentExecutionService = {
           eventCount,
         },
       });
+
+      // H3: summaryMissing side-channel — emit only when hasSummary is false so
+      // consumers can correlate without demoting runResultStatus to 'partial'.
+      if (!hasSummary) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'run.terminal.summary_missing',
+            critical: false,
+            runResultStatus: derivedRunResultStatus ?? 'partial',
+          },
+        });
+      }
 
       // Surface terminal failures as system incidents for operator visibility.
       if (finalStatus === 'failed' || finalStatus === 'timeout' || finalStatus === 'loop_detected') {
@@ -1650,17 +1667,28 @@ export const agentExecutionService = {
           // primary agent-run completion path always passes a non-null
           // `runResultStatus` here (when derivedRunResultStatus is null
           // the run is not terminal and this branch is unreachable).
+          // HERMES-S1: thread errorMessage from the pre-finalize DB read so
+          // failed-without-throw runs surface the error to extractRunInsights.
+          const threadedErrorMessage = derivedRunResultStatus === 'failed'
+            ? (preFinalizeRow?.errorMessage ?? null)
+            : null;
+          if (threadedErrorMessage !== null) {
+            tryEmitAgentEvent({
+              runId: run.id,
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              sourceService: 'agentExecutionService',
+              payload: {
+                eventType: 'run.terminal.extracted_with_errorMessage',
+                critical: false,
+                errorMessageLength: threadedErrorMessage.length,
+              },
+            });
+          }
           const extractionOutcome = {
             runResultStatus: (derivedRunResultStatus ?? 'partial') as 'success' | 'partial' | 'failed',
-            // trajectoryPassed is always null in Phase B — no per-run
-            // verdict is persisted today. Reserved forward-compat slot.
             trajectoryPassed: null as boolean | null,
-            // Best-effort errorMessage for the short-summary guard.
-            // The normal terminal path does not set errorMessage on the
-            // run row here (only the catch path does); pass null. A
-            // future refactor could surface loopResult.errorMessage if
-            // the loop ever captures one without throwing.
-            errorMessage: null as string | null,
+            errorMessage: threadedErrorMessage,
           };
           await workspaceMemoryService.extractRunInsights(
             run.id,
@@ -1765,7 +1793,6 @@ export const agentExecutionService = {
         'failed',
         /* hasError */ true,
         /* hadUncertainty */ false,
-        /* hasSummary */ false,
       );
       const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',

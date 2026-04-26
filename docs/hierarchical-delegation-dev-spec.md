@@ -313,7 +313,13 @@ Computed once per call, inside the skill handler, before validation. The adaptiv
 
 ### 4.3 Delegation skill error codes
 
-Structured errors returned by `spawn_sub_agents` and `reassign_task` when validation fails. Shape follows the existing structured-error convention used elsewhere in `skillExecutor.ts` — `{ success: false, error: { code, message, context } }`.
+Structured errors returned by `spawn_sub_agents` and `reassign_task` when validation fails.
+
+**v1 canonical shape (C4a-6-RETSHAPE Branch A — pre-launch hardening spec §4.3):** The implementation uses the legacy flat-string error pattern consistent with all other skill handlers in `skillExecutor.ts`:
+```
+{ success: false, error: '<code-string>', context?: { runId, callerAgentId, ... } }
+```
+The nested-envelope shape (`{ success: false, error: { code, message, context } }`) described further in this section reflects the *intended* long-term contract. Branch B migration (nested envelope across all ~40 skill handlers) is deferred post-launch. The `context` sibling field carries the structured diagnostic payload for v1; it is stable and consumer-safe.
 
 **Uniform contract (applies to every error code in this section).**
 - `code` is one of the string literals enumerated below. The enum is closed for v1 — adding a new code requires a spec update.
