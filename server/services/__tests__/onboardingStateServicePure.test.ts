@@ -227,14 +227,25 @@ await test('swallows db errors and resolves (bookkeeping must not block executio
   assert(true, 'no exception propagated');
 });
 
-await test('throws missing_org_context when called without withOrgTx', async () => {
+await test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
+  // Contract: onboarding-state persistence is bookkeeping — when callers reach
+  // the service without an active org-scoped tx, getOrgScopedDb throws
+  // missing_org_context, but that throw must be swallowed inside the try/catch
+  // so workflow finalisation/cancellation does not hard-fail on bookkeeping.
   let threw = false;
+  let thrown: unknown;
   try {
     await upsertSubaccountOnboardingState(makeParams());
-  } catch {
+  } catch (err) {
     threw = true;
+    thrown = err;
   }
-  assert(threw, 'expected failure when called outside org context');
+  assert(
+    !threw,
+    `expected upsertSubaccountOnboardingState to resolve without throwing when called outside withOrgTx, but it threw: ${
+      thrown instanceof Error ? thrown.message : String(thrown)
+    }`,
+  );
 });
 
 // ---------------------------------------------------------------------------

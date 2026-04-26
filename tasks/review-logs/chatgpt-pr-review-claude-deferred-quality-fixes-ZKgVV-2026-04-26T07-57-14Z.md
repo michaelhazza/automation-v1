@@ -111,3 +111,105 @@ User response: **R2 → defer, Bonus → defer** (both routed to `tasks/todo.md`
 ### Commit hash
 
 Round 1 commit: `a01c2ceb` (single commit for Y5 implementation + deferred-items routing + session log creation).
+
+Follow-on commit: `432b36d9` recorded the Round 1 commit hash inside this log.
+
+---
+
+## Round 2 — 2026-04-26T08-10-00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Fix before merge
+Codex finding is valid: onboardingStateService can now hard-fail job completion
+
+getOrgScopedDb('onboardingStateService') was moved outside the existing
+try/catch, so missing org context now throws before the service reaches its
+log-and-swallow failure handling. The PR comment notes this can turn
+non-critical onboarding bookkeeping into hard workflow/job failures.
+
+Fix: move the DB lookup inside the guarded block:
+
+  try {
+    const db = getOrgScopedDb('onboardingStateService');
+    await db.insert(subaccountOnboardingState)...
+  } catch (err) {
+    logger.warn(...);
+  }
+
+That preserves the original contract: onboarding-state persistence is
+bookkeeping and must not block workflow finalisation/cancellation.
+
+Optional but worthwhile
+Add a test for:
+upsertSubaccountOnboardingState(...) called outside withOrgTx resolves without
+throwing
+Right now the test expects it to throw, but based on the service purpose and
+Codex comment, that expectation is probably wrong.
+
+Final call: Not done yet. Fix the onboardingStateService error-boundary issue,
+rerun the targeted test + build, then likely finalise.
+```
+
+### Investigation
+
+Confirmed Codex/ChatGPT diagnosis. Branch commit `86548956` (refactor(services): A3) moved the service from a module-top `db` import to function-scope `getOrgScopedDb('onboardingStateService')` — but placed the resolution one line above the existing `try` block.
+
+`getOrgScopedDb` (`server/lib/orgScopedDb.ts:37`) calls `throwFailure('missing_org_context', ...)` when there is no active `withOrgTx` ALS context. With the resolution outside the catch, that throw escapes the function and propagates to the call site.
+
+Caller surface (all `await upsertSubaccountOnboardingState(...)` with no surrounding try/catch):
+- `server/services/workflowEngineService.ts:729` — terminal `cancelled` bookkeeping
+- `server/services/workflowEngineService.ts:838, 2212, 2481, 2894, 3055` — terminal completion bookkeeping (single + bulk parent + child)
+- `server/services/workflowRunService.ts:277` — workflow run finalisation
+
+Each call sits in the same async flow as the workflow status update — a hard throw at this point breaks the contract documented in the file header: "Failures are logged and swallowed — bookkeeping must never block execution."
+
+### Triage and Recommendations
+
+| # | Finding | Triage | scope_signal | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|--------------|----------------|----------------|----------|-----------|
+| F1 | onboardingStateService error boundary regression — `getOrgScopedDb` outside try/catch | technical | standard | implement | auto (implement) | high | Codex/ChatGPT diagnosis confirmed by reading commit `86548956`. The resolution must live inside the try/catch to preserve the bookkeeping-must-not-block contract documented in the file header and exercised by 7 caller sites. |
+| F2 | Test expectation flip — assertion that "throws when called outside withOrgTx" is now wrong | technical | standard | implement | auto (implement) | medium | The pre-existing test on line 230 asserted a throw under missing org context. Once F1 lands, the contract is "resolves and logs" — keeping the throw assertion would either break the test or, worse, codify the regressed contract. Updated to assert resolution and to capture/show any propagated error in the failure message. |
+
+### User-Facing Findings
+
+None.
+
+### Escalated to user
+
+None — both findings are technical with `implement` recommendation, no escalation carveouts triggered.
+
+### Implemented (auto-applied technical)
+
+**F1 — error boundary fix** (`server/services/onboardingStateService.ts`):
+
+- Moved `const db = getOrgScopedDb('onboardingStateService');` from line 50 (outside try) to line 56 (first line inside try).
+- Added a comment block above the `try` explaining the contract: getOrgScopedDb throws `missing_org_context` when called outside `withOrgTx`, and bookkeeping must never block workflow finalisation, so the resolution lives inside the try/catch alongside genuine DB errors.
+- Kept the existing `logger.error('subaccount_onboarding_state_upsert_failed', ...)` call. ChatGPT's snippet used `logger.warn` but the existing pattern at extraction time (`c6f491c3`) used `logger.error` and the failure shape is identical — log level is a separate decision from boundary placement and out of scope for this fix.
+
+**F2 — test contract update** (`server/services/__tests__/onboardingStateServicePure.test.ts`):
+
+- Renamed the test from "throws missing_org_context when called without withOrgTx" to "resolves without throwing when called outside withOrgTx (bookkeeping must not block)".
+- Inverted the assertion: now asserts `!threw`, with a diagnostic message that prints the propagated error (if any) so a future regression is easy to debug.
+- Added a docstring explaining the contract: `getOrgScopedDb` throws `missing_org_context`, but the service's try/catch swallows it so workflow finalisation/cancellation does not hard-fail on bookkeeping.
+
+### Gate results
+
+- `npx tsx server/services/__tests__/onboardingStateServicePure.test.ts`: **12 passed, 0 failed**. Structured log confirms the new path: `event:"subaccount_onboarding_state_upsert_failed", error:"missing_org_context:onboardingStateService: service-layer DB access reached without an active org-scoped transaction"`. The throw is caught and logged; the function resolves.
+- `npm run build:server` (`tsc -p server/tsconfig.json`): clean.
+
+### Round 2 final state
+
+- 2 findings total (F1, F2).
+- 2 implemented (both auto-applied technical).
+- 0 rejected, 0 deferred.
+
+| Decision source | Implement | Reject | Defer |
+|----------------|-----------|--------|-------|
+| Auto (technical) | 2 (F1, F2) | 0 | 0 |
+| User-decided    | 0 | 0 | 0 |
+
+### Commit hash
+
+Round 2 commit: pending — appended below after commit lands.

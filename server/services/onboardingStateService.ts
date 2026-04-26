@@ -47,8 +47,13 @@ export async function upsertSubaccountOnboardingState(params: {
   const status = mapRunStatusToOnboardingStatus(params.runStatus);
   const now = new Date();
 
-  const db = getOrgScopedDb('onboardingStateService');
+  // getOrgScopedDb() throws failure('missing_org_context') when the caller is
+  // outside an active withOrgTx block. Per the file header contract, onboarding
+  // bookkeeping MUST NOT block workflow finalisation — the resolution itself
+  // therefore lives inside the try/catch so any contract violation is logged
+  // and swallowed alongside genuine DB errors.
   try {
+    const db = getOrgScopedDb('onboardingStateService');
     await db
       .insert(subaccountOnboardingState)
       .values({
