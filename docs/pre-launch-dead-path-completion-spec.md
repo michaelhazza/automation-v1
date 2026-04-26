@@ -101,7 +101,7 @@ Each decision below is a verbatim distillation of the architect's resolution doc
 - **Location:** `server/routes/rules.ts` (extends existing rules router).
 - **Guards:** `authenticate` + `requireOrgPermission(BRIEFS_WRITE)`.
 - **Logic:** org-scoped JSONB scan for artefactId → validate `kind === 'approval'` → load `tasks.description` for `briefContext` → call `listRules({ orgId, ... })` (top 20) → call `ruleCandidateDrafter.draftCandidates(...)`.
-- **Error envelope:** flat `{ error: string }` matching existing `rules.ts` pattern. Migration to `{ code, message, context }` deferred to Chunk 5 C4a-6-RETSHAPE.
+- **Error envelope:** flat `{ error: string }` matching existing `rules.ts` pattern. Aligns with Chunk 5 C4a-6-RETSHAPE Branch A recommendation (grandfather flat-string); see Chunk 5 spec § 4.3. If user picks Branch B at review, Chunk 5 + Chunk 3 ship together against nested envelope.
 
 ### 4.4 C4a-REVIEWED-DISP — Post-approval invoke_automation dispatch
 
