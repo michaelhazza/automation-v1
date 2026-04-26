@@ -177,6 +177,9 @@ export interface AgentRunRequest {
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
   parentRunId?: string;
+  /** WB-1: for handoff runs, the canonical handoff-edge pointer. Set alongside
+   *  parentRunId (both equal the source run's id for a handoff run). */
+  handoffSourceRunId?: string;
   isSubAgent?: boolean;
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
@@ -400,6 +403,7 @@ export const agentExecutionService = {
         taskId: request.taskId ?? null,
         handoffDepth: request.handoffDepth ?? 0,
         parentRunId: request.parentRunId ?? null,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         workflowStepRunId: request.workflowStepRunId ?? null,

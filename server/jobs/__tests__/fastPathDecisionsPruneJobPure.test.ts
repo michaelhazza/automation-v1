@@ -34,6 +34,8 @@ function computePruneCutoff(retentionDays: number, now: Date): Date {
   return cutoff;
 }
 
+export {}; // make this a module (avoids global-scope redeclaration in tsc)
+
 console.log('\nfastPathDecisionsPruneJob — pure-function tests\n');
 
 const RETENTION_DAYS = 90;

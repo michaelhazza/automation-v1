@@ -375,7 +375,9 @@ export async function dismissBundleSuggestion(input: {
       docSetHash,
     })
     .onConflictDoUpdate({
-      target: [bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash],
+      // BUNDLE-DISMISS-RLS: target matches the 3-column unique index
+      // (migration 0231) — organisation_id scopes dismissals per org.
+      target: [bundleSuggestionDismissals.organisationId, bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash],
       set: { dismissedAt: sql`now()` },
     })
     .returning();

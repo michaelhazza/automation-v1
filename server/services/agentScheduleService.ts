@@ -125,6 +125,7 @@ export const agentScheduleService = {
           taskId: data.taskId,
           handoffDepth: data.handoffDepth,
           parentRunId: data.sourceRunId,
+          handoffSourceRunId: data.sourceRunId,
           triggerContext: {
             type: 'handoff',
             sourceRunId: data.sourceRunId,
