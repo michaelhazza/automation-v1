@@ -28,6 +28,7 @@ Every invariant below is **testable or enforceable** — checkable by a script, 
 4. Gate expectations
 5. Spec-vs-implementation translation rules
 6. State / Lifecycle invariants
+7. Cross-flow operational invariants
 
 Invariant Violation Protocol
 
@@ -281,6 +282,42 @@ The H3 invariant (3.5) is the orthogonal rule about summary presence; this is th
   *Enforcement:*
   - **Static:** CI grep for new string literals matching the status-shape pattern in `server/services/`, `server/jobs/`, `server/routes/` → must intersect the canonical sets in `shared/runStatus.ts`
   - **Manual** (owner: `spec-reviewer` agent): raises a directional finding when a new status appears without the corresponding `runStatus.ts` update
+
+---
+
+## 7. Cross-flow operational invariants
+
+These invariants govern how flows behave under stress — retry, conflict, concurrency. They cross every chunk and every flow. Folded in 2026-04-26 from external review feedback.
+
+**7.1 Idempotency posture is explicitly classified per externally-triggered write.** Every flow that accepts external input (HTTP route, websocket, webhook receiver, scheduled job) MUST classify its idempotency posture in its spec as exactly one of: **key-based** (deterministic dedup key against persisted state), **state-based** (the state machine guards retry — e.g. status-predicate UPDATE), or **non-idempotent (intentional)** (explicitly accepts retry duplicates with documented rationale).
+
+  *Enforcement:*
+  - **Manual** (owner: `pr-reviewer` agent + spec author): every per-flow contract section in any spec must declare the chosen posture.
+  - **Static:** grep for "idempotency" / "Idempotency" in every Chunk 3 + Chunk 4 + Chunk 5 spec section that adds a write path → must surface a stated posture.
+
+**7.2 Source-of-truth precedence is fixed.** When two artefacts disagree about the outcome of the same operation, the precedence is:
+
+1. **Execution records** (`agent_runs`, `workflow_step_runs`, `automation_execution_runs`) — ground truth. The state-machine row IS the outcome.
+2. **Step / run state machine** (`status` columns) — derived from #1; consistent because written in the same tx.
+3. **Artefacts** (conversation_messages.artefacts JSONB) — UI-facing surface; reflects #1 + #2 but is a snapshot at write time.
+4. **Logs** (`audit_events`, `agent_execution_events`) — informational; never authoritative for outcome.
+
+  *Enforcement:*
+  - **Manual** (owner: spec author + `pr-reviewer` agent): every flow that emits an artefact AND modifies an execution record MUST cite this hierarchy in its spec section. If the artefact's `executionStatus` field disagrees with the execution record's terminal state, the execution record wins.
+  - **Static:** grep new code for direct reads of `executionStatus` from artefact JSONB without joining to the underlying execution record → flag as fragile in spec-conformance review.
+
+**7.3 Correlation key is `executionId` (or `runId` when no execution exists).** Every observability event in any cross-flow chain MUST carry the same `executionId` (or `runId` for orchestration paths) so a trace can be reconstructed by filtering on a single key. The chain crosses HTTP route → service → step run → webhook → completion event → artefact.
+
+  *Enforcement:*
+  - **Static:** every `observabilityEvent` payload schema in spec § 4.5.7 / § 6.5.2 / § 6.5.3 must include `executionId` (or `runId`) at the top level.
+  - **Manual** (owner: `pr-reviewer` agent): trace correlation is verified at first incident; missing key fails review.
+
+**7.4 Every flow emits an explicit terminal-state status.** No flow returns silently. Every externally-triggered write path MUST emit a discriminated `status: 'success' | 'partial' | 'failed'` field in its terminal observability event AND in any user-facing response. Implicit success-by-absence is forbidden; an HTTP 200 without an explicit `status` field is a violation.
+
+  *Enforcement:*
+  - **Static:** grep every spec § 4.5.6 / § 6.5.1 / § 6.5.2 (no-silent-partial-success) for the three-value union → must be present in every flow.
+  - **Test:** pure tests in Chunks 3, 4, 5 cover the success / partial / failed cases for each flow; no test asserts "succeeded if no error thrown" — every assertion checks the `status` field directly.
+  - **Manual** (owner: spec author): every flow's response shape contract (e.g. § 4.5.8) must declare the `status` field.
 
 ---
 
