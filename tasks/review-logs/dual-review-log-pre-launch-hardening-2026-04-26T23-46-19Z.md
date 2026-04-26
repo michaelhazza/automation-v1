@@ -3,7 +3,7 @@
 **Files reviewed:** uncommitted/committed diff vs `main` on branch `impl/pre-launch-hardening` (Phases 1, 2, 4, 5, 6 + B10-MAINT-RLS + B1–B9 fixes).
 **Iterations run:** 3/3 (4th attempt blocked by Codex usage cap; loop terminated at the documented cap)
 **Timestamp:** 2026-04-26T23:46:19Z
-**Commit at finish:** f105e541e12e20a11cb718fc00de2674b3751b57
+**Commit at finish:** 5ef8c1c63716e9f67ab09e5bbff0c762b54455e6
 
 ---
 
