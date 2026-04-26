@@ -1,3 +1,42 @@
+You are an expert technical reviewer auditing a software-engineering specification for implementation readiness. The spec is a post-merge backlog of 20 quality follow-up items derived from a four-pass review of PR #196 (codebase audit-remediation) in the Automation OS codebase.
+
+**Codebase framing (do NOT challenge these — they are explicit posture statements):**
+- Pre-production: no live users, no staged rollouts.
+- Rapid evolution: no feature flags except for behaviour modes.
+- Testing posture: static gates primary; runtime tests are pure-function only; no frontend / E2E / API-contract tests.
+- Prefer existing primitives over new ones (`policyEngineService`, `withBackoff`, `getOrgScopedDb`, `withOrgTx`, `actionService`, etc.).
+- The spec is post-merge backlog work; nothing here blocks shipping.
+
+**Your job:** identify mechanical and directional weaknesses in the spec that would slow or mislead an implementer who later picks up an item. Focus on:
+
+1. **Path / line-number drift** — files referenced may have moved or shifted lines.
+2. **Anchor / ToC inconsistency** — the §1 ToC must point at real heading slugs.
+3. **Self-contradictions** — two parts of the spec saying different things (an item's "Files" table missing files mentioned in prose, sequencing claims that conflict with dependency claims, etc.).
+4. **Load-bearing claims without mechanisms** — phrases like "must be idempotent" / "source of truth" without naming HOW the property is enforced.
+5. **Missing acceptance criteria / test signals** — items where Acceptance criteria don't actually verify the Goal.
+6. **Schema / migration drift** — references to migration numbers, table names, columns that may not match current state.
+7. **Unnamed primitives** — "a new service that does X" without naming it concretely.
+8. **Sequencing bugs** — Item A depends on Item B but B is sequenced later in §2.
+9. **Cross-item contradictions** — e.g. one item's annotation contract conflicts with another's.
+10. **Missing per-item verdicts / status fields.**
+
+**Output format:** group findings under section headings (`## A1`, `## A2`, etc., or `## Cross-cutting`). Within each section list discrete findings as numbered items. Each finding should have:
+
+- A one-sentence description of the issue.
+- The specific spec section / line range / quote it refers to (if you can pinpoint).
+- A concrete suggested fix (one or two sentences).
+- A severity tag: `critical` / `important` / `minor` / `nit`.
+
+**Do NOT propose:**
+- Adding feature flags, staged rollouts, canary deploys, kill switches.
+- Adding frontend / E2E / API-contract tests.
+- Introducing new logger frameworks or generic abstraction layers.
+- Splitting the spec into multiple specs (the §3 Out of scope section explicitly rejects this).
+- Re-litigating items in §3 Out of scope.
+
+The spec under review:
+
+==== BEGIN SPEC ====
 # Audit Remediation Follow-ups — Post-Merge Backlog Spec
 
 **Created:** 2026-04-25
@@ -63,7 +102,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Sequencing posture:** none of these items are blocking; PR #196 is already shipped. They are post-merge work, sequenced by dependency and risk. See §2.
 
-**Reviewer's contract:** each item below carries the same shape — Source, Files, Goal, Approach, Acceptance criteria, Tests, Dependencies, Risk, Definition of Done. A future implementer should be able to pick up a single item and ship it without rereading the source review logs. **Per-item status is tracked in §5 Tracking** — items do not carry an inline `Status:` field; the §5 table is the single source of truth so a status update only needs to land in one place.
+**Reviewer's contract:** each item below carries the same shape — Source, Files, Goal, Approach, Acceptance criteria, Tests, Dependencies, Risk, Definition of Done. A future implementer should be able to pick up a single item and ship it without rereading the source review logs.
 
 **Testing posture (per `docs/spec-context.md`):** this spec sticks to (a) pure-function unit tests under the `*Pure.ts` + `*.test.ts` convention, (b) new static gates, and (c) the carved-out integration-test envelope already documented for hot-path concerns — RLS, idempotency / concurrency-control, and crash-resume parity. Items that propose runtime tests (A1 RLS-context binding, A2 RLS write-boundary guard, B2 job idempotency / concurrency, H1 derived-data null-safety) sit inside that carve-out. Items that propose anything outside the carve-out (e.g. multi-process integration tests in F2) call it out explicitly and downgrade to a documented manual smoke step where the framing requires it.
 
@@ -93,19 +132,14 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Approach (in order):**
 1. **Inventory.** Enumerate every `canonicalDataService.<method>(...)` call site in `server/` (excluding `__tests__`). Group by method signature shape: `(orgId)`-only, `(orgId, accountId)`, `(accountId, orgId?)`, write methods, etc. Capture the inventory in `tasks/builds/<slug>/canonical-call-sites.md` so the migration is auditable.
-2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. The current method surface mixes two shapes — most methods are positional (`getAccountById(accountId, organisationId)` etc.), and a small number take an args-object (`listInactiveContacts(args: { orgId, subaccountId, ... })` at `:493`). Migration shape per category:
-   - **Positional methods** become `(principal: PrincipalContext, ...rest)` — `principal` is the new first positional, the original positional args (e.g. `accountId`) follow.
-   - **Args-object methods** become `(principal: PrincipalContext, args: { ... })` — `principal` is the first positional, the original args object becomes the second positional. The `orgId` / `subaccountId` fields come OUT of the args object (they live on `principal` now); other fields stay where they were.
-   - The choice between "second positional principal-on-args" (`{ principal, ...args }`) and "split positional" (`(principal, args)`) must be uniform — pick one for the whole service. Recommended: split positional, since most methods are positional today and a single shape is easier to grep against in the gate.
-   
-   Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
+2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
 3. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls.
 4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must pass a `PrincipalContext`-shaped first argument (call-site-level enforcement, not file-level). The right approach is a positive allowlist of accepted first-argument shapes rather than a narrow negative matcher:
    - **Positive allowlist (accepted first-argument shapes):** the gate accepts a `canonicalDataService.<method>(` call only when the first argument matches one of:
      - `fromOrgId(` / `fromOrgId<` (the explicit constructor)
      - `withPrincipalContext(` (called inline)
      - A locally-typed `PrincipalContext` variable — detected via a same-file `: PrincipalContext` annotation in scope (function parameter list or `const principal: PrincipalContext = ...`).
-   - **Bare identifiers, raw object literals (`{ organisationId: ... }` style), and spread expressions in the first-argument position are violations.** Note that under step 2's split-positional shape, the args object — when present — is the SECOND positional argument, not the first; an object literal as the second argument is fine. The gate's matcher inspects only the first argument's shape.
+   - **Anything else is a violation** — including bare identifiers, raw object literals (`{ organisationId: ... }`), spread expressions, and method chains. This is broader than the iteration-1 "bare identifier only" matcher and closes the object-literal escape hatch.
    - Implementation: a small TypeScript-aware lint rule using the TypeScript compiler API would be ideal, but a regex pass is sufficient for v1 — match `canonicalDataService\.\w+\(\s*([^)]*)` and assert the first argument starts with `fromOrgId(`, `withPrincipalContext(`, or matches a known same-file `: PrincipalContext`-typed identifier.
    - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 5) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
    - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if other invocations in the same file are correctly migrated.
@@ -117,7 +151,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 - Every non-test caller in `server/` passes `fromOrgId(...)` or an existing `PrincipalContext` value.
 - `scripts/verify-principal-context-propagation.sh` fails when **any** `canonicalDataService.<method>(` invocation in an importing file passes a non-`PrincipalContext` first argument (call-site granularity, not file granularity), AND when the file has no `@principal-context-import-only` annotation.
 - A deliberate test regression — drop a `fromOrgId(...)` call from any caller, leaving a bare-`organisationId` invocation — causes the gate to fail even if other invocations in the same file are correctly migrated.
-- TypeScript compiles cleanly. `npm run build:server` (TypeScript-checks server tree) passes.
+- TypeScript compiles cleanly. `npm run typecheck` passes.
 
 **Tests required:**
 - New: `server/services/__tests__/canonicalDataService.principalContext.test.ts` — constructs a `PrincipalContext` via `fromOrgId(orgId, subaccountId)`, calls one read method (e.g. `getAccountById`) and one write method (e.g. `upsertAccount`), asserts:
@@ -135,7 +169,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 - All caller files updated; all method signatures migrated; every method body wraps its DB work in `withPrincipalContext(...)`.
 - Gate updated to call-site granularity with the positive-allowlist matcher; baseline entry in `scripts/guard-baselines.json` regenerated; deliberate-regression test passes for each accepted-shape category.
 - New unit test under `__tests__` locks the contract.
-- `npm run build:server` (TypeScript-checks server tree), `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
+- `npm run typecheck`, `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
 - The spec status field for A1 in `§5 Tracking` is checked.
 
 ---
@@ -165,7 +199,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
    - Tables in `rls-not-applicable-allowlist.txt`: exempt. The allowlist file carries a one-line rationale per entry.
 2. **Runtime guard (`server/lib/rlsBoundaryGuard.ts`).** Export `assertRlsAwareWrite(tableName)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`). The guard does NOT hook into a Drizzle-internal middleware (this codebase has no such seam). Instead, it is invoked at the two places that already mediate every service-layer write:
    - **Wrap `getOrgScopedDb`'s returned handle** with a Proxy that intercepts `.insert(table)`, `.update(table)`, `.delete(table)` calls. On each, call `assertRlsAwareWrite(table)`. If the table is in `rlsProtectedTables`, the call is OK (the handle is org-scoped by construction). If the table is not in `rlsProtectedTables` AND not in `rls-not-applicable-allowlist.txt`, throw `RlsBoundaryUnregistered`.
-   - **Wrap the `tx` argument that `withAdminConnection(options, fn)` passes into its callback.** `withAdminConnection` is a callback-based API (`withAdminConnection(options, async (tx) => { ... })`), not a handle factory — it does NOT return a handle the caller can wrap externally. The guard introduces a thin shim, e.g. `withAdminConnectionGuarded(options, async (guardedTx) => { ... })`, defined in `rlsBoundaryGuard.ts`, that internally calls `withAdminConnection(options, async (tx) => fn(proxy(tx)))` and applies the Proxy interception to `tx` before user code sees it. Callers migrate to `withAdminConnectionGuarded` over time; the unwrapped `withAdminConnection` is left in place so existing audit-bypass callers don't break. If a write to a registered table happens via the guarded admin tx WITHOUT the caller explicitly switching the session role to `admin_role` (per `withAdminConnection`'s own contract), throw `RlsBoundaryAdminWriteToProtectedTable`. Detection of the role switch is best-effort — the guard scans the same callback for a `SET LOCAL ROLE admin_role` execution and treats its presence as the deliberate-bypass signal.
+   - **Wrap `withAdminConnection`'s returned handle** the same way. If a write to a registered table happens via `withAdminConnection`, throw `RlsBoundaryAdminWriteToProtectedTable` (admin connections are BYPASSRLS — writes to RLS-protected tables from there must be deliberate; the guard surfaces accidental usage in dev).
    - Production behaviour: the guard is no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
    - This is wrapper-level enforcement, not Drizzle middleware — it composes with existing primitives instead of inventing a new one.
 3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** PostToolUse hook that runs on Write/Edit to `migrations/*.sql` (top-level path — confirmed by `ls migrations/` showing migrations 0001..0227+):
@@ -183,12 +217,11 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 - The migration guard emits a warning when a deliberately-uncovered migration is staged.
 
 **Tests required:**
-- New: `server/lib/__tests__/rlsBoundaryGuard.test.ts` — five cases:
+- New: `server/lib/__tests__/rlsBoundaryGuard.test.ts` — three cases:
   1. `getOrgScopedDb` handle writes to a registered table → succeeds.
   2. `getOrgScopedDb` handle writes to an unregistered, non-allowlisted table in dev → throws `RlsBoundaryUnregistered`.
   3. `getOrgScopedDb` handle writes to a table listed in `rls-not-applicable-allowlist.txt` → succeeds.
-  4. `withAdminConnectionGuarded` callback writes to a registered table WITHOUT a `SET LOCAL ROLE admin_role` in the same callback in dev → throws `RlsBoundaryAdminWriteToProtectedTable`.
-  5. `withAdminConnectionGuarded` callback writes to a registered table WITH a `SET LOCAL ROLE admin_role` in the same callback in dev → succeeds (deliberate admin bypass is permitted).
+  4. `withAdminConnection` handle writes to a registered table in dev → throws `RlsBoundaryAdminWriteToProtectedTable`.
 - Gate self-test: fixture migration under `scripts/__tests__/rls-protected-tables/` introducing a deliberate gap; gate must fail.
 
 **Dependencies:** none. This item is a foundational primitive that should land BEFORE any new tenant-scoped tables. If a new feature is being designed concurrently, sequence A2 first.
@@ -198,7 +231,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 **Definition of Done:**
 - All three components shipped (gate, runtime guard, migration hook).
 - Tests pass; the deliberate-gap fixtures fail the relevant gate.
-- `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnection` AND must explicitly `SET LOCAL ROLE admin_role` inside the callback to bypass RLS. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
+- `architecture.md` § Architecture Rules updated with one line: "All writes to tenant-scoped tables must go through `getOrgScopedDb`. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
 - Spec status field for A2 in `§5 Tracking` is checked.
 
 ---
@@ -224,13 +257,10 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Acceptance criteria:**
 - Neither service imports `db` from `../db/index.js`.
-- Both services have at least one new pure-function unit test under `server/services/__tests__/` covering the org-scoped read/transaction path. (Audit verified: there are NO existing tests for `briefVisibilityService.ts` or `onboardingStateService.ts` on current main — this acceptance criterion mandates new coverage rather than relying on hypothetical existing tests.)
+- Existing route tests covering `resolveBriefVisibility`, `resolveConversationVisibility`, and onboarding-state reads continue to pass.
 - Manual smoke: a brief read with the request principal's org bound returns the expected row; a deliberate org-mismatch returns `{ canView: false, canWrite: false }` (RLS now provides the secondary filter).
 
-**Tests required:**
-- New: `server/services/__tests__/briefVisibilityServicePure.test.ts` — happy-path test that mocks `getOrgScopedDb` and asserts each function under test calls it with the expected source string and uses the returned tx for the read.
-- New: `server/services/__tests__/onboardingStateServicePure.test.ts` — happy-path test that exercises the transaction path under `getOrgScopedDb` (mocked).
-- Both tests follow the `node:test` + `node:assert` convention.
+**Tests required:** existing tests should cover the contract. If no tests exist for `onboardingStateService`, add a single happy-path test that exercises a transaction under `getOrgScopedDb`.
 
 **Dependencies:** none. Pure refactor.
 
@@ -238,7 +268,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Definition of Done:**
 - Both services use `getOrgScopedDb` (with nested `.transaction(...)` where the existing logic needs a transaction). Neither service imports `withOrgTx` directly — `withOrgTx` stays in middleware / `createWorker`.
-- Tests pass. `npm run build:server` (TypeScript-checks server tree), `npm run lint`, `npm test` for the relevant suites.
+- Tests pass. `npm run typecheck`, `npm run lint`, `npm test` for the relevant suites.
 - Spec status field for A3 in `§5 Tracking` is checked.
 
 ---
@@ -259,25 +289,11 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Approach:**
 1. Create `server/services/__tests__/skillStudioServicePure.test.ts`.
-2. Use the repo-native `node:test` + `node:assert` harness (NOT Jest — there is no Jest in this repo). Imports follow the existing `*Pure.test.ts` convention:
-   ```ts
-   import { strict as assert } from 'node:assert';
-   import { test } from 'node:test';
-   import { saveSkillVersion } from '../skillStudioService.js';
-   ```
-   Mock the transaction wrapper so the test stays within `runtime_tests: pure_function_only` posture (consistent with existing `*Pure.test.ts` files in the codebase).
-3. Three assertions using `assert.rejects` / a happy-path `await`:
-   ```ts
-   await assert.rejects(
-     () => saveSkillVersion(skillId, 'org', null, payload),
-     /saveSkillVersion: orgId is required for scope=org/,
-   );
-   await assert.rejects(
-     () => saveSkillVersion(skillId, 'subaccount', null, payload),
-     /saveSkillVersion: orgId is required for scope=subaccount/,
-   );
-   await saveSkillVersion(skillId, 'system', null, payload); // happy path — must not throw
-   ```
+2. Mock the transaction wrapper so the test stays within `runtime_tests: pure_function_only` posture (consistent with existing `*Pure.test.ts` files in the codebase).
+3. Three assertions:
+   - `await expect(saveSkillVersion(skillId, 'org', null, payload)).rejects.toThrow(/saveSkillVersion: orgId is required for scope=org/)`.
+   - `await expect(saveSkillVersion(skillId, 'subaccount', null, payload)).rejects.toThrow(/saveSkillVersion: orgId is required for scope=subaccount/)`.
+   - `await expect(saveSkillVersion(skillId, 'system', null, payload)).resolves.not.toThrow()` — happy-path executes.
 4. Use exact-message matching where feasible to make a future drift in the error text fail the test.
 
 **Acceptance criteria:**
@@ -292,7 +308,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 **Risk:** zero — purely additive.
 
 **Definition of Done:**
-- File created; `npx tsx --test server/services/__tests__/skillStudioServicePure.test.ts` passes (the repo's `node:test` runner is invoked via `tsx`; there is no `npm test -- <pattern>` shortcut — the closest aggregate is `npm run test:unit` which runs `bash scripts/run-all-unit-tests.sh`).
+- File created; `npm test -- skillStudioServicePure` passes.
 - Spec status field for B1 in `§5 Tracking` is checked.
 
 ---
@@ -458,22 +474,17 @@ No double-invocation regression tests exist for any of the four.
 1. Create `scripts/verify-architect-context.sh`. Logic:
    - Read `.claude/agents/architect.md`.
    - Find the `## Context files` section. If missing → fail with `architect-context: section missing`.
-   - Extract the numbered list under it. Compare the extracted entries to a reference fixture at `scripts/architect-context-expected.txt` — one path per line, in order. The gate fails if:
-     - An entry from the fixture is missing from the architect.md section (deletion → emit "missing entry: `<path>`").
-     - The architect.md section has an entry not in the fixture (addition → emit "unexpected entry: `<path>`; update `architect-context-expected.txt`").
-     - The path order differs (renumbering → emit "order mismatch at line N").
+   - Extract the numbered list under it. Capture the current entry count as the **expected count** (today: 6). The gate fails if the count drops below the expected value — there is no "allow one drop" tolerance, because C2's acceptance criteria require deletion of one path to fail. The expected count is stored in a small adjacent fixture `scripts/architect-context-expected-count.txt` that the gate reads, so legitimate edits to the architect.md context list update the fixture in the same commit (and the commit author has to think about it explicitly).
    - For each entry that names a file path (`.md` extension or matching a known path pattern), assert the path resolves on disk. Skip lines like "the specific task..." that don't name a file.
    - Emit `[GATE] architect-context: violations=<count>` per the C1 standard.
-   
-   The fixture file holds the expected list of paths, NOT just the count, so the "naming the deleted entry" acceptance criterion is achievable. Legitimate edits to the architect.md context list update the fixture in the same commit, and the commit author has to think about it explicitly.
 2. Wire into the gates suite (`package.json` script or CI workflow) so it runs on every commit that touches `.claude/agents/architect.md` or any listed context file (catches renames where the agent file isn't updated).
-3. Self-test: a fixture variant under `scripts/__tests__/architect-context/` with a deleted entry — gate must fail with the specific entry named.
+3. Self-test: a fixture variant under `scripts/__tests__/architect-context/` with a deleted entry — gate must fail.
 
 **Acceptance criteria:**
 - `bash scripts/verify-architect-context.sh` exits 0 today.
-- Deleting one path from the section without updating `architect-context-expected.txt` → gate fails with a specific error naming the deleted entry.
-- Adding an entry to architect.md without updating the fixture → gate fails naming the unexpected entry.
-- Renaming a referenced file without updating the section → gate fails (path-resolution check fires).
+- Deleting one path from the section without updating `architect-context-expected-count.txt` → gate fails with a specific error naming the deleted entry.
+- Updating the count fixture but leaving the section unchanged → gate fails (count mismatch the other direction).
+- Renaming a referenced file without updating the section → gate fails.
 - Gate emits the standard `[GATE] architect-context: violations=<count>` line.
 
 **Tests required:** fixture variants exercising the failure modes; verified manually or via a tiny shell-test harness.
@@ -682,41 +693,39 @@ Operator chooses one of three framings — present this list verbatim during spe
 
 **Source:** spec-conformance REQ #32; already tracked in `tasks/todo.md:862`.
 
-**Audit verdict (2026-04-26 refreshed):** VALID. `scripts/verify-skill-read-paths.sh` exists. Captured fresh on this iteration:
-```
-FAIL: -5 actions missing readPath tag
-Literal action entries: 94, with readPath: 99
-```
-The gate already subtracts 2 for the interface definition + methodology template (lines 14-21 of the script) — so `readPath: 99` is the post-subtraction count. Net: there are 5 SURPLUS `readPath:` lines beyond what the subtract-2 calibration accounts for. The error message `-5 actions missing` is the gate's `(94 - 99)` arithmetic showing readPath > action by 5, not the other direction. Audit spec §5.5 deferred this as lowest-priority enumeration work.
+**Audit verdict (2026-04-25):** VALID. `scripts/verify-skill-read-paths.sh` exists. `tasks/todo.md:862` carries the P3-H8 entry: gate reports `Literal action entries: 94, with readPath: 99` (count mismatch of 5). Audit spec §5.5 deferred this as lowest-priority enumeration work.
 
 **Files:**
 - `scripts/verify-skill-read-paths.sh` (gate logic — may need a tweak to reporting).
 - `server/config/actionRegistry.ts` (likely site of the 5 mismatches).
 - `tasks/todo.md:862` — P3-H8 entry to close.
 
-**Goal:** reconcile the 5-surplus-readPath mismatch. The gate report shows `99 readPath:` lines (post-subtract-2) vs `94 actionType:` lines — so there are 5 surplus `readPath:` occurrences that aren't paired with an `actionType` field. The patch is one of: (a) remove 5 stray `readPath:` lines that the calibration missed, (b) add 5 missing `actionType:` lines if the readPaths are real entries with malformed metadata, (c) update the calibration constant if the surplus is structural (e.g. a new template / type-definition block was added since the gate's `-2` was set).
+**Goal:** reconcile the 5-entry mismatch. The gate's existing report (`Literal action entries: 94, with readPath: 99`) shows the readPath count is HIGHER than the action count — so the mismatch isn't "five actions are missing readPath", it's most likely either (a) duplicate or template `readPath:` lines being counted alongside literal entries, or (b) the existing subtraction-of-2 calibration in the gate (lines 14-21 of `verify-skill-read-paths.sh`) is off by 5. The investigation has to come first; the patch shape depends on what the investigation finds.
 
 **Approach:**
 
-The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter — it counts `actionType: '<name>'` entries vs `readPath:` lines (with a hardcoded subtraction of 2 for non-entry occurrences: the interface definition and the methodology template at gate lines 14-21). It has no per-entry parser, so per-entry annotations would be invisible to it. Approach in this order:
+The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter — it counts `actionType: '<name>'` entries vs `readPath:` lines (with a hardcoded subtraction of 2 for non-entry occurrences: the interface definition and the methodology template). It has no per-entry parser, so per-entry annotations like `@no-read-path` would be invisible to it. Approach in this order:
 
-1. **Step 1 — locate the 5 surplus `readPath:` occurrences.** Two greps:
+1. **Step 1 — diagnose the actual cause of the 99-vs-94 mismatch.** Run the gate verbosely:
    ```bash
-   grep -n "actionType:" server/config/actionRegistry.ts | wc -l   # → 94
-   grep -n "readPath:"   server/config/actionRegistry.ts | wc -l   # → 101 (= 99 + 2 the gate subtracts)
+   bash scripts/verify-skill-read-paths.sh
    ```
-   List both grep outputs side-by-side. The 5 `readPath:` lines that are NOT immediately preceded by an `actionType:` line in the same object literal are the surplus. Common explanations: a recently-added "default options" template, a forward-declared interface, a `readPath` parameter on a generator function, or duplicate `readPath` fields inside one entry.
-2. **Step 2 — patch shape depends on what Step 1 found:**
-   - If the surplus are non-entry uses (templates / generator params / type defs): update the gate's subtraction constant from 2 to 7, with a comment explaining the new constant and listing each subtracted occurrence.
-   - If the surplus are duplicate `readPath:` fields inside an entry: remove the duplicates (only one `readPath` per entry).
-   - If the surplus are entries with `readPath` but missing `actionType`: add the missing `actionType` fields, OR remove the orphan entries if they're dead code.
+   Then inspect `server/config/actionRegistry.ts` directly:
+   - Count literal `actionType: '...'` lines (should be 94).
+   - Count literal `readPath:` lines including the interface definition and methodology template (should be 99 today; the gate subtracts 2 to land on 97 — but the gate reports 99, so the subtraction may not be running, or there are 4 more `readPath:` lines than the gate expects).
+   - Identify whether the surplus `readPath:` lines are: (i) entries with `readPath` that have no corresponding `actionType` field (malformed entries), (ii) extra non-entry occurrences the subtraction-of-2 calibration missed, (iii) duplicate readPath fields inside one entry, or (iv) something else.
+2. **Step 2 — patch shape depends on diagnosis:**
+   - If (i): add the missing `actionType` fields, OR remove the orphan `readPath` lines.
+   - If (ii): update the gate's subtraction constant from 2 to the correct number, with a comment explaining the new constant.
+   - If (iii): remove duplicates.
+   - If (iv): document and decide.
 3. **Step 3 — fallback if a per-entry parser is needed:** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). Treat this as a separate, bigger task — do not bundle into D3.
 4. Re-run the gate; expect matching action and readPath counts and exit 0.
 5. Cross-reference and close the P3-H8 entry in `tasks/todo.md`.
 
 **Acceptance criteria:**
 - Gate exits 0 with matching action and readPath counts (via either fix-the-source or fix-the-calibration, per Step 2).
-- The cause from Step 1 is captured in a one-paragraph note in `tasks/builds/<slug>/progress.md` so the audit-trail explains the actual root cause.
+- The diagnosis from Step 1 is captured in a one-paragraph note in `tasks/builds/<slug>/progress.md` so the audit-trail explains the actual root cause.
 - `tasks/todo.md` P3-H8 entry checked off.
 
 **Tests required:** none in code; gate is the test.
@@ -752,23 +761,22 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
 **Goal:** triage each failing test. Either fix the underlying issue or convert to a documented permanent skip with a one-line rationale. Eliminates "unrelated noise" in future audit runs.
 
 **Approach:**
-1. Run each test file individually with `tsx`:
+1. Run each test file individually:
    ```bash
-   npx tsx --test server/services/__tests__/referenceDocumentServicePure.test.ts
-   npx tsx --test server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts
-   npx tsx --test server/services/__tests__/skillHandlerRegistryEquivalence.test.ts
-   npx tsx --test server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts
+   npm test -- referenceDocumentServicePure
+   npm test -- skillAnalyzerServicePureFallbackAndTables
+   npm test -- skillHandlerRegistryEquivalence
+   npm test -- crmQueryPlanner/__tests__/crmQueryPlannerService
    ```
-   (This repo runs `node:test`-based files through `tsx`. The aggregate runner is `npm run test:unit` (`bash scripts/run-all-unit-tests.sh`); there is no `npm test -- <pattern>` shortcut.)
 2. Capture the exact failure for each.
 3. **Per test, decide:**
    - **Logic regression in the service** → fix the service.
    - **Test-only bug** (assertion against stale fixture, drift in shape, mock that no longer matches) → fix the test.
-   - **Test no longer relevant** (covers behaviour the service no longer has) → delete the file, OR convert to a skipped `node:test` case via the `skip` option: `test('covers removed-behaviour X — see <commit>', { skip: 'X removed in <commit>' }, () => { ... })`. (`node:test` does not have a Jest-style `it.skip`; the `skip` option is the equivalent.)
+   - **Test no longer relevant** (covers behaviour the service no longer has) → delete the file, OR convert to `it.skip` with a permanent reason: `it.skip('covers removed-behaviour X — see <commit>', ...)`.
 4. **Document the disposition.** For each test, add an entry to `KNOWLEDGE.md` under "Audit-remediation followups: pre-existing test triage" naming the file, the failure, and the disposition.
 
 **Acceptance criteria:**
-- All four test files either pass, or carry a documented `node:test` `skip` option with rationale, or are deleted.
+- All four test files either pass, or carry a documented `it.skip` with rationale, or are deleted.
 - `npm test` no longer reports these four files as failing.
 - `KNOWLEDGE.md` carries the triage entries.
 
@@ -816,9 +824,9 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
 4. If Step 0 reveals the gate already exits 0 on current main (i.e. the captured failure was historical): close E2's `verify-integration-reference.mjs` track and update §5 Tracking accordingly with a note "verified clean on <commit>".
 
 **Acceptance criteria:**
-- `bash scripts/verify-pure-helper-convention.sh` exits 0 (or all `<N>` (currently 7) violators carry annotations the gate recognises). The captured violator count must be confirmed against current main as part of the work — do not rely on the historical "7" count.
-- `node scripts/verify-integration-reference.mjs` no longer reports the actual current blocking error (per Step 0's fresh capture).
-- `<N>` advisory warnings (per Step 0's fresh capture): recorded in `scripts/guard-baselines.json` under the gate's `GUARD_ID`; gate emits parseable count line per C1.
+- `bash scripts/verify-pure-helper-convention.sh` exits 0 (or all 7 carry annotations the gate recognises).
+- `node scripts/verify-integration-reference.mjs` no longer reports a blocking parse error.
+- 26 warnings: recorded in `scripts/guard-baselines.json` under the gate's `GUARD_ID`; gate emits parseable count line per C1.
 
 **Tests required:** none in code; the gates are the verification.
 
@@ -971,16 +979,9 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 G1's reusable script is scoped to **current-order replay only** — it does NOT attempt to roll back to historical commits or compare against historical schema snapshots. That capability is explicitly out of scope for this version because (a) the pre-merge G1 form was never run and is now historical, and (b) cross-commit comparison requires `git show` shell-out for every migration file, plus a schema-introspection diff against an artefact this repo doesn't yet maintain. Both belong in a separate, larger spec if anyone ever needs them.
 
 1. Write `scripts/verify-migration-sequencing.sh` parameterised on a database URL. Steps:
-   1. Spin up a fresh disposable database (a one-shot Postgres container, or a local dev DB the operator is OK to drop). Run every migration in `migrations/` (current numerical order) end-to-end. Verify zero errors. Verify the resulting schema matches what Drizzle expects:
-      - Run `npx drizzle-kit introspect` to dump the actual DB schema to a temp `.ts` file.
-      - Diff the introspected output against `server/db/schema/*.ts` using `node:assert.deepStrictEqual` on the parsed AST or, simpler, use `diff -u` after running both through a `prettier --parser typescript` normaliser.
-      - Any non-trivial diff is a finding. Trivial diffs (whitespace, comment-only, import-order) are ignored.
-      - This step's load-bearing claim is "Drizzle schema is authoritative; migrations must produce that schema". The diff is the enforcement.
-   2. With `app.organisation_id` SET to a fixture org: for each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196), exercise both a `SELECT` and an `INSERT` inside a `BEGIN…ROLLBACK` envelope. Both must succeed.
-   3. With `app.organisation_id` UNSET: same operations, but split expected outcomes by operation type (matching the source remediation spec's RLS contract):
-      - `SELECT` returns zero rows (RLS filters silently — no exception).
-      - `INSERT` / `UPDATE` / `DELETE` is REJECTED with a Postgres error (FORCE RLS turns missing-org writes into hard failures, not silent zero-row no-ops).
-      - The script asserts each behaviour explicitly. If a tenant table's write returns zero rows instead of erroring, that's a finding (the table's RLS policy is missing FORCE RLS).
+   1. Spin up a fresh disposable database (a one-shot Postgres container, or a local dev DB the operator is OK to drop). Run every migration in `migrations/` (current numerical order) end-to-end. Verify zero errors. Verify `drizzle-kit introspect` matches the schema declared in `server/db/schema/*.ts` (the live source of truth — this repo treats the Drizzle schema as authoritative; any divergence between schema and migrations is itself a finding).
+   2. With `app.organisation_id` SET to a fixture org: write a single test row to each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196). Each must succeed. The script wraps each table's write in a `BEGIN…ROLLBACK` envelope so no test data persists.
+   3. With `app.organisation_id` UNSET: same writes. Each must fail closed (zero rows affected, no exception leak).
 2. Wire into a manual-trigger CI workflow (not blocking on every commit; runs on demand or pre-deploy when the operator chooses).
 3. Treat the very first run as the post-deploy validation for PR #196 — execute against a local dev DB and capture results.
 
@@ -1018,13 +1019,8 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 1. Create one agent via the admin UI; assert no errors in client/server logs.
 2. Trigger one automation; assert the workflow run completes.
 3. Trigger one webhook (GHL); assert the canonical-row write succeeds.
-4. Trigger and observe each of the four jobs:
-   - `bundleUtilizationJob` is **disabled until Phase 6** (per its file header `Schedule: disabled until Phase 6`); enqueue it manually via the queue admin tooling and confirm it runs without exception.
-   - `measureInterventionOutcomeJob` runs hourly — wait for one scheduled cycle OR enqueue manually.
-   - `ruleAutoDeprecateJob` runs nightly — enqueue manually; do NOT wait for the nightly slot.
-   - `connectorPollingSync` runs continuously — observe the next natural cycle.
-   Assert each runs without exception.
-5. Tail logs for 10 min on current main; observe baseline WARN-level volume and any specific WARN lines that look new or unusual. (No pre-merge baseline log is checked in for comparison; this is current-state observation only — if a future PR wants pre/post deltas, it must capture its own pre-merge baseline.)
+4. Wait for one cycle of: `bundleUtilizationJob`, `measureInterventionOutcomeJob`, `ruleAutoDeprecateJob`, `connectorPollingSync`. Assert each runs without exception.
+5. Tail logs for 10 min: count WARN-level lines pre-merge vs post-merge; investigate any spike.
 6. Tail LLM router metrics for 10 min: cost-per-request, retry rate; investigate any spike.
 7. Capture any unexpected behaviour as a `KNOWLEDGE.md` entry under "Post-merge observations: PR #196".
 
@@ -1205,8 +1201,8 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive |
 | A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ☐ todo | — | low-risk refactor |
 | B1 | saveSkillVersion orgId-required throw test | ☐ todo | — | trivial |
-| B2 | Job idempotency audit | ☐ todo | — | may bundle with B2-ext OR ship separately (split DoD allows partial completion) |
-| B2-ext | Job concurrency standard | ☐ todo | — | may bundle with B2 OR ship separately (split DoD allows partial completion) |
+| B2 | Job idempotency audit | ☐ todo | — | bundle with B2-ext |
+| B2-ext | Job concurrency standard | ☐ todo | — | bundle with B2 |
 | C1 | Gate baseline count line | ☐ todo | — | foundational for C2/D3/E2/H1 gates |
 | C2 | architect.md context-section drift guard | ☐ todo | — | depends on C1 |
 | C3 | Canonical registry drift test | ☐ todo | — | independent |
@@ -1235,3 +1231,9 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 - Advances to `Status: complete` when all rows are `✓` or `↗`.
 - After completion, the spec stays in `docs/superpowers/specs/` as historical record — do not delete.
 
+
+==== END SPEC ====
+
+==== ITERATION 3 NOTE ====
+This is iteration 3. Iterations 1+2 fixed: front-matter, A1 call-site granularity + withPrincipalContext naming + positive allowlist + guard-baselines.json, A2 Proxy-based runtime guard + file-based allowlist + correct migration path, A3 function-local getOrgScopedDb + correct middleware paths + DoD, B2 Jest replacement + concurrency-vs-idempotency separation + DoD split, C2 expected-count fixture, C3 inspect-first approach, D1 baseline destination, D3 diagnose-first, E2 Step-0 re-run, F2 rateLimitStoreService consumer-only, G1 disposable DB + current-order replay only, H1 logger sibling path. Focus on residual issues.
+==== END NOTE ====
