@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (gate authoring rules, manifest-migration consistency, logger test pattern)
+**Last updated:** 2026-04-27 (gate authoring rules, manifest-migration consistency, logger test pattern, CRLF, calibration constants, Pure test naming, withPrincipalContext job constraint; §10 format rules and finishing-branch trigger)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -179,6 +179,8 @@ Every call to `canonicalDataService` must pass a `PrincipalContext`. Use `fromOr
 
 Detection gate: `scripts/verify-principal-context-propagation.sh`
 
+`withPrincipalContext` throws if called outside an active `withOrgTx` block. Job handlers and other non-request contexts (which run outside any `withOrgTx`) must construct a `PrincipalContext` via `fromOrgId(orgId, subaccountId?)` and pass it as the first parameter — they cannot use `withPrincipalContext` wrapping.
+
 ---
 
 ## 5. Gates are the source of truth
@@ -214,6 +216,9 @@ Gates that emit `WARNING` (not `BLOCKING FAIL`) are observability signals. A `# 
 - **Scan-path override env vars must disable the matching path exclusions.** An override env var (e.g. `DERIVED_DATA_NULL_SAFETY_SCAN_DIR`) that points at a fixture directory is useless if the gate still applies `! -path "*/__tests__/*"`. Remove that exclusion when the override is set.
 - **Grep-based gates must skip `import type` lines.** Type-only imports are erased at compile time and should not trigger import-presence gates. Pipe through `grep -v "import type"` before the pattern match, or document the limitation and require `guard-ignore-next-line` at affected call sites.
 - **Advisory gate runners must use `|| true`.** Any script that captures advisory gate output via `OUTPUT="$(bash gate.sh 2>&1)"` under `set -euo pipefail` must append `|| true`: `OUTPUT="$(bash gate.sh 2>&1 || true)"`. Without it, promoting the gate from advisory to blocking will kill the runner before the count line is parsed.
+- **Calibration constants must enumerate every exclusion.** When a gate subtracts a hard-coded constant from a raw count, each excluded occurrence must be listed as an inline comment with a unique grep pattern (one hit per exclusion). A bare magic number is unverifiable — the next author cannot tell whether it's still correct. `scripts/verify-skill-read-paths.sh` is the canonical example.
+- **`actionType` regex must include dots.** The pattern `actionType: '[a-z_]+'` does not match dot-namespaced types (`crm.fire_automation`, `crm.query`, etc.). Use `[a-z_.]+` or document the exclusion explicitly.
+- **Strip CRLF when parsing files on Windows.** Windows-authored files contain `\r\n`. Bash scripts that join or split lines must pipe through `tr -d '\r'`; JS parsers must `.replace(/\r/g, '')` before splitting on `\n`. The `guard-utils.sh` jq wrapper already does this — new scripts must replicate it.
 
 ## 6. Migration discipline
 
@@ -233,6 +238,7 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 - **Gates pass = done.** A green gate run is the definition of done for a phase.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
 - **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
+- **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
 - **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
 - **Spy on the logger object directly, not on `process.env` or `console.*`.** `server/lib/logger.ts` captures `LOG_LEVEL` into a `const` at import time. Patching `process.env.LOG_LEVEL` in `beforeEach` is a no-op — the constant is already resolved. Use `mock.method(logger, 'warn', () => {})` / `mock.method(logger, 'debug', () => {})` to intercept at the object level. Without this, DEBUG-path tests silently false-PASS because the level filter drops the call before any spy can see it.
 
@@ -325,6 +331,19 @@ Before any PR that touches tenant data merges, answer YES to all five:
 - `docs/spec-context.md` flips `live_users: yes` → update §8.5 (feature freeze no longer applies; rollout model changes).
 - A new gate is introduced → add its detection reference to the relevant section.
 - A pattern from `KNOWLEDGE.md` reaches "stable, enforce everywhere" status → migrate it here.
+- **After finishing a development branch** → the `finishing-a-development-branch` skill (Step 2) scans code review output and appends qualifying findings here.
+
+### Format rules for all new additions
+
+Every new bullet added to this document must meet **all** of the following:
+
+- **One sentence preferred, two sentences maximum.** If you can't state the rule concisely, it is not ready for this document.
+- **No code blocks.** Code examples belong in `architecture.md` or `KNOWLEDGE.md`.
+- **No "why" explanations inline.** The rule stands alone. Rationale goes in the PR description or `KNOWLEDGE.md`.
+- **Class-level rule only.** Must prevent a repeatable class of mistake, not describe a one-off fix.
+- **Universally applicable.** Must apply across features, not be specific to one domain or PR.
+
+If a finding does not meet every criterion, it goes to `KNOWLEDGE.md` instead — not here with a caveat.
 
 ---
 
