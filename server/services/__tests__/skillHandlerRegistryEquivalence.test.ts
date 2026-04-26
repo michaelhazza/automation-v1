@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Uses dynamic await import('../skillExecutor.js') — gate regex only matches static 'from' imports; sibling is imported correctly"
 /**
  * skillHandlerRegistryEquivalence.test.ts — Phase 0 of skill-analyzer-v2.
  *

@@ -93,7 +93,7 @@ function extractFencedBlocks(markdown) {
         blocks.push({ tag, body: body.join('\n'), startLine });
         inBlock = false;
       } else {
-        body.push(line);
+        body.push(line.replace(/\r$/, ''));
       }
     }
   }

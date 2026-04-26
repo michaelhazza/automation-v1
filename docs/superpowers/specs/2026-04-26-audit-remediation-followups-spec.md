@@ -1535,7 +1535,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | D2 | Cycle count framing decision | ✓ done | Option (c) chosen: 43-cycle residual accepted to Phase 5A with 3-cluster breakdown. Recorded in source spec §6.3 + §13.3. | decision-only |
 | D3 | verify-skill-read-paths.sh cleanup | ✓ done | Calibration constant updated from 2 to 7; 5 surplus from crm.* dot-namespaced entries (not matched by ACTION_COUNT pattern); gate exits 0. | depends on C1 |
 | E1 | 4 pre-existing unit test failures | ✓ done | tasks/builds/audit-remediation-followups/e1-pre-existing-test-triage/ | All 4 test-only bugs fixed: referenceDocumentServicePure split-delimiter, skillAnalyzerPure SOURCE-marker assertion, skillHandlerRegistry +3 keys/count, crmQueryPlanner env-seeding preamble | triage |
-| E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
+| E2 | 2 pre-existing gate failures | ✓ done | tasks/builds/audit-remediation-followups/e2-pre-existing-gate-triage/ | pure-helper-convention: 7 files suppressed with guard-ignore-file (inline pure sims, dynamic imports, no-.js-ext import); integration-reference: CRLF parse error fixed in gate script, 26 advisory warnings baselined | triage; depends on C1 |
 | F1 | findAccountBySubaccountId targeted method | ☐ todo | — | independent |
 | F2 | configDocuments parsedCache durability | ☐ todo | — | strictly depends on Phase-5A `rateLimitStoreService`; defer or migrate to deferred if surface doesn't fit |
 | G1 | Migration sequencing verification (re-runnable) | ⧖ script authored; first-run against local DB pending | tasks/builds/audit-remediation-followups/g1-migration-sequencing/ | superseded as pre-merge; run as post-deploy |

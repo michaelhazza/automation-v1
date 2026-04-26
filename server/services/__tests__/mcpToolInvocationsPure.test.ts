@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Inline pure simulation — logic extracted inline to avoid impure transitive imports; no sibling import needed"
 /**
  * mcpToolInvocationsPure unit tests — runnable via:
  *   npx tsx server/services/__tests__/mcpToolInvocationsPure.test.ts

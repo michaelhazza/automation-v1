@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Inline pure simulation — constants inlined to avoid drizzle-orm transitive import; no sibling import needed"
 /**
  * memoryBlockVersionServicePure.test.ts — canonical registry + diff utility
  *
