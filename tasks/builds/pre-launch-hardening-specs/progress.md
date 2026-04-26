@@ -22,7 +22,7 @@ PR order ≠ implementation order. Do **not** infer dependency ordering from PR 
 
 ## Pinned SHAs
 
-- Invariants pinned at: _(captured in Task 0.6 Step 3)_
+- **Invariants pinned at:** `a00506b00613f4f649828e8a2896a0c931450999` (commit `a00506b0`, 2026-04-26)
 - Schema-decisions architect SHA: _(captured in Task 2.1 Step 3)_
 - Dead-path-completion architect SHA: _(captured in Task 3.1 Step 3)_
 
@@ -42,7 +42,7 @@ _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumpt
 
 - [x] Task 0    Branch setup
 - [x] Task 0.5  Mini-spec on branch — no-op (PR #203 already merged to main, mini-spec inherited at branch creation; verified byte-identical to source SHA 1023ff02)
-- [ ] Task 0.6  Cross-chunk invariants doc
+- [x] Task 0.6  Cross-chunk invariants doc — committed at a00506b0, all 5 done-criteria pass (5 sections, 30 invariants, all testable/enforceable, all cited, Amendments section present)
 - [ ] Task 1    Chunk 1 — RLS Hardening Sweep
 - [ ] Task 2.1  Architect input — Chunk 2
 - [ ] Task 3.1  Architect input — Chunk 3
