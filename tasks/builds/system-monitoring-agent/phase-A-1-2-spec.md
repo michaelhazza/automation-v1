@@ -1582,11 +1582,83 @@ A new filter pill is added to the existing filter bar at the top of `SystemIncid
 
 ## 11. Feedback loop
 
+The feedback loop is the **mechanism** by which the agent gets better. The agent on day one is calibrated against author intuition; without operator-grounded data, drift cannot be detected and tuning becomes guesswork. The loop is small, structured, and queryable.
+
 ### 11.1 Schema additions for prompt-was-useful
+
+The relevant columns are already declared in §4.5 (`prompt_was_useful`, `prompt_feedback_text`) — this subsection cross-references rather than duplicates.
+
+**Where they sit.** Both columns live on the `system_incidents` row, not on a separate feedback table. Rationale:
+
+- Each incident has at most one prompt and at most one feedback submission (per §10.4 — feedback is one-shot). A separate table would be a 1:1 row with the incident, which is over-normalisation.
+- The audit history of the feedback (who submitted when, did it change, partial-vs-yes) lives in the `system_incident_events` log, not as additional columns. The schema columns hold the **current state**; the events hold the **history**.
+
+**Lifecycle of these columns:**
+
+| State | `prompt_was_useful` | `prompt_feedback_text` | Triggered by |
+|---|---|---|---|
+| Incident never auto-triaged | NULL | NULL | initial |
+| Incident triaged, no feedback yet | NULL | NULL | agent triage write |
+| Operator submitted feedback | `true \| false` | text or NULL | `recordPromptFeedback` mutation |
+| Operator skipped (in §10.4 sense) | NULL | NULL | no DB write |
+
+**No backfill.** Existing incidents (from before this spec ships) have `NULL` in both columns and remain so. The Phase 0/0.5 backlog of incidents is not eligible for auto-triage retroactively (the agent did not exist when they happened) — backfilling is meaningless.
 
 ### 11.2 Event type — `investigate_prompt_outcome`
 
+The event row is the **fidelity-preserving** record. Where the schema columns hold "the answer", the event log holds "what happened, when, by whom, with what context."
+
+**Event type:** `investigate_prompt_outcome`. Appended to `system_incident_events` whenever `recordPromptFeedback` is called (§10.4 mutation).
+
+**Row shape:**
+
+| Column | Value | Notes |
+|---|---|---|
+| `event_type` | `investigate_prompt_outcome` | New value in the event-type enum (§12.1). |
+| `incident_id` | `system_incidents.id` | FK as usual. |
+| `actor_user_id` | the sysadmin who submitted the feedback | NOT NULL — feedback always has a human actor. |
+| `metadata.was_successful` | `'yes' \| 'no' \| 'partial'` | The full three-value answer, including the `partial` case that the boolean column flattens. |
+| `metadata.text` | `string \| null` | Free-text feedback (max 2,000 chars). |
+| `metadata.linked_pr_url` | `string \| null` | Optional. If the operator's resolution included a PR, the URL is captured (re-uses the existing resolve-modal "linked PR URL" field from Phase 0/0.5). Joining this to the agent's diagnosis is the single richest data point we collect. |
+| `metadata.resolved_at` | timestamp | When the resolve happened (the trigger before feedback). |
+| `metadata.diagnosis_run_id` | the agent run id from `agent_diagnosis_run_id` | Lets us join feedback back to the specific agent run that produced the diagnosis. |
+| `metadata.heuristic_fires` | array of heuristic ids | Which heuristics fired on this incident. Lets per-heuristic feedback aggregation work without re-querying. |
+| `created_at` | NOW() | Standard. |
+
+**Why duplicate `was_successful` between the column and the event metadata.** The column is the "current state" the UI reads. The event metadata captures the historical fidelity. If feedback is ever re-opened (e.g. an admin override path is added later), the column updates but the original event remains; auditing remains complete.
+
+**Idempotency.** The mutation is idempotent on `(incident_id, actor_user_id)` for first submission; subsequent calls are 409 (per §10.4). Event log holds exactly one `investigate_prompt_outcome` row per incident.
+
+**No emit when feedback is skipped.** "Skip" in the UI does not write an event; we only record affirmative actions. A "no feedback after N days" signal is derivable from `WHERE agent_diagnosis IS NOT NULL AND prompt_was_useful IS NULL AND status = 'resolved' AND resolved_at < NOW() - 30 days`. Phase 3 may reach for this via a follow-up audit dashboard; not built now.
+
 ### 11.3 What this trains for Phase 3
+
+The data accumulated by this loop is the **input to the Phase 3 (auto-fix) gate**. Phase 3 is its own design exercise; this section names the data dependencies it will rely on.
+
+**Per-heuristic FP rate calibration.**
+
+- Each `investigate_prompt_outcome` row joins to the heuristics that fired on the incident (`metadata.heuristic_fires`).
+- Aggregate: for each heuristic, the ratio of `was_successful = 'yes'` to total feedback submissions is the empirical proxy for "the heuristic identified a real issue."
+- This replaces author-best-guess `expectedFpRate` (§6.3) with measured rates, after enough volume.
+- Operator is expected to review this monthly (target cadence) and update heuristic metadata in the registry via PR.
+
+**Per-prompt-template effectiveness.**
+
+- `was_successful = 'yes' AND linked_pr_url IS NOT NULL` is the strongest positive signal: the operator was satisfied, and the diagnosis led to a code change.
+- `was_successful = 'no'` is the strongest negative signal: the prompt led nowhere or wrong direction.
+- `was_successful = 'partial' + free-text` is the iteration goldmine — operator-described "what the agent missed" maps directly to changes the prompt template (§9.7) or the protocol doc (§5) need to absorb.
+
+**Auto-fix gate signal (Phase 3 input).**
+
+- The threshold "the agent's prompts consistently lead to one-shot fixes operators accept without rewriting" is qualitative on day one.
+- Quantitative version: % of agent-diagnosed incidents where `was_successful = 'yes' AND linked_pr_url IS NOT NULL` exceeds (target tbd in Phase 3 design — likely 70-80%) over a rolling 30-day window.
+- When this metric stabilises above the threshold, Phase 3 can be designed with confidence that the agent's diagnosis quality is high enough to drive an automated executor against the same Investigate-Fix Protocol.
+
+**Why this matters for the overall product.**
+
+This is the lever that turns the system monitor from a "tool that helps operators" into "infrastructure that runs unattended." The pre-condition for unattended auto-fix is operator-grounded evidence that the agent's diagnoses are right often enough to trust without review. The feedback loop accumulates that evidence in a queryable form, with every resolve event. No separate dashboard build, no instrumentation campaign, no analytics pipeline — just structured rows on the existing event log.
+
+**No analytics view in this spec.** A sysadmin-only dashboard that visualises feedback rollups (per-heuristic FP rate over time, prompt-effectiveness trend) is **out of scope** for this spec. The data is captured; the visualisation is a Phase 3 deliverable, designed alongside the auto-fix gate. For now, the data is queryable via direct SQL or via a future audit log surface — neither blocks Phase 2 shipping.
 
 ## 12. Observability + kill switches
 
