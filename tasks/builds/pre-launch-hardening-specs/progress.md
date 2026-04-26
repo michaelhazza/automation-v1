@@ -53,7 +53,7 @@ _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumpt
 - [x] Task 0    Branch setup
 - [x] Task 0.5  Mini-spec on branch — no-op (PR #203 already merged to main, mini-spec inherited at branch creation; verified byte-identical to source SHA 1023ff02)
 - [x] Task 0.6  Cross-chunk invariants doc — committed at 31e94d34 (v2 supersedes a00506b0), all 5 done-criteria pass (6 sections, 36 invariants, typed enforcement (Gate/Test/Static/Manual), State/Lifecycle category added, Invariant Violation Protocol explicit, Amendments section present)
-- [ ] Task 1    Chunk 1 — RLS Hardening Sweep
+- [x] Task 1    Chunk 1 — RLS Hardening Sweep — PR #204 open
 - [ ] Task 2.1  Architect input — Chunk 2
 - [ ] Task 3.1  Architect input — Chunk 3
 - [ ] Task 4    Chunk 4 — Maintenance Job RLS Contract
@@ -72,7 +72,7 @@ _(populated as each chunk PR opens)_
 
 | Chunk | Spec slug | Branch | PR # | Status |
 |---|---|---|---|---|
-| 1 | pre-launch-rls-hardening | spec/pre-launch-rls-hardening | TBD | not started |
+| 1 | pre-launch-rls-hardening | spec/pre-launch-rls-hardening | [#204](https://github.com/michaelhazza/automation-v1/pull/204) | open for review |
 | 2 | pre-launch-schema-decisions | spec/pre-launch-schema-decisions | TBD | not started |
 | 3 | pre-launch-dead-path-completion | spec/pre-launch-dead-path-completion | TBD | not started |
 | 4 | pre-launch-maintenance-job-rls | spec/pre-launch-maintenance-job-rls | TBD | not started |
