@@ -22,7 +22,7 @@ PR order ≠ implementation order. Do **not** infer dependency ordering from PR 
 
 ## Pinned SHAs
 
-- **Invariants pinned at:** `31e94d34aaae5a609708e6fa511458ce256f4e11` (commit `31e94d34`, 2026-04-26 — v2 with typed enforcement + State/Lifecycle + Violation Protocol; superseded `a00506b0`)
+- **Invariants pinned at:** `cf2ecbd06fa8b61a4ed092b931dd0c54a9a66ad2` (commit `cf2ecbd0`, 2026-04-26 — v3 with Manual-enforcement owners + 6.3 cancelled/skipped semantics + amendment SHA re-pin protocol; supersedes `31e94d34` → `a00506b0`)
 - Schema-decisions architect SHA: _(captured in Task 2.1 Step 3)_
 - Dead-path-completion architect SHA: _(captured in Task 3.1 Step 3)_
 
