@@ -1884,11 +1884,129 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 
 ## 14. Testing strategy
 
+Three layers — unit, integration, manual smoke. Each layer has explicit gating so the executor can self-verify each slice before handoff (§15.3). Coverage targets are stated as concrete invariants, not percentage goals.
+
 ### 14.1 Unit
+
+Pure-function tests. Fast, deterministic, no DB, no network. CI-gating per architecture.md.
+
+**Phase A:**
+
+| Test target | Invariants asserted |
+|---|---|
+| `idempotency.ts` (§4.1) | 100 calls in 1s with same key → 1 ingest, 99 LRU hits. 2 calls 61s apart → 2 ingests (TTL respected). LRU eviction at 10,001st key drops oldest. Different fingerprints with same key → independent (key is `${fp}:${key}`). |
+| `throttle.ts` (§4.2) | 100 calls in 1s with same fp → 1 ingest, 99 throttled. 2 calls 1.1s apart with same fp → 2 ingests. Map eviction at 50,001st unique fp → oldest drops, metric increments. Fingerprint isolation: cross-fp calls do not interfere. |
+| `systemPrincipal.ts` (§4.3) | `getSystemPrincipal()` returns reference-equal singleton across calls. Principal carries `scope='system'`, `isSystemPrincipal=true`, no PII. |
+| `assertSystemAdminContext.ts` (§4.4) | Throws `UnauthorizedSystemAccessError` for: unauthenticated context, regular user context, org-admin context, subaccount-admin context. Passes for: system-principal context, sysadmin context with `system_admin.write` permission. |
+
+**Investigate-Fix Protocol (§5):**
+
+| Test target | Invariants asserted |
+|---|---|
+| `promptValidation.ts` (§9.8) | Rejects: missing required section, length below 200 chars, length above 6,000 chars, "git push" / "merge to main" / "auto-deploy" patterns. Accepts: full template with all required sections, length 400–800 tokens. |
+
+**Heuristic registry (§6) and heuristics (§9.5, §9.6):**
+
+| Test target | Invariants asserted |
+|---|---|
+| Each `Heuristic` module | Positive test (synthetic candidate that should fire → fires with expected confidence). Negative test (baseline-normal candidate → does not fire). `requiresBaseline` test (insufficient sample count → returns `insufficient_data`, does not fire). |
+| Each suppression rule | Specific positive case (rule matches → fire suppressed, audit row written with `suppression_id`). |
+| Registry index (§6.4) | All registered heuristics conform to the `Heuristic` interface (compile-time enforced; this is a runtime cross-check). Phase filter respects `SYSTEM_MONITOR_HEURISTIC_PHASES`. |
+
+**Baselining (§7):**
+
+| Test target | Invariants asserted |
+|---|---|
+| `baselineReader.ts` | Returns null on no row. `getOrNull` returns null when `sample_count < min`. Reads are read-only — no side effects. |
+| Refresh-job pure helpers | Aggregate computation correct against fixture: p50, p95, p99, mean, stddev, min, max all match expected values for a known input set. UPSERT semantics verified at the integration layer. |
+
+**Synthetic checks (§8):**
+
+| Test target | Invariants asserted |
+|---|---|
+| Each check module (§8.2) | Positive test (condition is met → fires with expected severity, fingerprint override format correct). Negative test (condition not met → `fired: false`). Cold-start: no baseline → returns `fired: false` with skip log line, never fires false-positive. |
+
+**Phase 2 triage (§9.2, §9.3):**
+
+| Test target | Invariants asserted |
+|---|---|
+| `clusterFires.ts` | N fires on the same candidate → 1 cluster. Fires on N different candidates → N clusters. |
+| `rateLimit.ts` | First two attempts within window → allowed. Third attempt → blocked, `agent_triage_skipped` event written. After window expires → counter resets. Auto-escalation respects guardrails — guardrail fail → `agent_escalation_blocked` event. |
+
+**Client (§10):**
+
+| Test target | Invariants asserted |
+|---|---|
+| `DiagnosisAnnotation.tsx` | Renders all five empty/awaiting states correctly per §10.3 mapping. |
+| `InvestigatePromptBlock.tsx` | Copy button writes to clipboard mock. Markdown rendering preserves headings and code blocks. |
+| `FeedbackWidget.tsx` | All three radio options enable Submit. Skip hides widget without server call. Submit posts correct payload, displays success state, persists across drawer re-open. |
+| `DiagnosisFilterPill.tsx` | All four values map to expected query params. ANDs correctly with existing filters in the URL. |
 
 ### 14.2 Integration
 
+DB required, full stack. Each test in its own transaction; rolled back at the end. Some tests need pg-boss in test mode.
+
+**Phase A:**
+
+| Test | What it proves |
+|---|---|
+| `systemPrincipal.integration.test.ts` | `withSystemPrincipal` sets the session-variable; SELECT against `system_incidents` works inside the wrapper, fails outside. SELECT against `agent_runs` returns rows (system principal has read access to tenant tables for monitoring). SELECT against tenant-write tables (e.g. `subaccounts`) without explicit grant returns RLS-denied. |
+| `idempotencyEndToEnd.integration.test.ts` | Two `recordIncident` calls with same `idempotencyKey` and fp → exactly 1 row in `system_incidents`, 1 event row, occurrence count = 1. Same key + different fp → 2 rows. Different key + same fp → 2 occurrences (correct — distinct operations). |
+| `throttleEndToEnd.integration.test.ts` | 100 fast calls with same fp → 1 row, 1 occurrence count, 99 throttled metrics. |
+| Phase 0/0.5 regression suite | All existing Phase 0/0.5 tests still pass (no schema or behaviour regressions). Run as part of every CI build. |
+
+**Phase 1:**
+
+| Test | What it proves |
+|---|---|
+| `syntheticChecks.queueStalled.integration.test.ts` | Pause pg-boss processing for the threshold duration; tick produces an incident with `source='synthetic'`, fingerprint override per §8.3. Subsequent ticks within the bucket window do not duplicate (idempotency key works). |
+| `syntheticChecks.coldStart.integration.test.ts` | Fresh test DB with no agents / connectors → ticks for 60 minutes, zero false-positive incidents written. |
+| `syntheticChecks.heartbeat.integration.test.ts` | Tick 1 writes heartbeat. Manually advance clock 3× tick interval. Tick 2 reads stale heartbeat → fires critical incident. Self-check incident `metadata.isSelfCheck = true` set; Phase 2 triage does not auto-trigger (recursion guard). |
+| `baselineRefresh.integration.test.ts` | Seed 100 agent_run rows; run refresh; verify `system_monitor_baselines` row created with correct stats. Re-run refresh; row updated, not duplicated. Window cutoff: rows older than 7 days excluded. |
+
+**Phase 2:**
+
+| Test | What it proves |
+|---|---|
+| `triageJob.incidentDriven.integration.test.ts` | Open an incident with `severity='high'`. Triage job dispatched within transaction. Agent run starts. `agent_diagnosis_added` event written within 60 seconds of incident open. `system_incidents` row has populated diagnosis fields. |
+| `triageJob.sweepDriven.integration.test.ts` | Stage a soft-fail signal: agent run with empty output. Run a sweep tick. Heuristic `empty-output-baseline-aware` fires. Triage job dispatched. New incident created with `source='sweep'` (or appropriate). Diagnosis written. |
+| `triageJob.rateLimit.integration.test.ts` | Open an incident with same fingerprint 3 times in 1 hour. First two trigger triage; third skipped (rate-limited). After 24h window: counter reset; new attempt triages. |
+| `triageJob.autoEscalate.integration.test.ts` | Rate-limited incident with `severity='critical'` after window expires → auto-escalation event written, manual-escalate path invoked, escalation guardrails respected. |
+| `triageJob.killSwitch.integration.test.ts` | Set `SYSTEM_MONITOR_ENABLED=false`. Open an incident. Triage job not dispatched (or, if pre-dispatched, handler short-circuits with `agent_triage_skipped` event). No agent run starts. |
+| `sweepJob.cap.integration.test.ts` | Stage 100 candidates; sweep selects top 50 by confidence; emits `sweep_capped` event with `excess_count=50`. |
+| `incidentFeedback.integration.test.ts` | Resolve agent-diagnosed incident → `recordPromptFeedback` mutation writes to `prompt_was_useful` + `prompt_feedback_text`, emits `investigate_prompt_outcome` event. Second submission returns 409. Non-sysadmin caller returns 403. |
+| `promptValidation.integration.test.ts` | Agent run produces invalid prompt → write rejected, retry triggered, second invalid → `agent_triage_failed` event written, drawer shows failure state. |
+| `agentSkillSet.integration.test.ts` | Verify the `system_monitor` agent's bound skill set has zero `destructiveHint: true` skills. CI gate. |
+
+**RLS and access control:**
+
+| Test | What it proves |
+|---|---|
+| `rls.systemMonitor.integration.test.ts` | Non-sysadmin user (regular, org-admin, subaccount-admin) cannot SELECT `system_monitor_baselines` or `system_monitor_heuristic_fires`. Non-sysadmin user cannot call any new mutation routes. |
+| `rls.systemPrincipal.integration.test.ts` | System principal context can SELECT system tables, can INSERT into `system_incidents` (only via `recordIncident`), cannot INSERT into tenant tables. |
+
 ### 14.3 Smoke
+
+Manual, run in staging, gating production deploy. Not CI-automated.
+
+| Step | What to do | Pass criterion |
+|---|---|---|
+| 1. Phase A smoke | Trigger a fast retry loop (e.g. break a known route, hit it 100×/sec for 5s). | `system_incidents` shows 1 row with throttle metric incremented; not 100 rows. |
+| 2. Synthetic queue stall | Pause one pg-boss queue worker for 6 minutes. | `pg-boss-queue-stalled` synthetic check fires; incident row appears in admin page with `source='synthetic'`. |
+| 3. Synthetic heartbeat | Stop the synthetic-check job for 4 minutes; restart. | Tick after restart fires `heartbeat-self`; recursion guard prevents Phase 2 auto-triage on the resulting incident. |
+| 4. Phase 2 incident-driven | Trigger a real high-severity incident (e.g. force a deliberate failure in a test agent). | Within 60s, drawer shows agent diagnosis + investigate prompt; `agent_diagnosis_added` event in audit log. |
+| 5. Phase 2 sweep | Configure a test agent to return empty output. Trigger a run. | Within 5 minutes, sweep produces a triage; new incident with diagnosis appears. |
+| 6. Prompt copy-paste | Copy the generated `investigate_prompt` from the drawer into a fresh local Claude Code session. | Claude Code reads the prompt, identifies the relevant files, follows the investigation steps without follow-up clarification. (This is the load-bearing manual test — it is the Investigate-Fix Protocol's only end-to-end validation.) |
+| 7. Feedback widget | Resolve the agent-diagnosed incident from step 4. Submit `wasSuccessful='yes'` with linked PR URL. | `investigate_prompt_outcome` event row written with all metadata. Subsequent drawer open shows feedback summary. |
+| 8. Rate-limit | Trigger the same incident fingerprint 3 times in succession. | First two triage; third skipped with `agent_triage_skipped` event. |
+| 9. Kill switch | Set `SYSTEM_MONITOR_ENABLED=false`. Open a high-severity incident. | No triage. Page shows incident with "Auto-triage rate-limited or disabled" inline state. Reset switch; new incident triages normally. |
+| 10. Cold-start | Spin up a fresh staging DB. Run for 60 minutes with no real activity. | Zero false-positive synthetic incidents. Zero baseline-dependent heuristic fires (all return `insufficient_data`). |
+
+**Smoke checklist** lives in `tasks/builds/system-monitoring-agent/staging-smoke-checklist.md` (created in Slice D as part of the rollout-plan handoff). Every step has a pass/fail tickbox plus a notes column for observations.
+
+**Re-run on every staging deploy** before promoting to production. The full suite is ~30 minutes of focused operator time. Acceptable for the deploy cadence.
+
+**No load test in this spec.** Phase 0/0.5 covered the load test for the ingest path. The new layers (synthetic checks, sweep, agent triage) are bounded by their own caps (input cap on sweep, rate limit on triage, tick interval on synthetic). A load test of "100× the expected sweep candidate volume" is not flagged as needed for this spec — it is a Phase 3 readiness exercise if and when traffic patterns suggest it.
 
 ## 15. Rollout plan
 
