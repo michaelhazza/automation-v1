@@ -76,6 +76,19 @@ export class RlsBoundaryAdminWriteToProtectedTable extends Error {
   }
 }
 
+export class RlsBoundaryUnresolvableTable extends Error {
+  readonly code = 'rls_boundary_unresolvable_table';
+  constructor(public readonly method: 'insert' | 'update' | 'delete', source: string) {
+    super(
+      `[rls-boundary] Could not extract table name from .${method}() argument (${source}): ` +
+        `Drizzle's internal table shape may have changed, or the caller passed an unexpected value. ` +
+        `If this is a legitimate Drizzle release upgrade, update extractTableName() in server/lib/rlsBoundaryGuard.ts ` +
+        `to recognise the new shape. Failing closed in dev/test prevents an RLS bypass via the proxy's silent-skip path.`,
+    );
+    this.name = 'RlsBoundaryUnresolvableTable';
+  }
+}
+
 // ── Allowlist loading ──────────────────────────────────────────────────────
 
 let cachedAllowlist: ReadonlySet<string> | null = null;
@@ -246,6 +259,16 @@ export function wrapWithBoundary<T extends object>(
         const tableName = extractTableName(table);
         if (tableName) {
           checkWrite(tableName, options);
+        } else {
+          // Defence-in-depth (Y5): if extractTableName returns null on a write,
+          // we cannot run the boundary check. Production short-circuits above
+          // (wrapWithBoundary returns the handle unchanged), so this branch
+          // only runs in dev/test — failing closed surfaces the gap loudly
+          // before it ships, instead of silently letting the write through.
+          throw new RlsBoundaryUnresolvableTable(
+            prop as 'insert' | 'update' | 'delete',
+            options.source,
+          );
         }
         // Forward to the original method with its original receiver. Using
         // .apply preserves the chained-builder return value.

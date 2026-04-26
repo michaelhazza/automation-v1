@@ -1010,3 +1010,28 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
   - Suggested approach: prepend Rule 1's grep pipeline in `scripts/verify-rls-contract-compliance.sh` with `grep -v "^[[:space:]]*import type "` (or augment the per-line filter inside the while loop). Type-only imports are erased at compile time and issue zero queries, so the gate has no business flagging them. 2-line change.
   - Why deferred: the suppression in this branch is correct under the current rules; gate-level fix is hygiene improvement, not a correctness fix.
 
+---
+
+## Deferred from PR #203 (ChatGPT review) — candidates for next spec
+
+**Captured:** 2026-04-26T08:00:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-claude-deferred-quality-fixes-ZKgVV-2026-04-26T07-57-14Z.md`
+**PR:** #203 — https://github.com/michaelhazza/automation-v1/pull/203
+**Branch:** `claude/deferred-quality-fixes-ZKgVV`
+
+ChatGPT review of the audit-remediation-followups PR surfaced two architectural items that were deferred (after user review) for follow-up specs. Items below are not bugs in the current PR — they are scale/contract concerns that warrant their own scoped spec rather than being wedged into this branch.
+
+- [ ] **CHATGPT-PR203-R2** — Replace per-row tx + advisory-lock pattern in `measureInterventionOutcomeJob` with a batched per-org claim model.
+  - **Severity:** medium (throughput / scale).
+  - **Scope:** architectural (changes documented concurrency model + likely requires schema work).
+  - **Files affected:** `server/jobs/measureInterventionOutcomeJob.ts`, possibly `server/db/schema/interventionOutcomes.ts` (uniqueness constraint on `intervention_id`).
+  - **Rationale for defer:** the current per-row tx + advisory lock is correct (claim+verify idempotency), but at high intervention throughput it serialises every row through a lock + transaction round-trip. ChatGPT's suggested `INSERT ... ON CONFLICT (intervention_id) DO NOTHING` would shed the lock and the per-row tx, but it presumes a unique constraint on `intervention_outcomes.intervention_id` that does not currently exist. The alternative (batch per org, single tx, conditional insert) changes the documented per-row claim+verify semantics that the spec explicitly chose. Either path is non-trivial reasoning + a migration; deserves its own spec.
+  - **Suggested next-spec framing:** decide between (a) add unique constraint on `intervention_outcomes.intervention_id` and switch to `ON CONFLICT DO NOTHING`, or (b) keep claim+verify but batch per-org with a single tx and a single advisory lock per batch. (a) is simpler if the data model permits it; (b) preserves the current concurrency model but amortises lock overhead. Either way the spec should set a target throughput (rows/sec/org) and include a load-test acceptance criterion.
+
+- [ ] **CHATGPT-PR203-BONUS** — Standardise a cross-job `JobResult` discriminated union (`ok | noop | partial | error`) with `queueService` logging + monitoring agent consumption.
+  - **Severity:** low (system-thinking / observability hygiene).
+  - **Scope:** architectural (cross-cutting refactor across all job files).
+  - **Files affected:** every file under `server/jobs/*` (each job's return shape), `server/services/queueService.ts` (logging consumer), monitoring/alerting consumers (TBD), shared types (`shared/types/jobs.ts` or new).
+  - **Rationale for defer:** valid system-thinking improvement that would unify how jobs report outcome and how monitoring acts on partial-success. Not a bug; ChatGPT explicitly tagged it "optional but powerful." Tacking it onto this PR would balloon scope across all jobs without a clear contract sketch. Better as a dedicated spec that defines the union, the queueService logging shape, the monitoring consumer's expectations, and a migration plan that converts jobs incrementally rather than in one commit.
+  - **Suggested next-spec framing:** define `JobResult = { kind: 'ok', detail?: ... } | { kind: 'noop', reason: string } | { kind: 'partial', completed: N, failed: M, errors: ... } | { kind: 'error', cause: ... }`. Specify how `queueService` logs each kind (current `logger.info('job_noop', ...)` already covers `noop`). Specify which monitoring signals each kind raises. Migrate jobs file-by-file behind the new return shape; old plain-`Promise<void>` jobs continue to work as `kind: 'ok'` until migrated.
+

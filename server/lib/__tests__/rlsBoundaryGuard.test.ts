@@ -23,6 +23,7 @@
 import {
   RlsBoundaryUnregistered,
   RlsBoundaryAdminWriteToProtectedTable,
+  RlsBoundaryUnresolvableTable,
   assertRlsAwareWrite,
   withOrgScopedBoundary,
   wrapWithBoundary,
@@ -236,6 +237,31 @@ test('case 6: Proxy preserves return shape — chained .insert(t).values(r).retu
   assertEqual(guarded.other, 42, 'arbitrary props untouched');
 });
 
+// ── Case 7: Y5 — unresolvable table name throws in dev/test ───────────────
+
+test('case 7: write with unresolvable table name throws RlsBoundaryUnresolvableTable in dev/test', () => {
+  const { handle } = makeStubHandle();
+  const guarded = wrapStubOrgScoped(handle, 'test-case-7');
+  // Pass an object with no `_.name`, no `name`, and no `TableName` symbol —
+  // simulating a Drizzle internal-shape change that breaks extractTableName.
+  const opaqueTable = { mystery: 'shape' } as unknown as { _: { name: string } };
+  assertThrows(
+    () => guarded.insert(opaqueTable),
+    RlsBoundaryUnresolvableTable,
+    'expected RlsBoundaryUnresolvableTable on insert with opaque table',
+  );
+  assertThrows(
+    () => guarded.update(opaqueTable),
+    RlsBoundaryUnresolvableTable,
+    'expected RlsBoundaryUnresolvableTable on update with opaque table',
+  );
+  assertThrows(
+    () => guarded.delete(opaqueTable),
+    RlsBoundaryUnresolvableTable,
+    'expected RlsBoundaryUnresolvableTable on delete with opaque table',
+  );
+});
+
 // ── Production-mode no-op (extra confidence) ───────────────────────────────
 
 test('production mode: assertRlsAwareWrite never throws on an unregistered table', () => {
@@ -259,6 +285,24 @@ test('production mode: wrapWithBoundary returns the handle unchanged (no proxy o
     assertEqual(guarded, handle, 'handle returned unchanged in production');
     // And admin write to a protected table does NOT throw.
     guarded.insert(tasksTable);
+  } finally {
+    process.env.NODE_ENV = prevEnv;
+  }
+});
+
+test('production mode: wrapWithBoundary bypasses the hardened branch (returns raw handle, no proxy intercept)', () => {
+  const prevEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    const { handle } = makeStubHandle();
+    const guarded = wrapStubOrgScoped(handle, 'prod-unresolvable-bypass');
+    // Identity equality is the meaningful invariant — production returns the
+    // raw handle, so the guard's hardened "throw on unresolvable table" branch
+    // is unreachable in prod. RLS policy itself is the prod ground truth; the
+    // dev-time hardening (case 7 above) is what surfaces the gap before it
+    // ships. Anything beyond identity here is a function of the underlying
+    // handle's behaviour, not the guard's.
+    assertEqual(guarded, handle, 'handle returned unchanged in production');
   } finally {
     process.env.NODE_ENV = prevEnv;
   }
