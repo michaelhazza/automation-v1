@@ -5,7 +5,7 @@
  * Security enabled with a tenant-isolation policy keyed on
  * `current_setting('app.organisation_id', true)`. The list is consumed by:
  *
- *   - `scripts/gates/verify-rls-coverage.sh` — CI gate that fails when a
+ *   - `scripts/verify-rls-coverage.sh` — CI gate that fails when a
  *     manifest entry has no matching `CREATE POLICY` in any migration.
  *     Every migration that adds a new tenant-owned table is expected to
  *     append the table to this manifest in the same commit.
