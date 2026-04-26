@@ -1,0 +1,32 @@
+## Cross-cutting
+1. Several verification commands in the spec do not exist in this repo as written. Ref: A1/A3 DoD and B1/E1 commands (`npm run typecheck`, `npm run lint`, `npm test -- …`); `package.json` only defines `build`, `build:server`, `test`, `test:gates`, `test:qa`, and `test:unit`. Fix: replace them with repo-real commands such as `npm run build:server`, `npx tsx <test-file>`, or a documented gate script. Severity: `important`.
+
+2. Some test instructions assume Jest/Mocha APIs that the repo does not use. Ref: B1 approach (`await expect(...).rejects...`) and E1 disposition (`it.skip(...)`); current tests are plain `node:test` or custom `tsx` harnesses, not Jest. Fix: rewrite these sections in repo-native terms (`test(...)`, `assert.rejects(...)`, or a local skip convention) so implementers do not have to invent a framework. Severity: `important`.
+
+3. The item bodies still lack a local status field even though §0 says every item carries a uniform pickup shape. Ref: §0 “each item below carries the same shape” vs item sections, which have `Audit verdict` but no `Status`; status exists only in §5. Fix: add `Status: ☐ todo` or at least `Tracking: §5/<row>` to each item header. Severity: `minor`.
+
+## A1 / A2 / A3
+1. A1 contradicts the current canonical read surface by banning object-literal first args without saying how existing object-shaped methods migrate. Ref: A1 step 2 “change the signature to accept `PrincipalContext` as the first parameter” plus step 4 “Anything else is a violation — including raw object literals”; current planner callers already use `canonicalDataService.listInactiveContacts({ orgId, subaccountId, ... })`-style calls. Fix: split A1 into two explicit migration shapes: positional methods become `(principal, ...)`, object methods become either `(principal, args)` or `{ principal, ...args }`, and align the gate with that choice. Severity: `critical`.
+
+2. A2’s runtime-guard mechanism is written against a `withAdminConnection` API that does not exist. Ref: A2 step 2 “Wrap `withAdminConnection`’s returned handle the same way”; actual `withAdminConnection` is callback-based, not a handle factory. Fix: specify either wrapping the `tx` passed into the callback or adding a named helper that proxies the callback argument before invoking user code. Severity: `critical`.
+
+3. A2’s proposed architecture rule overstates the contract and conflicts with the same item’s admin-bypass story. Ref: A2 DoD says “All writes to tenant-scoped tables must go through `getOrgScopedDb`,” while A2 itself allows deliberate `withAdminConnection` writes and tests for them. Fix: narrow the rule to normal tenant-scoped request/job paths, and explicitly carve out deliberate admin-bypass writes via `withAdminConnection` + `SET LOCAL ROLE admin_role`. Severity: `important`.
+
+4. A3 claims “existing route tests” cover the migration, but the spec names no such suites and the service functions are not obviously exercised by dedicated tests. Ref: A3 Acceptance criteria / Tests required (“Existing route tests covering `resolveBriefVisibility`, `resolveConversationVisibility`, and onboarding-state reads continue to pass”). Fix: name the exact existing test files, or make one small service-level test mandatory for each service instead of hoping the coverage exists. Severity: `important`.
+
+## C2 / D3 / E2
+1. C2’s count-only fixture cannot satisfy its own acceptance criteria. Ref: C2 approach stores only `architect-context-expected-count.txt`, but acceptance says deleting one path should fail “with a specific error naming the deleted entry.” Fix: store the expected path list, not just the count, or weaken the acceptance criteria to count-only drift detection. Severity: `important`.
+
+2. D3’s diagnosis is already stale against the current gate logic. Ref: D3 says the gate reports `Literal action entries: 94, with readPath: 99` and wonders whether “the subtraction may not be running,” but `verify-skill-read-paths.sh` currently subtracts 2 before printing. Fix: refresh D3 from a fresh captured run on current `main` and replace the speculative 99/97 narrative with the actual output and root cause. Severity: `important`.
+
+3. E2 still hardcodes placeholder warning counts after explicitly saying they must be re-run first. Ref: E2 Step 0 says “The numbers below (‘26 warnings’, ‘1 blocking error’) are placeholders,” but Acceptance criteria still says “26 warnings: recorded in `scripts/guard-baselines.json`…”. Fix: replace hardcoded numbers with `<captured warning count>` language until the rerun is done, or update the section immediately with the real count. Severity: `important`.
+
+## G1 / G2
+1. G1’s schema-verification claim is load-bearing but underspecified, and its fail-closed write expectation is likely wrong for RLS writes. Ref: G1 step 1.1 says “Verify `drizzle-kit introspect` matches the schema declared in `server/db/schema/*.ts`” without naming a diff procedure, and step 1.3 says writes with `app.organisation_id` unset should produce “zero rows affected, no exception leak,” while the source remediation spec describes missing-org writes as rejected runtime errors. Fix: define the exact comparison artifact for introspection, and split expected outcomes by operation type (`SELECT` returns none, writes are rejected/error as appropriate). Severity: `important`.
+
+2. G2 asks for a pre-merge vs post-merge WARN comparison that cannot be produced from this backlog item alone. Ref: G2 step 5 “count WARN-level lines pre-merge vs post-merge”; the PR is already merged and the spec does not point to any pre-merge baseline log. Fix: either point to a concrete pre-merge log artifact or change the step to a current-state smoke observation only. Severity: `important`.
+
+3. G2 tells the operator to “wait for one cycle” of `bundleUtilizationJob`, but that job is currently documented as disabled until Phase 6. Ref: G2 step 4 names `bundleUtilizationJob`; current job header says “Schedule: disabled until Phase 6.” Fix: change the runbook to manually trigger disabled jobs, or remove them from the passive “wait for one cycle” checklist. Severity: `important`.
+
+## B2 / Tracking
+1. B2/B2-ext says the two items may ship in separate PRs “in either order,” but §5 tracking still says “bundle with B2-ext” / “bundle with B2.” Ref: B2 note on partial completion vs §5 rows for `B2` and `B2-ext`. Fix: change the tracking notes to reflect optional bundling so the table does not contradict the split DoD. Severity: `minor`.
