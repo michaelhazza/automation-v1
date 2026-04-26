@@ -596,6 +596,30 @@ This subsection makes the per-component failure surface explicit. Constraints de
 
 **Key consistency check (CI gate).** Slice C adds a CI script that greps every `enqueue` / `pgboss.send` / `recordIncident` call site in the new code and verifies an `idempotencyKey` or `singletonKey` is set per the table above. Missing → CI red. Pattern: regex over `server/services/systemMonitor/**` and `server/jobs/systemMonitor*.ts`.
 
+**Storage, lifecycle, cleanup, and collision handling.**
+
+| Idempotency layer | Storage | Lifecycle | Cleanup | Collision handling (key exists, payload differs) |
+|---|---|---|---|---|
+| `recordIncident` LRU (§4.1) | Process-local `Map`-backed LRU, 10,000 entries soft cap | Per-process; lost on restart by design | LRU eviction on size or TTL (60s); no background sweep needed | **Last-payload-wins is unacceptable** — payload differing means a different logical operation arrived under the same key (caller bug). The LRU stores only the key, not the payload, so collision is undetectable. The downstream DB write performs a fingerprint+content-hash compare and, on mismatch, writes a fresh row (the second call is treated as a distinct occurrence). The mismatch is logged at `warn` with `idempotency-key-payload-mismatch`. |
+| Per-fingerprint throttle map (§4.2) | Process-local `Map<string, number>`, 50,000 entries cap | Per-process | LRU eviction on size; entries naturally age out as time advances past the throttle window | n/a — value is just a timestamp, not payload-bearing |
+| pg-boss `singletonKey` | pg-boss tables (`pgboss.job`) | Job lifetime — ends when job state is `completed`, `failed`, or `archived` | pg-boss internal — `pgboss.archive` retention controlled by existing pg-boss config | pg-boss collapses concurrent enqueues by key; payload of the second enqueue is **discarded**, not merged. If callers must surface a payload-differs case, the caller checks the singleton-key-collision return value from `pgboss.send` and emits a log line. |
+| `write_diagnosis` work-product idempotency (§4.8 row) | DB-row-level: `system_incidents.agent_diagnosis_run_id` carries the agent run id; second call with the same `(incidentId, agentRunId)` is a no-op | Permanent — until the incident reopens with a fresh `agent_diagnosis_run_id` (re-triage) | None needed — the row is durable; new triage replaces it via UPDATE | If `(incidentId, agentRunId)` already exists with a different `agent_diagnosis` payload, this is a contract violation (the agent retried with the same run id but produced different content). Write rejected with typed error; logger error `write-diagnosis-payload-conflict`. The retry-up-to-2 loop in §9.8 is the legitimate path; payload-conflict beyond that is a bug. |
+| `recordPromptFeedback` mutation (§10.4) | DB unique constraint or application-level check on `(incident_id, actor_user_id)` plus the `prompt_was_useful IS NULL` precondition | Permanent (until admin-override path is added — out of scope) | None | First-wins; second submission returns 409 with body `{ error: 'feedback-already-submitted' }`. No silent overwrite. |
+
+**Cleanup posture for in-process layers.** The two in-process layers (LRU, throttle map) self-clean via eviction and TTL. There is **no background sweep** — adding one would be a new failure surface (sweep that doesn't run leaves stale data; sweep that runs too often masks real cardinality). The cap-based + TTL-based eviction model is the simpler-and-correct posture.
+
+**No persistent idempotency store.** This spec deliberately does not introduce a Redis / DB-backed idempotency cache. The cost of a missed dedupe is "two rows where one would do" — recoverable at the row level via the existing fingerprint deduplication in `recordIncident`. The cost of building a persistent cache is non-trivial (operational dependency, eviction story, cross-tenant blast radius). Phase 3 may upgrade if traffic patterns warrant; that decision lives in Phase 3's design, not here.
+
+**Schema evolution rules for idempotency-bearing JSON payloads.**
+
+The `schema_version: 'v1'` field on agent-emitted JSON (§9.8) is the version anchor. The compatibility contract is:
+
+- **Backward compatibility (readers).** Code that reads a `v1` payload MUST tolerate unknown fields — additive changes within `v1` (new optional keys) are not version bumps. A `v1` consumer that throws on unknown keys is a bug.
+- **Forward compatibility (writers).** A new version MUST NOT remove a required field without a version bump. Required-field removal or type changes are breaking — the writer bumps to `v2` and the reader switches on `schema_version` to dispatch.
+- **Old-record readability.** Old records with `schema_version: 'v1'` MUST remain readable without transformation after a `v2` is introduced. Migration of historical rows is out of scope; readers handle both versions side-by-side, indefinitely. (This matches the additive-only schema posture in §4.6 — schema changes never destroy history.)
+- **What "required" means.** Required fields per `v1` are the ones documented in §9.8 + §12.1 metadata tables. New optional fields can land any time without a version bump as long as readers tolerate them.
+- **Version-bump trigger.** A version bump is required only when a payload field is removed, renamed, retyped, or its semantics change in a way that breaks a `v1` reader. New optional fields, additional enum values on string-enum fields (with `v1` readers ignoring unknown enum values), and stricter validation on writes (rejecting payloads `v1` would have accepted) are NOT version bumps — they are graceful evolutions within the version.
+
 **Why this is a global invariant, not per-component.** A new sub-system added in Phase 3 must inherit the same idempotency posture without redesign. Naming the rule once + centralising the key formats is the lever that prevents per-feature drift.
 
 **Inherited from Phase 0/0.5.** The fingerprint algorithm itself (the deterministic identity of an incident) is unchanged — it is the natural identity component for every `recordIncident` key. Phase 0/0.5 fingerprint contract is the foundation; this section layers idempotency keys *on top of* fingerprint, not in place of.
@@ -652,6 +676,68 @@ This subsection makes the per-component failure surface explicit. Constraints de
 - **Mechanism:** Two concurrent calls reading `lastSeenByFingerprint.get(fp)` may both see no entry, both proceed to ingest, both write `lastSeenByFingerprint.set(fp, now)`. Result: two ingests in a 1-2ms window, then throttle kicks in for subsequent calls. The race window is sub-millisecond; the cost is one duplicate row at most. Not worth a mutex — the throttle is a soft optimisation.
 
 **Cross-cutting concurrency posture.** All concurrency rules are documented and tested. The three load-bearing patterns are: (a) pg-boss `singletonKey` for tick / triage dedup, (b) work-product idempotency for retry safety, (c) accept-the-soft-race for sub-millisecond optimisations where the cost is bounded.
+
+**4.9.9 Deterministic ordering guarantees.**
+
+Ordering matters for some paths and is irrelevant for others. Every path introduced by this spec falls into one of two buckets — there is no implicit "probably-fine ordering" zone.
+
+| Path | Ordering posture | Why |
+|---|---|---|
+| `system_incident_events` append-only log | **Ordered** by `created_at` (timestamp) and surrogate `id` (uuid v7 per existing convention) | Operators read events in time order; UI renders chronologically; downstream feedback aggregation joins on order. |
+| Sweep heuristic evaluations within a tick | **Commutative** — heuristics are evaluated independently against each candidate; any order yields the same fires set | No heuristic depends on another's output within a tick. |
+| Sweep candidates within a tick | **Commutative** | Each candidate is evaluated independently; clustering happens after all fires are collected. |
+| Synthetic checks within a tick | **Commutative** | Each check runs in isolation; one check's outcome does not affect another's. |
+| Multiple `recordIncident` calls with different fingerprints | **Commutative** | Each fingerprint owns its own incident lifecycle. |
+| Multiple `recordIncident` calls with the **same** fingerprint | **First-wins-per-window** | Throttle (§4.2) drops duplicates; idempotency LRU (§4.1) collapses re-tries; `occurrence_count` increments via DB UPDATE which is serialisable. |
+| `agent_runs` message history within a single run | **Ordered** by `sequence_number` (existing Phase-0 convention) | Agent execution depends on message order. |
+| Baseline aggregate computation | **Commutative** | Aggregates over a window are order-independent by construction. |
+| pg-boss job retries | **Ordered** per job; retries replace prior attempts at the same logical position | Existing pg-boss semantics. |
+
+**Rule:** When a new path is introduced (in this spec or downstream), its concurrency contract must declare its ordering posture in one of these two buckets. There is no third bucket — "we'll figure it out at runtime" is the failure pattern this rule prevents.
+
+### 4.10 Cross-invariant interaction rules
+
+§4.7 (failure modes), §4.8 (idempotency), §4.9 (concurrency), and §9.3 (partial-success) each define one axis of system behaviour. They interact under real load — a retry that hits an idempotency layer, a partial-success that retries only failed components, a failure that must still persist its idempotency record. Without naming the interactions explicitly, the executor will pick a local rule per-axis and the system will drift.
+
+**4.10.1 Idempotency × Retry.** Retries MUST reuse the same idempotency key as the original attempt. A new key would mean "this is a new logical operation," which is what idempotency is designed to prevent. Concretely:
+
+- pg-boss retries inherit the original job's payload; `idempotencyKey` is part of the payload, so re-execution sees the same key.
+- Application-level retry (e.g. agent's `write_diagnosis` retry-up-to-2) reuses the same `(incidentId, agentRunId)` key; the second attempt is a no-op when the row already has the diagnosis.
+- A **new** idempotency key is only generated when the work itself is logically new — e.g. a fresh sweep tick (new `bucketKey`), a re-triage of an incident after a rate-limit window resets (new `(incidentId, agentRunId)` because `agentRunId` is new).
+
+**4.10.2 Concurrency × Idempotency.** Concurrent identical requests MUST collapse to one execution. The losing call returns the in-flight or completed result; it does not re-execute and does not error. Concretely:
+
+- pg-boss `singletonKey` collapses concurrent enqueues into one job (§4.9.1, §4.9.2, §4.9.5). The losing enqueue is logged as `triage_enqueue_deduplicated` (or equivalent) and skipped.
+- Idempotency LRU (§4.1) returns "hit" for the second concurrent `recordIncident` with the same key; second caller sees no DB write but receives the same logical "incident recorded" outcome.
+- Work-product idempotency (§4.8 `write_diagnosis`) makes the second attempt a no-op when the row already carries the diagnosis.
+
+**4.10.3 Partial Success × Retry.** A `partial_success` outcome (§9.3) MUST NOT re-run successfully completed components on retry. Only the failed components are eligible for retry. Concretely:
+
+- Sweep handler returns `partial_success` when one heuristic errored on one candidate. The fires that succeeded propagate to triage (downstream side effects already happened). The next 5-min sweep tick re-evaluates the failed pair against the new (overlapping) window — this is the natural retry, not a forced re-execution of the full tick.
+- The retry policy in §9.3 ("`success` and `partial_success` are NOT retried") is the explicit form of this rule: pg-boss does not retry the whole tick on partial outcomes; the next scheduled tick is the retry surface.
+- Synthetic-check tick follows the same rule: a tick with one failed check is not retried as a whole; the failing check re-runs on the next 1-min tick.
+
+**4.10.4 Failure Mode × Idempotency.** A failed execution MUST still persist its idempotency record so a subsequent retry can detect it has already been attempted. Without this, a hard-failed call retries indefinitely from the same caller. Concretely:
+
+- `agent_triage_failed` events (§12.1) are written for every failure mode (`prompt_validation`, `agent_run_failed`, `timeout`, `self_stuck`). The event row is the durable failure record; the rate limit (§9.9) consults `triage_attempt_count` (incremented on every triage attempt, success or failure) to bound retries.
+- A `recordIncident` call that throws after writing the LRU entry leaves the entry behind — second caller within TTL is collapsed even though the first never produced a row. Acceptable: TTL bound is short (60s); the second caller's next attempt outside TTL writes fresh.
+- Idempotency for failed work-product writes (e.g. failed `write_diagnosis`) is enforced via the agent's retry-up-to-2 loop (§9.8); after exhaustion, `agent_triage_failed` event is written and `triage_attempt_count` increments, preventing infinite retry through the rate-limit gate.
+
+**4.10.5 Heartbeat × Liveness × Stalled-state.** "Running" and "stuck" must be distinguishable; an in-flight job that produces no progress for too long is stalled, not still running. Concretely:
+
+- pg-boss provides job-level liveness via its internal heartbeat (worker → boss tables). A worker that dies leaves the job in a state pg-boss reaps after the configured timeout; the job is then retried per the retry policy (§4.10.1) or lands in DLQ (§4.7.5).
+- Agent-run liveness is tracked via `agent_runs.runtime_ms` updated on every step; a run that exceeds the soft cap (5 minutes per §9.11 / §12.4) is treated as stalled — the triage handler emits `agent_triage_failed` with `reason='timeout'` and the rate-limit counter increments.
+- The monitor's own self-stuck detection (§9.11) is the second-tier liveness check: cross-run pattern detection (`identical output`, `tool-only final message`, `no write_diagnosis after 8 turns`) catches semantic stuck states that runtime alone misses.
+- **No heartbeat column on `system_incidents`.** Liveness is tracked at the work-product level (job, agent-run), not at the incident level. The incident is a logical entity; the job/run is the executing entity that has "running" semantics.
+
+**4.10.6 In-flight duplicate-request semantics.** When a duplicate request arrives while the same logical work is in flight, the duplicate MUST observe the in-flight status and either (a) collapse via singleton key (no-op enqueue) or (b) return the in-flight reference if the call is read-style. Concretely:
+
+- Triage enqueue duplicates collapse via `singletonKey: incidentId` (§4.9.1). The duplicate enqueue does not block, does not error, does not re-execute. It writes `triage_enqueue_deduplicated` to the audit log and returns.
+- Sweep tick duplicates collapse via `singletonKey: 'sweep-tick'` (§4.9.5).
+- Read-style requests (e.g. operator polling the incident drawer while the agent is mid-run) read the current state of `system_incidents` — `triage_attempt_count > 0 AND agent_diagnosis IS NULL AND last_triage_attempt_at > NOW() - 5 min` is the in-flight indicator (§10.1 loading state). The drawer renders a skeleton; no re-trigger.
+- **No new DB column for in-flight state.** The combination of `triage_attempt_count`, `agent_diagnosis`, `last_triage_attempt_at` already encodes the four observable states (idle, in-flight, succeeded, failed-but-retryable). Adding a status column would duplicate state and create the "two sources of truth" failure mode that NG-class rules explicitly prevent.
+
+**Rule (cross-cutting):** When a new path is introduced (in this spec or downstream), the executor confirms its behaviour against the six interaction rules above before merging. The conformance check is part of the spec-conformance pass — not a runtime gate.
 
 ## 5. Investigate-Fix Protocol
 
@@ -1685,7 +1771,16 @@ The day-one heuristic set (§9.5) detects stuck states in **other** agents — `
 3. The drawer renders a triage-failed badge with copy "Auto-triage encountered an unexpected state — operator should investigate manually" (§10.3 failure-mode visibility).
 4. The synthetic-check `agent-run-success-rate-low` (§8.2 row 7) catches the broader trend: if monitor self-stuck persists across multiple incidents, the synthetic check fires its own incident pointing at the monitor agent itself.
 
-**Auto-recovery vs human intervention.** No auto-recovery. The monitor agent does not retry itself past the existing `write_diagnosis` retry-up-to-2 loop (§9.8). A self-stuck condition is always escalated to human — the operator manually escalates the incident to a sysadmin via the existing Phase 0/0.5 path. The kill switch (`SYSTEM_MONITOR_ENABLED=false`) is the operator's tool if the monitor is stuck across many runs.
+**Severity ladder for self-stuck signals.** A single-run stuck event and a cross-run pattern of stuck events are graded differently — one is noise, the other is a system-level alarm. The graduated response uses existing primitives, not new ones:
+
+| Tier | Trigger | Action | Operator visibility |
+|---|---|---|---|
+| INFO / WARN | One stuck signal on one run (any criterion above fires) | Logger `warn('monitor-self-stuck', ...)`; `agent_triage_failed` event with `reason='self_stuck'`; rate-limit counter increments | Triage drawer renders triage-failed badge with manual-escalate copy (§10.3). No alert. |
+| CRITICAL | Cross-run pattern — the synthetic check `agent-run-success-rate-low` (§8.2) detects elevated stuck rate across the `system_monitor` agent's recent runs | The synthetic check fires its own incident with `source='synthetic'` pointing at `system_monitor` itself. Severity propagates from synthetic check metadata. | New incident appears on the SystemIncidentsPage; sysadmin sees it on next visit. The auto-escalation path (§9.9) applies if severity is `high` / `critical` and the rate limit is hit. |
+
+**No auto-remediation, no auto-recovery.** The monitor agent does not retry itself past the existing `write_diagnosis` retry-up-to-2 loop (§9.8). A self-stuck condition is always escalated to human — the operator manually escalates the incident to a sysadmin via the existing Phase 0/0.5 path. The kill switch (`SYSTEM_MONITOR_ENABLED=false`) is the operator's tool if the monitor is stuck across many runs. The CRITICAL tier above is a **detection upgrade**, not an auto-fix path; the response is still operator-driven.
+
+**Why no auto-remediation here.** Auto-remediation on the monitor itself would be a Phase 3 capability (auto-fix is the Phase 3 deliverable per §19.2). The Phase 2 surface deliberately stops at "diagnose + escalate to human"; introducing auto-remediation rules at the monitor layer would cross that line. Out of scope.
 
 **No recursion.** A self-stuck monitor incident has `metadata.isMonitorSelfStuck=true`. Phase 2's incident-driven trigger explicitly excludes incidents with that flag from auto-triage (§9.2 — same recursion guard pattern as `metadata.isSelfCheck`).
 
@@ -2011,6 +2106,28 @@ All new code paths follow the existing structured-logger convention from `phase-
 **Test posture.** No CI gate enforces dimension presence (the static-gates posture per spec-context.md does not extend to log-format linting). The convention is documented + reviewed in PRs; metric-bearing log lines are explicitly called out in §12.3 + the relevant section.
 
 **Heuristic-fires audit table is the structured log for sweeps.** Per §4.5, `system_monitor_heuristic_fires` is the durable audit row for every heuristic fire (or suppression / insufficient-data). Logger calls are redundant for this signal; logger is used only for the sweep tick start/end and for unexpected errors.
+
+**Log-level + sampling rules (cost guardrails).** Queryable structured logs are valuable; they are also a cost lever if every code path emits at `info`. The rules below bound volume without weakening observability:
+
+| Tier | Always logged | Sampled / gated | Rationale |
+|---|---|---|---|
+| `error` | All instances. No sampling. | n/a | Errors are sparse and load-bearing — sampling would lose the signal that matters most. |
+| `warn` | All instances. No sampling. | n/a | Recoverable errors (single-heuristic throw, single-entity baseline failure) are still rare per minute; full retention. |
+| `info` (state transitions) | Every fire, every triage start/end, every refresh tick start/end, every kill-switch state change | n/a — state transitions are bounded volume by construction | These are the observable events operators search by; sampling would create gaps in the timeline. |
+| `info` (high-frequency events) | First instance + summary every N (default N=100, configurable per call site) | Sampled | High-frequency `info` (e.g. per-evaluation logger calls if they were promoted from `debug`) gets first-write + every-Nth-write retention. The rest become a counter increment. |
+| `debug` | Off in production; on in development / explicit debug sessions | Gated by environment (`LOG_LEVEL=debug`) | Per-evaluation, per-candidate, per-token-spend trace. Useful in dev; cost-prohibitive at scale. |
+
+**Always-on rule.** Errors, warnings, and state transitions are NEVER sampled. A sampling rule that drops state transitions creates gaps in the audit log that look like missing data; debugging cost outweighs storage savings. Sampling applies only to high-frequency `info` paths flagged at the call site.
+
+**No silent fallback rule (invariant).** Every fallback (graceful degradation, regex → AST fallback, baseline `null` → `insufficient_data`, throttle map eviction → no-throttle-on-this-fingerprint) MUST emit a structured log line at `warn` or `info` with an explicit `reason` field. A fallback that occurs without log evidence is a silent degradation — operators cannot tell the system is running on the degraded path. Concrete enforcement points:
+
+- §4.7.2 throttle-map eviction → `system_incident_ingest_throttle_map_evictions` counter + `warn('throttle-map-evicted', { fingerprint, reason: 'cap-hit' })`.
+- §4.7.4 baseline-refresh failure → `baseline_refresh_failed` event + `warn('baseline-refresh-entity-failed', { entity_kind, entity_id, metric, reason: '<err>' })`.
+- §4.7.6 synthetic-check timeout → `warn('synthetic-check-slow', { check_id, duration_ms, reason: 'soft-cap-exceeded' })`.
+- §6 heuristic regex fallback to AST (when an AST parser fails) → `warn('heuristic-fallback', { heuristic_id, reason: 'ast-parse-failed' })`.
+- Any new fallback added downstream of this spec inherits the rule: silent fallbacks are a code-review block.
+
+**Why the rule is enforced.** Silent degradation is the failure mode operators discover via incident postmortem — "the system was running on the degraded path for three days and nobody noticed." Naming the invariant once + applying it to every fallback is cheaper than discovering each silent path the hard way.
 
 **Log volume estimate.** Per sweep (5-min interval): ~50-200 candidates × ~14 heuristics = ~700-2,800 evaluations. At `debug` log level, this is meaningful volume; in production, `debug` is off — sweep evaluations log at `debug`, only fires log at `info`. Per minute: ~5-30 fires across the platform under healthy conditions, with rare bursts during incidents. Acceptable.
 
