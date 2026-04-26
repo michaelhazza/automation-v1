@@ -74,6 +74,7 @@ export async function handleBriefMessage(
       .from(agentRuns)
       .where(and(
         eq(agentRuns.taskId, input.briefId),
+        eq(agentRuns.organisationId, input.organisationId),
         gte(agentRuns.createdAt, windowStart),
       ));
     frequencyCapHit = (freqRow?.c ?? 0) >= FOLLOWUP_FREQUENCY_CAP;
@@ -84,6 +85,7 @@ export async function handleBriefMessage(
         .from(agentRuns)
         .where(and(
           eq(agentRuns.taskId, input.briefId),
+          eq(agentRuns.organisationId, input.organisationId),
           inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
         ));
       concurrencyCapHit = (concRow?.c ?? 0) >= 1;
@@ -103,6 +105,13 @@ export async function handleBriefMessage(
       content: '',
       artefacts: [artefact],
     });
+    if (input.isFollowUp) {
+      logger.info('brief.followup.simple_reply_emitted', {
+        event: 'brief.followup.simple_reply_emitted',
+        conversationId: input.conversationId,
+        status: 'success',
+      });
+    }
   } else if (dispatchRoute === 'frequency_capped') {
     logger.info('brief.followup.cap_hit', {
       event: 'brief.followup.cap_hit',
@@ -148,32 +157,38 @@ export async function handleBriefMessage(
         intentKind: fastPathDecision.route,
       });
     }
-    // Pass status:'inbox' to force eligibility — the job handler re-reads the real task
-    // from the DB; this object is only used for the eligibility predicate.
-    import('../jobs/orchestratorFromTaskJob.js')
-      .then(({ enqueueOrchestratorRoutingIfEligible }) =>
-        enqueueOrchestratorRoutingIfEligible(
-          {
-            id: input.briefId,
-            organisationId: input.organisationId,
-            status: 'inbox',
-            assignedAgentId: null,
-            isSubTask: false,
-            createdByAgentId: null,
-            description: input.text,
-          },
-          { scope: input.scope ?? fastPathDecision.scope },
-        ),
-      )
-      .catch((err: unknown) => {
-        const event = input.isFollowUp ? 'brief.followup.failed' : 'brief.orchestrator_enqueue_failed';
-        logger.error(event, {
-          event,
+    // Dynamic import to avoid circular dependency — orchestratorFromTaskJob → services.
+    // Awaited so enqueue failures surface to the caller and terminal events fire correctly.
+    try {
+      const { enqueueOrchestratorRoutingIfEligible } = await import('../jobs/orchestratorFromTaskJob.js');
+      await enqueueOrchestratorRoutingIfEligible(
+        {
+          id: input.briefId,
+          organisationId: input.organisationId,
+          status: 'inbox',
+          assignedAgentId: null,
+          isSubTask: false,
+          createdByAgentId: null,
+          description: input.text,
+        },
+        { scope: input.scope ?? fastPathDecision.scope },
+      );
+      if (input.isFollowUp) {
+        logger.info('brief.followup.orchestrator_enqueued', {
+          event: 'brief.followup.orchestrator_enqueued',
           conversationId: input.conversationId,
-          error: err instanceof Error ? err.message : String(err),
-          ...(input.isFollowUp ? { status: 'failed' } : {}),
+          status: 'success',
         });
+      }
+    } catch (err: unknown) {
+      const event = input.isFollowUp ? 'brief.followup.failed' : 'brief.orchestrator_enqueue_failed';
+      logger.error(event, {
+        event,
+        conversationId: input.conversationId,
+        error: err instanceof Error ? err.message : String(err),
+        ...(input.isFollowUp ? { status: 'failed' } : {}),
       });
+    }
   }
 
   return { route: dispatchRoute, fastPathDecision };

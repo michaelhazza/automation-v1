@@ -175,7 +175,7 @@ router.post(
     const [task] = await db
       .select({ description: tasks.description })
       .from(tasks)
-      .where(eq(tasks.id, briefId))
+      .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, req.orgId!)))
       .limit(1);
 
     const briefContext = task?.description ?? '';

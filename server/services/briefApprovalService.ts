@@ -6,7 +6,7 @@
 // Unique-violation (23505) is caught and translated per spec §4.5.1.
 
 import { db } from '../db/index.js';
-import { tasks, conversationMessages } from '../db/schema/index.js';
+import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../lib/logger.js';
 import { actionService } from './actionService.js';
@@ -77,7 +77,21 @@ export async function decideBriefApproval(
     return { status: 'failed', error: 'artefact_stale', reason: 'cancelled_brief' };
   }
 
-  // 2. JSONB scan: find the original approval card + any existing decision artefact
+  // 2. Validate conversation belongs to this brief (prevents cross-brief approval dispatch)
+  const [conv] = await db
+    .select({ scopeId: conversations.scopeId, scopeType: conversations.scopeType })
+    .from(conversations)
+    .where(and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.organisationId, input.organisationId),
+    ))
+    .limit(1);
+
+  if (!conv || conv.scopeType !== 'brief' || conv.scopeId !== input.briefId) {
+    return { status: 'failed', error: 'artefact_not_found' };
+  }
+
+  // 3. JSONB scan: find the original approval card + any existing decision artefact
   const allMessages = await db
     .select({ artefacts: conversationMessages.artefacts })
     .from(conversationMessages)
@@ -87,14 +101,18 @@ export async function decideBriefApproval(
     ));
 
   let approvalCard: BriefApprovalCard | null = null;
+  let foundArtefactWithId = false;
   let existingDecision: BriefApprovalDecision | null = null;
   let decisionMatchCount = 0;
 
   for (const msg of allMessages) {
     if (!Array.isArray(msg.artefacts)) continue;
     for (const a of msg.artefacts as Array<Record<string, unknown>>) {
-      if (a['artefactId'] === input.artefactId && a['kind'] === 'approval') {
-        approvalCard = a as unknown as BriefApprovalCard;
+      if (a['artefactId'] === input.artefactId) {
+        foundArtefactWithId = true;
+        if (a['kind'] === 'approval') {
+          approvalCard = a as unknown as BriefApprovalCard;
+        }
       }
       if (a['parentArtefactId'] === input.artefactId && a['kind'] === 'approval_decision') {
         decisionMatchCount++;
@@ -115,10 +133,14 @@ export async function decideBriefApproval(
   }
 
   if (!approvalCard) {
+    // Artefact exists but is not an approval card → 422; truly absent → 404
+    if (foundArtefactWithId) {
+      return { status: 'failed', error: 'artefact_not_approval' };
+    }
     return { status: 'failed', error: 'artefact_not_found' };
   }
 
-  // 3. Idempotency pre-check — decision already exists
+  // 4. Idempotency pre-check — decision already exists
   if (existingDecision) {
     if (existingDecision.decision === input.decision) {
       logger.info('brief.approval.idempotent_hit', {
@@ -150,7 +172,7 @@ export async function decideBriefApproval(
     };
   }
 
-  // 4. Attempt proposeAction for audit trail; determine executionStatus from outcome
+  // 5. Attempt proposeAction for audit trail; determine executionStatus from outcome
   const executionId = crypto.randomUUID();
   let executionStatus: BriefApprovalDecision['executionStatus'] = 'failed';
 
@@ -187,7 +209,7 @@ export async function decideBriefApproval(
     executionStatus = 'failed';
   }
 
-  // 5. Write decision artefact (captures user intent regardless of proposeAction outcome)
+  // 6. Write decision artefact (captures user intent regardless of proposeAction outcome)
   const decisionArtefact: BriefApprovalDecision = {
     artefactId: executionId,
     kind: 'approval_decision',
@@ -199,60 +221,21 @@ export async function decideBriefApproval(
     executionStatus,
   };
 
-  try {
-    await writeConversationMessage({
-      conversationId: input.conversationId,
-      briefId: input.briefId,
-      organisationId: input.organisationId,
-      subaccountId: input.subaccountId,
-      role: 'assistant',
-      content: '',
-      artefacts: [decisionArtefact],
-    });
-  } catch (writeErr: unknown) {
-    // 23505 unique_violation: two concurrent requests passed the pre-check simultaneously.
-    // Re-fetch and classify as idempotent or conflict.
-    if (isUniqueViolation(writeErr)) {
-      const raced = await refetchDecisionArtefact(input.conversationId, input.organisationId, input.artefactId);
-      if (!raced) throw writeErr; // should not happen; re-throw to surface as 500
-      if (raced.decision === input.decision) {
-        logger.info('brief.approval.idempotent_hit', {
-          event: 'brief.approval.idempotent_hit',
-          artefactId: input.artefactId,
-          executionId: raced.executionId,
-          status: 'success',
-        });
-        return {
-          status: 'success',
-          artefact: raced,
-          executionId: raced.executionId ?? raced.artefactId,
-          executionStatus: raced.executionStatus,
-          idempotent: true,
-        };
-      }
-      logger.info('brief.approval.conflict', {
-        event: 'brief.approval.conflict',
-        artefactId: input.artefactId,
-        priorDecision: raced.decision,
-        attemptedDecision: input.decision,
-        status: 'failed',
-      });
-      return {
-        status: 'failed',
-        error: 'approval_already_decided',
-        priorDecision: raced.decision,
-        priorArtefact: raced,
-      };
-    }
-    logger.error('brief.approval.failed', {
-      event: 'brief.approval.failed',
-      artefactId: input.artefactId,
-      executionId,
-      error: writeErr instanceof Error ? writeErr.message : String(writeErr),
-      status: 'failed',
-    });
-    throw writeErr;
-  }
+  // Race protection: writeConversationMessage calls validateLifecycleChainForWrite, which scans
+  // existing messages for any artefact already superseding this parentArtefactId. If a concurrent
+  // caller won the race and committed its decision artefact before we reach the validator, our
+  // artefact is rejected (artefactsAccepted: 0) and a lifecycle conflict is logged. Subsequent
+  // reads will see two decisions only if both callers race through the validator simultaneously —
+  // that case is caught by the decisionMatchCount > 1 guard on the next call to decideBriefApproval.
+  await writeConversationMessage({
+    conversationId: input.conversationId,
+    briefId: input.briefId,
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    role: 'assistant',
+    content: '',
+    artefacts: [decisionArtefact],
+  });
 
   const latencyMs = Date.now() - startMs;
   logger.info('brief.approval.dispatched', {
@@ -279,34 +262,3 @@ export async function decideBriefApproval(
   };
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as Record<string, unknown>)['code'] === '23505'
-  );
-}
-
-async function refetchDecisionArtefact(
-  conversationId: string,
-  organisationId: string,
-  parentArtefactId: string,
-): Promise<BriefApprovalDecision | null> {
-  const messages = await db
-    .select({ artefacts: conversationMessages.artefacts })
-    .from(conversationMessages)
-    .where(and(
-      eq(conversationMessages.conversationId, conversationId),
-      eq(conversationMessages.organisationId, organisationId),
-    ));
-  for (const msg of messages) {
-    if (!Array.isArray(msg.artefacts)) continue;
-    for (const a of msg.artefacts as Array<Record<string, unknown>>) {
-      if (a['parentArtefactId'] === parentArtefactId && a['kind'] === 'approval_decision') {
-        return a as unknown as BriefApprovalDecision;
-      }
-    }
-  }
-  return null;
-}

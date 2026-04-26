@@ -1705,7 +1705,7 @@ export const WorkflowEngineService = {
    */
   async resumeInvokeAutomationStep(
     stepRunId: string,
-  ): Promise<{ alreadyResumed: boolean }> {
+  ): Promise<{ alreadyResumed: boolean; stepOutcome: 'completed' | 'failed' }> {
     // Optimistic transition: awaiting_approval → running (the guard IS the lock)
     const [updated] = await db
       .update(workflowStepRuns)
@@ -1723,7 +1723,8 @@ export const WorkflowEngineService = {
         status: 'success',
         alreadyResumed: true,
       });
-      return { alreadyResumed: true };
+      // Another concurrent winner already owns this step; treat as completed from our perspective.
+      return { alreadyResumed: true, stepOutcome: 'completed' };
     }
 
     const sr = updated;
@@ -1742,19 +1743,19 @@ export const WorkflowEngineService = {
       .limit(1);
     if (!run) {
       await this.failStepRunInternal(sr, 'resume_run_not_found');
-      return { alreadyResumed: false };
+      return { alreadyResumed: false, stepOutcome: 'failed' };
     }
 
     const definition = await loadDefinitionForRun(run);
     if (!definition) {
       await this.failStepRunInternal(sr, 'resume_definition_not_found');
-      return { alreadyResumed: false };
+      return { alreadyResumed: false, stepOutcome: 'failed' };
     }
 
     const step = findStepInDefinition(definition, sr.stepId) as InvokeAutomationStep | undefined;
     if (!step || step.type !== 'invoke_automation') {
       await this.failStepRunInternal(sr, 'resume_step_not_invoke_automation');
-      return { alreadyResumed: false };
+      return { alreadyResumed: false, stepOutcome: 'failed' };
     }
 
     const startMs = Date.now();
@@ -1777,7 +1778,7 @@ export const WorkflowEngineService = {
         runId: run.id,
         status: 'success',
       });
-      return { alreadyResumed: false };
+      return { alreadyResumed: false, stepOutcome: 'completed' };
     }
 
     const result = invokeGuardResult;
@@ -1794,25 +1795,34 @@ export const WorkflowEngineService = {
         latencyMs,
         status: 'success',
       });
-      return { alreadyResumed: false };
+      return { alreadyResumed: false, stepOutcome: 'completed' };
     }
 
     // error — respect failurePolicy: 'continue' as in the primary dispatch path
     const errorReason = `invoke_automation_error: ${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`;
     if (step.failurePolicy === 'continue') {
       await this.completeStepRunInternal(sr, { error: result.error }, hashValue(result.error), 'invoke_automation_continue');
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
     } else {
       await this.failStepRunInternal(sr, errorReason);
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'failed' };
     }
-    logger.error('step.resume.failed', {
-      event: 'step.resume.failed',
-      stepRunId,
-      runId: run.id,
-      error: errorReason,
-      latencyMs,
-      status: 'failed',
-    });
-    return { alreadyResumed: false };
   },
 
   async failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
