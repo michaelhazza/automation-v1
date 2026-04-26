@@ -26,6 +26,16 @@ PR order ≠ implementation order. Do **not** infer dependency ordering from PR 
 - Schema-decisions architect SHA: _(captured in Task 2.1 Step 3)_
 - Dead-path-completion architect SHA: _(captured in Task 3.1 Step 3)_
 
+## Workflow deviations from plan.md
+
+**Authorised by user 2026-04-26 mid-Task-1:**
+
+- **`spec-reviewer` agent is SKIPPED for every chunk in this sprint.** Plan.md §3 + every chunk task's Step 4 references `spec-reviewer`; those steps are bypassed. Each spec ships without the iterative reviewer pass. The user adjudicates spec quality directly when they review.
+- **Review-cadence checkpoints are SKIPPED.** Plan.md §15 lists 7 checkpoint stops; the session runs straight through to Task 7 without pausing. Stop conditions still apply (anything that genuinely blocks → escalate), but normal review pauses are removed.
+- **Per-chunk verification (Q2 default) is RETAINED.** Each chunk's cited items are verified against present `tasks/todo.md` + repo state before drafting, to avoid the same scope-mismatch caught on Chunk 1.
+
+Effect on `## Status` below: spec-reviewer entries are not separately listed.
+
 ## Architect-output conflict check
 
 _(stamped after §10b clears — pre-Task 2/3 gate)_
