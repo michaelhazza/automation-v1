@@ -1,3 +1,42 @@
+You are an expert technical reviewer auditing a software-engineering specification for implementation readiness. The spec is a post-merge backlog of 20 quality follow-up items derived from a four-pass review of PR #196 (codebase audit-remediation) in the Automation OS codebase.
+
+**Codebase framing (do NOT challenge these — they are explicit posture statements):**
+- Pre-production: no live users, no staged rollouts.
+- Rapid evolution: no feature flags except for behaviour modes.
+- Testing posture: static gates primary; runtime tests are pure-function only; no frontend / E2E / API-contract tests.
+- Prefer existing primitives over new ones (`policyEngineService`, `withBackoff`, `getOrgScopedDb`, `withOrgTx`, `actionService`, etc.).
+- The spec is post-merge backlog work; nothing here blocks shipping.
+
+**Your job:** identify mechanical and directional weaknesses in the spec that would slow or mislead an implementer who later picks up an item. Focus on:
+
+1. **Path / line-number drift** — files referenced may have moved or shifted lines.
+2. **Anchor / ToC inconsistency** — the §1 ToC must point at real heading slugs.
+3. **Self-contradictions** — two parts of the spec saying different things (an item's "Files" table missing files mentioned in prose, sequencing claims that conflict with dependency claims, etc.).
+4. **Load-bearing claims without mechanisms** — phrases like "must be idempotent" / "source of truth" without naming HOW the property is enforced.
+5. **Missing acceptance criteria / test signals** — items where Acceptance criteria don't actually verify the Goal.
+6. **Schema / migration drift** — references to migration numbers, table names, columns that may not match current state.
+7. **Unnamed primitives** — "a new service that does X" without naming it concretely.
+8. **Sequencing bugs** — Item A depends on Item B but B is sequenced later in §2.
+9. **Cross-item contradictions** — e.g. one item's annotation contract conflicts with another's.
+10. **Missing per-item verdicts / status fields.**
+
+**Output format:** group findings under section headings (`## A1`, `## A2`, etc., or `## Cross-cutting`). Within each section list discrete findings as numbered items. Each finding should have:
+
+- A one-sentence description of the issue.
+- The specific spec section / line range / quote it refers to (if you can pinpoint).
+- A concrete suggested fix (one or two sentences).
+- A severity tag: `critical` / `important` / `minor` / `nit`.
+
+**Do NOT propose:**
+- Adding feature flags, staged rollouts, canary deploys, kill switches.
+- Adding frontend / E2E / API-contract tests.
+- Introducing new logger frameworks or generic abstraction layers.
+- Splitting the spec into multiple specs (the §3 Out of scope section explicitly rejects this).
+- Re-litigating items in §3 Out of scope.
+
+The spec under review:
+
+==== BEGIN SPEC ====
 # Audit Remediation Follow-ups — Post-Merge Backlog Spec
 
 **Created:** 2026-04-25
@@ -93,19 +132,15 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Approach (in order):**
 1. **Inventory.** Enumerate every `canonicalDataService.<method>(...)` call site in `server/` (excluding `__tests__`). Group by method signature shape: `(orgId)`-only, `(orgId, accountId)`, `(accountId, orgId?)`, write methods, etc. Capture the inventory in `tasks/builds/<slug>/canonical-call-sites.md` so the migration is auditable.
-2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. Each method body MUST wrap its DB work in `withPrincipalContext(principal, async (tx) => { ... })` from `server/db/withPrincipalContext.ts` — this is the named primitive that binds `app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, and `app.current_team_ids` on top of the org-scoped tx that `withOrgTx` already opened. The `app.organisation_id` session var is set by the upstream `withOrgTx` opened in `server/middleware/auth.ts` or `server/lib/createWorker.ts`; principal vars are set by `withPrincipalContext`. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
+2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
 3. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls.
-4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must pass a `PrincipalContext`-shaped first argument (call-site-level enforcement, not file-level). The right approach is a positive allowlist of accepted first-argument shapes rather than a narrow negative matcher:
-   - **Positive allowlist (accepted first-argument shapes):** the gate accepts a `canonicalDataService.<method>(` call only when the first argument matches one of:
-     - `fromOrgId(` / `fromOrgId<` (the explicit constructor)
-     - `withPrincipalContext(` (called inline)
-     - A locally-typed `PrincipalContext` variable — detected via a same-file `: PrincipalContext` annotation in scope (function parameter list or `const principal: PrincipalContext = ...`).
-   - **Anything else is a violation** — including bare identifiers, raw object literals (`{ organisationId: ... }`), spread expressions, and method chains. This is broader than the iteration-1 "bare identifier only" matcher and closes the object-literal escape hatch.
-   - Implementation: a small TypeScript-aware lint rule using the TypeScript compiler API would be ideal, but a regex pass is sufficient for v1 — match `canonicalDataService\.\w+\(\s*([^)]*)` and assert the first argument starts with `fromOrgId(`, `withPrincipalContext(`, or matches a known same-file `: PrincipalContext`-typed identifier.
+4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must be accompanied by a `PrincipalContext` argument (call-site-level enforcement, not file-level). Two-part approach:
+   - **Negative pattern (legacy signatures banned):** for each file importing `canonicalDataService`, grep for `canonicalDataService\.[a-zA-Z]+\(\s*[a-zA-Z_]` where the first argument is a bare identifier rather than `fromOrgId(` / `withPrincipalContext(` / a `PrincipalContext`-typed local. Each hit is a violation.
+   - **Positive pattern (helper invocation present):** retain the existing `grep -qE '(withPrincipalContext|principal/types|fromOrgId|PrincipalContext)'` import check as a cheap pre-filter; the negative pattern above is the actual enforcement.
    - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 5) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
-   - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if other invocations in the same file are correctly migrated.
+   - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if some other invocation in the same file does.
 5. **Annotation contract.** Files that legitimately import without calling (e.g. registry files where the import is forward-looking) must carry a top-of-file annotation: `// @principal-context-import-only — reason: <one-sentence rationale>`. The gate scans for this annotation and exempts the file.
-6. **Suppression sweep / baseline.** This gate's violation count is recorded in the centralized baseline store at `scripts/guard-baselines.json` (keyed on `principal-context-propagation`, consistent with every other guard in `scripts/lib/guard-utils.sh`'s `check_baseline()` flow). After migration, the entry must drop to zero. Do NOT introduce a per-guard `tasks/baselines/*.txt` — that pattern is rejected throughout this spec.
+6. **Suppression sweep.** After migration, `tasks/baselines/principal-context-propagation.txt` must drop to zero (or a documented ≥0 baseline if any annotated exemptions remain).
 
 **Acceptance criteria:**
 - Every `canonicalDataService` method accepts `PrincipalContext` as its first parameter.
@@ -116,19 +151,18 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Tests required:**
 - New: `server/services/__tests__/canonicalDataService.principalContext.test.ts` — constructs a `PrincipalContext` via `fromOrgId(orgId, subaccountId)`, calls one read method (e.g. `getAccountById`) and one write method (e.g. `upsertAccount`), asserts:
-  - `withPrincipalContext` is invoked inside the method body (verified via spy / mock on the imported helper).
-  - The org-scoped session var (`app.organisation_id`) is bound by the upstream `withOrgTx` for the duration of the call.
-  - The principal session vars (`app.current_subaccount_id`, `app.current_principal_type`, `app.current_principal_id`, `app.current_team_ids`) are bound by `withPrincipalContext` when the principal carries those fields.
+  - The org-scoped session var (`app.organisation_id`) is bound for the duration of the call.
+  - The subaccount session var (`app.subaccount_id`) is bound when the principal carries one.
   - Calling without `PrincipalContext` (e.g. passing `null as any`) throws a clear error before any DB work is done.
-- Gate self-test: a fixture file under `scripts/__tests__/principal-context-propagation/` that intentionally violates the new rule (one fixture per accepted-shape category — bare identifier, object literal, spread); the gate must report each.
+- Gate self-test: a fixture file under `scripts/__tests__/principal-context-propagation/` that intentionally violates the new rule; the gate must report it.
 
 **Dependencies:** none — this item is the gating change for several others in this spec. Items B2 and B2-ext are sequenced after A1 because some jobs read canonical data and benefit from a `PrincipalContext`-aware surface.
 
 **Risk:** medium. Touches the entire `canonicalDataService` surface (31 methods) and every non-test caller. Mitigation: ship behind a single PR with the gate flip in the same commit, so a half-migrated state is impossible.
 
 **Definition of Done:**
-- All caller files updated; all method signatures migrated; every method body wraps its DB work in `withPrincipalContext(...)`.
-- Gate updated to call-site granularity with the positive-allowlist matcher; baseline entry in `scripts/guard-baselines.json` regenerated; deliberate-regression test passes for each accepted-shape category.
+- All caller files updated; all method signatures migrated.
+- Gate updated; baseline file regenerated; deliberate-regression test passes.
 - New unit test under `__tests__` locks the contract.
 - `npm run typecheck`, `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
 - The spec status field for A1 in `§5 Tracking` is checked.
@@ -192,7 +226,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 **Definition of Done:**
 - All three components shipped (gate, runtime guard, migration hook).
 - Tests pass; the deliberate-gap fixtures fail the relevant gate.
-- `architecture.md` § Architecture Rules updated with one line: "All writes to tenant-scoped tables must go through `getOrgScopedDb`. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
+- `architecture.md` § Architecture Rules updated with one line: "All writes to tenant-scoped tables must go through `getOrgScopedDb`. Tables that don't apply must carry `@rls-not-applicable`."
 - Spec status field for A2 in `§5 Tracking` is checked.
 
 ---
@@ -212,7 +246,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Approach:**
 1. **briefVisibilityService.ts:** replace the file-scope `import { db }` with `import { getOrgScopedDb } from '../lib/orgScopedDb.js'`. Inside each function (`resolveBriefVisibility`, `resolveConversationVisibility`), call `const tx = getOrgScopedDb('briefVisibilityService')` at function entry — NOT at module top. `getOrgScopedDb` throws `failure('missing_org_context')` when there is no active `withOrgTx` block, and module top-level evaluation runs at import time before any tx is opened. Replace the existing `db.select(...)` calls with `tx.select(...)`. The org-scoped tx already has `app.organisation_id` bound by the upstream `withOrgTx` opened in the auth middleware or `createWorker`.
-2. **onboardingStateService.ts:** same pattern — function-local `getOrgScopedDb` calls. The transaction currently at `:51` (`db.insert(...)` followed by chained calls) should be rewritten to use the org-scoped handle: `const tx = getOrgScopedDb('onboardingStateService'); await tx.insert(...).values({ ... })...`. Direct use of `withOrgTx` is NOT appropriate inside services — `withOrgTx(ctx: OrgTxContext, fn)` is the entry-point primitive used by `server/middleware/auth.ts` (HTTP path) and `server/lib/createWorker.ts` (pg-boss path), not a per-call helper. Service code that needs a fresh nested transaction uses `getOrgScopedDb` and chains `.transaction(async (innerTx) => { ... })` on the returned handle.
+2. **onboardingStateService.ts:** same pattern — function-local `getOrgScopedDb` calls. The transaction currently at `:51` (`db.insert(...)` followed by chained calls) should be rewritten to use the org-scoped handle: `const tx = getOrgScopedDb('onboardingStateService'); await tx.insert(...).values({ ... })...`. Direct use of `withOrgTx` is NOT appropriate inside services — `withOrgTx(ctx: OrgTxContext, fn)` is the entry-point primitive used by `server/middleware/orgScoping.ts` and `server/lib/createWorker.ts`, not a per-call helper. Service code that needs a fresh nested transaction uses `getOrgScopedDb` and chains `.transaction(async (innerTx) => { ... })` on the returned handle.
 3. **Verify no behaviour change.** The org-scoped tx binds `app.organisation_id` per request/job; queries already filter by `organisationId` in the WHERE clause, so RLS becomes belt-and-braces, not the primary filter.
 4. **Lint guardrail.** Note that `scripts/verify-rls-contract-compliance.sh` allowlists `server/services/**` (lines 40-48 of the script), so it does NOT today catch raw `db` imports inside services — once these two files are migrated, the only enforcement is code review until the planned A2 schema-vs-registry gate ships. If A2 lands first, no further work is needed; if A3 ships first, accept that the regression-prevention guarantee for new services arrives later with A2.
 
@@ -228,7 +262,7 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 **Risk:** low. Internal-only.
 
 **Definition of Done:**
-- Both services use `getOrgScopedDb` (with nested `.transaction(...)` where the existing logic needs a transaction). Neither service imports `withOrgTx` directly — `withOrgTx` stays in middleware / `createWorker`.
+- Both services use `getOrgScopedDb` / `withOrgTx`.
 - Tests pass. `npm run typecheck`, `npm run lint`, `npm test` for the relevant suites.
 - Spec status field for A3 in `§5 Tracking` is checked.
 
@@ -293,7 +327,7 @@ No double-invocation regression tests exist for any of the four.
 - `server/jobs/connectorPollingSync.ts`
 - New tests: `server/jobs/__tests__/<jobName>.idempotency.test.ts` for each.
 - New: `architecture.md` § Architecture Rules — one paragraph codifying the standard.
-- New (optional but recommended): `scripts/verify-job-concurrency-headers.sh` — gate that checks each `server/jobs/*.ts` carries the standard header. Note that `scripts/verify-job-idempotency-keys.sh` already exists and enforces `idempotencyStrategy` declarations on `JOB_CONFIG` entries in `server/config/jobConfig.ts` — that gate covers the *enqueue-side* dedup contract. The proposed new gate is *complementary*, not duplicative: it verifies the *handler-side* concurrency-and-idempotency-model header comment, which is a different shape of declaration. Implementers may instead extend `verify-job-idempotency-keys.sh` to cross-check that every `JOB_CONFIG` entry's handler file carries the standard header — that approach reuses an existing gate and is the preferred extension path if it can be done without expanding the gate's complexity beyond ~30 lines.
+- New (optional but recommended): `scripts/verify-job-concurrency-headers.sh` — gate that checks each `server/jobs/*.ts` carries the standard header.
 
 **Goal:** every long-running or cron-driven job declares (a) its concurrency control mechanism, (b) its idempotency strategy. Eliminates the "but the job IS idempotent, why is this still broken?" failure mode. B2 covers idempotency (same input → same effect). B2-ext covers concurrency (two runners in parallel cannot both perform work).
 
@@ -331,9 +365,9 @@ No double-invocation regression tests exist for any of the four.
    - Add: header, advisory lock, `WHERE` predicate.
 
    **connectorPollingSync.ts** — already lease-protected at `:22-37`.
-   - Concurrency: lease via `sync_lock_token` UPDATE with skip-if-held semantics. Already in place — prevents two runners from both acquiring the lock.
-   - Idempotency (separately): phase-aware execution. The lease addresses concurrency, NOT idempotency on retry-after-release. For replay-safety, each phase must carry an independent no-op-if-already-done predicate (e.g. "phase=fetch returns early if `last_sync_at > started_at - lookback`"; "phase=process_batch uses an `INSERT … ON CONFLICT DO UPDATE` upsert keyed on the source-event id"). The handler header MUST enumerate per-phase idempotency mechanisms, not collapse "lease holds → both properties hold" — that's the conflation B2 explicitly fixes.
-   - Add: header comment formalising the lease as the concurrency mechanism AND the per-phase no-op predicates as the idempotency mechanism (these are two distinct contract elements). Audit the existing phases against the per-phase predicate requirement; add any predicate that is missing.
+   - Concurrency: lease via `sync_lock_token` UPDATE. Already in place.
+   - Idempotency: phase-aware execution; the lease prevents double-execution.
+   - Add: header comment formalising the existing model. No code change beyond the comment.
 
 3. **Per-job double-invocation regression test.** Each job gets `server/jobs/__tests__/<job>.idempotency.test.ts` exercising:
    - **Sequential double-invocation:** call the job twice in a row; assert state matches single-invocation, no duplicate side effects.
@@ -356,19 +390,11 @@ No double-invocation regression tests exist for any of the four.
 - Run the new parallel tests N=10 times to surface flakiness early. This repo's test runner is `tsx` invoked via shell scripts (see `package.json` scripts), not Jest — implement the repeat by either (a) wrapping the parallel-double-invocation case in a 10-iteration `for` loop inside the test file itself, or (b) re-invoking `tsx server/jobs/__tests__/<job>.idempotency.test.ts` 10 times from `scripts/run-all-unit-tests.sh` for the affected files only. Do NOT add Jest as a dependency.
 - Roll out the highest-frequency job (likely `connectorPollingSync`) first — it already has a lease, so the change is comment-only; gives confidence in the standard before risk-bearing changes.
 
-**Definition of Done — B2 (idempotency only):**
-- All four jobs carry the **Idempotency model:** section of the header with named mechanism per job (`bundleUtilizationJob`: replay-safe upsert; `measureInterventionOutcomeJob`: claim+verify; `ruleAutoDeprecateJob`: idempotent-by-construction with `WHERE deprecated_at IS NULL` predicate; `connectorPollingSync`: per-phase no-op predicates).
-- Each job has a passing **sequential double-invocation regression test** — calling the job twice in a row produces the same final state as a single invocation.
-- B2 row in `§5 Tracking` is checked when these criteria hold, even if B2-ext's concurrency criteria are still in flight.
-
-**Definition of Done — B2-ext (concurrency only):**
-- All four jobs carry the **Concurrency model:** section of the header with named lock primitive per job (advisory lock / lease / claim+verify).
-- Each job has a passing **parallel double-invocation regression test** — `Promise.all([job(), job()])` produces exactly one work-performed outcome.
-- (Optional) the gate (either a new `verify-job-concurrency-headers.sh` or an extension of `verify-job-idempotency-keys.sh`) exits 0 with the standard header present in every `server/jobs/*.ts`.
+**Definition of Done:**
+- All four jobs migrated and tested.
+- (Optional) gate added.
 - `architecture.md` § Architecture Rules carries one paragraph: "Cron and long-running jobs MUST declare a Concurrency model and an Idempotency model in a header comment using the standard form. See `server/jobs/connectorPollingSync.ts` for the canonical example."
-- B2-ext row in `§5 Tracking` is checked.
-
-**Note on partial completion:** B2 and B2-ext may ship in separate PRs in either order. The split DoD above lets `§5 Tracking` reflect partial progress accurately — B2 can complete before B2-ext does, or vice versa.
+- Spec status fields for B2 and B2-ext in `§5 Tracking` are checked.
 
 ---
 
@@ -435,7 +461,7 @@ No double-invocation regression tests exist for any of the four.
 1. Create `scripts/verify-architect-context.sh`. Logic:
    - Read `.claude/agents/architect.md`.
    - Find the `## Context files` section. If missing → fail with `architect-context: section missing`.
-   - Extract the numbered list under it. Capture the current entry count as the **expected count** (today: 6). The gate fails if the count drops below the expected value — there is no "allow one drop" tolerance, because C2's acceptance criteria require deletion of one path to fail. The expected count is stored in a small adjacent fixture `scripts/architect-context-expected-count.txt` that the gate reads, so legitimate edits to the architect.md context list update the fixture in the same commit (and the commit author has to think about it explicitly).
+   - Extract the numbered list under it. Require ≥ 5 entries (current count is 6; allow one drop for legitimate edits).
    - For each entry that names a file path (`.md` extension or matching a known path pattern), assert the path resolves on disk. Skip lines like "the specific task..." that don't name a file.
    - Emit `[GATE] architect-context: violations=<count>` per the C1 standard.
 2. Wire into the gates suite (`package.json` script or CI workflow) so it runs on every commit that touches `.claude/agents/architect.md` or any listed context file (catches renames where the agent file isn't updated).
@@ -443,8 +469,7 @@ No double-invocation regression tests exist for any of the four.
 
 **Acceptance criteria:**
 - `bash scripts/verify-architect-context.sh` exits 0 today.
-- Deleting one path from the section without updating `architect-context-expected-count.txt` → gate fails with a specific error naming the deleted entry.
-- Updating the count fixture but leaving the section unchanged → gate fails (count mismatch the other direction).
+- Deleting one path from the section → gate fails with a specific error.
 - Renaming a referenced file without updating the section → gate fails.
 - Gate emits the standard `[GATE] architect-context: violations=<count>` line.
 
@@ -478,23 +503,20 @@ No double-invocation regression tests exist for any of the four.
 
 **Approach:**
 1. Pure test, no DB. Read schema files via `import` (Drizzle table objects expose `.[Symbol.for('drizzle:Name')]` or similar) OR via filesystem scan + regex on `pgTable('canonical_...'`. Either approach works; pick whichever is more stable.
-2. Build two sets initially (the third set requires inspection of the planner registry's actual structure):
+2. Build three sets:
    - `schemaTables`: every Drizzle table whose name starts with `canonical_`.
    - `dictionaryTables`: keys exported from `canonicalDictionaryRegistry`.
-3. **Inspect `canonicalQueryRegistry` first.** Its keys are semantic action identifiers like `contacts.inactive_over_days` — NOT canonical table names directly. To derive a `queryPlannerTables` set, the test needs metadata that maps each planner action to the canonical table it queries. Two options, in priority order:
-   - **Preferred:** if `canonicalQueryRegistry`'s entries already carry an explicit `canonicalTable` metadata field, extract it. Document the field name in the test.
-   - **Fallback:** if no such metadata exists, narrow C3's scope to the two-set comparison (`schemaTables` vs `dictionaryTables`) and create a follow-up todo to add the metadata so the third comparison can land later. Do NOT regex over the planner-action strings — `contacts.inactive_over_days` is not a reliable signal of "table = `canonical_contacts`".
-4. Assert set containment (with a small allowlist within the test for deliberate exemptions):
+   - `queryPlannerTables`: keys / table names referenced by `canonicalQueryRegistry`.
+3. Assert pairwise equality (or document deliberate exemptions in a small allowlist within the test):
    - `schemaTables ⊆ dictionaryTables` — every schema canonical table is registered in the dictionary.
    - `dictionaryTables ⊆ schemaTables` — no stale registry entries.
-   - `queryPlannerTables ⊆ dictionaryTables` — every planner reference is dictionary-registered (only if step 3 yielded a reliable extraction).
-5. On failure, emit a clear diff message naming the offending table and which set is missing it.
+   - `queryPlannerTables ⊆ dictionaryTables` — every planner reference is dictionary-registered.
+4. On failure, emit a clear diff message naming the offending table and which set is missing it.
 
 **Acceptance criteria:**
 - The test exists and passes on current main.
 - Adding a `canonical_*` table to schema without dictionary registration → test fails with the new table name in the failure message.
 - Adding an entry to the dictionary for a non-existent schema table → test fails.
-- (If step 3 preferred path applies) adding a planner action that references an unregistered canonical table → test fails.
 
 **Tests required:** the test itself.
 
@@ -661,32 +683,25 @@ Operator chooses one of three framings — present this list verbatim during spe
 - `server/config/actionRegistry.ts` (likely site of the 5 mismatches).
 - `tasks/todo.md:862` — P3-H8 entry to close.
 
-**Goal:** reconcile the 5-entry mismatch. The gate's existing report (`Literal action entries: 94, with readPath: 99`) shows the readPath count is HIGHER than the action count — so the mismatch isn't "five actions are missing readPath", it's most likely either (a) duplicate or template `readPath:` lines being counted alongside literal entries, or (b) the existing subtraction-of-2 calibration in the gate (lines 14-21 of `verify-skill-read-paths.sh`) is off by 5. The investigation has to come first; the patch shape depends on what the investigation finds.
+**Goal:** reconcile the 5-entry mismatch. Either add the missing `readPath` tags to the action definitions, or update the gate's expected count if the mismatch reflects a legitimate exemption.
 
 **Approach:**
 
-The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter — it counts `actionType: '<name>'` entries vs `readPath:` lines (with a hardcoded subtraction of 2 for non-entry occurrences: the interface definition and the methodology template). It has no per-entry parser, so per-entry annotations like `@no-read-path` would be invisible to it. Approach in this order:
+The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter — it counts `actionType: '<name>'` entries vs `readPath:` lines and fails on any mismatch. It has no per-entry parser, so per-entry annotations like `@no-read-path` would be invisible to it. Two options, in priority order:
 
-1. **Step 1 — diagnose the actual cause of the 99-vs-94 mismatch.** Run the gate verbosely:
+1. **Preferred: bring the readPath count up to match the action count.** Run the gate verbosely:
    ```bash
    bash scripts/verify-skill-read-paths.sh
    ```
-   Then inspect `server/config/actionRegistry.ts` directly:
-   - Count literal `actionType: '...'` lines (should be 94).
-   - Count literal `readPath:` lines including the interface definition and methodology template (should be 99 today; the gate subtracts 2 to land on 97 — but the gate reports 99, so the subtraction may not be running, or there are 4 more `readPath:` lines than the gate expects).
-   - Identify whether the surplus `readPath:` lines are: (i) entries with `readPath` that have no corresponding `actionType` field (malformed entries), (ii) extra non-entry occurrences the subtraction-of-2 calibration missed, (iii) duplicate readPath fields inside one entry, or (iv) something else.
-2. **Step 2 — patch shape depends on diagnosis:**
-   - If (i): add the missing `actionType` fields, OR remove the orphan `readPath` lines.
-   - If (ii): update the gate's subtraction constant from 2 to the correct number, with a comment explaining the new constant.
-   - If (iii): remove duplicates.
-   - If (iv): document and decide.
-3. **Step 3 — fallback if a per-entry parser is needed:** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). Treat this as a separate, bigger task — do not bundle into D3.
-4. Re-run the gate; expect matching action and readPath counts and exit 0.
-5. Cross-reference and close the P3-H8 entry in `tasks/todo.md`.
+   Inspect the 5-entry mismatch by comparing the `actionType: '...'` lines and the `readPath: ...` lines visually in `server/config/actionRegistry.ts`. For each action without a `readPath`, decide whether the action genuinely reads canonical/skill data and add the appropriate `readPath` value (`'canonical'`, `'liveFetch'`, or `'none'`). The gate's own interface definition already lists `'none'` as a valid value, so an action that does no reads should be tagged `readPath: 'none' as const`.
+2. **Fallback (only if option 1 is impossible):** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). At that point a per-entry `// @no-read-path` annotation becomes feasible. Treat this as a separate, bigger task — do not bundle into D3.
+
+3. Re-run the gate; expect `Literal action entries: N, with readPath: N` (matching counts) and exit 0.
+4. Cross-reference and close the P3-H8 entry in `tasks/todo.md`.
 
 **Acceptance criteria:**
-- Gate exits 0 with matching action and readPath counts (via either fix-the-source or fix-the-calibration, per Step 2).
-- The diagnosis from Step 1 is captured in a one-paragraph note in `tasks/builds/<slug>/progress.md` so the audit-trail explains the actual root cause.
+- Gate exits 0 with matching action and readPath counts.
+- Each of the 5 sites gains an explicit `readPath` value (`'canonical'`, `'liveFetch'`, or `'none' as const`).
 - `tasks/todo.md` P3-H8 entry checked off.
 
 **Tests required:** none in code; gate is the test.
@@ -758,15 +773,15 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
 
 **Source:** test gate run during final-review.
 
-**Audit verdict (2026-04-25):** PARTIAL — both gate files exist:
-- `scripts/verify-pure-helper-convention.sh` — 7 violations as of the final-review log.
-- `scripts/verify-integration-reference.mjs` — the captured "1 blocking error in YAML parse" diagnosis is stale. `yaml` IS in `package.json` (`yaml: ^2.8.3`), and the source-spec iteration-5 review log (`tasks/review-logs/spec-review-log-codebase-audit-remediation-spec-5-2026-04-25T07-28-39Z.md`) already noted the earlier "yaml missing" diagnosis was wrong. The actual current failure mode must be re-captured by running the gate fresh — do not rely on the stale diagnosis below.
+**Audit verdict (2026-04-25):** VALID. Both gate files exist:
+- `scripts/verify-pure-helper-convention.sh` — 7 violations.
+- `scripts/verify-integration-reference.mjs` — 1 blocking error in `integration_reference_meta` YAML parse + 26 warnings.
 
-**Step 0 (must run BEFORE anything else):** re-run `node scripts/verify-integration-reference.mjs` on current main and capture the actual current error/warning state. Replace the stale diagnosis in this spec section with the new findings before scheduling the work. The numbers below ("26 warnings", "1 blocking error") are placeholders that need to be confirmed or replaced.
+Both fail on `main`. Same triage rule as E1 — fix or baseline.
 
 **Files:**
 - `scripts/verify-pure-helper-convention.sh` (gate) + 7 offender `*Pure.test.ts` files.
-- `scripts/verify-integration-reference.mjs` (gate) + the actual YAML / data source the gate parses (identify by running the gate; do not leave as "TBD").
+- `scripts/verify-integration-reference.mjs` (gate) + the YAML it parses (`integration_reference_meta`-named source, location TBD by gate run).
 
 **Goal:** drive both gates to clean state, or update baselines with documented rationale.
 
@@ -778,11 +793,10 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
    - **If misnamed** (test exercises an in-process pure helper but doesn't import a sibling because the helper is defined inline) → rename to `*.test.ts` (drop `Pure`).
    - **If genuinely pure-self-contained** (e.g. tests pure utility logic against fixtures) → carry an exception annotation `// @pure-helper-convention-exempt: <reason>` at the top of the file. Update the gate to recognise the annotation.
 
-**verify-integration-reference.mjs (counts to be confirmed by Step 0 above):**
-1. With Step 0's fresh diagnosis in hand, identify the actual failure mode (parse error / missing field / shape mismatch / nothing currently failing because the earlier blocker was fixed).
-2. If a real blocking error remains: fix it at the source (the YAML or data file the gate parses).
-3. If only advisory warnings remain: record their count in the existing centralized baseline store at `scripts/guard-baselines.json` keyed on this gate's `GUARD_ID` (the `.mjs` gate must adopt the same baseline pattern as the shell gates — `check_baseline()` in `scripts/lib/guard-utils.sh`; for the `.mjs` runner this means writing a small JS helper that reads/writes the same JSON file). Do NOT introduce a parallel `scripts/baselines/*.txt` format. Address remaining warnings case-by-case as time allows; do NOT block on this in E2.
-4. If Step 0 reveals the gate already exits 0 on current main (i.e. the captured failure was historical): close E2's `verify-integration-reference.mjs` track and update §5 Tracking accordingly with a note "verified clean on <commit>".
+**verify-integration-reference.mjs (1 blocking + 26 warnings):**
+1. Run the gate; identify the YAML file and line where the parse fails.
+2. Fix the YAML parse error (likely a stray `:` or unbalanced quote).
+3. The 26 warnings are advisory; record their count in the existing centralized baseline store at `scripts/guard-baselines.json` keyed on this gate's `GUARD_ID` (the `.mjs` gate must adopt the same baseline pattern as the shell gates — `check_baseline()` in `scripts/lib/guard-utils.sh`; for the `.mjs` runner this means writing a small JS helper that reads/writes the same JSON file). Do NOT introduce a parallel `scripts/baselines/*.txt` format. Address remaining warnings case-by-case as time allows; do NOT block on this in E2.
 
 **Acceptance criteria:**
 - `bash scripts/verify-pure-helper-convention.sh` exits 0 (or all 7 carry annotations the gate recognises).
@@ -936,13 +950,11 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 **Goal:** convert the never-executed pre-merge gate into a re-runnable post-deploy verification script. Lets future migration-heavy PRs gain the same coverage.
 
 **Approach:**
-
-G1's reusable script is scoped to **current-order replay only** — it does NOT attempt to roll back to historical commits or compare against historical schema snapshots. That capability is explicitly out of scope for this version because (a) the pre-merge G1 form was never run and is now historical, and (b) cross-commit comparison requires `git show` shell-out for every migration file, plus a schema-introspection diff against an artefact this repo doesn't yet maintain. Both belong in a separate, larger spec if anyone ever needs them.
-
 1. Write `scripts/verify-migration-sequencing.sh` parameterised on a database URL. Steps:
-   1. Spin up a fresh disposable database (a one-shot Postgres container, or a local dev DB the operator is OK to drop). Run every migration in `migrations/` (current numerical order) end-to-end. Verify zero errors. Verify `drizzle-kit introspect` matches the schema declared in `server/db/schema/*.ts` (the live source of truth — this repo treats the Drizzle schema as authoritative; any divergence between schema and migrations is itself a finding).
-   2. With `app.organisation_id` SET to a fixture org: write a single test row to each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196). Each must succeed. The script wraps each table's write in a `BEGIN…ROLLBACK` envelope so no test data persists.
-   3. With `app.organisation_id` UNSET: same writes. Each must fail closed (zero rows affected, no exception leak).
+   1. Spin up a fresh disposable database (a one-shot Postgres container, or a local dev DB the operator is OK to drop). Run all migrations 0001..N in order. Verify zero errors. Verify `drizzle-kit introspect` matches the expected schema.
+   2. Take a snapshot of the disposable DB at HEAD. Reset to the pre-PR-196 commit. Run the historical migrations through that commit. Then re-run only the new migrations introduced since. Verify zero errors and zero data loss against the snapshot.
+   3. With `app.organisation_id` SET to a fixture org: write a single test row to each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196). Each must succeed. The script cleans up the test rows in a `BEGIN…ROLLBACK` envelope so no test data persists.
+   4. With `app.organisation_id` UNSET: same writes. Each must fail closed (zero rows affected, no exception leak).
 2. Wire into a manual-trigger CI workflow (not blocking on every commit; runs on demand or pre-deploy when the operator chooses).
 3. Treat the very first run as the post-deploy validation for PR #196 — execute against a local dev DB and capture results.
 
@@ -1013,8 +1025,6 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 **Files:**
 - `architecture.md` § Architecture Rules (one rule added).
 - New: `scripts/verify-derived-data-null-safety.sh` (gate).
-- New: `scripts/derived-data-null-safety-fields.txt` (allowlist of async-produced field names; consumed by the gate).
-- New: `server/lib/derivedDataMissingLog.ts` (shared WARN-line helper, sibling of `server/lib/logger.ts` — placed at the existing `server/lib/` level rather than a new `server/lib/logging/` subdirectory, since the only logging primitive in the repo today is `server/lib/logger.ts` and a single sibling does not justify a new subtree).
 - New tests: per-service tests under `__tests__/<service>.derivedDataNullSafety.test.ts` for services that read async-produced state.
 
 **Goal:** codify a single architecture-level rule so consumers of derived data (rollups, bundle outputs, intervention outcomes, async-enrichment fields) treat that data as nullable by default. Closes the silent-degradation failure mode where consumers throw or cascade-fail when an upstream job hasn't run yet.
@@ -1042,7 +1052,7 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
    - Allow exemption via comment annotation `// @null-safety-exempt: <reason>`.
    - Emit `[GATE] derived-data-null-safety: violations=<count>` per C1.
 
-5. **Operator log signal.** Define a single shared helper `logDataDependencyMissing(service, field, orgId)` in `server/lib/derivedDataMissingLog.ts` (sibling of `server/lib/logger.ts`) so every WARN line is shaped identically and parseable for dashboards. Internally the helper delegates to the existing `server/lib/logger.ts` so no new logger framework is introduced.
+5. **Operator log signal.** Define a single shared helper `logDataDependencyMissing(service, field, orgId)` in `server/lib/logging/derivedDataMissing.ts` so every WARN line is shaped identically and parseable for dashboards.
 
 **Acceptance criteria:**
 - Rule codified in `architecture.md` § Architecture Rules.
@@ -1083,11 +1093,10 @@ PR #196 is merged. Re-sequenced relative to the original draft (which assumed pr
 | 5 | **B1, C4** — zero-risk additive | Trivial; ship anytime, possibly bundled into other PRs of opportunity. | < 1 hour each |
 | 6 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1 — sequence first within the drift-guards group. | half-day |
 | 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle with C1 in a single "drift-guards" PR. | 1 day |
-| 8 | **A3, F1** — internal refactors | Independent; ship as small PRs. | 1 day each |
-| 8b | **F2** — configDocuments cache durability | Blocked behind Phase-5A `rateLimitStoreService` (per source spec §8.1) — F2 cannot start until that primitive ships. Not part of the parallel-shippable batch. | 1 day after Phase-5A |
+| 8 | **A3, F1, F2** — internal refactors | Independent; ship as small PRs. F2 strictly depends on Phase-5A's `rateLimitStoreService` (per source spec §8.1) — F2 reuses that primitive rather than introducing a new one. | 1 day each |
 | 9 | **H1** — cross-service null-safety contract | High-leverage system rule. Codify before further service expansion; small audit script + architecture.md rule + per-service refactors. | 2–3 days |
-| 10 | **A1** — principal-context propagation | Major migration of `canonicalDataService` + every caller + gate hardening. | 3–5 days |
-| 11 | **A2** — RLS write-boundary guard | New architectural primitive (Proxy-based runtime guard + schema-vs-registry gate + migration hook). Schedule with §13.5A or its own phase. **Independent of A1** — A2's mechanism is table-name + Proxy-based, not principal-flag-based; the earlier A1→A2 dependency claim was stale and has been removed. A1 and A2 may ship in parallel, or A2 first if the runtime-guard scaffolding is desired before more services land. | 3–4 days |
+| 10 | **A1** — principal-context propagation | Major migration of `canonicalDataService` + every caller + gate hardening. Land before A2 because A2's runtime guard reads `PrincipalContext` flags. | 3–5 days |
+| 11 | **A2** — RLS write-boundary guard | New architectural primitive (gate + runtime guard + migration hook). Schedule with §13.5A or its own phase. | 3–4 days |
 | 12 | **B2 + B2-ext** — job idempotency + concurrency standard | After A1 (some jobs benefit from `PrincipalContext`-aware data access). Bundle idempotency audit with concurrency-guard standardisation. | 3–4 days |
 
 **Critical-path summary:**
@@ -1192,3 +1201,9 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 - Advances to `Status: complete` when all rows are `✓` or `↗`.
 - After completion, the spec stays in `docs/superpowers/specs/` as historical record — do not delete.
 
+
+==== END SPEC ====
+
+==== ITERATION 2 NOTE ====
+This is iteration 2. The spec already received iteration-1 mechanical fixes addressing call-site granularity (A1), Proxy-based runtime guard with file-based allowlist (A2), function-local getOrgScopedDb (A3), tsx test runner (B2), guard-baselines.json reuse (E2), rateLimitStoreService consumer-only F2, disposable-DB G1, and others. Focus this iteration on residual issues that survived iteration 1 — especially load-bearing claims that still lack mechanisms, cross-item contradictions, and any remaining path/line drift.
+==== END NOTE ====
