@@ -133,6 +133,8 @@ If neither condition holds, the single DB call goes inline in the route (wrapped
 1. **Org-scoped service** — use `withOrgTx(organisationId, async (tx) => { … })` from `server/instrumentation.ts`. Every query inside runs with `app.organisation_id` set.
 2. **Admin/system service** — use `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Bypasses RLS by design. For routes with `requireSystemAdmin` middleware or system-scoped tables.
 3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
+4. **Background / maintenance jobs that write tenant data** — acquire an admin connection for top-level iteration, then call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts`. A job that skips this pattern silently no-ops on every write because RLS sees no session var.
+5. **Log-and-swallow services** (bookkeeping, audit inserts, best-effort mirrors — anything whose contract says "must not block execution") — `getOrgScopedDb()` must be the **first line inside** the `try` block, never above it. Placing it above the catch turns a missing-org-context throw into a hard failure that escapes the error boundary. When reviewing a diff that adds `getOrgScopedDb`, confirm every hit is inside a `try {`.
 
 ---
 
@@ -210,7 +212,7 @@ Gates that emit `WARNING` (not `BLOCKING FAIL`) are observability signals. A `# 
 
 1. **Migrations are append-only.** Never edit a historical migration file after it has run.
 2. **Migration numbers are assigned at merge time.** Use `<NNNN>_<name>.sql` as a placeholder during PR development; rename the file to claim the next available number immediately before merge (after rebasing onto latest `main`).
-3. **System-scoped tables** (no `organisation_id`) must document in the migration header why they are not added to `RLS_PROTECTED_TABLES`.
+3. **System-scoped tables** (no `organisation_id`) must document in the migration header why they are not added to `RLS_PROTECTED_TABLES`. Every migration that creates a table must either add it to the registry with a full policy **or** include a `-- system-scoped: <reason>` header comment. Neither = gate failure, not just a review comment.
 4. **Drizzle schema changes** that accompany a migration land in the same PR. The schema file and the migration are a unit.
 5. **Corrective migrations** follow the §1.5 precedent: enumerate all historical policy names, DROP them, then CREATE with the canonical policy shape.
 
@@ -267,6 +269,8 @@ Before any PR that touches tenant data merges, answer YES to all five:
 - [ ] **Service-layer mediated.** No route or lib file imports `db` directly.
 - [ ] **Subaccount-resolved.** Every route with `:subaccountId` calls `resolveSubaccount(...)` before using the ID.
 - [ ] **Gates green.** All RLS gates plus the architectural-contract gates pass on the feature branch before review.
+- [ ] **Background jobs follow the admin/org tx pattern.** Any new maintenance job that writes tenant rows mirrors `memoryDedupJob.ts` (admin connection for iteration, `withOrgTx` per tenant write).
+- [ ] **Log-and-swallow services keep `getOrgScopedDb` inside `try`.** No resolution above the catch boundary.
 
 ---
 
