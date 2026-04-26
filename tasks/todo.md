@@ -859,7 +859,7 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] **P3-H5 — `measureInterventionOutcomeJob.ts:213-218` queries `canonicalAccounts` outside `canonicalDataService`**. high/high. Fix: move query into `canonicalDataService.getCanonicalAccounts()` or equivalent.
 - [ ] **P3-H6 — `server/services/referenceDocumentService.ts:7` imports directly from `providers/anthropicAdapter`** — bypasses `llmRouter`. high/high. Fix: use `llmRouter.routeCall()` or expose token-count via router; no adapter imports from services.
 - [ ] **P3-H7 — 5+ files import `canonicalDataService` without `PrincipalContext` / `fromOrgId` migration shim**: `actionRegistry.ts`, `intelligenceSkillExecutor.ts`, `connectorPollingService.ts`, `canonicalQueryRegistry.ts`, `ghlWebhook.ts`. high/medium. Fix: add `PrincipalContext` parameter or apply `fromOrgId()` shim per gate remediation notes.
-- [ ] **P3-H8 — 5 actions in `actionRegistry` missing `readPath` field** — `verify-skill-read-paths.sh` fails (94 literal entries vs 99 with readPath). high/high. Fix: add `readPath` tag to each of the 5 missing entries; re-run gate.
+- [x] **P3-H8 — 5 actions in `actionRegistry` missing `readPath` field** — `verify-skill-read-paths.sh` fails (94 literal entries vs 99 with readPath). high/high. Fix: add `readPath` tag to each of the 5 missing entries; re-run gate. Resolved in D3 — root cause was 5 crm.* dot-namespaced entries whose readPath fields were counted but whose actionType lines don't match the gate's `'[a-z_]+'` pattern; calibration constant updated from 2 to 7 with full per-occurrence comment listing; gate now exits 0.
 - [ ] **P3-M15 — `canonical_flow_definitions` + `canonical_row_subaccount_scopes` missing from canonical dictionary registry**. medium/high. Fix: add both table entries to registry.
 - [ ] **P3-M13 — `verify-input-validation.sh` WARNING** — some routes may lack Zod validation. medium/medium. Fix: manual scan of routes added in last 3 PRs; add Zod schemas where missing.
 - [ ] **P3-M14 — `verify-permission-scope.sh` WARNING** — some permission checks incomplete. medium/medium. Fix: manual scan; add missing `requireOrgMember` / RBAC checks.
@@ -951,4 +951,87 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] **N-3 — `actionRegistry.ts:2-4` comment is aspirational.** Tighten to reflect that the file does not actually call `canonicalDataService` today; the import is gate-presence-only.
 - [ ] **N-4 — Migration 0227 header says "8 tables".** Now correct after B-3 fix removed the 2 over-scope blocks. Verify on next pass.
 - [ ] **N-5 — `configDocuments` route's in-memory `parsedCache` is per-process (multi-process bug class).** Pre-existing; flagged for Phase 5A `rateLimitStoreService` runbook to clean up alongside §8.1's rate-limiter durability work — same defect class (key-value with TTL, per-process state).
+
+---
+
+## C3 follow-up: add canonicalTable metadata to canonicalQueryRegistry; upgrade C3 drift test to three-set comparison
+
+**Captured:** 2026-04-26
+**Source:** C3 implementation — `canonicalQueryRegistry.ts` lacks a `canonicalTable` field on its entries (keys are semantic action identifiers like `contacts.inactive_over_days`, not table names). Per spec §C3 forced-decision rule, the test ships as a two-set comparison until the metadata field is added.
+
+**Owner:** next developer adding a new `canonical_*` table OR authoring Phase-5A spec (whichever fires first).
+**Trigger:** Phase-5A spec authoring OR any new `canonical_*` table addition.
+**Back-link:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` §C3
+
+**Work required:**
+- [ ] Add a `canonicalTable: string` metadata field to each entry in `server/services/crmQueryPlanner/executors/canonicalQueryRegistryMeta.ts` (or wherever the meta is defined).
+- [ ] Upgrade `server/services/__tests__/canonicalRegistryDriftPure.test.ts` to extract the `queryPlannerTables` set from the registry metadata and assert `queryPlannerTables ⊆ dictionaryTables`.
+- [ ] Update the test's header comment to reflect three-set comparison.
+
+**Phase-5A spec coupling (per spec §C3):** The Phase-5A spec, when authored, MUST include a checklist item in its own §1 (or equivalent scope section) reading exactly:
+- [ ] C3 follow-up: upgrade canonicalRegistryDrift test from 2-set to 3-set comparison
+  - Source: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §C3
+
+---
+
+## Deferred from spec-conformance review — audit-remediation-followups (2026-04-26)
+
+**Captured:** 2026-04-26T05:34:10Z
+**Source log:** `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md`
+
+- [ ] **SC-2026-04-26-1** — A2 schema-vs-registry gate fails on current main (`exit 1`, 64 violations: 60 unregistered tenant tables + 4 stale registry entries).
+  - Spec section: §A2 Acceptance criteria — *"`bash scripts/verify-rls-protected-tables.sh` exits 0 on the current main"*.
+  - Gap: `server/config/rlsProtectedTables.ts` covers 74 tables but `migrations/*.sql` declares ~134 tables with `organisation_id`. The 60-table delta is mostly real tenant-scoped tables that should either be registered (with a matching `CREATE POLICY` in their migration) or added to `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. The 4 stale entries (`document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`) scope via parent FK and have no direct `organisation_id` column — registry should drop these or the diff logic should be taught to recognise FK-scoping.
+  - Suggested approach: the cheapest path is a triage pass — for each of the 60 unregistered tables, `grep -l "<table>" migrations/*.sql` to find the migration, check whether it carries a `CREATE POLICY` block. If yes → add to `rlsProtectedTables.ts`. If no but the table is genuinely tenant-private → write the policy migration AND add the entry. If no and the table is a system/audit/cross-tenant ledger → add to `rls-not-applicable-allowlist.txt` with rationale. The 4 stale entries can be removed mechanically once you confirm their FK-scoping vs `organisation_id` from their schema files.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #15.
+
+- [x] **SC-2026-04-26-2** — H1 helper `server/lib/derivedDataMissingLog.ts` has no unit tests. **CLOSED 2026-04-26** — added `server/lib/__tests__/derivedDataMissingLog.test.ts` with 6 cases (first-call WARN, repeat-DEBUG, multi-orgId / multi-field / multi-service distinct keys, `_resetWarnedKeysForTesting` boundary). Spies `logger.warn` / `logger.debug` directly via `node:test` `mock.method` so the test does not depend on `LOG_LEVEL` (which the logger captures at module-import time and would silently filter the DEBUG path).
+  - Spec section: §H1 Approach step 3 ("Add unit tests asserting the 'upstream not populated yet' path returns null without throwing") + Approach step 5 ("Tests in step 3 cover both the first-occurrence emit AND the rate-limited-skip / debug-downgrade behaviour, so the contract is exercised").
+  - Gap: H1's chosen Pattern B (first-occurrence WARN, subsequent DEBUG via in-memory `Set<string>`) is implemented but uncovered. Progress.md notes 0 refactors were needed at consumer sites, so no per-service `derivedDataNullSafety.test.ts` files were authored — but the helper itself still needs a test. The `_resetWarnedKeysForTesting()` export at line 60 was added FOR tests, yet no test file uses it.
+  - Suggested approach: add `server/lib/__tests__/derivedDataMissingLog.test.ts` with three `node:test` cases — (1) first call for `(svc, field, orgId)` triple emits at WARN (mock `logger.warn`), (2) repeat call for the same triple emits at DEBUG (mock `logger.debug`), (3) `_resetWarnedKeysForTesting()` clears the set and the next call WARNs again. Use the existing `node:test` + `node:assert` harness; pattern matches `server/services/__tests__/skillStudioServicePure.test.ts`.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #59g.
+
+- [x] **SC-2026-04-26-3** — H1 gate self-test fixture cannot fail. **CLOSED 2026-04-26** — `scripts/verify-derived-data-null-safety.sh` now accepts a `DERIVED_DATA_NULL_SAFETY_SCAN_DIR` env-var override; `scripts/__tests__/derived-data-null-safety/run-fixture-self-test.sh` runs the gate against the fixture dir and asserts a violation is reported on `fixture-with-violation.ts`. The fixture's `@null-safety-exempt` and `guard-ignore-next-line` annotations were removed so the gate fires. Both the gate and self-test are wired into `scripts/run-all-gates.sh`.
+  - Spec section: §H1 Acceptance criteria — *"Gate self-test: deliberate-violation fixture must fail"*.
+  - Gap: fixture at `scripts/__tests__/derived-data-null-safety/fixture-with-violation.ts` is structured to demonstrate a violation (`utilizationByModelFamily!` non-null assertion) but is unreachable: (a) the gate scans only `server/` (`find "$ROOT_DIR/server" -name "*.ts" ! -path "*/__tests__/*"` at gate line 27), and (b) the fixture line carries `// @null-safety-exempt: test fixture` AND `// guard-ignore-next-line` so even if the gate did scan it, both suppression mechanisms would silence the violation. The spec wants the fixture to PROVE the gate fires; today nothing wires it up.
+  - Suggested approach: write `scripts/__tests__/derived-data-null-safety/run-fixture-check.sh` (mirror the shape of `scripts/__tests__/principal-context-propagation/run-fixture-check.sh`) that copies the fixture into a temp `server/` path, runs the gate, asserts at least one violation lands for the temp path, then cleans up. Alternatively: add a `--fixture-path <dir>` argument to the gate itself so a self-test runner can point it at the fixture directory without copying. Either approach takes <30 min.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #59h.
+
+- [ ] **GATES-2026-04-26-1** — `reference_documents` (0202) and `reference_document_versions` (0203) FORCE RLS hardening.
+  - **Severity: medium (security posture).** FORCE RLS prevents the table owner from bypassing the existing policies — the same risk that `DEVELOPMENT_GUIDELINES.md` §1.2 identifies as the entire reason FORCE matters. Without it, a malicious or accidentally privileged DB connection (e.g. a misconfigured admin pool) could read across tenants on these two tables. The ALS-managed application pool does not run as table owner, so production blast radius is bounded — but the gap is real and should not be lost.
+  - Surfaced by: `scripts/verify-rls-coverage.sh` after the manifest entries were re-pointed at 0202/0203 in this session.
+  - Status: both files are now baselined in `HISTORICAL_BASELINE_FILES` with `@rls-baseline:` annotations. CREATE POLICY exists (org-isolation on parent doc; parent-EXISTS on versions); FORCE RLS does not.
+  - Suggested approach: write `migrations/02NN_reference_documents_force_rls.sql` adding `ALTER TABLE reference_documents FORCE ROW LEVEL SECURITY;` and `ALTER TABLE reference_document_versions FORCE ROW LEVEL SECURITY;`. Versions table needs a parent-EXISTS WITH CHECK clause matching the existing USING shape (no organisation_id column). Once shipped, drop both files from `HISTORICAL_BASELINE_FILES` and remove the `@rls-baseline` annotations.
+  - Why deferred: the migration's correctness depends on careful reasoning about the WITH CHECK shape for versions table (parent-EXISTS write check is non-obvious — needs a written test against actual writes via INSERT INTO reference_document_versions to confirm FORCE RLS doesn't break authoring flows). Also the 0202 migration carries a second `subaccount_isolation` policy keyed on a non-canonical `app.current_subaccount_id` session var — the FORCE-RLS work should reconcile that policy too, otherwise multi-policy OR semantics could mask the canonical isolation.
+
+- [ ] **GATES-2026-04-26-2** — `verify-rls-contract-compliance.sh` should skip `import type` lines.
+  - Surfaced by: pr-reviewer S3 on commit `fd61246e`. The `rlsBoundaryGuard.ts` line-47 `guard-ignore-next-line` is the right tactical fix today, but every future legitimate type-only import of an org-scoped DB type will need its own per-line suppression with similar wording.
+  - Suggested approach: prepend Rule 1's grep pipeline in `scripts/verify-rls-contract-compliance.sh` with `grep -v "^[[:space:]]*import type "` (or augment the per-line filter inside the while loop). Type-only imports are erased at compile time and issue zero queries, so the gate has no business flagging them. 2-line change.
+  - Why deferred: the suppression in this branch is correct under the current rules; gate-level fix is hygiene improvement, not a correctness fix.
+
+---
+
+## Deferred from PR #203 (ChatGPT review) — candidates for next spec
+
+**Captured:** 2026-04-26T08:00:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-claude-deferred-quality-fixes-ZKgVV-2026-04-26T07-57-14Z.md`
+**PR:** #203 — https://github.com/michaelhazza/automation-v1/pull/203
+**Branch:** `claude/deferred-quality-fixes-ZKgVV`
+
+ChatGPT review of the audit-remediation-followups PR surfaced two architectural items that were deferred (after user review) for follow-up specs. Items below are not bugs in the current PR — they are scale/contract concerns that warrant their own scoped spec rather than being wedged into this branch.
+
+- [ ] **CHATGPT-PR203-R2** — Replace per-row tx + advisory-lock pattern in `measureInterventionOutcomeJob` with a batched per-org claim model.
+  - **Severity:** medium (throughput / scale).
+  - **Scope:** architectural (changes documented concurrency model + likely requires schema work).
+  - **Files affected:** `server/jobs/measureInterventionOutcomeJob.ts`, possibly `server/db/schema/interventionOutcomes.ts` (uniqueness constraint on `intervention_id`).
+  - **Rationale for defer:** the current per-row tx + advisory lock is correct (claim+verify idempotency), but at high intervention throughput it serialises every row through a lock + transaction round-trip. ChatGPT's suggested `INSERT ... ON CONFLICT (intervention_id) DO NOTHING` would shed the lock and the per-row tx, but it presumes a unique constraint on `intervention_outcomes.intervention_id` that does not currently exist. The alternative (batch per org, single tx, conditional insert) changes the documented per-row claim+verify semantics that the spec explicitly chose. Either path is non-trivial reasoning + a migration; deserves its own spec.
+  - **Suggested next-spec framing:** decide between (a) add unique constraint on `intervention_outcomes.intervention_id` and switch to `ON CONFLICT DO NOTHING`, or (b) keep claim+verify but batch per-org with a single tx and a single advisory lock per batch. (a) is simpler if the data model permits it; (b) preserves the current concurrency model but amortises lock overhead. Either way the spec should set a target throughput (rows/sec/org) and include a load-test acceptance criterion.
+
+- [ ] **CHATGPT-PR203-BONUS** — Standardise a cross-job `JobResult` discriminated union (`ok | noop | partial | error`) with `queueService` logging + monitoring agent consumption.
+  - **Severity:** low (system-thinking / observability hygiene).
+  - **Scope:** architectural (cross-cutting refactor across all job files).
+  - **Files affected:** every file under `server/jobs/*` (each job's return shape), `server/services/queueService.ts` (logging consumer), monitoring/alerting consumers (TBD), shared types (`shared/types/jobs.ts` or new).
+  - **Rationale for defer:** valid system-thinking improvement that would unify how jobs report outcome and how monitoring acts on partial-success. Not a bug; ChatGPT explicitly tagged it "optional but powerful." Tacking it onto this PR would balloon scope across all jobs without a clear contract sketch. Better as a dedicated spec that defines the union, the queueService logging shape, the monitoring consumer's expectations, and a migration plan that converts jobs incrementally rather than in one commit.
+  - **Suggested next-spec framing:** define `JobResult = { kind: 'ok', detail?: ... } | { kind: 'noop', reason: string } | { kind: 'partial', completed: N, failed: M, errors: ... } | { kind: 'error', cause: ... }`. Specify how `queueService` logs each kind (current `logger.info('job_noop', ...)` already covers `noop`). Specify which monitoring signals each kind raises. Migrate jobs file-by-file behind the new return shape; old plain-`Promise<void>` jobs continue to work as `kind: 'ok'` until migrated.
 

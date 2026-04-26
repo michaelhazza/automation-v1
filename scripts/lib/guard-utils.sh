@@ -127,6 +127,7 @@ emit_summary() {
   if [ "${GUARD_OUTPUT:-text}" != "json" ]; then
     echo ""
     echo "Summary: $files_scanned files scanned, $violations violations found"
+    echo "[GATE] ${GUARD_ID}: violations=${violations}"
   fi
 }
 

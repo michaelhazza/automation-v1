@@ -39,12 +39,23 @@ fi
 VIOLATIONS=0
 
 # ── Historical baseline ───────────────────────────────────────────────────────
-# Migrations 0204–0208 and 0212 were authored before FORCE ROW LEVEL SECURITY
+# Migrations 0202–0208 and 0212 were authored before FORCE ROW LEVEL SECURITY
 # and the canonical session-var pattern were established. They are immutable;
-# migration 0213 repairs their policies at runtime and migration 0227 applies
-# FORCE RLS. Files in this list are exempt from the FORCE RLS and CREATE POLICY
+# migration 0213 repairs the policies on 0204–0208 / 0212 at runtime and
+# migration 0227 applies FORCE RLS to those.
+#
+# 0202 (reference_documents) and 0203 (reference_document_versions) were
+# excluded from 0227's hardening — see the NOTE in 0227_rls_hardening_corrective.sql:
+# the versions table has no organisation_id column so the canonical policy shape
+# does not apply verbatim, and the parent-EXISTS variant is routed to a separate
+# follow-on migration. The CREATE POLICY in 0202/0203 still provides org isolation;
+# only FORCE RLS is missing. The deferred hardening is tracked in tasks/todo.md.
+#
+# Files in this list are exempt from the FORCE RLS and CREATE POLICY
 # checks when they carry a @rls-baseline: annotation comment.
 HISTORICAL_BASELINE_FILES=(
+  "0202_reference_documents.sql"
+  "0203_reference_document_versions.sql"
   "0204_document_bundles.sql"
   "0205_document_bundle_members.sql"
   "0206_document_bundle_attachments.sql"

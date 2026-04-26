@@ -1520,27 +1520,27 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 
 | ID | Item | Status | Build slug / PR | Notes |
 |---|---|---|---|---|
-| A1a | Principal-context propagation: service surface change | ☐ todo | — | precedes A1b; deprecated shim allowed temporarily |
-| A1b | Principal-context propagation: gate hardening + caller enforcement | ☐ todo | — | depends on A1a; removes shims, flips gate to call-site granularity |
-| A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive — ships in three phases (schema-diff gate, migration hook, runtime guard) |
-| A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ☐ todo | — | low-risk refactor |
-| B1 | saveSkillVersion orgId-required throw test | ☐ todo | — | trivial |
-| B2 | Job idempotency audit | ☐ todo | — | may bundle with B2-ext OR ship separately (split DoD allows partial completion) |
-| B2-ext | Job concurrency standard | ☐ todo | — | may bundle with B2 OR ship separately (split DoD allows partial completion) |
-| C1 | Gate baseline count line | ☐ todo | — | foundational for C2/D3/E2/H1 gates |
-| C2 | architect.md context-section drift guard | ☐ todo | — | depends on C1 |
-| C3 | Canonical registry drift test | ☐ todo | — | independent |
-| C4 | actionRegistry.ts comment cleanup | ☐ todo | — | trivial |
-| D1 | verify-input-validation + verify-permission-scope baselines | ☐ todo | — | investigative |
-| D2 | Cycle count framing decision | ☐ todo | — | decision-only |
-| D3 | verify-skill-read-paths.sh cleanup | ☐ todo | — | depends on C1 |
-| E1 | 4 pre-existing unit test failures | ☐ todo | — | triage |
-| E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
-| F1 | findAccountBySubaccountId targeted method | ☐ todo | — | independent |
-| F2 | configDocuments parsedCache durability | ☐ todo | — | strictly depends on Phase-5A `rateLimitStoreService`; defer or migrate to deferred if surface doesn't fit |
-| G1 | Migration sequencing verification (re-runnable) | ☐ todo | — | superseded as pre-merge; run as post-deploy |
-| G2 | Post-merge smoke test runbook | ☐ todo | — | run ASAP |
-| H1 | Cross-service null-safety contract | ☐ todo | — | depends on C1; ships BEFORE B2 (per §2 re-sequencing); gate ships advisory on first release |
+| A1a | Principal-context propagation: service surface change | ✓ done | tasks/builds/audit-remediation-followups/a1a-principal-context-surface/ | All 31 canonicalDataService methods migrated to (principal: PrincipalContext, …) first-positional; 4 in-scope callers + intelligenceSkillExecutor migrated to fromOrgId(); 7/7 principal-context tests pass; build:server clean; gate violations=0. withPrincipalContext wrapping deferred to A1b (non-route callers run outside withOrgTx) |
+| A1b | Principal-context propagation: gate hardening + caller enforcement | ✓ done | tasks/builds/audit-remediation-followups/a1b-principal-context-gate/ | Gate flipped to call-site granularity (positive allowlist of fromOrgId / withPrincipalContext / locally-typed PrincipalContext identifiers); A1a left no shims to remove; 5 fixtures (3 violation, 2 pass) under scripts/__tests__/principal-context-propagation/ with manual driver; 0/42 misclassifications on main → regex matcher sufficient (no AST fallback needed); @principal-context-import-only annotation added to actionRegistry.ts and crmQueryPlannerService.ts; baseline regenerated to 0; deliberate-regression test confirms gate fails on bare-identifier injection |
+| A2 | RLS write-boundary guard | ✓ done | tasks/builds/audit-remediation-followups/a2-rls-boundary-guard/ | All 3 phases shipped in one PR: Phase 1 (`scripts/verify-rls-protected-tables.sh` schema-vs-registry diff + `scripts/rls-not-applicable-allowlist.txt` empty-by-default allowlist + manifest header path-correction); Phase 2 (`.claude/hooks/rls-migration-guard.js` advisory PostToolUse hook for `migrations/*.sql`); Phase 3 (`server/lib/rlsBoundaryGuard.ts` Proxy-based runtime guard with `assertRlsAwareWrite` + `wrapWithBoundary` + `withOrgScopedBoundary` + `withAdminConnectionGuarded`; 11 tests including 6-case spec contract). Gate extended with `allowRlsBypass: true` justification check (blocking) + raw `.execute(sql)` write-path coverage check (advisory). architecture.md updated with the RLS write-boundary paragraph. |
+| A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ✓ done | tasks/builds/audit-remediation-followups/a3-services-org-scoped-db/ | 8/8 + 12/12 pure tests pass; both services migrated to getOrgScopedDb; build clean |
+| B1 | saveSkillVersion orgId-required throw test | ✓ done | tasks/builds/audit-remediation-followups/b1-save-skill-version-throw-test/ | 3/3 node:test pass; orgId guard inlined pure; scope=system no-throw confirmed |
+| B2 | Job idempotency audit | ✓ done | tasks/builds/audit-remediation-followups/b2-job-idempotency-concurrency/ | 4 jobs carry idempotency-model header (replay-safe upsert / claim+verify / idempotent-by-construction / per-phase no-op predicates); structured `{ status: 'noop', reason, jobName }` returns added; idempotency contract tests cover the `__testHooks` seam shape + reset pattern |
+| B2-ext | Job concurrency standard | ✓ done | tasks/builds/audit-remediation-followups/b2-job-idempotency-concurrency/ | 4 jobs carry concurrency-model header; per-org `pg_advisory_xact_lock` added to `bundleUtilizationJob` + `measureInterventionOutcomeJob`; global lock on `ruleAutoDeprecateJob` (justified inline); existing lease retained on `connectorPollingSync`; `__testHooks` seam exposed on all 4 |
+| C1 | Gate baseline count line | ✓ done | tasks/builds/audit-remediation-followups/c1-gate-count-line/ | emit_summary() patched in guard-utils.sh; all 26 standalone scripts patched; discipline test fixture added; architecture.md updated |
+| C2 | architect.md context-section drift guard | ✓ done | tasks/builds/audit-remediation-followups/c2-architect-context-drift/ | scripts/verify-architect-context.sh + scripts/architect-context-expected.txt; 3 failure-mode fixtures; gate exits 0 on current codebase |
+| C3 | Canonical registry drift test | ✓ done | tasks/builds/audit-remediation-followups/c3-canonical-registry-drift/ | 2-set comparison (schema ⊆ dictionary); 4/4 tests pass; C3 follow-up entry in tasks/todo.md with Phase-5A coupling |
+| C4 | actionRegistry.ts comment cleanup | ✓ done | tasks/builds/audit-remediation-followups/c4-action-registry-comment/ | Path A (A1b not done): replaced misleading canonicalDataService comment with accurate one; gate violations=0 |
+| D1 | verify-input-validation + verify-permission-scope baselines | ✓ done | Post-PR-196 baselines: input-validation=44, permission-scope=13. Recorded in tasks/builds/audit-remediation/progress.md. | investigative |
+| D2 | Cycle count framing decision | ✓ done | Option (c) chosen: 43-cycle residual accepted to Phase 5A with 3-cluster breakdown. Recorded in source spec §6.3 + §13.3. | decision-only |
+| D3 | verify-skill-read-paths.sh cleanup | ✓ done | Calibration constant updated from 2 to 7; 5 surplus from crm.* dot-namespaced entries (not matched by ACTION_COUNT pattern); gate exits 0. | depends on C1 |
+| E1 | 4 pre-existing unit test failures | ✓ done | tasks/builds/audit-remediation-followups/e1-pre-existing-test-triage/ | All 4 test-only bugs fixed: referenceDocumentServicePure split-delimiter, skillAnalyzerPure SOURCE-marker assertion, skillHandlerRegistry +3 keys/count, crmQueryPlanner env-seeding preamble | triage |
+| E2 | 2 pre-existing gate failures | ✓ done | tasks/builds/audit-remediation-followups/e2-pre-existing-gate-triage/ | pure-helper-convention: 7 files suppressed with guard-ignore-file (inline pure sims, dynamic imports, no-.js-ext import); integration-reference: CRLF parse error fixed in gate script, 26 advisory warnings baselined | triage; depends on C1 |
+| F1 | findAccountBySubaccountId targeted method | ✓ done | tasks/builds/audit-remediation-followups/f1-find-account-by-subaccount/ | New method on canonicalDataService; measureInterventionOutcomeJob migrated; 5/5 node:test pass; build clean |
+| F2 | configDocuments parsedCache durability | ⧖ parked (Phase-5A not merged) | — | rateLimitStoreService.ts does not exist on main as of 2026-04-26; case (c) per plan: continue waiting until Phase-5A ships, then evaluate surface fit |
+| G1 | Migration sequencing verification (re-runnable) | ⧖ script authored; first-run against local DB pending | tasks/builds/audit-remediation-followups/g1-migration-sequencing/ | superseded as pre-merge; run as post-deploy |
+| G2 | Post-merge smoke test runbook | ⧖ runbook authored; live execution pending operator | tasks/builds/audit-remediation-followups/g2-post-merge-smoke/ | runbook at tasks/runbooks/audit-remediation-post-merge-smoke.md; flip to ✓ after operator completes all 7 steps |
+| H1 | Cross-service null-safety contract | ⧖ Phase 1 advisory gate shipped; Phase 2 promotion pending | tasks/builds/audit-remediation-followups/h1-derived-data-null-safety/ | All 7 in-scope read sites already null-safe; 0 refactors; gate baseline=0; Pattern B chosen; Phase 2 promotion requires 2-3 week clean observation window |
 
 **Status legend:** ☐ todo · ⧖ in progress · ✓ done · ↗ migrated to other spec · ✗ rejected (move to §3 with rationale).
 

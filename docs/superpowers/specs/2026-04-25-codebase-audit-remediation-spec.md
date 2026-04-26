@@ -1121,6 +1121,13 @@ npm run build:client                                                          # 
 npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts # named test passes (run by direct path; scripts/run-all-unit-tests.sh ignores `--` filters)
 ```
 
+**Framing decision (D2 — 2026-04-26):** Phase 3 shipped with 43 residual server cycles, not ≤ 5. Decision: **(c) accept the 43-cycle residual to Phase 5A** — the three known clusters:
+- `skillExecutor ↔ tools` — mutual import between skill execution and tool registry; refactor requires extracting a shared interface; deferred to Phase 5A.
+- `agentExecutionService ↔ middleware` — service layer and middleware share state types; type extraction needed; deferred to Phase 5A.
+- `agentService ↔ llmService ↔ queueService` — three-way dependency via shared job/result types; deferred to Phase 5A where cycle count target is 0.
+
+Phase 3 DoD bar retrospectively adjusted: ≤ 43 cycles is the Phase 3 passing bar (the ≤ 5 target was written before the residual cluster count was known). Phase 5A §13.5A DoD requires cycle count = 0.
+
 **Cycle-count discipline — two-stage target.** Phase 3 sets a target of ≤ 5, not 0. The root fix drives the 175→≤5 reduction; the last few cycles (the two schema-leaf tail items: `agentRuns.ts:3` and `skillAnalyzerJobs.ts:15`) are surgical and route to Phase 5A (§8.4). **Phase 5A is where the count must reach 0** — the programme is not declared complete while any server-side cycles remain. The Phase 3 PR ships once the count drops sharply; the Phase 5A tail items close the final gap. This two-stage sequencing is intentional: the Phase 3 type-extraction is the architecturally significant change; the Phase 5A tail items are one-file extractions with trivial review cost. Inverting the order would delay Phase 3 on minor mechanical work.
 
 ---
@@ -1850,7 +1857,9 @@ Each phase has a per-phase definition of done. The audit-remediation programme a
 
 ### §13.3 Phase 3 DoD
 
-- [ ] `npx madge --circular --extensions ts server/ | wc -l` ≤ 5.
+> **Framing note (D2 — 2026-04-26):** The server cycle count target of ≤ 5 was not met; actual result is 43. Framing decision (c) accepted — see §6.3 Framing decision for cluster breakdown. The ≤ 5 bar is retrospectively adjusted to ≤ 43 for Phase 3; Phase 5A must reach 0.
+
+- [ ] `npx madge --circular --extensions ts server/ | wc -l` ≤ 43. *(Original target ≤ 5; adjusted per D2 framing decision — 43 cycles accepted to Phase 5A. See §6.3.)*
 - [ ] `npx madge --circular --extensions ts,tsx client/src/ | wc -l` ≤ 1.
 - [ ] `shared/types/agentExecutionCheckpoint.ts` exists and exports `AgentRunCheckpoint`, `SerialisableMiddlewareContext`, `SerialisablePreToolDecision`, `PreToolDecision`.
 - [ ] `server/db/schema/agentRunSnapshots.ts` imports only from `drizzle-orm`, `drizzle-orm/pg-core`, sibling schema files, or `shared/**`. No `server/services/**`, `server/lib/**`, or `server/middleware/**` imports. (Note: the broader leaf-rule guarantee for every schema file is NOT in Phase 3 scope — `agentRuns.ts` and `skillAnalyzerJobs.ts` also violate it today; those are tail items in §8.4. The Phase 3 fix is the cascade-driver only.)

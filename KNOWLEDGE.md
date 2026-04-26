@@ -820,3 +820,51 @@ The audit-remediation-followups spec accreted seven cross-cutting meta rules acr
 **Where NOT to use this pattern.** Item-specific contracts (e.g. "A2 requires `allowRlsBypass` be declared explicitly", "C1 [GATE] line is the last application-level line") stay inside the item. The §0.X slot is for posture that applies across items, not for any constraint that happens to be cross-cutting in surface area.
 
 **Applied to:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` §0.1 through §0.7. Pattern generalises to any backlog spec with ≥6 items where cross-cutting architectural posture emerges across rounds of review.
+
+## Post-merge observations: PR #196
+
+Template entry — operator must fill in actual outcomes after running the runbook at
+`tasks/runbooks/audit-remediation-post-merge-smoke.md`. This section records the live
+results once the 7-step smoke test is executed against a deployed environment.
+
+| Step | Outcome | Notes |
+|---|---|---|
+| 1 — Agent creation | (pending) | |
+| 2 — Automation trigger | (pending) | |
+| 3 — GHL webhook receipt | (pending) | |
+| 4a — bundleUtilizationJob | (pending) | |
+| 4b — measureInterventionOutcomeJob | (pending) | |
+| 4c — ruleAutoDeprecateJob | (pending) | |
+| 4d — connectorPollingSync | (pending) | |
+| 5 — Log tail (10 min) | (pending) | |
+| 6 — LLM router metrics | (pending) | |
+| 7 — Final verdict | (pending) | |
+
+Update this section and flip the §5 Tracking row to `✓ done` after the operator completes
+all 7 steps cleanly. Any blocker from step 7 goes to `tasks/todo.md § Blockers`.
+
+---
+
+## Audit-remediation followups: pre-existing test triage
+
+Files triaged (2026-04-26):
+
+- `server/services/__tests__/referenceDocumentServicePure.test.ts` — `out.split('---\n')[1]` matched the `---DOC_START---\n` delimiter instead of the `\n---\n` metadata separator, so `parts[1]` was the metadata block rather than the content block. Disposition: **test-only bug** — fix: split on `'\n---\n'`.
+
+- `server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts` — assertion `includes('[SOURCE: library]')` was stale after `withSourceMarker` was updated to always embed the heading-qualified `sourceKey`, producing the extended form `[SOURCE: library "heading>cols"]`. Disposition: **test-only bug** — fix: prefix match `includes('[SOURCE: library')`.
+
+- `server/services/__tests__/skillHandlerRegistryEquivalence.test.ts` — three handlers (`crm.query`, `ask_clarifying_questions`, `challenge_assumptions`) were added to `SKILL_HANDLERS` in `skillExecutor.ts` after the test's 163-entry baseline was set; the mirror list and count assertion were not updated. This test is an anti-drift gate — it MUST be updated in the same commit as any `SKILL_HANDLERS` addition. Disposition: **test-only bug** — fix: add 3 keys to `CANONICAL_HANDLER_KEYS`, bump count to 166.
+
+- `server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts` — file had no env-seeding preamble; `crmQueryPlannerService.ts` transitively imports `server/db/index.ts` which validates `DATABASE_URL`/`JWT_SECRET`/`EMAIL_FROM` via zod on module initialisation. Pattern: add `await import('dotenv/config')` + `process.env.X ??= 'placeholder'` **before** any service import. Because ESM static imports are hoisted, the service import must be a dynamic `const { x } = await import(...)` placed after the env-seed block. Disposition: **test-only bug** — see `skillHandlerRegistryEquivalence.test.ts` for the canonical pattern to copy.
+
+**Reusable rule:** Any test file that imports a service which (directly or transitively) calls `server/db/index.ts` must apply the env-seeding + dynamic-import pattern. Static imports are hoisted in ESM and cannot be gated behind top-level `await` env setup.
+
+### 2026-04-26 Gotcha — Adding `getOrgScopedDb()` to a log-and-swallow service must keep the resolution INSIDE the existing try/catch
+
+When migrating a service from a module-top `db` import to function-scope `getOrgScopedDb('source')`, do NOT place the resolution above the existing try/catch — even if the call looks like setup. `getOrgScopedDb` throws `failure('missing_org_context')` when called outside an active `withOrgTx` ALS context, and that throw will escape any error boundary placed below it.
+
+**Caught in PR #203 (Round 2) on `server/services/onboardingStateService.ts`.** Commit `86548956` (refactor(services): A3) moved `const db = getOrgScopedDb('onboardingStateService');` to the line immediately above the existing `try/catch`. The file's documented contract is "Failures are logged and swallowed — bookkeeping must never block execution," and 7 caller sites in `workflowEngineService.ts` and `workflowRunService.ts` invoke it after committing terminal `cancelled` / `completed` status updates with no surrounding try/catch of their own. With the resolution outside the catch, a contract violation by any caller (workflow path that bypassed `withOrgTx`) becomes a hard failure of workflow finalisation instead of a logged-and-swallowed bookkeeping miss.
+
+**Rule.** For any service whose header contract says failures are log-and-swallow, the FIRST line inside the `try` block must be `const db = getOrgScopedDb(...)`. Resolution lives inside the boundary, not above it. Apply this consistently across the services that share this contract — onboarding state, telemetry dual-writes, audit-log inserts, "best-effort" event mirrors. The cost of the extra line of indentation is zero; the cost of a hard-failure regression on terminal workflow paths is a stuck queue.
+
+**Detection heuristic.** When reviewing a service refactor that adds `getOrgScopedDb`, grep the diff for `getOrgScopedDb(` and confirm every hit is inside a `try {` block. If any hit is at function-scope above `try`, that's the regression. The same heuristic catches the inverse mistake (someone wrapping `getOrgScopedDb` in a try/catch where the contract should fail loudly — admin paths, hot paths that demand org context).

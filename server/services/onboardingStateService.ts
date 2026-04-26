@@ -10,7 +10,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountOnboardingState } from '../db/schema/subaccountOnboardingState.js';
 import type { SubaccountOnboardingStatus } from '../db/schema/subaccountOnboardingState.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
@@ -47,7 +47,13 @@ export async function upsertSubaccountOnboardingState(params: {
   const status = mapRunStatusToOnboardingStatus(params.runStatus);
   const now = new Date();
 
+  // getOrgScopedDb() throws failure('missing_org_context') when the caller is
+  // outside an active withOrgTx block. Per the file header contract, onboarding
+  // bookkeeping MUST NOT block workflow finalisation — the resolution itself
+  // therefore lives inside the try/catch so any contract violation is logged
+  // and swallowed alongside genuine DB errors.
   try {
+    const db = getOrgScopedDb('onboardingStateService');
     await db
       .insert(subaccountOnboardingState)
       .values({

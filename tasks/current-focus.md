@@ -8,6 +8,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
+**Active spec:** docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md
+**Active plan:** docs/superpowers/plans/2026-04-26-audit-remediation-followups.md
+**Active build slug:** audit-remediation-followups (Wave 1)
+**Last updated:** 2026-04-26
+
+---
+
 **In-flight spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md` — PR #196 (branch `feat/codebase-audit-remediation-spec`) merge-ready after the full review pipeline. Phases 1+2+3 of 5 shipped (Phase 1 RLS hardening, Phase 2 gate compliance, Phase 3 architectural integrity). Pipeline outcomes: spec-conformance CONFORMANT_AFTER_FIXES (1 mechanical fix; 4 directional items routed to backlog) → pr-reviewer REQUEST_CHANGES (3 blocking + 2 strong fixed in-branch; 5 deferred) → dual-reviewer PR ready (3 iterations, 1 minor comment fix) → 2 rounds ChatGPT PR review with verdict APPROVED with controlled rollout (Round 1: 3 auto-rejects no-op + 7 escalated all defer; Round 2: 2 high-leverage additions H1 + B2-ext routed to follow-up spec). 136 files vs origin/main (+38k / -1.3k). Session log: `tasks/review-logs/chatgpt-pr-review-feat-codebase-audit-remediation-spec-2026-04-25T20-31-09Z.md`. **Pre-merge gate (G1):** migration verification per follow-up spec (fresh DB bootstrap + staging migrate + FORCE RLS smoke test) — must run before merge. **Post-merge action (G2):** smoke-test runbook per follow-up spec (agent / automation / webhook / job cycle + log/LLM/job monitoring). All other findings deferred to `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` (20 items across 8 groups A–H, sequenced post-merge backlog). Phases 4+5 of original spec also pending (separate future PRs). Final HEAD at session close: pending close-out commit (last named: `a83e28f2`). Awaiting merge into `main`.
 
 **Also merge-ready:** PR #187 (branch `feat/clientpulse-ui-simplification`) — clientpulse UI simplification. Full review pipeline complete (spec-conformance CONFORMANT → pr-reviewer with B1–B3 + S1 fixed in-branch + S2–S7 / N1–N8 deferred → dual-reviewer hit Codex usage limit → 3 rounds ChatGPT PR review, 15 rejected as diff-vs-HEAD hallucinations, 5 polish items deferred). 63 files vs origin/main (+7.7k / -721). Session log: `tasks/review-logs/chatgpt-pr-review-clientpulse-ui-simplification-2026-04-24T12-01-27Z.md`. Final HEAD at session close: `ccb5d343`. Awaiting merge into `main`.

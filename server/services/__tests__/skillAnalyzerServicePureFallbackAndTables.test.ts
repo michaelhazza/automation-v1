@@ -86,7 +86,9 @@ test('remediateTables: recovers missing row with [SOURCE: library] marker', () =
     incomingInstructions: null,
   });
   assertEq(out.autoRecoveredRows, 1, 'should recover 1 row');
-  assert(out.instructions.includes('[SOURCE: library]'), 'should mark recovered row');
+  // withSourceMarker always includes the sourceKey (heading-qualified headerKey),
+  // so the marker is the extended form '[SOURCE: library "..."]' not bare '[SOURCE: library]'.
+  assert(out.instructions.includes('[SOURCE: library'), 'should mark recovered row');
 });
 
 test('remediateTables: does not match tables with different headers', () => {

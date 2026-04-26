@@ -1,0 +1,21 @@
+# RLS-not-applicable allowlist
+#
+# Tables that legitimately have an `organisation_id` column but are NOT covered
+# by an RLS policy. Each entry is a table name followed by a one-line rationale
+# explaining why RLS does not apply.
+#
+# Format:  <table_name>  <one-line rationale>
+# Comment lines start with `#`.
+#
+# This file is consumed by:
+#   - scripts/verify-rls-protected-tables.sh (Phase 1 schema-vs-registry diff)
+#   - server/lib/rlsBoundaryGuard.ts (runtime guard, dev/test only)
+#
+# Adding an entry here is a security-posture change. Prefer registering the
+# table in `server/config/rlsProtectedTables.ts` and adding a `CREATE POLICY`
+# in the matching migration. Use this file only when RLS is genuinely not
+# applicable (system-admin tables, read replicas, intentionally cross-tenant
+# audit ledgers).
+#
+# (Currently empty — every tenant table on `main` is registered in
+# rlsProtectedTables.ts. Add new entries below as needed.)
