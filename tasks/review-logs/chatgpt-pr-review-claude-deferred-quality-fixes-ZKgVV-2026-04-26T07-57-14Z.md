@@ -110,4 +110,4 @@ User response: **R2 → defer, Bonus → defer** (both routed to `tasks/todo.md`
 
 ### Commit hash
 
-Round 1 commit: `<filled-in-after-commit>` (single commit for Y5 implementation + deferred-items routing + session log update).
+Round 1 commit: `a01c2ceb` (single commit for Y5 implementation + deferred-items routing + session log creation).
