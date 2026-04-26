@@ -25,7 +25,10 @@ if [ ! -x "$GATE" ] && [ ! -f "$GATE" ]; then
 fi
 
 # Run the gate against the fixture directory only.
-OUTPUT="$(DERIVED_DATA_NULL_SAFETY_SCAN_DIR="$SCRIPT_DIR" bash "$GATE")"
+# `|| true` so the runner survives a future flip of the gate from advisory
+# (`exit 0`) to blocking (`exit 1`) — the runner's job is to assert the
+# count line, not propagate the gate's exit code.
+OUTPUT="$(DERIVED_DATA_NULL_SAFETY_SCAN_DIR="$SCRIPT_DIR" bash "$GATE" 2>&1 || true)"
 echo "$OUTPUT"
 
 # Extract the violation count from the C1-format count line.
