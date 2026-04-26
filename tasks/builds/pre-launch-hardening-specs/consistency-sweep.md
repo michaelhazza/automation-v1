@@ -190,3 +190,25 @@ External review's fifth pass identified 5 minor clarification gaps. 1 promoted t
 **Re-stamped at:** 2026-04-26 (same day as v4)
 **Findings since v4 stamp:** 5 edge-clarification gaps. 0 mechanical · 5 directional resolved inline (1 to invariants 7.7; 4 to per-flow contracts) · 0 false alarms.
 **Spec set status:** edge-condition coherent; ready for implementation. No further architectural or directional gaps identified across 4 review passes.
+
+---
+
+## Spec consolidation 2026-04-26 (post-v5)
+
+User-requested artefact restructure: the 6 per-chunk spec files in `docs/` were merged into a single multi-phase spec at `docs/pre-launch-hardening-spec.md`. **No content changes** — the consolidation is purely an organisational re-shape:
+
+- 6 per-chunk specs DELETED from `docs/`.
+- 1 consolidated spec CREATED at `docs/pre-launch-hardening-spec.md` (~2080 lines).
+- Phase numbering renumbered to linear implementation order: Phase 1 = Chunk 1, Phase 2 = Chunk 2, Phase 3 = Chunk 4, Phase 4 = Chunk 6, Phase 5 = Chunk 5, Phase 6 = Chunk 3. Original chunk numbers preserved as `(was Chunk N)` anchors.
+- Cross-references rewritten (`Chunk N` → `Phase M` per the mapping above; `(was Chunk N)` anchors preserved via sentinel substitution).
+- Companion invariants doc UNCHANGED (still SHA-pinned at `1cc81656`).
+- Architect outputs UNCHANGED (still in `tasks/builds/.../architect-output/`).
+- Verification log UNCHANGED.
+
+Sweep findings since v5 stamp: **0 new findings.** Consolidation is mechanical; no contract drift. Same content, single document.
+
+### Sweep stamp v6 (consolidation)
+
+**Stamped at:** 2026-04-26
+**Spec set:** `docs/pre-launch-hardening-spec.md` (consolidated) + `docs/pre-launch-hardening-invariants.md` (companion).
+**Coverage:** all 32 findings across 5 review passes are resolved in the consolidated spec; nothing lost in consolidation.

@@ -183,3 +183,18 @@ Fifth external review surfaced 5 final clarification gaps. 1 promoted to invaria
 **Spec set status (post-v5):** edge-condition coherent; no further architectural/directional gaps across 5 review passes. **Ready for implementation.**
 
 See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md` for the full audit (v1 → v5).
+
+### Spec consolidation (2026-04-26)
+
+User-requested artefact restructure: the 6 per-chunk spec files in `docs/` were merged into a single multi-phase spec at **`docs/pre-launch-hardening-spec.md`**. Phases are renumbered to linear implementation order; original chunk numbers preserved as `(was Chunk N)` traceability anchors. No content changes — purely organisational.
+
+| Phase | Was | Section |
+|---|---|---|
+| 1 — RLS Hardening Sweep | Chunk 1 | § 2 |
+| 2 — Schema Decisions + Renames | Chunk 2 | § 3 |
+| 3 — Maintenance-Job RLS Contract | Chunk 4 | § 4 |
+| 4 — Gate Hygiene Cleanup | Chunk 6 | § 5 |
+| 5 — Execution-Path Correctness | Chunk 5 | § 6 |
+| 6 — Dead-Path Completion | Chunk 3 | § 7 |
+
+Companion invariants doc unchanged (still pinned at SHA `1cc81656`). Architect outputs unchanged. Implementation reads ONE spec, follows ONE order: `1 → {2, 3, 4} → 5 → 6`.

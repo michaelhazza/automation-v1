@@ -120,13 +120,17 @@ Source: live runs of `bash scripts/verify-input-validation.sh` and `bash scripts
 
 ## Per-spec PR list
 
-_(populated as each chunk PR opens)_
+_(populated as each chunk PR opens; superseded 2026-04-26 by spec consolidation — see below)_
 
-| Chunk | Spec slug | Branch | PR # | Status |
-|---|---|---|---|---|
-| 1 | pre-launch-rls-hardening | spec/pre-launch-rls-hardening | [#204](https://github.com/michaelhazza/automation-v1/pull/204) | open for review |
-| 2 | pre-launch-schema-decisions | spec/pre-launch-schema-decisions | [#209](https://github.com/michaelhazza/automation-v1/pull/209) | open for review |
-| 3 | pre-launch-dead-path-completion | spec/pre-launch-dead-path-completion | [#208](https://github.com/michaelhazza/automation-v1/pull/208) | open for review |
-| 4 | pre-launch-maintenance-job-rls | spec/pre-launch-maintenance-job-rls | [#205](https://github.com/michaelhazza/automation-v1/pull/205) | open for review |
-| 5 | pre-launch-execution-correctness | spec/pre-launch-execution-correctness | [#207](https://github.com/michaelhazza/automation-v1/pull/207) | open for review |
-| 6 | pre-launch-gate-hygiene | spec/pre-launch-gate-hygiene | [#206](https://github.com/michaelhazza/automation-v1/pull/206) | open for review |
+**Spec consolidation 2026-04-26.** The 6 per-chunk spec files in `docs/` were merged into a single multi-phase spec at `docs/pre-launch-hardening-spec.md`. Phases are renumbered to linear implementation order; original chunk numbers preserved as `(was Chunk N)` traceability anchors. The 6 per-chunk PRs (#204–#209) were already closed and consolidated into PR #210; the spec file consolidation is the artefact-level analogue. Companion invariants doc (`docs/pre-launch-hardening-invariants.md` SHA `1cc81656`) remains separate and SHA-pinned.
+
+| Phase | Was | Section in consolidated spec | PR |
+|---|---|---|---|
+| 1 — RLS Hardening Sweep | Chunk 1 | `docs/pre-launch-hardening-spec.md` § 2 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+| 2 — Schema Decisions + Renames | Chunk 2 | § 3 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+| 3 — Maintenance-Job RLS Contract | Chunk 4 | § 4 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+| 4 — Gate Hygiene Cleanup | Chunk 6 | § 5 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+| 5 — Execution-Path Correctness | Chunk 5 | § 6 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+| 6 — Dead-Path Completion | Chunk 3 | § 7 | [#210](https://github.com/michaelhazza/automation-v1/pull/210) |
+
+The 6 closed PRs (#204–#209) remain as historical record. They were closed pre-consolidation and carry the per-chunk file content at the SHAs they were last pushed to.
