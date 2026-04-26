@@ -775,3 +775,48 @@ When a spec has a registry of cross-cutting axes (e.g. `§4.10 Cross-invariant i
 ### [2026-04-26] Pattern — Default-to-user-facing triage with internal-quality specs achieves 100% autonomy
 
 Across the 4-round system-monitoring-agent ChatGPT spec review, every finding (34 total — 30 in rounds 1-3, 4 in round 4) was triaged `technical` and decided autonomously. Zero user-facing findings, zero user gates, zero user-input-required moments. The spec was internal-quality through and through: failure modes, contracts, schema evolution, observability invariants, idempotency keys, concurrency rules, defaults tables, status markers. **Pattern:** when a spec defines internal subsystems with no described user-visible surface (no UI copy, no workflow ordering, no feature naming, no pricing, no permission policy, no notification copy), the entire ChatGPT review loop is auto-executable under the technical bucket. The triage discipline (default-to-user-facing on ambiguity) does not produce false escalations on this spec class because the ambiguity surface is empty — there are no user-visible elements to mistakenly escalate. **Implication for spec authoring:** specs that intentionally hide user surface (deferring UI to architect, naming only internal types, deferring user-visible features to other specs) are the cheapest to review autonomously. Specs that bundle user-visible surface into internal-contract specs are the most expensive — every UI-string finding requires a user gate. Worth keeping the layers separate at spec time.
+
+### [2026-04-26] Culture — If a gate fails, we stop. We don't workaround the spec. We fix the system.
+
+Surfaced by ChatGPT in the closing verdict on the audit-remediation-followups spec review (PR #201, Round 5). When a static gate, test, or invariant fails, the default response must be **stop and fix the underlying system** — never add an exemption, raise the baseline, suppress the warning, comment the line out, or restructure the code so the gate stops noticing. Each of those reactions hollows out the gate without fixing what the gate was telling you.
+
+**Why this matters in this codebase specifically.** The testing posture is `static_gates_primary` (per `docs/spec-context.md`) — runtime tests are scoped to pure functions only, frontend / API-contract / E2E tests are deliberately deferred. The static gates ARE the safety net. A bypassed gate doesn't just mute one alert; it removes a primary signal from the only signal layer the project currently runs against itself. The fix-the-system / don't-bypass-the-gate posture is therefore not stylistic — it is the operational contract that makes the rest of the testing posture coherent.
+
+**Concrete decision rules:**
+1. If a gate fires on your PR: assume the gate is right and your code is wrong until proven otherwise.
+2. If proving otherwise takes more than 15 minutes, escalate — do not bypass while you investigate.
+3. If the gate is genuinely wrong (false positive), fix the gate, add a regression test for the gate's logic, then re-run on your PR. Do not exempt your specific occurrence.
+4. Baseline-count increases in `scripts/guard-baselines.json` always require a PR-description note explaining why (per §0.7 of the audit-remediation-followups spec). No silent baseline creep.
+5. Rate-limit / DEBUG-downgrade discipline applies to operator log lines, not to gate signals — gate signals stay loud.
+
+**Anti-patterns to reject in review:**
+- "Add this file to the allowlist for now, we'll fix it later" → no, fix it now.
+- "Bump the baseline by 1, the gate is too strict" → no, justify or fix.
+- "Comment out the failing assertion, the test is wrong" → no, the test is asking a real question.
+- "Wrap the call site in an exception so the runtime guard doesn't see it" → no, that's exactly what the guard is for.
+
+**Applied to:** ChatGPT spec review session for `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` (PR #201, Round 5 closing verdict). The spec itself codifies the supporting machinery — §0.1 gate quality bar, §0.5 no silent success on partial execution, §0.7 baseline-rot prevention, §4.1 per-item integrity check — but this culture rule is the human-side contract that makes them stick.
+
+### [2026-04-26] Spec review pattern — Reviewer pressure surfaces blast-radius before the reviewer surfaces blockers
+
+Across the 4 review rounds on the audit-remediation-followups spec, ChatGPT's first round produced 8 structural findings that were all variants of one theme: **the original sequencing concentrated blast radius and the reviewer caught it before any "blocker" surfaced**. A1 was a single 31-method API migration + gate flip in one PR; A2 shipped runtime-guard + schema-diff + migration-hook all at once; H1 enforcement gate started blocking on day 1; B2 sequenced four jobs as a single chunk. None of these were "wrong" — they were just brittle in execution.
+
+The reviewer's actual contribution wasn't pointing at design defects. It was pointing at **where execution would crack first**. Round 1 produced 8 splits / phases / advisory-mode demotions; Round 2 produced 11 precision tightenings on the new edges those splits exposed; Round 3 produced 8 measurable-trigger refinements on the new precision edges; Round 4 produced 12 drift-prevention rules on the long-term failure modes the now-tightened version would face over time. Each round's findings were generated by the previous round's edits — the spec didn't get more "correct", it got progressively more **execution-resilient under pressure**.
+
+**Reusable rule for spec authors:** when a reviewer's first round is structural (not factual), do not interpret it as "the spec is wrong". Interpret it as "the spec is brittle". Apply the splits and re-submit; expect the next round to be precision tightenings on the new seams. Plan for 3–4 rounds of this shape on any spec that is large enough to have real blast radius (~1500+ lines, multiple cross-cutting items, gates that touch CI). Do not stop after Round 1 — the structure-first / precision-second / drift-prevention-third shape is the pattern.
+
+**Anti-pattern.** Treating Round 1 structural feedback as "blockers" and trying to defend the original shape. The spec was already approvable in Round 1 — but defending the unsplit A1 / unphased A2 / day-1-blocking H1 would have produced a worse outcome than splitting them and accepting the precision rounds that followed.
+
+**Applied to:** ChatGPT spec review session for `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` (PR #201) — 4 substantive rounds, 39 findings applied, 0 deferred, 1 closing verdict round. Session log: `tasks/review-logs/chatgpt-spec-review-audit-remediation-followups-2026-04-26T00-57-02Z.md`. Generalises to any spec ≥1000 lines with multiple cross-cutting items.
+
+### [2026-04-26] Spec authoring — Cross-cutting `§0.X` meta-rule slots are the right home for execution-discipline rules that govern many items at once
+
+The audit-remediation-followups spec accreted seven cross-cutting meta rules across four review rounds — §0.1 gate quality bar, §0.2 no new primitives unless named, §0.3 no cross-item scope expansion, §0.4 determinism over cleverness, §0.5 no silent success on partial execution, §0.6 architecture default lock scope, §0.7 baseline rot prevention. Each was extracted from a recurring failure mode that would otherwise have to be re-stated inside every relevant item.
+
+**Why this works.** Once the §0.X slot exists, individual items reference the rule by section number rather than restating it. A1b cites §0.4. B2 cites §0.5 and §0.6. E2 cites §0.7. H1 cites §0.3 and §0.5. The cross-references compress the spec without losing precision and — more importantly — every later round's reviewer can write "extend §0.4" instead of "add a determinism note to A1b AND A2 AND B2 AND C3 AND D3 separately". The spec stays internally consistent because the rule lives in one place.
+
+**Authoring heuristic.** When a review round produces three or more findings that are variants of the same architectural posture (determinism, scope control, observability volume, lock scope, partial execution, baseline discipline, primitive reuse), promote the posture to a §0.X slot rather than stamping each item. The conversion threshold is "three items would benefit" — under that, an item-local note is fine; at or above that, the meta rule earns its slot.
+
+**Where NOT to use this pattern.** Item-specific contracts (e.g. "A2 requires `allowRlsBypass` be declared explicitly", "C1 [GATE] line is the last application-level line") stay inside the item. The §0.X slot is for posture that applies across items, not for any constraint that happens to be cross-cutting in surface area.
+
+**Applied to:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` §0.1 through §0.7. Pattern generalises to any backlog spec with ≥6 items where cross-cutting architectural posture emerges across rounds of review.
