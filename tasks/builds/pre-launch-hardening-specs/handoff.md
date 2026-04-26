@@ -168,13 +168,18 @@ Third external review surfaced 9 cross-flow coherence gaps. Resolved by promotin
 
 ### Edge-condition tightening pass (2026-04-26 amendment v4)
 
-Fourth external review surfaced 7 edge-condition gaps. Resolved by promoting 3 to cross-spec invariants (§ 7.5–7.7, re-pinned to SHA `335e86cb`) and 4 to per-flow contracts:
+Fourth external review surfaced 7 edge-condition gaps. 3 promoted to cross-spec invariants (§ 7.5–7.7) and 4 to per-flow contracts.
 
-- **Invariants § 7.5–7.7 (new):** 7.5 Retry classification (`safe | guarded | unsafe`) declared per operation; 7.6 `status` vs `executionStatus` distinct semantics; 7.7 Terminal event guarantee per chain.
-- **Chunk 3 § 4.5.1 (DR3):** first-commit-wins rule for concurrent different decisions (no deterministic preference between approve/reject).
-- **Chunk 3 § 4.5.3 (DR2):** suppressed-follow-up ordering LOCKED to Option A (NOT re-queued); Option B deferred.
-- **Chunk 3 § 4.5.5 + 4.5.7 (C4a):** HTTP-disconnect / gateway-timeout behaviour pinned (execution continues; result persisted; events fire; client recovers via WS).
-- **Chunk 3 § 4.5.7 (DR1):** `rule.draft_candidates.collision_detected` event for JSONB multi-match data-integrity flag.
-- **Chunks 3, 4, 5:** terminal events declared per chain to satisfy invariant 7.7.
+### Final clarifications pass (2026-04-26 amendment v5)
 
-See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment 2026-04-26 (third pass)` and § Amendment 2026-04-26 (fourth pass) for the full audit.
+Fifth external review surfaced 5 final clarification gaps. 1 promoted to invariant 7.7 extension (post-terminal event prohibition); 4 folded as per-flow contract clarifications. Invariants doc re-pinned to SHA `13ffec6d`.
+
+- **Invariant 7.7 extension:** post-terminal event prohibition (no further events under the same correlation key after the terminal event).
+- **Chunk 3 § 4.5.1 (DR3):** classification clarification — `idempotent_hit` vs `conflict` semantics ("failed intent, not failed system").
+- **Chunk 3 § 4.5.1 (DR1):** `artefact_id_collision` is HARD FAILURE (HTTP 500); no fallback.
+- **Chunk 3 § 4.5.3 (DR2):** cap precedence — frequency cap wins when both exceeded; events mutually exclusive per request.
+- **Chunk 3 § 4.5.5 (C4a):** timeout is terminal for the decision artefact; re-dispatch requires new artefact OR deferred manual-retry route.
+
+**Spec set status (post-v5):** edge-condition coherent; no further architectural/directional gaps across 5 review passes. **Ready for implementation.**
+
+See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md` for the full audit (v1 → v5).

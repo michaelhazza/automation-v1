@@ -1,7 +1,7 @@
 # Pre-Launch Schema Decisions + Renames — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 2
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `335e86cb3e3bf490eb72a63f4d4f38cf419b65cf`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `13ffec6d372d3d823352f88cca9b9eb9728910b5`)
 **Architect input:** `tasks/builds/pre-launch-hardening-specs/architect-output/schema-decisions.md` (commit SHA: `65494c88eb12bbaf22b2ed05ec1f29f14601f566` — final 630-line version; supersedes the 314-line partial at `d5dc0b78`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 2 lands alongside Chunks 4 + 6 after Chunk 1; blocks Chunks 5 + 3)
 **Status:** draft, ready for user review

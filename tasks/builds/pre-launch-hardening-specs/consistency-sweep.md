@@ -167,3 +167,26 @@ Plus terminal-event additions across all chains in Chunks 3, 4, 5 to satisfy inv
 **Findings since v3 stamp:** 7 edge-condition gaps. 0 mechanical · 7 directional resolved inline (3 promoted to cross-spec invariants 7.5–7.7; 4 to per-flow contracts) · 0 false alarms.
 **Retry classification declared everywhere:** every operation now carries an explicit `safe | guarded | unsafe` label; per-spec grep verifies.
 **Terminal events declared everywhere:** every chain in Chunks 3, 4, 5 has at least one event marked TERMINAL with the discriminated `status` field.
+
+---
+
+## Amendment 2026-04-26 (fifth pass) — final clarifications
+
+External review's fifth pass identified 5 minor clarification gaps. 1 promoted to invariant 7.7 extension; 4 folded as per-flow contract clarifications. Invariants doc re-pinned to SHA `13ffec6d`.
+
+### Resolution
+
+**Invariant extension:**
+- 7.7 Post-terminal event prohibition: once a terminal event is emitted for a correlation key, no further events with that key may be emitted (drop or re-key). Closes the dangling-chain assumption.
+
+**Per-flow clarifications (Chunk 3):**
+- §4.5.1 (DR3): semantic distinction between `idempotent_hit` (success — system honoured the user's intent) and `conflict` (failed intent, not failed system). Both are non-mutating terminal outcomes; `status` field discriminates correctly.
+- §4.5.1 (DR1): `artefact_id_collision` is HARD FAILURE (HTTP 500). No fallback to "first match"; no silent continuation.
+- §4.5.3 (DR2): cap precedence locked — when both frequency and concurrency caps exceeded simultaneously, ONLY `brief.followup.cap_hit` emits (frequency takes precedence; events are mutually exclusive per request).
+- §4.5.5 (C4a): timeout is TERMINAL for the decision artefact. Re-dispatch requires a brand-new approval artefact OR explicit manual-retry route (deferred to post-launch).
+
+### Sweep stamp v5
+
+**Re-stamped at:** 2026-04-26 (same day as v4)
+**Findings since v4 stamp:** 5 edge-clarification gaps. 0 mechanical · 5 directional resolved inline (1 to invariants 7.7; 4 to per-flow contracts) · 0 false alarms.
+**Spec set status:** edge-condition coherent; ready for implementation. No further architectural or directional gaps identified across 4 review passes.

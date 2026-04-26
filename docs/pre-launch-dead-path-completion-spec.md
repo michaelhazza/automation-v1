@@ -1,7 +1,7 @@
 # Pre-Launch Dead-Path Completion — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 3
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `335e86cb3e3bf490eb72a63f4d4f38cf419b65cf`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `13ffec6d372d3d823352f88cca9b9eb9728910b5`)
 **Architect input:** `tasks/builds/pre-launch-hardening-specs/architect-output/dead-path-completion.md` (commit SHA: `6bbbd737d48b9393146cd35f4930c0efdbb1be54`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 3 lands LAST — depends on RLS + schema + execution-correctness foundations)
 **Status:** draft, ready for user review
@@ -136,6 +136,15 @@ This section pins execution-safety contracts that the architect output left impl
 
 **First-commit-wins rule (concurrent different decisions).** When two simultaneous requests carry different decisions for the same `artefactId` (e.g. Request A: approve, Request B: reject hitting the partial unique index in the same instant), the **first commit wins** (FIFO at the database level, decided by the partial unique index's serialisation). The losing request returns HTTP 409 with the winning decision attached. There is **no deterministic preference** between approve and reject — neither outcome is privileged. This rule prevents future "business logic override" attempts (e.g. "if approve and reject race, approve wins") from being added without a deliberate spec amendment.
 
+**Classification clarification (idempotent-hit vs conflict).** Both `brief.approval.idempotent_hit` (HTTP 200) and `brief.approval.conflict` (HTTP 409) are non-mutating terminal outcomes. The semantic distinction:
+
+- **idempotent_hit (`status: 'success'`):** the same decision was already recorded; the system honoured the user's intent. **No failure of any kind.**
+- **conflict (`status: 'failed'`):** a *different* decision was already recorded; the user's intent for THIS request was NOT honoured. This is **failed intent, not failed system** — the system is healthy; the conflict is in the user's request relative to the already-decided state.
+
+Monitoring/analytics may filter on `status` directly; both are non-mutating but only `conflict` indicates an unmet user intent worth surfacing.
+
+**DR1 artefact-ID collision = hard failure.** When the JSONB scan in § 4.5.4 returns more than one row for an artefactId (per the uniqueness rule), the lookup throws `artefact_id_collision`. The HTTP response is **HTTP 500** (system error). There is **no fallback to "first match"**, **no silent continuation**, **no soft-skip**. The collision is a data-integrity red flag and MUST surface as a hard failure so operator dashboards see it. The `rule.draft_candidates.collision_detected` event is emitted alongside the throw and persists even if the request itself returns 500.
+
 **Stale-decision guard (per invariant 7.2 source-of-truth precedence).** Before invoking `actionService.proposeAction`, the service re-validates the artefact against the current execution-record state. If the parent brief's `tasks.status` is `'cancelled'` OR the underlying action's `actionPolicy` has been disabled since the artefact was emitted, the decision is rejected with HTTP 410 `{ error: 'artefact_stale', reason: '<cancelled_brief|disabled_policy|...>' }`. Pre-launch staleness is rare (rapid testing, no live data) but the rule is in place; spec author confirms the validation surface during implementation.
 
 **Artefact ID uniqueness (per invariant 6.5 + new requirement).** Artefact IDs are generated via the existing UUIDv7 generator in `shared/ids.ts` (or equivalent) and are **globally unique within an organisation** by construction. The org-scoped JSONB scan from § 4.5.4 returns at most one match per artefactId. If two matches are returned, the lookup throws `artefact_id_collision` — fail-loud, not silent.
@@ -195,6 +204,7 @@ This isolation between HTTP transport and execution lifecycle is binding for v1;
 - **Concurrency cap (overlap protection).** Maximum **1 active orchestrator run per conversation at any time.** Before enqueue, check for any `agent_runs` row with `conversationId = $1` and `status IN (IN_FLIGHT_RUN_STATUSES from runStatus.ts)`. If one exists, short-circuit to `simple_reply` with sentinel artefact: "An analysis is still running — your follow-up will be processed once it completes." No orchestrator job enqueued.
 - **When either cap reached.** The `handleBriefMessage` helper short-circuits to `simple_reply` path. No orchestrator job enqueued. Frequency-cap and concurrency-cap have distinct sentinel messages and distinct log events.
 - **Caps are informational, not enforced via DB constraint.** Pure-function check at request time. If frequency cap hit, log `brief.followup.cap_hit`. If concurrency cap hit, log `brief.followup.concurrency_blocked`.
+- **Cap precedence (when both exceeded simultaneously).** Frequency cap takes precedence: only `brief.followup.cap_hit` is emitted, NOT `brief.followup.concurrency_blocked`. Both events are mutually exclusive per request — never both. Rationale: frequency-cap triggers indicate user behaviour (loop-shaped traffic) while concurrency-cap triggers indicate system-state (in-flight run); when both apply, the user-behaviour signal is the more actionable one for triage.
 - **Test:** pure test `briefMessageHandlerPure.test.ts` extension — six cases: 6th orchestration in 10-min window short-circuits (frequency); follow-up arriving while prior run in-flight short-circuits (concurrency); window-resets after 10 minutes; cap is per-conversation (different conversations reset independently); two simultaneous follow-ups → first wins, second sees in-flight and short-circuits; frequency check happens BEFORE concurrency check (both events emit on the appropriate trigger).
 
 ### 4.5.4 DR1 JSONB index assumption
@@ -215,7 +225,7 @@ This isolation between HTTP transport and execution lifecycle is binding for v1;
 **Contract.**
 
 - **Timeout:** the webhook fetch in `invokeAutomationStep` has a hard timeout of **30 seconds**. After 30s, the fetch is aborted; the resume path emits `automation_execution_error` with `code: 'automation_webhook_timeout'` (added to §5.7 vocabulary if not already present).
-- **Retry posture:** **NO automatic retry on timeout in v1.** The decision artefact is marked failed; the user can manually retry via re-approving (which now hits the C4a-REVIEWED-DISP idempotency guard in 4.5.2 — the prior decision returns 200 with the failure marker, blocking a duplicate dispatch). Manual retry path is a deferred item if the user explicitly wants it.
+- **Retry posture:** **NO automatic retry on timeout in v1.** The decision artefact is marked failed; the timeout is a **terminal failure for that decision artefact**. A subsequent re-approve attempt by the user hits the C4a-REVIEWED-DISP idempotency guard in 4.5.2 (state-based: `status === 'running'` or terminal) and short-circuits — the prior decision is returned, NOT a fresh dispatch. **Re-dispatching the webhook for a timed-out decision requires either (a) a brand-new approval artefact emitted by the orchestrator on a subsequent run, OR (b) an explicit manual-retry mechanism (deferred to post-launch — see § 10 Deferred Items).** In v1, the user cannot directly retry the same approval after timeout; this is the documented contract, not a bug.
 - **Failure classification:** webhook 4xx → user-error; webhook 5xx → system-error; timeout → system-error; network failure → system-error. Distinction surfaces in the artefact's `executionStatus` and the audit log.
 - **Test:** pure test on the timeout path — assert `automation_webhook_timeout` is emitted; failure is classified as system-error; no retry attempted.
 
@@ -438,6 +448,7 @@ No DB migrations involved. All four reverts are file-revert granularity. New ser
 ## 10. Deferred Items
 
 - **Async post-approval dispatch.** v1 picks synchronous resume per architect § 4. Trigger to revisit: webhook latencies routinely exceed 30s in testing-round traffic, OR an HTTP timeout incident links to a stuck approval response. Resolution: move post-approval dispatch to a pg-boss job that the approval response acknowledges immediately. Out of scope for v1.
+- **Manual retry path for timed-out approvals.** v1 contract per § 4.5.5: timeout is terminal; re-dispatch requires a new artefact. Trigger to revisit: testing-round operators routinely need to retry timed-out webhooks without waiting for the orchestrator's next run. Resolution: dedicated `POST /api/briefs/:briefId/approvals/:artefactId/retry` route that emits a fresh approval artefact (new artefactId) and re-enters the dispatch path. Until then, users who want to retry a timed-out webhook must either wait for the orchestrator to re-emit the approval OR manually re-trigger the orchestrator via DR2.
 - **Conversation-level rate limiting on follow-ups.** Architect-flagged risk: a user could spam follow-ups and trigger many Orchestrator runs. Trigger to revisit: spam observed in testing, OR per-org cost spike attributable to follow-up loops. Resolution: piggyback on existing rate-limit middleware OR add a per-conversation cooldown.
 - **Follow-up re-invocation for non-Brief scopes.** Out-of-scope per § 1; new feature. Trigger to revisit: explicit operator request for `task` or `agent_run` conversation surfaces.
 - **Skill error envelope migration in `rules.ts`.** Bound to Chunk 5 C4a-6-RETSHAPE Branch B. If Branch A (grandfather), this entry stays open indefinitely; if Branch B (migrate), this entry closes when Chunk 5 implementation lands.
