@@ -3049,6 +3049,8 @@ These are non-negotiable. Violations are blocking issues in any code review.
 
 **Gate output standard (`[GATE]` line).** Every `scripts/verify-*.sh` and `scripts/verify-*.mjs` gate must emit `[GATE] <guard_id>: violations=<count>` as the final application-level stdout line. The canonical parser is `grep -E '^\[GATE\] [a-z0-9-]+: violations=[0-9]+$' | tail -n 1`. Framework-level output (diagnostic echoes, framework logs) may appear after the `[GATE]` line; application-level output (violation reports, summaries) must not. Scripts sourcing `scripts/lib/guard-utils.sh` get this line automatically via `emit_summary()`; standalone scripts must emit it explicitly before each exit path.
 
+**Derived-data null-safety.** Service code that reads fields populated by background jobs (`bundleUtilizationJob`, `measureInterventionOutcomeJob`, `ruleAutoDeprecateJob`, `connectorPollingSync`) must handle null/undefined defensively — these fields may not be populated on first use. Non-null assertions (`data!`) and unconditional throws on missing derived data are prohibited. Use `logDataDependencyMissing` from `server/lib/derivedDataMissingLog.ts` and return null/empty/sentinel instead. The helper uses Pattern B (first-occurrence WARN, subsequent occurrences DEBUG via in-memory `Set<string>` keyed `<service>.<field>:<orgId>`) — low-volume paths, process-restart resets the set. See Phase 1 scope in `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §H1`.
+
 ---
 
 ## Hierarchical Agent Delegation

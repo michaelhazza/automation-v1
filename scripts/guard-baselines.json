@@ -20,5 +20,6 @@
   "no-silent-failures": 10,
   "principal-context-propagation": 4,
   "integration-reference": 26,
-  "architect-context": 0
+  "architect-context": 0,
+  "derived-data-null-safety": 0
 }
