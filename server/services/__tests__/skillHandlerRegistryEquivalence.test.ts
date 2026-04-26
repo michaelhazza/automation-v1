@@ -46,7 +46,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (163 entries)
+// Canonical handler key set (166 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -220,6 +220,10 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'request_feature',
   'smart_skip_from_website',
   'canonical_dictionary',
+  // CRM Query Planner + deliberation handlers (added after initial 163-entry baseline)
+  'crm.query',
+  'ask_clarifying_questions',
+  'challenge_assumptions',
 ];
 
 // ---------------------------------------------------------------------------
@@ -255,11 +259,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 163 keys', () => {
+test('SKILL_HANDLERS has exactly 166 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 163) {
+  if (count !== 166) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 163. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 166. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

@@ -830,3 +830,19 @@ results once the 7-step smoke test is executed against a deployed environment.
 
 Update this section and flip the §5 Tracking row to `✓ done` after the operator completes
 all 7 steps cleanly. Any blocker from step 7 goes to `tasks/todo.md § Blockers`.
+
+---
+
+## Audit-remediation followups: pre-existing test triage
+
+Files triaged (2026-04-26):
+
+- `server/services/__tests__/referenceDocumentServicePure.test.ts` — `out.split('---\n')[1]` matched the `---DOC_START---\n` delimiter instead of the `\n---\n` metadata separator, so `parts[1]` was the metadata block rather than the content block. Disposition: **test-only bug** — fix: split on `'\n---\n'`.
+
+- `server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts` — assertion `includes('[SOURCE: library]')` was stale after `withSourceMarker` was updated to always embed the heading-qualified `sourceKey`, producing the extended form `[SOURCE: library "heading>cols"]`. Disposition: **test-only bug** — fix: prefix match `includes('[SOURCE: library')`.
+
+- `server/services/__tests__/skillHandlerRegistryEquivalence.test.ts` — three handlers (`crm.query`, `ask_clarifying_questions`, `challenge_assumptions`) were added to `SKILL_HANDLERS` in `skillExecutor.ts` after the test's 163-entry baseline was set; the mirror list and count assertion were not updated. This test is an anti-drift gate — it MUST be updated in the same commit as any `SKILL_HANDLERS` addition. Disposition: **test-only bug** — fix: add 3 keys to `CANONICAL_HANDLER_KEYS`, bump count to 166.
+
+- `server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts` — file had no env-seeding preamble; `crmQueryPlannerService.ts` transitively imports `server/db/index.ts` which validates `DATABASE_URL`/`JWT_SECRET`/`EMAIL_FROM` via zod on module initialisation. Pattern: add `await import('dotenv/config')` + `process.env.X ??= 'placeholder'` **before** any service import. Because ESM static imports are hoisted, the service import must be a dynamic `const { x } = await import(...)` placed after the env-seed block. Disposition: **test-only bug** — see `skillHandlerRegistryEquivalence.test.ts` for the canonical pattern to copy.
+
+**Reusable rule:** Any test file that imports a service which (directly or transitively) calls `server/db/index.ts` must apply the env-seeding + dynamic-import pattern. Static imports are hoisted in ESM and cannot be gated behind top-level `await` env setup.

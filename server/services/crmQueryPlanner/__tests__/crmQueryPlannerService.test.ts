@@ -5,10 +5,23 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts
  */
-import { runQuery } from '../crmQueryPlannerService.js';
+
+// crmQueryPlannerService transitively imports server/db/index.ts which validates
+// env vars via zod. Load .env first so the import does not throw on DATABASE_URL.
+// In environments without a .env file (CI, ephemeral sandboxes), fall back to
+// placeholder values — this test never hits the DB or signs a JWT.
+// ESM static imports are hoisted before any code runs, so we use dynamic imports
+// to guarantee env vars are seeded before the service module initialises.
+await import('dotenv/config');
+process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
+process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
+process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
+
 import type { RunQueryDeps } from '../crmQueryPlannerService.js';
 import type { RunLlmStage3Output } from '../llmPlanner.js';
 import type { ExecutorContext, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
+
+const { runQuery } = await import('../crmQueryPlannerService.js');
 
 let passed = 0;
 let failed = 0;
