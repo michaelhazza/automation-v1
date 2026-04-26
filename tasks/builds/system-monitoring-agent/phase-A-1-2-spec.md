@@ -1450,15 +1450,135 @@ The full env-var inventory across this spec lives in §12.2 (consolidated for op
 
 ## 10. UI surface
 
+The UI scope is deliberately tight. Per CLAUDE.md frontend principles, this spec adds no new pages, no new navigation entries, no dashboards. Every change extends the existing `SystemIncidentsPage` (Phase 0/0.5) and its triage drawer. Inline state beats new surface.
+
 ### 10.1 Triage drawer additions
+
+The Phase 0/0.5 triage drawer (`client/src/pages/SystemIncidentsPage.tsx` and the drawer subcomponent) renders a single incident's metadata, recent events, and lifecycle actions (resolve, suppress, escalate). This spec adds three inline blocks to that drawer, in the order below. Layout is vertical; existing actions remain at the top.
+
+| Block | Position | Renders | Visibility |
+|---|---|---|---|
+| Diagnosis annotation | Top of drawer body, above existing metadata | The agent's hypothesis + evidence + confidence (§10.3) | Only when `agent_diagnosis IS NOT NULL`. Otherwise: a slim "Awaiting diagnosis" or "Not auto-triaged" line — see §10.5. |
+| `investigate_prompt` block | Immediately below the diagnosis annotation | Markdown-rendered prompt with copy button (§10.2) | Only when `investigate_prompt IS NOT NULL`. |
+| Feedback widget | Below the existing resolve action, only after a resolve has happened against an agent-diagnosed incident | "Was this useful?" yes/no + free-text (§10.4) | Only when incident `resolved` AND `agent_diagnosis IS NOT NULL` AND `prompt_was_useful IS NULL`. |
+
+**Existing drawer surface unchanged.** The escalation modal, suppression modal, recent-events list, and metadata block all remain as-is. New blocks are additive.
+
+**Loading states.** The diagnosis and prompt blocks render their own skeleton row when the agent is still triaging — detected via `triage_attempt_count > 0 AND agent_diagnosis IS NULL AND last_triage_attempt_at > NOW() - 5 min`. Outside that window, "no diagnosis yet" copy renders without a skeleton.
+
+**Width.** The drawer width is unchanged. Long prompts scroll vertically inside the prompt block; horizontal overflow on the prompt block uses native `pre` wrapping behaviour with `white-space: pre-wrap` so copy/paste preserves formatting.
+
+**Mobile.** Drawer is sysadmin-only; sysadmin workflow is desktop. Mobile layout is not optimised in this spec — the existing drawer falls back to a stacked view, and the new blocks inherit it. No mobile-specific design.
 
 ### 10.2 `investigate_prompt` copy button
 
+**Render.** A monospace-rendered block containing the markdown text of `system_incidents.investigate_prompt`. The block is read-only and selectable. A single primary action — `Copy prompt` — sits at the top right of the block.
+
+**Copy behaviour.**
+
+- Click → `navigator.clipboard.writeText(investigatePrompt)`.
+- On success: button label flips to `Copied` for 2 seconds, then returns to `Copy prompt`.
+- On failure (clipboard API blocked): inline tooltip "Copy failed — select the text manually" with no thrown error.
+- No event written for copy actions in v1. Future iteration may emit a `prompt_copied` event for the feedback loop, but copy alone is a weak signal — the resolve-time feedback widget (§10.4) is the load-bearing data point.
+
+**Markdown rendering.** The prompt is markdown by construction (per the protocol §5.2). The drawer reuses the existing markdown renderer used elsewhere in `SystemIncidentsPage` for incident notes, with `pre`-style code block formatting preserved. Headings, lists, and inline code render as expected.
+
+**No edit-in-place.** The prompt is rendered read-only. If the operator wants to modify the prompt before pasting, they paste into Claude Code and edit there — same as any other prompt source. Editing the stored prompt would mutate the audit record; we want the original agent-generated text on file.
+
+**Empty state.** If `investigate_prompt IS NULL` (incident not yet triaged, or rate-limit-skipped, or validation-failed), the block does not render. The diagnosis annotation block (§10.3) carries a state line — see below.
+
+**No download / export.** Copy-to-clipboard is the only export path. No "download as .md", no "send to email", no "open in editor". Adding those is not user-requested and would expand scope; copy is sufficient.
+
 ### 10.3 Diagnosis annotation rendering
+
+The diagnosis JSON (`system_incidents.agent_diagnosis`, populated by `write_diagnosis` per §9.4) renders as a structured block at the top of the drawer body. Layout matches the existing incident-metadata block style — labelled rows, light typographic hierarchy.
+
+**Rendered fields:**
+
+| Field | Source | Display |
+|---|---|---|
+| Hypothesis | `agent_diagnosis.hypothesis` | Plain paragraph. No markdown — it's prose. |
+| Confidence | `agent_diagnosis.confidence` | Pill badge: `low` / `medium` / `high`. Colour: low=neutral, medium=blue, high=green. (Not red — high confidence is good, not alarming.) |
+| Evidence | `agent_diagnosis.evidence[]` | Bullet list. Each item: `{type, ref, summary}`. `ref` rendered as a clickable link if it points to a known entity (agent run id → run log page; row id → no link in v1). |
+| Generated at | `agent_diagnosis.generatedAt` | Relative time (`2 minutes ago`) with absolute time on hover. Matches existing event-row style. |
+| Agent run | `agent_diagnosis_run_id` | Small footer link: `View triage run` → opens the agent run's log in a new drawer or page. (If the agent-run-log page does not yet exist for system-managed agents, render as plain text "Triage run id: <uuid>" until that page is added — flagged as Phase 3 polish.) |
+
+**Empty / not-yet-triaged states:**
+
+| Condition | Render |
+|---|---|
+| `agent_diagnosis IS NULL` AND `triage_attempt_count == 0` AND incident is sweep-eligible | "Awaiting auto-triage" — slim status line, no skeleton, no progress bar. |
+| `agent_diagnosis IS NULL` AND `triage_attempt_count > 0` AND `last_triage_attempt_at > NOW() - 5 min` | Skeleton block with "Triaging…" caption. |
+| `agent_diagnosis IS NULL` AND `last_triage_attempt_at` older than 5 min AND `triage_attempt_count` at cap | "Auto-triage rate-limited — manual escalate available" with link to existing escalate-to-agent action. |
+| `agent_diagnosis IS NULL` AND incident is `source = 'self_check'` OR `metadata.isSelfCheck = true` | "Auto-triage skipped (self-check incident)" — no escalate prompt; this is intentional per §9.2. |
+| `agent_diagnosis IS NULL` AND `severity = 'low'` | "Auto-triage skipped (low severity)" — operator can manual-escalate. |
+
+**Failure mode visibility.** If the agent ran but produced an invalid prompt (validation failure per §9.8), `agent_diagnosis` may be set but `investigate_prompt` is NULL — render the diagnosis as normal, plus a "Prompt validation failed — operator should investigate manually" line in red text. This is a real failure mode worth surfacing inline; hiding it would let the agent silently degrade.
+
+**No real-time auto-update.** The drawer refreshes when the user closes and re-opens it, when the page re-fetches per Phase 0.5 backstop polling, and when a WebSocket `system_incident:updated` event fires for the open incident (existing Phase 0.5 channel, no new event type). A "diagnosis just landed" inline notification is **not** added; the drawer simply re-renders with the new content.
 
 ### 10.4 Feedback widget — was this useful
 
+The feedback widget is the load-bearing input to the iteration loop (§5.5, §11). It captures structured operator feedback the moment the operator's working memory is sharpest — at resolve time, against an agent-diagnosed incident.
+
+**Render.** A small inline card that appears in the drawer **only after the operator has resolved an agent-diagnosed incident** AND `prompt_was_useful IS NULL`. Layout:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Was the agent's diagnosis useful?                                │
+│   ( ) Yes — it pointed me at the right place                     │
+│   ( ) No — I had to investigate from scratch                     │
+│   ( ) Partially — useful but missed something                    │
+│                                                                  │
+│   What did it get right or wrong? (optional)                     │
+│   ┌────────────────────────────────────────────────────────────┐ │
+│   │                                                            │ │
+│   └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│   [ Submit ]   [ Skip ]                                          │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**State machine:**
+
+| State | Render |
+|---|---|
+| Resolve just happened, agent had diagnosed, no feedback submitted | Widget visible, `Submit` disabled until a radio is chosen. |
+| Operator chose a radio | `Submit` enabled. Free-text remains optional. |
+| Operator clicked `Submit` | Server call to new mutation `recordPromptFeedback(incidentId, { wasSuccessful: 'yes' | 'no' | 'partial', text?: string })`. On success → widget collapses to "Thanks — feedback saved" line; persists on next drawer open. |
+| Operator clicked `Skip` | Widget hides for the session; no event written; widget reappears on next session if `prompt_was_useful` is still NULL. |
+| `prompt_was_useful IS NOT NULL` | Widget hidden. Resolved-incident drawer shows feedback summary inline: "Operator marked this useful: yes" — for context next time someone reviews the incident. |
+
+**Mapping `wasSuccessful` to the schema column:**
+
+The schema column `prompt_was_useful` is `boolean | NULL`. The widget has three radio options. Mapping: `yes → true`, `no → false`, `partial → true with metadata.partial = true on the event row`. Why store `partial` on the event row, not the schema: the boolean column is the simple aggregate-friendly signal; the event log carries the fidelity. This avoids adding a third schema state for what is, fundamentally, a "useful with caveats" signal.
+
+**Mutation route.** A new `POST /api/system/incidents/:id/feedback` endpoint, sysadmin-gated (per §4.4 `assertSystemAdminContext`), accepting `{ wasSuccessful: 'yes'|'no'|'partial', text?: string }`. Writes to `prompt_was_useful` and `prompt_feedback_text` (§4.5) and emits `investigate_prompt_outcome` event (§11.2). Idempotent on first submission per incident; subsequent submissions are rejected with 409 (one feedback per incident; over-write would lose history, and the operator can edit after the fact via the audit trail if a future iteration needs it).
+
+**Optional free-text length.** Up to 2,000 characters. Above that, the textarea hard-stops and shows a character counter. No multi-line markdown rendering on display — the field is stored and re-displayed as plain text.
+
 ### 10.5 Filter for agent-diagnosed incidents
+
+A new filter pill is added to the existing filter bar at the top of `SystemIncidentsPage`. The filter operates on `agent_diagnosis IS NULL` / `IS NOT NULL`.
+
+**Pill values:**
+
+| Value | Server filter | UI label |
+|---|---|---|
+| `all` (default) | none | `All` |
+| `diagnosed` | `agent_diagnosis IS NOT NULL` | `Diagnosed by agent` |
+| `awaiting` | `agent_diagnosis IS NULL` AND eligible for auto-triage AND `triage_attempt_count < cap` | `Awaiting diagnosis` |
+| `not-triaged` | `agent_diagnosis IS NULL` AND not eligible for auto-triage (low severity, self-check, rate-limited past cap) | `Not auto-triaged` |
+
+**Default.** `all`. Operators are expected to triage by severity and recency first; the diagnosis filter is for "let me see only the incidents the agent has annotated" workflows during weekly review.
+
+**Stacks with existing filters.** The new pill ANDs with existing filters (severity, status, source). No special-case logic.
+
+**Server-side query.** The list endpoint (`GET /api/system/incidents`) accepts a new query parameter `?diagnosis=all|diagnosed|awaiting|not-triaged`. Default `all`. Server validates against an enum; unknown values return 400.
+
+**No counts on the pill.** Inline count badges on filter pills are explicitly out of scope per CLAUDE.md frontend principles ("default to hidden"). The list itself shows the count after filtering applies.
+
+**Search and sort interaction.** Sort options (recency, severity) and the existing search box continue to operate over the filtered set. No regressions to existing behaviour.
 
 ## 11. Feedback loop
 
