@@ -1,0 +1,1134 @@
+# System Monitor — Active Monitoring Spec (Phase A + 1 + 2)
+
+**Status:** v1 — draft, pre-review
+**Owner:** Platform
+**Scope:** Server + client + migrations + new `docs/investigate-fix-protocol.md` doc + new system-managed agent
+**Predecessor:** `tasks/builds/system-monitoring-agent/phase-0-spec.md` (Phase 0 + 0.5 — shipped via PR #188)
+**Successor:** None planned. Phase 0.75 / Phase 3 / Phase 4 remain deferred (§19).
+
+This spec moves the System Monitor from **passive incident sink** (Phase 0/0.5) to **active monitoring** by:
+
+1. Adding the foundations needed to safely run a system-scoped agent (Phase A).
+2. Adding **synthetic checks** that detect silent failures — absence-of-events the error-driven sink cannot see (Phase 1).
+3. Adding the **`system_monitor` agent** itself: incident-triggered + sweep-driven, diagnosis-only, emits a single standalone `investigate_prompt` per incident formatted per a shared **Investigate-Fix Protocol** that the operator pastes into a local Claude Code session for diagnosis and approved fixes (Phase 2 + 2.5).
+
+All three internal phases ship on **one branch** with **one PR at the end**, but execution is staged across **multiple Claude Code sessions** — one per slice (A, B, C, D). At the end of each session the executor writes current state to `tasks/builds/system-monitoring-agent/progress.md`; the next session picks up from there. This avoids `/compact` mid-build at the cost of larger end-of-build PR review surface — accepted trade-off.
+
+---
+
+## Table of contents
+
+0. [Decisions log](#0-decisions-log)
+1. [Summary](#1-summary)
+2. [Context](#2-context)
+3. [Goals, non-goals, success criteria](#3-goals-non-goals-success-criteria)
+4. [Phase A — Foundations](#4-phase-a--foundations)
+5. [Investigate-Fix Protocol](#5-investigate-fix-protocol)
+6. [Heuristic Registry (config-as-code)](#6-heuristic-registry-config-as-code)
+7. [Baselining primitive](#7-baselining-primitive)
+8. [Phase 1 — Synthetic checks](#8-phase-1--synthetic-checks)
+9. [Phase 2 — Monitor agent (day-one + 2.5)](#9-phase-2--monitor-agent-day-one--25)
+10. [UI surface](#10-ui-surface)
+11. [Feedback loop](#11-feedback-loop)
+12. [Observability + kill switches](#12-observability--kill-switches)
+13. [File inventory](#13-file-inventory)
+14. [Testing strategy](#14-testing-strategy)
+15. [Rollout plan](#15-rollout-plan)
+16. [Risk register](#16-risk-register)
+17. [Implementation slicing & session pacing](#17-implementation-slicing--session-pacing)
+18. [Out-of-scope (explicit)](#18-out-of-scope-explicit)
+19. [Future phases (summary)](#19-future-phases-summary)
+
+---
+
+## 0. Decisions log
+
+This section captures every binding decision made during scoping, in CEO-level prose so the executor doesn't need to reverse-engineer intent from downstream sections. Anything the user wants to override is a single edit here; downstream sections cross-reference back.
+
+### 0.1 Prerequisites — verified against the current codebase (post-PR-#188)
+
+| ID | Question | Finding | Effect on spec |
+|---|---|---|---|
+| P1 | Is the Phase 0 incident sink live? | Yes — PR #188 merged. `system_incidents`, `system_incident_events`, `system_incident_suppressions` exist. Ingest hooks live in global error handler, asyncHandler, DLQ monitor, agent-run terminal-failed transition, connector polling, skill execution, LLM router. | Phase A builds **on** the existing sink; does not rebuild it. |
+| P2 | Is there a system-managed agent precedent? | Yes — Orchestrator (migration 0157) and Portfolio Health Agent (migration 0068). Both use `isSystemManaged=true` flag. | `system_monitor` follows the same pattern; see §9.1. |
+| P3 | Does pg-boss have a job-handler convention for system-scoped agents? | Yes — Orchestrator triggers agent runs via pg-boss handlers. | `system-monitor-triage` and `system-monitor-sweep` jobs follow the existing handler convention; see §9.2 / §9.3. |
+| P4 | Is there a principal-context primitive that supports `scope='system'`? | **Partial.** Phase 0/0.5 used Option A (request-attached `req.principal` carrying user context). System-scoped agent runs need a synthesised system-principal. `phase-0-spec.md §7.4` flagged this as Option B, deferred. | Phase A §4.3 builds Option B. **Hard prerequisite for Phase 2.** |
+| P5 | Is there a baselining primitive (rolling p50/p95 per agent / skill / connector)? | **No.** No service computes per-entity rolling stats today. | Phase A §7 builds it. **Hard prerequisite for baseline-relative heuristics.** |
+| P6 | Is Claude Code already integrated with this repo? | Yes — `CLAUDE.md` is the canonical project-instruction file, read by every Claude Code session in this repo. | Investigate-Fix Protocol references go in `CLAUDE.md`; see §5.3. |
+| P7 | Is `docs/` an established home for protocol documents? | Yes — `docs/capabilities.md`, `docs/spec-context.md`, `docs/codebase-audit-framework.md`, `docs/frontend-design-principles.md`. | `docs/investigate-fix-protocol.md` lives alongside; see §5.1. |
+
+### 0.2 Open questions — resolved during scoping
+
+| ID | Question | Decision | Reasoning |
+|---|---|---|---|
+| Q1 | Defer Phase 0.75 (email/Slack push)? | **Yes — defer indefinitely.** | Stated workflow is page-based monitoring. Push channels add ~3-5 days of work for capability not used by the workflow. Revisit only if monitoring fatigue across multiple operators creates a need. |
+| Q2 | Build a separate server-side investigate-fix agent? | **No.** Use the **Investigate-Fix Protocol** pattern instead — a shared markdown contract that both ends (system monitor + Claude Code) honour. | Claude Code already IS the investigate-fix agent. Building a server-side facsimile is Phase 3 (auto-remediation) in disguise — pre-production it masks signal. The protocol-doc approach preserves the "eventually roll into auto-fix" path: when ready, point a server-side worker at the same protocol. No architectural change. |
+| Q3 | Prompt field name on `system_incidents`? | **`investigate_prompt`** (single nullable text column). | Matches the user's framing. Avoids the word "remediation" which implies execution. Surfaced in the triage drawer with a copy button. |
+| Q4 | Trigger model for the monitor agent? | **Both.** (a) Incident-driven — auto-triggered on incident open with `severity >= medium`. (b) Sweep-driven — periodic `system-monitor-sweep` pg-boss job runs every 5 min over the last 15 min of activity. | Incident-driven covers known errors. Sweep covers degraded-correctness signals on runs that did not error. Together they cover "every run". |
+| Q5 | Heuristic registry storage — DB table or config-as-code? | **Config-as-code module** (`server/services/systemMonitor/heuristics/`). | Heuristic set is small and churns with deploys anyway. DB-table flexibility is unnecessary at this scale and adds an admin-UI dependency. Promote to DB only if tuning frequency exceeds deploy frequency. |
+| Q6 | Heuristic metadata wrapper? | **Yes.** Every heuristic carries `{id, severity, confidence, expectedFpRate, suppressionRules, baselineRequirements}`. | False-positive fatigue is the failure mode this whole project has to avoid. Metadata is non-optional. Per-heuristic suppression rules let us tune one heuristic without disabling the agent. |
+| Q7 | Baseline-relative thresholds vs absolute? | **Baseline-relative wherever possible.** Absolute thresholds only as a floor (e.g. minimum 1s latency before "5× p95" applies). | Avoids noise on tiny medians; avoids lockstep tuning across agent types of different complexity. |
+| Q8 | Sweep input cap to control token cost? | **Yes.** Max 50 runs OR 200 KB of log payload per sweep, whichever hits first. Summary stats first; deep-read only on heuristic fire. | Prevents a busy day from blowing the agent budget. Deep-read is the expensive call; gate it behind a cheap-heuristic pre-pass. |
+| Q9 | Phase 2.5 — same spec or follow-up? | **Same spec, same execution.** Day-one heuristics (Phase 2.0) ship first; Phase 2.5 cross-run/systemic heuristics ship in the same session once baseline data exists. | The structural surface (heuristic registry, baselining, agent prompt) is identical. Only the heuristic configuration grows. Splitting specs would duplicate ~80% of the document. |
+| Q10 | What does "every run" mean? | **Every terminal agent-run transition + every job-completed transition + every skill-execution completion within the sweep window.** | Phase 0 already ingests *failed* terminal transitions. Phase 2 sweep extends coverage to *successful* transitions, which is where the soft-fail signals live. |
+| Q11 | Are non-sysadmin operators in scope? | **No.** The triage drawer remains sysadmin-only. The agent runs as a system principal. | Matches Phase 0/0.5 access model; no new permission surface. |
+| Q12 | Auto-remediation in this spec? | **No.** Phase 3. The agent only annotates incidents and emits `investigate_prompt` text. | Explicit non-goal. Diagnosis-only skills; no `destructiveHint: true` skills wired in this spec. |
+| Q13 | Multi-agent coordination heuristics in this spec? | **No.** Phase 3 (per the heuristics review). Schema reserves space (correlation-ID clusters, run-graph references) but no heuristics fire in 2.0/2.5. | Multi-agent coordination is a separate signal class with its own design surface; cleanest as a follow-on phase. |
+| Q14 | Semantic correctness (LLM judge) in this spec? | **No.** Phase 3. Listed as a deliberate non-goal in §3.2. | Adds a per-run LLM call cost lever and a separate prompt-engineering surface. Not worth coupling to the structural delivery. |
+
+### 0.3 Decisions inherited from `phase-0-spec.md` (unchanged)
+
+The three-table schema, fingerprint algorithm + override governance, classification taxonomy, severity enum, sync/async ingest mode toggle, suppression model, escalation guardrails, AlertFatigueGuardBase, self-check job, admin page layout, Pulse integration, manual-escalate-to-agent flow — all stand. This spec adds to the surface; it does not modify any of it.
+
+### 0.4 Why this spec covers three internal phases
+
+Phase A, Phase 1, and Phase 2 (with 2.5 expansion) share most of their delivery surface — schema additions, agent definition, UI changes, file inventory, test strategy, rollout. Splitting into three specs would duplicate ~70% of the content and introduce stale-cross-reference risk between them. One unified spec, three internal slices, one branch, one PR — review burden concentrated at the end, accepted trade-off per user direction.
+
+### 0.5 Decisions deferred to architect
+
+The architect pass (after this spec passes user review) will resolve:
+
+- Exact file paths for new server modules (the spec names directories, not files, where naming convention has multiple valid options).
+- Migration sequencing relative to any in-flight migrations on `main`.
+- Whether the Phase 2.5 baseline storage table merges with an existing analytics table or stands alone.
+- Final pg-boss queue concurrency and rate-limit settings.
+- React component hierarchy for the triage drawer additions.
+
+This spec defines the **what** and the **why**; the architect plan defines the **where** and the **how**.
+
+## 1. Summary
+
+**Vision.** A system-scoped monitoring agent that watches every agent run, every job-completed transition, and every skill execution in the platform; flags anything that looks wrong (errors **and** soft-fail signals like degraded outputs, runtime/token anomalies, silent infrastructure drift); and emits a single standalone **`investigate_prompt`** per incident — formatted per a shared **Investigate-Fix Protocol** — that the operator pastes into a local Claude Code session. Claude Code investigates, proposes fixes, executes on approval. Human-in-the-loop throughout; no auto-remediation in this scope.
+
+**Three internal phases delivered in this spec.**
+
+| Slice | Builds | Why this order |
+|---|---|---|
+| **Phase A — Foundations** | Idempotency at `recordIncident`, per-fingerprint throttle, system-principal context (Option B), `assertSystemAdminContext` defence-in-depth, `investigate_prompt` schema column, baselining tables. | Unblocks Phase 2 (system-principal context is a hard prerequisite); hardens the ingest path for traffic Phase 1 will generate. |
+| **Phase 1 — Synthetic checks** | `system-monitor-synthetic-checks` pg-boss tick. Checks for absence-of-events: queue stalls, no-runs-in-N-minutes, stale connectors, heartbeat probes. Writes incidents with `source='synthetic'`. | Catches silent failures the error-driven sink misses. Generates incident volume that Phase 2 then triages — useful to have before Phase 2 day one. |
+| **Phase 2 — Monitor agent (day-one + 2.5)** | New `system_monitor` agent (system-managed, scope `system`). Two triggers: incident-driven (`severity >= medium`) + sweep-driven (5-min tick over 15-min window). Day-one heuristic set per the structural review. Phase 2.5 cross-run/systemic heuristics layered on top. Generates `investigate_prompt` per the Investigate-Fix Protocol. Diagnosis-only skills. Rate-limited. Kill switch. | The actual deliverable. Everything before it is plumbing. |
+
+**Two cross-cutting primitives** introduced once and used across phases:
+
+- **Investigate-Fix Protocol** — `docs/investigate-fix-protocol.md`. The shared contract between (a) the system monitor's prompt-authoring instructions and (b) Claude Code's prompt-consumption behaviour. Iterating the protocol improves both ends in lockstep. When Phase 3 (auto-remediation) eventually arrives, a server-side worker pointed at the same protocol becomes the auto-fixer — no architectural change.
+- **Heuristic Registry** — `server/services/systemMonitor/heuristics/`. Config-as-code module. Every heuristic carries `{id, severity, confidence, expectedFpRate, suppressionRules, baselineRequirements}`. False-positive fatigue is the failure mode this whole project has to avoid; metadata is non-optional.
+
+**Explicit non-goals** (covered in §3.2):
+- No push notifications (Phase 0.75 — deferred indefinitely).
+- No auto-remediation (Phase 3).
+- No semantic-correctness LLM judge (Phase 3).
+- No multi-agent coordination heuristics (Phase 3).
+- No dev-agent handoff (Phase 4).
+
+**Delivery model.** One branch (`claude/add-system-monitoring-BgLlY` or successor), one PR at the end. Execution staged across multiple Claude Code sessions; each session writes to `tasks/builds/system-monitoring-agent/progress.md` before ending; next session picks up from there. No mid-build `/compact`.
+
+**Estimated effort.** ~11-13 days of focused work split across 4 sessions: A (~1d), B (~3d), C (~5d), D (~2-3d).
+
+## 2. Context
+
+### 2.1 Vision recap
+
+The long-term goal — articulated since the Phase 0 spec — is a system-managed monitoring agent that watches the platform in real time, self-diagnoses issues, eventually self-fixes simple ones (retry, throttle, flag-flip), and escalates anything requiring human judgement. Pre-production we deliberately do **not** auto-fix: stabilisation needs raw unremediated error streams, not an agent papering over bugs. This spec covers the **active monitoring + diagnosis + human-in-the-loop fix** stages. Auto-fix is Phase 3, gated on accumulated evidence that the agent's diagnosis quality is high enough to trust with the action.
+
+### 2.2 What Phase 0/0.5 already shipped (PR #188)
+
+**Reuse — do not rebuild:**
+
+| Primitive | Location | How this spec uses it |
+|---|---|---|
+| `system_incidents` table | `server/db/schema.ts` (post-merge) | Add `investigate_prompt` column, agent diagnosis fields. Do not modify shape otherwise. |
+| `system_incident_events` table | same | Add new event types (§12.1). Append-only contract preserved. |
+| `recordIncident` ingest service | `server/services/systemIncidentIngest/` (or post-merge equivalent) | Wrap with idempotency + per-fingerprint throttle (Phase A). Do not touch fingerprint algorithm. |
+| Fingerprint algorithm + override governance | `phase-0-spec.md §5.2` | Inherited unchanged. Phase 1 synthetic checks use `fingerprintOverride` per the override contract. |
+| Severity enum `low \| medium \| high \| critical` | shared | Reused unchanged. |
+| Sync/async ingest mode toggle | `SYSTEM_INCIDENT_INGEST_MODE` env var | Reused unchanged. |
+| `SystemIncidentFatigueGuard` (extracted base class) | `server/services/alertFatigueGuard.ts` | Reused for sweep-driven incident dedupe (§9.3). |
+| Self-check job | `system-monitor-self-check` pg-boss job | Reused unchanged. Phase 2 sweep job sits alongside, not on top. |
+| `requireSystemAdmin` middleware | `server/middleware/requireSystemAdmin.ts` | Reused for new routes. |
+| System admin incidents page | `client/src/pages/SystemIncidentsPage.tsx` | Extended with triage drawer additions (§10), not replaced. |
+| Pulse `system_incident` kind | `server/services/pulseService.ts` | Reused unchanged. Sweep-source incidents fan out via the same mechanism. |
+| Manual escalate-to-agent | Phase 0.5 §10.2 | Reused unchanged. Phase 2 auto-triggered triage runs alongside, not in place of. |
+| Orchestrator + Portfolio Health Agent precedent | migrations 0157, 0068 | Blueprint for `system_monitor` agent (§9.1). |
+
+**Critical gaps this spec fills:**
+
+1. **No system-principal context.** Phase 0/0.5 used Option A (request-attached). System-scoped agent runs need synthesised system-principal (Option B). Phase A §4.3.
+2. **No baselining primitive.** Heuristics that reference "5× the p95 baseline" need a service that computes p50/p95 per agent type / skill id / connector id over a rolling window. Phase A §7.
+3. **No proactive sink.** All Phase 0 ingest hooks are **reactive** — they fire on errors. Silent failures (no-runs-in-N-minutes) emit no event and so create no incident. Phase 1 fills this with synthetic checks.
+4. **No diagnosis layer.** Incidents currently land on the page raw — operator reads stack trace, decides what to do. Phase 2 adds an agent that annotates each incident with a diagnosis hypothesis and a paste-ready Claude Code prompt.
+5. **No prompt-emission contract.** What "good prompt to hand to Claude Code" means is undefined. The Investigate-Fix Protocol (§5) defines it.
+
+### 2.3 What this spec adds (in one diagram)
+
+```
+                                  ┌────────────────────────────────────────────┐
+                                  │   Phase 0/0.5 (shipped) — passive sink     │
+                                  │                                            │
+   reactive errors  ──────────────┼─►  recordIncident()                        │
+                                  │       │                                    │
+                                  │       └──► system_incidents (table)        │
+                                  └────────────────────────────────────────────┘
+                                                     │
+                                                     │  THIS SPEC adds:
+                                                     ▼
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │  Phase A — Foundations                                                    │
+   │  ┌─────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
+   │  │ idempotency +   │  │ system-principal     │  │ baselining tables +  │  │
+   │  │ per-fp throttle │  │ context (Option B)   │  │ investigate_prompt   │  │
+   │  └─────────────────┘  └──────────────────────┘  └──────────────────────┘  │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │  Phase 1 — Synthetic checks                                               │
+   │  ┌──────────────────────────────────────────────┐                         │
+   │  │ system-monitor-synthetic-checks (1-min tick) │ ───► recordIncident()   │
+   │  │ queue stalls, no-runs, stale connectors      │      source='synthetic' │
+   │  └──────────────────────────────────────────────┘                         │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │  Phase 2 — Monitor agent (day-one + 2.5)                                  │
+   │                                                                           │
+   │  Trigger 1: incident-open (severity >= medium)                            │
+   │     enqueue system-monitor-triage(incidentId)                             │
+   │                                                                           │
+   │  Trigger 2: system-monitor-sweep (5-min tick, 15-min window)              │
+   │     pre-pass: heuristic registry over recent runs                         │
+   │     on fire: deep-read; agent run                                         │
+   │                                                                           │
+   │  Agent: system_monitor (system-managed, scope='system')                   │
+   │     reads: agent runs, jobs, DLQ, connectors, logs                        │
+   │     writes: diagnosis + investigate_prompt                                │
+   │              ─► back onto system_incidents row                            │
+   │              ─► event log: agent_diagnosis_added                          │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │  Cross-cutting: Investigate-Fix Protocol (docs/investigate-fix-protocol.md)│
+   │     contract for: how the agent formats prompts                            │
+   │                   how Claude Code consumes prompts (via CLAUDE.md hook)    │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │  UI: triage drawer adds copy-button on investigate_prompt + feedback widget│
+   └──────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.4 Why one branch, four sessions, one PR
+
+**Why one branch.** The slices are cohesive — Phase 1 generates volume Phase 2 consumes; Phase A schema additions are referenced by every later slice. Splitting branches creates merge-conflict surface against `main` for no review benefit.
+
+**Why four sessions.** Building all four slices in one session would push context utilisation past the comfortable threshold (~50-60% per CLAUDE.md §12). Compacting mid-build loses fidelity on prior decisions. Starting a fresh session per slice keeps each one in clean context, with `progress.md` as the durable handoff artefact.
+
+**Why one PR.** Slice boundaries are not natural review boundaries — Phase A on its own is dead code, Phase 1 without Phase 2 is noise. The reviewable unit is the whole feature. User has explicitly accepted the larger end-of-build PR review surface.
+
+**The trade-off accepted.** Larger PR surface (~11-13 days of work in one review) vs. context cleanliness mid-build. User direction: cleanliness wins. To partially mitigate, the spec includes per-slice verification commands (§15.3) so the executor can self-verify each slice before handoff — review at the end then has confidence each slice was internally coherent.
+
+## 3. Goals, non-goals, success criteria
+
+### 3.1 Goals
+
+**Phase A:**
+
+- GA.1 `recordIncident()` is idempotent on an optional `idempotencyKey` per fingerprint. Two calls with the same key within a 60-second dedupe window do not double-increment `occurrence_count`.
+- GA.2 Per-fingerprint ingestion throttle. `lastSeen[fp] < 1s ago` causes the second call to be silently dropped (counted in a process-local metric, not raised as an error).
+- GA.3 A system-principal context primitive exists. Calling code can synthesise a principal with `scope: 'system'` for use by system-managed agent runs and authenticated server-to-server calls.
+- GA.4 Service-layer `assertSystemAdminContext(ctx)` is wired into every `system_incidents` mutation entry point as defence-in-depth. Failures throw a typed error before the DB write.
+- GA.5 The `investigate_prompt` text column exists on `system_incidents`. Nullable. No length cap. Surfaced via a new GET endpoint shape and the existing list/detail endpoints.
+- GA.6 Baselining primitive: rolling p50/p95/p99/median for runtime and token-count is computed per `(entity_kind, entity_id)` over the last 7 days, refreshed every 15 minutes, exposed as a read API for heuristics.
+
+**Phase 1:**
+
+- G1.1 A `system-monitor-synthetic-checks` pg-boss job runs every 60 seconds.
+- G1.2 The job applies the day-one synthetic check set (§8.2) and writes incidents with `source='synthetic'` for any check that fires.
+- G1.3 Synthetic incidents use `fingerprintOverride` per the override governance contract (`phase-0-spec.md §5.2`) — namespace `synthetic:<check_id>:<resource_kind>:<resource_id>` — to ensure a stalled queue does not produce N incidents.
+- G1.4 The synthetic check job has its own kill switch (`SYNTHETIC_CHECKS_ENABLED`) independent of `SYSTEM_INCIDENT_INGEST_ENABLED`.
+- G1.5 No synthetic check produces a false positive within the first hour of running on an idle staging environment. (Cold-start tolerance: checks gracefully report "insufficient baseline" rather than firing.)
+
+**Phase 2 (day-one + 2.5):**
+
+- G2.1 The `system_monitor` agent exists as a system-managed agent (`isSystemManaged=true`), scope `system`, with diagnosis-only skills (§9.4).
+- G2.2 An incident-driven trigger enqueues `system-monitor-triage(incidentId)` whenever an incident opens with `severity >= medium` AND `source != 'self_check'` (avoids self-recursion).
+- G2.3 A sweep-driven trigger runs every 5 minutes via `system-monitor-sweep` pg-boss job. The job evaluates the heuristic registry against the last 15 minutes of agent runs, jobs, and skill executions. On any heuristic fire above its `confidence` threshold, the agent is invoked with the relevant evidence context.
+- G2.4 The agent emits, for every incident it triages, a single standalone `investigate_prompt` formatted per the Investigate-Fix Protocol (§5). The prompt includes file paths and line numbers where available.
+- G2.5 The agent annotates the incident with a structured diagnosis (hypothesis + evidence references + confidence). Annotation is written via a new event type `agent_diagnosis_added` (§12.1).
+- G2.6 The agent is rate-limited: max 2 invocations per fingerprint per 24 hours; persistent recurrence past the rate limit auto-escalates to human via the existing manual-escalate path.
+- G2.7 The agent has a kill switch (`SYSTEM_MONITOR_ENABLED`) that, when off, disables both triggers cleanly without touching the synthetic-check job or the incident sink.
+- G2.8 The day-one heuristic set (§9.5) ships with metadata (severity, confidence, expectedFpRate, suppression rules) and is gated by baseline availability — heuristics with `requiresBaseline: true` no-op when the baseline service reports `insufficient_data`.
+- G2.9 The Phase 2.5 heuristic expansion (§9.6) adds cross-run/systemic heuristics, layered onto the same registry without breaking changes to the registry interface.
+
+**UI:**
+
+- GU.1 The triage drawer renders `investigate_prompt` in a copy-formatted block with a one-click copy button.
+- GU.2 The drawer renders the agent's diagnosis annotation if present, with confidence and evidence links.
+- GU.3 A "was this useful?" feedback widget appears when the operator marks an incident resolved against an agent-diagnosed incident. Captures `wasSuccessful: bool + freeText: string`.
+- GU.4 A list-view filter pill: "Diagnosed by agent" / "Awaiting diagnosis" / "All".
+
+**Feedback loop:**
+
+- GF.1 Resolution outcomes against agent-diagnosed incidents emit an `investigate_prompt_outcome` event, capturing whether the prompt was used, whether the resulting fix was accepted, and free-text on what the agent missed.
+- GF.2 The feedback data is queryable for tuning heuristics and the Investigate-Fix Protocol — the source-of-truth for the eventual auto-fix gate.
+
+### 3.2 Non-goals
+
+These are deliberate omissions, not deferred work:
+
+- **NG1 No push notifications.** Phase 0.75 (email/Slack) remains deferred indefinitely. Operator workflow is page-based monitoring; no channel adapters, no preferences UI, no fatigue-guard wiring beyond what Phase 0/0.5 already shipped.
+- **NG2 No auto-remediation.** No skills with `destructiveHint: true`. The agent reads, diagnoses, annotates, emits prompts. It does not retry jobs, disable flags, restart connectors, or change any state outside `system_incidents` rows it owns.
+- **NG3 No semantic-correctness LLM judge.** Heuristics that check "does this output make sense given this input" are Phase 3. The cost lever (per-run LLM judge calls) and the prompt-engineering surface are out of scope.
+- **NG4 No multi-agent coordination heuristics.** Handoff failure, state mismatch between agents, duplicate work, conflicting outputs — Phase 3. Schema preserves correlation-ID space; no heuristics fire.
+- **NG5 No dev-agent handoff.** Phase 4 — depends on Phase 3 stable. The "persistent_defect" classification still exists from Phase 0/0.5 but is not consumed by any new agent in this spec.
+- **NG6 No tenant-scoped monitoring.** This spec ships a system-scoped agent only. Per-tenant monitoring agents (Portfolio Health Agent precedent extended) are out of scope.
+- **NG7 No real-time WebSocket push of agent diagnoses.** The existing Phase 0.5 WebSocket fans out incident-open / status-change events. Diagnosis annotations land via the same channel piggybacked on the existing event types — no new WS event type, no new client-side handler.
+- **NG8 No new admin UI page.** All UI changes extend the existing `SystemIncidentsPage`. No new route, no new navigation entry.
+- **NG9 No baseline storage in a new persistent table for tenants.** Baseline storage is global / system-scoped — not partitioned by tenant. Per-tenant baselines are Phase 3.
+- **NG10 No prompt versioning.** The Investigate-Fix Protocol doc is versioned by git history. Generated `investigate_prompt` text does not carry a protocol-version stamp — protocol drift is observable from the git log of the doc, sufficient for the iteration loop.
+
+### 3.3 Success criteria — observable, measurable
+
+| ID | Criterion | How to verify |
+|---|---|---|
+| S1 | Idempotency window functional. | Unit test: two `recordIncident` calls with same `idempotencyKey` within 60s produce one row, one `occurrence_count` increment. |
+| S2 | Per-fp throttle blocks tight loops. | Unit test: 100 calls in 1s with same fingerprint → 1 ingest, 99 throttled (counter incremented). |
+| S3 | System-principal context usable end-to-end. | Integration test: enqueue `system-monitor-triage`, handler runs, `req.principal.scope === 'system'` in agent invocation. |
+| S4 | `assertSystemAdminContext` blocks unauthorised caller. | Unit test: call any `system_incidents` mutation service method with a non-sysadmin context → typed error before DB write. |
+| S5 | Synthetic checks detect a stalled queue. | Smoke test: pause pg-boss processing for 5 min; verify `system-monitor-synthetic-checks` produces an incident with `source='synthetic'`. |
+| S6 | Synthetic checks tolerate idle baseline. | Smoke test: cold-start staging, run synthetic checks for 1h, no false positives. |
+| S7 | Agent triages incident-driven trigger. | Smoke test: emit a `severity='high'` incident; verify `system-monitor-triage` job enqueued, agent run started, `agent_diagnosis_added` event emitted within 60s. |
+| S8 | Agent triages sweep-driven trigger. | Smoke test: stage a soft-fail signal (e.g. an agent run that completes but produces empty output); verify next sweep-tick triggers the agent and produces a diagnosis. |
+| S9 | `investigate_prompt` is paste-ready. | Manual: copy 5 generated prompts, paste each into a local Claude Code session, verify Claude Code can act on each without follow-up clarification. |
+| S10 | Day-one heuristic set fires correctly. | Unit tests: each heuristic in §9.5 has a positive test (it fires) and a negative test (it does not fire on baseline-normal data). |
+| S11 | Phase 2.5 heuristics gated on baseline. | Unit test: cross-run heuristic asked to evaluate on N<10 baseline returns `insufficient_data` and does not fire. |
+| S12 | Feedback widget captures outcomes. | Smoke test: resolve an agent-diagnosed incident with feedback "useful, fixed in PR #X"; verify `investigate_prompt_outcome` event written. |
+| S13 | Kill switches cleanly disable each layer. | Smoke tests: set each kill-switch env var to `false`, verify the corresponding job/agent/trigger no-ops without erroring. |
+| S14 | Rate-limit prevents agent invocation storms. | Unit test: invoke triage 3× in 24h on same fingerprint → first 2 run, 3rd no-ops with `rate_limited` event. |
+| S15 | No Phase 0/0.5 regressions. | Existing `phase-0-spec.md §12` smoke tests still pass after this spec lands. |
+
+## 4. Phase A — Foundations
+
+Phase A is **dead-code-by-design** — none of these primitives are user-visible on their own. They exist to unblock Phase 1 and Phase 2. Verifiable via unit tests and integration tests; no UI surface to smoke.
+
+### 4.1 Idempotency at `recordIncident` (deferred #1)
+
+**Why.** Tight-loop traffic — same fingerprint, same payload, fired N× per second from a stuck retry loop — currently produces N occurrences. That is correct under the current contract but misleads triage ("incident has 1,847 occurrences") and inflates `occurrence_count` in a way that obscures real recurrence patterns.
+
+**Shape.**
+
+- Extend `IncidentInput` with optional `idempotencyKey?: string`.
+- If `idempotencyKey` is present, ingest does an early-return lookup in a process-local LRU keyed on `${fingerprint}:${idempotencyKey}`. TTL = 60s (configurable via `SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS`).
+- LRU hit → no DB write, no event append. Increment process-local counter `system_incident_ingest_idempotent_hits` (logged-as-metric per the §0.5 v3 KNOWLEDGE.md convention).
+- LRU miss → proceed with normal ingest path; on success, write the key to the LRU.
+- LRU bound: 10,000 entries per process, soft cap. Eviction on size or TTL.
+
+**Why process-local, not Redis.** The dedupe window is short (60s) and the cost of a missed dedupe is "two rows where one would do" — recoverable, not corrupting. Process-local LRU avoids a Redis dependency for a soft optimisation. Phase 3 may upgrade to Redis if the agent's ingest rate exceeds a single process's LRU effectiveness; that's a deferred decision.
+
+**Callers updated.** Async ingest worker (`SYSTEM_INCIDENT_INGEST_MODE=async`) gets the `idempotencyKey` via the pg-boss payload. No changes to the `recordIncident` shape for callers that don't need idempotency — `idempotencyKey` is optional.
+
+**Test plan.** Unit: 100 calls with same key in 1s → 1 row, 1 event, 99 LRU hits. Unit: 2 calls with same fingerprint but different keys → 2 occurrences (correct — different operations). Unit: 2 calls with same key 61s apart → 2 occurrences (TTL respected).
+
+### 4.2 Per-fingerprint ingestion throttle (deferred #5)
+
+**Why.** Distinct from #4.1 — idempotency keys are caller-supplied opt-in. Throttle is fingerprint-derived automatic backpressure for callers that don't know to set keys. A skill in a tight retry loop produces 100 calls/sec with no idempotency key; throttle drops 99 of them based purely on fingerprint timing.
+
+**Shape.**
+
+- Process-local map `lastSeenByFingerprint: Map<string, number>`.
+- On every `recordIncident` call, compute fingerprint as today (Phase 0 §5.2 unchanged), then check `lastSeenByFingerprint.get(fp)`.
+- If `now - lastSeen < THROTTLE_MS` (default 1000ms, env-configurable via `SYSTEM_INCIDENT_THROTTLE_MS`): drop, increment `system_incident_ingest_throttled` counter, return.
+- Otherwise: set `lastSeenByFingerprint.set(fp, now)`, proceed with ingest.
+- Map size cap: 50,000 entries. On eviction, oldest entries drop first. Eviction is a metric — `system_incident_ingest_throttle_map_evictions`.
+
+**Interaction with idempotency (§4.1).** Throttle runs **first**. If throttle drops the call, idempotency LRU is not consulted. Order: `compute fingerprint → throttle check → idempotency check → DB write`.
+
+**Interaction with sync/async toggle.** Throttle and idempotency live in the **synchronous portion** of `recordIncident`, regardless of `SYSTEM_INCIDENT_INGEST_MODE`. They prevent enqueueing duplicate jobs in async mode. The async worker does not reapply throttle — by design, anything that made it onto the queue gets processed.
+
+**Test plan.** Unit: 100 calls in 1s with same fingerprint → 1 ingest, 99 throttled. Unit: 2 calls 1.1s apart with same fingerprint → 2 ingests (window expired). Unit: 2 calls in 1s with different fingerprints → 2 ingests (no cross-fp interference). Unit: map eviction at 50k+1th unique fingerprint → oldest drops, metric increments.
+
+### 4.3 System-principal context (Option B from `phase-0-spec.md §7.4`)
+
+**Why.** Phase 0/0.5 used **Option A** for principal context — `req.principal` attached by middleware on every authenticated request. That works for user-initiated traffic but cannot serve a system-managed agent run that has no inbound HTTP request. Phase 2's `system_monitor` agent runs from a pg-boss handler; there is no `req`. We need a synthesised system-principal.
+
+**Option B shape.**
+
+- New module: `server/services/principal/systemPrincipal.ts` (final path resolved by architect).
+- Exports `getSystemPrincipal(): Principal` — returns a singleton with:
+  - `scope: 'system'`
+  - `userId: SYSTEM_PRINCIPAL_USER_ID` (a sentinel UUID seeded via migration into `users` table with `is_system: true`, email `system@platform.local`, no password, no auth, never logs in)
+  - `subaccountId: null` (system principals are not subaccount-scoped)
+  - `organisationId: SYSTEM_OPERATIONS_ORG_ID` (the `isSystemOrg=true` org seeded in Phase 0/0.5)
+  - `permissions: ['system_monitor.*']` — minimal scope, expanded only by explicit grant
+  - `isSystemPrincipal: true` discriminator
+
+- The principal is **immutable**, **process-singleton**, and **safe to log** (no PII).
+
+- New helper: `withSystemPrincipal<T>(fn: (ctx: PrincipalContext) => Promise<T>): Promise<T>`. Sets `AsyncLocalStorage` for the duration of `fn`. Used at the top of every system-managed pg-boss handler:
+
+  ```ts
+  bossHandler('system-monitor-sweep', async (job) => {
+    return withSystemPrincipal(async (ctx) => {
+      // ctx.principal.scope === 'system'
+      ...
+    });
+  });
+  ```
+
+**RLS interaction.** `phase-0-spec.md §7.4` deferred this. Decision now: **system-principal bypasses RLS for `system_*` tables only.** Three-layer fail-closed (RLS → app guard → service guard) becomes:
+
+| Layer | For tenant tables | For `system_incidents` etc. |
+|---|---|---|
+| Postgres RLS | enforces tenant scope | denies all rows by default; PERMITs only when `current_setting('app.principal_scope', true) = 'system'` |
+| Drizzle app guard | tenant filter | system filter |
+| Service guard | `requireOrgScoped(ctx)` | `assertSystemAdminContext(ctx)` (§4.4) |
+
+The session-variable approach (`SET LOCAL app.principal_scope = 'system'` inside `withSystemPrincipal`) is the standard Drizzle + RLS pattern (`architecture.md §Row-Level Security`).
+
+**Why singleton, not per-call.** Avoids accidental duplication / divergence. The principal carries no per-call state — it's a stable identity object.
+
+**Test plan.** Unit: `getSystemPrincipal()` returns the same object across calls. Integration: pg-boss handler wrapped in `withSystemPrincipal` can SELECT from `system_incidents`; same handler unwrapped fails RLS. Integration: system principal cannot SELECT from a tenant-scoped table (e.g. `agent_runs`) without explicit cross-scope grant — verifies blast radius is contained.
+
+**Migration.** Seed the system user row + the system org row (latter already exists from Phase 0/0.5 per Q2 in `phase-0-spec.md §0.2`). New migration adds the system user only.
+
+### 4.4 `assertSystemAdminContext` defence-in-depth (deferred #R3.1)
+
+**Why.** PR #188 chatgpt-pr-review flagged that `system_incidents` mutations rely on route-layer `requireSystemAdmin` middleware as the only authorisation gate. If a future code path calls a service method directly (e.g. from another internal service, or a misrouted handler), authorisation is silently bypassed. Defence-in-depth mandates a service-layer assertion that throws regardless of how the caller arrived.
+
+**Shape.**
+
+- New helper: `assertSystemAdminContext(ctx: PrincipalContext): asserts ctx is SystemAdminContext`.
+- Throws `UnauthorizedSystemAccessError` (typed) if:
+  - `ctx.principal.scope !== 'system'` AND
+  - `ctx.principal.permissions` does not include `system_admin.write`
+- System principals (from §4.3) pass automatically. Sysadmin users with `system_admin.write` permission pass.
+- All other principals (regular users, even with `org_admin` or `subaccount_admin`) fail.
+
+**Wiring.** Called as the **first line** of every `system_incidents` mutation service method:
+
+```ts
+async function resolveIncident(ctx: PrincipalContext, id: string, ...) {
+  assertSystemAdminContext(ctx);
+  // ...
+}
+```
+
+Applied to: `createIncidentManually`, `updateIncidentStatus`, `acknowledgeIncident`, `resolveIncident`, `suppressFingerprint`, `unsuppressFingerprint`, `escalateToAgent`, `triggerTestIncident`, plus the new mutations introduced in this spec (`annotateDiagnosis`, `recordPromptFeedback` — §10, §11).
+
+**Not called on read methods.** Reads still gate via `requireSystemAdmin` middleware + RLS. Defence-in-depth is for mutations only — read paths do not have the same blast radius.
+
+**Test plan.** Unit: each mutation service method, called with a non-sysadmin context, throws `UnauthorizedSystemAccessError`. Unit: same methods called with a sysadmin or system context succeed. Integration: a contrived "internal service calls service method directly without middleware" path is blocked.
+
+### 4.5 Schema additions
+
+All additive. No column modifications to existing Phase 0/0.5 tables. No data backfills required.
+
+**`system_incidents` — new columns:**
+
+| Column | Type | Constraint | Purpose |
+|---|---|---|---|
+| `investigate_prompt` | `text` | nullable | The paste-ready Claude Code prompt generated by the monitor agent. Single field per Q3 §0.2. |
+| `agent_diagnosis` | `jsonb` | nullable | Structured diagnosis object: `{hypothesis, evidence[], confidence, generatedAt, agentRunId}`. |
+| `agent_diagnosis_run_id` | `uuid` | nullable, FK `agent_runs(id)` ON DELETE SET NULL | Pointer to the agent run that produced the diagnosis. Enables drilling from triage drawer to the run log. |
+| `prompt_was_useful` | `boolean` | nullable | Operator's feedback on whether the `investigate_prompt` led to a useful outcome. Set when feedback widget submitted (§10.4). |
+| `prompt_feedback_text` | `text` | nullable | Free-text feedback from the operator on what the agent missed or got right. |
+| `triage_attempt_count` | `integer` | NOT NULL DEFAULT 0 | Number of times the monitor agent has triaged this incident. Used for rate limiting (§9.9). |
+| `last_triage_attempt_at` | `timestamp` | nullable | Last triage attempt time. Used for rate-limit window. |
+| `sweep_evidence_run_ids` | `uuid[]` | NOT NULL DEFAULT `'{}'` | Run IDs the agent inspected when this incident was sweep-driven (vs incident-driven, where the source row is in `metadata`). Empty for incident-driven triage. |
+
+**New table `system_monitor_baselines`:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `entity_kind` | `text` | enum: `agent`, `skill`, `connector`, `job_queue`, `llm_router` |
+| `entity_id` | `text` | natural key per entity_kind (agent slug, skill id, connector id, queue name, router model) |
+| `metric_name` | `text` | enum: `runtime_ms`, `token_count`, `output_length_chars`, `skill_invocation_count`, `tool_latency_ms`, etc. |
+| `window_start` | `timestamp` | start of the rolling window this row represents |
+| `window_end` | `timestamp` | end of window (= refresh time) |
+| `sample_count` | `integer` | how many observations contributed |
+| `p50` | `double precision` | median |
+| `p95` | `double precision` |  |
+| `p99` | `double precision` |  |
+| `mean` | `double precision` |  |
+| `stddev` | `double precision` |  |
+| `min` | `double precision` |  |
+| `max` | `double precision` |  |
+| `created_at` | `timestamp` | refresh time |
+
+Unique constraint: `(entity_kind, entity_id, metric_name)` — one current-baseline row per (entity, metric). Refresh updates in place via UPSERT, not append. Historical baselines are not preserved — Phase 3 may add a `system_monitor_baselines_history` table for drift detection.
+
+**New table `system_monitor_heuristic_fires` (audit log):**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `heuristic_id` | `text` | from registry |
+| `fired_at` | `timestamp` |  |
+| `entity_kind` | `text` |  |
+| `entity_id` | `text` |  |
+| `evidence_run_id` | `uuid` | nullable, the run that triggered the fire |
+| `confidence` | `double precision` | the heuristic's confidence at fire time |
+| `metadata` | `jsonb` | heuristic-specific payload |
+| `produced_incident_id` | `uuid` | nullable, FK `system_incidents(id)` — null if heuristic fired but throttle/dedupe blocked incident creation |
+
+This table is the truth for "how often does heuristic X fire" and "what's its real false-positive rate". Used to tune heuristic metadata (§6.3) over time.
+
+### 4.6 Migration
+
+Single migration file (final number TBD by architect — auto-incremented from current head). Contents:
+
+1. `ALTER TABLE system_incidents ADD COLUMN investigate_prompt text;`
+2. `ALTER TABLE system_incidents ADD COLUMN agent_diagnosis jsonb;`
+3. ... (remaining new columns from §4.5)
+4. `CREATE TABLE system_monitor_baselines (...);` with unique index.
+5. `CREATE TABLE system_monitor_heuristic_fires (...);`
+6. `INSERT INTO users (id, email, is_system, ...) VALUES (SYSTEM_PRINCIPAL_USER_ID, 'system@platform.local', true, ...);` — system principal seed.
+7. RLS policy additions for the two new tables (system-only access, mirrors `system_incidents`).
+
+No column drops, no type changes, no constraint tightening on existing data. Migration is idempotent-friendly via `IF NOT EXISTS` where Drizzle generator allows.
+
+**Rollback.** Drop the two new tables, drop the new columns. The system user row is left in place (deleting a referenced FK is messier than the row's footprint).
+
+## 5. Investigate-Fix Protocol
+
+### 5.1 Document location and purpose
+
+**Location.** `docs/investigate-fix-protocol.md` — alongside `docs/capabilities.md`, `docs/spec-context.md`, `docs/codebase-audit-framework.md`, `docs/frontend-design-principles.md`. This is the established home for cross-cutting protocol/reference docs in the repo.
+
+**Purpose.** Define a single shared contract between two consumers:
+
+1. **The monitor agent** (server-side, `system_monitor`). Its prompt-authoring instructions reference this protocol — "when emitting `investigate_prompt`, format per `docs/investigate-fix-protocol.md`." This makes prompt format predictable and tunable in one place.
+2. **Claude Code** (operator's local development environment). Via a `CLAUDE.md` hook (§5.3), every Claude Code session in this repo is told "if given a prompt that begins with the protocol header, follow `docs/investigate-fix-protocol.md` for execution behaviour."
+
+The protocol is the **structural** contract. Both ends iterate against it. The agent's prompt-writing improves; Claude Code's prompt-consumption behaviour improves; the contract holds the iteration coherent.
+
+**The forward path.** When Phase 3 (auto-remediation) ships, a server-side worker will follow the **same protocol** to consume prompts unattended. No architectural change — just a new executor pointed at the same contract. The protocol-doc approach is the lever that makes Phase 3 incremental rather than a rewrite.
+
+### 5.2 Prompt structure (the contract)
+
+Every `investigate_prompt` value generated by the monitor agent must conform to the following structure. Sections are markdown-headered for human readability and machine parseability.
+
+```markdown
+# Investigate-Fix Request
+
+## Protocol
+v1 (per docs/investigate-fix-protocol.md)
+
+## Incident
+- ID: <system_incidents.id>
+- Fingerprint: <fingerprint>
+- Severity: <low|medium|high|critical>
+- First seen: <ISO8601>
+- Occurrence count: <integer>
+- Source: <route|agent|job|connector|skill|llm_router|synthetic|self_check>
+
+## Problem statement
+<One paragraph. What looks wrong. Plain English. No internal jargon
+without expansion. Example: "Agent run abc123 completed successfully
+but produced no output text. The agent is configured to summarise
+emails; the user-facing result is empty. This is the third occurrence
+in the last 6 hours.">
+
+## Evidence
+<Bullet list. Each bullet must include a file:line reference where applicable,
+or a stable resource identifier (agent_runs.id, pgboss.job.id, etc.).
+Example:
+- agent_runs.id = abc123 (server/services/agentRunner.ts:147 logs the
+  empty-output case)
+- Recent runs: see system_incidents row, sweep_evidence_run_ids
+- Heuristic that fired: empty_output_baseline_aware (confidence 0.78)
+  defined in server/services/systemMonitor/heuristics/agentQuality.ts:34
+- Baseline median output for this agent: 1,247 chars (this run: 0 chars)>
+
+## Hypothesis
+<One paragraph. Best guess at root cause, with confidence stated.
+Example: "Likely cause is the upstream Gmail connector returning an
+empty thread payload — see connector_configs row id 'gmail-default'
+where lastSyncError contained 'rate-limited' 8 minutes before this
+run. Confidence: medium. Alternative hypothesis: a recent change to
+the email-summary skill prompt (commit hash if known); see
+git log -- server/skills/emailSummary.ts.">
+
+## Investigation steps
+<Numbered list. What Claude Code should do, in order. Each step concrete
+enough to execute without follow-up clarification.
+Example:
+1. Read server/services/agentRunner.ts:140-180 for the empty-output
+   handling.
+2. Read server/skills/emailSummary.ts to verify prompt and tool calls.
+3. Query agent_runs WHERE agent_id = '...' AND created_at > NOW() - INTERVAL '24 hours'
+   — count how many produced empty output vs non-empty.
+4. Check git log on server/skills/emailSummary.ts for changes in the last 7 days.>
+
+## Scope
+- In scope: server/skills/emailSummary.ts, server/services/agentRunner.ts (read), Gmail connector config (read).
+- Out of scope: changes to system_incidents table, changes to the monitor agent itself, changes to RLS policies.
+
+## Do not change without confirmation
+<Optional. List of files or behaviours the operator should be asked
+about before modifying. Example: "Do not modify the agent's system
+prompt without explicit operator confirmation — the prompt is part of
+the agent's tuned behaviour and changes affect all subaccounts using it.">
+
+## Expected output
+A diff or set of proposed changes. The operator (human in the loop)
+will review and approve before merge. Do not commit or push without
+approval.
+
+## Approval gate
+The user (operator) must explicitly approve any code change before it
+is committed.
+```
+
+**Required sections** — Protocol, Incident, Problem statement, Evidence, Hypothesis, Investigation steps, Scope, Expected output, Approval gate.
+**Optional section** — Do not change without confirmation.
+**Forbidden** — anything that instructs Claude Code to commit, push, deploy, or merge without explicit operator approval.
+
+The agent's prompt-authoring system prompt (§9.7) carries this template verbatim and is instructed to fill in each section. Empty sections are explicitly disallowed — the agent must either provide content or state `(none — see Hypothesis)`.
+
+### 5.3 `CLAUDE.md` hook
+
+A new section is added to `CLAUDE.md` (in this repo) under a clearly identifiable heading:
+
+```markdown
+## Investigate-Fix Protocol
+
+When given a prompt that begins with `# Investigate-Fix Request`, the prompt
+follows the contract defined in `docs/investigate-fix-protocol.md`. Read
+that document, then:
+
+1. Treat the `## Scope` section as authoritative — do not modify files
+   outside it without explicit user approval.
+2. Treat the `## Do not change without confirmation` list as a hard gate.
+3. Execute `## Investigation steps` in order. If a step is impossible,
+   stop and report — do not improvise.
+4. Produce proposed changes for user review per `## Expected output`.
+   Do not commit, push, deploy, or merge without explicit user approval.
+5. If the incident's hypothesis is wrong, report what you found and stop —
+   do not pursue an unbounded investigation.
+
+Iterating on the protocol itself: see the document. Update it when new
+patterns emerge.
+```
+
+This is **the** integration point. No code change. No skill. Just instruction text in `CLAUDE.md` that every Claude Code session in this repo will read.
+
+### 5.4 Authoring instructions consumed by the monitor agent
+
+The agent's system prompt (built in §9.7) includes:
+
+- A copy of the §5.2 template structure.
+- The list of required sections.
+- The "forbidden" content list.
+- A specific example of a well-formed prompt (one short worked example, anonymised).
+- Instructions to **always** include `file:line` references when the evidence supports it; **never** fabricate file paths or line numbers; if the evidence is purely behavioural (e.g. a job that didn't run), use a stable resource identifier (`pgboss.job.id`, `agent_runs.id`, etc.) instead.
+- Instructions on length: **target 400-800 tokens per prompt**, hard cap 1,500. Above the hard cap, the agent must trim Evidence or Investigation Steps and note that it did so.
+- Instructions on humility: hypothesis is always stated with confidence; if confidence is `low`, the agent must say so and recommend the operator investigate before assuming the hypothesis is correct.
+
+### 5.5 Iteration loop / feedback signal
+
+The protocol is a **living document**. It will be wrong on day one. Iteration is the point.
+
+**Inputs to iteration:**
+
+- The `prompt_was_useful: bool` + `prompt_feedback_text` fields on `system_incidents` (§4.5, §11).
+- The `investigate_prompt_outcome` event log (§11.2).
+- Operator-side observations: which prompts led to one-shot fixes, which led to operator rewriting the prompt, which led to wrong-direction investigations.
+
+**Iteration cadence:** weekly review of the prior week's prompts + outcomes. Adjustments land as edits to `docs/investigate-fix-protocol.md`. Each edit is a normal commit with a clear message — protocol drift is observable from git log.
+
+**When the agent's prompts consistently lead to one-shot fixes operators accept without rewriting**, that is the signal Phase 3 (auto-fix) is on solid ground. The protocol holds; the agent's diagnosis quality has stabilised; the auto-fix executor can be pointed at the same contract. There is no formal "auto-fix gate" threshold in this spec — Phase 3 is its own design exercise — but the feedback data accumulated here is the input to that decision.
+
+## 6. Heuristic Registry (config-as-code)
+
+### 6.1 Module location and shape
+
+**Location.** `server/services/systemMonitor/heuristics/` (final path TBD by architect).
+
+**Shape.** Config-as-code, not a DB table. Each heuristic is a TypeScript module exporting a single object that conforms to the `Heuristic` interface (§6.2). A central `index.ts` collects all heuristics into a registry array. The registry is loaded at process start; reload requires deploy. This is intentional — heuristic churn aligns with deploy cadence, and DB-backed flexibility is unnecessary at this scale.
+
+**Why config-as-code.**
+
+- **Version controlled.** Every heuristic change is a normal git commit, reviewable in a PR.
+- **Type-safe.** The compiler enforces the interface contract; mismatched metadata is a build failure, not a runtime surprise.
+- **Testable.** Each heuristic ships with positive + negative unit tests in the same module file.
+- **No admin UI dependency.** No new page, no permission grants, no new mutation routes.
+- **Migrate when tuning frequency exceeds deploy frequency.** Today they're roughly equivalent (~weekly). Promote to DB only when "I want to tune this without a deploy" becomes a recurring need.
+
+**Module layout** (illustrative, final paths by architect):
+
+```
+server/services/systemMonitor/heuristics/
+  index.ts                            # registry array, public API
+  types.ts                            # Heuristic, HeuristicResult, HeuristicContext
+  agentQuality/
+    emptyOutputBaselineAware.ts
+    maxTurnsHit.ts
+    toolSuccessButFailureLanguage.ts
+    runtimeAnomaly.ts
+    tokenAnomaly.ts
+    repeatedSkillInvocation.ts
+    identicalOutputDifferentInputs.ts
+    outputTruncation.ts
+    finalMessageNotAssistant.ts
+  skillExecution/
+    toolOutputSchemaMismatch.ts
+    skillLatencyAnomaly.ts
+    toolFailedButAgentClaimedSuccess.ts
+  infrastructure/
+    jobCompletedNoSideEffect.ts        # critical-class
+    connectorEmptyResponseRepeated.ts
+    cacheHitRateDegradation.ts          # Phase 2.5
+    latencyCreep.ts                     # Phase 2.5
+    retryRateIncrease.ts                # Phase 2.5
+    authRefreshSpike.ts                 # Phase 2.5
+    llmFallbackUnexpected.ts            # Phase 2.5
+  systemic/
+    successRateDegradationTrend.ts      # Phase 2.5
+    outputEntropyCollapse.ts            # Phase 2.5
+    toolSelectionDrift.ts               # Phase 2.5
+    costPerOutcomeIncreasing.ts         # Phase 2.5
+```
+
+### 6.2 Heuristic interface
+
+```ts
+type Severity = 'low' | 'medium' | 'high' | 'critical';
+type EntityKind = 'agent_run' | 'job' | 'skill_execution' | 'connector_poll' | 'llm_call';
+
+interface BaselineRequirement {
+  entityKind: EntityKind;
+  metric: string;
+  minSampleCount: number;          // e.g. 10
+}
+
+interface SuppressionRule {
+  id: string;                       // unique within heuristic
+  description: string;              // human-readable why
+  predicate: (ctx: HeuristicContext, evidence: Evidence) => boolean;
+  // returns true to suppress this fire
+}
+
+interface Heuristic {
+  id: string;                       // stable, unique, kebab-case
+  category: 'agent_quality' | 'skill_execution' | 'infrastructure' | 'systemic';
+  phase: '2.0' | '2.5';             // ships in day-one or 2.5
+
+  // Metadata wrapper — non-optional. False-positive fatigue protection.
+  severity: Severity;               // default severity of incidents this raises
+  confidence: number;               // 0..1, how confident we are when this fires (post-suppression)
+  expectedFpRate: number;           // 0..1, calibrated estimate; tuned over time from heuristic_fires audit
+
+  // Baseline gating. If any requirement fails, heuristic.evaluate returns 'insufficient_data'.
+  requiresBaseline: BaselineRequirement[];
+
+  // Suppression rules. Evaluated AFTER predicate fires. Any true → fire is dropped, audit row written.
+  suppressions: SuppressionRule[];
+
+  // Hot path. Returns one of:
+  //   - { fired: false }
+  //   - { fired: true, evidence: Evidence, confidence: number }
+  //   - { fired: false, reason: 'insufficient_data' }
+  evaluate(ctx: HeuristicContext, candidate: Candidate): Promise<HeuristicResult>;
+
+  // Description rendered into the agent's evidence list when this fires.
+  describe(evidence: Evidence): string;
+}
+
+interface HeuristicContext {
+  baselines: BaselineReader;        // see §7.5
+  db: Database;
+  logger: Logger;
+  now: Date;                        // injectable for tests
+}
+
+interface Candidate {
+  // What's being evaluated. Shape per entityKind.
+  // For sweep: an agent_run, a job, a skill_execution, etc.
+  // For incident-driven: the incident itself + its source row.
+  entityKind: EntityKind;
+  entity: unknown;                  // typed per kind
+}
+
+type HeuristicResult =
+  | { fired: false }
+  | { fired: false; reason: 'insufficient_data' | 'suppressed'; suppressionId?: string }
+  | { fired: true; evidence: Evidence; confidence: number };
+```
+
+The `confidence` returned by `evaluate` may differ from the registry-level `confidence` — the latter is the **default** when the heuristic fires; the former is the **per-fire** value computed against the specific evidence. The downstream agent uses the per-fire confidence; the registry-level value is metadata for tuning.
+
+### 6.3 Severity, confidence, expected FP rate, suppression
+
+**Severity.** What severity the *incident* gets if this heuristic is the top-fired contributor. The agent may upgrade severity (multiple heuristics fired, evidence converges) but never downgrades below this floor.
+
+**Confidence.** Two readings:
+
+- **Registry default** (`Heuristic.confidence`): a calibrated estimate of how confident we are, on average, that a fire indicates a real issue. Initial values are author's-best-guess; tuned over time from audit data.
+- **Per-fire** (`HeuristicResult.confidence`): the heuristic's actual confidence in this specific fire, computed against the evidence (e.g. "90% over 1-sample threshold" vs "5% over 1-sample threshold").
+
+The agent only triages when at least one heuristic fires with per-fire confidence ≥ a runtime threshold (default 0.5, env-configurable via `SYSTEM_MONITOR_MIN_CONFIDENCE`).
+
+**Expected FP rate** (`Heuristic.expectedFpRate`). Author's calibrated estimate of the false-positive rate, expressed as a fraction. Used for triage prioritisation: if two heuristics fire on the same candidate, the one with lower `expectedFpRate` weighs more heavily in the agent's evidence ranking. Also surfaced in the heuristic-fires audit dashboard (Phase 3) for empirical recalibration. Initial values are author's best estimate.
+
+**Suppression rules.** Evaluated *after* the predicate fires but *before* the heuristic counts as fired. Each rule is a named predicate with a description. Examples:
+
+- "Suppress if the run was a known-experimental subaccount" — for agents we know are unstable on purpose.
+- "Suppress if the agent has fewer than 10 historical runs" — too thin a baseline to compare against.
+- "Suppress if this is the first run of the day and the system was idle for >12h" — cold-start anomalies.
+
+Suppressions are first-class: every suppressed fire writes a `system_monitor_heuristic_fires` row with `produced_incident_id = null` and `metadata.suppression_id` set, so we can see "this heuristic would have fired 50× this week, but 47 were suppressed by rule X" — that's signal that either the rule is right (the heuristic is too eager) or the rule is wrong (we're hiding a real pattern).
+
+### 6.4 Registration and invocation
+
+**Registration.** `index.ts` exports `const HEURISTICS: Heuristic[] = [...]`. New heuristic = new module + add to the array. The compiler validates the interface; an array cast is forbidden.
+
+**Invocation paths:**
+
+1. **Sweep.** `system-monitor-sweep` job iterates `HEURISTICS` over each candidate (agent runs, jobs, skill executions in the sweep window). For each `(heuristic, candidate)`:
+   - Skip if `heuristic.phase` doesn't match the current `SYSTEM_MONITOR_HEURISTIC_PHASES` env (default `'2.0,2.5'`).
+   - Skip if `heuristic.requiresBaseline` is unmet.
+   - Call `heuristic.evaluate(ctx, candidate)`.
+   - If fired and per-fire confidence ≥ threshold and not suppressed → write `system_monitor_heuristic_fires` row, accumulate evidence for this candidate.
+   - At end of sweep, candidates with ≥1 high-confidence fire are queued for agent triage.
+
+2. **Incident-driven.** When an incident opens with `severity >= medium`, the `system-monitor-triage` job runs the heuristic registry against the incident's source data (the row that produced the incident, plus its recent context). This re-scores the incident with a richer evidence list before the agent reads it.
+
+3. **Phase 1 synthetic checks.** Synthetic checks are **separate** from the heuristic registry — they run on a different timescale (1-min tick), they detect absence-of-events, and their fire rate is much lower. They share the metadata wrapper concept (severity, confidence, etc.) but do not implement the `Heuristic` interface. Architect may unify if a clean abstraction emerges; default is two registries.
+
+### 6.5 Configuration / tuning workflow
+
+Tuning is a **PR**, not an admin UI form. Workflow:
+
+1. Audit shows heuristic X has fired 200× this week with 180 marked suppressed-by-rule-Y. Operator inspects the 20 unsuppressed fires.
+2. Of the 20: 15 led to operator-approved fixes, 5 were noise.
+3. Operator (or developer) opens a PR that either:
+   - Tightens rule Y to allow fewer suppressions if the suppressions were wrong.
+   - Adjusts heuristic X's `expectedFpRate` from 0.30 to 0.25 to reflect actual data.
+   - Adjusts heuristic X's predicate (e.g. raise the multiplier from 5× to 7×) if the noise pattern is consistent.
+4. PR includes the audit data as evidence; reviewer can see why the change is justified.
+5. Merge → deploy → next sweep applies the new behaviour.
+
+For the initial release, all tuning runs through this workflow. Phase 3 may add a runtime override table for emergency suppression (e.g. "disable heuristic X immediately, fix tomorrow") — explicitly out of scope for this spec.
+
+## 7. Baselining primitive
+
+The baselining primitive is the **substrate** under most heuristics. Without it, "5× p95" reduces to "5× a magic number". Building it once, well, prevents heuristic-by-heuristic reinvention.
+
+### 7.1 What gets baselined
+
+For each `(entity_kind, entity_id, metric_name)` triple, we maintain a current rolling baseline.
+
+**Entity kinds and their natural keys:**
+
+| `entity_kind` | `entity_id` source | Examples |
+|---|---|---|
+| `agent` | `agents.slug` | `portfolio-health-agent`, `orchestrator`, `system_monitor` |
+| `skill` | `skills.id` (uuid) | uuid of each registered skill |
+| `connector` | `connector_configs.provider_type` + `:` + `connector_configs.id` | `gmail:abc-123` |
+| `job_queue` | pg-boss queue name | `connector-polling-sync`, `system-monitor-sweep` |
+| `llm_router` | model identifier | `claude-opus-4-7`, `claude-sonnet-4-6` |
+
+**Metrics** (per kind — not all metrics apply to all kinds):
+
+| Metric | Applies to | Definition |
+|---|---|---|
+| `runtime_ms` | agent, skill, job_queue, connector | Wall-clock duration of one execution |
+| `token_count_input` | agent, llm_router | Input tokens per call |
+| `token_count_output` | agent, llm_router | Output tokens per call |
+| `output_length_chars` | agent, skill | Length of final output text |
+| `skill_invocation_count` | agent | Number of skill calls per agent run |
+| `tool_latency_ms` | skill | Per-tool-call latency within a skill |
+| `cache_hit_rate` | llm_router | Fraction of calls that hit cache |
+| `success_rate` | agent, skill, connector, job_queue | Successful executions / total |
+| `retry_count` | agent, skill, job_queue | Retries per execution |
+
+Phase 2.5 adds derived metrics (ratios, deltas) — those compose existing ones, not net-new baseline columns.
+
+### 7.2 Storage choice
+
+**Persistent table** `system_monitor_baselines` (defined in §4.5), one row per `(entity_kind, entity_id, metric_name)`, holding the **current** rolling-window stats.
+
+**Why persistent.**
+
+- Survives process restart — heuristics work immediately on cold-start, no warm-up period.
+- Cross-process consistent — pg-boss workers, sweep job, incident-triage job all see the same baselines.
+- Cheap to read — single indexed lookup per (entity, metric).
+
+**Why not in-memory.** Every process restart would erase baselines, leading to a "everything looks anomalous after deploy" failure mode.
+
+**Why no history table in this spec.** Cross-run / drift detection (Phase 2.5) currently reads only the **current** baseline against per-run observed values. Drift-over-time detection (output entropy collapse, cost per outcome increasing) reads agent-run rows directly via a time-bucketed query, not from baseline history. A `system_monitor_baselines_history` table is a Phase 3 addition — not built now.
+
+### 7.3 Refresh job
+
+**Job:** `system-monitor-baselines-refresh` pg-boss job.
+
+**Cadence:** every 15 minutes. Configurable via `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES`.
+
+**Window:** rolling 7 days. Configurable via `SYSTEM_MONITOR_BASELINE_WINDOW_DAYS`.
+
+**Algorithm (per `(entity_kind, entity_id, metric_name)`):**
+
+1. SELECT raw observations from the relevant source table (`agent_runs`, `skill_executions`, `pgboss.archive`, `connector_polls`, `llm_router_calls` — exact tables resolved by architect against current schema) WHERE `created_at >= NOW() - INTERVAL '7 days'`.
+2. Compute `count`, `p50`, `p95`, `p99`, `mean`, `stddev`, `min`, `max`.
+3. UPSERT into `system_monitor_baselines` keyed on `(entity_kind, entity_id, metric_name)`.
+
+**Cost.** Roughly N entities × M metrics × one aggregate query each. For ~50 agents, ~30 skills, ~10 connectors, ~5 queues, ~3 LLM router models with ~9 metrics, that's ~900 indexed aggregate queries every 15 minutes. Acceptable. Optimisation (single multi-aggregate query per source table) is an architect decision, not a spec requirement.
+
+**Idempotency.** UPSERT is naturally idempotent. A failed refresh leaves the prior baseline in place — heuristics keep using stale-but-valid data until the next refresh succeeds.
+
+**Kill switch.** `SYSTEM_MONITOR_BASELINE_REFRESH_ENABLED` (default `true`). When off, baselines freeze in place. Heuristics continue to read them.
+
+### 7.4 Bootstrap requirement (N≥10)
+
+**The cold-start problem.** A new agent has 0 historical runs. A heuristic that says "5× p95" has nothing to compare against. Naïve fallback (use a hardcoded threshold, or fire on the first anomaly) generates false-positive storms on day one of any deploy that introduces a new agent.
+
+**Solution.** Every heuristic that depends on a baseline declares its requirement via `requiresBaseline: BaselineRequirement[]` (§6.2). Each requirement names an entity kind, a metric, and a `minSampleCount`. Default `minSampleCount` is 10. Architects may set higher minimums for high-variance metrics (e.g. token counts on first generation might need 30 samples).
+
+**At evaluation time:**
+
+```ts
+for (const req of heuristic.requiresBaseline) {
+  const baseline = await ctx.baselines.get(req.entityKind, entity.id, req.metric);
+  if (!baseline || baseline.sample_count < req.minSampleCount) {
+    return { fired: false, reason: 'insufficient_data' };
+  }
+}
+```
+
+**Effect.** A new agent with 3 runs sees its baseline-dependent heuristics return `insufficient_data` — they no-op silently. The heuristic-fires audit captures the no-op for visibility. By the time the agent has 10+ runs, baseline-dependent heuristics activate.
+
+**Heuristics that do NOT require a baseline.** Several day-one heuristics are baseline-free — they detect categorical conditions (e.g. `max_turns` reached, final message is a tool message, tool returned success but text says "I couldn't"). These fire on the first occurrence regardless of sample size.
+
+### 7.5 Read API for heuristics
+
+```ts
+interface BaselineReader {
+  get(
+    entityKind: EntityKind,
+    entityId: string,
+    metric: string,
+  ): Promise<Baseline | null>;
+
+  // Convenience wrapper that returns null if sample_count < min, instead of returning a thin baseline.
+  getOrNull(
+    entityKind: EntityKind,
+    entityId: string,
+    metric: string,
+    minSampleCount: number,
+  ): Promise<Baseline | null>;
+}
+
+interface Baseline {
+  entityKind: EntityKind;
+  entityId: string;
+  metric: string;
+  windowStart: Date;
+  windowEnd: Date;
+  sampleCount: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  mean: number;
+  stddev: number;
+  min: number;
+  max: number;
+}
+```
+
+The reader is **read-only**, **hot-path**, **no caching** beyond the connection-pool query cache. The baselines table is small (low thousands of rows) and indexed on the natural key — single-query reads are fast.
+
+**No write API.** Baselines are written exclusively by the refresh job. Heuristics cannot mutate them.
+
+## 8. Phase 1 — Synthetic checks
+
+### 8.1 Job: `system-monitor-synthetic-checks`
+
+**Job name** (kebab-case per `phase-0-spec.md §0.6`): `system-monitor-synthetic-checks`.
+
+**Tick:** every 60 seconds via pg-boss schedule. Configurable via `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS`.
+
+**Handler shape:**
+
+```ts
+bossHandler('system-monitor-synthetic-checks', async (job) => {
+  return withSystemPrincipal(async (ctx) => {
+    if (!isEnabled('SYNTHETIC_CHECKS_ENABLED')) return;
+    for (const check of SYNTHETIC_CHECKS) {
+      try {
+        const result = await check.run(ctx);
+        if (result.fired) {
+          await recordIncident({
+            source: 'synthetic',
+            severity: result.severity,
+            fingerprintOverride: `synthetic:${check.id}:${result.resourceKind}:${result.resourceId}`,
+            summary: result.summary,
+            classification: 'system_fault',
+            metadata: { checkId: check.id, ...result.metadata },
+            idempotencyKey: `synthetic:${check.id}:${result.resourceId}:${result.bucketKey}`,
+          });
+        }
+      } catch (err) {
+        ctx.logger.error('synthetic-check-failed', { checkId: check.id, err });
+        // do not throw — one bad check should not break the tick
+      }
+    }
+  });
+});
+```
+
+**Run time budget:** 30 seconds total per tick. Each check internally caps at 5s; checks that exceed time out and log a warning. The job does not run two ticks in parallel — pg-boss `singletonKey: 'synthetic-checks'`.
+
+**Error isolation:** one check throwing does not abort the tick. The handler logs and continues.
+
+### 8.2 Day-one checks
+
+Each check is a TypeScript module under `server/services/systemMonitor/synthetic/` (final paths by architect). Each exports:
+
+```ts
+interface SyntheticCheck {
+  id: string;
+  description: string;
+  defaultSeverity: Severity;
+  run(ctx: HeuristicContext): Promise<SyntheticResult>;
+}
+
+type SyntheticResult =
+  | { fired: false }
+  | {
+      fired: true;
+      severity: Severity;
+      resourceKind: string;
+      resourceId: string;
+      summary: string;
+      bucketKey: string;            // for idempotency window — e.g. "2026-04-25T14:30" (15-min bucket)
+      metadata: Record<string, unknown>;
+    };
+```
+
+**Day-one set:**
+
+| ID | Description | Default severity | Logic |
+|---|---|---|---|
+| `pg-boss-queue-stalled` | A pg-boss queue has not progressed in N minutes despite having pending jobs. | `high` | For each active queue: if `pending_count > 0` AND `last_completed_at` is older than `STALL_THRESHOLD_MINUTES` (default 5), fire. |
+| `no-agent-runs-in-window` | A system-managed agent has not run in N minutes despite being scheduled / on-demand-eligible. | `medium` | For each `isSystemManaged=true` agent that has a typical run cadence: if `MAX(agent_runs.created_at) < NOW() - threshold`, fire. Threshold per agent. |
+| `connector-poll-stale` | A connector configured for polling has not reported a successful poll in N minutes. | `medium` | For each connector with `polling_enabled=true`: if `last_successful_poll_at < NOW() - polling_interval × 3`, fire. |
+| `dlq-not-drained` | The pg-boss DLQ has unhandled rows older than N minutes. | `high` | If `SELECT count(*) FROM pgboss.archive WHERE state = 'failed' AND last_error_at < NOW() - INTERVAL '30 minutes'` > 0, fire. (The DLQ ingestion already creates incidents per failure; this is the meta-signal that the DLQ itself isn't being drained.) |
+| `heartbeat-self` | The synthetic-check job records its own heartbeat to a known KV. If the heartbeat hasn't been updated in N minutes when read, fire on next tick. | `critical` | Two-tick design: tick 1 writes `last_heartbeat = NOW()` to `system_kv`. Tick 2 reads it; if older than 3× tick interval, fire. (Detects "the synthetic-check job is itself broken" — closes the meta-loop.) |
+| `connector-error-rate-elevated` | A connector has produced > N errors in the last hour without a successful poll between them. | `high` | For each connector: if `connector_polls WHERE error IS NOT NULL AND created_at > NOW() - 1h` count ≥ 3 AND no successful poll in same window, fire. |
+| `agent-run-success-rate-low` | A system-managed agent's success rate over the last hour is below baseline minus 30%. | `medium` | Read baseline `success_rate` for the agent; if last-hour rate is < `baseline.p50 - 0.30`, fire. Requires baseline (`requiresBaseline`); skips with `insufficient_data` if no baseline. |
+
+Phase 2.5 may add more synthetic checks; this is the day-one set.
+
+**Cold-start tolerance.** Every check that depends on baseline data degrades gracefully to `fired: false` when baseline is missing, with a `ctx.logger.info('synthetic-check-skipped-baseline')` line. No false positives on a fresh staging environment.
+
+### 8.3 Incident shape (`source='synthetic'`)
+
+Synthetic incidents follow the existing Phase 0 schema but with these conventions:
+
+- `source = 'synthetic'`
+- `fingerprintOverride` is **required** (not optional). Format: `synthetic:<check_id>:<resourceKind>:<resourceId>`. Example: `synthetic:pg-boss-queue-stalled:queue:connector-polling-sync`.
+- `idempotencyKey` set per check using a time-bucket (e.g. 15-minute bucket) so a stalled queue doesn't produce 15 incidents in 15 minutes — instead, one incident with a rising `occurrence_count` reflecting the persistence.
+- `classification = 'system_fault'` always. Synthetic checks never fire on user-fault conditions.
+- `severity` per check default; can be elevated by check logic (e.g. queue stalled for 30+ min escalates from `high` to `critical`).
+- `metadata` includes `checkId`, the resource identifiers, and any check-specific evidence.
+- `affected_resource_*` columns populated where the check identifies a specific resource.
+
+Synthetic incidents are **first-class** in the existing UI — they appear on the system incidents page just like reactive ones, with `source='synthetic'` filterable. The triage drawer renders them identically; the agent (Phase 2) triages them just like reactive ones.
+
+**Self-recursion guard.** The `heartbeat-self` check fires incidents with `source='synthetic'` AND `metadata.isSelfCheck=true`. Phase 2's incident-driven trigger explicitly excludes incidents where `metadata.isSelfCheck=true` from auto-triage to prevent the agent triaging its own dead heartbeat (which would be a recursion loop).
+
+### 8.4 Configuration
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SYNTHETIC_CHECKS_ENABLED` | `true` | Master kill switch. |
+| `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` | `60` | Tick interval. |
+| `SYSTEM_MONITOR_QUEUE_STALL_THRESHOLD_MINUTES` | `5` | `pg-boss-queue-stalled` threshold. |
+| `SYSTEM_MONITOR_CONNECTOR_STALE_MULTIPLIER` | `3` | `connector-poll-stale` multiplier on the connector's own polling interval. |
+| `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | `dlq-not-drained` threshold. |
+| `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | `heartbeat-self` tolerance in ticks. |
+| `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | Per-agent inactivity thresholds for `no-agent-runs-in-window`. JSON map of `{agentSlug: minutes}`. |
+
+Per-check enable/disable is via heuristic-style suppression, not env vars — keeps the env surface minimal.
+
+## 9. Phase 2 — Monitor agent (day-one + 2.5)
+
+### 9.1 Agent definition (`system_monitor`)
+
+### 9.2 Triggers — incident-driven + sweep
+
+### 9.3 Sweep job (`system-monitor-sweep`)
+
+### 9.4 Diagnosis-only skills
+
+### 9.5 Day-one heuristic set (Phase 2.0)
+
+### 9.6 Phase 2.5 heuristic expansion (cross-run / systemic)
+
+### 9.7 Agent prompt template (Investigate-Fix Protocol consumer)
+
+### 9.8 `investigate_prompt` output contract
+
+### 9.9 Rate limiting
+
+### 9.10 Kill switch + env vars
+
+## 10. UI surface
+
+### 10.1 Triage drawer additions
+
+### 10.2 `investigate_prompt` copy button
+
+### 10.3 Diagnosis annotation rendering
+
+### 10.4 Feedback widget — was this useful
+
+### 10.5 Filter for agent-diagnosed incidents
+
+## 11. Feedback loop
+
+### 11.1 Schema additions for prompt-was-useful
+
+### 11.2 Event type — `investigate_prompt_outcome`
+
+### 11.3 What this trains for Phase 3
+
+## 12. Observability + kill switches
+
+### 12.1 New event types
+
+### 12.2 New env vars
+
+### 12.3 Logging conventions
+
+## 13. File inventory
+
+## 14. Testing strategy
+
+### 14.1 Unit
+
+### 14.2 Integration
+
+### 14.3 Smoke
+
+## 15. Rollout plan
+
+### 15.1 Order of operations across sessions
+
+### 15.2 Session boundaries and `progress.md` handoff protocol
+
+### 15.3 Verification commands per slice
+
+## 16. Risk register
+
+## 17. Implementation slicing & session pacing
+
+### 17.1 Slice A — Foundations
+
+### 17.2 Slice B — Phase 1 + Protocol + Registry + Baselining
+
+### 17.3 Slice C — Phase 2 day-one
+
+### 17.4 Slice D — Phase 2.5 expansion
+
+### 17.5 Session handoff between slices
+
+## 18. Out-of-scope (explicit)
+
+## 19. Future phases (summary)
+
+---
+
+<!-- All sections below are filled via Edit per the long-doc-guard chunked workflow. -->
