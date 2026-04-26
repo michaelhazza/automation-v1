@@ -41,7 +41,7 @@ _(stamped in Task 6.6 once cross-spec naming, contracts, primitives, and assumpt
 ## Status
 
 - [x] Task 0    Branch setup
-- [ ] Task 0.5  Mini-spec on branch
+- [x] Task 0.5  Mini-spec on branch — no-op (PR #203 already merged to main, mini-spec inherited at branch creation; verified byte-identical to source SHA 1023ff02)
 - [ ] Task 0.6  Cross-chunk invariants doc
 - [ ] Task 1    Chunk 1 — RLS Hardening Sweep
 - [ ] Task 2.1  Architect input — Chunk 2
