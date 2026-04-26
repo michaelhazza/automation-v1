@@ -19,6 +19,7 @@ All three internal phases ship on **one branch** with **one PR at the end**, but
 ## Table of contents
 
 0. [Decisions log](#0-decisions-log)
+0A. [Glossary](#0a-glossary)
 1. [Summary](#1-summary)
 2. [Context](#2-context)
 3. [Goals, non-goals, success criteria](#3-goals-non-goals-success-criteria)
@@ -95,6 +96,28 @@ The architect pass (after this spec passes user review) will resolve:
 - React component hierarchy for the triage drawer additions.
 
 This spec defines the **what** and the **why**; the architect plan defines the **where** and the **how**.
+
+## 0A. Glossary
+
+Spec-internal terms with specific meanings. Used throughout the document. Naming differences from the wider codebase are flagged.
+
+| Term | Definition |
+|---|---|
+| **Agent** | A configured agent row in the `agents` table. Has a slug, system prompt, bound skill set, and a scope (`subaccount` / `org` / `system`). The new `system_monitor` agent is system-scoped (§9.1). |
+| **Agent run** | A single execution of an agent — one row in `agent_runs`. Carries inputs, message history, terminal status, runtime, token counts. Terminal statuses live in `shared/runStatus.ts` (`TERMINAL_RUN_STATUSES`). |
+| **Skill** | A registered tool an agent may invoke during a run. Has an id, input schema, output schema, and a `destructiveHint: boolean` flag. The `system_monitor` agent's skill set is read-only with two narrow write skills (§9.4). |
+| **Skill execution** | A single invocation of a skill within an agent run — one row in `skill_executions`. Carries input, output, runtime, success/failure. |
+| **Job** | A pg-boss queue entry. Identified by `(queue_name, id)`. Has a state (`created` / `active` / `completed` / `failed`), a payload, and retry count. Phase 2 introduces `system-monitor-triage`, `system-monitor-sweep`, `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh` queues. |
+| **Heuristic** | A TypeScript module under `server/services/systemMonitor/heuristics/` that conforms to the `Heuristic` interface (§6.2). Evaluates one signal against one candidate (or windowed candidate set for Phase 2.5). Carries metadata (severity, confidence, expectedFpRate, suppressions, requiresBaseline). |
+| **Synthetic check** | A check that detects **absence** of expected events — no agent runs in N minutes, queue stalled, connector poll stale, etc. Distinct from heuristics (which evaluate **presence** of degraded events). Lives under `server/services/systemMonitor/synthetic/`. Runs on a 60-second tick. |
+| **Sweep** | The 5-minute pg-boss tick that iterates the heuristic registry over recent agent runs, jobs, and skill executions (§9.3). Two-pass: cheap pre-pass + deep-read on fire. Window is rolling 15 minutes. |
+| **Triage** | The act of the `system_monitor` agent reading evidence about an incident or sweep cluster and producing (a) a structured `agent_diagnosis` JSON and (b) a paste-ready `investigate_prompt` (§9.2, §9.7, §9.8). Triggered either by an incident-open event (severity ≥ medium) or by a sweep cluster. |
+| **Baseline** | The current rolling-window p50/p95/p99/mean/stddev/min/max for one `(entity_kind, entity_id, metric_name)` triple. Refreshed every 15 minutes. Stored in `system_monitor_baselines`. Read via `BaselineReader` (§7.5). |
+| **Fingerprint** | A stable, content-derived hash that identifies an incident class. Inherited unchanged from Phase 0/0.5 (§5.2 of `phase-0-spec.md`). Used as the dedup / throttle / rate-limit key. |
+| **Incident** | A row in `system_incidents`. Created by `recordIncident()` either reactively (from error hooks) or by a synthetic check or by a sweep cluster. Has severity, status, source, fingerprint, and (after triage) `agent_diagnosis` + `investigate_prompt`. |
+| **Investigate-Fix Protocol** | The shared markdown contract in `docs/investigate-fix-protocol.md` (§5) that defines (a) how the monitor agent formats `investigate_prompt` text and (b) how Claude Code consumes it. Versioned by git history of the doc. |
+| **System principal** | The synthesised principal context (`scope='system'`, sentinel `userId`, `isSystemPrincipal=true`) used by system-managed agent runs and pg-boss handlers that have no inbound HTTP request. Set via `withSystemPrincipal()` (§4.3). |
+| **Kill switch** | An env-var-based on/off flag for one layer of the system. The hierarchy is documented in §12.2. Always defaults to `true` (system on); the operator sets `false` to disable. |
 
 ## 1. Summary
 
@@ -479,6 +502,156 @@ Single migration file (final number TBD by architect — auto-incremented from c
 No column drops, no type changes, no constraint tightening on existing data. Migration is idempotent-friendly via `IF NOT EXISTS` where Drizzle generator allows.
 
 **Rollback.** Drop the two new tables, drop the new columns. The system user row is left in place (deleting a referenced FK is messier than the row's footprint).
+
+### 4.7 Failure mode tables (per critical component)
+
+This subsection makes the per-component failure surface explicit. Constraints describe *what should hold*; failure modes describe *what happens when they don't*. Without explicit detection signals + system behaviour, multi-tenant + multi-agent failures degrade silently rather than failing loudly.
+
+**4.7.1 PrincipalContext propagation (§4.3, §4.4).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| `withSystemPrincipal` not invoked at handler entry | RLS denies all `system_*` table reads; query returns empty result or `permission denied` error | Hard fail. Handler logs `error('system-principal-context-missing', { handler, jobId })` and rethrows. pg-boss retries up to job retry limit (default 3); after that the job lands in DLQ and triggers the existing Phase 0/0.5 DLQ ingest hook. |
+| Wrong `organisation_id` on synthesised principal (drift from `SYSTEM_OPERATIONS_ORG_ID`) | Cross-tenant read anomaly in audit log: system principal reading rows it should not be able to | Block at `assertSystemAdminContext` (§4.4) — typed `UnauthorizedSystemAccessError`. Audit log row written. RLS provides a second wall; even if the assertion is bypassed, the session-variable RLS denies the read. |
+| Partial propagation — `withSystemPrincipal` covers part of a code path, then async work outside the scope queries with the wrong context | Mixed scoped + unscoped queries produce inconsistent results in the same handler | Reject the request. The integration test in §14.2 (`systemPrincipal.integration.test.ts`) explicitly probes this — a cross-scope query inside `withSystemPrincipal` for a tenant-write operation must fail. AsyncLocalStorage ensures any awaited continuation inside the wrapper inherits the context; code that breaks the context (e.g. `setImmediate` outside an `await`) fails the integration test. |
+| `assertSystemAdminContext` bypassed (e.g. a new mutation method forgets to call it) | A mutation method completes against `system_incidents` from a non-sysadmin caller in CI integration test | Build fails. Slice C ships a CI gate that greps every `system_incidents` mutation method for an `assertSystemAdminContext(ctx)` call as the first executable line. Missing → CI red. |
+
+**4.7.2 `recordIncident` ingest path (§4.1, §4.2).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| Idempotency LRU evicts a key inside the 60s window (LRU full of newer keys) | `system_incident_ingest_idempotent_evictions` counter increments; second call with same key writes a second row | Soft fail. Metric increments; second row treated as a real second occurrence. Acceptable degradation — the LRU is a soft optimisation, not a correctness guarantee. Post-incident review catches if the eviction rate exceeds a threshold (Phase 3 dashboard signal). |
+| Throttle map full (50,000 unique fingerprints) | `system_incident_ingest_throttle_map_evictions` counter increments | Oldest fingerprints lose their throttle protection. Tight-loop traffic on a recently-evicted fingerprint will not be throttled until the next call sets the entry. Acceptable — eviction rate is a tunable; if elevated, raise the cap or shorten throttle window. |
+| `recordIncident` called from a handler that did not synthesise a principal | Sync mode: throws inside the route's auth middleware before reaching `recordIncident`. Async mode: the worker reads the queued payload but writing to `system_incident_events` fails RLS | Async mode: worker logs `error('incident-ingest-no-principal', ...)`, message stays on the queue, retries up to retry limit. Sync mode: 401/403 from the route. |
+| Async ingest worker stalled (pg-boss queue not draining) | Synthetic check `pg-boss-queue-stalled` fires (§8.2) on the `system-incident-ingest-async` queue | High-severity incident emitted via `source='synthetic'`. The Phase 0/0.5 self-check (`system-monitor-self-check`) provides a second signal. |
+
+**4.7.3 Sweep job (§9.3).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| One heuristic throws inside `evaluate` | `logger.error('heuristic-evaluate-failed', { heuristic_id, candidate_id, err })` | The sweep handler's per-heuristic `try/catch` (§9.3 handler shape) catches; sweep continues with next heuristic. The candidate is not abandoned — other heuristics still evaluate against it. |
+| `loadCandidates` query times out or errors | `logger.error('sweep-load-candidates-failed', { window, err })` | Sweep handler returns early; pg-boss retries the job (default 3). After retries exhausted, lands in DLQ. The next 5-min tick is independent; window overlap means missed candidates re-evaluate on the next tick (§9.3). |
+| Sweep input cap hit (>50 candidates or >200 KB payload) | `sweep_capped` event written with `excess_count` (§12.1) | Top-50 by per-fire confidence proceed to triage. Excess candidates re-evaluate on next sweep (window overlap). Persistent cap-hits are a signal worth surfacing — Phase 3 dashboard. |
+| Sweep tick exceeds 5-minute interval (next tick attempts to start while previous still running) | pg-boss `singletonKey: 'sweep'` causes the new tick to no-op; logger info | Acceptable — a slow sweep is a signal to investigate (deep-reads taking too long, baseline reader slow), but not a hard fail. The 15-min window means a one-tick miss is recovered on the next tick. |
+| All candidates evaluate to no fires | Empty `fires[]`, `triages_enqueued: 0` in `sweep_completed` event | Normal. No incident production from this tick. |
+
+**4.7.4 Baseline refresh (§7.3).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| One `(entity_kind, entity_id, metric)` aggregate query fails | `baseline_refresh_failed` event written (§12.1); `logger.warn('baseline-refresh-entity-failed', ...)` | Other entities continue. The failed entity's existing baseline row stays in place (UPSERT failure leaves prior row intact); heuristics keep using stale-but-valid data until the next refresh. |
+| Whole refresh job throws | `logger.error('baseline-refresh-failed', { err })`; pg-boss retries | Existing baselines unchanged. Heuristics that read `BaselineReader.get()` continue with stale data. The 15-minute refresh cadence means staleness is bounded; multi-tick failure is a signal worth investigating. |
+| Refresh runs against an empty source table | Aggregate returns `count = 0`; UPSERT skipped (per architect-final aggregate logic) | No row written. `BaselineReader.get()` returns `null` for that triple → heuristics with `requiresBaseline` return `insufficient_data` (§7.4). |
+| Sample count drops below `minSampleCount` for a previously-baseline entity (e.g. agent decommissioned) | Reader returns row with `sample_count < min` | `getOrNull(..., minSampleCount)` returns `null` → heuristic gracefully degrades to `insufficient_data`. |
+
+**4.7.5 Triage agent run (§9.2, §9.8).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| Agent run hits max-turns without producing diagnosis | `agent_runs.terminated_reason == 'max_turns'`; no `write_diagnosis` call | `agent_triage_failed` event written with `reason='agent_run_failed'`. UI drawer renders triage-failed badge (§10.3). Operator can manual-escalate via Phase 0/0.5 path. |
+| `write_diagnosis` produces invalid prompt (validation fails per §9.8) | `promptValidation` rejects; agent's run loop retries up to 2× | After 2 retries: `agent_triage_failed` event with `reason='prompt_validation'`. UI shows "Prompt validation failed — operator should investigate manually" inline (§10.3 failure mode visibility line). |
+| Agent run errors (LLM API down, rate-limited at provider level) | Run terminal status non-success | `agent_triage_failed` event with `reason='agent_run_failed'`, `error_message` field carries provider error. pg-boss retries the triage job (default 3). |
+| Triage timeout exceeds 5-minute soft cap | Job runtime tracking | `agent_triage_failed` with `reason='timeout'`. Operator notified via the existing UI surface; manual-escalate available. |
+| Concurrent triage attempts on same incident (sweep + incident-driven race) | pg-boss `singletonKey` per `incidentId` collapses (§9.2) | Second enqueue is a no-op. Audit log shows one triage; no double-charge to rate limit. |
+
+**4.7.6 Synthetic-check tick (§8.1).**
+
+| Failure mode | Detection signal | System behaviour |
+|---|---|---|
+| One check throws inside `run(ctx)` | `logger.error('synthetic-check-failed', { checkId, err })` | Per-check `try/catch` in the tick handler isolates the failure. Other checks continue. The bad check is still on the next tick — a persistently-failing check produces persistent log lines, surfaced for operator attention. |
+| Check internally exceeds 5s soft cap | Check-side timeout produces `fired: false` + `logger.warn('synthetic-check-slow', ...)` | The slow check does not block the tick. Persistent slowness is a signal worth investigating; the tick budget is 30s total per §8.1. |
+| Tick handler exceeds 30s budget (rare; checks isolated) | pg-boss runtime > 30s | Logger warns. Next tick is independent. Persistent breach surfaces on the operator's monitoring view. |
+| `recordIncident` from inside a check fails (e.g. RLS issue on sync mode) | Per-check `try/catch` catches | Check is logged as failed; tick continues. No incident written; the next tick re-evaluates and tries again. |
+
+**Cross-cutting failure-recovery posture.** No silent failures. Every failure mode either (a) writes a structured event (`agent_triage_failed`, `sweep_capped`, `baseline_refresh_failed`, etc.) that surfaces in the audit log + UI, or (b) increments a counter that's queryable via the standard structured-log dimensions (§12.3). Operators see what failed and why; the system does not paper over failures with default-success states.
+
+### 4.8 Global idempotency invariant + key-format conventions
+
+**The invariant.** Every externally-triggerable action introduced by this spec MUST carry a deterministic idempotency key. "Externally-triggerable" means: any action enqueued by pg-boss, any HTTP mutation route the operator can hit, any reactive ingest path that may be retried, any sweep / synthetic-check / baseline-refresh tick. The key must be derivable from the action's identity (the inputs that uniquely determine "this is the same action"), not from a random UUID generated at enqueue time.
+
+**Why a deterministic key.** Random keys defeat the purpose — two retries of the same logical action with different random keys are treated as two distinct actions, double-executing the side effect. A deterministic key is the same on retry as on the original; idempotency layer collapses them.
+
+**Key-format conventions.**
+
+| Action class | Key format | Storage | Expiry |
+|---|---|---|---|
+| `recordIncident` (any caller) | `<caller-supplied>:<fingerprint>` (caller may pre-derive a key, or omit and accept fingerprint-only behaviour) | Process-local LRU (§4.1) | 60s TTL (`SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS`) |
+| `recordIncident` from synthetic check | `synthetic:<check_id>:<resourceId>:<bucketKey>` (§8.1) | Same LRU | Same TTL |
+| `recordIncident` from sweep cluster | `sweep:<candidateKind>:<candidateId>:<bucketKey>` | Same LRU | Same TTL |
+| `system-monitor-triage` enqueue (incident-driven) | `triage:<incidentId>` (singletonKey) | pg-boss singleton | Job lifetime |
+| `system-monitor-triage` enqueue (sweep-driven) | `sweep:<candidateKind>:<candidateId>:<bucketKey>` | pg-boss singleton + idempotencyKey on payload | Job lifetime |
+| `system-monitor-sweep` tick | `sweep-tick:<bucketKey>` (singletonKey) | pg-boss singleton | Job lifetime |
+| `system-monitor-synthetic-checks` tick | `synthetic-checks` (singletonKey, single tick at a time) | pg-boss singleton | Job lifetime |
+| `system-monitor-baseline-refresh` tick | `baseline-refresh` (singletonKey) | pg-boss singleton | Job lifetime |
+| `write_diagnosis` skill call | `(incidentId, agentRunId)` — composite primary-key-style check inside the skill | DB unique constraint on `(system_incidents.id, agent_diagnosis_run_id)` — second call is a no-op when both columns already match | Permanent (until incident reopens with new `agent_diagnosis_run_id`) |
+| `write_event` skill call | `(incidentId, event_type, agentRunId)` for agent-emitted events | Composite check inside the service; idempotent INSERT pattern (existing Phase 0/0.5 pattern) | Permanent |
+| `recordPromptFeedback` mutation | `(incidentId, actor_user_id)` — first submission wins, second returns 409 (§10.4) | DB unique-constraint-or-application-level check | Permanent |
+
+**Bucket keys.** A `bucketKey` is a time-bucket string used to coarsen idempotency windows for periodic actions. Format: `YYYY-MM-DDTHH:MM` rounded to the nearest bucket interval. Examples:
+
+- Sweep `bucketKey`: 15-minute bucket — `2026-04-26T01:30` covers 01:30:00–01:44:59.
+- Synthetic-check `bucketKey`: 15-minute bucket per check — same format, prevents N incidents in N minutes from a single stalled queue.
+
+**Deduplication windows are documented per action.** Every action declaring an idempotency key also names its window above. The window is the shortest interval during which two calls with the same key are guaranteed to collapse. Outside the window, behaviour reverts to "two distinct actions" (acceptable for the periodic actions; for permanent actions like `write_diagnosis`, the window is the lifetime of the row).
+
+**Key consistency check (CI gate).** Slice C adds a CI script that greps every `enqueue` / `pgboss.send` / `recordIncident` call site in the new code and verifies an `idempotencyKey` or `singletonKey` is set per the table above. Missing → CI red. Pattern: regex over `server/services/systemMonitor/**` and `server/jobs/systemMonitor*.ts`.
+
+**Why this is a global invariant, not per-component.** A new sub-system added in Phase 3 must inherit the same idempotency posture without redesign. Naming the rule once + centralising the key formats is the lever that prevents per-feature drift.
+
+**Inherited from Phase 0/0.5.** The fingerprint algorithm itself (the deterministic identity of an incident) is unchanged — it is the natural identity component for every `recordIncident` key. Phase 0/0.5 fingerprint contract is the foundation; this section layers idempotency keys *on top of* fingerprint, not in place of.
+
+### 4.9 Concurrency + race-condition rules
+
+**The invariant.** Every concurrent path introduced by this spec must declare its concurrency posture: last-write-wins vs reject-if-stale vs deduplicate-via-singleton. Implicit "it'll probably be fine" is not acceptable.
+
+**4.9.1 Concurrent triage on the same incident (sweep + incident-driven race).**
+
+- **Posture:** Deduplicate via pg-boss `singletonKey: incidentId`.
+- **Mechanism:** Both the incident-driven trigger (§9.2) and the sweep-driven trigger (§9.3) enqueue with the same `singletonKey`. pg-boss collapses concurrent enqueues into one job. The second enqueue is logged as `triage_enqueue_deduplicated` (audit) and skipped.
+- **Rate-limit accounting:** The collapsed enqueue counts as **one** triage attempt against `triage_attempt_count` (§9.9). A noisy candidate that fires both triggers in the same window is one triage, not two.
+- **Test:** §14.2 `triageJob.incidentDriven.integration.test.ts` includes a probe that fires both triggers within 1 second and verifies one agent run.
+
+**4.9.2 Concurrent baseline refresh (overlap with prior tick).**
+
+- **Posture:** Single-tick-at-a-time via pg-boss `singletonKey: 'baseline-refresh'`. Last-write-wins on the row level (UPSERT).
+- **Mechanism:** A slow refresh tick that exceeds 15 minutes will block the next tick from starting until it finishes. The next tick then runs against fresher data. UPSERT on `(entity_kind, entity_id, metric_name)` means even if two refreshes did somehow run, the second's UPSERT overwrites the first's row — last-write-wins is acceptable because both writers compute against the same window.
+- **Failure mode:** Persistent slowness (refresh > 15min consistently) leaves baselines stale beyond their nominal cadence; surface via the existing baseline-refresh-failed audit (§12.1) and via the elapsed-time logger field.
+
+**4.9.3 Concurrent feedback submission on the same incident.**
+
+- **Posture:** Reject-if-stale (first wins). Second submission returns 409.
+- **Mechanism:** `recordPromptFeedback` (§10.4) uses an application-level check + DB unique constraint on `(incident_id, actor_user_id)` (or equivalently, the existing nullable column transition is gated — `prompt_was_useful IS NULL` becomes the precondition for a write). Concurrent first-time submissions race; whichever commits first wins; the loser receives 409.
+- **Why first-wins, not last-wins:** Feedback is meant to capture the operator's first-pass impression at resolve time. Allowing overwrite would require a richer audit trail (see §11.1 — "the audit history lives in the events log, the schema column holds the current state"). Forcing first-wins keeps the audit trail meaningful — if the operator wants to update feedback, an explicit admin override path is the right surface (out of scope for v1).
+
+**4.9.4 Concurrent `recordIncident` calls (tight-loop traffic).**
+
+- **Posture:** Deduplicate via per-fingerprint throttle (§4.2) + idempotency LRU (§4.1).
+- **Mechanism:** Order is: `compute fingerprint → throttle check → idempotency check → DB write`. Throttle wins first (drops 99/100 same-fingerprint calls in 1s). Idempotency LRU catches the rest if `idempotencyKey` is supplied.
+- **Cross-process behaviour:** Process-local LRU + map are NOT shared across processes. A multi-process deploy will, in the worst case, write one row per process per fingerprint per second. Acceptable — the cost of a missed dedupe is "two rows where one would do," and the 1s window is short enough that the multi-process overcount is bounded. Phase 3 may upgrade to Redis for cross-process coordination if traffic patterns warrant; explicitly deferred.
+
+**4.9.5 Concurrent sweep ticks (slow tick + new tick).**
+
+- **Posture:** Single-tick-at-a-time via pg-boss `singletonKey: 'sweep-tick'`.
+- **Mechanism:** Same as baseline refresh — pg-boss collapses concurrent attempts. The new tick waits or no-ops; the 15-minute window overlap on the next clean tick recovers the missed candidates.
+- **No advisory locks needed:** pg-boss singleton is sufficient. Heuristic evaluations are read-only against agent-run / job / skill-execution rows; they do not mutate state, so no locking is required at the row level.
+
+**4.9.6 Concurrent retry overlap (pg-boss retry vs original execution).**
+
+- **Posture:** Idempotency at the work-product level, not the job level.
+- **Mechanism:** A pg-boss retry of a triage job that crashed mid-run executes again. The agent's `write_diagnosis` skill enforces idempotency on `(incidentId, agentRunId)` (§4.8). If the original run wrote the diagnosis before the crash, the retry's `write_diagnosis` is a no-op. If not, the retry re-runs the agent and writes fresh.
+- **Why not job-level idempotency:** A pg-boss retry has the same job payload but the agent run may produce different content (different LLM sample, different timestamps). Job-level idempotency would mask legitimate retries; work-product idempotency catches "this row already has the diagnosis we'd write" and short-circuits.
+
+**4.9.7 Concurrent webhook delivery (Phase 0/0.5 inheritance).**
+
+- **Posture:** Inherited unchanged from Phase 0/0.5 — webhooks (Pulse, WebSocket fanout) are at-least-once; consumers must be idempotent.
+- **No new webhooks in this spec.** Diagnosis updates fan out via the existing `system_incident:updated` channel (NG7). No new event delivery surface introduced.
+
+**4.9.8 Throttle map race (concurrent `recordIncident` on the same fingerprint within 1ms).**
+
+- **Posture:** Last-write-wins on the map. Acceptable race.
+- **Mechanism:** Two concurrent calls reading `lastSeenByFingerprint.get(fp)` may both see no entry, both proceed to ingest, both write `lastSeenByFingerprint.set(fp, now)`. Result: two ingests in a 1-2ms window, then throttle kicks in for subsequent calls. The race window is sub-millisecond; the cost is one duplicate row at most. Not worth a mutex — the throttle is a soft optimisation.
+
+**Cross-cutting concurrency posture.** All concurrency rules are documented and tested. The three load-bearing patterns are: (a) pg-boss `singletonKey` for tick / triage dedup, (b) work-product idempotency for retry safety, (c) accept-the-soft-race for sub-millisecond optimisations where the cost is bounded.
 
 ## 5. Investigate-Fix Protocol
 
@@ -1171,6 +1344,40 @@ bossHandler('system-monitor-sweep', async (job) => {
 
 **Failure isolation.** A heuristic throwing in `evaluate` is logged and skipped. The sweep does not abort. A bad heuristic in the registry cannot break the sweep for all heuristics.
 
+**Partial-success contract.** A sweep tick is a multi-step batch — N candidates × M heuristics. Partial outcomes are normal, not exceptional. The structured result of every tick is:
+
+```ts
+type SweepResult = {
+  status: 'success' | 'partial_success' | 'failure';
+  window: { start: Date; end: Date };
+  candidates_evaluated: number;
+  heuristics_evaluated: number;
+  fired: HeuristicFire[];          // per-fire structured records
+  suppressed: HeuristicFire[];     // suppression-rule blocked
+  insufficient_data: HeuristicFire[]; // baseline gating skipped
+  errored: { heuristic_id: string; candidate_id: string; err: string }[];
+  triages_enqueued: number;        // collapsed by clustering
+  capped: { excess_count: number; cap_kind: 'candidate' | 'payload' } | null;
+  duration_ms: number;
+};
+```
+
+Returned from the handler, written to the structured log as the `sweep_completed` event (§12.1).
+
+**Status values:**
+
+- `success` — every (heuristic, candidate) pair completed (fired, suppressed, insufficient-data, or no-fire). No errors. Cap not hit.
+- `partial_success` — at least one heuristic errored (`errored.length > 0`) OR the input cap was hit (`capped != null`). Successful fires still propagate to triage; errored pairs are skipped on this tick and will re-evaluate on the next.
+- `failure` — the handler itself threw (e.g. `loadCandidates` failed). No fires propagate. pg-boss retries.
+
+**Retry eligibility:** `success` and `partial_success` are NOT retried — they completed (with the partial caveat for the latter). `failure` is retried by pg-boss up to its retry limit; after exhaustion the job lands in DLQ and the synthetic-check `dlq-not-drained` (§8.2) catches the persistence.
+
+**Downstream consumption.** The triage handler consumes the `fired` array — only fires propagate to triage. `errored`, `suppressed`, `insufficient_data` are audit-only; they land in `system_monitor_heuristic_fires` (§4.5) for tuning data but do not become incidents. `capped` is surfaced as a `sweep_capped` event for operator visibility.
+
+**Idempotency under partial success.** A `partial_success` re-tick on the next 5-min cycle re-evaluates every candidate in the new (overlapping) window. Heuristic fires from the previous tick are deduplicated via the `system_monitor_heuristic_fires` audit row + per-fingerprint throttle (§4.2) — a candidate that fired heuristic X in tick 1 and fires it again in tick 2 produces one incident, not two.
+
+The same partial-success contract applies to the **synthetic-check tick** (§8.1). Each tick runs N checks; one check failing does not abort the others; the tick handler returns a structured `SyntheticTickResult` with the same shape (`fired`, `errored`, `duration_ms`, `status`).
+
 ### 9.4 Diagnosis-only skills
 
 The agent's tool set is **read-only**. This is the architectural hard line that separates Phase 2 from Phase 3. No skill in this set takes a side effect outside the diagnosis columns of the incident row the agent is currently triaging.
@@ -1386,6 +1593,15 @@ The agent calls `write_diagnosis(incidentId, { investigatePrompt: <text> })` onc
 
 **One prompt per incident.** Subsequent triages of the same incident (rate-limit allowing — §9.9) overwrite the prior diagnosis and prompt. The prior values are not preserved on the incident row; the audit trail is the `system_incident_events` log, which has the full history of `agent_diagnosis_added` rows.
 
+**Schema versioning on agent-emitted JSON payloads.** Every agent-written JSON payload carries a `schema_version: 'v1'` field at the top level. Applies to:
+
+- `system_incidents.agent_diagnosis` JSON: `{ schema_version: 'v1', hypothesis, evidence, confidence, generatedAt, agentRunId }`.
+- `system_incident_events.metadata` for `agent_diagnosis_added`, `agent_triage_skipped`, `agent_triage_failed`, `prompt_generated`, `investigate_prompt_outcome`: each carries `schema_version: 'v1'` alongside the per-event fields documented in §12.1.
+
+Why on every payload, not on the table: the JSON shape is the contract; tables outlive single shapes. A future Phase 3 enhancement (e.g. richer evidence types) bumps to `schema_version: 'v2'` while old rows stay readable. Consumers (UI render, downstream analytics) check `schema_version` at read time.
+
+**No prompt-text version stamp.** The `investigate_prompt` text itself is markdown, not JSON. Its versioning is the `## Protocol` line at the top (`v1 (per docs/investigate-fix-protocol.md)` — §5.2). The protocol-doc version + the agent's stored prompt are the version pair; the text body does not need an explicit field. (Consistent with NG10 — no protocol-version stamp at runtime; per-payload `schema_version` is for the structured JSON only.)
+
 **Display.** The triage drawer (§10) renders the `investigate_prompt` text inside a copy-formatted block with a one-click copy button. No syntax highlighting beyond markdown; the prompt is markdown-formatted and the existing markdown renderer is reused.
 
 ### 9.9 Rate limiting
@@ -1447,6 +1663,33 @@ Rate limiting is the bound on **agent invocation cost**. Every triage call costs
 | `SYSTEM_MONITOR_SWEEP_PAYLOAD_CAP_KB` | `200` | Hard ceiling on deep-read payload per sweep. |
 
 The full env-var inventory across this spec lives in §12.2 (consolidated for ops).
+
+### 9.11 Stuck-state detection for the monitor agent itself
+
+The day-one heuristic set (§9.5) detects stuck states in **other** agents — `max-turns-hit`, `repeated-skill-invocation`, `final-message-not-assistant`, `runtime-anomaly`. The same detection must apply to the `system_monitor` agent's own runs, otherwise a stuck monitor produces no diagnoses + no audit signal + no escalation.
+
+**Detection criteria** (any one fires):
+
+| Condition | Threshold | Source |
+|---|---|---|
+| `max_turns` reached | `agent_runs.terminated_reason == 'max_turns'` | Run row |
+| Runtime exceeds soft cap | `runtime_ms > 5 minutes` | Run row |
+| Identical output across triages | Two consecutive triages on the same fingerprint produce byte-identical `agent_diagnosis.hypothesis` | `system_incidents` history (compared inside `recordTriageOutcome`) |
+| Tool-only final message | Last message in run is `tool` or `system`, not `assistant` | Run message history |
+| No `write_diagnosis` call after N turns | After 8 turns without a `write_diagnosis` invocation | Run message history |
+
+**Escalation path.** When any criterion fires for a `system_monitor` agent run:
+
+1. The triage handler logs `error('monitor-self-stuck', { agent_run_id, criterion })`.
+2. Writes `agent_triage_failed` event (§12.1) with `reason='self_stuck'` and `metadata.criterion`.
+3. The drawer renders a triage-failed badge with copy "Auto-triage encountered an unexpected state — operator should investigate manually" (§10.3 failure-mode visibility).
+4. The synthetic-check `agent-run-success-rate-low` (§8.2 row 7) catches the broader trend: if monitor self-stuck persists across multiple incidents, the synthetic check fires its own incident pointing at the monitor agent itself.
+
+**Auto-recovery vs human intervention.** No auto-recovery. The monitor agent does not retry itself past the existing `write_diagnosis` retry-up-to-2 loop (§9.8). A self-stuck condition is always escalated to human — the operator manually escalates the incident to a sysadmin via the existing Phase 0/0.5 path. The kill switch (`SYSTEM_MONITOR_ENABLED=false`) is the operator's tool if the monitor is stuck across many runs.
+
+**No recursion.** A self-stuck monitor incident has `metadata.isMonitorSelfStuck=true`. Phase 2's incident-driven trigger explicitly excludes incidents with that flag from auto-triage (§9.2 — same recursion guard pattern as `metadata.isSelfCheck`).
+
+**Why this is a separate subsection.** §9.5 heuristics evaluate against agent runs of *other* agents. The `system_monitor` agent's own runs are excluded from the sweep candidate set (`agent_id != system_monitor`). This subsection defines the detection that *does* apply to the monitor's own runs — equivalent rules, different code path.
 
 ## 10. UI surface
 
@@ -1670,9 +1913,9 @@ All event types append to `system_incident_events`. The Phase 0/0.5 enum is exte
 
 | Event type | Source | When written | `metadata` shape |
 |---|---|---|---|
-| `agent_diagnosis_added` | `system_monitor` agent | After `write_diagnosis` succeeds — diagnosis JSON and `investigate_prompt` are now on the row. | `{ agent_run_id, heuristic_fires: string[], confidence }` |
-| `agent_triage_skipped` | `system-monitor-triage` enqueue path or handler short-circuit | When triage was eligible but skipped (rate-limited, kill switch off, self-check, severity floor not met). | `{ reason: 'rate_limited' \| 'disabled' \| 'self_check' \| 'severity_floor', triage_attempt_count }` |
-| `agent_triage_failed` | `system-monitor-triage` handler | When the agent ran but did not produce a valid output (prompt validation failure, agent run errored). | `{ agent_run_id, reason: 'prompt_validation' \| 'agent_run_failed' \| 'timeout', error_message? }` |
+| `agent_diagnosis_added` | `system_monitor` agent | After `write_diagnosis` succeeds — diagnosis JSON and `investigate_prompt` are now on the row. | `{ schema_version: 'v1', agent_run_id, heuristic_fires: string[], confidence }` |
+| `agent_triage_skipped` | `system-monitor-triage` enqueue path or handler short-circuit | When triage was eligible but skipped (rate-limited, kill switch off, self-check, severity floor not met, monitor self-stuck). | `{ schema_version: 'v1', reason: 'rate_limited' \| 'disabled' \| 'self_check' \| 'severity_floor' \| 'self_stuck', triage_attempt_count }` |
+| `agent_triage_failed` | `system-monitor-triage` handler | When the agent ran but did not produce a valid output (prompt validation failure, agent run errored, monitor self-stuck). | `{ schema_version: 'v1', agent_run_id, reason: 'prompt_validation' \| 'agent_run_failed' \| 'timeout' \| 'self_stuck', error_message?, criterion? }` |
 | `agent_auto_escalated` | rate-limit-aware auto-escalation path (§9.9) | When a rate-limited high/critical incident auto-escalates to the system-ops sentinel. | `{ to_subaccount_id, escalation_count, fingerprint }` |
 | `agent_escalation_blocked` | same path | When auto-escalation hit a Phase 0.5 escalation guardrail. | `{ reason: 'guardrail_cap' \| 'cooldown' \| 'subaccount_disabled' }` |
 | `heuristic_fired` | sweep job | Every fire that passed the per-fire confidence threshold. Written to `system_monitor_heuristic_fires` (§4.5), not `system_incident_events` — but the audit hook still emits a `heuristic_fired` row on the incident if a fire produced an incident. | `{ heuristic_id, confidence, evidence_run_id }` |
@@ -1680,7 +1923,7 @@ All event types append to `system_incident_events`. The Phase 0/0.5 enum is exte
 | `sweep_completed` | sweep job | End of every sweep tick. Audit-only on the system level, not per-incident. Stored in a structured log row, not on `system_incident_events`. | `{ candidates_evaluated, fires, triages_enqueued, sweep_capped_count? }` |
 | `sweep_capped` | sweep job | When the sweep input cap was hit (more than 50 candidates or 200 KB payload). | `{ excess_count, cap_kind: 'candidate' \| 'payload' }` |
 | `triage_rate_limited` | triage enqueue path | Aggregated form of `agent_triage_skipped` for sysadmin-visible counters. Same data as `agent_triage_skipped` but emitted to a metrics channel for dashboarding. Not a separate event row — flagged here for completeness. | n/a (metrics) |
-| `prompt_generated` | `system_monitor` agent | After `write_diagnosis` writes the `investigate_prompt`. Companion to `agent_diagnosis_added` so we can distinguish "diagnosis written" from "prompt written" if validation fails on prompt only. | `{ agent_run_id, prompt_length_chars }` |
+| `prompt_generated` | `system_monitor` agent | After `write_diagnosis` writes the `investigate_prompt`. Companion to `agent_diagnosis_added` so we can distinguish "diagnosis written" from "prompt written" if validation fails on prompt only. | `{ schema_version: 'v1', agent_run_id, prompt_length_chars }` |
 | `investigate_prompt_outcome` | sysadmin via `recordPromptFeedback` mutation | When the operator submits feedback after resolving an agent-diagnosed incident (§11.2). | per §11.2 table |
 | `synthetic_check_fired` | synthetic check tick | A synthetic check produced an incident. Companion event on the resulting incident — explains "this incident's source was synthetic check X." | `{ check_id, resource_kind, resource_id, bucket_key }` |
 | `baseline_refreshed` | baseline refresh job | Tick completed. System-level audit, not on `system_incident_events`. Logged structurally. | `{ entities_refreshed, duration_ms }` |
@@ -1747,6 +1990,26 @@ All new code paths follow the existing structured-logger convention from `phase-
 - No PII in logs. Customer email addresses, names, message bodies — all redacted or omitted by the calling code. The system-principal context (§4.3) carries no PII; this is intentional.
 - Log levels: `debug` for high-volume paths (every heuristic evaluation), `info` for state transitions (every fire, every triage, every refresh), `warn` for recoverable errors (single-heuristic throw, single-entity baseline failure), `error` for non-recoverable errors (handler throws past its catch).
 
+**Queryable-dimensions invariant (logs-as-metrics).** Several internal counters in this spec are surfaced via tagged structured logs rather than a dedicated metrics service (§4.1 `system_incident_ingest_idempotent_hits`, §4.2 `system_incident_ingest_throttled`, §4.2 `system_incident_ingest_throttle_map_evictions`, §9.3 sweep cap counts). Any log line that is intended to be aggregated as a metric MUST carry the queryable dimensions needed to slice it. **Required dimension keys per metric-bearing log line:**
+
+| Dimension | When required | Source |
+|---|---|---|
+| `correlationId` | Always when available (request-bound paths) | Existing logger middleware |
+| `incidentId` | When the line refers to an incident | The incident row |
+| `agentId` | When the line refers to an agent run (the *triaged* agent, not necessarily `system_monitor`) | `agent_runs.agent_id` |
+| `agentRunId` | When the line refers to a specific run | `agent_runs.id` |
+| `jobId` | When the line refers to a pg-boss job | pg-boss job id |
+| `runId` | Alias for `agentRunId` in agent-execution paths | same |
+| `entityKind` + `entityId` | When the line refers to a baselined entity | per §7.1 |
+| `heuristic_id` | When the line refers to a heuristic fire / suppression / failure | from registry |
+| `orgId` | When the line refers to a tenant-scoped entity (read-only access by system principal) | `agent_runs.organisation_id` |
+
+**Rule:** any log line emitted as `logger.info(...)` or `logger.warn(...)` for the explicit purpose of metric aggregation MUST include the dimensions relevant to its metric. Lines without dimensions cannot be sliced by `orgId` / `agentId` / `jobId` / `runId` and become useless at scale. Any new metric-bearing log line in this spec's surface area is added with its dimensions named at write time, not retrofitted later.
+
+**Why this is enforced as an invariant.** Aggregating tagged-log-as-metric works at small scale; at scale it breaks the moment an operator asks "which org / agent / run is responsible for these throttle hits?" Naming the dimension contract once + applying it to every metric-bearing line keeps the pattern viable as volume grows.
+
+**Test posture.** No CI gate enforces dimension presence (the static-gates posture per spec-context.md does not extend to log-format linting). The convention is documented + reviewed in PRs; metric-bearing log lines are explicitly called out in §12.3 + the relevant section.
+
 **Heuristic-fires audit table is the structured log for sweeps.** Per §4.5, `system_monitor_heuristic_fires` is the durable audit row for every heuristic fire (or suppression / insufficient-data). Logger calls are redundant for this signal; logger is used only for the sweep tick start/end and for unexpected errors.
 
 **Log volume estimate.** Per sweep (5-min interval): ~50-200 candidates × ~14 heuristics = ~700-2,800 evaluations. At `debug` log level, this is meaningful volume; in production, `debug` is off — sweep evaluations log at `debug`, only fires log at `info`. Per minute: ~5-30 fires across the platform under healthy conditions, with rare bursts during incidents. Acceptable.
@@ -1754,6 +2017,41 @@ All new code paths follow the existing structured-logger convention from `phase-
 **No log shipping change.** This spec uses the existing logger configuration. If the host runtime forwards logs to an external aggregator (Datadog, Loki, etc.), new event names will appear there without configuration changes. If the host runtime relies on stdout only, the `system-monitor-self-check` (Phase 0/0.5) constraint remains: process-local rolling buffer, multi-instance undercount acceptable. No change to that posture.
 
 **Searchability.** Operators debugging an incident search by `correlationId` (existing convention) or `incidentId`. Both fields are present on every Phase 2 log line that involves an incident. Heuristic debugging searches by `heuristic_id`. Baseline issues search by `entity_kind`/`entity_id`/`metric`.
+
+### 12.4 Explicit defaults — retries, timeouts, failure recovery
+
+Implicit "the system retries a few times then gives up" is not specified. This subsection consolidates every retry count, timeout, and failure-recovery default in one place. Every default is tunable via env var where one is named in §12.2; otherwise the default is the spec-defined value.
+
+| Path | Default | Notes |
+|---|---|---|
+| pg-boss job retry count (all new queues — triage, sweep, synthetic-checks, baseline-refresh) | 3 | Inherited pg-boss default. After exhaustion → DLQ → `dlq-not-drained` synthetic check (§8.2) eventually fires. |
+| pg-boss retry backoff | exponential per pg-boss default | Inherited. |
+| `system-monitor-triage` job soft timeout | 5 minutes | Triage run beyond this fires `agent_triage_failed` with `reason='timeout'` (§9.11 / §4.7.5). |
+| `system-monitor-sweep` tick soft cap | 5 minutes (matches tick cadence) | A slow sweep blocks the next tick via `singletonKey`. Logger info on overlap; not a hard fail. |
+| `system-monitor-synthetic-checks` tick budget | 30 seconds total | §8.1. Per-check internal cap: 5 seconds. |
+| `system-monitor-baseline-refresh` tick budget | 5 minutes | Slow refresh blocks the next tick via `singletonKey` (§4.9.2). |
+| `write_diagnosis` validation retry-loop (agent-side) | max 2 retries | §9.8. After 2 failures: `agent_triage_failed` with `reason='prompt_validation'`. |
+| Incident-driven trigger cooldown | none beyond rate limit | Rate limit (§9.9) is the only gate. No additional cooldown. |
+| Sweep window | 15 minutes (overlapping by 10 min) | §9.3. |
+| Sweep candidate cap | 50 | §9.3. Configurable via `SYSTEM_MONITOR_SWEEP_CANDIDATE_CAP`. |
+| Sweep payload cap | 200 KB | §9.3. Configurable via `SYSTEM_MONITOR_SWEEP_PAYLOAD_CAP_KB`. |
+| Per-fingerprint rate limit | 2 triages / 24h rolling | §9.9. Configurable. |
+| Idempotency LRU TTL | 60 seconds | §4.1. Configurable. |
+| Throttle window | 1 second | §4.2. Configurable. |
+| Baseline `minSampleCount` default | 10 | §7.4. Per-heuristic override allowed. |
+| Baseline window | 7 days rolling | §7.3. Configurable. |
+| Per-fire confidence threshold | 0.5 | §9.10 / §6.3. Configurable. |
+| Synthetic-check failure handling | per-check `try/catch`; one bad check does not abort the tick | §8.1, §4.7.6. Logger error; persistence surfaces as repeated log lines. |
+| Heuristic-evaluate failure handling | per-heuristic `try/catch`; one bad heuristic does not abort the sweep | §9.3, §4.7.3. Logger error. |
+| Baseline-refresh entity failure handling | per-entity isolation; failed entity keeps prior row | §4.7.4. Other entities continue. |
+| Triage agent run failure | `agent_triage_failed` event + drawer badge | §4.7.5, §10.3. Operator notified; manual escalate available. |
+| Default agent model | `claude-opus-4-7` | §9.1. Configurable via `SYSTEM_MONITOR_MODEL`. |
+| `agent_triage_skipped` reasons (the audit-log enum) | `rate_limited \| disabled \| self_check \| severity_floor \| self_stuck` | §12.1, §9.11. |
+| `agent_triage_failed` reasons | `prompt_validation \| agent_run_failed \| timeout \| self_stuck` | §12.1, §9.11. |
+
+**No retry on operator-facing mutations.** `recordPromptFeedback` is not retried — first submission wins, second returns 409 (§4.9.3). The operator either sees success or 409; no silent retry on the client.
+
+**No retry past the documented count.** Three pg-boss retries is the maximum for any new queue introduced by this spec. The DLQ → synthetic check is the catch-all for persistent failure; the synthetic-check incident is then the operator's signal.
 
 ## 13. File inventory
 
