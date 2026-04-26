@@ -2345,6 +2345,58 @@ These items are deliberate omissions, not deferred work. Naming them here preven
 
 ## 19. Future phases (summary)
 
+These are sketched here only to make the architectural choices in this spec legible — the Investigate-Fix Protocol pattern, the diagnosis-only contract, the feedback-loop schema, the system-principal context — and to clarify what is being deferred vs what is being foreclosed. Each future phase is its own design exercise; nothing here is committed.
+
+### 19.1 Phase 0.75 — push notification channels (deferred indefinitely)
+
+Email and Slack push delivery for incident notifications. Deferred per Q1 §0.2 because the operator workflow is page-based; push channels would add ~3-5 days of work for capability not currently used.
+
+**Trigger to revisit.** Multiple operators with overlapping monitoring duties; monitoring fatigue from page-only checking; an incident that should have paged but didn't. None of these are present today.
+
+**What this spec preserves for Phase 0.75.** The `SystemIncidentFatigueGuard` extracted in Phase 0/0.5 is unchanged. The `userSettings` schema for notification preferences was deferred in Phase 0/0.5 and remains deferred. When Phase 0.75 is reopened, the wiring slots into the existing fatigue-guard infrastructure without redesign.
+
+### 19.2 Phase 3 — auto-remediation
+
+The agent stops emitting prompts for the human and starts executing fixes itself, gated by accumulated evidence that its diagnoses are right often enough to trust unattended.
+
+**Architectural lever.** The Investigate-Fix Protocol (§5) is already the contract. A server-side worker that follows the same protocol — reads `investigate_prompt`, executes `## Investigation steps`, produces a diff, applies it under a controlled deployment workflow — is the auto-fix executor. No protocol redesign; no agent prompt redesign. Just a new executor pointed at the same shared contract.
+
+**Gate signal.** Per §11.3 — the percentage of agent-diagnosed incidents where `was_successful = 'yes' AND linked_pr_url IS NOT NULL` over a rolling 30-day window. Threshold tbd in Phase 3 design; expected to be 70-80%.
+
+**Other Phase 3 work that depends on or enables this:**
+- Semantic-correctness LLM judge (per-run output evaluation).
+- Multi-agent coordination heuristics (handoff failure, state mismatch, conflicting outputs).
+- Per-tenant baselines (so per-tenant agents have their own norms).
+- A runtime override table for emergency heuristic suppression (per §6.5 forward note).
+- An analytics dashboard for feedback rollups (per §11.3 forward note).
+- A baseline history table (per §7.2 forward note) so drift detection works over months not hours.
+
+Each of those is its own design problem. Phase 3 is not one PR; it is a phase boundary that contains several.
+
+### 19.3 Phase 4 — dev-agent handoff
+
+When the agent's diagnoses are reliably good and the auto-fix executor handles common cases, the next step is a development agent that takes the harder cases — diagnosed but unfixable-by-recipe — and produces a PR for human review.
+
+**Architectural lever.** The "persistent_defect" classification from Phase 0/0.5 is the input. The `investigate_prompt` is the spec the dev agent works against. The Investigate-Fix Protocol is, again, the contract — but now with a more capable executor that can refactor, write tests, and propose architectural changes inside its `## Scope` block.
+
+**Depends on Phase 3 stable.** No point in handing the dev agent ambiguous diagnoses; Phase 3 is the precondition.
+
+### 19.4 Phase 5+ — tenant-scoped monitoring
+
+A per-tenant monitoring agent that watches a single org's runs and produces tenant-scoped incidents (visible to org admins, not sysadmins). Extension of the Portfolio Health Agent precedent.
+
+**Architectural lever.** The system-principal pattern (§4.3) and the monitoring agent shape (§9) generalise. A new agent with `scope='org'` and a per-org principal would inherit most of the infrastructure. Per-tenant baselines (Phase 3) are a precondition — the system-scoped baselines aggregate across all tenants and are not appropriate for per-tenant signals.
+
+**No timeline.** Tenant-scoped monitoring is a new product surface, not just an internal extension. Phase 5 is a real product decision the team makes when it makes one — not a build that flows naturally from this work.
+
+### 19.5 What stays unbuilt forever (probably)
+
+A small list, mainly to close the loop on architectural conversations the team has already had:
+
+- A "stop and wait for human approval" interrupt inside the agent's run loop. The agent runs to completion or fails; humans review at incident-resolve time. Approval gates inside the run cost more than they save.
+- A "rollback the auto-fix" action surface. If Phase 3 ships, rollback is a normal git operation, not a UI action. The agent does not commit; the executor does, behind the deployment workflow's controls.
+- A "let the agent author its own heuristics" surface. Heuristics are config-as-code with explicit metadata for a reason — author-best-guess values are inputs to the calibration loop. Agent-authored heuristics would short-circuit the loop. Out of scope, probably permanently.
+
 ---
 
-<!-- All sections below are filled via Edit per the long-doc-guard chunked workflow. -->
+End of spec.
