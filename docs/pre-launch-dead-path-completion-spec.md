@@ -1,7 +1,7 @@
 # Pre-Launch Dead-Path Completion — Spec
 
 **Source:** `docs/pre-launch-hardening-mini-spec.md` § Chunk 3
-**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `13ffec6d372d3d823352f88cca9b9eb9728910b5`)
+**Invariants:** `docs/pre-launch-hardening-invariants.md` (commit SHA: `1cc81656138663496a09915db28587ffd83fbddc`)
 **Architect input:** `tasks/builds/pre-launch-hardening-specs/architect-output/dead-path-completion.md` (commit SHA: `6bbbd737d48b9393146cd35f4930c0efdbb1be54`)
 **Implementation order:** `1 → {2, 4, 6} → 5 → 3` (Chunk 3 lands LAST — depends on RLS + schema + execution-correctness foundations)
 **Status:** draft, ready for user review
@@ -153,6 +153,7 @@ Monitoring/analytics may filter on `status` directly; both are non-mutating but 
 
 - **Idempotency key:** `(artefactId, decision)`. The first decision recorded for an `artefactId` is canonical; subsequent decisions for the same `artefactId` return the existing superseding artefact unchanged (HTTP 200, same response body).
 - **Enforcement mechanism:** pre-check in `briefApprovalService.decideBriefApproval()` reads the `conversation_messages` JSONB chain for any artefact whose `parentArtefactId === artefactId AND kind === 'approval_decision'`. If found, return that artefact directly; do NOT call `actionService.proposeAction`. If not found, transactional INSERT of the decision artefact with a unique partial index on `(parent_artefact_id) WHERE kind = 'approval_decision'` to catch race conditions.
+- **Unique-violation translation (REQUIRED).** When two requests pass the pre-check simultaneously and both attempt the INSERT, one wins; the second hits the partial unique index and Postgres raises `23505 unique_violation`. The service MUST catch this exact error code and translate it into the defined behaviour: re-fetch the now-existing decision artefact, then return either HTTP 200 idempotent (if the existing decision matches the requested decision) OR HTTP 409 conflict (if it differs). **Raw `unique_violation` errors MUST NOT bubble as HTTP 500.** Any 500 from this code path is a violation of this contract; pure tests assert the catch-and-translate handles all four cases (insert-wins / lose-with-same / lose-with-different / unrelated-error).
 - **HTTP semantics:** second-and-subsequent identical requests return HTTP 200 with `idempotent: true` field on the response. Different decisions for the same `artefactId` (approve then reject) return HTTP 409 `{ error: 'approval_already_decided' }` with the prior decision attached.
 - **Test:** spec-named pure test `briefApprovalServicePure.test.ts` extension — five cases: first decision succeeds; identical retry returns existing artefact + `idempotent: true`; conflicting second decision returns 409; stale artefact (cancelled brief) returns 410; collision (two matches) throws `artefact_id_collision`.
 
