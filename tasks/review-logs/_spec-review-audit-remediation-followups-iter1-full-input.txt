@@ -1,7 +1,46 @@
+You are an expert technical reviewer auditing a software-engineering specification for implementation readiness. The spec is a post-merge backlog of 20 quality follow-up items derived from a four-pass review of PR #196 (codebase audit-remediation) in the Automation OS codebase.
+
+**Codebase framing (do NOT challenge these — they are explicit posture statements):**
+- Pre-production: no live users, no staged rollouts.
+- Rapid evolution: no feature flags except for behaviour modes.
+- Testing posture: static gates primary; runtime tests are pure-function only; no frontend / E2E / API-contract tests.
+- Prefer existing primitives over new ones (`policyEngineService`, `withBackoff`, `getOrgScopedDb`, `withOrgTx`, `actionService`, etc.).
+- The spec is post-merge backlog work; nothing here blocks shipping.
+
+**Your job:** identify mechanical and directional weaknesses in the spec that would slow or mislead an implementer who later picks up an item. Focus on:
+
+1. **Path / line-number drift** — files referenced may have moved or shifted lines.
+2. **Anchor / ToC inconsistency** — the §1 ToC must point at real heading slugs.
+3. **Self-contradictions** — two parts of the spec saying different things (an item's "Files" table missing files mentioned in prose, sequencing claims that conflict with dependency claims, etc.).
+4. **Load-bearing claims without mechanisms** — phrases like "must be idempotent" / "source of truth" without naming HOW the property is enforced.
+5. **Missing acceptance criteria / test signals** — items where Acceptance criteria don't actually verify the Goal.
+6. **Schema / migration drift** — references to migration numbers, table names, columns that may not match current state.
+7. **Unnamed primitives** — "a new service that does X" without naming it concretely.
+8. **Sequencing bugs** — Item A depends on Item B but B is sequenced later in §2.
+9. **Cross-item contradictions** — e.g. one item's annotation contract conflicts with another's.
+10. **Missing per-item verdicts / status fields.**
+
+**Output format:** group findings under section headings (`## A1`, `## A2`, etc., or `## Cross-cutting`). Within each section list discrete findings as numbered items. Each finding should have:
+
+- A one-sentence description of the issue.
+- The specific spec section / line range / quote it refers to (if you can pinpoint).
+- A concrete suggested fix (one or two sentences).
+- A severity tag: `critical` / `important` / `minor` / `nit`.
+
+**Do NOT propose:**
+- Adding feature flags, staged rollouts, canary deploys, kill switches.
+- Adding frontend / E2E / API-contract tests.
+- Introducing new logger frameworks or generic abstraction layers.
+- Splitting the spec into multiple specs (the §3 Out of scope section explicitly rejects this).
+- Re-litigating items in §3 Out of scope.
+
+The spec under review:
+
+==== BEGIN SPEC ====
 # Audit Remediation Follow-ups — Post-Merge Backlog Spec
 
-**Created:** 2026-04-25
-**Last revised:** 2026-04-26 (spec-reviewer iteration 1 — mechanical fixes)
+**Created:** 2026-04-26
+**Last revised:** 2026-04-25 (detail pass — pre-implementation review)
 **Status:** draft (post-merge backlog, ready for spec-reviewer)
 **Source PR:** #196 — `feat/codebase-audit-remediation-spec` (merged at `f824a03`)
 **Source spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
@@ -65,8 +104,6 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Reviewer's contract:** each item below carries the same shape — Source, Files, Goal, Approach, Acceptance criteria, Tests, Dependencies, Risk, Definition of Done. A future implementer should be able to pick up a single item and ship it without rereading the source review logs.
 
-**Testing posture (per `docs/spec-context.md`):** this spec sticks to (a) pure-function unit tests under the `*Pure.ts` + `*.test.ts` convention, (b) new static gates, and (c) the carved-out integration-test envelope already documented for hot-path concerns — RLS, idempotency / concurrency-control, and crash-resume parity. Items that propose runtime tests (A1 RLS-context binding, A2 RLS write-boundary guard, B2 job idempotency / concurrency, H1 derived-data null-safety) sit inside that carve-out. Items that propose anything outside the carve-out (e.g. multi-process integration tests in F2) call it out explicitly and downgrade to a documented manual smoke step where the framing requires it.
-
 ---
 
 ## §1 Items
@@ -95,19 +132,15 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 1. **Inventory.** Enumerate every `canonicalDataService.<method>(...)` call site in `server/` (excluding `__tests__`). Group by method signature shape: `(orgId)`-only, `(orgId, accountId)`, `(accountId, orgId?)`, write methods, etc. Capture the inventory in `tasks/builds/<slug>/canonical-call-sites.md` so the migration is auditable.
 2. **Service-side migration.** For each `canonicalDataService` method, change the signature to accept `PrincipalContext` as the first parameter; derive `organisationId` (and `subaccountId` where applicable) from it internally. Read methods that accept `accountId` keep `accountId` as a separate parameter — `PrincipalContext` describes the requesting principal, not the target row. **No deprecation shims** (project is pre-production per `docs/spec-context.md` framing).
 3. **Caller migration.** Update every call site identified in step 1 to pass `fromOrgId(organisationId, subaccountId)` (or `fromOrgId(organisationId, null)` where there is no subaccount in scope). The 4 import-only files convert their imports into actual calls.
-4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must be accompanied by a `PrincipalContext` argument (call-site-level enforcement, not file-level). Two-part approach:
-   - **Negative pattern (legacy signatures banned):** for each file importing `canonicalDataService`, grep for `canonicalDataService\.[a-zA-Z]+\(\s*[a-zA-Z_]` where the first argument is a bare identifier rather than `fromOrgId(` / `withPrincipalContext(` / a `PrincipalContext`-typed local. Each hit is a violation.
-   - **Positive pattern (helper invocation present):** retain the existing `grep -qE '(withPrincipalContext|principal/types|fromOrgId|PrincipalContext)'` import check as a cheap pre-filter; the negative pattern above is the actual enforcement.
-   - Keep import-only suppression available via `is_suppressed` AND via the `@principal-context-import-only` annotation (see step 5) for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
-   - The gate must reject a file that imports `canonicalDataService` and has at least one invocation that does NOT pass a `PrincipalContext`-shaped first argument, even if some other invocation in the same file does.
+4. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` to require that any file importing `canonicalDataService` also has at least one `fromOrgId(` or `withPrincipalContext(` *call* (not just an import). Approach: replace the existing `grep -qE '(withPrincipalContext|principal/types|fromOrgId|PrincipalContext)'` import check with an additional pattern that asserts an invocation form: `grep -qE '(fromOrgId|withPrincipalContext)\s*\('`. Keep import-only suppression available via `is_suppressed` for legitimate cases (e.g. `intelligenceSkillExecutor.ts`).
 5. **Annotation contract.** Files that legitimately import without calling (e.g. registry files where the import is forward-looking) must carry a top-of-file annotation: `// @principal-context-import-only — reason: <one-sentence rationale>`. The gate scans for this annotation and exempts the file.
 6. **Suppression sweep.** After migration, `tasks/baselines/principal-context-propagation.txt` must drop to zero (or a documented ≥0 baseline if any annotated exemptions remain).
 
 **Acceptance criteria:**
 - Every `canonicalDataService` method accepts `PrincipalContext` as its first parameter.
 - Every non-test caller in `server/` passes `fromOrgId(...)` or an existing `PrincipalContext` value.
-- `scripts/verify-principal-context-propagation.sh` fails when **any** `canonicalDataService.<method>(` invocation in an importing file passes a non-`PrincipalContext` first argument (call-site granularity, not file granularity), AND when the file has no `@principal-context-import-only` annotation.
-- A deliberate test regression — drop a `fromOrgId(...)` call from any caller, leaving a bare-`organisationId` invocation — causes the gate to fail even if other invocations in the same file are correctly migrated.
+- `scripts/verify-principal-context-propagation.sh` fails when an importing file has no invocation AND no `@principal-context-import-only` annotation.
+- A deliberate test regression — drop a `fromOrgId(...)` call from any caller — causes the gate to fail.
 - TypeScript compiles cleanly. `npm run typecheck` passes.
 
 **Tests required:**
@@ -136,48 +169,46 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 
 **Source:** chatgpt-pr-review Round 1 — Surgical C.
 
-**Audit verdict (2026-04-25):** PARTIAL — `server/config/rlsProtectedTables.ts` exists and is comprehensive (47 entries with rationale). But: no runtime guard exists that enforces new tables get registered or that writes go through an RLS-aware connection. No file `rlsBoundaryGuard.ts` or `scripts/verify-rls-protected-tables.sh`. The header comment in `rlsProtectedTables.ts:8` references `scripts/gates/verify-rls-coverage.sh` — the actual script lives at `scripts/verify-rls-coverage.sh` (no `gates/` subdirectory in this repo); it verifies the registry-vs-migrations linkage, not the schema-vs-registry diff or write-path enforcement.
+**Audit verdict (2026-04-25):** PARTIAL — `server/config/rlsProtectedTables.ts` exists and is comprehensive (47 entries with rationale). But: no runtime guard exists that enforces new tables get registered or that writes go through an RLS-aware connection. No file `rlsBoundaryGuard.ts` or `scripts/verify-rls-protected-tables.sh`. The header comment in `rlsProtectedTables.ts:8` references `scripts/gates/verify-rls-coverage.sh` — that script exists but only verifies the registry-vs-migrations linkage, not the schema-vs-registry diff or write-path enforcement.
 
 **Files (new + edits):**
-- New: `server/lib/rlsBoundaryGuard.ts` — runtime guard layered on top of `getOrgScopedDb` / `withAdminConnection` (sibling to `orgScopedDb.ts`, NOT under a new `server/lib/db/` subdirectory; the existing DB helpers live directly under `server/lib/`).
+- New: `server/lib/db/rlsBoundaryGuard.ts` — runtime guard wrapping `getOrgScopedDb`.
 - New: `scripts/verify-rls-protected-tables.sh` — schema-vs-registry diff gate.
-- New: `scripts/rls-not-applicable-allowlist.txt` — explicit allowlist for tables that legitimately have `organisation_id` but no RLS (single source of truth for both the gate and the runtime guard; supersedes the schema-file-comment annotation that earlier drafts proposed but neither schema-introspection nor SQL-parsing can read).
-- New: `.claude/hooks/rls-migration-guard.js` — pre-commit hook that warns when a new migration creates an `organisation_id` column without an accompanying `CREATE POLICY`. Scans `migrations/*.sql` (top-level — this repo's migrations live at `migrations/`, NOT `server/db/migrations/`).
-- Edits: `server/config/rlsProtectedTables.ts` (header-comment path correction), `scripts/verify-rls-coverage.sh` (cross-link to new gate).
-- Test: `server/lib/__tests__/rlsBoundaryGuard.test.ts`.
+- New: `.claude/hooks/rls-migration-guard.js` — pre-commit hook that warns when a new migration creates an `organisation_id` column without an accompanying `CREATE POLICY`.
+- Edits: `server/config/rlsProtectedTables.ts` (annotation contract for opt-out cases), `scripts/gates/verify-rls-coverage.sh` (link to new gate).
+- Test: `server/lib/db/__tests__/rlsBoundaryGuard.test.ts`.
 
 **Goal:** make the `rlsProtectedTables` registry self-enforcing on three fronts — (1) schema drift (every tenant table appears), (2) migration-time signal (new tables prompt explicit RLS decisions), (3) write-path enforcement (writes to listed tables refuse non-RLS-aware connections in dev/test).
 
 **Approach (in order):**
-1. **Schema-vs-registry drift gate (`scripts/verify-rls-protected-tables.sh`).** Parse the SQL migrations under `migrations/*.sql` (the SQL files are the source of truth for what tables exist with what columns) for every `CREATE TABLE` that includes an `organisation_id` column. Diff that set against `rlsProtectedTables`:
-   - Tables in migrations but not registry AND not in `scripts/rls-not-applicable-allowlist.txt` → fail with "Add to `rlsProtectedTables` or to `rls-not-applicable-allowlist.txt`".
-   - Tables in registry but not in any migration → fail with "Stale registry entry".
-   - Tables in `rls-not-applicable-allowlist.txt`: exempt. The allowlist file carries a one-line rationale per entry.
-2. **Runtime guard (`server/lib/rlsBoundaryGuard.ts`).** Export `assertRlsAwareWrite(tableName)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`). The guard does NOT hook into a Drizzle-internal middleware (this codebase has no such seam). Instead, it is invoked at the two places that already mediate every service-layer write:
-   - **Wrap `getOrgScopedDb`'s returned handle** with a Proxy that intercepts `.insert(table)`, `.update(table)`, `.delete(table)` calls. On each, call `assertRlsAwareWrite(table)`. If the table is in `rlsProtectedTables`, the call is OK (the handle is org-scoped by construction). If the table is not in `rlsProtectedTables` AND not in `rls-not-applicable-allowlist.txt`, throw `RlsBoundaryUnregistered`.
-   - **Wrap `withAdminConnection`'s returned handle** the same way. If a write to a registered table happens via `withAdminConnection`, throw `RlsBoundaryAdminWriteToProtectedTable` (admin connections are BYPASSRLS — writes to RLS-protected tables from there must be deliberate; the guard surfaces accidental usage in dev).
-   - Production behaviour: the guard is no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
-   - This is wrapper-level enforcement, not Drizzle middleware — it composes with existing primitives instead of inventing a new one.
-3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** PostToolUse hook that runs on Write/Edit to `migrations/*.sql` (top-level path — confirmed by `ls migrations/` showing migrations 0001..0227+):
+1. **Schema-vs-registry drift gate (`scripts/verify-rls-protected-tables.sh`).** Introspect the live schema (or parse migrations) for every table that has an `organisation_id` column AND is not in an explicit allowlist (e.g. `organisations` itself). Diff against `rlsProtectedTables`:
+   - Tables in schema but not registry → fail with "Add to `rlsProtectedTables` or annotate with `@rls-not-applicable`".
+   - Tables in registry but not schema → fail with "Stale registry entry".
+   - Allow override per table via `@rls-not-applicable: <reason>` comment in the schema file.
+2. **Runtime guard (`rlsBoundaryGuard.ts`).** Export a function `assertRlsAwareWrite(tableName, conn)` invoked in dev/test only (gated on `process.env.NODE_ENV !== 'production'`) that:
+   - Looks up `tableName` in `rlsProtectedTables`.
+   - If listed: verify the connection identity (tagged at construction in `getOrgScopedDb`) carries an `orgScoped: true` flag. If not, throw `RlsBoundaryViolation`.
+   - If not listed and not annotated `@rls-not-applicable`: throw `RlsBoundaryUnregistered`.
+   - Production behaviour: silently no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
+   - Hook into Drizzle's executor middleware so the guard fires automatically for inserts/updates/deletes — no per-call boilerplate.
+3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** PostToolUse hook that runs on Write/Edit to `server/db/migrations/*.sql`:
    - Parse the SQL diff. If a new `CREATE TABLE` includes `organisation_id`, look for a matching `CREATE POLICY` in the same file or any sibling file in the same migration set.
-   - If absent, emit an advisory warning (not blocking) that points at the registry file and asks the author to register the table or add it to `rls-not-applicable-allowlist.txt`.
-4. **Allowlist contract.** Tables that legitimately have `organisation_id` but no RLS (e.g. system-wide read replicas, audit ledgers) appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. Both the schema-vs-registry gate and the runtime guard read this file. (Earlier drafts proposed an in-source `@rls-not-applicable` annotation, but neither SQL parsing nor live schema introspection sees TS comments, so the file-based allowlist is the only viable source of truth across all enforcement points.)
+   - If absent, emit an advisory warning (not blocking) that points at the registry file and asks the author to register the table or carry a documented exemption.
+4. **Annotation contract.** Tables that legitimately have `organisation_id` but no RLS (e.g. system-wide read replicas, audit ledgers): carry a top-of-file annotation `@rls-not-applicable: <reason>` in the schema file. The schema-vs-registry gate exempts annotated tables.
 
 **Acceptance criteria:**
 - `bash scripts/verify-rls-protected-tables.sh` exits 0 on the current main.
-- Adding a new tenant table without registering it (and without an entry in `rls-not-applicable-allowlist.txt`) → gate fails.
+- Adding a new tenant table without registering or annotating it → gate fails.
 - Adding a new entry to `rlsProtectedTables` for a non-existent table → gate fails.
-- A unit test in `rlsBoundaryGuard.test.ts` writes to an unregistered table via a `getOrgScopedDb` handle in dev mode → throws `RlsBoundaryUnregistered`.
-- A unit test writes to a registered table via `withAdminConnection` in dev mode → throws `RlsBoundaryAdminWriteToProtectedTable`.
-- Same writes under `NODE_ENV=production` → no throw (production path delegates to the policy).
+- A unit test in `rlsBoundaryGuard.test.ts` writes to a registered table via a non-org-scoped connection in dev mode → throws `RlsBoundaryViolation`.
+- Same write under `NODE_ENV=production` → no throw (production path delegates to the policy).
 - The migration guard emits a warning when a deliberately-uncovered migration is staged.
 
 **Tests required:**
-- New: `server/lib/__tests__/rlsBoundaryGuard.test.ts` — three cases:
-  1. `getOrgScopedDb` handle writes to a registered table → succeeds.
-  2. `getOrgScopedDb` handle writes to an unregistered, non-allowlisted table in dev → throws `RlsBoundaryUnregistered`.
-  3. `getOrgScopedDb` handle writes to a table listed in `rls-not-applicable-allowlist.txt` → succeeds.
-  4. `withAdminConnection` handle writes to a registered table in dev → throws `RlsBoundaryAdminWriteToProtectedTable`.
+- New: `server/lib/db/__tests__/rlsBoundaryGuard.test.ts` — three cases:
+  1. Org-scoped connection writes to a registered table → succeeds.
+  2. Raw `db` connection writes to a registered table → throws (dev mode).
+  3. Raw `db` connection writes to an annotated `@rls-not-applicable` table → succeeds.
 - Gate self-test: fixture migration under `scripts/__tests__/rls-protected-tables/` introducing a deliberate gap; gate must fail.
 
 **Dependencies:** none. This item is a foundational primitive that should land BEFORE any new tenant-scoped tables. If a new feature is being designed concurrently, sequence A2 first.
@@ -206,10 +237,10 @@ This spec consolidates every accepted-but-deferred item into a single addressabl
 **Goal:** bring both services in line with the post-Phase-1 RLS pattern. Removes the latent risk that defence-in-depth weakens silently if RLS were ever bypassed at the connection level.
 
 **Approach:**
-1. **briefVisibilityService.ts:** replace the file-scope `import { db }` with `import { getOrgScopedDb } from '../lib/orgScopedDb.js'`. Inside each function (`resolveBriefVisibility`, `resolveConversationVisibility`), call `const tx = getOrgScopedDb('briefVisibilityService')` at function entry — NOT at module top. `getOrgScopedDb` throws `failure('missing_org_context')` when there is no active `withOrgTx` block, and module top-level evaluation runs at import time before any tx is opened. Replace the existing `db.select(...)` calls with `tx.select(...)`. The org-scoped tx already has `app.organisation_id` bound by the upstream `withOrgTx` opened in the auth middleware or `createWorker`.
-2. **onboardingStateService.ts:** same pattern — function-local `getOrgScopedDb` calls. The transaction currently at `:51` (`db.insert(...)` followed by chained calls) should be rewritten to use the org-scoped handle: `const tx = getOrgScopedDb('onboardingStateService'); await tx.insert(...).values({ ... })...`. Direct use of `withOrgTx` is NOT appropriate inside services — `withOrgTx(ctx: OrgTxContext, fn)` is the entry-point primitive used by `server/middleware/orgScoping.ts` and `server/lib/createWorker.ts`, not a per-call helper. Service code that needs a fresh nested transaction uses `getOrgScopedDb` and chains `.transaction(async (innerTx) => { ... })` on the returned handle.
-3. **Verify no behaviour change.** The org-scoped tx binds `app.organisation_id` per request/job; queries already filter by `organisationId` in the WHERE clause, so RLS becomes belt-and-braces, not the primary filter.
-4. **Lint guardrail.** Note that `scripts/verify-rls-contract-compliance.sh` allowlists `server/services/**` (lines 40-48 of the script), so it does NOT today catch raw `db` imports inside services — once these two files are migrated, the only enforcement is code review until the planned A2 schema-vs-registry gate ships. If A2 lands first, no further work is needed; if A3 ships first, accept that the regression-prevention guarantee for new services arrives later with A2.
+1. **briefVisibilityService.ts:** replace the file-scope `import { db }` with `import { getOrgScopedDb } from '../lib/orgScopedDb.js'`. Update `resolveBriefVisibility` and `resolveConversationVisibility` to instantiate `const db = getOrgScopedDb('briefVisibilityService')` at the top of each function, OR (preferred) at the top of the module if both functions share a single connection. Confirm that `principal.organisationId` is already available; the org-scoped connection binds the session var on use.
+2. **onboardingStateService.ts:** same pattern. Replace `import { db }` with `getOrgScopedDb`. Update the transaction at `:51` to use `withOrgTx(organisationId, async (tx) => { ... })` if the function already receives `organisationId`, otherwise use `getOrgScopedDb` at function entry.
+3. **Verify no behaviour change.** The org-scoped connection binds `app.organisation_id` per-call; queries already filter by `organisationId` in the WHERE clause, so RLS becomes belt-and-braces, not the primary filter.
+4. **Lint guardrail.** No new gate needed — the `verify-rls-coverage`-adjacent gate already discourages raw `db` imports outside the data layer.
 
 **Acceptance criteria:**
 - Neither service imports `db` from `../db/index.js`.
@@ -348,7 +379,7 @@ No double-invocation regression tests exist for any of the four.
 
 **Risk:** medium. Concurrency-control bugs are notoriously hard to surface in tests. Mitigations:
 - Land per-job in separate commits so a regression in one is isolated.
-- Run the new parallel tests N=10 times to surface flakiness early. This repo's test runner is `tsx` invoked via shell scripts (see `package.json` scripts), not Jest — implement the repeat by either (a) wrapping the parallel-double-invocation case in a 10-iteration `for` loop inside the test file itself, or (b) re-invoking `tsx server/jobs/__tests__/<job>.idempotency.test.ts` 10 times from `scripts/run-all-unit-tests.sh` for the affected files only. Do NOT add Jest as a dependency.
+- Run the new parallel tests N=10 times in CI (Jest `--repeats 10`) to surface flakiness early.
 - Roll out the highest-frequency job (likely `connectorPollingSync`) first — it already has a lease, so the change is comment-only; gives confidence in the standard before risk-bearing changes.
 
 **Definition of Done:**
@@ -504,19 +535,14 @@ No double-invocation regression tests exist for any of the four.
 
 **Approach:**
 
-The right fix depends on whether A1 has shipped:
+Replace lines 2-3 with:
+```ts
+// fromOrgId imported here to satisfy verify-principal-context-propagation gate.
+// This registry does not invoke canonicalDataService directly today; future handler
+// additions that do should pass fromOrgId(organisationId, subaccountId) explicitly.
+```
 
-- **If A1 has NOT shipped (current main):** the existing import is dead and the comment is misleading. Replace lines 2-3 with:
-  ```ts
-  // fromOrgId imported here to satisfy verify-principal-context-propagation gate.
-  // This registry does not invoke canonicalDataService directly today; future handler
-  // additions that do should pass fromOrgId(organisationId, subaccountId) explicitly.
-  ```
-  This is a comment-only fix that accurately describes the current state.
-
-- **If A1 HAS shipped:** A1's hardened gate enforces call-site granularity, not file-level import presence, so the dead import is no longer load-bearing. Remove the `import { fromOrgId }` line entirely (and the misleading comment with it). No `@principal-context-import-only` annotation is needed because there are no `canonicalDataService` invocations in this file at all — the file simply drops out of the gate's scope.
-
-Pick whichever path matches the A1 status at the moment C4 is implemented. The end state under A1 is "no import, no comment"; the interim state under no-A1 is "import retained, comment corrected".
+If A1 lands first and the gate is upgraded to require call-presence, this comment can be replaced by a `// @principal-context-import-only — registry; no canonicalDataService callers` annotation per A1's annotation contract. **If A1 has shipped before C4 is started, do that instead.**
 
 **Acceptance criteria:** the comment accurately describes the file's relationship to `canonicalDataService`.
 
@@ -543,28 +569,27 @@ Pick whichever path matches the A1 status at the moment C4 is implemented. The e
 **Files:**
 - Investigative — no code changes initially.
 - If new regressions are found: targeted fixes within the files the gates name.
-- Output artefact: append baseline counts to `tasks/builds/audit-remediation/progress.md` (preferred — that's the active build-slug log) and cross-link from this spec's §5 Tracking row. Do NOT amend the merged source spec `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md` post-merge; the merged spec is historical record.
+- Output artefact: append baselines to `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md` § 5.7 / `tasks/builds/audit-remediation/progress.md`.
 
 **Goal:** prove (or refute) that PR #196 did not introduce any new violations of these two gates. Closes the audit-trail gap left when Chunk 2 didn't capture baselines.
 
 **Approach:**
-1. Stash any in-flight work. Check out the **first parent of merge commit `f824a03`** — i.e. `f824a03^1` (or equivalently `f824a03~1` in linear-history form). That is the pre-PR-196 `main` HEAD. The merge commit `f824a03` itself is the post-PR-196 state.
-2. Run both gates on the pre-PR-196 commit:
+1. Stash any in-flight work; checkout `main` at `f824a03` (PR #196 merge commit's parent — `f824a03~1`) for the pre-PR-196 state.
+2. Run both gates on that commit:
    ```bash
-   git checkout f824a03^1
    bash scripts/verify-input-validation.sh > /tmp/iv-pre.txt 2>&1
    bash scripts/verify-permission-scope.sh > /tmp/ps-pre.txt 2>&1
    ```
    Capture violation counts.
-3. Check out current `main` (post-PR-196). Run both gates again. Capture counts.
+3. Checkout `main` (post-PR-196). Run both gates again. Capture counts.
 4. Diff:
-   - Counts unchanged → Phase 2 introduced nothing. Record baselines in `tasks/builds/audit-remediation/progress.md`; close the audit-trail item.
+   - Counts unchanged → Phase 2 introduced nothing. Append baselines to the source spec / progress.md, close the audit-trail item.
    - Counts higher → enumerate the new violations. For each, decide: fix on a follow-up PR, or document as pre-existing-but-newly-surfaced (with evidence the underlying file/pattern existed before).
    - Counts lower → great; record the delta and update baselines.
 5. **No new code unless step 4 turns up real regressions.** This is investigative-first.
 
 **Acceptance criteria:**
-- Counts captured for both gates at both commits, recorded in a checked-in artefact (`tasks/builds/audit-remediation/progress.md`, with a one-line back-reference from this spec's §5 Tracking row).
+- Counts captured for both gates at both commits, recorded in a checked-in artefact (the source spec amendment + progress.md).
 - Any new regressions either fixed or explicitly documented.
 - `tasks/builds/audit-remediation/progress.md` reflects the closure.
 
@@ -647,22 +672,19 @@ Operator chooses one of three framings — present this list verbatim during spe
 **Goal:** reconcile the 5-entry mismatch. Either add the missing `readPath` tags to the action definitions, or update the gate's expected count if the mismatch reflects a legitimate exemption.
 
 **Approach:**
-
-The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter — it counts `actionType: '<name>'` entries vs `readPath:` lines and fails on any mismatch. It has no per-entry parser, so per-entry annotations like `@no-read-path` would be invisible to it. Two options, in priority order:
-
-1. **Preferred: bring the readPath count up to match the action count.** Run the gate verbosely:
+1. Run the gate verbosely to identify the 5 specific entries:
    ```bash
    bash scripts/verify-skill-read-paths.sh
    ```
-   Inspect the 5-entry mismatch by comparing the `actionType: '...'` lines and the `readPath: ...` lines visually in `server/config/actionRegistry.ts`. For each action without a `readPath`, decide whether the action genuinely reads canonical/skill data and add the appropriate `readPath` value (`'canonical'`, `'liveFetch'`, or `'none'`). The gate's own interface definition already lists `'none'` as a valid value, so an action that does no reads should be tagged `readPath: 'none' as const`.
-2. **Fallback (only if option 1 is impossible):** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). At that point a per-entry `// @no-read-path` annotation becomes feasible. Treat this as a separate, bigger task — do not bundle into D3.
-
-3. Re-run the gate; expect `Literal action entries: N, with readPath: N` (matching counts) and exit 0.
+2. For each mismatch entry:
+   - **If it's a literal action that legitimately reads from canonical/skill data:** add a `readPath` tag pointing at the source.
+   - **If it's a literal action that doesn't read (pure compute, side-effect only):** add an annotation like `// @no-read-path: <reason>` and update the gate to skip annotated entries.
+3. Re-run; expect violations=0.
 4. Cross-reference and close the P3-H8 entry in `tasks/todo.md`.
 
 **Acceptance criteria:**
-- Gate exits 0 with matching action and readPath counts.
-- Each of the 5 sites gains an explicit `readPath` value (`'canonical'`, `'liveFetch'`, or `'none' as const`).
+- Gate exits 0 (or matches updated expected count).
+- Each of the 5 sites either gains a `readPath` tag or an explicit annotation with rationale.
 - `tasks/todo.md` P3-H8 entry checked off.
 
 **Tests required:** none in code; gate is the test.
@@ -757,12 +779,12 @@ Both fail on `main`. Same triage rule as E1 — fix or baseline.
 **verify-integration-reference.mjs (1 blocking + 26 warnings):**
 1. Run the gate; identify the YAML file and line where the parse fails.
 2. Fix the YAML parse error (likely a stray `:` or unbalanced quote).
-3. The 26 warnings are advisory; record their count in the existing centralized baseline store at `scripts/guard-baselines.json` keyed on this gate's `GUARD_ID` (the `.mjs` gate must adopt the same baseline pattern as the shell gates — `check_baseline()` in `scripts/lib/guard-utils.sh`; for the `.mjs` runner this means writing a small JS helper that reads/writes the same JSON file). Do NOT introduce a parallel `scripts/baselines/*.txt` format. Address remaining warnings case-by-case as time allows; do NOT block on this in E2.
+3. The 26 warnings are advisory; capture in a baseline file (`scripts/baselines/integration-reference.txt`) and use the C1 baseline pattern. Address case-by-case as time allows; do NOT block on this in E2.
 
 **Acceptance criteria:**
 - `bash scripts/verify-pure-helper-convention.sh` exits 0 (or all 7 carry annotations the gate recognises).
 - `node scripts/verify-integration-reference.mjs` no longer reports a blocking parse error.
-- 26 warnings: recorded in `scripts/guard-baselines.json` under the gate's `GUARD_ID`; gate emits parseable count line per C1.
+- 26 warnings: baselined in a checked-in file; gate emits parseable count line per C1.
 
 **Tests required:** none in code; the gates are the verification.
 
@@ -851,48 +873,47 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 
 **Files:**
 - `server/routes/configDocuments.ts:33-36, 103-104` (consumer migration).
-- Existing primitive (Phase-5A planned): `server/services/rateLimitStoreService.ts`. Source spec `2026-04-25-codebase-audit-remediation-spec.md` §8.1 already names this as the shared sliding-window / bucket-with-TTL primitive for the same defect class (per-process Map state). F2 reuses this primitive rather than introducing a new one. **No new primitive file is created by F2.**
-- Schema: F2 does not introduce a new schema; it relies on the table `rateLimitStoreService` will land (Phase-5A §8.1's migration). If Phase-5A's table is `rate_limit_buckets` and is shaped specifically for sliding-window rate limiting (not generic KV with TTL), F2's preferred consumer pattern is to call `rateLimitStoreService` only if its surface fits; otherwise fall back to the in-memory `Map` until a generic KV primitive is justified by a second use site (see step 3 below).
+- New: `server/services/kvStoreWithTtlService.ts` (the shared primitive — IF it's not already part of Phase-5A `rateLimitStoreService` work).
+- Schema: `server/db/schema/kvStore.ts` (new table `kv_store_with_ttl`) with one migration (the next available number — `0228_*` at time of writing).
 
-**Goal:** replace per-process in-memory cache with the planned shared durable primitive when it ships, OR document explicit deferral if the planned primitive's shape doesn't fit a generic KV-with-TTL use case. Avoid inventing a parallel primitive.
+**Goal:** replace per-process in-memory cache with a table-backed durable KV-with-TTL primitive that survives multi-process and process restart. Reuses (or introduces) the same primitive that Phase-5A's `rateLimitStoreService` will need.
 
 **Approach:**
-1. **Check Phase-5A status before doing any code work.** Three sub-cases:
-   - **Phase-5A merged with `rateLimitStoreService` AND its API is general-purpose KV-with-TTL** (`set(key, value, ttlMs)` / `get(key)`): consume it directly (step 2).
-   - **Phase-5A merged but `rateLimitStoreService` is shape-specific to sliding-window rate limiting** (`incrementBucket` / `sumWindow` only — see source spec §8.1): the surface does not fit `configDocuments`'s "store a parsed-document summary blob keyed by uuid for 10 minutes" need. Stop F2, write a one-line note in `tasks/todo.md` under "F2 deferred: rateLimitStoreService surface doesn't generalise; defer until a second use site justifies a separate KV-TTL primitive", and leave the in-memory cache in place.
-   - **Phase-5A not yet merged:** defer F2 until Phase-5A ships and the surface decision can be made.
-2. **Migrate `configDocuments.ts` (consumer-only path, only if step 1 case (a) applies).**
-   - Replace the `Map` with `rateLimitStoreService` calls using the existing API surface.
-   - `parsedCache.set(id, summary)` → `await rateLimitStoreService.set(id, summary, CACHE_TTL_MS)` (or whatever the existing `set(...)` signature is — adapt to the actual API).
-   - `parsedCache.get(id)` → `await rateLimitStoreService.get(id)`.
-   - Remove the `setTimeout` deletion — TTL is enforced by the underlying store.
-3. **No new primitive in this spec.** If Phase-5A's surface doesn't generalise, F2 stays deferred. The decision to introduce a generic `kvStoreWithTtl` primitive belongs in a future spec that has at least two concrete consumers and a "why not extend `rateLimitStoreService`" paragraph per `docs/spec-authoring-checklist.md` §1.
-4. **Verify** via existing route tests; if step 1 case (a) applies, add one test that exercises the cache miss → re-parse path.
+1. **Check Phase-5A status.** If Phase-5A is in flight or merged with a `kvStoreWithTtl` primitive, consume it directly. Otherwise:
+2. **Define the primitive (if not yet built).**
+   - Schema: `kv_store_with_ttl(key text PRIMARY KEY, value jsonb NOT NULL, expires_at timestamptz NOT NULL, organisation_id uuid)` — `organisation_id` for tenant isolation; consider RLS per A2.
+   - Service: `server/services/kvStoreWithTtlService.ts` exporting `set(key, value, ttlMs)`, `get(key)`, `delete(key)`, `purgeExpired()`. Migration adds the table + index on `expires_at`. Add to `rlsProtectedTables`.
+   - Cleanup: a low-frequency cron deletes expired rows (or piggyback on `purgeExpired` on each `get`).
+3. **Migrate `configDocuments.ts`.**
+   - Replace the `Map` with the service.
+   - `parsedCache.set(id, summary)` → `await kvStoreWithTtl.set(id, summary, CACHE_TTL_MS, { organisationId: orgId })`.
+   - `parsedCache.get(id)` (if present in the file's other handlers) → `await kvStoreWithTtl.get(id, { organisationId: orgId })`.
+   - Remove the `setTimeout` deletion — the TTL is enforced at read time and via the cleanup cron.
+4. **Verify** via existing route tests; add one test that exercises the cache miss → re-parse path (since cache durability is the value-add).
 
-**Acceptance criteria (only applies when Phase-5A surface fits — case (a)):**
-- `parsedCache` `Map` removed; `configDocuments.ts` calls `rateLimitStoreService` (or its successor) instead.
-- Process restart: a value set with TTL > restart time remains readable after restart (manual smoke — start server, set value, restart server, read value).
-- TTL expiry: a value past its expiry is not returned.
-
-**Acceptance criteria (when Phase-5A surface does not fit — case (b)):**
-- `tasks/todo.md` carries an entry "F2 deferred: rateLimitStoreService surface doesn't generalise; revisit when a second KV-TTL consumer surfaces".
-- `parsedCache` `Map` left in place; no code change.
-- F2 row in §5 Tracking marked `↗ migrated to deferred` with the todo link.
+**Acceptance criteria:**
+- `parsedCache` `Map` removed; `configDocuments.ts` calls `kvStoreWithTtlService` instead.
+- Multi-process test (run two server instances pointing at the same DB; insert via process A, read via process B) returns the same value.
+- Process restart: a value set with TTL > restart time remains readable after restart.
+- TTL expiry: a value past `expires_at` is not returned (and is opportunistically deleted).
 
 **Tests required:**
-- New pure-function test for the cache-miss → re-parse path in `configDocuments` (case (a) only). No multi-process integration test in this spec — a multi-process test sits outside the carved-out integration-test envelope (RLS / idempotency / crash-resume) and would require new test infrastructure. Restart durability is verified via the manual smoke step in Acceptance criteria.
+- New unit test for `kvStoreWithTtlService` covering set/get/delete/expire.
+- New integration test for `configDocuments` covering cache miss → re-parse.
+- The multi-process test can be a CI-level test harness (preferred) or a documented manual smoke step.
 
 **Dependencies:**
-- Phase-5A `rateLimitStoreService` (must ship first; F2 cannot proceed without it).
-- A2 (RLS write-boundary) preferred so the underlying table is registered through the same path other tenant tables use.
-- A1 not strictly required.
+- A2 (RLS write-boundary) preferred so the new table is registered from day 1.
+- Phase-5A `rateLimitStoreService` if it ships first (consume that primitive).
+- A1 not strictly required but ergonomically the new service should accept `PrincipalContext`.
 
-**Risk:** low. Single route surface; behaviour hidden behind a cache-miss → re-parse path so a degraded (slower) experience is the worst case if the primitive misbehaves. F2 will not introduce a new primitive — the higher-risk path is explicitly closed off in step 3 of the Approach.
+**Risk:** low. Single route surface; behaviour hidden behind a cache-miss → re-parse path so a degraded (slower) experience is the worst case if the primitive misbehaves.
 
 **Definition of Done:**
-- Either: `parsedCache` removed from `configDocuments.ts` and consumer migration verified (case (a)), OR: F2 explicitly deferred with a `tasks/todo.md` entry (case (b)).
-- No new primitive file introduced by F2 itself.
-- Spec status field for F2 in `§5 Tracking` is checked (or migrated, per case).
+- `parsedCache` removed from `configDocuments.ts`.
+- New primitive (if introduced) lands with schema migration + RLS registry entry + tests.
+- Multi-process and restart smoke tests pass.
+- Spec status field for F2 in `§5 Tracking` is checked.
 
 ---
 
@@ -912,23 +933,23 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 
 **Approach:**
 1. Write `scripts/verify-migration-sequencing.sh` parameterised on a database URL. Steps:
-   1. Spin up a fresh disposable database (a one-shot Postgres container, or a local dev DB the operator is OK to drop). Run all migrations 0001..N in order. Verify zero errors. Verify `drizzle-kit introspect` matches the expected schema.
-   2. Take a snapshot of the disposable DB at HEAD. Reset to the pre-PR-196 commit. Run the historical migrations through that commit. Then re-run only the new migrations introduced since. Verify zero errors and zero data loss against the snapshot.
-   3. With `app.organisation_id` SET to a fixture org: write a single test row to each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196). Each must succeed. The script cleans up the test rows in a `BEGIN…ROLLBACK` envelope so no test data persists.
+   1. Spin up a fresh DB (or a sandbox snapshot). Run all migrations 0001..N in order. Verify zero errors. Verify `drizzle-kit introspect` matches the expected schema.
+   2. Take a snapshot of the staging DB. Run only the new migrations on top. Verify zero errors and zero data loss.
+   3. With `app.organisation_id` SET to a fixture org: write to each tenant table (`agents`, `automations`, `memory_review_queue`, `document_bundles`, `agent_run_snapshots`, plus any added since PR #196). Each must succeed.
    4. With `app.organisation_id` UNSET: same writes. Each must fail closed (zero rows affected, no exception leak).
-2. Wire into a manual-trigger CI workflow (not blocking on every commit; runs on demand or pre-deploy when the operator chooses).
-3. Treat the very first run as the post-deploy validation for PR #196 — execute against a local dev DB and capture results.
+2. Wire into a manual-trigger CI workflow (not blocking on every commit; runs on demand or pre-deploy).
+3. Treat the very first run as the post-deploy validation for PR #196 — execute and capture results.
 
 **Acceptance criteria:**
 - Script exists and is executable.
-- First run passes against a fresh disposable DB.
+- First run passes against current staging.
 - Failure modes: a deliberately-broken migration (out-of-order, missing FORCE RLS) → script fails with the offending migration named.
 
 **Tests required:** the script itself; first run is the test.
 
 **Dependencies:** none.
 
-**Risk:** low. The script performs deliberate test writes inside a `BEGIN…ROLLBACK` envelope on a disposable DB; it is verification-by-controlled-write, not strictly read-only. No staged-rollout posture is implied — the codebase explicitly does not run staging deploys (per `docs/spec-context.md` `staged_rollout: never_for_this_codebase_yet`); G1 runs against any disposable Postgres the operator can spin up.
+**Risk:** zero (read-only verification against staging).
 
 **Definition of Done:**
 - Script committed.
@@ -1054,7 +1075,7 @@ PR #196 is merged. Re-sequenced relative to the original draft (which assumed pr
 | 5 | **B1, C4** — zero-risk additive | Trivial; ship anytime, possibly bundled into other PRs of opportunity. | < 1 hour each |
 | 6 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1 — sequence first within the drift-guards group. | half-day |
 | 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle with C1 in a single "drift-guards" PR. | 1 day |
-| 8 | **A3, F1, F2** — internal refactors | Independent; ship as small PRs. F2 strictly depends on Phase-5A's `rateLimitStoreService` (per source spec §8.1) — F2 reuses that primitive rather than introducing a new one. | 1 day each |
+| 8 | **A3, F1, F2** — internal refactors | Independent; ship as small PRs. F2 leans on Phase-5A `kvStoreWithTtl` if it ships first. | 1 day each |
 | 9 | **H1** — cross-service null-safety contract | High-leverage system rule. Codify before further service expansion; small audit script + architecture.md rule + per-service refactors. | 2–3 days |
 | 10 | **A1** — principal-context propagation | Major migration of `canonicalDataService` + every caller + gate hardening. Land before A2 because A2's runtime guard reads `PrincipalContext` flags. | 3–5 days |
 | 11 | **A2** — RLS write-boundary guard | New architectural primitive (gate + runtime guard + migration hook). Schedule with §13.5A or its own phase. | 3–4 days |
@@ -1078,7 +1099,7 @@ These were considered during the four-pass review of PR #196 and explicitly reje
 - **chatgpt-pr-review Round 1 watch-fors with no concrete claim** — "scope blast radius" / "cross-service coupling" / "LLM cost surface expansion". Auto-rejected as advisory; no actionable item exists. (Note: H1 in this spec captures the *concrete* version of cross-service coupling that emerged in Round 2 — that one is in scope.)
 - **Codex's `anyBlocked` revert proposal** — rejected by dual-reviewer Claude-adjudication; would have triggered TS2367. Already handled with a clarifying comment in `server/services/skillExecutor.ts:2261-2265`.
 - **PR splitting** — ChatGPT itself recommended NOT splitting at this stage. PR #196 shipped intact. Future PRs in this backlog should ship as small, focused units (per §2 sizing column) — but PR #196 itself is closed.
-- **Adding more abstraction layers / additional logging systems** — explicit chatgpt-pr-review reject. Do not introduce new logger frameworks, new generic abstraction layers, or new internal event-bus primitives as part of this backlog. The primitives the spec calls for (`rlsBoundaryGuard` runtime helper, gate emit helpers, the `logDataDependencyMissing` shared helper in H1) are concrete and named — no broader scope. F2 explicitly does NOT introduce a new generic `kvStoreWithTtl` primitive; it reuses Phase-5A's `rateLimitStoreService` or stays deferred.
+- **Adding more abstraction layers / additional logging systems** — explicit chatgpt-pr-review reject. Do not introduce new logger frameworks, new generic abstraction layers, or new internal event-bus primitives as part of this backlog. The primitives the spec calls for (`kvStoreWithTtl`, `rlsBoundaryGuard`, gate emit helpers) are concrete and named — no broader scope.
 - **Retroactive G1 execution as a pre-merge gate.** PR #196 is merged at `f824a03`. The pre-merge form of G1 cannot be run. The re-runnable post-deploy form is in scope (see G1 above) — but not as a "block PR #196 retroactively".
 
 ---
@@ -1106,7 +1127,7 @@ This spec is complete when every actionable item in §1 has shipped (or, for D2,
 | E1 | low | Standard | `npm test` clean for the four files | dedicated PR |
 | E2 | low | Standard | both gates pass | dedicated PR |
 | F1 | low | Standard | new unit test asserts targeted SELECT | bundle-friendly |
-| F2 | low | Standard | restart-durability manual smoke | dedicated PR (consumer-only; depends on Phase-5A `rateLimitStoreService`) |
+| F2 | low | Significant | multi-process + restart smoke | dedicated PR (or with kvStoreWithTtl) |
 | G1 | zero | Standard | first run captures results | dedicated PR |
 | G2 | zero | Trivial | runbook completed; KNOWLEDGE.md entry | runbook |
 | H1 | low | Significant | per-service tests + gate self-test | dedicated PR |
@@ -1144,7 +1165,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 | E1 | 4 pre-existing unit test failures | ☐ todo | — | triage |
 | E2 | 2 pre-existing gate failures | ☐ todo | — | triage; depends on C1 |
 | F1 | findAccountBySubaccountId targeted method | ☐ todo | — | independent |
-| F2 | configDocuments parsedCache durability | ☐ todo | — | strictly depends on Phase-5A `rateLimitStoreService`; defer or migrate to deferred if surface doesn't fit |
+| F2 | configDocuments parsedCache durability | ☐ todo | — | depends on Phase-5A kvStore primitive if available |
 | G1 | Migration sequencing verification (re-runnable) | ☐ todo | — | superseded as pre-merge; run as post-deploy |
 | G2 | Post-merge smoke test runbook | ☐ todo | — | run ASAP |
 | H1 | Cross-service null-safety contract | ☐ todo | — | depends on C1, B2 |
@@ -1162,3 +1183,5 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 - Advances to `Status: complete` when all rows are `✓` or `↗`.
 - After completion, the spec stays in `docs/superpowers/specs/` as historical record — do not delete.
 
+
+==== END SPEC ====
